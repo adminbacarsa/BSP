@@ -468,7 +468,7 @@ export default function EmployeeDashboard() {
         newMap.forEach((current, id) => {
           const previous = previousShiftRef.current.get(id);
           if (previous) {
-            const fields: Array<keyof Shift> = ['startTime', 'endTime', 'objectiveName', 'clientName', 'objectiveId', 'positionName', 'status'];
+            const fields: Array<keyof Shift> = ['startTime', 'endTime', 'objectiveName', 'clientName', 'objectiveId', 'positionName'];
             const changed = fields.some((f) => normalizeField((previous as any)[f]) !== normalizeField((current as any)[f]));
             if (changed) {
               newAlerts.push({ id: `modified-${id}-${Date.now()}`, type: 'MODIFIED', shift: current, prev: previous, at: new Date() });
