@@ -59,7 +59,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const [credGuardada, setCredGuardada]   = useState(false);
   const [modoEdicion, setModoEdicion]     = useState(false);
   const [empresaLocal, setEmpresaLocal]   = useState(empresaNombre || '');
-  const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 20 });
+  const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 30 });
   const photoOffRef                       = useRef({ x: 50, y: 20 });
   const [flipped, setFlipped]             = useState(false);
   const [credModelo, setCredModelo]       = useState<string>('gradiente');
@@ -657,20 +657,19 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   );
 
   const photoZoneV = (
-    // Vertical: ancho completo, flex 0 0 44%
-    <div ref={photoContRef} style={{ flex: '0 0 58%', position: 'relative', overflow: 'hidden', pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
+    // Vertical: columna lateral izquierda 38%, sin overlay de nombre
+    <div ref={photoContRef} style={{ width: '38%', flexShrink: 0, position: 'relative', overflow: 'hidden', pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
       {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}><RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p></div>}
       {fotoMostrada ? (
         <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, transform: esCutout ? 'none' : `scale(${photoScale})`, transformOrigin: `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 4px 14px rgba(0,0,0,0.6))' : 'none', willChange: 'transform', pointerEvents: 'none', userSelect: 'none' }}/>
       ) : (
-        <div style={{ width: '100%', height: '100%', background: `${tema.h2}80`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><svg viewBox="0 0 60 80" width="30%" height="30%"><circle cx="30" cy="22" r="14" fill="rgba(255,255,255,0.2)"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="rgba(255,255,255,0.2)"/></svg></div>
+        <div style={{ width: '100%', height: '100%', background: `linear-gradient(180deg, ${tema.h2}60, ${tema.h1}90)`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <svg viewBox="0 0 60 80" width="55%" height="auto"><circle cx="30" cy="22" r="14" fill="rgba(255,255,255,0.18)"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="rgba(255,255,255,0.18)"/></svg>
+          {!viewOnly && <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', textAlign: 'center', padding: '0 6px', letterSpacing: '0.1em' }}>Sin foto</p>}
+        </div>
       )}
-      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '50%', background: 'linear-gradient(0deg, #0b1120 0%, transparent 100%)', pointerEvents: 'none' }}/>
-      <div style={{ position: 'absolute', bottom: 10, left: 14, right: 14, pointerEvents: 'none' }}>
-        <p style={{ color: '#fff', fontSize: 22, fontWeight: 800, lineHeight: 1.2 }}>{apellidoNombre || nombre || '—'}</p>
-        <p style={{ color: tema.accent, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>{empData.category || 'Vigilador'}</p>
-      </div>
-      {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.75)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
+      <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 24, background: `linear-gradient(90deg, transparent, ${bg})`, pointerEvents: 'none' }}/>
+      {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', top: 6, left: 6, width: 18, height: 18, borderRadius: '50%', background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="10" height="10" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.75)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
     </div>
   );
 
@@ -689,7 +688,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             onMouseMove={onCardMouseMove}
             style={{
               position: 'relative', width: '100%',
-              height: isH ? 'min(500px, calc(100svw * 1.19))' : 'min(calc(100svh - 170px), 580px)',
+              height: isH ? 'min(500px, calc(100svw * 1.19))' : 'min(calc(100svh - 180px), 480px)',
               transformStyle: 'preserve-3d',
               transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
               transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
@@ -719,51 +718,59 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                 {stripeTop}
               </div>
             ) : (
-              // Vertical: header | foto dominante | datos
+              // Vertical: header compacto + [foto | datos] side-by-side + footer QR
               <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', borderRadius: 12, overflow: 'hidden', background: bg, display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
-                <div style={{ padding: '12px 14px 10px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                  {logoEl(26)}
+                {/* Header */}
+                <div style={{ padding: '11px 14px 9px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, borderBottom: `1px solid ${tema.accent}20` }}>
+                  {logoEl(24)}
                   <div style={{ minWidth: 0 }}>
-                    <p style={{ color: '#fff', fontSize: 16, fontWeight: 900, letterSpacing: '0.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 8px rgba(0,0,0,0.5)' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
-                    <p style={{ color: `${tema.accent}bb`, fontSize: 7.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{credTitulo}</p>
+                    <p style={{ color: '#fff', fontSize: 14, fontWeight: 900, letterSpacing: '0.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
+                    <p style={{ color: `${tema.accent}bb`, fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{credTitulo}</p>
                   </div>
                 </div>
-                {photoZoneV}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '10px 14px 12px', minHeight: 0 }}>
-                  {/* Legajo + DNI — grandes */}
-                  <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end', marginBottom: 4 }}>
+                {/* Cuerpo: foto izq + datos der */}
+                <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+                  {photoZoneV}
+                  {/* Columna de datos */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '14px 14px 10px 10px', minWidth: 0 }}>
+                    <div style={{ marginBottom: 10 }}>
+                      <p style={{ color: '#fff', fontSize: 15, fontWeight: 900, lineHeight: 1.25, wordBreak: 'break-word' }}>{apellidoNombre || nombre || '—'}</p>
+                      <p style={{ color: tema.accent, fontSize: 7.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 3 }}>{empData.category || 'Vigilador'}</p>
+                    </div>
+                    <div style={{ height: 0.5, background: `${tema.accent}22`, marginBottom: 10 }}/>
                     {empData.fileNumber && (
-                      <div>
+                      <div style={{ marginBottom: 7 }}>
                         <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Legajo</p>
-                        <p style={{ color: '#fff', fontSize: 19, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>#{empData.fileNumber}</p>
+                        <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>#{empData.fileNumber}</p>
                       </div>
                     )}
                     {empData.dni && (
-                      <div>
+                      <div style={{ marginBottom: 7 }}>
                         <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>DNI</p>
-                        <p style={{ color: '#fff', fontSize: 19, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>{empData.dni}</p>
+                        <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>{empData.dni}</p>
                       </div>
                     )}
-                  </div>
-                  {/* CUIL — fila propia */}
-                  {empData.cuil && (
-                    <div style={{ marginBottom: 8 }}>
-                      <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>CUIL</p>
-                      <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
-                    </div>
-                  )}
-                  <div style={{ height: 0.5, background: `${tema.accent}22`, marginBottom: 8 }}/>
-                  {verSection()}
-                  {/* Sector + QR — al fondo */}
-                  <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', paddingTop: 8 }}>
-                    {credPie ? (
-                      <div>
-                        <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 }}>Sector</p>
-                        <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: 700 }}>{credPie}</p>
+                    {empData.cuil && (
+                      <div style={{ marginBottom: 6 }}>
+                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>CUIL</p>
+                        <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
                       </div>
-                    ) : <div/>}
-                    {qrBtn()}
+                    )}
+                    <div style={{ marginTop: 'auto' }}>
+                      <div style={{ height: 0.5, background: `${tema.accent}22`, marginBottom: 8 }}/>
+                      {verSection()}
+                    </div>
                   </div>
+                </div>
+                {/* Footer */}
+                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 14px 9px', borderTop: `1px solid ${tema.accent}18` }}>
+                  {credPie ? (
+                    <div>
+                      <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Sector</p>
+                      <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: 700 }}>{credPie}</p>
+                    </div>
+                  ) : <div/>}
+                  {qrBtn()}
                 </div>
                 {stripeTop}
                 {stripeBot}
