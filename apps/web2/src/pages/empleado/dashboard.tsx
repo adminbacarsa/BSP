@@ -2864,4 +2864,3 @@ export default function EmployeeDashboard() {
     </AuthGuard>
   );
 }
-         

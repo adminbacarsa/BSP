@@ -702,7 +702,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
               </div>
             ) : (
               // Vertical: ID badge profesional
-              <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', borderRadius: 12, overflow: 'hidden', background: bg, display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
+              <div style={{ position: 'relative', width: '100%', backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', borderRadius: 12, overflow: 'hidden', background: bg, display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
                 {/* Banda superior con patrón */}
                 <div style={{ background: `linear-gradient(135deg, ${tema.h1} 0%, ${tema.h2} 100%)`, padding: '13px 14px 11px', flexShrink: 0, position: 'relative', overflow: 'hidden' }}>
                   <div style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(135deg, ${tema.accent}12 0px, ${tema.accent}12 1px, transparent 1px, transparent 14px)`, pointerEvents: 'none' }}/>
