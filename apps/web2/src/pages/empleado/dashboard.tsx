@@ -204,12 +204,22 @@ export default function EmployeeDashboard() {
   const [loadingInbox, setLoadingInbox] = useState(false);
   const inboxBucketsRef = useRef<Record<string, any[]>>({});
   const inboxFallbackRef = useRef<Set<string>>(new Set());
+  const ADMIN_NOTIF_TYPES = new Set([
+    'RETENCION_DETECTADA','RETENCION_LARGA','VACANTE_PROTOCOLO_COBERTURA',
+    'RELEVO_NO_PRESENTADO','POSICION_SIN_RELEVO','RECARGO_12H',
+    'AUSENCIA_AUTO','AUSENCIA_CORTO_PLAZO','AVISO_AUSENCIA_ANTICIPADA',
+    'INGRESO_AUTOREGISTRO_ALERTA','RELEVO_INMINENTE',
+  ]);
   const monthInbox = useMemo(() => {
     const now = new Date();
     return inbox.filter((n) => {
       const d = toDate(n.createdAt);
       if (!d) return false;
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+      if (d.getFullYear() !== now.getFullYear() || d.getMonth() !== now.getMonth()) return false;
+      // Excluir notificaciones de admin (target:'admin' o tipos operativos conocidos)
+      if (n.target === 'admin') return false;
+      if (ADMIN_NOTIF_TYPES.has(n.type)) return false;
+      return true;
     });
   }, [inbox]);
   const unreadInbox = useMemo(() => monthInbox.filter((n) => !n.read), [monthInbox]);
@@ -2784,67 +2794,4 @@ export default function EmployeeDashboard() {
                           <div className="font-bold text-slate-200">{r.requesterName || 'Empleado'} ⇄ {r.targetName || 'Empleado'}</div>
                           <div className="text-[11px] text-slate-400 mt-0.5">{formatDate(r.requesterShiftDate)} · {status}</div>
                           {status === 'PENDING_PEER' && isTarget && (<div className="flex gap-2 mt-2"><button onClick={() => handleRespondSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Aceptar</button><button onClick={() => handleRespondSwap(r.id, false)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Rechazar</button></div>)}
-                          {status === 'PENDING_REQUESTER' && isRequester && (<div className="flex gap-2 mt-2"><button onClick={() => handleConfirmSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Confirmar</button><button onClick={() => handleConfirmSwap(r.id, false)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Cancelar</button></div>)}
-                          {isRequester && !['APPROVED','REJECTED','CANCELLED'].includes(statusUpper) && status !== 'PENDING_REQUESTER' && (<div className="flex gap-2 mt-2"><button onClick={() => handleCancelSwap(r.id)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Cancelar solicitud</button></div>)}
-                          {status === 'PENDING_APPROVAL' && <div className="text-[10px] text-amber-300 mt-2">Pendiente de autorización</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-      </div>
-
-      {/* ══ MODAL CREDENCIAL — con edición (ícono header) ══ */}
-      {showCredencial && (
-        <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
-          <button
-            onClick={() => { backCloserRef.current = null; setShowCredencial(false); history.back(); }}
-            className="fixed z-[70] text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800/80"
-            style={{ top: 12, right: 12 }}
-          >
-            <X size={22}/>
-          </button>
-          <div className="px-4 py-6">
-            {empDocIdSt && empProfile ? (
-              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre}/>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
-                <p className="text-slate-500 text-sm font-bold">Cargando...</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ══ MODAL CREDENCIAL — solo vista (card home) ══ */}
-      {showCredencialVista && (
-        <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
-          <button
-            onClick={() => { backCloserRef.current = null; setShowCredencialVista(false); history.back(); }}
-            className="fixed z-[70] text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800/80"
-            style={{ top: 12, right: 12 }}
-          >
-            <X size={22}/>
-          </button>
-          <div className="px-4 py-6">
-            {empDocIdSt && empProfile ? (
-              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly={true}/>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
-                <p className="text-slate-500 text-sm font-bold">Cargando...</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-    </AuthGuard>
-  );
-}
+                          {status === 'PENDING_REQUESTER' && isRequester && (<div className="flex gap-2 mt-2"><button onClick={() => handleConfirmSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opac
