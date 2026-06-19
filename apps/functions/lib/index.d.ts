@@ -21,6 +21,7 @@ export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Run
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
+export declare const notificarLlegadaTarde: functions.HttpsFunction & functions.Runnable<any>;
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateDevice: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateAndSetPassword: functions.HttpsFunction & functions.Runnable<any>;

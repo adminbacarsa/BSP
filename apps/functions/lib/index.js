@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -990,6 +990,51 @@ exports.reportarAusencia = functions.https.onCall(async (data, context) => {
     }
     catch (error) {
         throw new functions.https.HttpsError("internal", error.message);
+    }
+});
+exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => {
+    if (!context.auth)
+        throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
+    const { shiftId } = data;
+    if (!shiftId)
+        throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+    const db = admin.firestore();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    try {
+        const shiftRef = db.collection('turnos').doc(shiftId);
+        const shiftSnap = await shiftRef.get();
+        if (!shiftSnap.exists)
+            throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+        const shiftData = shiftSnap.data();
+        await shiftRef.update({
+            lateArrivalAt: now,
+            checkInStatus: 'LATE_PENDING',
+        });
+        try {
+            await db.collection('novedades').add({
+                type: 'LLEGADA_TARDE_AVISO',
+                shiftId,
+                employeeId: shiftData.employeeId || context.auth.uid,
+                employeeName: shiftData.employeeName || '',
+                objectiveId: shiftData.objectiveId || '',
+                objectiveName: shiftData.objectiveName || '',
+                clientName: shiftData.clientName || '',
+                empresaId: shiftData.empresaId || null,
+                description: (shiftData.employeeName || 'El guardia') + ' aviso que llegara tarde a ' + (shiftData.objectiveName || 'su puesto'),
+                createdAt: now,
+                status: 'unread',
+                viewed: false,
+            });
+        }
+        catch (e) {
+            console.warn('[notificarLlegadaTarde] No se pudo crear novedad:', e?.message);
+        }
+        return { success: true };
+    }
+    catch (error) {
+        if (error instanceof functions.https.HttpsError)
+            throw error;
+        throw new functions.https.HttpsError('internal', error.message);
     }
 });
 const nodemailer = require("nodemailer");

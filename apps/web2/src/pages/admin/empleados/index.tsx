@@ -15,11 +15,13 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { filterRowsByEmpresa, belongsToEmpresaView, shouldScopeQueriesToEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 import { buildEmployeeSavePayload, initialLegajoForm, mapFirestoreToLegajoForm, normalizeEmployeeStatus } from '@/lib/employees/employeeLegajoDefaults';
 import {
-  Search, Plus, Edit2, Trash2, MapPin,
+  Search, Plus, Edit2, Trash2, MapPin, Eye,
   FileBadge, UserCheck, UserX, Send, KeyRound,
   CheckSquare, Square, CheckCircle2, Clock, AlertCircle,
   Loader2, Mail, ShieldCheck, LayoutGrid, List, ExternalLink
 } from 'lucide-react';
+import { useRouter } from 'next/router';
+import { useAuth } from '@/context/AuthContext';
 
 type ListViewMode = 'cards' | 'table';
 
@@ -31,6 +33,8 @@ const isEmployeeActive = (status: string | undefined) => {
 export default function EmployeesPage() {
   const { addToast } = useToast();
   const { empresaId, empresa } = useEmpresa();
+  const { isSuperAdmin } = useAuth();
+  const router = useRouter();
   const migracionCompleta = empresa?.migracionCompleta ?? false;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const [view, setView] = useState<'list' | 'form'>('list');
@@ -349,6 +353,15 @@ export default function EmployeesPage() {
       >
         <ExternalLink size={13} />
       </Link>
+      {isSuperAdmin && emp.id && (
+        <button
+          onClick={() => router.push(`/empleado/dashboard?preview=${emp.id}`)}
+          className="p-1.5 rounded-lg text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors"
+          title="Ver portal del empleado (preview)"
+        >
+          <Eye size={13} />
+        </button>
+      )}
       <button
         onClick={() => openEdit(emp)}
         disabled={loadingEdit}

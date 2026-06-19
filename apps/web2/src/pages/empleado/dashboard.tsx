@@ -241,14 +241,33 @@ export default function EmployeeDashboard() {
 
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
 
-  const { user } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
   const router = useRouter();
+  // ── Superadmin preview mode ──────────────────────────────────────────────
+  const previewEmpId = (router.isReady && isSuperAdmin) ? ((router.query.preview as string) || null) : null;
+  const isPreviewMode = !!(isSuperAdmin && previewEmpId);
+  const [previewEmployees, setPreviewEmployees] = useState<Array<{ id: string; name: string; empresa?: string }>>([]);
+  const [previewSearch, setPreviewSearch] = useState('');
+  const [showPreviewPicker, setShowPreviewPicker] = useState(false);
+
   const previousShiftRef = useRef<Map<string, Shift>>(new Map());
   const shiftInitialLoadDone = useRef(false);
   const [shiftAlerts, setShiftAlerts] = useState<Array<{ id: string; type: 'MODIFIED' | 'ADDED' | 'REMOVED'; shift: Shift; prev?: Shift; at: Date }>>([]);
   const empDocIdRef = useRef<string | null>(null);
   const [showLogoutMenu, setShowLogoutMenu] = useState(false);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load employees for superadmin preview picker
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    getDocs(query(collection(db, 'empleados'), orderBy('lastName'), limit(200))).then(snap => {
+      setPreviewEmployees(snap.docs.map(d => {
+        const data = d.data();
+        const name = `${data.lastName || ''}, ${data.firstName || data.nombre || ''}`.trim().replace(/^,\s*/, '');
+        return { id: d.id, name: name || d.id, empresa: data.empresaId };
+      }));
+    }).catch(() => {});
+  }, [isSuperAdmin]);
 
   const startPressTimer = () => {
     pressTimerRef.current = setTimeout(() => setShowLogoutMenu(true), 1500);
@@ -346,23 +365,36 @@ export default function EmployeeDashboard() {
     setLoadingShifts(true);
 
     let empDocId: string | null = null;
-    try {
-      empDocId = await resolveEmpDocId();
-      if (empDocId) setEmpDocIdSt(empDocId);
-    } catch (resolveErr: any) {
-      console.error('[dashboard] resolveEmpDocId error:', resolveErr?.code, resolveErr?.message);
-      addToast(`Sin acceso al perfil (${resolveErr?.code || 'error'})`, 'error');
-      setLoadingShifts(false);
-      return () => {};
-    }
 
-    if (!empDocId) {
-      console.warn('[dashboard] No empleados doc found for uid:', user.uid, 'email:', user.email);
-      addToast('Perfil de empleado no encontrado. Contactar al administrador.', 'error');
-      setTimeout(() => { signOut(auth).catch(() => {}); window.location.href = '/login'; }, 3000);
-      setShifts([]);
-      setLoadingShifts(false);
-      return () => {};
+    // Superadmin preview mode: use the query param directly, skip resolveEmpDocId
+    if (isPreviewMode && previewEmpId) {
+      empDocId = previewEmpId;
+      setEmpDocIdSt(empDocId);
+    } else {
+      try {
+        empDocId = await resolveEmpDocId();
+        if (empDocId) setEmpDocIdSt(empDocId);
+      } catch (resolveErr: any) {
+        console.error('[dashboard] resolveEmpDocId error:', resolveErr?.code, resolveErr?.message);
+        addToast(`Sin acceso al perfil (${resolveErr?.code || 'error'})`, 'error');
+        setLoadingShifts(false);
+        return () => {};
+      }
+
+      if (!empDocId) {
+        // Superadmin sin preview param: mostrar picker en vez de redirigir a login
+        if (isSuperAdmin) {
+          setLoadingShifts(false);
+          setShowPreviewPicker(true);
+          return () => {};
+        }
+        console.warn('[dashboard] No empleados doc found for uid:', user.uid, 'email:', user.email);
+        addToast('Perfil de empleado no encontrado. Contactar al administrador.', 'error');
+        setTimeout(() => { signOut(auth).catch(() => {}); window.location.href = '/login'; }, 3000);
+        setShifts([]);
+        setLoadingShifts(false);
+        return () => {};
+      }
     }
 
     // Cargar datos del empleado desde Firestore (no depender del displayName de Firebase Auth)
@@ -1015,6 +1047,7 @@ export default function EmployeeDashboard() {
 
   const handleCheckIn = async (shift: Shift) => {
     if (!user) return;
+    if (isPreviewMode) { addToast('Modo preview — acción deshabilitada', 'info'); return; }
     const start = toDate(shift.startTime);
     const end = toDate(shift.endTime);
     if (!start || !end) {
@@ -1106,6 +1139,7 @@ export default function EmployeeDashboard() {
 
   const handleLlegadaTarde = async (shift: Shift) => {
     if (!user) return;
+    if (isPreviewMode) { addToast('Modo preview — acción deshabilitada', 'info'); return; }
     setCheckingShiftId(shift.id);
     try {
       const callable = httpsCallable(functions, 'notificarLlegadaTarde');
@@ -1122,6 +1156,7 @@ export default function EmployeeDashboard() {
 
   const handleSubmitAbsenceRequest = async () => {
     if (!user) return;
+    if (isPreviewMode) { addToast('Modo preview — acción deshabilitada', 'info'); return; }
     if (!absenceStart || !absenceEnd) {
       addToast('Seleccioná las fechas', 'error');
       return;
@@ -1646,6 +1681,66 @@ export default function EmployeeDashboard() {
   return (
     <AuthGuard>
       <Head><title>Portal Empleado | CronoApp</title></Head>
+
+      {/* ── Superadmin preview banner ── */}
+      {isPreviewMode && (
+        <div className="sticky top-0 z-50 flex items-center gap-2 bg-orange-600 px-3 py-2 text-white text-xs font-bold">
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+          <span className="flex-1 truncate">PREVIEW · {empProfile ? `${empProfile.lastName || ''} ${empProfile.firstName || ''}`.trim() || previewEmpId : previewEmpId}</span>
+          <button onClick={() => setShowPreviewPicker(true)} className="shrink-0 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded text-[10px] font-black uppercase">Cambiar</button>
+          <button onClick={() => router.back()} className="shrink-0 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded text-[10px] font-black uppercase">← Volver</button>
+        </div>
+      )}
+
+      {/* ── Superadmin employee picker overlay ── */}
+      {isSuperAdmin && showPreviewPicker && (
+        <div className="fixed inset-0 z-[9999] bg-slate-950/95 flex flex-col p-4">
+          <div className="flex items-center gap-3 mb-4">
+            <svg className="w-5 h-5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            <h2 className="text-white font-black text-base flex-1">Vista previa — Seleccionar empleado</h2>
+            {isPreviewMode && <button onClick={() => setShowPreviewPicker(false)} className="text-slate-400 hover:text-white"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>}
+          </div>
+          <div className="bg-slate-800 rounded-xl px-3 py-2 flex items-center gap-2 mb-3">
+            <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input
+              autoFocus
+              type="text"
+              placeholder="Buscar empleado..."
+              value={previewSearch}
+              onChange={e => setPreviewSearch(e.target.value)}
+              className="bg-transparent text-white text-sm flex-1 outline-none placeholder-slate-500"
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-1">
+            {previewEmployees
+              .filter(e => !previewSearch || e.name.toLowerCase().includes(previewSearch.toLowerCase()) || e.empresa?.toLowerCase().includes(previewSearch.toLowerCase()))
+              .slice(0, 50)
+              .map(emp => (
+                <button
+                  key={emp.id}
+                  onClick={() => { setShowPreviewPicker(false); setPreviewSearch(''); router.push(`/empleado/dashboard?preview=${emp.id}`); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition-colors ${previewEmpId === emp.id ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'}`}
+                >
+                  <div className="w-7 h-7 rounded-full bg-slate-600 flex items-center justify-center text-[10px] font-black text-white shrink-0">
+                    {emp.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold truncate">{emp.name}</p>
+                    {emp.empresa && <p className="text-[10px] text-slate-400 truncate">{emp.empresa}</p>}
+                  </div>
+                  {previewEmpId === emp.id && <svg className="w-4 h-4 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>}
+                </button>
+              ))}
+            {previewEmployees.length === 0 && (
+              <p className="text-slate-500 text-sm text-center py-8">Cargando empleados...</p>
+            )}
+          </div>
+          {!isPreviewMode && (
+            <button onClick={() => router.back()} className="mt-3 w-full py-3 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold">← Volver al admin</button>
+          )}
+        </div>
+      )}
+
       {!isOnline && (
         <div role="alert" aria-live="assertive" className="sticky top-0 z-50 flex items-center gap-2 bg-amber-50 border-b-2 border-amber-400 px-4 py-2.5 text-amber-800 text-xs font-medium">
           <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072M12 12h.01M8.464 15.536a5 5 0 010-7.072M5.636 18.364a9 9 0 010-12.728" /></svg>
