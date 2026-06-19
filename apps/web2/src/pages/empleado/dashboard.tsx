@@ -511,14 +511,19 @@ export default function EmployeeDashboard() {
 
   useEffect(() => {
     if (!user) return;
+    // In preview mode, wait until router is ready and previewEmpId is resolved
+    if (isSuperAdmin && !router.isReady) return;
     let unsub: (() => void) | null = null;
     loadObjectives();
     fetchShifts().then(u => { unsub = u; });
     return () => { if (unsub) unsub(); };
-  }, [user?.uid]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, previewEmpId]);
 
   useEffect(() => {
     if (!user) return;
+    // Superadmin en modo preview: saltar verificación de dispositivo
+    if (isSuperAdmin) { setDeviceVerified(true); return; }
     const localDeviceId = typeof window !== 'undefined' ? localStorage.getItem('cosp_device_id') : null;
     // Verificar si el empleado tiene bypassDeviceCheck activo (para pruebas / acceso directo)
     resolveEmpDocId().then(async (empDocId) => {
