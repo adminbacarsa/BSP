@@ -2824,8 +2824,8 @@ export default function EmployeeDashboard() {
             >
               <X size={22}/>
             </button>
-            <div className="flex items-center justify-center min-h-full py-8 px-4">
-              <div className="w-full max-w-xs sm:max-w-sm lg:[zoom:1.5] xl:[zoom:1.7]">
+            <div className="px-4 py-6 flex justify-center">
+              <div className="w-full max-w-[300px] sm:max-w-[340px] lg:max-w-[360px] lg:[zoom:1.25] xl:[zoom:1.4]">
               {empDocIdSt && empProfile ? (
                 <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre}/>
               ) : (
@@ -2849,8 +2849,8 @@ export default function EmployeeDashboard() {
             >
               <X size={22}/>
             </button>
-            <div className="flex items-center justify-center min-h-full py-8 px-4">
-              <div className="w-full max-w-xs sm:max-w-sm lg:[zoom:1.5] xl:[zoom:1.7]">
+            <div className="px-4 py-6 flex justify-center">
+              <div className="w-full max-w-[300px] sm:max-w-[340px] lg:max-w-[360px] lg:[zoom:1.25] xl:[zoom:1.4]">
               {empDocIdSt && empProfile ? (
                 <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly={true}/>
               ) : (

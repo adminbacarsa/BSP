@@ -726,8 +726,8 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                 {/* Barra accent */}
                 <div style={{ height: 3, background: `linear-gradient(90deg, ${tema.accent}, ${tema.h2}60)`, flexShrink: 0 }}/>
                 {/* Foto centrada */}
-                <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{ width: '60%', aspectRatio: '3/4', overflow: 'hidden', borderRadius: 10, border: `2px solid ${tema.accent}`, position: 'relative', boxShadow: `0 0 0 4px ${tema.accent}20, 0 8px 24px rgba(0,0,0,0.5)` }}>
+                <div style={{ padding: '12px 18px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ width: '52%', aspectRatio: '3/4', overflow: 'hidden', borderRadius: 10, border: `2px solid ${tema.accent}`, position: 'relative', boxShadow: `0 0 0 4px ${tema.accent}20, 0 8px 24px rgba(0,0,0,0.5)` }}>
                     <div ref={photoContRef} style={{ position: 'absolute', inset: 0, pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
                       {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}><RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p></div>}
                       {fotoMostrada ? (
@@ -747,13 +747,13 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                   </div>
                 </div>
                 {/* Nombre */}
-                <div style={{ padding: '14px 16px 0', textAlign: 'center' }}>
-                  <p style={{ color: '#fff', fontSize: 16, fontWeight: 900, lineHeight: 1.2, letterSpacing: '0.02em' }}>{apellidoNombre || nombre || '—'}</p>
+                <div style={{ padding: '10px 14px 0', textAlign: 'center' }}>
+                  <p style={{ color: '#fff', fontSize: 15, fontWeight: 900, lineHeight: 1.2, letterSpacing: '0.02em' }}>{apellidoNombre || nombre || '—'}</p>
                 </div>
                 {/* Separador */}
-                <div style={{ margin: '12px 16px', height: 1, background: `linear-gradient(90deg, transparent, ${tema.accent}50, transparent)` }}/>
+                <div style={{ margin: '8px 14px', height: 1, background: `linear-gradient(90deg, transparent, ${tema.accent}50, transparent)` }}/>
                 {/* Datos en grilla */}
-                <div style={{ padding: '0 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 12px' }}>
+                <div style={{ padding: '0 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 10px' }}>
                   {empData.fileNumber && (
                     <div>
                       <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>Legajo</p>
@@ -768,17 +768,17 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                   )}
                 </div>
                 {empData.cuil && (
-                  <div style={{ padding: '8px 16px 0' }}>
+                  <div style={{ padding: '6px 14px 0' }}>
                     <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>CUIL</p>
                     <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
                   </div>
                 )}
                 {/* Verificacion */}
-                <div style={{ padding: '10px 16px 0' }}>
+                <div style={{ padding: '8px 14px 0' }}>
                   {verSection()}
                 </div>
                 {/* Footer */}
-                <div style={{ flexShrink: 0, marginTop: 14, background: `linear-gradient(90deg, ${tema.h2}cc, ${tema.h1}cc)`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 10px', borderTop: `1px solid ${tema.accent}30` }}>
+                <div style={{ flexShrink: 0, marginTop: 10, background: `linear-gradient(90deg, ${tema.h2}cc, ${tema.h1}cc)`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 10px', borderTop: `1px solid ${tema.accent}30` }}>
                   {credPie ? (
                     <div>
                       <p style={{ color: `${tema.accent}99`, fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Sector</p>
@@ -904,8 +904,8 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
 
       {/* Modal cámara */}
       {showCamera && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3" style={{ background: tema.h1 }}>
+        <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+          <div className="flex items-center justify-between px-4 py-2" style={{ background: tema.h1 }}>
             <p className="text-white font-black text-sm">Foto carnet</p>
             <button onClick={cerrarCamara} className="text-slate-400 hover:text-white p-1"><X size={22}/></button>
           </div>
@@ -952,7 +952,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
               )}
             </div>
           </div>
-          <div className="pb-12 pt-5 flex justify-center" style={{ background: tema.h1 }}>
+          <div className="pb-8 pt-4 flex justify-center" style={{ background: tema.h1 }}>
             <button
               onClick={countdown === null ? iniciarContador : undefined}
               disabled={countdown !== null}
