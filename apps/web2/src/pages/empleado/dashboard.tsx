@@ -750,7 +750,7 @@ export default function EmployeeDashboard() {
   const blueCountdownMinutes = blueDiffMinutes !== null && blueDiffMinutes <= 30 && blueDiffMinutes > 15 ? blueDiffMinutes : null;
   const blueTimeOk = blueDiffMinutes !== null && blueDiffMinutes <= 15 && blueDiffMinutes >= -5;
   const blueCanRequest = !!blueShift && !blueShift.isFranco && blueTimeOk && !blueHasPendingRequest && !blueIsConfirmedPresent;
-  const blueLateWindow = blueDiffMinutes !== null && blueDiffMinutes < -5 && blueDiffMinutes >= -30;
+  const blueLateWindow = blueDiffMinutes !== null && blueDiffMinutes < -5 && blueDiffMinutes >= -120;
   const blueIsLateNotified = !!(blueShift && (lateArrivalSent[blueShift?.id || ''] || blueShift.lateArrivalAt));
   const blueLateCanRequest = !!blueShift && !blueShift.isFranco && blueLateWindow && !blueHasPendingRequest && !blueIsConfirmedPresent;
 
@@ -2175,7 +2175,7 @@ export default function EmployeeDashboard() {
                   {checkingShiftId === blueShift.id ? 'Enviando...' : 'Llegué Tarde'}
                 </button>
               )}
-              {portalFeatures.checkIn && blueLateCanRequest && blueIsLateNotified && blueShift && (
+              {portalFeatures.checkIn && blueIsLateNotified && !blueIsConfirmedPresent && !blueHasPendingRequest && blueShift && !blueShift.isFranco && (
                 <button
                   onClick={() => handleCheckIn(blueShift)}
                   disabled={checkingShiftId === blueShift.id}
