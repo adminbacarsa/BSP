@@ -2097,7 +2097,7 @@ export default function EmployeeDashboard() {
                 return (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-indigo-100">
-                    {heroObjective?.name || heroShift?.objectiveName || heroShift?.objectiveId || 'Objetivo'}
+                    {heroObjective?.name || heroShift?.objectiveName || (heroShift?.objectiveId ? objectivesMap[heroShift.objectiveId]?.name : null) || 'Objetivo'}
                   </span>
                   {heroObjective?.clientName || heroShift?.clientName ? (
                     <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-indigo-100">
@@ -2263,7 +2263,7 @@ export default function EmployeeDashboard() {
                       ) : (
                         <div>
                           <p className="text-sm font-black text-white truncate leading-tight">
-                            {objective?.name || shift.objectiveName || shift.objectiveId || 'Sin objetivo'}
+                            {objective?.name || shift.objectiveName || (shift.objectiveId ? objectivesMap[shift.objectiveId]?.name : null) || 'Sin objetivo'}
                           </p>
                           <p className="text-[11px] text-indigo-400 font-bold mt-1">
                             {formatTime(shift.startTime)} – {formatTime(shift.endTime)}
@@ -2345,7 +2345,7 @@ export default function EmployeeDashboard() {
                 const DAY_ABBR = ['Do','Lu','Ma','Mi','Ju','Vi','Sa'];
                 const selShift = selectedCalendarDay ? shiftsByDate[selectedCalendarDay] : null;
                 const selObjData = selShift?.objectiveId ? objectivesMap[selShift.objectiveId] : null;
-                const selLabel = selShift?.isFranco ? 'Franco' : (selObjData?.name || selShift?.objectiveName || selShift?.clientName || selShift?.objectiveId || 'Sin objetivo');
+                const selLabel = selShift?.isFranco ? 'Franco' : (selObjData?.name || selShift?.objectiveName || selShift?.clientName || (selShift?.objectiveId ? objectivesMap[selShift.objectiveId]?.name : null) || 'Sin objetivo');
                 const selMapsUrl = selObjData && selObjData.lat && selObjData.lng
                   ? `https://www.google.com/maps?q=${selObjData.lat},${selObjData.lng}`
                   : selObjData?.address ? `https://www.google.com/maps/search/${encodeURIComponent(selObjData.address)}` : null;
@@ -2487,7 +2487,7 @@ export default function EmployeeDashboard() {
                 <div className="divide-y divide-slate-800/60">
                   {upcomingShifts.map(shift => {
                     const objectiveData = shift.objectiveId ? objectivesMap[shift.objectiveId] : null;
-                    const objectiveLabel = shift.isFranco ? 'Franco' : (objectiveData?.name || shift.objectiveName || shift.clientName || shift.objectiveId || 'Sin objetivo');
+                    const objectiveLabel = shift.isFranco ? 'Franco' : (objectiveData?.name || shift.objectiveName || shift.clientName || (shift.objectiveId ? objectivesMap[shift.objectiveId]?.name : null) || 'Sin objetivo');
                     const isFranco = !!shift.isFranco;
                     const rawStatus = shift.status || (shift.isPresent ? 'PRESENT' : 'ASSIGNED');
                     const isPresent = shift.isPresent || rawStatus === 'PRESENT' || rawStatus === 'InProgress';
@@ -2609,7 +2609,7 @@ export default function EmployeeDashboard() {
                   <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-2xl p-3.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-black text-white truncate">{s.objectiveName || s.objectiveId || 'Sin objetivo'}</p>
+                        <p className="text-sm font-black text-white truncate">{s.objectiveName || (s.objectiveId ? objectivesMap[s.objectiveId]?.name : null) || 'Sin objetivo'}</p>
                         <p className="text-[11px] font-bold mt-0.5" style={{ color: empresaColor }}>{formatDate(s.startTime)}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">{formatTime(s.startTime)} – {formatTime(s.endTime)}</p>
                       </div>
@@ -2645,7 +2645,7 @@ export default function EmployeeDashboard() {
                   <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-2xl p-3.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-black text-white truncate">{s.objectiveName || s.objectiveId || 'Sin objetivo'}</p>
+                        <p className="text-sm font-black text-white truncate">{s.objectiveName || (s.objectiveId ? objectivesMap[s.objectiveId]?.name : null) || 'Sin objetivo'}</p>
                         <p className="text-[11px] font-bold mt-0.5" style={{ color: empresaColor }}>{formatDate(s.startTime)}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">{formatTime(s.startTime)} – {formatTime(s.endTime)}</p>
                         {s.checkInTime && (
@@ -2794,4 +2794,67 @@ export default function EmployeeDashboard() {
                           <div className="font-bold text-slate-200">{r.requesterName || 'Empleado'} ⇄ {r.targetName || 'Empleado'}</div>
                           <div className="text-[11px] text-slate-400 mt-0.5">{formatDate(r.requesterShiftDate)} · {status}</div>
                           {status === 'PENDING_PEER' && isTarget && (<div className="flex gap-2 mt-2"><button onClick={() => handleRespondSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Aceptar</button><button onClick={() => handleRespondSwap(r.id, false)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Rechazar</button></div>)}
-                          {status === 'PENDING_REQUESTER' && isRequester && (<div className="flex gap-2 mt-2"><button onClick={() => handleConfirmSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opac
+                          {status === 'PENDING_REQUESTER' && isRequester && (<div className="flex gap-2 mt-2"><button onClick={() => handleConfirmSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Confirmar</button><button onClick={() => handleConfirmSwap(r.id, false)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Cancelar</button></div>)}
+                          {isRequester && !['APPROVED','REJECTED','CANCELLED'].includes(statusUpper) && status !== 'PENDING_REQUESTER' && (<div className="flex gap-2 mt-2"><button onClick={() => handleCancelSwap(r.id)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Cancelar solicitud</button></div>)}
+                          {status === 'PENDING_APPROVAL' && <div className="text-[10px] text-amber-300 mt-2">Pendiente de autorización</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      {/* ══ MODAL CREDENCIAL — con edición (ícono header) ══ */}
+      {showCredencial && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
+          <button
+            onClick={() => { backCloserRef.current = null; setShowCredencial(false); history.back(); }}
+            className="fixed z-[70] text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800/80"
+            style={{ top: 12, right: 12 }}
+          >
+            <X size={22}/>
+          </button>
+          <div className="px-4 py-6">
+            {empDocIdSt && empProfile ? (
+              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre}/>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
+                <p className="text-slate-500 text-sm font-bold">Cargando...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ MODAL CREDENCIAL — solo vista (card home) ══ */}
+      {showCredencialVista && (
+        <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
+          <button
+            onClick={() => { backCloserRef.current = null; setShowCredencialVista(false); history.back(); }}
+            className="fixed z-[70] text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800/80"
+            style={{ top: 12, right: 12 }}
+          >
+            <X size={22}/>
+          </button>
+          <div className="px-4 py-6">
+            {empDocIdSt && empProfile ? (
+              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly={true}/>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
+                <p className="text-slate-500 text-sm font-bold">Cargando...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+    </AuthGuard>
+  );
+}
