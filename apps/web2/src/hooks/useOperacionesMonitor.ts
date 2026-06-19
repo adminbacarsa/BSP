@@ -321,6 +321,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             } else { finalEmpName = 'VACANTE'; }
 
             const hasActiveSLA = activeSlaMap.has(shift.objectiveId);
+            // isCustomPost: puesto custom (no 24h) → se auto-cierra al fin del turno sin retención
+            const slaRowForPos = filteredSLA.find((sv: any) => sv.objectiveId === shift.objectiveId);
+            const posRowForPos = slaRowForPos?.positions?.find((p: any) => normPosName(p.name) === normPosName(rawPos));
+            const _posCV = String(posRowForPos?.coverageType || '').toLowerCase();
+            const isCustomPost = !!_posCV && _posCV !== '24hs' && _posCV !== '24' && _posCV !== '24h';
             const isAbsent = !!shift.isAbsent;
             // isPresent solo si el turno arranca dentro de los próximos 60 min O ya inició
             // Evita el bug de turnos con isPresent=true que en realidad no empiezan en horas
@@ -430,7 +435,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
-                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField
+                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField
             };
         }).filter(Boolean);
 
@@ -900,6 +905,27 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const retainedShifts = processedData.filter((s: any) => s.isRetention && !s.isCompleted);
         for (const s of retainedShifts) {
             const endMs = s.endDateObj?.getTime?.() ?? 0;
+
+            // ── PUESTO CUSTOM: cerrar inmediatamente al terminar (sin relevo ni espera) ──
+            // Solo si NO hay retención manual del operador (manualRetentionType está seteado)
+            const isOperatorRetention = s.isRetentionByField && !!s.manualRetentionType;
+            if (s.isCustomPost && !isOperatorRetention) {
+                const autoCustomKey = `${s.id}_AUTO_END_CUSTOM_POST`;
+                if (!alertedVacancyIds.current.has(autoCustomKey)) {
+                    alertedVacancyIds.current.add(autoCustomKey);
+                    autoCloseShiftTx(s.id, {
+                        status: 'COMPLETED', isCompleted: true, isPresent: false,
+                        completedAt: serverTimestamp(), completedBy: 'Sistema',
+                        completionReason: 'AUTO_SHIFT_END_CUSTOM',
+                    }, empresaId).then(ok => {
+                        if (ok) toast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
+                    }).catch(e => {
+                        alertedVacancyIds.current.delete(autoCustomKey);
+                        console.warn('[autoEndCustomPost]', e);
+                    });
+                }
+                continue;
+            }
 
             // ── AUTO-FIN RETENCIÓN: puesto cubierto por turnos regulares ──
             const autoEndKey = `${s.id}_AUTO_END_RETENTION`;

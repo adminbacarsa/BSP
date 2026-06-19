@@ -175,6 +175,8 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       const newlyRetained = processedData.filter(s => {
         if (!s.isPresent || s.isCompleted || s.isFranco || s.isUnassigned) return false;
         if (processedIds.current.has(`retention_set_${s.id}`)) return false;
+        // Puestos custom: no marcar isRetention — se auto-cierran al terminar el turno
+        if (s.isCustomPost) return false;
         // isRetention computado (por tiempo) pero aún no guardado en Firestore
         const retentionByTime = s.endDateObj && (new Date()).getTime() > s.endDateObj.getTime();
         return retentionByTime && !s.isRetention; // Firestore field not yet set
@@ -188,9 +190,10 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         }).catch(e => console.warn('[retention T+0]', e));
       }
 
-      // Guardias en retención > 30 min
+      // Guardias en retención > 30 min (solo puestos 24h — los custom se auto-cierran)
       const retentions = processedData.filter(s => {
         if (!s.isRetention) return false;
+        if (s.isCustomPost && !s.manualRetentionType) return false; // custom sin retención manual → no alertar
         if (processedIds.current.has(`retention_${s.id}`)) return false;
         return s.retentionMinutes > 30;
       });
@@ -232,7 +235,9 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         if (!(s.isPresent || s.status === 'PRESENT')) return false;
         if (s.isFranco || s.isUnassigned) return false;
         // No auto-completar retenciones naturales — sí las retenciones manuales con tiempo fijo (manualRetentionType='extended')
-        if (s.isRetention && s.manualRetentionType !== 'extended') return false;
+        // Excepción: puestos custom sin retención manual del operador se auto-cierran siempre
+        const isOperatorRetention = s.isRetentionByField && !!s.manualRetentionType;
+        if (s.isRetention && s.manualRetentionType !== 'extended' && !(s.isCustomPost && !isOperatorRetention)) return false;
         if (processedIds.current.has(`autocomplete_${s.id}`)) return false;
         const endMs = s.endDateObj?.getTime?.() || 0;
         return endMs > 0 && (now.getTime() - endMs) > 2 * 60 * 1000;
