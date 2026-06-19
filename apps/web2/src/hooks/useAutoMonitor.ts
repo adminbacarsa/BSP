@@ -28,6 +28,10 @@ const createNovedad = (type: string, title: string, description: string, shiftDa
     shiftId: shiftData.id || null,
     clientId: shiftData.clientId || null,
     objectiveId: shiftData.objectiveId || null,
+    objectiveName: shiftData.objectiveName || null,
+    employeeId: shiftData.employeeId || null,
+    employeeName: shiftData.employeeName || null,
+    positionName: shiftData.positionName || null,
     createdAt: serverTimestamp(),
     reportedBy: 'SISTEMA_AUTO',
   }, String(shiftData.empresaId || empresaId || '').trim())).catch(() => {});

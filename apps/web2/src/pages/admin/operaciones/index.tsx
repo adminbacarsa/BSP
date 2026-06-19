@@ -3860,6 +3860,9 @@ export default function OperacionesPage() {
                               POSICION_SIN_RELEVO:         { label: 'REL',     bg: 'bg-amber-100 text-amber-700',          border: 'border-l-amber-500' },
                               RETENCION_LARGA:             { label: 'REC',     bg: 'bg-orange-100 text-orange-800',        border: 'border-l-orange-600' },
                               RELEVO_INMINENTE:            { label: 'RELEVO',  bg: 'bg-blue-100 text-blue-800',            border: 'border-l-blue-600' },
+                              LLEGADA_TARDE:               { label: 'TARDE',   bg: 'bg-amber-400 text-white animate-pulse', border: 'border-l-amber-400' },
+                              TURNO_COMPLETADO_AUTO:       { label: 'FIN',     bg: 'bg-slate-100 text-slate-600',           border: 'border-l-slate-300' },
+                              INGRESO_AUTOREGISTRO:        { label: 'INGRESO', bg: 'bg-teal-100 text-teal-700',             border: 'border-l-teal-500' },
                             };
                             const getMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
                             const groups: { type: string; items: any[] }[] = [];
@@ -4069,6 +4072,9 @@ export default function OperacionesPage() {
                                     RECARGO_12H:                 { label: 'REC+12',  bg: 'bg-orange-100 text-orange-800',           border: 'border-l-orange-600', actionBg: 'bg-orange-700 hover:bg-orange-800' },
                                     RETENCION_DETECTADA:         { label: 'REC',     bg: 'bg-orange-100 text-orange-800',           border: 'border-l-orange-600', actionBg: 'bg-orange-700 hover:bg-orange-800' },
                                     RELEVO_INMINENTE:            { label: 'RELEVO',  bg: 'bg-blue-100 text-blue-800',               border: 'border-l-blue-600',   actionBg: 'bg-blue-600 hover:bg-blue-700' },
+                                    LLEGADA_TARDE:               { label: 'TARDE',   bg: 'bg-amber-400 text-white animate-pulse',    border: 'border-l-amber-400',  actionBg: 'bg-amber-500 hover:bg-amber-600' },
+                                    TURNO_COMPLETADO_AUTO:       { label: 'FIN',     bg: 'bg-slate-100 text-slate-600',              border: 'border-l-slate-400',  actionBg: 'bg-slate-600 hover:bg-slate-700' },
+                                    INGRESO_AUTOREGISTRO:        { label: 'INGRESO', bg: 'bg-teal-100 text-teal-700',                border: 'border-l-teal-500',   actionBg: 'bg-teal-600 hover:bg-teal-700' },
                                 };
                                 const getMeta = (t: string) => NOV_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300', actionBg: 'bg-slate-700 hover:bg-slate-800' };
                                 // Agrupar por tipo
@@ -4108,6 +4114,7 @@ export default function OperacionesPage() {
                                                             <p className="text-[9px] text-slate-400 truncate leading-tight">{n.positionName || n.description || ''}</p>
                                                         </div>
                                                         <span className="text-[9px] font-mono text-slate-500 w-10 text-right shrink-0">{ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}</span>
+                                        <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }} className="p-1 bg-slate-700 text-white rounded hover:bg-slate-800 transition-colors shrink-0" title="Atender"><CheckCircle size={10}/></button>
                                                         <button onClick={() => { setNotifPanelOpen(false); setDetailNovedad(n); }}
                                                             className={`text-[9px] font-black text-white px-2 py-1 rounded-lg w-16 text-center shrink-0 transition-colors ${meta.actionBg}`}>VER</button>
                                                     </div>
