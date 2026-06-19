@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -867,7 +867,7 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
                     employeeName: incomingName,
                     relievedEmployeeId: outEmpId,
                     relievedEmployeeName: outName,
-                    description: `${incomingName} relevÃ³ a ${outName} en ${objectiveName}${outPosName ? ' â€” ' + outPosName : ''}`,
+                    description: `${incomingName} relevÃ³ a ${outName} en ${objectiveName}${outPosName ? ' — ' + outPosName : ''}`,
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                     autoProcessed: true,
                     source: 'AUTO_RELEVO',
@@ -887,7 +887,7 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
                         tokenSet.add(t);
                 });
                 const tokens = Array.from(tokenSet);
-                const notifTitle = 'âœ… Turno finalizado â€” relevado';
+                const notifTitle = 'âœ… Turno finalizado — relevado';
                 const notifBody = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
                 let notifDocId = null;
                 try {
@@ -1282,7 +1282,7 @@ function buildClientPortalEmailHtml(resetLink, clientName) {
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
               <tr>
                 <td style="background:#4f46e5;border-radius:8px;">
-                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÃ‘A</a>
+                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÃ'A</a>
                 </td>
               </tr>
             </table>
@@ -1462,10 +1462,34 @@ exports.autoCompletarTurnos = functions
     let alertedNoRelief = 0;
     for (const docSnap of snap.docs) {
         const shift = docSnap.data();
-        if (shift.isRetention === true)
-            continue;
         if ((shift.status || '') === 'INTERRUPTED')
             continue;
+        if (shift.isRetention === true) {
+            const autoRetentionMs = shift.autoRetentionAt?.toMillis?.() ?? 0;
+            if (!autoRetentionMs) {
+                const endMs2 = shift.endTime?.toMillis?.() ?? 0;
+                if (!endMs2)
+                    continue;
+                const minutesSinceEnd = (nowMs - endMs2) / 60000;
+                if (minutesSinceEnd < 360)
+                    continue;
+            }
+            else {
+                const minutesInRetention = (nowMs - autoRetentionMs) / 60000;
+                if (minutesInRetention < 120)
+                    continue;
+            }
+            completeBatch.update(docSnap.ref, {
+                status: 'COMPLETED',
+                isCompleted: true,
+                isPresent: false,
+                completedAt: now,
+                completedBy: 'Sistema',
+                completionReason: 'AUTO_END_CF_RETENTION_TIMEOUT',
+            });
+            completed++;
+            continue;
+        }
         const endTimeMs = shift.endTime?.toMillis?.() ?? 0;
         if (!endTimeMs)
             continue;
@@ -1511,16 +1535,16 @@ exports.autoCompletarTurnos = functions
                 actorUid: 'SYSTEM',
                 module: 'OPERACIONES',
                 shiftId: docSnap.id,
-                details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} â€” ${shift.objectiveName || ''}`,
+                details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
                 timestamp: now,
             });
             completed++;
         }
         else if (relievePending) {
-            if (!shift.isRetention) {
+            if (!shift.isRetention || !shift.autoRetentionAt) {
                 completeBatch.update(docSnap.ref, {
                     isRetention: true,
-                    retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentÃ³`,
+                    retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
                     autoRetentionAt: now,
                 });
             }
@@ -1529,14 +1553,14 @@ exports.autoCompletarTurnos = functions
                 await admin.messaging().sendEachForMulticast({
                     tokens: retTokensB,
                     notification: {
-                        title: 'â° Quedaste en retenciÃ³n',
-                        body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© hasta aviso de Operaciones.`,
+                        title: '⏰ Quedaste en retención',
+                        body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
                     },
                     webpush: {
                         notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
                         fcmOptions: { link: '/empleado/dashboard' },
                     },
-                }).catch(e => console.warn('[autoCompletarTurnos] Push retenciÃ³n B error:', e));
+                }).catch(e => console.warn('[autoCompletarTurnos] Push retención B error:', e));
             }
             const existingB = await db.collection('novedades')
                 .where('shiftId', '==', docSnap.id)
@@ -1556,7 +1580,7 @@ exports.autoCompletarTurnos = functions
                     employeeName: shift.employeeName || '',
                     reliefEmployeeName: relievePending.data().employeeName || '',
                     positionName: shift.positionName || '',
-                    description: `â° RETENCIÃ“N: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) â€” su relevo no se presentÃ³. Requiere cobertura urgente.`,
+                    description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
                     createdAt: now,
                     source: 'SYSTEM_SCHEDULER',
                 });
@@ -1564,10 +1588,10 @@ exports.autoCompletarTurnos = functions
             }
         }
         else if (relieveAbsent) {
-            if (!shift.isRetention) {
+            if (!shift.isRetention || !shift.autoRetentionAt) {
                 completeBatch.update(docSnap.ref, {
                     isRetention: true,
-                    retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentÃ³`,
+                    retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
                     autoRetentionAt: now,
                 });
             }
@@ -1576,14 +1600,14 @@ exports.autoCompletarTurnos = functions
                 await admin.messaging().sendEachForMulticast({
                     tokens: retTokensB2,
                     notification: {
-                        title: 'â° Quedaste en retenciÃ³n',
-                        body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© hasta aviso de Operaciones.`,
+                        title: '⏰ Quedaste en retención',
+                        body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
                     },
                     webpush: {
                         notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
                         fcmOptions: { link: '/empleado/dashboard' },
                     },
-                }).catch(e => console.warn('[autoCompletarTurnos] Push retenciÃ³n B2 error:', e));
+                }).catch(e => console.warn('[autoCompletarTurnos] Push retención B2 error:', e));
             }
             const existing = await db.collection('novedades')
                 .where('shiftId', '==', docSnap.id)
@@ -1601,7 +1625,7 @@ exports.autoCompletarTurnos = functions
                     empresaId: shiftEmpresaId(shift) || null,
                     employeeName: shift.employeeName || '',
                     positionName: shift.positionName || '',
-                    description: `âš ï¸ RETENCIÃ“N FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) â€” su relevo no se presentÃ³. Requiere cobertura urgente.`,
+                    description: `⚠️ RETENCIÓN FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
                     createdAt: now,
                     source: 'SYSTEM_SCHEDULER',
                 });
@@ -1628,7 +1652,7 @@ exports.autoCompletarTurnos = functions
                 console.warn('[autoCompletarTurnos] Error checking SLA:', e);
             }
             if (requiresContinuousCoverage) {
-                if (!shift.isRetention) {
+                if (!shift.isRetention || !shift.autoRetentionAt) {
                     completeBatch.update(docSnap.ref, {
                         isRetention: true,
                         retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
@@ -1892,24 +1916,28 @@ exports.detectarAusencias = functions
                     for (const retDoc of toRetain) {
                         const retData = retDoc.data();
                         if (!retData.isRetention) {
+                            const retEndMs = retData.endTime?.toMillis?.() ?? 0;
+                            const retentionAt = retEndMs > nowMs
+                                ? admin.firestore.Timestamp.fromMillis(retEndMs)
+                                : now;
                             await retDoc.ref.update({
                                 isRetention: true,
-                                retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentÃ³`,
-                                autoRetentionAt: now,
+                                retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
+                                autoRetentionAt: retentionAt,
                             });
                             const retTokens = await getEmployeeTokens(db, retData.employeeId);
                             if (retTokens.length > 0) {
                                 await admin.messaging().sendEachForMulticast({
                                     tokens: retTokens,
                                     notification: {
-                                        title: 'â° Quedaste en retenciÃ³n',
-                                        body: `${shift.employeeName || 'El guardia siguiente'} no se presentÃ³ en ${shift.objectiveName || 'el puesto'}. PermanecÃ© en el puesto hasta aviso de Operaciones.`,
+                                        title: '⏰ Quedaste en retención',
+                                        body: `${shift.employeeName || 'El guardia siguiente'} no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé en el puesto hasta aviso de Operaciones.`,
                                     },
                                     webpush: {
                                         notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
                                         fcmOptions: { link: '/empleado/dashboard' },
                                     },
-                                }).catch(e => console.warn('[detectarAusencias] Push retenciÃ³n error:', e));
+                                }).catch(e => console.warn('[detectarAusencias] Push retención error:', e));
                             }
                             await db.collection('novedades').add({
                                 type: 'RETENCION_POR_AUSENCIA',
@@ -1922,7 +1950,7 @@ exports.detectarAusencias = functions
                                 employeeName: retData.employeeName || '',
                                 absentEmployeeId: shift.employeeId,
                                 absentEmployeeName: shift.employeeName || '',
-                                description: `${retData.employeeName || 'Guardia'} retenido automÃ¡ticamente â€” ${shift.objectiveName} Â· ${shift.positionName} â€” por ausencia de ${shift.employeeName}`,
+                                description: `${retData.employeeName || 'Guardia'} retenido automÃ¡ticamente — ${shift.objectiveName} Â· ${shift.positionName} — por ausencia de ${shift.employeeName}`,
                                 createdAt: now,
                                 source: 'SYSTEM_SCHEDULER',
                             });
@@ -1942,12 +1970,12 @@ exports.detectarAusencias = functions
                     await admin.messaging().sendEachForMulticast({
                         tokens,
                         notification: {
-                            title: 'âš ï¸ Ausencia registrada',
+                            title: '⚠️ Ausencia registrada',
                             body: `No se registrÃ³ tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
                         },
                         webpush: {
                             notification: {
-                                title: 'âš ï¸ Ausencia registrada',
+                                title: '⚠️ Ausencia registrada',
                                 body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). IngresÃ¡ al portal si estÃ¡s presente.`,
                                 icon: '/icons/icon-192x192.png',
                                 requireInteraction: true,
@@ -2023,7 +2051,7 @@ exports.detectarAusencias = functions
                     clientId: shift.clientId || null,
                     empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
-                    description: `${shift.employeeName || 'Empleado'} no se presentÃ³ al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
+                    description: `${shift.employeeName || 'Empleado'} no se presentó al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
                     createdAt: now,
                     source: 'SYSTEM_SCHEDULER',
                 });
@@ -2034,7 +2062,7 @@ exports.detectarAusencias = functions
                 actorUid: 'SYSTEM',
                 module: 'OPERACIONES',
                 shiftId: docSnap.id,
-                details: `Ausencia automÃ¡tica: ${shift.employeeName || ''} â€” ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
+                details: `Ausencia automÃ¡tica: ${shift.employeeName || ''} — ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
                 timestamp: now,
             });
             absents++;
@@ -2723,15 +2751,79 @@ exports.cleanupSlaDevueltas = functions
     });
     if (novCount > 0)
         novBatches.push(novBatch);
-    for (const batch of novBatches)
-        await batch.commit();
+    for (const b of novBatches)
+        await b.commit();
     deletedNovedades = novedadesSnap.size;
-    console.log(`[cleanupSlaDevueltas] Listo: ${deletedTurnos} turnos + ${deletedNovedades} novedades eliminados`);
-    res.json({
-        ok: true,
-        deletedTurnos,
-        deletedNovedades,
-        turnoIds: deletedTurnoIds,
+    res.json({ ok: true, deletedTurnos, deletedNovedades, deletedTurnoIds });
+});
+exports.setEmployeePortalPassword = functions.https.onCall(async (data, context) => {
+    const callerAuth = context.auth;
+    if (!callerAuth)
+        throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
+    const tokenRole = callerAuth.token.role || '';
+    let hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === tokenRole.toLowerCase());
+    if (!hasAccess) {
+        try {
+            const sysDoc = await admin.firestore().collection('system_users').doc(callerAuth.uid).get();
+            if (sysDoc.exists) {
+                const fsRole = sysDoc.data()?.role || '';
+                hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === fsRole.toLowerCase());
+            }
+        }
+        catch (_) { }
+    }
+    if (!hasAccess)
+        throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
+    const { employeeId, password, actorName } = data;
+    if (!employeeId)
+        throw new functions.https.HttpsError('invalid-argument', 'employeeId requerido.');
+    if (!password || password.length < 6)
+        throw new functions.https.HttpsError('invalid-argument', 'La contraseña debe tener al menos 6 caracteres.');
+    const db = admin.firestore();
+    const empDoc = await db.collection('empleados').doc(employeeId).get();
+    if (!empDoc.exists)
+        throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
+    const emp = empDoc.data();
+    const email = (emp.email || emp.correo || '').toString().trim().toLowerCase();
+    if (!email)
+        throw new functions.https.HttpsError('failed-precondition', 'El empleado no tiene email registrado.');
+    const empName = (emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim() || email);
+    const empresaId = (emp.empresaId || '').toString();
+    let uid;
+    let alreadyExisted = false;
+    try {
+        const existing = await admin.auth().getUserByEmail(email);
+        uid = existing.uid;
+        alreadyExisted = true;
+        await admin.auth().updateUser(uid, { password });
+    }
+    catch (e) {
+        if (e.code === 'auth/user-not-found') {
+            const newUser = await admin.auth().createUser({ email, password, displayName: empName });
+            await admin.auth().setCustomUserClaims(newUser.uid, { role: 'employee', type: 'employee' });
+            uid = newUser.uid;
+        }
+        else {
+            throw e;
+        }
+    }
+    await db.collection('empleados').doc(employeeId).update({
+        'portalInvite.sent': true,
+        'portalInvite.passwordSetAt': admin.firestore.FieldValue.serverTimestamp(),
+        'portalInvite.passwordSetBy': actorName || callerAuth.token.email || callerAuth.uid,
     });
+    const actor = actorName || callerAuth.token.name || callerAuth.token.email || 'Admin';
+    await db.collection('audit_logs').add({
+        action: 'PORTAL_PASSWORD_SET',
+        module: 'RRHH',
+        actorName: actor,
+        actorUid: callerAuth.uid,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        employeeId,
+        employeeName: empName,
+        empresaId,
+        details: 'Contraseña de portal establecida para ' + empName + ' (' + email + '). Usuario ' + (alreadyExisted ? 'existente actualizado' : 'nuevo creado') + '.',
+    });
+    return { success: true, email, alreadyExisted, uid };
 });
 //# sourceMappingURL=index.js.map

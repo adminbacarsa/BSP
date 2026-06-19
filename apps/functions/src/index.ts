@@ -1215,6 +1215,58 @@ export const reportarAusencia = functions.https.onCall(async (data, context) => 
     }
 });
 
+
+// =========================================================
+// 12b. NOTIFICAR LLEGADA TARDE DESDE PORTAL
+// =========================================================
+export const notificarLlegadaTarde = functions.https.onCall(async (data, context) => {
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
+
+    const { shiftId } = data;
+    if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+
+    const db = admin.firestore();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    try {
+        const shiftRef = db.collection('turnos').doc(shiftId);
+        const shiftSnap = await shiftRef.get();
+        if (!shiftSnap.exists) throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+
+        const shiftData = shiftSnap.data() as any;
+
+        await shiftRef.update({
+            lateArrivalAt: now,
+            checkInStatus: 'LATE_PENDING',
+        });
+
+        // Crear novedad para notificar al operador en CC
+        try {
+            await db.collection('novedades').add({
+                type: 'LLEGADA_TARDE_AVISO',
+                shiftId,
+                employeeId: shiftData.employeeId || context.auth.uid,
+                employeeName: shiftData.employeeName || '',
+                objectiveId: shiftData.objectiveId || '',
+                objectiveName: shiftData.objectiveName || '',
+                clientName: shiftData.clientName || '',
+                empresaId: shiftData.empresaId || null,
+                description: (shiftData.employeeName || 'El guardia') + ' aviso que llegara tarde a ' + (shiftData.objectiveName || 'su puesto'),
+                createdAt: now,
+                status: 'unread',
+                viewed: false,
+            });
+        } catch (e) {
+            console.warn('[notificarLlegadaTarde] No se pudo crear novedad:', (e as Error)?.message);
+        }
+
+        return { success: true };
+    } catch (error: any) {
+        if (error instanceof functions.https.HttpsError) throw error;
+        throw new functions.https.HttpsError('internal', error.message);
+    }
+});
+
 // =========================================================
 // 13. ENVÃO DE ACCESO AL PORTAL DE EMPLEADOS
 // =========================================================

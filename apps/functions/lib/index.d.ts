@@ -46,3 +46,4 @@ export declare const getEmpresaAfipConfig: functions.HttpsFunction & functions.R
 export declare const scheduledAutoInjustificada: functions.CloudFunction<unknown>;
 export declare const onAusenciaCertificado: functions.CloudFunction<functions.Change<functions.firestore.QueryDocumentSnapshot>>;
 export declare const cleanupSlaDevueltas: functions.HttpsFunction;
+export declare const setEmployeePortalPassword: functions.HttpsFunction & functions.Runnable<any>;
