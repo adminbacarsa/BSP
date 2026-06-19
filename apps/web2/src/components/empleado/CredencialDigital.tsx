@@ -671,7 +671,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             onMouseMove={onCardMouseMove}
             style={{
               position: 'relative', width: '100%',
-              height: isH ? 'min(500px, calc(100svw * 1.19))' : 'min(calc(100svh - 180px), 480px)',
+              height: isH ? 'min(500px, calc(100svw * 1.19))' : 'auto',
               transformStyle: 'preserve-3d',
               transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
               transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
@@ -712,10 +712,10 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                   </div>
                 </div>
                 {/* Cuerpo: foto carnet + datos */}
-                <div style={{ flex: 1, display: 'flex', minHeight: 0, padding: '14px 14px 10px 14px', gap: 12, alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', padding: '14px 14px 10px 14px', gap: 12 }}>
                   {/* Foto proporcion carnet 3:4 */}
                   <div style={{ flexShrink: 0, width: '36%', position: 'relative' }}>
-                    <div style={{ width: '100%', paddingBottom: '133%', position: 'relative', overflow: 'hidden', borderRadius: 8, border: `1.5px solid ${tema.accent}40` }}>
+                    <div style={{ width: '100%', aspectRatio: '3/4', overflow: 'hidden', borderRadius: 8, border: `1.5px solid ${tema.accent}40`, position: 'relative' }}>
                       <div ref={photoContRef} style={{ position: 'absolute', inset: 0, pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
                         {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}><RefreshCw size={14} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 8, fontWeight: 900 }}>{progFondo}%</p></div>}
                         {fotoMostrada ? (
