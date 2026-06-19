@@ -729,6 +729,7 @@ const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; b
     RELEVO_NO_PRESENTADO:         { label: 'SIN RELEVO',     bg: 'bg-amber-600',  text: 'text-white', border: 'border-amber-500' },
     POSICION_SIN_RELEVO:          { label: 'SIN RELEVO',     bg: 'bg-amber-600',  text: 'text-white', border: 'border-amber-500' },
     RETENCION_LARGA:              { label: 'RETENCIÓN',      bg: 'bg-orange-700', text: 'text-white', border: 'border-orange-600' },
+    RELEVO_INMINENTE:             { label: 'RELEVO',         bg: 'bg-blue-600',   text: 'text-white', border: 'border-blue-500' },
     CONVOCATORIA_RETEN:           { label: 'CONVOCATORIA',   bg: 'bg-indigo-600', text: 'text-white', border: 'border-indigo-500' },
     FRANCO_TRABAJADO:             { label: 'FRANCO TRAB.',   bg: 'bg-indigo-600', text: 'text-white', border: 'border-indigo-500' },
     ADELANTO_TURNO:               { label: 'ADELANTO',       bg: 'bg-indigo-500', text: 'text-white', border: 'border-indigo-400' },
@@ -1355,7 +1356,7 @@ export default function TacticalMapView() {
                 // Triage: urgentes vs PROT (automatizados, menos urgentes)
                 const urgentNovedades = pendingNovedades.filter(n =>
                     n.type === 'AUSENCIA_CORTO_PLAZO' || n.type === 'AVISO_AUSENCIA_ANTICIPADA' ||
-                    n.type === 'POSICION_SIN_RELEVO' || n.type === 'RETENCION_LARGA' ||
+                    n.type === 'POSICION_SIN_RELEVO' || n.type === 'RETENCION_LARGA' || n.type === 'RELEVO_INMINENTE' ||
                     n.type === 'AUSENCIA_AUTO' || n.type === 'RELEVO_NO_PRESENTADO'
                 );
                 const protNovedades = pendingNovedades.filter(n => n.type === 'VACANTE_PROTOCOLO_COBERTURA');
@@ -1375,6 +1376,7 @@ export default function TacticalMapView() {
                     POSICION_SIN_RELEVO:         { label: 'REL',     bg: 'bg-amber-100 text-amber-700',         border: 'border-l-amber-500' },
                     RELEVO_NO_PRESENTADO:        { label: 'REL',     bg: 'bg-amber-100 text-amber-700',         border: 'border-l-amber-500' },
                     RETENCION_LARGA:             { label: 'REC',     bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
+                    RELEVO_INMINENTE:            { label: 'RELEVO',  bg: 'bg-blue-100 text-blue-800',           border: 'border-l-blue-600' },
                     RECARGO_12H:                 { label: 'REC+12',  bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
                     RETENCION_DETECTADA:         { label: 'REC',     bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
                 };

@@ -1291,6 +1291,7 @@ const TYPE_META: Record<string, { label: string; bg: string; text: string; borde
     RELEVO_NO_PRESENTADO:         { label: 'SIN RELEVO',      bg: 'bg-amber-600',  text: 'text-white',     border: 'border-amber-500' },
     POSICION_SIN_RELEVO:          { label: 'SIN RELEVO',      bg: 'bg-amber-600',  text: 'text-white',     border: 'border-amber-500' },
     RETENCION_LARGA:              { label: 'RETENCIÓN',       bg: 'bg-orange-700', text: 'text-white',     border: 'border-orange-600' },
+    RELEVO_INMINENTE:             { label: 'RELEVO',          bg: 'bg-blue-600',   text: 'text-white',     border: 'border-blue-500' },
     CONVOCATORIA_RETEN:           { label: 'CONVOCATORIA',    bg: 'bg-indigo-600', text: 'text-white',     border: 'border-indigo-500' },
     FRANCO_TRABAJADO:             { label: 'FRANCO TRAB.',    bg: 'bg-indigo-600', text: 'text-white',     border: 'border-indigo-500' },
     ADELANTO_TURNO:               { label: 'ADELANTO',        bg: 'bg-indigo-500', text: 'text-white',     border: 'border-indigo-400' },
@@ -2785,7 +2786,7 @@ export default function OperacionesPage() {
             AUSENCIA_AUTO:'AUSENCIA', VACANTE_PROTOCOLO_COBERTURA:'PROT. COBERTURA',
             VACANTE_A_PLANIFICACION:'VACANTE PLAN', RELEVO_NO_PRESENTADO:'RELEVO',
             VACANTE_NO_CUBIERTA:'SIN CUBRIR', BAJA_CUBIERTA:'BAJA CUBIERTA',
-            RETENCION_LARGA:'RETENCION', POSICION_SIN_RELEVO:'SIN RELEVO',
+            RETENCION_LARGA:'RETENCION', POSICION_SIN_RELEVO:'SIN RELEVO', RELEVO_INMINENTE:'RELEVO',
             RECARGO_12H:'RECARGO 12H', LLEGADA_TARDE:'TARDANZA', RETENCION:'RETENCION',
             RETENCION_DETECTADA:'RETENCION', RETENCIÓN:'RETENCION',
         } as any)[t] || t;
@@ -3858,6 +3859,7 @@ export default function OperacionesPage() {
                               AUSENCIA_OPERATIVA:          { label: 'AUS',     bg: 'bg-rose-100 text-rose-700',            border: 'border-l-rose-500' },
                               POSICION_SIN_RELEVO:         { label: 'REL',     bg: 'bg-amber-100 text-amber-700',          border: 'border-l-amber-500' },
                               RETENCION_LARGA:             { label: 'REC',     bg: 'bg-orange-100 text-orange-800',        border: 'border-l-orange-600' },
+                              RELEVO_INMINENTE:            { label: 'RELEVO',  bg: 'bg-blue-100 text-blue-800',            border: 'border-l-blue-600' },
                             };
                             const getMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
                             const groups: { type: string; items: any[] }[] = [];
@@ -4066,6 +4068,7 @@ export default function OperacionesPage() {
                                     RETENCION_LARGA:             { label: 'REC',     bg: 'bg-orange-100 text-orange-800',           border: 'border-l-orange-600', actionBg: 'bg-orange-700 hover:bg-orange-800' },
                                     RECARGO_12H:                 { label: 'REC+12',  bg: 'bg-orange-100 text-orange-800',           border: 'border-l-orange-600', actionBg: 'bg-orange-700 hover:bg-orange-800' },
                                     RETENCION_DETECTADA:         { label: 'REC',     bg: 'bg-orange-100 text-orange-800',           border: 'border-l-orange-600', actionBg: 'bg-orange-700 hover:bg-orange-800' },
+                                    RELEVO_INMINENTE:            { label: 'RELEVO',  bg: 'bg-blue-100 text-blue-800',               border: 'border-l-blue-600',   actionBg: 'bg-blue-600 hover:bg-blue-700' },
                                 };
                                 const getMeta = (t: string) => NOV_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300', actionBg: 'bg-slate-700 hover:bg-slate-800' };
                                 // Agrupar por tipo

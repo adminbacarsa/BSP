@@ -927,6 +927,63 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 continue;
             }
 
+            // ── RELEVO CON TARDANZA REGISTRADA (lateETA): respetar hora acordada ──────────────
+            // Si hay un turno de relevo en el mismo puesto con lateETA registrado,
+            // el sistema NO auto-cierra al retenido hasta pasado el ETA + buffer.
+            // A T-5min del ETA lanza alerta "relevo inminente — preparar handover".
+            if (!isOperatorRetention) {
+                const relevoShift = processedData.find((other: any) => {
+                    if (other.id === s.id || other.isPresent || other.isCompleted) return false;
+                    if (other.objectiveId !== s.objectiveId) return false;
+                    if (normPosName(other.positionName) !== normPosName(s.positionName)) return false;
+                    if (!other.lateETA) return false;
+                    const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
+                    return otherStart >= endMs - 30 * 60000 && otherStart <= endMs + 4 * 60 * 60000;
+                });
+
+                if (relevoShift?.lateETA) {
+                    // Parsear "HH:MM" al timestamp de hoy (usando la fecha del endDateObj del retenido)
+                    const [etaH, etaM] = (relevoShift.lateETA as string).split(':').map(Number);
+                    const base = s.endDateObj instanceof Date ? s.endDateObj : new Date(endMs);
+                    const etaDate = new Date(base.getFullYear(), base.getMonth(), base.getDate(), etaH, etaM, 0);
+                    // Si la hora ETA es anterior a endTime (ej: turno nocturno cruzando medianoche) sumar 1 día
+                    if (etaDate.getTime() < endMs - 30 * 60000) etaDate.setDate(etaDate.getDate() + 1);
+                    const etaMs = etaDate.getTime();
+                    const minsToEta = (etaMs - nowMs) / 60000;
+
+                    // Alerta 5 min antes del ETA
+                    const etaAlertKey = `${s.id}_ETA_RELEVO_ALERT`;
+                    if (minsToEta <= 5 && minsToEta > -10 && !alertedVacancyIds.current.has(etaAlertKey)) {
+                        alertedVacancyIds.current.add(etaAlertKey);
+                        const etaLabel = `${String(etaH).padStart(2,'0')}:${String(etaM).padStart(2,'0')}`;
+                        toast.warning(`⏰ Relevo inminente: ${relevoShift.employeeName || 'Guardia'} llega a las ${etaLabel} — relevar a ${s.employeeName}`, { duration: 30000 });
+                        addDoc(collection(db, 'novedades'), stampEmpresaId({
+                            type: 'RELEVO_INMINENTE',
+                            shiftId: s.id,
+                            relevoShiftId: relevoShift.id,
+                            employeeId: s.employeeId,
+                            employeeName: s.employeeName,
+                            relevorName: relevoShift.employeeName || '',
+                            objectiveId: s.objectiveId,
+                            objectiveName: s.objectiveName || '',
+                            clientId: s.clientId || null,
+                            positionName: s.positionName || '',
+                            eta: relevoShift.lateETA,
+                            status: 'pending',
+                            title: 'Relevo inminente',
+                            description: `${relevoShift.employeeName || 'Relevo'} llega a las ${etaLabel}. Relevar a ${s.employeeName} en ${s.objectiveName || s.positionName}.`,
+                            createdAt: serverTimestamp(),
+                            source: 'SYSTEM_SCHEDULER',
+                        }, String(s.empresaId || empresaId || '').trim())).catch(e => console.warn('[relevodInminente]', e));
+                    }
+
+                    // Mientras el ETA + 15 min no haya pasado: no auto-cerrar (esperar al relevo)
+                    const etaGraceMs = etaMs + 15 * 60000;
+                    if (nowMs < etaGraceMs) continue;
+                    // Si ya pasó el grace y el relevo no llegó → cae al bloque shouldAutoClose normal
+                }
+            }
+
             // ── AUTO-FIN RETENCIÓN: puesto cubierto por turnos regulares ──
             const autoEndKey = `${s.id}_AUTO_END_RETENTION`;
             if (!alertedVacancyIds.current.has(autoEndKey)) {
