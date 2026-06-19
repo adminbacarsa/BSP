@@ -921,10 +921,26 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     const shiftData = shiftDoc.data()!;
 
     // Verificar que el turno pertenece al empleado que hace la solicitud
+    // Excepción: superadmin puede registrar presente en nombre del empleado (modo preview/testing)
+    const callerRole = String(context.auth.token?.role ?? context.auth.token?.['custom:role'] ?? '');
+    const callerIsSuperAdmin = isSuperAdminBackupRole(callerRole);
+
     const empSnap = await db.collection('empleados').where('uid', '==', context.auth.uid).limit(1).get();
-    if (empSnap.empty) throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
-    const empId = empSnap.docs[0].id;
-    if (shiftData.employeeId !== empId) throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
+    let empId: string;
+    if (empSnap.empty) {
+        if (callerIsSuperAdmin) {
+            // Superadmin en modo preview: usar el employeeId del turno directamente
+            if (!shiftData.employeeId) throw new functions.https.HttpsError('not-found', 'Turno sin empleado asignado.');
+            empId = shiftData.employeeId;
+        } else {
+            throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
+        }
+    } else {
+        empId = empSnap.docs[0].id;
+        if (!callerIsSuperAdmin && shiftData.employeeId !== empId) {
+            throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
+        }
+    }
 
     // Bug fix: si el turno ya fue marcado ausente, rechazar el check-in
     // (el operador debe gestionar el ingreso manualmente para evitar estado inconsistente)
