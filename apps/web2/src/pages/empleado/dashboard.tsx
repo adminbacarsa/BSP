@@ -941,6 +941,16 @@ export default function EmployeeDashboard() {
     return total.toFixed(0);
   }, [shifts]);
 
+  const monthlyTardanzas = useMemo(() => {
+    const n = new Date();
+    const start = new Date(n.getFullYear(), n.getMonth(), 1);
+    const end = new Date(n.getFullYear(), n.getMonth() + 1, 0, 23, 59, 59, 999);
+    return shifts.filter(s => {
+      const d = toDate(s.startTime);
+      return d && d >= start && d <= end && !!s.lateArrivalAt;
+    }).length;
+  }, [shifts]);
+
   useEffect(() => {
     if (hasUnread) setShowNotifications(true);
   }, [hasUnread]);
@@ -2308,8 +2318,8 @@ export default function EmployeeDashboard() {
               <p className="text-[9px] text-slate-600">este mes</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
-              <p className="text-[9px] font-black uppercase text-slate-500 mb-1">Horas</p>
-              <p className="text-3xl font-black" style={{ color: empresaColor }}>{monthlyHours}</p>
+              <p className="text-[9px] font-black uppercase text-slate-500 mb-1">Tardanzas</p>
+              <p className="text-3xl font-black text-amber-400">{monthlyTardanzas}</p>
               <p className="text-[9px] text-slate-600">este mes</p>
             </div>
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
@@ -2609,7 +2619,7 @@ export default function EmployeeDashboard() {
                   <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-2xl p-3.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-black text-white truncate">{s.objectiveName || (s.objectiveId ? objectivesMap[s.objectiveId]?.name : null) || 'Sin objetivo'}</p>
+                        <p className="text-sm font-black text-white truncate">{(s.objectiveName && objectivesMap[s.objectiveName]?.name) || s.objectiveName || (s.objectiveId ? objectivesMap[s.objectiveId]?.name : null) || 'Sin objetivo'}</p>
                         <p className="text-[11px] font-bold mt-0.5" style={{ color: empresaColor }}>{formatDate(s.startTime)}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">{formatTime(s.startTime)} – {formatTime(s.endTime)}</p>
                       </div>
@@ -2645,7 +2655,7 @@ export default function EmployeeDashboard() {
                   <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-2xl p-3.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-black text-white truncate">{s.objectiveName || (s.objectiveId ? objectivesMap[s.objectiveId]?.name : null) || 'Sin objetivo'}</p>
+                        <p className="text-sm font-black text-white truncate">{(s.objectiveName && objectivesMap[s.objectiveName]?.name) || s.objectiveName || (s.objectiveId ? objectivesMap[s.objectiveId]?.name : null) || 'Sin objetivo'}</p>
                         <p className="text-[11px] font-bold mt-0.5" style={{ color: empresaColor }}>{formatDate(s.startTime)}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">{formatTime(s.startTime)} – {formatTime(s.endTime)}</p>
                         {s.checkInTime && (
@@ -2793,8 +2803,6 @@ export default function EmployeeDashboard() {
                         <div key={r.id} className="border border-slate-800 rounded-xl p-3 text-xs">
                           <div className="font-bold text-slate-200">{r.requesterName || 'Empleado'} ⇄ {r.targetName || 'Empleado'}</div>
                           <div className="text-[11px] text-slate-400 mt-0.5">{formatDate(r.requesterShiftDate)} · {status}</div>
-                          {status === 'PENDING_PEER' && isTarget && (<div className="flex gap-2 mt-2"><button onClick={() => handleRespondSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Aceptar</button><button onClick={() => handleRespondSwap(r.id, false)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Rechazar</button></div>)}
-                          {status === 'PENDING_REQUESTER' && isRequester && (<div className="flex gap-2 mt-2"><button onClick={() => handleConfirmSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Confirmar</button><button onClick={() => handleConfirmSwap(r.id, false)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Cancelar</button></div>)}
                           {isRequester && !['APPROVED','REJECTED','CANCELLED'].includes(statusUpper) && status !== 'PENDING_REQUESTER' && (<div className="flex gap-2 mt-2"><button onClick={() => handleCancelSwap(r.id)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Cancelar solicitud</button></div>)}
                           {status === 'PENDING_APPROVAL' && <div className="text-[10px] text-amber-300 mt-2">Pendiente de autorización</div>}
                         </div>
@@ -2807,54 +2815,54 @@ export default function EmployeeDashboard() {
           </div>
         )}
 
+        {/* ===== MODAL: CREDENCIAL (editar) ===== */}
+        {showCredencial && (
+          <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
+            <button
+              onClick={() => { backCloserRef.current = null; setShowCredencial(false); history.back(); }}
+              className="fixed z-[70] text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800/80"
+              style={{ top: 12, right: 12 }}
+            >
+              <X size={22}/>
+            </button>
+            <div className="px-4 py-6 max-w-sm mx-auto">
+              {empDocIdSt && empProfile ? (
+                <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre}/>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
+                  <p className="text-slate-500 text-sm font-bold">Cargando...</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ===== MODAL: CREDENCIAL (vista empleado) ===== */}
+        {showCredencialVista && (
+          <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
+            <button
+              onClick={() => { backCloserRef.current = null; setShowCredencialVista(false); history.back(); }}
+              className="fixed z-[70] text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800/80"
+              style={{ top: 12, right: 12 }}
+            >
+              <X size={22}/>
+            </button>
+            <div className="px-4 py-6 max-w-sm mx-auto">
+              {empDocIdSt && empProfile ? (
+                <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly={true}/>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
+                  <p className="text-slate-500 text-sm font-bold">Cargando...</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
-
-      {/* ══ MODAL CREDENCIAL — con edición (ícono header) ══ */}
-      {showCredencial && (
-        <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
-          <button
-            onClick={() => { backCloserRef.current = null; setShowCredencial(false); history.back(); }}
-            className="fixed z-[70] text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800/80"
-            style={{ top: 12, right: 12 }}
-          >
-            <X size={22}/>
-          </button>
-          <div className="px-4 py-6">
-            {empDocIdSt && empProfile ? (
-              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre}/>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
-                <p className="text-slate-500 text-sm font-bold">Cargando...</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ══ MODAL CREDENCIAL — solo vista (card home) ══ */}
-      {showCredencialVista && (
-        <div className="fixed inset-0 z-[60] overflow-y-auto" style={{ background: 'rgba(0,0,0,0.95)', backdropFilter: 'blur(4px)' }}>
-          <button
-            onClick={() => { backCloserRef.current = null; setShowCredencialVista(false); history.back(); }}
-            className="fixed z-[70] text-slate-400 hover:text-white transition-colors p-2 rounded-xl hover:bg-slate-800/80"
-            style={{ top: 12, right: 12 }}
-          >
-            <X size={22}/>
-          </button>
-          <div className="px-4 py-6">
-            {empDocIdSt && empProfile ? (
-              <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly={true}/>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-20 gap-3">
-                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
-                <p className="text-slate-500 text-sm font-bold">Cargando...</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
     </AuthGuard>
   );
 }
+         
