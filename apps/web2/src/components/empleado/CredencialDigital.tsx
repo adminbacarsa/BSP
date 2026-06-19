@@ -656,23 +656,6 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     </div>
   );
 
-  const photoZoneV = (
-    // Vertical: columna lateral izquierda 38%, sin overlay de nombre
-    <div ref={photoContRef} style={{ width: '38%', flexShrink: 0, position: 'relative', overflow: 'hidden', pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
-      {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}><RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p></div>}
-      {fotoMostrada ? (
-        <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, transform: esCutout ? 'none' : `scale(${photoScale})`, transformOrigin: `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 4px 14px rgba(0,0,0,0.6))' : 'none', willChange: 'transform', pointerEvents: 'none', userSelect: 'none' }}/>
-      ) : (
-        <div style={{ width: '100%', height: '100%', background: `linear-gradient(180deg, ${tema.h2}60, ${tema.h1}90)`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <svg viewBox="0 0 60 80" width="55%" height="auto"><circle cx="30" cy="22" r="14" fill="rgba(255,255,255,0.18)"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="rgba(255,255,255,0.18)"/></svg>
-          {!viewOnly && <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', textAlign: 'center', padding: '0 6px', letterSpacing: '0.1em' }}>Sin foto</p>}
-        </div>
-      )}
-      <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 24, background: `linear-gradient(90deg, transparent, ${bg})`, pointerEvents: 'none' }}/>
-      {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', top: 6, left: 6, width: 18, height: 18, borderRadius: '50%', background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="10" height="10" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.75)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
-    </div>
-  );
-
   // Stripes decorativas
   const stripeTop = <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${tema.h2}, ${tema.accent}, ${tema.h2})`, pointerEvents: 'none' }}/>;
   const stripeBot = <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg, ${tema.h2}, ${tema.accent}80, ${tema.h2})`, pointerEvents: 'none' }}/>;
@@ -728,35 +711,51 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                     <p style={{ color: `${tema.accent}bb`, fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{credTitulo}</p>
                   </div>
                 </div>
-                {/* Cuerpo: foto izq + datos der */}
-                <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-                  {photoZoneV}
+                {/* Cuerpo: foto carnet + datos */}
+                <div style={{ flex: 1, display: 'flex', minHeight: 0, padding: '14px 14px 10px 14px', gap: 12, alignItems: 'flex-start' }}>
+                  {/* Foto proporcion carnet 3:4 */}
+                  <div style={{ flexShrink: 0, width: '36%', position: 'relative' }}>
+                    <div style={{ width: '100%', paddingBottom: '133%', position: 'relative', overflow: 'hidden', borderRadius: 8, border: `1.5px solid ${tema.accent}40` }}>
+                      <div ref={photoContRef} style={{ position: 'absolute', inset: 0, pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
+                        {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}><RefreshCw size={14} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 8, fontWeight: 900 }}>{progFondo}%</p></div>}
+                        {fotoMostrada ? (
+                          <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, transform: esCutout ? 'none' : `scale(${photoScale})`, transformOrigin: `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 4px 14px rgba(0,0,0,0.6))' : 'none', willChange: 'transform', pointerEvents: 'none', userSelect: 'none' }}/>
+                        ) : (
+                          <div style={{ width: '100%', height: '100%', background: `linear-gradient(180deg, ${tema.h2}80, ${tema.h1})`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <svg viewBox="0 0 60 80" width="50%" height="auto"><circle cx="30" cy="22" r="14" fill="rgba(255,255,255,0.18)"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="rgba(255,255,255,0.18)"/></svg>
+                            {!viewOnly && <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Sin foto</p>}
+                          </div>
+                        )}
+                        {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', bottom: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="9" height="9" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.75)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
+                      </div>
+                    </div>
+                  </div>
                   {/* Columna de datos */}
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '14px 14px 10px 10px', minWidth: 0 }}>
-                    <div style={{ marginBottom: 10 }}>
-                      <p style={{ color: '#fff', fontSize: 15, fontWeight: 900, lineHeight: 1.25, wordBreak: 'break-word' }}>{apellidoNombre || nombre || '—'}</p>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <p style={{ color: '#fff', fontSize: 14, fontWeight: 900, lineHeight: 1.2, wordBreak: 'break-word' }}>{apellidoNombre || nombre || '—'}</p>
                       <p style={{ color: tema.accent, fontSize: 7.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 3 }}>{empData.category || 'Vigilador'}</p>
                     </div>
-                    <div style={{ height: 0.5, background: `${tema.accent}22`, marginBottom: 10 }}/>
+                    <div style={{ height: 0.5, background: `${tema.accent}22`, marginBottom: 8 }}/>
                     {empData.fileNumber && (
-                      <div style={{ marginBottom: 7 }}>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Legajo</p>
-                        <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>#{empData.fileNumber}</p>
+                      <div style={{ marginBottom: 6 }}>
+                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Legajo</p>
+                        <p style={{ color: '#fff', fontSize: 16, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>#{empData.fileNumber}</p>
                       </div>
                     )}
                     {empData.dni && (
-                      <div style={{ marginBottom: 7 }}>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>DNI</p>
-                        <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>{empData.dni}</p>
+                      <div style={{ marginBottom: 6 }}>
+                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>DNI</p>
+                        <p style={{ color: '#fff', fontSize: 16, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>{empData.dni}</p>
                       </div>
                     )}
                     {empData.cuil && (
                       <div style={{ marginBottom: 6 }}>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 7, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>CUIL</p>
-                        <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
+                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>CUIL</p>
+                        <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
                       </div>
                     )}
-                    <div style={{ marginTop: 'auto' }}>
+                    <div style={{ marginTop: 10 }}>
                       <div style={{ height: 0.5, background: `${tema.accent}22`, marginBottom: 8 }}/>
                       {verSection()}
                     </div>
