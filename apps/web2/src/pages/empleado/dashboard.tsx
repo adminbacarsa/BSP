@@ -1881,6 +1881,8 @@ export default function EmployeeDashboard() {
                       else if (type === 'SHIFT_UPDATE') actionLabel = 'Modificado';
                       else if (type === 'FRANCO') actionLabel = 'Franco asignado';
                       else if (type === 'CHECKIN') actionLabel = 'Presente';
+                      else if (type === 'INGRESO_AUTOREGISTRO' || type === 'INGRESO_AUTOREGISTRO_ALERTA') actionLabel = 'Ingreso';
+                      else if (type === 'LLEGADA_TARDE_AVISO') actionLabel = 'Llegada tarde';
                       else if (type === 'RETENTION' || type === 'RETENCION') actionLabel = 'Retención';
                       return (
                         <div key={n.id} onClick={() => !n.read && markNotificationRead(n.id, n.title || n.body)}
