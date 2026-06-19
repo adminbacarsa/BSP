@@ -250,11 +250,20 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const cerrarCamara = () => { stream?.getTracks().forEach(t => t.stop()); setStream(null); setShowCamera(false); };
   const capturarFoto = () => {
     const video = videoRef.current, canvas = canvasRef.current; if (!video || !canvas) return;
-    const side = Math.min(video.videoWidth, video.videoHeight);
-    canvas.width = side; canvas.height = side;
+    // Crop 3:4 portrait centrado en el video
+    const vw = video.videoWidth, vh = video.videoHeight;
+    let capW: number, capH: number, sx: number, sy: number;
+    if (vw / vh > 3 / 4) {
+      capH = vh; capW = Math.round(vh * 3 / 4);
+      sx = Math.round((vw - capW) / 2); sy = 0;
+    } else {
+      capW = vw; capH = Math.round(vw * 4 / 3);
+      sx = 0; sy = Math.round((vh - capH) / 5); // bias hacia arriba para incluir hombros
+    }
+    canvas.width = capW; canvas.height = capH;
     const ctx = canvas.getContext('2d')!;
-    ctx.save(); ctx.translate(side, 0); ctx.scale(-1, 1);
-    ctx.drawImage(video, (video.videoWidth - side) / 2, (video.videoHeight - side) / 2, side, side, 0, 0, side, side);
+    ctx.save(); ctx.translate(capW, 0); ctx.scale(-1, 1);
+    ctx.drawImage(video, sx, sy, capW, capH, 0, 0, capW, capH);
     ctx.restore();
     canvas.toBlob(blob => {
       if (!blob) return;
@@ -902,28 +911,34 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
           <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
             <video ref={videoRef} playsInline muted className="h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }}/>
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+              {/* Oscurece todo excepto la silueta cabeza+hombros */}
               <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
                 <defs>
-                  <mask id="carnet-mask">
+                  <mask id="hombros-mask">
                     <rect x="0" y="0" width="100" height="100" fill="white"/>
-                    <ellipse cx="50" cy="46" rx="36" ry="44" fill="black"/>
+                    <ellipse cx="50" cy="28" rx="20" ry="23" fill="black"/>
+                    <path d="M 8 100 C 8 72 22 60 30 53 C 34 63 41 68 50 68 C 59 68 66 63 70 53 C 78 60 92 72 92 100 Z" fill="black"/>
                   </mask>
                 </defs>
-                <rect x="0" y="0" width="100" height="100" fill="rgba(0,0,0,0.72)" mask="url(#carnet-mask)"/>
+                <rect x="0" y="0" width="100" height="100" fill="rgba(0,0,0,0.78)" mask="url(#hombros-mask)"/>
               </svg>
-              <svg style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -54%)', pointerEvents: 'none' }} width="230" height="280" viewBox="0 0 230 280">
-                <ellipse cx="115" cy="128" rx="112" ry="125" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="2" strokeDasharray="12 6"/>
-                <line x1="0" y1="85" x2="40" y2="85" stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="5 4"/>
-                <line x1="190" y1="85" x2="230" y2="85" stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" strokeDasharray="5 4"/>
-                <path d="M 0 36 L 0 8 L 30 8" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 230 36 L 230 8 L 200 8" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 0 244 L 0 272 L 30 272" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 230 244 L 230 272 L 200 272" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              {/* Contorno guia con puntos */}
+              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
+                <ellipse cx="50" cy="28" rx="20" ry="23" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="0.7" strokeDasharray="3 2"/>
+                <path d="M 8 100 C 8 72 22 60 30 53 C 34 63 41 68 50 68 C 59 68 66 63 70 53 C 78 60 92 72 92 100" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="0.7" strokeDasharray="3 2"/>
+                <line x1="24" y1="55" x2="76" y2="55" stroke="rgba(255,255,255,0.2)" strokeWidth="0.4" strokeDasharray="2 2"/>
+                <path d="M 4 18 L 4 8 L 14 8" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 96 18 L 96 8 L 86 8" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 4 82 L 4 92 L 14 92" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M 96 82 L 96 92 L 86 92" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
               {countdown === null && (
-                <div style={{ position: 'absolute', bottom: 148, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
-                  <div style={{ background: `${tema.h1}ee`, borderRadius: 20, padding: '7px 18px' }}>
-                    <p className="text-white text-[11px] font-bold text-center">Encuadrá el rostro · Mirá a cámara</p>
+                <div style={{ position: 'absolute', bottom: 148, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                  <div style={{ background: 'rgba(0,0,0,0.65)', borderRadius: 20, padding: '6px 16px', backdropFilter: 'blur(4px)' }}>
+                    <p className="text-white text-[11px] font-bold text-center">Encuadrá cabeza y hombros · Mirá a cámara</p>
+                  </div>
+                  <div style={{ background: 'rgba(0,0,0,0.45)', borderRadius: 12, padding: '4px 12px' }}>
+                    <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 9, textAlign: 'center' }}>El fondo se eliminará automáticamente</p>
                   </div>
                 </div>
               )}
