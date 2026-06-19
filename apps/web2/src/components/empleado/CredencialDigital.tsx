@@ -701,78 +701,82 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                 {stripeTop}
               </div>
             ) : (
-              // Vertical: header compacto + [foto | datos] side-by-side + footer QR
+              // Vertical: ID badge profesional
               <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', borderRadius: 12, overflow: 'hidden', background: bg, display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
-                {/* Header */}
-                <div style={{ padding: '11px 14px 9px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, borderBottom: `1px solid ${tema.accent}20` }}>
-                  {logoEl(24)}
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ color: '#fff', fontSize: 14, fontWeight: 900, letterSpacing: '0.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
-                    <p style={{ color: `${tema.accent}bb`, fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{credTitulo}</p>
+                {/* Banda superior con patrón */}
+                <div style={{ background: `linear-gradient(135deg, ${tema.h1} 0%, ${tema.h2} 100%)`, padding: '13px 14px 11px', flexShrink: 0, position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(135deg, ${tema.accent}12 0px, ${tema.accent}12 1px, transparent 1px, transparent 14px)`, pointerEvents: 'none' }}/>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
+                    {logoEl(28)}
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ color: '#fff', fontSize: 13, fontWeight: 900, letterSpacing: '0.03em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 6px rgba(0,0,0,0.4)' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
+                      <p style={{ color: tema.accent, fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.15em', marginTop: 1 }}>{credTitulo}</p>
+                    </div>
                   </div>
                 </div>
-                {/* Cuerpo: foto carnet + datos */}
-                <div style={{ display: 'flex', padding: '14px 14px 10px 14px', gap: 12 }}>
-                  {/* Foto proporcion carnet 3:4 */}
-                  <div style={{ flexShrink: 0, width: '36%', position: 'relative' }}>
-                    <div style={{ width: '100%', aspectRatio: '3/4', overflow: 'hidden', borderRadius: 8, border: `1.5px solid ${tema.accent}40`, position: 'relative' }}>
+                {/* Línea accent */}
+                <div style={{ height: 3, background: `linear-gradient(90deg, ${tema.accent}, ${tema.h2}80)`, flexShrink: 0 }}/>
+                {/* Cuerpo */}
+                <div style={{ display: 'flex', padding: '14px 14px 12px', gap: 14, flex: 1 }}>
+                  {/* Foto */}
+                  <div style={{ flexShrink: 0, width: '38%' }}>
+                    <div style={{ width: '100%', aspectRatio: '3/4', overflow: 'hidden', borderRadius: 8, border: `2px solid ${tema.accent}`, position: 'relative', boxShadow: `0 0 0 3px ${tema.accent}22` }}>
                       <div ref={photoContRef} style={{ position: 'absolute', inset: 0, pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
-                        {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}><RefreshCw size={14} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 8, fontWeight: 900 }}>{progFondo}%</p></div>}
+                        {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3 }}><RefreshCw size={14} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 8, fontWeight: 900 }}>{progFondo}%</p></div>}
                         {fotoMostrada ? (
-                          <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, transform: esCutout ? 'none' : `scale(${photoScale})`, transformOrigin: `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 4px 14px rgba(0,0,0,0.6))' : 'none', willChange: 'transform', pointerEvents: 'none', userSelect: 'none' }}/>
+                          <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, transform: esCutout ? 'none' : `scale(${photoScale})`, transformOrigin: `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 4px 14px rgba(0,0,0,0.7))' : 'none', willChange: 'transform', pointerEvents: 'none', userSelect: 'none' }}/>
                         ) : (
-                          <div style={{ width: '100%', height: '100%', background: `linear-gradient(180deg, ${tema.h2}80, ${tema.h1})`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                            <svg viewBox="0 0 60 80" width="50%" height="auto"><circle cx="30" cy="22" r="14" fill="rgba(255,255,255,0.18)"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="rgba(255,255,255,0.18)"/></svg>
-                            {!viewOnly && <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Sin foto</p>}
+                          <div style={{ width: '100%', height: '100%', background: `linear-gradient(170deg, ${tema.h2}cc, ${tema.h1})`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                            <svg viewBox="0 0 60 80" width="55%" height="auto" opacity="0.4"><circle cx="30" cy="22" r="14" fill="#fff"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="#fff"/></svg>
+                            {!viewOnly && <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Sin foto</p>}
                           </div>
                         )}
-                        {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', bottom: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="9" height="9" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.75)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
+                        {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', bottom: 5, right: 5, width: 18, height: 18, borderRadius: '50%', background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="9" height="9" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.8)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
                       </div>
                     </div>
-                  </div>
-                  {/* Columna de datos */}
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                    <div style={{ marginBottom: 8 }}>
-                      <p style={{ color: '#fff', fontSize: 14, fontWeight: 900, lineHeight: 1.2, wordBreak: 'break-word' }}>{apellidoNombre || nombre || '—'}</p>
-                      <p style={{ color: tema.accent, fontSize: 7.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 3 }}>{empData.category || 'Vigilador'}</p>
+                    {/* Badge cargo debajo de foto */}
+                    <div style={{ marginTop: 7, background: tema.accent, borderRadius: 5, padding: '3px 6px', textAlign: 'center' }}>
+                      <p style={{ color: '#000', fontSize: 7, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{empData.category || 'Vigilador'}</p>
                     </div>
-                    <div style={{ height: 0.5, background: `${tema.accent}22`, marginBottom: 8 }}/>
+                  </div>
+                  {/* Datos */}
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', paddingTop: 2 }}>
+                    <p style={{ color: '#fff', fontSize: 15, fontWeight: 900, lineHeight: 1.2, wordBreak: 'break-word', marginBottom: 10 }}>{apellidoNombre || nombre || '—'}</p>
+                    <div style={{ height: 1, background: `linear-gradient(90deg, ${tema.accent}60, transparent)`, marginBottom: 10 }}/>
                     {empData.fileNumber && (
-                      <div style={{ marginBottom: 6 }}>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Legajo</p>
-                        <p style={{ color: '#fff', fontSize: 16, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>#{empData.fileNumber}</p>
+                      <div style={{ marginBottom: 8 }}>
+                        <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>Legajo</p>
+                        <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1, letterSpacing: '0.02em' }}>#{empData.fileNumber}</p>
                       </div>
                     )}
                     {empData.dni && (
-                      <div style={{ marginBottom: 6 }}>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>DNI</p>
-                        <p style={{ color: '#fff', fontSize: 16, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>{empData.dni}</p>
+                      <div style={{ marginBottom: 8 }}>
+                        <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>DNI</p>
+                        <p style={{ color: '#fff', fontSize: 17, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>{empData.dni}</p>
                       </div>
                     )}
                     {empData.cuil && (
-                      <div style={{ marginBottom: 6 }}>
-                        <p style={{ color: 'rgba(255,255,255,0.38)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>CUIL</p>
-                        <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
+                      <div style={{ marginBottom: 8 }}>
+                        <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>CUIL</p>
+                        <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
                       </div>
                     )}
-                    <div style={{ marginTop: 10 }}>
-                      <div style={{ height: 0.5, background: `${tema.accent}22`, marginBottom: 8 }}/>
+                    <div style={{ marginTop: 'auto', paddingTop: 8 }}>
                       {verSection()}
                     </div>
                   </div>
                 </div>
                 {/* Footer */}
-                <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 14px 9px', borderTop: `1px solid ${tema.accent}18` }}>
+                <div style={{ flexShrink: 0, background: `linear-gradient(90deg, ${tema.h2}cc, ${tema.h1}cc)`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 9px', borderTop: `1px solid ${tema.accent}30` }}>
                   {credPie ? (
                     <div>
-                      <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 6.5, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Sector</p>
-                      <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: 700 }}>{credPie}</p>
+                      <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Sector</p>
+                      <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontWeight: 700 }}>{credPie}</p>
                     </div>
                   ) : <div/>}
                   {qrBtn()}
                 </div>
                 {stripeTop}
-                {stripeBot}
               </div>
             )}
 
