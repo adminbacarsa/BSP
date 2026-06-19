@@ -2824,7 +2824,8 @@ export default function EmployeeDashboard() {
             >
               <X size={22}/>
             </button>
-            <div className="px-4 py-6 max-w-sm mx-auto">
+            <div className="flex items-center justify-center min-h-full py-8 px-4">
+              <div className="w-full max-w-xs sm:max-w-sm">
               {empDocIdSt && empProfile ? (
                 <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre}/>
               ) : (
@@ -2833,6 +2834,7 @@ export default function EmployeeDashboard() {
                   <p className="text-slate-500 text-sm font-bold">Cargando...</p>
                 </div>
               )}
+              </div>
             </div>
           </div>
         )}
@@ -2847,7 +2849,8 @@ export default function EmployeeDashboard() {
             >
               <X size={22}/>
             </button>
-            <div className="px-4 py-6 max-w-sm mx-auto">
+            <div className="flex items-center justify-center min-h-full py-8 px-4">
+              <div className="w-full max-w-xs sm:max-w-sm">
               {empDocIdSt && empProfile ? (
                 <CredencialDigital empDocId={empDocIdSt} empData={empProfile} empresaNombre={empresaNombre} viewOnly={true}/>
               ) : (
@@ -2856,6 +2859,7 @@ export default function EmployeeDashboard() {
                   <p className="text-slate-500 text-sm font-bold">Cargando...</p>
                 </div>
               )}
+              </div>
             </div>
           </div>
         )}
