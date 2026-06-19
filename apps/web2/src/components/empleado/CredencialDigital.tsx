@@ -672,6 +672,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             style={{
               position: 'relative', width: '100%',
               height: isH ? 'min(500px, calc(100svw * 1.19))' : 'auto',
+              minHeight: isH ? undefined : 'clamp(420px, 58svh, 560px)',
               transformStyle: 'preserve-3d',
               transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
               transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
