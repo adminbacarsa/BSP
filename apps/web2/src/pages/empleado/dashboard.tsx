@@ -858,7 +858,10 @@ export default function EmployeeDashboard() {
         const sStart = toDate(s.startTime);
         if (!sStart || sStart < start || sStart > end) return false;
         const status = (s.status || '').toString().toLowerCase();
-        return !!s.checkInTime || s.isPresent || status.includes('present') || status.includes('inprogress');
+        // Incluir: con check-in, presentes activos, o turnos completados (estuvieron presentes)
+        const wasPresent = !!s.checkInTime || s.isPresent || status.includes('present') || status.includes('inprogress');
+        const wasCompleted = (s.isCompleted || status.includes('complet') || status.includes('final')) && !s.isAbsent && !status.includes('ausent') && !status.includes('absent');
+        return wasPresent || wasCompleted;
       })
       .sort((a, b) => (toDate(b.startTime)?.getTime() || 0) - (toDate(a.startTime)?.getTime() || 0));
   }, [shifts]);
@@ -1105,10 +1108,8 @@ export default function EmployeeDashboard() {
     if (!user) return;
     setCheckingShiftId(shift.id);
     try {
-      await updateDoc(doc(db, 'turnos', shift.id), {
-        lateArrivalAt: serverTimestamp(),
-        checkInStatus: 'LATE_PENDING'
-      });
+      const callable = httpsCallable(functions, 'notificarLlegadaTarde');
+      await callable({ shiftId: shift.id });
       setLateArrivalSent(prev => ({ ...prev, [shift.id]: true }));
       addToast('Operaciones fue notificado de tu llegada tarde', 'info');
     } catch (e) {
