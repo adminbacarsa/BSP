@@ -80,6 +80,7 @@ export const onNovedadCreated = functions
         title,
         body,
         type: data.type,
+        target: 'admin',
         novedadId: snap.id,
         empresaId: empresaId || null,
         read: false,

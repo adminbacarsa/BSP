@@ -142,7 +142,7 @@ export const onTurnoWrite = functions
       [...byEmpId.docs, ...byUid.docs].forEach(d => { const t = d.data()?.token; if (typeof t === 'string' && t.length > 10) tokenSet.add(t); });
       const tokens = Array.from(tokenSet);
       const turnoId = change.after.id;
-      await db.collection('user_notifications').add({ uid: empUid || null, employeeId, title: retMsg.title, body: retMsg.body, type: 'RETENCION_AUTO', turnoId, read: false, readAt: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+      await db.collection('user_notifications').add({ uid: empUid || null, employeeId, title: retMsg.title, body: retMsg.body, type: 'RETENCION_AUTO', target: 'employee', turnoId, read: false, readAt: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
       if (tokens.length) {
         await admin.messaging().sendEachForMulticast({ tokens, notification: { title: retMsg.title, body: retMsg.body }, webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } } }).catch(e => console.warn('[onTurnoWrite] Retención push error:', e));
       }
@@ -179,7 +179,7 @@ export const onTurnoWrite = functions
       await db.collection('user_notifications').add({
         uid: empUidC || null, employeeId: completedEmployeeId,
         title: completedMsg.title, body: completedMsg.body,
-        type: 'TURNO_COMPLETADO', turnoId: turnoIdC,
+        type: 'TURNO_COMPLETADO', target: 'employee', turnoId: turnoIdC,
         read: false, readAt: null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
@@ -257,6 +257,7 @@ export const onTurnoWrite = functions
         title: msg.title,
         body: msg.body,
         type: eventType,
+        target: 'employee',
         turnoId,
         read: false,
         readAt: null,

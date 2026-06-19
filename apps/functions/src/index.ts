@@ -1107,6 +1107,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                         title:      notifTitle,
                         body:       notifBody,
                         type:       'RELEVO_AUTOMATICO',
+                        target:     'employee',
                         turnoId:    outDoc.id,
                         read:       false,
                         readAt:     null,
