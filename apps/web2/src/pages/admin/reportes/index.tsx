@@ -137,7 +137,7 @@ export default function ReportsPage() {
     }, [employeeReport, empSortBy]);
 
     const shiftObjectiveName = useCallback((s: any) =>
-        String(s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '').trim(),
+        String(s.objectiveName || objMap[s.objectiveId] || '').trim(),
     [objMap]);
 
     const shiftsDetailMeta = useMemo(() => {
@@ -815,7 +815,7 @@ export default function ReportsPage() {
                                         <td className="p-4 text-center font-mono text-xs text-slate-500">
                                             {isLeaveReportShift(s) ? '—' : `${formatTime(s.startTime)} - ${formatTime(s.endTime)}`}
                                         </td>
-                                        <td className="p-4 text-xs font-bold text-slate-600 truncate max-w-[160px]">{s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '-'}</td>
+                                        <td className="p-4 text-xs font-bold text-slate-600 truncate max-w-[160px]">{s.objectiveName || objMap[s.objectiveId] || '-'}</td>
                                         <td className="p-4 text-center">
                                             {(() => {
                                                 const orig = (s.origin || '').toUpperCase();
@@ -893,7 +893,7 @@ export default function ReportsPage() {
         );
         const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(baseShifts);
         const allStatuses = [...new Set(baseShifts.map((s:any) => s.status).filter(Boolean))].sort();
-        const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || s.objectiveId).filter(Boolean))].sort();
+        const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || '').filter(Boolean))].sort();
         const objectivesForSelect = detailObjectiveSearch.trim()
             ? allObjectivesDetail.filter(o => o.toLowerCase().includes(detailObjectiveSearch.trim().toLowerCase()))
             : allObjectivesDetail;
@@ -917,10 +917,10 @@ export default function ReportsPage() {
             if (detailFilterTimeTo && hhmm > detailFilterTimeTo) return false;
             if (detailFilterStatus && s.status !== detailFilterStatus) return false;
             if (detailFilterObjective) {
-                const objName = s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '';
+                const objName = s.objectiveName || objMap[s.objectiveId] || '';
                 if (objName !== detailFilterObjective) return false;
             } else if (detailObjectiveSearch.trim()) {
-                const objName = (s.objectiveName || objMap[s.objectiveId] || s.objectiveId || '').toLowerCase();
+                const objName = (s.objectiveName || objMap[s.objectiveId] || '').toLowerCase();
                 if (!objName.includes(detailObjectiveSearch.trim().toLowerCase())) return false;
             }
             if (detailFilterEmployee && s.employeeName !== detailFilterEmployee) return false;

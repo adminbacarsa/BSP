@@ -308,7 +308,7 @@ export default function EmployeeLegajoForm({
                                     {(form.restriccionesObjetivo || []).map((r: any, i: number) => (
                                         <div key={i} className="flex items-center gap-3 p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-xl">
                                             <div className="flex-1">
-                                                <p className="text-xs font-black text-rose-800 dark:text-rose-200 uppercase">{r.objectiveName || r.objectiveId}</p>
+                                                <p className="text-xs font-black text-rose-800 dark:text-rose-200 uppercase">{r.objectiveName || 'Sin objetivo'}</p>
                                                 {r.reason && <p className="text-[10px] text-rose-500">{r.reason}</p>}
                                             </div>
                                             <button type="button" onClick={() => setForm({ ...form, restriccionesObjetivo: (form.restriccionesObjetivo || []).filter((_: any, idx: number) => idx !== i) })} className="p-1 hover:bg-rose-100 text-rose-400 rounded-lg"><X size={14} /></button>

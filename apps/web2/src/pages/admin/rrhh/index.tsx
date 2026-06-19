@@ -2696,7 +2696,7 @@ export default function EmployeesPage() {
                                   {(form.restriccionesObjetivo || []).map((r: any, i: number) => (
                                     <div key={i} className="flex items-center gap-3 p-3 bg-rose-50 border border-rose-200 rounded-xl">
                                       <div className="flex-1">
-                                        <p className="text-xs font-black text-rose-800 uppercase">{r.objectiveName || r.objectiveId}</p>
+                                        <p className="text-xs font-black text-rose-800 uppercase">{r.objectiveName || 'Sin objetivo'}</p>
                                         {r.reason && <p className="text-[10px] text-rose-500">{r.reason}</p>}
                                         <p className="text-[10px] text-slate-400">{r.date}</p>
                                       </div>

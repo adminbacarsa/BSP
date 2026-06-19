@@ -697,7 +697,7 @@ export default function AnalisisPage() {
       }
       if (analDimension === 'objective') {
         const oid = String(t.objectiveId || '').trim();
-        return objectiveNameById[oid] || t.objectiveName || oid || 'Sin objetivo';
+        return objectiveNameById[oid] || t.objectiveName || 'Sin objetivo';
       }
       if (analDimension === 'client') {
         const cid = String(t.clientId || '').trim();
@@ -773,7 +773,7 @@ export default function AnalisisPage() {
       if (!t.objectiveId) return;
       if (analClientId && t.clientId !== analClientId) return;
       const oid = String(t.objectiveId);
-      map[oid] = objectiveNameById[oid] || t.objectiveName || oid;
+      map[oid] = objectiveNameById[oid] || t.objectiveName || 'Sin objetivo';
     });
     return Object.entries(map).sort((a,b) => a[1].localeCompare(b[1]));
   }, [analRawTurnos, analClientId, objectiveNameById]);
@@ -1022,7 +1022,7 @@ export default function AnalisisPage() {
 
     const objInfoMap = new Map(services.map((s: any) => [
       s.objectiveId,
-      { name: s.objectiveName || s.objectiveId, client: s.clientName || 'Sin Cliente' },
+      { name: s.objectiveName || 'Sin objetivo', client: s.clientName || 'Sin Cliente' },
     ]));
     const byDur = new Map<number, DurAcc>();
 
@@ -1076,7 +1076,7 @@ export default function AnalisisPage() {
 
       const oid = String(t.objectiveId || 'SIN_OBJETIVO');
       const objInfo = objInfoMap.get(t.objectiveId) || {
-        name: t.objectiveName || t.objectiveId || oid,
+        name: t.objectiveName || 'Sin objetivo',
         client: t.clientName || 'Sin Cliente',
       };
       const objRow = bucket.byObjective.get(oid) || {
@@ -3190,7 +3190,7 @@ export default function AnalisisPage() {
                         >
                           {theoretical.active.map((s: any) => (
                             <option key={s.id} value={s.id}>
-                              {(s.objectiveName || s.objectiveId || 'Objetivo')} · {s.clientName || s.clientId || 'Cliente'}
+                              {(s.objectiveName || 'Sin objetivo')} · {s.clientName || 'Sin cliente'}
                             </option>
                           ))}
                         </select>
