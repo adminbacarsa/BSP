@@ -241,7 +241,7 @@ export default function EmployeeDashboard() {
 
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
 
-  const { user, isSuperAdmin } = useAuth();
+  const { user, isSuperAdmin, loading: authLoading } = useAuth();
   const router = useRouter();
   // ── Superadmin preview mode ──────────────────────────────────────────────
   const previewEmpId = (router.isReady && isSuperAdmin) ? ((router.query.preview as string) || null) : null;
@@ -510,7 +510,7 @@ export default function EmployeeDashboard() {
   };
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || authLoading) return;
     // In preview mode, wait until router is ready and previewEmpId is resolved
     if (isSuperAdmin && !router.isReady) return;
     let unsub: (() => void) | null = null;
@@ -518,10 +518,10 @@ export default function EmployeeDashboard() {
     fetchShifts().then(u => { unsub = u; });
     return () => { if (unsub) unsub(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, previewEmpId]);
+  }, [user?.uid, authLoading, previewEmpId]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || authLoading) return;
     // Superadmin en modo preview: saltar verificación de dispositivo
     if (isSuperAdmin) { setDeviceVerified(true); return; }
     const localDeviceId = typeof window !== 'undefined' ? localStorage.getItem('cosp_device_id') : null;
@@ -552,7 +552,7 @@ export default function EmployeeDashboard() {
         setDeviceVerified(d.deviceId === localDeviceId);
       }).catch(() => setDeviceVerified(null));
     });
-  }, [user?.uid]);
+  }, [user?.uid, authLoading]);
 
   useEffect(() => {
     if (!user) return;
