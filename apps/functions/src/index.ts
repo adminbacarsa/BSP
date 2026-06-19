@@ -993,7 +993,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
             clientName: shiftData.clientName || '',
             empresaId: shiftData.empresaId || null,
             coords: coords || null,
-            description: `Ingreso por portal: ${shiftData.employeeName || empId}`,
+            description: `Ingreso por portal: ${shiftData.employeeName || (await db.collection('empleados').doc(empId).get().then(d => { const x = d.data(); return x ? `${x.lastName || ''} ${x.firstName || ''}`.trim() : empId; }).catch(() => empId))}`,
             createdAt: now,
             status: 'unread',
             viewed: false,
