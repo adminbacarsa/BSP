@@ -246,9 +246,10 @@ export default function EmployeeDashboard() {
   // ── Superadmin preview mode ──────────────────────────────────────────────
   const previewEmpId = (router.isReady && isSuperAdmin) ? ((router.query.preview as string) || null) : null;
   const isPreviewMode = !!(isSuperAdmin && previewEmpId);
-  const [previewEmployees, setPreviewEmployees] = useState<Array<{ id: string; name: string; empresa?: string }>>([]);
+  const [previewEmployees, setPreviewEmployees] = useState<Array<{ id: string; name: string; empresa?: string; fileNumber?: string }>>([]);
   const [previewSearch, setPreviewSearch] = useState('');
   const [showPreviewPicker, setShowPreviewPicker] = useState(false);
+  const [previewEmpresaFilter, setPreviewEmpresaFilter] = useState<string | null>(null);
 
   const previousShiftRef = useRef<Map<string, Shift>>(new Map());
   const shiftInitialLoadDone = useRef(false);
@@ -260,11 +261,11 @@ export default function EmployeeDashboard() {
   // Load employees for superadmin preview picker
   useEffect(() => {
     if (!isSuperAdmin) return;
-    getDocs(query(collection(db, 'empleados'), orderBy('lastName'), limit(200))).then(snap => {
+    getDocs(query(collection(db, 'empleados'), orderBy('lastName'), limit(500))).then(snap => {
       setPreviewEmployees(snap.docs.map(d => {
         const data = d.data();
         const name = `${data.lastName || ''}, ${data.firstName || data.nombre || ''}`.trim().replace(/^,\s*/, '');
-        return { id: d.id, name: name || d.id, empresa: data.empresaId };
+        return { id: d.id, name: name || d.id, empresa: data.empresaId || '', fileNumber: data.fileNumber || data.legajo || '' };
       }));
     }).catch(() => {});
   }, [isSuperAdmin]);
@@ -1693,58 +1694,98 @@ export default function EmployeeDashboard() {
           <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
           <span className="flex-1 truncate">PREVIEW · {empProfile ? `${empProfile.lastName || ''} ${empProfile.firstName || ''}`.trim() || previewEmpId : previewEmpId}</span>
           <button onClick={() => setShowPreviewPicker(true)} className="shrink-0 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded text-[10px] font-black uppercase">Cambiar</button>
-          <button onClick={() => router.back()} className="shrink-0 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded text-[10px] font-black uppercase">← Volver</button>
+          <button onClick={() => router.push('/admin')} className="shrink-0 bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded text-[10px] font-black uppercase">← Admin</button>
         </div>
       )}
 
       {/* ── Superadmin employee picker overlay ── */}
-      {isSuperAdmin && showPreviewPicker && (
-        <div className="fixed inset-0 z-[9999] bg-slate-950/95 flex flex-col p-4">
-          <div className="flex items-center gap-3 mb-4">
-            <svg className="w-5 h-5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-            <h2 className="text-white font-black text-base flex-1">Vista previa — Seleccionar empleado</h2>
-            {isPreviewMode && <button onClick={() => setShowPreviewPicker(false)} className="text-slate-400 hover:text-white"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>}
-          </div>
-          <div className="bg-slate-800 rounded-xl px-3 py-2 flex items-center gap-2 mb-3">
-            <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-            <input
-              autoFocus
-              type="text"
-              placeholder="Buscar empleado..."
-              value={previewSearch}
-              onChange={e => setPreviewSearch(e.target.value)}
-              className="bg-transparent text-white text-sm flex-1 outline-none placeholder-slate-500"
-            />
-          </div>
-          <div className="flex-1 overflow-y-auto space-y-1">
-            {previewEmployees
-              .filter(e => !previewSearch || e.name.toLowerCase().includes(previewSearch.toLowerCase()) || e.empresa?.toLowerCase().includes(previewSearch.toLowerCase()))
-              .slice(0, 50)
-              .map(emp => (
+      {isSuperAdmin && showPreviewPicker && (() => {
+        const empresas = Array.from(new Set(previewEmployees.map(e => e.empresa).filter(Boolean))).sort() as string[];
+        const filtered = previewEmployees.filter(e => {
+          const matchEmpresa = !previewEmpresaFilter || e.empresa === previewEmpresaFilter;
+          const matchSearch = !previewSearch || e.name.toLowerCase().includes(previewSearch.toLowerCase()) || (e.fileNumber && e.fileNumber.toLowerCase().includes(previewSearch.toLowerCase()));
+          return matchEmpresa && matchSearch;
+        });
+        return (
+          <div className="fixed inset-0 z-[9999] bg-slate-950 flex flex-col">
+            {/* Header */}
+            <div className="flex items-center gap-3 px-4 pt-5 pb-3 border-b border-slate-800">
+              <svg className="w-5 h-5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-white font-black text-sm">Vista previa portal empleado</h2>
+                <p className="text-slate-500 text-[11px]">{filtered.length} empleado{filtered.length !== 1 ? 's' : ''}{previewEmpresaFilter ? ` · ${previewEmpresaFilter}` : ` · ${empresas.length} empresa${empresas.length !== 1 ? 's' : ''}`}</p>
+              </div>
+              {isPreviewMode
+                ? <button onClick={() => setShowPreviewPicker(false)} className="text-slate-400 hover:text-white p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>
+                : <button onClick={() => router.push('/admin')} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">← Admin</button>
+              }
+            </div>
+            {/* Empresa filter chips */}
+            {empresas.length > 1 && (
+              <div className="flex gap-2 px-4 py-2.5 overflow-x-auto border-b border-slate-800/60 scrollbar-none">
+                <button
+                  onClick={() => setPreviewEmpresaFilter(null)}
+                  className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-bold transition-colors ${!previewEmpresaFilter ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                >Todas</button>
+                {empresas.map(emp => (
+                  <button
+                    key={emp}
+                    onClick={() => setPreviewEmpresaFilter(previewEmpresaFilter === emp ? null : emp)}
+                    className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-bold transition-colors ${previewEmpresaFilter === emp ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                  >{emp}</button>
+                ))}
+              </div>
+            )}
+            {/* Search */}
+            <div className="px-4 py-2.5 border-b border-slate-800/60">
+              <div className="bg-slate-800 rounded-xl px-3 py-2 flex items-center gap-2">
+                <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Buscar por nombre o legajo..."
+                  value={previewSearch}
+                  onChange={e => setPreviewSearch(e.target.value)}
+                  className="bg-transparent text-white text-sm flex-1 outline-none placeholder-slate-500"
+                />
+                {previewSearch && <button onClick={() => setPreviewSearch('')} className="text-slate-500 hover:text-white"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>}
+              </div>
+            </div>
+            {/* Employee list */}
+            <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1">
+              {filtered.slice(0, 80).map(emp => (
                 <button
                   key={emp.id}
                   onClick={() => { setShowPreviewPicker(false); setPreviewSearch(''); router.push(`/empleado/dashboard?preview=${emp.id}`); }}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-2.5 transition-colors ${previewEmpId === emp.id ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'}`}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 transition-colors ${previewEmpId === emp.id ? 'bg-orange-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-200 hover:bg-slate-800'}`}
                 >
-                  <div className="w-7 h-7 rounded-full bg-slate-600 flex items-center justify-center text-[10px] font-black text-white shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-black text-white shrink-0">
                     {emp.name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold truncate">{emp.name}</p>
-                    {emp.empresa && <p className="text-[10px] text-slate-400 truncate">{emp.empresa}</p>}
+                    <p className="text-[10px] text-slate-400 truncate">
+                      {emp.fileNumber ? <span className="text-slate-300 font-mono">#{emp.fileNumber}</span> : null}
+                      {emp.fileNumber && emp.empresa ? <span className="mx-1">·</span> : null}
+                      {emp.empresa ? <span>{emp.empresa}</span> : null}
+                    </p>
                   </div>
                   {previewEmpId === emp.id && <svg className="w-4 h-4 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>}
                 </button>
               ))}
-            {previewEmployees.length === 0 && (
-              <p className="text-slate-500 text-sm text-center py-8">Cargando empleados...</p>
-            )}
+              {filtered.length === 0 && previewEmployees.length === 0 && (
+                <p className="text-slate-500 text-sm text-center py-10">Cargando empleados...</p>
+              )}
+              {filtered.length === 0 && previewEmployees.length > 0 && (
+                <p className="text-slate-500 text-sm text-center py-10">Sin resultados para "{previewSearch}"</p>
+              )}
+              {filtered.length > 80 && (
+                <p className="text-slate-600 text-[11px] text-center py-3">Mostrando 80 de {filtered.length} — refiná la búsqueda</p>
+              )}
+            </div>
           </div>
-          {!isPreviewMode && (
-            <button onClick={() => router.back()} className="mt-3 w-full py-3 bg-slate-800 text-slate-300 rounded-xl text-sm font-bold">← Volver al admin</button>
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       {!isOnline && (
         <div role="alert" aria-live="assertive" className="sticky top-0 z-50 flex items-center gap-2 bg-amber-50 border-b-2 border-amber-400 px-4 py-2.5 text-amber-800 text-xs font-medium">
