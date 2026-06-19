@@ -153,7 +153,7 @@ export const onTurnoWrite = functions
     // Se dispara cuando el sistema cierra el turno (completionReason: AUTO_SHIFT_END).
     // El guardia recibe una notificación de finalización en su app.
     if (after && before && !before.isCompleted && after.isCompleted === true &&
-        after.completionReason === 'AUTO_SHIFT_END') {
+        (after.completionReason === 'AUTO_SHIFT_END' || after.completionReason === 'AUTO_SHIFT_END_CUSTOM' || after.completionReason === 'AUTO_END_CF_RETENTION_TIMEOUT' || after.completionReason === 'AUTO_COVERAGE_COMPLETE')) {
       const completedEmployeeId: string = after.employeeId;
       if (!completedEmployeeId) return;
       const objective = after.objectiveName || after.clientName || 'tu puesto';
