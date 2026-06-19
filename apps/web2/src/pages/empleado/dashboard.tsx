@@ -1073,7 +1073,6 @@ export default function EmployeeDashboard() {
 
   const handleCheckIn = async (shift: Shift) => {
     if (!user) return;
-    if (isPreviewMode) { addToast('Modo preview — acción deshabilitada', 'info'); return; }
     const start = toDate(shift.startTime);
     const end = toDate(shift.endTime);
     if (!start || !end) {
@@ -1165,7 +1164,6 @@ export default function EmployeeDashboard() {
 
   const handleLlegadaTarde = async (shift: Shift) => {
     if (!user) return;
-    if (isPreviewMode) { addToast('Modo preview — acción deshabilitada', 'info'); return; }
     setCheckingShiftId(shift.id);
     try {
       const callable = httpsCallable(functions, 'notificarLlegadaTarde');
@@ -1182,7 +1180,6 @@ export default function EmployeeDashboard() {
 
   const handleSubmitAbsenceRequest = async () => {
     if (!user) return;
-    if (isPreviewMode) { addToast('Modo preview — acción deshabilitada', 'info'); return; }
     if (!absenceStart || !absenceEnd) {
       addToast('Seleccioná las fechas', 'error');
       return;
