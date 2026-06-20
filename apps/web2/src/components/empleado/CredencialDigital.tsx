@@ -904,61 +904,57 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
 
       {/* Modal cámara */}
       {showCamera && (
-        <div className="fixed inset-0 z-[70] bg-black flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2" style={{ background: tema.h1 }}>
-            <p className="text-white font-black text-sm">Foto carnet</p>
-            <button onClick={cerrarCamara} className="text-slate-400 hover:text-white p-1"><X size={22}/></button>
-          </div>
-          <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
-            <video ref={videoRef} playsInline muted className="h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }}/>
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-              {/* Oscurece todo excepto la silueta cabeza+hombros */}
-              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
-                <defs>
-                  <mask id="hombros-mask">
-                    <rect x="0" y="0" width="100" height="100" fill="white"/>
-                    <ellipse cx="50" cy="28" rx="20" ry="23" fill="black"/>
-                    <path d="M 8 100 C 8 72 22 60 30 53 C 34 63 41 68 50 68 C 59 68 66 63 70 53 C 78 60 92 72 92 100 Z" fill="black"/>
-                  </mask>
-                </defs>
-                <rect x="0" y="0" width="100" height="100" fill="rgba(0,0,0,0.78)" mask="url(#hombros-mask)"/>
-              </svg>
-              {/* Contorno guia con puntos */}
-              <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
-                <ellipse cx="50" cy="28" rx="20" ry="23" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="0.7" strokeDasharray="3 2"/>
-                <path d="M 8 100 C 8 72 22 60 30 53 C 34 63 41 68 50 68 C 59 68 66 63 70 53 C 78 60 92 72 92 100" fill="none" stroke="rgba(255,255,255,0.85)" strokeWidth="0.7" strokeDasharray="3 2"/>
-                <line x1="24" y1="55" x2="76" y2="55" stroke="rgba(255,255,255,0.2)" strokeWidth="0.4" strokeDasharray="2 2"/>
-                <path d="M 4 18 L 4 8 L 14 8" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 96 18 L 96 8 L 86 8" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 4 82 L 4 92 L 14 92" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M 96 82 L 96 92 L 86 92" fill="none" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              {countdown === null && (
-                <div style={{ position: 'absolute', bottom: 148, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                  <div style={{ background: 'rgba(0,0,0,0.65)', borderRadius: 20, padding: '6px 16px', backdropFilter: 'blur(4px)' }}>
-                    <p className="text-white text-[11px] font-bold text-center">Encuadrá cabeza y hombros · Mirá a cámara</p>
-                  </div>
-                  <div style={{ background: 'rgba(0,0,0,0.45)', borderRadius: 12, padding: '4px 12px' }}>
-                    <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 9, textAlign: 'center' }}>El fondo se eliminará automáticamente</p>
-                  </div>
-                </div>
-              )}
-              {countdown !== null && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)' }}>
-                  <p style={{ fontSize: 140, fontWeight: 900, color: '#fff', lineHeight: 1, textShadow: `0 0 40px ${tema.accent}, 0 4px 16px rgba(0,0,0,0.8)` }}>
-                    {countdown}
-                  </p>
-                </div>
-              )}
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(6px)' }}>
+          <div className="w-full flex flex-col overflow-hidden" style={{ maxWidth: 380, maxHeight: '95svh', borderRadius: 16, background: '#000' }}>
+            <div className="flex items-center justify-between px-4 py-3 shrink-0" style={{ background: tema.h1 }}>
+              <p className="text-white font-black text-sm">Foto carnet</p>
+              <button onClick={cerrarCamara} className="text-slate-400 hover:text-white p-1"><X size={22}/></button>
             </div>
-          </div>
-          <div className="pb-8 pt-4 flex justify-center" style={{ background: tema.h1 }}>
+            <div style={{ position: 'relative', width: '100%', aspectRatio: '3/4', flexShrink: 0, overflow: 'hidden', background: '#000' }}>
+              <video ref={videoRef} playsInline muted style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}/>
+              <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <defs>
+                    <mask id="hombros-mask">
+                      <rect x="0" y="0" width="100" height="100" fill="white"/>
+                      <ellipse cx="50" cy="30" rx="22" ry="25" fill="black"/>
+                      <path d="M 6 100 C 6 74 20 62 29 55 C 33 65 40 70 50 70 C 60 70 67 65 71 55 C 80 62 94 74 94 100 Z" fill="black"/>
+                    </mask>
+                  </defs>
+                  <rect x="0" y="0" width="100" height="100" fill="rgba(0,0,0,0.72)" mask="url(#hombros-mask)"/>
+                </svg>
+                <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <ellipse cx="50" cy="30" rx="22" ry="25" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="0.8" strokeDasharray="3 2"/>
+                  <path d="M 6 100 C 6 74 20 62 29 55 C 33 65 40 70 50 70 C 60 70 67 65 71 55 C 80 62 94 74 94 100" fill="none" stroke="rgba(255,255,255,0.9)" strokeWidth="0.8" strokeDasharray="3 2"/>
+                  <path d="M 4 16 L 4 6 L 14 6" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M 96 16 L 96 6 L 86 6" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M 4 84 L 4 94 L 14 94" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M 96 84 L 96 94 L 86 94" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                {countdown === null && (
+                  <div style={{ position: 'absolute', bottom: 12, left: 0, right: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    <div style={{ background: 'rgba(0,0,0,0.65)', borderRadius: 20, padding: '5px 14px' }}>
+                      <p className="text-white text-[10px] font-bold text-center">Encuadrá cabeza y hombros · Mirá a cámara</p>
+                    </div>
+                    <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 8, textAlign: 'center' }}>El fondo se eliminará automáticamente</p>
+                  </div>
+                )}
+                {countdown !== null && (
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)' }}>
+                    <p style={{ fontSize: 120, fontWeight: 900, color: '#fff', lineHeight: 1, textShadow: `0 0 40px ${tema.accent}` }}>{countdown}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="py-5 flex justify-center shrink-0" style={{ background: tema.h1 }}>
+
             <button
               onClick={countdown === null ? iniciarContador : undefined}
               disabled={countdown !== null}
               style={{ width: 76, height: 76, background: '#ffffff', border: `4px solid ${tema.accent}`, boxShadow: `0 0 0 8px ${tema.accent}30`, borderRadius: '50%', opacity: countdown !== null ? 0.5 : 1 }}
               className="active:scale-90 transition-transform"
             />
+            </div>
           </div>
         </div>
       )}
