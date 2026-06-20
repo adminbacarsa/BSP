@@ -125,6 +125,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                     activeDays: pos.activeDays || [],
                     activeDaysOk,
                     allowedShiftTypes: pos.allowedShiftTypes || [],
+                    slotDays: (pos.allowedShiftTypes || []).flatMap((s: any) => s.days || []).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i),
                     shifts: allPosShifts,
                 };
             });
@@ -303,11 +304,17 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                                                                 <span className="text-green-700">Cubierto: <b>{pos.covered}</b></span>
                                                                 {pos.absentCount > 0 && <span className="text-red-700">Ausentes: <b>{pos.absentCount}</b></span>}
                                                                 {pos.deficit > 0 && <span className="bg-red-600 text-white px-1.5 py-0.5 rounded font-bold">DÉFICIT: {pos.deficit}</span>}
-                                                                {pos.activeDays.length > 0 && (
-                                                                    <span className={pos.activeDaysOk ? 'text-green-700' : 'text-red-700 font-bold'}>
-                                                                        Días: [{pos.activeDays.join(',')}] {pos.activeDaysOk ? '✓ hoy OK' : '✗ HOY NO OPERA'}
-                                                                    </span>
-                                                                )}
+                                                                {(() => {
+                                                                    const dayCode = ['D','L','M','X','J','V','S'][(new Date()).getDay()];
+                                                                    const displayDays = pos.slotDays?.length > 0 ? pos.slotDays : pos.activeDays;
+                                                                    const ok = displayDays.length === 0 || displayDays.includes(dayCode);
+                                                                    if (displayDays.length === 0) return null;
+                                                                    return (
+                                                                        <span className={ok ? 'text-green-700' : 'text-orange-700 font-bold'}>
+                                                                            Días: [{displayDays.join(',')}] {ok ? '✓ hoy OK' : '✗ no opera hoy'}
+                                                                        </span>
+                                                                    );
+                                                                })()}
                                                                 {pos.allowedShiftTypes.length > 0 && (
                                                                     <span className="text-slate-400">Turnos SLA: {pos.allowedShiftTypes.length}</span>
                                                                 )}
