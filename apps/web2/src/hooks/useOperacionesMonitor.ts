@@ -514,6 +514,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             ? 'ABSENCE'
                             : 'NO_PLANNING';
                     relevantDefinitions.forEach((slot: any) => {
+                        // Respetar dias habilitados del turno (ej: RONDIN solo L-V)
+                        if (slot.days && Array.isArray(slot.days) && slot.days.length > 0) {
+                            if (!slot.days.includes(dayCode)) return;
+                        }
                         const start = createDateFromTime(slot.startTime, now);
                         let end = createDateFromTime(slot.endTime, now);
 
