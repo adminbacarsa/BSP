@@ -248,6 +248,27 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     } catch { fileInputRef.current?.click(); }
   };
   const cerrarCamara = () => { stream?.getTracks().forEach(t => t.stop()); setStream(null); setShowCamera(false); };
+  // Helper: quitar fondo con retry proxyToWorker:false si falla modo Worker
+  const runBgRemoval = async (
+    blob: Blob,
+    onProgress: (pct: number) => void
+  ): Promise<Blob> => {
+    const cfg = {
+      model: 'isnet_quint8' as const,
+      output: { format: 'image/png' as const },
+      progress: (_k: string, c: number, t: number) => { if (t > 0) onProgress(Math.round((c / t) * 100)); },
+    };
+    const { removeBackground } = await import('@imgly/background-removal');
+    // Primer intento con Worker (mas rapido, requiere SharedArrayBuffer)
+    try {
+      return await removeBackground(blob, { ...cfg, proxyToWorker: true });
+    } catch (e1) {
+      console.warn('[BG-REMOVAL] Worker mode fallo, reintentando sin Worker:', e1);
+    }
+    // Segundo intento sin Worker (main thread, funciona sin SharedArrayBuffer)
+    return await removeBackground(blob, { ...cfg, proxyToWorker: false });
+  };
+
   const capturarFoto = () => {
     const video = videoRef.current, canvas = canvasRef.current; if (!video || !canvas) return;
     // Crop 3:4 portrait centrado en el video
@@ -271,13 +292,10 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
       setPhotoOff({ x: 50, y: 20 }); cerrarCamara();
       setTimeout(() => {
         setQuitandoFondo(true); setProgFondo(0);
-        import('@imgly/background-removal').then(({ removeBackground }) =>
-          removeBackground(blob, { model: 'isnet_quint8', output: { format: 'image/png' },
-            progress: (_k: string, c: number, t: number) => { if (t > 0) setProgFondo(Math.round((c / t) * 100)); } })
+        runBgRemoval(blob, setProgFondo)
           .then(rb => { setFotoFinal(URL.createObjectURL(rb)); setCapturedBlob(rb); })
-          .catch(console.error)
-          .finally(() => { setQuitandoFondo(false); setProgFondo(0); })
-        );
+          .catch(e => { console.error('[BG-REMOVAL] fallo definitivo:', e); alert('No se pudo quitar el fondo. La foto se guarda con fondo.'); })
+          .finally(() => { setQuitandoFondo(false); setProgFondo(0); });
       }, 200);
     }, 'image/png');
   };
@@ -290,13 +308,10 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
       fetch(src).then(r => r.blob()).then(blob => {
         setCapturedBlob(blob);
         setQuitandoFondo(true); setProgFondo(0);
-        import('@imgly/background-removal').then(({ removeBackground }) =>
-          removeBackground(blob, { model: 'isnet_quint8', output: { format: 'image/png' },
-            progress: (_k: string, c: number, t: number) => { if (t > 0) setProgFondo(Math.round((c / t) * 100)); } })
+        runBgRemoval(blob, setProgFondo)
           .then(rb => { setFotoFinal(URL.createObjectURL(rb)); setCapturedBlob(rb); })
-          .catch(console.error)
-          .finally(() => { setQuitandoFondo(false); setProgFondo(0); })
-        );
+          .catch(e => { console.error('[BG-REMOVAL] fallo definitivo:', e); alert('No se pudo quitar el fondo. La foto se guarda con fondo.'); })
+          .finally(() => { setQuitandoFondo(false); setProgFondo(0); });
       });
     };
     reader.readAsDataURL(file); e.target.value = '';
@@ -326,14 +341,12 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     if (!blob) return;
     setQuitandoFondo(true); setProgFondo(0);
     try {
-      const { removeBackground } = await import('@imgly/background-removal');
-      const rb = await removeBackground(blob, {
-        model: 'isnet_quint8', output: { format: 'image/png' },
-        progress: (_k: string, c: number, t: number) => { if (t > 0) setProgFondo(Math.round((c / t) * 100)); },
-      });
+      const rb = await runBgRemoval(blob, setProgFondo);
       setFotoFinal(URL.createObjectURL(rb)); setCapturedBlob(rb);
-    } catch (e) { console.error('BG removal error:', e); }
-    finally { setQuitandoFondo(false); setProgFondo(0); }
+    } catch (e) {
+      console.error('[BG-REMOVAL] fallo definitivo:', e);
+      alert('No se pudo quitar el fondo. Intenta de nuevo o guarda la foto con fondo.');
+    } finally { setQuitandoFondo(false); setProgFondo(0); }
   };
   const iniciarContador = () => {
     if (countdownRef.current) clearInterval(countdownRef.current);
