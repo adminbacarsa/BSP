@@ -32,17 +32,31 @@ export default function App({ Component, pageProps }: AppProps) {
   useEffect(() => {
     initTheme();
     applyCompanyThemeFromStorage();
-    // El SDK de Firestore puede lanzar "INTERNAL ASSERTION FAILED" de forma asíncrona
-    // cuando el watch stream se reconecta. No afecta datos — solo previene que Next.js
-    // muestre el overlay de error en desarrollo.
-    const handler = (e: PromiseRejectionEvent) => {
-      if (e.reason?.message?.includes('INTERNAL ASSERTION FAILED')) {
+    // Firestore SDK bug: "INTERNAL ASSERTION FAILED" deja el cliente en estado irrecuperable.
+    // Al detectarlo, recargamos la página para restaurar la conexión limpia.
+    const isFirestoreAssertion = (msg?: string) =>
+      typeof msg === 'string' && msg.includes('INTERNAL ASSERTION FAILED');
+
+    const onUnhandledRejection = (e: PromiseRejectionEvent) => {
+      if (isFirestoreAssertion(e.reason?.message)) {
         e.preventDefault();
-        console.warn('[Firestore] Internal assertion — ignorado (stream reconnect):', e.reason?.message);
+        console.warn('[Firestore] Internal assertion — recargando…');
+        setTimeout(() => window.location.reload(), 1500);
       }
     };
-    window.addEventListener('unhandledrejection', handler);
-    return () => window.removeEventListener('unhandledrejection', handler);
+    const onError = (e: ErrorEvent) => {
+      if (isFirestoreAssertion(e.message)) {
+        e.preventDefault();
+        console.warn('[Firestore] Internal assertion (sync) — recargando…');
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    };
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    window.addEventListener('error', onError);
+    return () => {
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+      window.removeEventListener('error', onError);
+    };
   }, []);
 
   return (
