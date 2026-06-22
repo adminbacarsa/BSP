@@ -352,7 +352,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
             const isFranco = !!shift.isFranco || shift.objectiveName === 'FRANCO';
             
-            if (isUnassigned && !isReportedToPlanning) return null; 
+            const isSinCobertura = !!shift.isSinCobertura;
+            // Descartar docs reales vacantes no-devueltos EXCEPTO los autosinc_ SIN COBERTURA
+            if (isUnassigned && !isReportedToPlanning && !isSinCobertura) return null; 
 
             const isEarlyStartScheduled = !!shift.isEarlyStart;
             const isEarlyStart = isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
@@ -420,7 +422,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Los turnos origin==='SLA_VIRTUAL' son solo notificaciones hacia planificación:
             // el puesto sigue descubierto y NO cuentan como cobertura real.
             const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
-            const isSinCobertura = !!shift.isSinCobertura;
             // isSinCobertura NO cuenta como cobertura: la vacante debe seguir visible en
             // el tab VACANTES y en el PDF. Solo suprimimos el duplicado virtual en el dedup.
             const countsForCoverage = !isAutoNotification && (
@@ -1114,75 +1115,4 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Si el turno lleva >6h de retención, se cierra automáticamente.
             const autoTimeKey = `${s.id}_AUTO_END_OVERTIME`;
             if (minutesOvertime > 360 && !alertedVacancyIds.current.has(autoTimeKey)) {
-                alertedVacancyIds.current.add(autoTimeKey);
-                autoCloseShiftTx(s.id, {
-                    status: 'COMPLETED', isCompleted: true, isPresent: false,
-                    completedAt: serverTimestamp(), completedBy: 'Sistema',
-                    completionReason: 'AUTO_OVERTIME_LIMIT',
-                }, empresaId).then(ok => {
-                    if (ok) toast.info(`ℹ️ Turno cerrado: ${s.employeeName || 'Guardia'} — retención > 6h`);
-                }).catch(e => {
-                    alertedVacancyIds.current.delete(autoTimeKey);
-                    console.warn('[autoEndRetentionTime]', e);
-                });
-                continue;
-            }
-
-            if (minutesOvertime < 120) continue;
-            const alertKey = `${s.id}_RETENCION_LARGA`;
-            if (alertedVacancyIds.current.has(alertKey)) continue;
-            alertedVacancyIds.current.add(alertKey);
-            getDocs(query(collection(db, 'novedades'), where('shiftId', '==', s.id), where('type', '==', 'RETENCION_LARGA'), limit(1)))
-                .then(snap => {
-                    if (!snap.empty) return;
-                    addDoc(collection(db, 'novedades'), stampEmpresaId({
-                        type: 'RETENCION_LARGA',
-                        shiftId: s.id,
-                        employeeId: s.employeeId,
-                        employeeName: s.employeeName,
-                        objectiveId: s.objectiveId,
-                        objectiveName: s.objectiveName,
-                        positionName: s.positionName,
-                        minutesOvertime,
-                        status: 'pending',
-                        title: 'Retención prolongada',
-                        description: `${s.employeeName || 'Guardia'} lleva ${Math.round(minutesOvertime)} min retenido en ${s.objectiveName || 'su puesto'}.`,
-                        createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
-                    }, String(s.empresaId || empresaId || '').trim()))
-                    .catch(e => console.warn('[retentionLarga]', e));
-                })
-                .catch(e => console.warn('[retentionLarga:check]', e));
-        }
-    }, [processedData, empresaId]);
-
-    // isStable: se activa una sola vez cuando processedData se estabiliza después de isReady.
-    // NO vuelve a false — evita que updates de Firestore muestren la pantalla de carga repetidamente.
-    useEffect(() => {
-        if (!isReady) return;
-        if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
-        stableTimerRef.current = setTimeout(() => setIsStable(true), 700);
-        return () => { if (stableTimerRef.current) clearTimeout(stableTimerRef.current); };
-    }, [processedData, isReady]);
-
-    // Fallback: fuerza isStable(true) si despues de 3 seg el monitor no se inicio.
-    useEffect(() => {
-        const t = setTimeout(() => setIsStable(true), 3000);
-        return () => clearTimeout(t);
-    }, []);
-
-    return {
-        processedData, publishStatusMap,
-        recentLogs, isReady, isStable,
-        filterText, setFilterText, isCompact, setIsCompact,
-        handleAction,
-        viewTab, setViewTab,
-        stats, listData,
-        uniqueClients, selectedClientId, setSelectedClientId,
-        filteredObjectives,
-        employees,
-        servicesSLA,
-        rawShifts,
-        objectives,
-        now,
-    };
-}
+            
