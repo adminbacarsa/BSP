@@ -1168,4 +1168,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     return {
         processedData, publishStatusMap,
         recentLogs, isReady, isStable,
-        filterText, setFilterText, isCompact, setI
+        filterText, setFilterText, isCompact, setIsCompact,
+        handleAction,
+        viewTab, setViewTab,
+        stats, listData,
+        uniqueClients, selectedClientId, setSelectedClientId,
+        filteredObjectives,
+        employees,
+        servicesSLA,
+        rawShifts,
+        objectives,
+        now,
+    };
+}
