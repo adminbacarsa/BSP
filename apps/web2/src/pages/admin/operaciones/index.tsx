@@ -2716,6 +2716,51 @@ export default function OperacionesPage() {
         }
 
         // ═══════════════════════════════════════════════════════════════════════
+        // VACANTES SIN CUBRIR (incluye SIN COBERTURA auto-declaradas)
+        // ═══════════════════════════════════════════════════════════════════════
+        incY = (pdf as any).lastAutoTable?.finalY ? (pdf as any).lastAutoTable.finalY + 8 : incY + 8;
+        const vacantNormal  = vacantToday.filter((s: any) => !s.isSinCobertura);
+        const vacantSinCob  = vacantToday.filter((s: any) => s.isSinCobertura);
+        const allVacantRows = [
+            ...vacantSinCob.map((s: any) => [
+                'SIN COBERTURA',
+                sanitize(s.objectiveName || '-'),
+                sanitize(s.positionName || '-'),
+                `${fmt24(s.shiftDateObj)} - ${fmt24(s.endDateObj)}`,
+                sanitize(s.vacancyOrigin === 'ABSENCE' ? 'Ausencia' : 'Sin planif.'),
+            ]),
+            ...vacantNormal.map((s: any) => [
+                sanitize(s.isReportedToPlanning ? 'DEVUELTA' : 'SIN CUBRIR'),
+                sanitize(s.objectiveName || '-'),
+                sanitize(s.positionName || '-'),
+                `${fmt24(s.shiftDateObj)} - ${fmt24(s.endDateObj)}`,
+                sanitize(s.vacancyOrigin || '-'),
+            ]),
+        ];
+        pdf.setFontSize(10); pdf.setFont('helvetica', 'bold'); pdf.setTextColor(220, 38, 38);
+        pdf.text(`VACANTES SIN CUBRIR (${allVacantRows.length})`, 14, incY);
+        incY += 4;
+        autoTable(pdf, {
+            head: [['Estado', 'Objetivo', 'Posicion', 'Horario', 'Origen']],
+            body: allVacantRows.length > 0 ? allVacantRows : [['—', 'Sin vacantes sin cubrir', '—', '—', '—']],
+            startY: incY,
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [220, 38, 38] },
+            margin: { top: 0 },
+            didParseCell: (data: any) => {
+                if (data.section === 'body' && data.column.index === 0) {
+                    if (String(data.cell.raw) === 'SIN COBERTURA') {
+                        data.cell.styles.textColor = [71, 85, 105];
+                        data.cell.styles.fontStyle = 'bold';
+                    } else if (String(data.cell.raw) === 'SIN CUBRIR') {
+                        data.cell.styles.textColor = [220, 38, 38];
+                        data.cell.styles.fontStyle = 'bold';
+                    }
+                }
+            },
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
         // PÁGINA 5 — TURNOS COMPLETADOS
         // ═══════════════════════════════════════════════════════════════════════
         const y5 = sectionHeader('TURNOS COMPLETADOS', 5, 150, 105);

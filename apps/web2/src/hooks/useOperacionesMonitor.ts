@@ -421,10 +421,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // el puesto sigue descubierto y NO cuentan como cobertura real.
             const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
             const isSinCobertura = !!shift.isSinCobertura;
-            const countsForCoverage = isSinCobertura || (!isAutoNotification && (
+            // isSinCobertura NO cuenta como cobertura: la vacante debe seguir visible en
+            // el tab VACANTES y en el PDF. Solo suprimimos el duplicado virtual en el dedup.
+            const countsForCoverage = !isAutoNotification && (
                 (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
                 (isReportedToPlanning && !isValidEmployee)
-            ));
+            );
 
             const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
 
@@ -714,6 +716,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 s.endDateObj && s.endDateObj.getTime() > now.getTime() &&
                 Math.abs((s.shiftDateObj?.getTime() || 0) - (v.shiftDateObj?.getTime() || 0)) < 7200000 &&
                 sameSlot(s))) return false;
+            // Suprimir si ya existe el doc autosinc_ SIN COBERTURA para este slot
+            // El doc real reemplaza la vacante virtual — queda visible en VACANTES con badge SIN COB.
+            if (dedupedRealShifts.some(s => s.isSinCobertura && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             // Suprimir si hay guardias plan O presentes suficientes para el slot
             // (mejora: un guardia en PLAN ya resuelve la vacante aunque no haya hecho check-in)
