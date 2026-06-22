@@ -824,8 +824,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // sin importar si el turno ya empezó. El dedup de Firestore evita duplicados.
             // Esto garantiza que planificación sea notificada aunque el operador abra
             // la app tarde o no haya estado abierta durante la ventana 1-4h.
+            // Vacantes por AUSENCIA NO se auto-devuelven a planificacion:
+            // ya habia un empleado planificado que fue ausente, planificacion ya lo sabe.
+            // Auto-devolverlas genera estado DEVUELTA incorrecto en el mapa.
             const autoKey = `${v.id}_VACANTE_A_PLANIFICACION`;
-            if (!alertedVacancyIds.current.has(autoKey)) {
+            if (v.vacancyOrigin !== 'ABSENCE' && !alertedVacancyIds.current.has(autoKey)) {
                 alertedVacancyIds.current.add(autoKey);
                 getDocs(query(collection(db, 'novedades'), where('virtualVacancyId', '==', v.id), where('type', '==', 'VACANTE_A_PLANIFICACION'), limit(1)))
                     .then(async snap => {
