@@ -420,10 +420,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Los turnos origin==='SLA_VIRTUAL' son solo notificaciones hacia planificación:
             // el puesto sigue descubierto y NO cuentan como cobertura real.
             const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
-            const countsForCoverage = !isAutoNotification && (
+            const isSinCobertura = !!shift.isSinCobertura;
+            const countsForCoverage = isSinCobertura || (!isAutoNotification && (
                 (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
                 (isReportedToPlanning && !isValidEmployee)
-            );
+            ));
 
             const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
 
@@ -435,7 +436,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
-                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField
+                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField, isSinCobertura
             };
         }).filter(Boolean);
 
@@ -870,6 +871,45 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     .catch(e => console.warn('[autoAlertVacante:plan]', e));
             }
 
+            // ── PASO 3: T+120 → auto-declarar SIN COBERTURA ─────────────────
+            // Si pasaron 2h desde el inicio del turno y sigue sin cobertura,
+            // se crea un doc "autosinc_*" en turnos con isSinCobertura:true.
+            // Ese doc cuenta como cobertura en el SLA (suprime la vacante virtual)
+            // y deshabilita las acciones CUBRIR. Motivo: ausencia o falta de planificacion.
+            if (minutesUntil <= -120) {
+                const sinCobKey = `${v.id}_SIN_COBERTURA_FINAL`;
+                if (!alertedVacancyIds.current.has(sinCobKey)) {
+                    alertedVacancyIds.current.add(sinCobKey);
+                    const sinCobSafeId = v.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+                    const sinCobRef = doc(db, 'turnos', `autosinc_${sinCobSafeId}`);
+                    const sinCobEmpresaId = String(v.empresaId || empresaId || '').trim();
+                    getDoc(sinCobRef).then(snap => {
+                        if (snap.exists()) return; // ya declarado
+                        const motivo = v.vacancyOrigin === 'ABSENCE'
+                            ? `Ausencia sin cobertura — ${v.positionName} en ${v.objectiveName}`
+                            : `Falta de planificacion — ${v.positionName} en ${v.objectiveName}`;
+                        setDoc(sinCobRef, stampEmpresaId({
+                            clientId: v.clientId, clientName: v.clientName,
+                            objectiveId: v.objectiveId, objectiveName: v.objectiveName,
+                            positionName: v.positionName,
+                            employeeId: 'SIN_COBERTURA', employeeName: 'SIN COBERTURA',
+                            startTime: Timestamp.fromDate(v.shiftDateObj),
+                            endTime: Timestamp.fromDate(v.endDateObj),
+                            status: 'SIN_COBERTURA', isSinCobertura: true,
+                            vacancyOrigin: v.vacancyOrigin || 'NO_PLANNING',
+                            motivo,
+                            createdAt: serverTimestamp(),
+                        }, sinCobEmpresaId))
+                        .then(() => toast.info(`Sin cobertura: ${v.positionName} en ${v.objectiveName}`))
+                        .catch(e => {
+                            alertedVacancyIds.current.delete(sinCobKey);
+                            console.warn('[autoSinCobertura]', e);
+                        });
+                    }).catch(() => alertedVacancyIds.current.delete(sinCobKey));
+                }
+                continue; // no generar alerta PROTOCOLO para vacantes ya vencidas
+            }
+
             // ── PASO 2: alerta PROTOCOLO para el operador (solo ≤60 min) ────
             // Solo cuando el turno ya inició o está por iniciar (minutesUntil <= 0 = ya empezó).
             // Se crea UNA SOLA alerta con ID determinístico. Después de T+120 se auto-cierra.
@@ -1128,16 +1168,4 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     return {
         processedData, publishStatusMap,
         recentLogs, isReady, isStable,
-        filterText, setFilterText, isCompact, setIsCompact,
-        handleAction,
-        viewTab, setViewTab,
-        stats, listData,
-        uniqueClients, selectedClientId, setSelectedClientId,
-        filteredObjectives,
-        employees,
-        servicesSLA,
-        rawShifts,
-        objectives,
-        now,
-    };
-}
+        filterText, setFilterText, isCompact, setI

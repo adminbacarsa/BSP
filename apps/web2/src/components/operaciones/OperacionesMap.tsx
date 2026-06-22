@@ -167,6 +167,7 @@ const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover
 
                     let statusLabel = 'PLAN'; let statusColor = '#94a3b8';
                     if (shift.isFranco)                                                       { statusLabel = 'FRANCO';   statusColor = '#3b82f6'; }
+                    else if (shift.isSinCobertura)                                             { statusLabel = 'SIN COB.'; statusColor = '#475569'; }
                     else if (shift.isPresent && shift.manualRetentionType === 'extended')      { statusLabel = `+${shift.manualRetentionHours}h MAN`; statusColor = '#d97706'; }
                     else if (shift.isPresent && shift.manualRetentionType === 'open')          { statusLabel = 'MAN INDEF'; statusColor = '#d97706'; }
                     else if (shift.isRetention)                                                { statusLabel = 'RECARGO';  statusColor = '#ea580c'; }
@@ -185,7 +186,8 @@ const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover
                             <span style={{ flex: 1, fontSize: '10px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shift.positionName || '—'}</span>
                             <span style={{ width: '52px', fontSize: '8px', fontWeight: 800, color: 'white', background: statusColor, borderRadius: '4px', padding: '2px 0', textAlign: 'center', flexShrink: 0 }}>{statusLabel}</span>
                             <div style={{ width: '54px', flexShrink: 0, textAlign: 'right' }}>
-                                {shift.isUnassigned && !shift.isReportedToPlanning && <button onClick={() => onOpenCoverage(shift)} style={{ background: '#e11d48', color: 'white', fontSize: '9px', fontWeight: 800, padding: '3px 7px', borderRadius: '4px', border: 'none', cursor: 'pointer', width: '100%' }}>CUBRIR</button>}
+                                {shift.isUnassigned && !shift.isReportedToPlanning && !shift.isSinCobertura && <button onClick={() => onOpenCoverage(shift)} style={{ background: '#e11d48', color: 'white', fontSize: '9px', fontWeight: 800, padding: '3px 7px', borderRadius: '4px', border: 'none', cursor: 'pointer', width: '100%' }}>CUBRIR</button>}
+                                {shift.isSinCobertura && <span style={{ fontSize: '8px', color: '#94a3b8', fontStyle: 'italic', display: 'block', textAlign: 'center', lineHeight: 1.2 }}>{shift.vacancyOrigin === 'ABSENCE' ? 'ausencia' : 'sin plan'}</span>}
                                 {!shift.isPresent && !shift.isUnassigned && !shift.isCompleted && !shift.isAbsent && !shift.isFranco && (
                                     diffMin > 30
                                         ? <button onClick={() => onOpenAttendance(shift)} style={{ background: '#fef2f2', color: '#be123c', border: '1px solid #fecdd3', fontSize: '9px', fontWeight: 800, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer', width: '100%' }}>AUS.</button>
