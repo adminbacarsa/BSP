@@ -2891,11 +2891,26 @@ export default function PlanificacionPage() {
                         const end = new Date(start);
 
                         if(change.code === 'F' || change.code === 'FF' || change.code === 'V') end.setHours(23,59,59);
-                        else if (typeof change.endTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.endTime)) {
+                        else if (typeof change.endTime === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(change.endTime)) {
                             const [eh, em] = change.endTime.split(':').map(Number);
                             end.setHours(eh, em, 0);
                             if (end <= start) end.setTime(end.getTime() + 24 * 3600000); // turno nocturno
-                        } else end.setTime(start.getTime() + ((change.hours != null ? change.hours : 8)*3600000));
+                        } else {
+                            // endTime no disponible en el change: buscar en positionStructure (SLA)
+                            const slaPos = positionStructure.find((p: any) => p.positionName === (change.positionName || ''));
+                            const slaSh = slaPos?.shifts?.find((s: any) => String(s.code || '').toUpperCase() === String(change.code || '').toUpperCase());
+                            const slaEnd = typeof slaSh?.endTime === 'string' ? slaSh.endTime : null;
+                            const slaHours = Number(slaSh?.hours) > 0 ? Number(slaSh.hours) : null;
+                            if (slaEnd && /^\d{1,2}:\d{2}(:\d{2})?$/.test(slaEnd)) {
+                                const [eh, em] = slaEnd.split(':').map(Number);
+                                end.setHours(eh, em, 0);
+                                if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
+                            } else if (slaHours) {
+                                end.setTime(start.getTime() + slaHours * 3600000);
+                            } else {
+                                end.setTime(start.getTime() + ((change.hours != null ? change.hours : 8)*3600000));
+                            }
+                        }
 
                         const safeSwapWith = change.swapWith || null;
                         const safeSwapDate = change.swapDate || null;
