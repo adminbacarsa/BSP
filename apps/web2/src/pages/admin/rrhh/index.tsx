@@ -451,7 +451,11 @@ export default function EmployeesPage() {
       const isActive = e.status === 'activo' || e.status === 'active' || !e.status;
       const matchesStatus = showInactive ? !isActive : isActive;
       const obj = allObjectives.find(o => o.id === filterObjective);
-      const matchesObjective = !filterObjective || e.preferredObjectiveId === filterObjective || (obj && e.preferredObjectiveId === obj.docId);
+      const matchesObjective = !filterObjective
+        ? true
+        : filterObjective === '__sin_objetivo__'
+          ? !e.preferredObjectiveId
+          : e.preferredObjectiveId === filterObjective || (obj && e.preferredObjectiveId === obj.docId);
       const matchesCoords = !filterNoCoords || (!e.lat && !e.lng);
       return matchesTerm && matchesStatus && matchesObjective && matchesCoords;
     }));
@@ -2226,6 +2230,7 @@ export default function EmployeesPage() {
                         {allObjectives.length > 0 && (
                           <select value={filterObjective} onChange={e => setFilterObjective(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 px-3 py-1.5 rounded-xl text-[11px] font-bold text-slate-600 dark:text-white appearance-none">
                             <option value="">Todos los objetivos</option>
+                            <option value="__sin_objetivo__">— Sin objetivo</option>
                             {[...allObjectives].sort((a,b) => a.name.localeCompare(b.name)).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                           </select>
                         )}
