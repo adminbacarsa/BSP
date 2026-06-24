@@ -122,7 +122,7 @@ export function analyzeShiftComposition(start: string, end: string) {
   };
 }
 
-export function computePositionDayComposition(pos: ServicePosition, dayCode: string) {
+export function computePositionDayComposition(pos: ServicePosition, dayCode: string, dateStr?: string) {
   let dayTotal = 0;
   let dayNight = 0;
   const activeDays = pos.activeDays?.length ? pos.activeDays : [...WEEK_DAY_CODES];
@@ -158,8 +158,12 @@ export function computePositionDayComposition(pos: ServicePosition, dayCode: str
     addVariant(STANDARD_SHIFT_VARIANTS.N12);
   } else if (pos.coverageType === 'custom') {
     (pos.allowedShiftTypes || []).forEach((shift) => {
-      // Turnos de fechas específicas no son recurrentes; no contribuyen al cálculo mensual
-      if (Array.isArray((shift as any).specificDates) && (shift as any).specificDates.length > 0) return;
+      const sd: string[] | undefined = (shift as any).specificDates;
+      if (Array.isArray(sd) && sd.length > 0) {
+        // Turno de fecha específica: sumar solo si dateStr coincide
+        if (dateStr && sd.includes(dateStr)) addVariant(shift);
+        return;
+      }
       if (shift.days?.length) {
         if (shift.days.includes(dayCode)) addVariant(shift);
       } else {
@@ -215,7 +219,7 @@ export function calculateMonthlyBreakdown(
     if (!slaExcluded.has(dateStr)) {
       positions.forEach((pos) => {
         if (pos.excludedDates?.includes(dateStr)) return;
-        const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode);
+        const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode, dateStr);
         const q = pos.quantity || 1;
         monthAccumulator[monthKey].totalHours += dayTotal * q;
         monthAccumulator[monthKey].nightHours += dayNight * q;
@@ -330,7 +334,7 @@ export function slaHoursForPositionOnDay(
   if (excludedDates?.includes(dateStr)) return 0;
   if (pos.excludedDates?.includes(dateStr)) return 0;
   const dayCode = WEEK_DAY_CODES[cur.getDay()];
-  return computePositionDayComposition(pos, dayCode).dayTotal;
+  return computePositionDayComposition(pos, dayCode, dateStr).dayTotal;
 }
 
 /** Horas SLA totales de un servicio en un día (suma puestos × quantity). */
