@@ -592,7 +592,8 @@ export default function EmployeesPage() {
         scopeEmpresa,
         migracionCompleta,
       );
-      setAllObjectives(slaRows);
+      const uniqueObjectives = Array.from(new Map(slaRows.map((o: any) => [o.id, o])).values());
+      setAllObjectives(uniqueObjectives);
     } catch (e) {}
   };
 
