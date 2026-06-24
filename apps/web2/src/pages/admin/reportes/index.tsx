@@ -1791,14 +1791,14 @@ export default function ReportsPage() {
                             <option value="published">Solo publicados (liquidación oficial)</option>
                             <option value="unpublished">Solo borrador / no publicados</option>
                         </select>
-                        <label className="flex items-center gap-2 cursor-pointer mt-1 select-none">
-                            <input
-                                type="checkbox"
-                                checked={usePlannedHours}
-                                onChange={e => setUsePlannedHours(e.target.checked)}
-                                className="w-3.5 h-3.5 rounded accent-slate-700"
-                            />
-                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">Usar horas planificadas (sin fichada real)</span>
+                        <label className="flex items-center gap-2 cursor-pointer mt-1.5 select-none group">
+                            <div
+                                onClick={() => setUsePlannedHours(v => !v)}
+                                className={`w-8 h-4 rounded-full transition-colors flex-shrink-0 flex items-center px-0.5 ${usePlannedHours ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}
+                            >
+                                <div className={`w-3 h-3 rounded-full bg-white shadow transition-transform ${usePlannedHours ? 'translate-x-4' : 'translate-x-0'}`}/>
+                            </div>
+                            <span className={`text-[10px] font-bold transition-colors ${usePlannedHours ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400'}`}>Usar horas planificadas (sin fichada real)</span>
                         </label>
                     </div>
 
