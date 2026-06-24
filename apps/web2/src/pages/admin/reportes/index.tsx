@@ -74,6 +74,7 @@ export default function ReportsPage() {
     const { empresaId } = useEmpresa();
     const {
         loading, dateRange, setDateRange, publishFilter, setPublishFilter,
+        usePlannedHours, setUsePlannedHours,
         generateReports, loadAudit,
         employeeReport, objectiveReport, auditLogs,
         objMap, empMap, holidaysData, SHIFT_HOURS_LOOKUP, OPERATIVE_CODES
@@ -580,6 +581,7 @@ export default function ReportsPage() {
                         <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Users size={16}/> Liquidación de Horas</h3>
                         <p className="text-[10px] text-slate-400 mt-1">
                             Filtro: {publishFilter === 'published' ? 'Solo cronos publicados' : publishFilter === 'unpublished' ? 'Solo borradores / no publicados' : 'Todos los turnos (publicados y borrador)'}
+                            {usePlannedHours && <span className="ml-2 text-amber-500 font-bold">· Horas planificadas (sin fichada)</span>}
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2 items-center">
@@ -1786,6 +1788,15 @@ export default function ReportsPage() {
                             <option value="published">Solo publicados (liquidación oficial)</option>
                             <option value="unpublished">Solo borrador / no publicados</option>
                         </select>
+                        <label className="flex items-center gap-2 cursor-pointer mt-1 select-none">
+                            <input
+                                type="checkbox"
+                                checked={usePlannedHours}
+                                onChange={e => setUsePlannedHours(e.target.checked)}
+                                className="w-3.5 h-3.5 rounded accent-slate-700"
+                            />
+                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">Usar horas planificadas (sin fichada real)</span>
+                        </label>
                     </div>
 
                     <button onClick={() => activeTab === 'AUDIT' ? loadAudit() : generateReports()} className="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-black text-xs uppercase hover:bg-slate-800 transition-colors">

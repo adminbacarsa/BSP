@@ -554,7 +554,8 @@ const getNightDuration = (start: Date, end: Date) => {
 };
 
 // Calculadora CCT 507/07
-const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>) => {
+const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>, opts?: { usePlannedHours?: boolean }) => {
+    const usePlannedHours = opts?.usePlannedHours ?? false;
     const validShifts = shifts.filter(s => s.startTime && s.endTime && s.startTime.seconds && s.endTime.seconds);
     const sortedDocs = [...validShifts].sort((a, b) => a.startTime.seconds - b.startTime.seconds);
     const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(sortedDocs);
@@ -593,12 +594,12 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             let duration: number;
 
             if (isRet) {
-                if (end > new Date()) return;
+                if (!usePlannedHours && end > new Date()) return;
                 duration = RET_STANDBY_REFERENCE_HOURS;
             } else if (isDeploymentOrPoolShift(d)) {
                 duration = deploymentShiftHours(d);
                 if (duration <= 0) return;
-                if (end > new Date()) return;
+                if (!usePlannedHours && end > new Date()) return;
             } else {
                 duration = (end.getTime() - start.getTime()) / 3600000;
                 if (duration < 0 || duration > 24 || isNaN(duration)) {
@@ -623,7 +624,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             // Horas reales: solo turnos ya finalizados con fichada real (sin fallback a teÃ³rico)
             const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
-            if (isAbsent || end > new Date()) return;
+            if (isAbsent || (!usePlannedHours && end > new Date())) return;
 
             // Regla de liquidaciÃ³n:
             // - Inicio: siempre hora planificada (salvo adelanto explÃ­cito)
@@ -661,6 +662,9 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 worked = resolveFtLiquidationHours(d, duration);
             } else if (isRet) {
                 worked = duration; // Fix 5: RET sin fichada usa horas referenciales
+            } else if (usePlannedHours) {
+                worked = Math.min(Math.max(0, duration), 24);
+                turnosConDatosReales++;
             }
             // Fix 1: acumular horas FT reales (solo trabajadas)
             if (isFT && worked > 0) horasFTReal += worked;
@@ -882,6 +886,7 @@ export const useReportes = (forcedClientId?: string | null) => {
     const [empMap, setEmpMap] = useState<Record<string, string>>({});
     const [empMetaMap, setEmpMetaMap] = useState<Record<string, { name: string; legajo: string }>>({});
     const [publishFilter, setPublishFilter] = useState<ReportPublishFilter>('all');
+    const [usePlannedHours, setUsePlannedHours] = useState(false);
     const [objMap, setObjMap] = useState<Record<string, string>>({});
     const [objectiveAliases, setObjectiveAliases] = useState<Record<string, ObjectiveMeta>>({});
     const [clientMap, setClientMap] = useState<Record<string, string>>({});
@@ -1237,7 +1242,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                         propagateFrancoTrabajadoFlags(empGroups[empId]),
                     ),
                 );
-                const stats = calculateStatsExact(shifts, holidaysData);
+                const stats = calculateStatsExact(shifts, holidaysData, { usePlannedHours });
 
                 const ftCount = shifts.filter((s: any) => isFrancoTrabajadoShift(s)).length;
                 const ffCount = shifts.filter((s:any) => s.isFrancoCompensatorio || s.code === 'FF').length;
@@ -1370,6 +1375,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const stats = calculateStatsExact(
                     staffedShifts.filter((s: any) => shouldBillShiftToObjective(s)),
                     holidaysData,
+                    { usePlannedHours },
                 );
                 const annotatedShifts = (() => {
                     const merged = [
@@ -1442,6 +1448,8 @@ export const useReportes = (forcedClientId?: string | null) => {
         setDateRange,
         publishFilter,
         setPublishFilter,
+        usePlannedHours,
+        setUsePlannedHours,
         generateReports,
         loadAudit,
         employeeReport,
