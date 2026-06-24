@@ -49,8 +49,7 @@ function ensureWorktree() {
   }
 
   console.log(`\n▶ Actualizando worktree ${DEPLOY_DIR} ...`);
-  git('fetch origin', LAB_ROOT);
-  git(`reset --hard origin/${BRANCH}`, DEPLOY_DIR);
+  git(`reset --hard ${BRANCH}`, DEPLOY_DIR);
 }
 
 function syncEnvLocal() {
