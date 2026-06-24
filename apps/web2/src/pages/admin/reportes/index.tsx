@@ -581,7 +581,7 @@ export default function ReportsPage() {
                         <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Users size={16}/> Liquidación de Horas</h3>
                         <p className="text-[10px] text-slate-400 mt-1">
                             Filtro: {publishFilter === 'published' ? 'Solo cronos publicados' : publishFilter === 'unpublished' ? 'Solo borradores / no publicados' : 'Todos los turnos (publicados y borrador)'}
-                            {usePlannedHours && <span className="ml-2 text-amber-500 font-bold">· Horas planificadas (sin fichada)</span>}
+                            {usePlannedHours && <span className="ml-2 text-slate-900 dark:text-slate-100 font-bold">· Horas planificadas (sin fichada)</span>}
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2 items-center">
@@ -1215,7 +1215,7 @@ export default function ReportsPage() {
                                     <td colSpan={8} className="py-3 px-3">
                                         <div className="flex justify-around items-center">
                                             <div className="flex flex-col items-center">
-                                                <span className="text-[9px] text-slate-400 uppercase">Horas Totales</span>
+                                                <span className="text-[9px] text-slate-400 uppercase">Normales</span>
                                                 <span className="text-white font-mono text-lg">{horasSimples.toFixed(1)}</span>
                                             </div>
                                             <div className="h-8 w-px bg-slate-600"/>
