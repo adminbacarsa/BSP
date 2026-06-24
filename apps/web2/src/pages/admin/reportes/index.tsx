@@ -891,9 +891,10 @@ export default function ReportsPage() {
 
         // — Opciones para dropdowns —
         const baseShifts = dedupeShiftsByAbsencePriority(
-            propagateFrancoTrabajadoFlags(detailItem.rawShifts || []),
+            propagateFrancoTrabajadoFlags(detailItem.rawShifts || [], { usePlannedHours }),
+            { usePlannedHours },
         );
-        const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(baseShifts);
+        const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(baseShifts, { usePlannedHours });
         const allStatuses = [...new Set(baseShifts.map((s:any) => s.status).filter(Boolean))].sort();
         const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || '').filter(Boolean))].sort();
         const objectivesForSelect = detailObjectiveSearch.trim()
@@ -912,7 +913,7 @@ export default function ReportsPage() {
                 || (s.status || '').toUpperCase() === 'COMPLETED'
                 || (s.status || '').toUpperCase() === 'PRESENT'
                 || LEAVE_DETAIL_CODES.has(code) || s.type === 'NOVEDAD';
-            if (start > now && !hasRealStatus) return false;
+            if (start > now && !hasRealStatus && !usePlannedHours) return false;
 
             const hhmm = `${String(start.getHours()).padStart(2,'0')}:${String(start.getMinutes()).padStart(2,'0')}`;
             if (detailFilterTimeFrom && hhmm < detailFilterTimeFrom) return false;
@@ -956,30 +957,32 @@ export default function ReportsPage() {
 
                 const isFF = s.isFrancoCompensatorio || rawCode === 'FF';
 
-                const rStart = s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : null;
-                const rEndRaw = s.realEndTime?.seconds  ? new Date(s.realEndTime.seconds*1000)   : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds*1000) : null;
+                const rStart = usePlannedHours ? null : (s.realStartTime?.seconds ? new Date(s.realStartTime.seconds*1000) : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds*1000) : null);
+                const rEndRaw = usePlannedHours ? null : (s.realEndTime?.seconds  ? new Date(s.realEndTime.seconds*1000)   : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds*1000) : null);
                 // Relevo anticipado: si salió antes del fin planificado → crédito hasta fin planificado
                 const rEnd   = rEndRaw && endSec && rEndRaw < end ? end : rEndRaw;
                 let rDur: number | null = null;
                 if (rStart && rEnd) { const rd = (rEnd.getTime()-rStart.getTime())/3600000; rDur = rd >= 0 && rd <= 36 ? rd : null; }
 
                 const isRetentionShift = s.isRetention === true;
-                // Diurnas/nocturnas calculadas sobre horas REALES cuando existen, 0 si no hay presencia
+                // Diurnas/nocturnas: reales si hay fichada; planificadas si usePlannedHours
                 const activeStart = rStart ?? start;
                 const activeEnd = rEnd ?? end;
-                const night = zeroHours || (!rStart && !rEnd) ? 0 : getNightDuration(activeStart, activeEnd);
-                const effectiveDur = rDur ?? (isFT && duration > 0 ? duration : 0);
+                const night = zeroHours || (!rStart && !rEnd && !usePlannedHours) ? 0 : getNightDuration(activeStart, activeEnd);
+                const effectiveDur = rDur ?? ((isFT || usePlannedHours) && duration > 0 ? duration : 0);
                 const day = Math.max(0, effectiveDur - night);
 
                 const dateKey = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
-                const hFeriado = holidaysData[dateKey] ? (rDur ?? (isFT ? duration : 0)) : 0;
-                const horasTrabajadas = resolveLiquidationWorkedHours(s, {
-                    rDur,
-                    duration,
-                    isAbsent: isUnjustAbsentDetail,
-                    isFT,
-                    skipFrancoDoc: francoDocSkipIds.has(s.id),
-                });
+                const hFeriado = holidaysData[dateKey] ? (rDur ?? ((isFT || usePlannedHours) && duration > 0 ? duration : 0)) : 0;
+                const horasTrabajadas = (usePlannedHours && !isUnjustAbsentDetail && !francoDocSkipIds.has(s.id) && !isNonWork)
+                    ? (rDur ?? duration)
+                    : resolveLiquidationWorkedHours(s, {
+                        rDur,
+                        duration,
+                        isAbsent: isUnjustAbsentDetail,
+                        isFT,
+                        skipFrancoDoc: francoDocSkipIds.has(s.id),
+                    });
 
                 return {
                     id: s.id,

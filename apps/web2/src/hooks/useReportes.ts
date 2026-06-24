@@ -303,7 +303,8 @@ function leaveReportShiftScore(s: any): number {
 }
 
 /** Si hay licencia/ausencia RRHH en el dÃ­a, ocultar turno M/T/N sin fichada duplicado. */
-export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
+export function dedupeShiftsByAbsencePriority(shifts: any[], opts?: { usePlannedHours?: boolean }): any[] {
+    const usePlanned = opts?.usePlannedHours ?? false;
     const byEmpDate: Record<string, any[]> = {};
     for (const s of shifts) {
         const dk = s._dateKey || shiftCalendarDateKey(s);
@@ -333,7 +334,7 @@ export function dedupeShiftsByAbsencePriority(shifts: any[]): any[] {
             const code = String(s.code || '').toUpperCase();
             const isWork = !NON_WORK_CODES.has(code);
             const onLeave = isEmployeeOnLeave({ shiftCode: code, absenceType: s._absenceType });
-            if ((hasLeave || onLeave) && isWork && !shiftHasRealCheckIn(s)) continue;
+            if (!usePlanned && (hasLeave || onLeave) && isWork && !shiftHasRealCheckIn(s)) continue;
             out.push(s);
         }
     }
@@ -653,8 +654,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                             : d.checkOutTime?.seconds  ? new Date(d.checkOutTime.seconds * 1000)
                             : null;
 
-            const rStart = rStartRaw ? clampS(rStartRaw, start) : null;
-            const rEnd   = rEndRaw   ? clampE(rEndRaw,   end)   : null;
+            const rStart = (!usePlannedHours && rStartRaw) ? clampS(rStartRaw, start) : null;
+            const rEnd   = (!usePlannedHours && rEndRaw)   ? clampE(rEndRaw,   end)   : null;
             let worked = 0;
             if (rStart && rEnd) {
                 const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
@@ -1244,6 +1245,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const shifts = prepareShiftsForEmployeeLiquidation(
                     dedupeShiftsByAbsencePriority(
                         propagateFrancoTrabajadoFlags(empGroups[empId], { usePlannedHours }),
+                        { usePlannedHours },
                     ),
                 );
                 const stats = calculateStatsExact(shifts, holidaysData, { usePlannedHours });
@@ -1395,7 +1397,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                         const eid = s.employeeId || '_';
                         (byEmp[eid] ||= []).push(s);
                     });
-                    return Object.values(byEmp).flatMap((g) => dedupeShiftsByAbsencePriority(g));
+                    return Object.values(byEmp).flatMap((g) => dedupeShiftsByAbsencePriority(g, { usePlannedHours }));
                 })();
                 return {
                     id: objId,
