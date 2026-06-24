@@ -580,20 +580,20 @@ export default function EmployeesPage() {
           ? query(collection(db, 'clients'), where('empresaId', '==', empresaId))
           : collection(db, 'clients'),
       );
-      setClients(
-        cSnap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter(c => belongsToEmpresaView(c, empresaId, migracionCompleta)),
-      );
-      const sSnap = await getDocs(query(collection(db, 'servicios_sla'), where('status', '==', 'active')));
-      const slaRows = filterRowsByEmpresa(
-        sSnap.docs.map(d => ({ id: d.data().objectiveId || d.id, docId: d.id, name: d.data().objectiveName || d.data().name, clientId: d.data().clientId, empresaId: d.data().empresaId })),
-        empresaId,
-        scopeEmpresa,
-        migracionCompleta,
-      );
-      const uniqueObjectives = Array.from(new Map(slaRows.map((o: any) => [o.id, o])).values());
-      setAllObjectives(uniqueObjectives);
+      const clientsData = cSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((c: any) => belongsToEmpresaView(c, empresaId, migracionCompleta));
+      setClients(clientsData);
+      // Objetivos desde el array embebido en clients (fuente canónica, sin duplicados)
+      const objectives: any[] = [];
+      for (const client of clientsData) {
+        for (const obj of (client as any).objetivos || []) {
+          if (obj.id && obj.name) {
+            objectives.push({ id: obj.id, docId: obj.id, name: obj.name, clientId: client.id, empresaId: (client as any).empresaId });
+          }
+        }
+      }
+      setAllObjectives(objectives);
     } catch (e) {}
   };
 
