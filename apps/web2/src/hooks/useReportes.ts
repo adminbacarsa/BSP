@@ -113,7 +113,8 @@ export function isFrancoTrabajadoShift(shift: any): boolean {
  * Operaciones marca isFrancoTrabajado en el doc F; la fichada puede quedar en el turno de cobertura del mismo dÃ­a.
  * Si el flag no llegÃ³ a Firestore, infiere FT cuando hay F + turno con fichada el mismo dÃ­a.
  */
-export function propagateFrancoTrabajadoFlags(shifts: any[]): any[] {
+export function propagateFrancoTrabajadoFlags(shifts: any[], opts?: { usePlannedHours?: boolean }): any[] {
+    const usePlanned = opts?.usePlannedHours ?? false;
     const byDay = new Map<string, any[]>();
     for (const s of shifts) {
         const dk = shiftCalendarDateKey(s);
@@ -132,7 +133,9 @@ export function propagateFrancoTrabajadoFlags(shifts: any[]): any[] {
         if (!plainFrancoRest && !ftMarkedOnFrancoDoc) continue;
 
         const workCandidates = dayShifts.filter(
-            (s) => isLiquidationWorkCandidate(s) && shiftHasRealCheckIn(s) && !isFrancoTrabajadoShift(s),
+            (s) => isLiquidationWorkCandidate(s)
+                && (usePlanned || shiftHasRealCheckIn(s))
+                && !isFrancoTrabajadoShift(s),
         );
         if (workCandidates.length === 0) continue;
 
@@ -172,8 +175,9 @@ function shiftEndedForLiquidation(shift: any): boolean {
     return !!(endSec && new Date(endSec * 1000) <= new Date());
 }
 
-/** Evita duplicar FT cuando el doc F y el turno de cobertura con fichada coexisten el mismo dÃ­a. */
-export function buildFrancoDocLiquidationSkipIds(shifts: any[]): Set<string> {
+/** Evita duplicar FT cuando el doc F y el turno de cobertura coexisten el mismo día. */
+export function buildFrancoDocLiquidationSkipIds(shifts: any[], opts?: { usePlannedHours?: boolean }): Set<string> {
+    const usePlanned = opts?.usePlannedHours ?? false;
     const byDay = new Map<string, { francoIds: string[]; hasWorkCheckIn: boolean }>();
     for (const s of shifts) {
         const dk = shiftCalendarDateKey(s);
@@ -184,7 +188,7 @@ export function buildFrancoDocLiquidationSkipIds(shifts: any[]): Set<string> {
             bucket.francoIds.push(s.id);
         } else if (
             isLiquidationWorkCandidate(s)
-            && shiftHasRealCheckIn(s)
+            && (usePlanned || shiftHasRealCheckIn(s))
             && isFrancoTrabajadoShift(s)
         ) {
             bucket.hasWorkCheckIn = true;
@@ -558,7 +562,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     const usePlannedHours = opts?.usePlannedHours ?? false;
     const validShifts = shifts.filter(s => s.startTime && s.endTime && s.startTime.seconds && s.endTime.seconds);
     const sortedDocs = [...validShifts].sort((a, b) => a.startTime.seconds - b.startTime.seconds);
-    const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(sortedDocs);
+    const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(sortedDocs, { usePlannedHours });
 
     let hoursTotalOperativas = 0; // teÃ³ricas
     let totalDiurnas = 0;
@@ -1082,7 +1086,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 _allByEmp[s.employeeId].push(s);
             });
             Object.values(_allByEmp).forEach((empShifts: any[]) => {
-                propagateFrancoTrabajadoFlags(empShifts).forEach((s: any) => {
+                propagateFrancoTrabajadoFlags(empShifts, { usePlannedHours }).forEach((s: any) => {
                     if (s.isFrancoTrabajado || s._inferredFrancoTrabajado) ftShiftIds.add(s.id);
                 });
             });
@@ -1239,7 +1243,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             const empRows = Object.keys(empGroups).map(empId => {
                 const shifts = prepareShiftsForEmployeeLiquidation(
                     dedupeShiftsByAbsencePriority(
-                        propagateFrancoTrabajadoFlags(empGroups[empId]),
+                        propagateFrancoTrabajadoFlags(empGroups[empId], { usePlannedHours }),
                     ),
                 );
                 const stats = calculateStatsExact(shifts, holidaysData, { usePlannedHours });
