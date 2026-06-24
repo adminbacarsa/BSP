@@ -450,12 +450,12 @@ export default function EmployeesPage() {
       const matchesTerm = (e.lastName || '').toLowerCase().includes(term) || (e.firstName || '').toLowerCase().includes(term) || (e.fileNumber || '').includes(term);
       const isActive = e.status === 'activo' || e.status === 'active' || !e.status;
       const matchesStatus = showInactive ? !isActive : isActive;
-      const obj = allObjectives.find(o => o.id === filterObjective);
+      const obj = allObjectives.find((o: any) => o.id === filterObjective);
       const matchesObjective = !filterObjective
         ? true
         : filterObjective === '__sin_objetivo__'
           ? !e.preferredObjectiveId
-          : e.preferredObjectiveId === filterObjective || (obj && e.preferredObjectiveId === obj.docId);
+          : (obj?.allIds ?? [filterObjective]).includes(e.preferredObjectiveId);
       const matchesCoords = !filterNoCoords || (!e.lat && !e.lng);
       return matchesTerm && matchesStatus && matchesObjective && matchesCoords;
     }));
@@ -584,16 +584,18 @@ export default function EmployeesPage() {
         .map(d => ({ id: d.id, ...d.data() }))
         .filter((c: any) => belongsToEmpresaView(c, empresaId, migracionCompleta));
       setClients(clientsData);
-      // Objetivos desde el array embebido en clients (fuente canónica, sin duplicados)
-      const objectives: any[] = [];
+      // Deduplicar por nombre: el mismo objetivo puede tener varios IDs (uno por período).
+      // allIds permite que el filtro matchee cualquier ID registrado en un empleado.
+      const nameMap = new Map<string, { id: string; allIds: string[]; name: string; clientId: string }>();
       for (const client of clientsData) {
         for (const obj of (client as any).objetivos || []) {
-          if (obj.id && obj.name) {
-            objectives.push({ id: obj.id, docId: obj.id, name: obj.name, clientId: client.id, empresaId: (client as any).empresaId });
-          }
+          if (!obj.id || !obj.name) continue;
+          const existing = nameMap.get(obj.name);
+          if (existing) { if (!existing.allIds.includes(obj.id)) existing.allIds.push(obj.id); }
+          else nameMap.set(obj.name, { id: obj.id, allIds: [obj.id], name: obj.name, clientId: client.id });
         }
       }
-      setAllObjectives(objectives);
+      setAllObjectives(Array.from(nameMap.values()));
     } catch (e) {}
   };
 
