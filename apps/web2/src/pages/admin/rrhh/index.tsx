@@ -584,15 +584,16 @@ export default function EmployeesPage() {
         .map(d => ({ id: d.id, ...d.data() }))
         .filter((c: any) => belongsToEmpresaView(c, empresaId, migracionCompleta));
       setClients(clientsData);
-      // Deduplicar por nombre: el mismo objetivo puede tener varios IDs (uno por período).
-      // allIds permite que el filtro matchee cualquier ID registrado en un empleado.
-      const nameMap = new Map<string, { id: string; allIds: string[]; name: string; clientId: string }>();
+      // Dedup case-insensitive por nombre. Distintos IDs del mismo objetivo (por períodos
+      // o duplicados de datos) se agrupan en allIds[] para que el filtro los matchee todos.
+      const nameMap = new Map();
       for (const client of clientsData) {
         for (const obj of (client as any).objetivos || []) {
           if (!obj.id || !obj.name) continue;
-          const existing = nameMap.get(obj.name);
+          const key = String(obj.name).toLowerCase().trim();
+          const existing = nameMap.get(key);
           if (existing) { if (!existing.allIds.includes(obj.id)) existing.allIds.push(obj.id); }
-          else nameMap.set(obj.name, { id: obj.id, allIds: [obj.id], name: obj.name, clientId: client.id });
+          else nameMap.set(key, { id: obj.id, allIds: [obj.id], name: String(obj.name).trim(), clientId: client.id });
         }
       }
       setAllObjectives(Array.from(nameMap.values()));
@@ -2230,13 +2231,17 @@ export default function EmployeesPage() {
                         </div>
 
                         {/* Filtro objetivo */}
-                        {allObjectives.length > 0 && (
-                          <select value={filterObjective} onChange={e => setFilterObjective(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 px-3 py-1.5 rounded-xl text-[11px] font-bold text-slate-600 dark:text-white appearance-none">
-                            <option value="">Todos los objetivos</option>
-                            <option value="__sin_objetivo__">— Sin objetivo</option>
-                            {[...allObjectives].sort((a,b) => a.name.localeCompare(b.name)).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                          </select>
-                        )}
+                        <select value={filterObjective} onChange={e => setFilterObjective(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-700 px-3 py-1.5 rounded-xl text-[11px] font-bold text-slate-600 dark:text-white appearance-none">
+                          <option value="">Todos los objetivos</option>
+                          <option value="__sin_objetivo__">— Sin objetivo</option>
+                          {(() => {
+                            const seen = new Set<string>();
+                            return [...allObjectives]
+                              .sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''))
+                              .filter((o: any) => { const k = (o.name || '').toLowerCase().trim(); if (seen.has(k)) return false; seen.add(k); return true; })
+                              .map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>);
+                          })()}
+                        </select>
 
                         {/* Ciclo + filtros */}
                         <div className="flex items-center justify-between">
