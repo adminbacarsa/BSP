@@ -186,6 +186,7 @@ export interface V2ShiftDef {
     startTime?: string;
     endTime?: string;
     days?: string[]; // letras de día activas L M X J V S D
+    specificDates?: string[]; // YYYY-MM-DD: fechas puntuales (refuerzos), no recurrentes
 }
 
 export interface V2PositionDef {
@@ -610,20 +611,32 @@ function shiftHours(s: V2ShiftDef): number {
     return SHIFT_HRS_DEFAULT[code] ?? 8;
 }
 
-export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string): boolean {
+export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string, dateStr?: string): boolean {
+    // Turnos de fechas específicas activan el puesto solo en esas fechas
+    if (dateStr && (pos.shifts || []).some(
+        (s) => !isFrancoCode(s.code) && Array.isArray(s.specificDates) && s.specificDates.length > 0 && s.specificDates.includes(dateStr)
+    )) return true;
+
     if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) {
         return pos.activeDays.includes(dayLetter);
     }
-    const workingShifts = (pos.shifts || []).filter((s) => !isFrancoCode(s.code));
+    // Excluir turnos de fechas específicas del cálculo de días-de-semana
+    const workingShifts = (pos.shifts || []).filter(
+        (s) => !isFrancoCode(s.code) && !(Array.isArray(s.specificDates) && s.specificDates!.length > 0)
+    );
     const withDays = workingShifts.filter((s) => Array.isArray(s.days) && s.days!.length > 0);
     if (withDays.length === 0 || withDays.length < workingShifts.length) return true;
     return withDays.some((s) => s.days!.includes(dayLetter));
 }
 
 /** Bandas activas un día (sin francos). */
-function shiftsActiveOnDay(pos: V2PositionDef, dayLetter: string): V2ShiftDef[] {
+function shiftsActiveOnDay(pos: V2PositionDef, dayLetter: string, dateStr?: string): V2ShiftDef[] {
     return (pos.shifts || []).filter((s) => {
         if (isFrancoCode(s.code)) return false;
+        // Turnos de fechas específicas: solo incluir si el dateStr coincide
+        if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
+            return dateStr ? s.specificDates.includes(dateStr) : false;
+        }
         if (Array.isArray(s.days) && s.days.length > 0 && !s.days.includes(dayLetter)) return false;
         return true;
     });
@@ -640,10 +653,11 @@ function shiftsActiveOnDay(pos: V2PositionDef, dayLetter: string): V2ShiftDef[] 
 export function effectiveShiftsForPositionDay(
     pos: V2PositionDef,
     dayLetter: string,
-    autoCycles?: string[]
+    autoCycles?: string[],
+    dateStr?: string,
 ): V2ShiftDef[] {
-    if (!positionIsActiveOn(pos, dayLetter)) return [];
-    const dayShifts = shiftsActiveOnDay(pos, dayLetter);
+    if (!positionIsActiveOn(pos, dayLetter, dateStr)) return [];
+    const dayShifts = shiftsActiveOnDay(pos, dayLetter, dateStr);
     if (dayShifts.length === 0) return [];
     const { key: cycleKey } = pickRepresentativeCycle(autoCycles || []);
     if (cycleKey === '4+2') {
@@ -2195,10 +2209,10 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const inCurrentCycle = day.getDate() <= cutoffDay;
 
         for (const pos of ctx.positions) {
-            if (!positionIsActiveOn(pos, dayLetter)) continue;
+            if (!positionIsActiveOn(pos, dayLetter, dateStr)) continue;
             if (isCustomCoverPosition(pos)) continue;
             const qty = Math.max(1, Number(pos.qty) || 1);
-            const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+            const dayShifts = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles, dateStr);
             const group = positionGroups[pos.positionName] || [];
             const extD12Assigns: V2Assignment[] = [];
             const extN12Assigns: V2Assignment[] = [];
@@ -2350,8 +2364,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if (!posName2) continue;
             if (!cycleWorkDays[emp.id]?.has(dateStr2)) continue;
             const pos2 = ctx.positions.find(p => p.positionName === posName2);
-            if (!pos2 || !positionIsActiveOn(pos2, dayLetter2)) continue;
-            const dayShifts2 = effectiveShiftsForPositionDay(pos2, dayLetter2, ctx.autoCycles);
+            if (!pos2 || !positionIsActiveOn(pos2, dayLetter2, dateStr2)) continue;
+            const dayShifts2 = effectiveShiftsForPositionDay(pos2, dayLetter2, ctx.autoCycles, dateStr2);
             for (const sh2 of dayShifts2) {
                 const sCode2 = String(sh2.code || '').toUpperCase();
                 // Banda fija: el segundo pase NO puede asignar fuera de la banda primaria del empleado.

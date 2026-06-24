@@ -158,6 +158,8 @@ export function computePositionDayComposition(pos: ServicePosition, dayCode: str
     addVariant(STANDARD_SHIFT_VARIANTS.N12);
   } else if (pos.coverageType === 'custom') {
     (pos.allowedShiftTypes || []).forEach((shift) => {
+      // Turnos de fechas específicas no son recurrentes; no contribuyen al cálculo mensual
+      if (Array.isArray((shift as any).specificDates) && (shift as any).specificDates.length > 0) return;
       if (shift.days?.length) {
         if (shift.days.includes(dayCode)) addVariant(shift);
       } else {

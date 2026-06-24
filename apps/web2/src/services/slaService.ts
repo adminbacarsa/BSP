@@ -12,6 +12,7 @@ export interface ShiftVariant {
   hours: number;
   isCustom?: boolean;
   days?: string[];
+  specificDates?: string[]; // YYYY-MM-DD: fechas puntuales (refuerzos), no recurrentes
 }
 
 // Definición de Puesto

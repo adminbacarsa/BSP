@@ -96,10 +96,12 @@ export default function ServiciosSLAPage() {
   });
 
   const [newCustomShift, setNewCustomShift] = useState<{
-      name: string; start: string; end: string; code: string; days: string[]
+      name: string; start: string; end: string; code: string; days: string[]; specificDates: string[]
   }>({
-      name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S']
+      name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: []
   });
+  const [customShiftDateMode, setCustomShiftDateMode] = useState<'weekdays' | 'dates'>('weekdays');
+  const [pendingDate, setPendingDate] = useState('');
 
   const [isEditing, setIsEditing] = useState(false);
   const [externalChange, setExternalChange] = useState(false);
@@ -339,7 +341,8 @@ export default function ServiciosSLAPage() {
   // --- MODAL Y UTILS ---
   const openAddPositionModal = () => {
       setEditingShiftCode(null);
-      setNewCustomShift({ name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'] });
+      setNewCustomShift({ name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: [] });
+      setCustomShiftDateMode('weekdays');
       // Usar freshForm directamente para evitar capturar positionForm stale (async setState)
       const freshForm: ServicePosition = {
         id: '', name: 'Puesto 1', code: '', coverageType: '24hs', quantity: 1,
@@ -400,11 +403,13 @@ export default function ServiciosSLAPage() {
 
       const newVariant: ShiftVariant = {
           code, name: newCustomShift.name, startTime: newCustomShift.start, endTime: newCustomShift.end,
-          hours, isCustom: true, days: newCustomShift.days
+          hours, isCustom: true,
+          ...(customShiftDateMode === 'dates'
+              ? { specificDates: newCustomShift.specificDates }
+              : { days: newCustomShift.days }),
       };
 
       if (editingShiftCode !== null) {
-          // Reemplazar el turno existente
           setPositionForm(prev => ({
               ...prev,
               allowedShiftTypes: prev.allowedShiftTypes.map(v =>
@@ -415,16 +420,20 @@ export default function ServiciosSLAPage() {
       } else {
           setPositionForm(prev => ({ ...prev, allowedShiftTypes: [...prev.allowedShiftTypes, newVariant] }));
       }
-      setNewCustomShift(prev => ({ ...prev, name: '', code: '' }));
+      setNewCustomShift(prev => ({ ...prev, name: '', code: '', specificDates: [] }));
   };
 
   const startEditShift = (v: ShiftVariant) => {
-      setNewCustomShift({ name: v.name, start: v.startTime, end: v.endTime, code: v.code, days: v.days || [] });
+      const hasSpecificDates = Array.isArray(v.specificDates) && v.specificDates.length > 0;
+      setCustomShiftDateMode(hasSpecificDates ? 'dates' : 'weekdays');
+      setNewCustomShift({ name: v.name, start: v.startTime, end: v.endTime, code: v.code, days: v.days || [], specificDates: v.specificDates || [] });
       setEditingShiftCode(v.code);
   };
 
   const cancelEditShift = () => {
-      setNewCustomShift({ name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'] });
+      setNewCustomShift({ name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: [] });
+      setCustomShiftDateMode('weekdays');
+      setPendingDate('');
       setEditingShiftCode(null);
   };
 
@@ -1715,20 +1724,62 @@ export default function ServiciosSLAPage() {
                                     <div className="w-20"><span className="text-[9px] text-slate-400">Fin</span><input type="time" className="w-full p-2 text-xs font-bold rounded-lg border text-center" value={newCustomShift.end} onChange={e => setNewCustomShift({...newCustomShift, end: e.target.value})}/></div>
                                 </div>
                                 <div>
-                                    <span className="text-[9px] text-slate-400 block mb-1">Días Habilitados</span>
-                                    <div className="flex gap-1 justify-between items-center">
-                                        <div className="flex gap-1">
-                                            {['L','M','X','J','V','S','D'].map(day => (
-                                                <button key={day} onClick={() => toggleNewShiftDay(day)} className={`w-7 h-7 rounded text-[9px] font-black transition-colors ${newCustomShift.days.includes(day) ? 'bg-slate-900 text-white' : 'bg-white border text-slate-400'}`}>{day}</button>
-                                            ))}
-                                        </div>
-                                        <div className="flex gap-1">
-                                            {editingShiftCode && <button onClick={cancelEditShift} className="bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-300 flex items-center gap-1"><X size={12}/> Cancelar</button>}
-                                            <button onClick={addCustomShift} className={`text-white px-4 py-1.5 rounded-lg font-bold text-xs hover:scale-105 flex items-center gap-1 ${editingShiftCode ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-900'}`}>
-                                                {editingShiftCode ? <><CheckCircle size={14}/> Actualizar</> : <><Plus size={14}/> Agregar</>}
-                                            </button>
-                                        </div>
+                                    {/* Toggle: Días de semana / Fechas específicas */}
+                                    <div className="flex gap-1 mb-2">
+                                        <button onClick={() => setCustomShiftDateMode('weekdays')} className={`px-2.5 py-1 rounded-lg text-[9px] font-black transition-colors ${customShiftDateMode === 'weekdays' ? 'bg-slate-900 text-white' : 'bg-white border text-slate-400 hover:bg-slate-50'}`}>Días de semana</button>
+                                        <button onClick={() => setCustomShiftDateMode('dates')} className={`px-2.5 py-1 rounded-lg text-[9px] font-black transition-colors ${customShiftDateMode === 'dates' ? 'bg-indigo-600 text-white' : 'bg-white border text-slate-400 hover:bg-slate-50'}`}>Fechas específicas</button>
                                     </div>
+
+                                    {customShiftDateMode === 'weekdays' ? (
+                                        <div className="flex gap-1 justify-between items-center">
+                                            <div className="flex gap-1">
+                                                {['L','M','X','J','V','S','D'].map(day => (
+                                                    <button key={day} onClick={() => toggleNewShiftDay(day)} className={`w-7 h-7 rounded text-[9px] font-black transition-colors ${newCustomShift.days.includes(day) ? 'bg-slate-900 text-white' : 'bg-white border text-slate-400'}`}>{day}</button>
+                                                ))}
+                                            </div>
+                                            <div className="flex gap-1">
+                                                {editingShiftCode && <button onClick={cancelEditShift} className="bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-300 flex items-center gap-1"><X size={12}/> Cancelar</button>}
+                                                <button onClick={addCustomShift} className={`text-white px-4 py-1.5 rounded-lg font-bold text-xs hover:scale-105 flex items-center gap-1 ${editingShiftCode ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-900'}`}>
+                                                    {editingShiftCode ? <><CheckCircle size={14}/> Actualizar</> : <><Plus size={14}/> Agregar</>}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1.5">
+                                            <div className="flex gap-1 items-center">
+                                                <input
+                                                    type="date"
+                                                    value={pendingDate}
+                                                    onChange={e => setPendingDate(e.target.value)}
+                                                    className="p-1.5 text-xs rounded-lg border font-mono flex-1 text-slate-700"
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        if (!pendingDate || newCustomShift.specificDates.includes(pendingDate)) return;
+                                                        setNewCustomShift(prev => ({ ...prev, specificDates: [...prev.specificDates, pendingDate].sort() }));
+                                                        setPendingDate('');
+                                                    }}
+                                                    className="bg-slate-800 text-white px-2 py-1.5 rounded-lg text-xs font-bold flex items-center"
+                                                ><Plus size={12}/></button>
+                                            </div>
+                                            {newCustomShift.specificDates.length > 0 && (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {newCustomShift.specificDates.map(d => (
+                                                        <span key={d} className="flex items-center gap-1 bg-indigo-100 text-indigo-700 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                                                            {d}
+                                                            <button onClick={() => setNewCustomShift(prev => ({ ...prev, specificDates: prev.specificDates.filter(x => x !== d) }))} className="hover:text-rose-500 leading-none"><X size={8}/></button>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            <div className="flex justify-end gap-1">
+                                                {editingShiftCode && <button onClick={cancelEditShift} className="bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-300 flex items-center gap-1"><X size={12}/> Cancelar</button>}
+                                                <button onClick={addCustomShift} className={`text-white px-4 py-1.5 rounded-lg font-bold text-xs hover:scale-105 flex items-center gap-1 ${editingShiftCode ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-900'}`}>
+                                                    {editingShiftCode ? <><CheckCircle size={14}/> Actualizar</> : <><Plus size={14}/> Agregar</>}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -1758,6 +1809,7 @@ export default function ServiciosSLAPage() {
                                         <div className="flex items-center gap-2 mt-0.5">
                                             <p className="text-[9px] text-slate-400 font-mono">{v.startTime} – {v.endTime} · {v.hours}h</p>
                                             {v.days && v.days.length > 0 && <p className="text-[9px] font-black text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 rounded">{v.days.join('')}</p>}
+                                            {v.specificDates && v.specificDates.length > 0 && <p className="text-[9px] font-black text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 rounded">{v.specificDates.length} fecha{v.specificDates.length !== 1 ? 's' : ''}</p>}
                                         </div>
                                     </div>
                                     {positionForm.coverageType === 'custom' && (
