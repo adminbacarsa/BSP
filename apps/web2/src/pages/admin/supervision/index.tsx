@@ -193,6 +193,31 @@ function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar }: {
   );
 }
 
+// ─── ParentShiftInfo ────────────────────────────────────────────────────────
+
+function ParentShiftInfo({ parentShiftId }: { parentShiftId?: string }) {
+  const [info, setInfo] = useState<{ code: string; start: string; end: string } | null>(null);
+  useEffect(() => {
+    if (!parentShiftId) return;
+    getDoc(doc(db, 'turnos', parentShiftId)).then(snap => {
+      if (!snap.exists()) return;
+      const d = snap.data();
+      const fmt = (ts: any): string => {
+        if (ts?.seconds) return new Date(ts.seconds * 1000).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+        if (typeof ts === 'string' && ts.includes('T')) return ts.split('T')[1]?.slice(0, 5) || ts;
+        return ts || '';
+      };
+      setInfo({ code: d.code || '?', start: fmt(d.startTime), end: fmt(d.endTime) });
+    }).catch(() => {});
+  }, [parentShiftId]);
+  if (!info) return null;
+  return (
+    <span className="text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded-lg">
+      {info.code} {info.start}–{info.end}
+    </span>
+  );
+}
+
 // ─── tipos locales ──────────────────────────────────────────────────────────
 
 interface SlaPosition {
@@ -693,7 +718,12 @@ export default function SupervisionPage() {
                                 </>
                               )}
                               {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && (
-                                <span className="text-xs text-violet-600 font-bold flex items-center gap-1"><User size={10}/>{s.parentEmpleadoName}</span>
+                                <span className="text-xs text-violet-600 font-bold flex items-center gap-1">
+                                  <User size={10}/>{s.parentEmpleadoName}
+                                </span>
+                              )}
+                              {s.tipo === 'AGREGADO_TURNO' && (s as any).parentShiftId && (
+                                <ParentShiftInfo parentShiftId={(s as any).parentShiftId}/>
                               )}
                             </div>
                             {s.solicitadoPorNombre && (

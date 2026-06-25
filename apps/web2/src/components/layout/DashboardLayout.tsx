@@ -5,7 +5,7 @@ import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { auth, db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, writeBatch, doc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
@@ -301,6 +301,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const { empresa, empresaId } = useEmpresa();
   const [pendientesCount, setPendientesCount] = useState(0);
   const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
+  const [rfzPlanifIds, setRfzPlanifIds] = useState<string[]>([]);
   const canViewSupervision = canReadModule('SUPERVISION');
   const canViewPlanning = canReadModule('PLANNING');
 
@@ -328,7 +329,10 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
       where('type', '==', 'REFUERZO_CLIENTE_PENDIENTE'),
       where('status', '==', 'pending'),
     );
-    const unsub = onSnapshot(q, snap => setRfzPlanifCount(snap.size), () => {});
+    const unsub = onSnapshot(q, snap => {
+      setRfzPlanifCount(snap.size);
+      setRfzPlanifIds(snap.docs.map(d => d.id));
+    }, () => {});
     return unsub;
   }, [empresaId, canViewPlanning]);
 
@@ -461,9 +465,20 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               <Calendar size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Planificador</span>}
               {rfzPlanifCount > 0 && (
-                <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center`}>
+                <button
+                  type="button"
+                  title="Marcar notificaciones RFZ como leídas"
+                  onClick={async e => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (!rfzPlanifIds.length) return;
+                    const batch = writeBatch(db);
+                    rfzPlanifIds.forEach(id => batch.update(doc(db, 'novedades', id), { status: 'read', viewed: true }));
+                    await batch.commit();
+                  }}
+                  className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-red-500 hover:bg-red-700 text-white text-[9px] font-black rounded-full flex items-center justify-center transition-colors cursor-pointer`}
+                >
                   {rfzPlanifCount > 99 ? '99+' : rfzPlanifCount}
-                </span>
+                </button>
               )}
             </Link>
           )}
