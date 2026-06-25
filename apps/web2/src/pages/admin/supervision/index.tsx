@@ -5,7 +5,7 @@ import { Toaster, toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc, addDoc } from 'firebase/firestore';
 import {
   Shield, Clock, CheckCircle, XCircle, Users, AlertCircle,
   ChevronRight, RefreshCw, Plus, X, MessageSquare, User
@@ -164,21 +164,83 @@ export default function SupervisionPage() {
   const pendientes = solicitudes.filter(s => s.estado === 'PENDIENTE');
   const visibles = tab === 'PENDIENTE' ? pendientes : solicitudes;
 
+  // Crea los turnos reales en Firestore al aprobar una solicitud
+  async function crearTurnosParaSolicitud(sol: SolicitudRefuerzo): Promise<string[]> {
+    const nextDayDate = (dateStr: string) => {
+      const d = new Date(dateStr + 'T00:00:00');
+      d.setDate(d.getDate() + 1);
+      return d.toISOString().split('T')[0];
+    };
+    const isOvernight = sol.endTime < sol.startTime;
+    const fechaFin = isOvernight ? nextDayDate(sol.fecha) : sol.fecha;
+    const startISO = `${sol.fecha}T${sol.startTime}:00`;
+    const endISO   = `${fechaFin}T${sol.endTime}:00`;
+
+    const base = {
+      empresaId:           sol.empresaId,
+      objectiveId:         sol.objectiveId,
+      clientId:            sol.clientId,
+      clientName:          sol.clientName,
+      objectiveName:       sol.objectiveName,
+      fecha:               sol.fecha,
+      startTime:           startISO,
+      endTime:             endISO,
+      origin:              'CLIENT_REQUEST',
+      solicitudRefuerzoId: sol.id,
+      shiftCode:           'REF',
+      isPresent:           false,
+      isAbsent:            false,
+      isCompleted:         false,
+      draft:               false,
+    };
+
+    const ids: string[] = [];
+    if (sol.tipo === 'AGREGADO_TURNO') {
+      const ref = await addDoc(collection(db, 'turnos'), {
+        ...base,
+        employeeId:    sol.parentEmpleadoId  ?? null,
+        employeeName:  sol.parentEmpleadoName ?? null,
+        parentShiftId: sol.parentShiftId      ?? null,
+      });
+      ids.push(ref.id);
+    } else {
+      // REFUERZO_PUESTO: una vacante por pax solicitado
+      const n = sol.cantidadPax ?? 1;
+      for (let i = 0; i < n; i++) {
+        const ref = await addDoc(collection(db, 'turnos'), {
+          ...base,
+          positionId:   sol.positionId   ?? null,
+          positionName: sol.positionName ?? null,
+        });
+        ids.push(ref.id);
+      }
+    }
+    return ids;
+  }
+
   const handleAprobar = useCallback(async (nota: string) => {
     if (!aprobarTarget?.id || !user) return;
-    const p = solicitudRefuerzoService.update(aprobarTarget.id, {
-      estado: 'APROBADA',
-      autorizadoPorUid: user.uid,
-      autorizadoPorNombre: user.displayName || user.email || '',
-      autorizadoAt: Timestamp.now(),
-      ...(nota ? { notaInterna: nota } as any : {}),
-    });
-    toast.promise(p, {
-      loading: 'Aprobando…',
-      success: 'Solicitud aprobada',
-      error: 'Error al aprobar',
-    });
-    await p;
+    try {
+      toast.loading('Aprobando y generando turno…', { id: 'aprobar' });
+      const turnoIds = await crearTurnosParaSolicitud(aprobarTarget);
+      const estadoFinal = aprobarTarget.tipo === 'AGREGADO_TURNO' ? 'ASIGNADA' : 'APROBADA';
+      await solicitudRefuerzoService.update(aprobarTarget.id, {
+        estado:              estadoFinal,
+        autorizadoPorUid:    user.uid,
+        autorizadoPorNombre: user.displayName || user.email || '',
+        autorizadoAt:        Timestamp.now(),
+        turnoIds,
+        ...(nota ? { notaInterna: nota } as any : {}),
+      });
+      toast.success(
+        turnoIds.length === 1
+          ? `Aprobada — turno creado (${turnoIds[0].slice(0, 6)}…)`
+          : `Aprobada — ${turnoIds.length} turnos creados`,
+        { id: 'aprobar' },
+      );
+    } catch (e: any) {
+      toast.error(`Error: ${e?.message || 'No se pudo aprobar'}`, { id: 'aprobar' });
+    }
     setAprobarTarget(null);
   }, [aprobarTarget, user]);
 

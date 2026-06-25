@@ -3,7 +3,8 @@ import Head from 'next/head';
 import { db, auth } from '@/lib/firebase';
 import {
   collection, query, where, orderBy, onSnapshot,
-  addDoc, deleteDoc, updateDoc, serverTimestamp, getDocs, getDoc, doc
+  addDoc, deleteDoc, updateDoc, serverTimestamp, getDocs, getDoc, doc,
+  Timestamp,
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut, User, getIdTokenResult } from 'firebase/auth';
 import {
@@ -11,8 +12,9 @@ import {
   UserCheck, Car, Users, Trash2, Plus, Search, Upload, Download,
   AlertCircle, Lock, Mail, Phone, Eye, EyeOff, Loader2, X, CheckCircle2,
   ArrowRightCircle, ArrowLeftCircle, CalendarDays, Clock, Ban,
-  UserPlus, Truck, AlertTriangle
+  UserPlus, Truck, AlertTriangle, ShieldPlus, UserPlus2, CheckCircle, XCircle,
 } from 'lucide-react';
+import { solicitudRefuerzoService, SolicitudRefuerzo, SolicitudEstado } from '@/services/solicitudRefuerzoService';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -741,7 +743,7 @@ function GestionObjetivoScreen({
   clienteUser: ClienteUser;
   onBack: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<'personal' | 'accesos' | 'agenda'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'accesos' | 'agenda' | 'refuerzos'>('personal');
   const [accesosHoy, setAccesosHoy] = useState(0);
 
   useEffect(() => {
@@ -953,6 +955,7 @@ function GestionObjetivoScreen({
             { key: 'personal', label: 'Personal' },
             { key: 'accesos', label: 'Accesos hoy' },
             { key: 'agenda', label: 'Agenda' },
+            { key: 'refuerzos', label: 'Refuerzos' },
           ] as const).map(({ key, label }) => (
             <button
               key={key}
@@ -1222,6 +1225,275 @@ function GestionObjetivoScreen({
         {/* ── Tab Agenda ── */}
         {activeTab === 'agenda' && (
           <AgendaTab objetivo={objetivo} clienteUser={clienteUser} />
+        )}
+
+        {/* ── Tab Refuerzos ── */}
+        {activeTab === 'refuerzos' && (
+          <RefuerzosTab objetivo={objetivo} clienteUser={clienteUser} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── RefuerzosTab ─────────────────────────────────────────────────────────────
+
+const MIN_HORAS_ANTICIPACION = 8;
+
+function estadoRefuerzo(estado: SolicitudEstado) {
+  const map: Record<SolicitudEstado, { label: string; cls: string }> = {
+    PENDIENTE:  { label: 'Pendiente',  cls: 'bg-amber-100 text-amber-700' },
+    APROBADA:   { label: 'Aprobada',   cls: 'bg-teal-100 text-teal-700' },
+    RECHAZADA:  { label: 'Rechazada',  cls: 'bg-rose-100 text-rose-700' },
+    ASIGNADA:   { label: 'Asignada',   cls: 'bg-indigo-100 text-indigo-700' },
+    COMPLETADA: { label: 'Completada', cls: 'bg-slate-100 text-slate-600' },
+    CANCELADA:  { label: 'Cancelada',  cls: 'bg-slate-100 text-slate-400' },
+  };
+  const m = map[estado] ?? { label: estado, cls: 'bg-slate-100 text-slate-600' };
+  return <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${m.cls}`}>{m.label}</span>;
+}
+
+function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clienteUser: ClienteUser }) {
+  const [tipo, setTipo] = useState<'REFUERZO_PUESTO' | 'AGREGADO_TURNO'>('REFUERZO_PUESTO');
+  const [fecha, setFecha] = useState('');
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [motivo, setMotivo] = useState('');
+  const [cantidadPax, setCantidadPax] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [solicitudes, setSolicitudes] = useState<SolicitudRefuerzo[]>([]);
+  const [guardias, setGuardias] = useState<{ shiftId: string; nombre: string; empleadoId: string }[]>([]);
+  const [guardiaSelId, setGuardiaSelId] = useState('');
+
+  // Historial de solicitudes de este objetivo
+  useEffect(() => {
+    return solicitudRefuerzoService.subscribeByClient(clienteUser.clientId, items =>
+      setSolicitudes(items.filter(s => s.objectiveId === objetivo.id))
+    );
+  }, [objetivo.id, clienteUser.clientId]);
+
+  // Carga guardias activos del objetivo cuando tipo=AGREGADO_TURNO y fecha elegida
+  useEffect(() => {
+    setGuardiaSelId('');
+    if (tipo !== 'AGREGADO_TURNO' || !fecha) { setGuardias([]); return; }
+    let cancelled = false;
+    getDocs(query(
+      collection(db, 'turnos'),
+      where('objectiveId', '==', objetivo.id),
+    )).then(snap => {
+      if (cancelled) return;
+      const list = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter((t: any) => {
+          const tFecha = t.fecha || (t.startTime ? String(t.startTime).slice(0, 10) : '');
+          return tFecha === fecha && !t.isAbsent && t.employeeId;
+        })
+        .map((t: any) => ({ shiftId: t.id, nombre: t.employeeName || t.employeeId, empleadoId: t.employeeId }));
+      // dedup por empleadoId
+      const seen = new Set<string>();
+      setGuardias(list.filter((g: any) => seen.has(g.empleadoId) ? false : !!seen.add(g.empleadoId)));
+    });
+    return () => { cancelled = true; };
+  }, [tipo, fecha, objetivo.id]);
+
+  const shiftStartMs = fecha && startTime ? new Date(`${fecha}T${startTime}`).getTime() : 0;
+  const horasRestantes = shiftStartMs ? (shiftStartMs - Date.now()) / 3600000 : 0;
+  const anticipacionOk = horasRestantes >= MIN_HORAS_ANTICIPACION;
+
+  const guardiaSelected = guardias.find(g => g.shiftId === guardiaSelId);
+
+  const canSubmit = fecha && startTime && endTime && motivo.trim() &&
+    anticipacionOk &&
+    (tipo === 'REFUERZO_PUESTO' ? cantidadPax >= 1 : !!guardiaSelId);
+
+  const resetForm = () => {
+    setFecha(''); setStartTime(''); setEndTime(''); setMotivo('');
+    setCantidadPax(1); setGuardiaSelId(''); setShowForm(false);
+  };
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setSaving(true);
+    try {
+      const data: Omit<SolicitudRefuerzo, 'id'> = {
+        empresaId:          '', // se resuelve por clientId en rules; dejamos vacío o ponemos algo
+        clientId:           clienteUser.clientId,
+        clientName:         clienteUser.clientName,
+        objectiveId:        objetivo.id,
+        objectiveName:      objetivo.name,
+        tipo,
+        fecha,
+        startTime,
+        endTime,
+        motivo,
+        origen:             'PORTAL_CLIENTE',
+        estado:             'PENDIENTE',
+        solicitadoPorUid:   clienteUser.uid,
+        solicitadoPorNombre: clienteUser.nombre,
+        solicitadoAt:       Timestamp.now(),
+        ...(tipo === 'REFUERZO_PUESTO'
+          ? { cantidadPax }
+          : {
+              parentShiftId:      guardiaSelected?.shiftId,
+              parentEmpleadoId:   guardiaSelected?.empleadoId,
+              parentEmpleadoName: guardiaSelected?.nombre,
+            }
+        ),
+      };
+      await solicitudRefuerzoService.create(data);
+      resetForm();
+    } catch (e: any) {
+      alert(`Error: ${e?.message || 'No se pudo enviar'}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const today = new Date().toISOString().split('T')[0];
+
+  return (
+    <div className="space-y-5">
+      {/* Botón nueva solicitud */}
+      {!showForm && (
+        <button
+          onClick={() => setShowForm(true)}
+          className="flex items-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-black transition-colors shadow"
+        >
+          <ShieldPlus size={16}/> Solicitar refuerzo / agregado
+        </button>
+      )}
+
+      {/* Formulario */}
+      {showForm && (
+        <div className="bg-white border-2 border-indigo-200 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-black text-sm text-indigo-900 flex items-center gap-2"><ShieldPlus size={15}/> Nueva solicitud</h3>
+            <button onClick={resetForm} className="text-slate-400 hover:text-slate-600"><X size={16}/></button>
+          </div>
+
+          {/* Tipo */}
+          <div className="flex gap-2">
+            {(['REFUERZO_PUESTO', 'AGREGADO_TURNO'] as const).map(t => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTipo(t)}
+                className={`flex-1 py-2 rounded-xl text-xs font-black border transition-colors ${
+                  tipo === t ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'
+                }`}
+              >
+                {t === 'REFUERZO_PUESTO' ? '+ Refuerzo de puesto' : '+ Agregado de turno'}
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-500 -mt-1">
+            {tipo === 'REFUERZO_PUESTO'
+              ? 'Personal extra para el puesto en una fecha puntual.'
+              : 'Ampliar el horario de un guardia ya asignado al objetivo.'}
+          </p>
+
+          {/* Fecha y horarios */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
+              <input type="date" min={today} value={fecha} onChange={e => setFecha(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
+              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
+              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
+            </div>
+          </div>
+
+          {/* Alerta anticipación */}
+          {fecha && startTime && !anticipacionOk && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold">
+              <AlertCircle size={14}/> Mínimo {MIN_HORAS_ANTICIPACION}hs de anticipación
+              {horasRestantes > 0 && ` (quedan ${horasRestantes.toFixed(1)}hs)`}
+            </div>
+          )}
+
+          {/* REFUERZO: cantidad pax */}
+          {tipo === 'REFUERZO_PUESTO' && (
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cantidad de personas</label>
+              <input type="number" min={1} max={20} value={cantidadPax} onChange={e => setCantidadPax(Number(e.target.value))}
+                className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
+            </div>
+          )}
+
+          {/* AGREGADO: selector de guardia */}
+          {tipo === 'AGREGADO_TURNO' && (
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Guardia a ampliar</label>
+              {!fecha ? (
+                <p className="text-xs text-slate-400">Seleccioná la fecha primero</p>
+              ) : guardias.length === 0 ? (
+                <p className="text-xs text-slate-400">No hay guardias con turno asignado en esa fecha</p>
+              ) : (
+                <select value={guardiaSelId} onChange={e => setGuardiaSelId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400">
+                  <option value="">— Seleccioná un guardia —</option>
+                  {guardias.map(g => <option key={g.shiftId} value={g.shiftId}>{g.nombre}</option>)}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* Motivo */}
+          <div>
+            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Motivo / descripción</label>
+            <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={3}
+              placeholder="Describí el motivo del refuerzo o agregado…"
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium resize-none focus:outline-none focus:border-indigo-400"/>
+          </div>
+
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={resetForm} className="px-4 py-2 text-slate-500 text-xs font-bold hover:bg-slate-100 rounded-xl">Cancelar</button>
+            <button type="button" disabled={!canSubmit || saving} onClick={handleSubmit}
+              className="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black disabled:opacity-50 flex items-center justify-center gap-2 hover:bg-indigo-700 transition-colors">
+              {saving ? <Loader2 size={14} className="animate-spin"/> : <ShieldPlus size={14}/>}
+              Enviar solicitud
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Historial */}
+      <div>
+        <h4 className="text-xs font-black uppercase text-slate-500 mb-3">Mis solicitudes</h4>
+        {solicitudes.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-6">Sin solicitudes para este objetivo</p>
+        ) : (
+          <div className="space-y-2">
+            {solicitudes.map(s => (
+              <div key={s.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                    <span className="text-xs font-black text-slate-800">
+                      {s.tipo === 'REFUERZO_PUESTO' ? `+${s.cantidadPax ?? 1} refuerzo` : 'Agregado de turno'}
+                    </span>
+                    {estadoRefuerzo(s.estado)}
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {s.fecha} · {s.startTime}–{s.endTime}
+                    {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && ` · ${s.parentEmpleadoName}`}
+                  </p>
+                  {s.motivo && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{s.motivo}</p>}
+                  {s.motivoRechazo && (
+                    <p className="text-[10px] text-rose-500 mt-0.5">Rechazo: {s.motivoRechazo}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
