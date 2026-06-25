@@ -1954,10 +1954,20 @@ function fillScheduleFromPendulum(
         for (const code of bandOrder) {
             for (const slot of openSlots.filter(s => !s.filled && s.code === code)) {
                 const posPool = params.positionGroups[slot.pos.positionName] || [];
-                // Respetar posPool; si está vacío (nombre no registrado) usar todos
-                const poolToUse = posPool.length > 0
-                    ? (workersByBand[code] || []).filter(id => posPool.includes(id))
-                    : (workersByBand[code] || []);
+                // Preferir empleados de la banda correcta del posPool; si no hay disponibles,
+                // usar cualquier empleado disponible del posPool (el péndulo de 3 bandas crea
+                // desequilibrios donde rotationSlot=1 nunca cubre M).
+                const bandFiltered = posPool.length > 0
+                    ? (workersByBand[code] || []).filter(id =>
+                        posPool.includes(id) && !params.runtime[id].assignedDays.has(day.dateStr))
+                    : (workersByBand[code] || []).filter(id =>
+                        !params.runtime[id].assignedDays.has(day.dateStr));
+                const poolToUse = bandFiltered.length > 0
+                    ? bandFiltered
+                    : posPool.filter(id =>
+                        !params.runtime[id].assignedDays.has(day.dateStr) &&
+                        params.cycleWorkDays[id]?.has(day.dateStr) &&
+                        !ctx.absences[id]?.has(day.dateStr));
                 const pending = sortCandidates(poolToUse, params, code, inCurrent);
                 for (const empId of pending) {
                     if (params.runtime[empId].assignedDays.has(day.dateStr)) continue;
