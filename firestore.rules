@@ -154,6 +154,20 @@ service cloud.firestore {
       return isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
     }
 
+    function clientUserClientId() {
+      return isClientUser()
+        ? get(/databases/$(database)/documents/client_users/$(request.auth.uid)).data.get('clientId', '')
+        : '';
+    }
+
+    function clientUserMatchesSolicitud(data) {
+      return isClientUser() && clientUserClientId() == data.get('clientId', '');
+    }
+
+    function clientUserCanCreateSolicitud(data) {
+      return isClientUser() && clientUserClientId() == data.get('clientId', '');
+    }
+
     function feriadoReadable(data) {
       return isSuperAdmin() || docEmpresaId(data) == '' || tenantMatches(data);
     }
@@ -418,6 +432,14 @@ service cloud.firestore {
     match /ajustes_crono/{docId} {
       allow read:   if tenantAdminRead();
       allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
+    match /solicitudes_refuerzo/{docId} {
+      // Admin y supervisores leen/escriben por empresa
+      allow read:   if tenantAdminRead() || clientUserMatchesSolicitud(resource.data);
+      allow create: if tenantAdminCreate() || clientUserCanCreateSolicitud(request.resource.data);
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole } from 'lucide-react';
+import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole, Target } from 'lucide-react';
 import { db, functions } from '@/lib/firebase';
-import { collection, getDocs, query, orderBy, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
@@ -20,12 +20,13 @@ export default function UsersTab() {
 
     const [users, setUsers]         = useState<any[]>([]);
     const [rolesList, setRolesList] = useState<any[]>([]);
+    const [objetivosList, setObjetivosList] = useState<{id: string; name: string; clientName: string}[]>([]);
     const [loading, setLoading]     = useState(false);
     const [isModalOpen, setIsModalOpen]   = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [editMode, setEditMode]         = useState(false);
 
-    const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', supervisorPin: '', showPin: false };
+    const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', supervisorPin: '', showPin: false, objetivosAsignados: [] as string[] };
     const [formData, setFormData] = useState(initialForm);
 
     const empresasDropdown = isSuperAdmin
@@ -80,9 +81,29 @@ export default function UsersTab() {
             empresaId: empresaToFormValue(user),
             supervisorPin: user.supervisorPin || '',
             showPin: false,
+            objetivosAsignados: user.objetivosAsignados || [],
         });
         setIsModalOpen(true);
     };
+
+    // Carga objetivos cuando se abre el modal (para asignación a supervisores)
+    useEffect(() => {
+        if (!isModalOpen) return;
+        const empId = formData.empresaId === ALL_EMPRESAS_VALUE ? '' : (formData.empresaId || myEmpresaId);
+        if (!empId) { setObjetivosList([]); return; }
+        getDocs(query(collection(db, 'clients'), where('empresaId', '==', empId))).then(snap => {
+            const objs: {id: string; name: string; clientName: string}[] = [];
+            snap.docs.forEach(d => {
+                const data = d.data();
+                (data.objetivos || []).forEach((o: any) => {
+                    const oid = o.id || o.objectiveId;
+                    const oname = o.name || o.objectiveName || oid;
+                    if (oid) objs.push({ id: oid, name: oname, clientName: data.name || data.clientName || '' });
+                });
+            });
+            setObjetivosList(objs.sort((a, b) => a.name.localeCompare(b.name, 'es')));
+        }).catch(() => setObjetivosList([]));
+    }, [isModalOpen, formData.empresaId, myEmpresaId]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -98,11 +119,12 @@ export default function UsersTab() {
 
                 if (editMode) {
                     const patch: Record<string, unknown> = {
-                        firstName:     formData.firstName,
-                        lastName:      formData.lastName,
-                        role:          formData.role,
-                        empresaId:     efectivaEmpresaId,
-                        supervisorPin: formData.supervisorPin || null,
+                        firstName:           formData.firstName,
+                        lastName:            formData.lastName,
+                        role:                formData.role,
+                        empresaId:           efectivaEmpresaId,
+                        supervisorPin:       formData.supervisorPin || null,
+                        objetivosAsignados:  formData.objetivosAsignados,
                     };
                     if (allEmpresas) patch.allEmpresas = true;
                     else patch.allEmpresas = deleteField();
@@ -220,6 +242,9 @@ export default function UsersTab() {
                                     </span>
                                     {u.supervisorPin && (
                                         <span className="ml-1 text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-black border border-indigo-100">🔒 PIN</span>
+                                    )}
+                                    {u.objetivosAsignados?.length > 0 && (
+                                        <span className="ml-1 text-[9px] bg-teal-50 text-teal-700 px-1.5 py-0.5 rounded font-black border border-teal-100"><Target size={8} className="inline mr-0.5"/>{u.objetivosAsignados.length}</span>
                                     )}
                                 </td>
                                 <td className="p-5">
@@ -373,6 +398,37 @@ export default function UsersTab() {
                                     </div>
                                 </div>
                             </div>
+
+                            {/* Objetivos asignados — visible solo para roles no-SuperAdmin con objetivos disponibles */}
+                            {!formRoleIsSuperAdmin && objetivosList.length > 0 && (
+                                <div className="p-4 bg-teal-50 dark:bg-teal-900/20 border-2 border-teal-100 dark:border-teal-800 rounded-xl">
+                                    <label className="text-[10px] font-black uppercase text-teal-700 dark:text-teal-400 mb-2 flex items-center gap-1">
+                                        <Target size={10}/> Objetivos asignados <span className="font-normal normal-case text-teal-500">(para Supervisión)</span>
+                                    </label>
+                                    <div className="max-h-36 overflow-y-auto space-y-0.5 pr-1">
+                                        {objetivosList.map(o => (
+                                            <label key={o.id} className="flex items-center gap-2 cursor-pointer hover:bg-teal-100/60 dark:hover:bg-teal-800/30 px-2 py-1 rounded-lg">
+                                                <input
+                                                    type="checkbox"
+                                                    className="accent-teal-600"
+                                                    checked={formData.objetivosAsignados.includes(o.id)}
+                                                    onChange={e => {
+                                                        const updated = e.target.checked
+                                                            ? [...formData.objetivosAsignados, o.id]
+                                                            : formData.objetivosAsignados.filter(x => x !== o.id);
+                                                        setFormData({ ...formData, objetivosAsignados: updated });
+                                                    }}
+                                                />
+                                                <span className="text-xs font-bold text-teal-800 dark:text-teal-200 flex-1">{o.name}</span>
+                                                <span className="text-[9px] text-teal-500 dark:text-teal-400">{o.clientName}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    {formData.objetivosAsignados.length > 0 && (
+                                        <p className="mt-1.5 text-[9px] text-teal-600 dark:text-teal-400 font-bold">{formData.objetivosAsignados.length} objetivo{formData.objetivosAsignados.length !== 1 ? 's' : ''} asignado{formData.objetivosAsignados.length !== 1 ? 's' : ''}</p>
+                                    )}
+                                </div>
+                            )}
 
                             <div className="flex gap-3 pt-4">
                                 <button type="button" onClick={() => setIsModalOpen(false)}

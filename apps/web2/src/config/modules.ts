@@ -8,6 +8,7 @@ export const SYSTEM_MODULES = [
     { key: 'SERVICES', label: '📋 Servicios y SLA' },
     { key: 'REPORTS', label: '📈 Reportes y Liquidación' },
     { key: 'ANALYSIS', label: '🔬 Análisis Operativo' },
+    { key: 'SUPERVISION', label: '🛡️ Supervisión' },
     { key: 'ASSISTANT', label: '🤖 Asistente IA (globo)' },
     { key: 'CONFIG', label: '⚙️ Configuración Global' }
 ];
