@@ -430,14 +430,37 @@ export default function BackupTab() {
         throw new Error(data.error || `Error HTTP ${res.status}`);
       }
 
-      const written = Number(data.written ?? 0);
+      let written = Number(data.written ?? 0);
+
+      // Auto-retry en modo completo si empresa mode no encontró docs
+      if (written === 0 && isEmpresaMode) {
+        toast.info('Modo empresa sin documentos — reintentando en modo plataforma completa…');
+        setProgress({ done: 0, total: 0, phase: 'Reintentando en modo plataforma completa…' });
+        const controller2 = new AbortController();
+        const timeoutId2 = setTimeout(() => controller2.abort(), 13 * 60 * 1000);
+        try {
+          const res2 = await fetch(`${BRIDGE_URL}/import-backup-file`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Empresa-Id': empresaId || 'bacarsa',
+              'X-Import-Mode': 'full',
+              'X-Import-Dev-Mode': localDevMode ? '1' : '0',
+              'X-File-Name': encodeURIComponent(file.name),
+            },
+            body: file,
+            signal: controller2.signal,
+          });
+          const data2 = await res2.json().catch(() => ({})) as typeof data;
+          if (res2.ok) written = Number(data2.written ?? 0);
+        } finally {
+          clearTimeout(timeoutId2);
+        }
+        isEmpresaMode = false;
+      }
+
       if (written === 0) {
-        throw new Error(
-          'Importación terminó sin documentos. ' +
-          (isEmpresaMode
-            ? `El backup puede pertenecer a otra empresa. Usá el botón "Plataforma completa" e intentá de nuevo.`
-            : 'Verificá que el backup tenga documentos válidos.'),
-        );
+        throw new Error('Importación terminó sin documentos. Verificá que el backup tenga documentos válidos.');
       }
 
       const version: LoadedVersion = {
