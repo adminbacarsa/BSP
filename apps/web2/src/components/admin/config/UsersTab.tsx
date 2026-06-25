@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole, Target } from 'lucide-react';
+import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole, Target, Check, Search } from 'lucide-react';
 import { db, functions } from '@/lib/firebase';
 import { collection, getDocs, query, orderBy, where, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -21,6 +21,7 @@ export default function UsersTab() {
     const [users, setUsers]         = useState<any[]>([]);
     const [rolesList, setRolesList] = useState<any[]>([]);
     const [objetivosList, setObjetivosList] = useState<{id: string; name: string; clientName: string}[]>([]);
+    const [objetivosFilter, setObjetivosFilter] = useState('');
     const [loading, setLoading]     = useState(false);
     const [isModalOpen, setIsModalOpen]   = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
@@ -66,11 +67,13 @@ export default function UsersTab() {
     const handleOpenCreate = () => {
         setEditMode(false);
         setFormData({ ...initialForm, empresaId: isSuperAdmin ? '' : myEmpresaId });
+        setObjetivosFilter('');
         setIsModalOpen(true);
     };
 
     const handleOpenEdit = (user: any) => {
         setEditMode(true);
+        setObjetivosFilter('');
         setFormData({
             id: user.id,
             firstName: user.firstName,
@@ -283,8 +286,8 @@ export default function UsersTab() {
 
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-                    <div className="bg-white dark:bg-slate-800 rounded-[2rem] w-full max-w-lg p-8 shadow-2xl animate-in zoom-in-95 border border-slate-100 dark:border-slate-700">
-                        <div className="flex justify-between items-center mb-8">
+                    <div className="bg-white dark:bg-slate-800 rounded-[2rem] w-full max-w-lg shadow-2xl animate-in zoom-in-95 border border-slate-100 dark:border-slate-700 flex flex-col max-h-[90vh]">
+                        <div className="flex justify-between items-center mb-0 px-8 pt-8 pb-6 shrink-0">
                             <h3 className="font-black text-xl text-slate-900 dark:text-white uppercase">
                                 {editMode ? 'Editar Usuario' : 'Nuevo Acceso'}
                             </h3>
@@ -293,7 +296,8 @@ export default function UsersTab() {
                             </button>
                         </div>
 
-                        <form onSubmit={handleSubmit} className="space-y-5">
+                        <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden flex-1">
+                          <div className="overflow-y-auto flex-1 px-8 pb-2 space-y-5">
                             <div className="grid grid-cols-2 gap-5">
                                 <div>
                                     <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block">Nombre</label>
@@ -399,38 +403,69 @@ export default function UsersTab() {
                                 </div>
                             </div>
 
-                            {/* Objetivos asignados — visible solo para roles no-SuperAdmin con objetivos disponibles */}
-                            {!formRoleIsSuperAdmin && objetivosList.length > 0 && (
-                                <div className="p-4 bg-teal-50 dark:bg-teal-900/20 border-2 border-teal-100 dark:border-teal-800 rounded-xl">
-                                    <label className="text-[10px] font-black uppercase text-teal-700 dark:text-teal-400 mb-2 flex items-center gap-1">
-                                        <Target size={10}/> Objetivos asignados <span className="font-normal normal-case text-teal-500">(para Supervisión)</span>
-                                    </label>
-                                    <div className="max-h-36 overflow-y-auto space-y-0.5 pr-1">
-                                        {objetivosList.map(o => (
-                                            <label key={o.id} className="flex items-center gap-2 cursor-pointer hover:bg-teal-100/60 dark:hover:bg-teal-800/30 px-2 py-1 rounded-lg">
+                            {/* Objetivos asignados — checklist con buscador */}
+                            {!formRoleIsSuperAdmin && objetivosList.length > 0 && (() => {
+                                const q = objetivosFilter.trim().toLowerCase();
+                                const filtered = q
+                                    ? objetivosList.filter(o => o.name.toLowerCase().includes(q) || o.clientName.toLowerCase().includes(q))
+                                    : objetivosList;
+                                const cnt = formData.objetivosAsignados.length;
+                                return (
+                                    <div className="border-2 border-teal-200 dark:border-teal-700 rounded-xl overflow-hidden">
+                                        <div className="flex items-center justify-between px-3 py-2 bg-teal-50 dark:bg-teal-900/30 border-b border-teal-200 dark:border-teal-700">
+                                            <span className="text-[10px] font-black uppercase text-teal-700 dark:text-teal-300 flex items-center gap-1">
+                                                <Target size={10}/> Objetivos asignados
+                                            </span>
+                                            {cnt > 0 && (
+                                                <span className="text-[10px] font-black bg-teal-500 text-white px-2 py-0.5 rounded-full">
+                                                    {cnt} seleccionado{cnt !== 1 ? 's' : ''}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {objetivosList.length > 5 && (
+                                            <div className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-800 border-b border-teal-100 dark:border-teal-800">
+                                                <Search size={11} className="text-teal-400 shrink-0"/>
                                                 <input
-                                                    type="checkbox"
-                                                    className="accent-teal-600"
-                                                    checked={formData.objetivosAsignados.includes(o.id)}
-                                                    onChange={e => {
-                                                        const updated = e.target.checked
-                                                            ? [...formData.objetivosAsignados, o.id]
-                                                            : formData.objetivosAsignados.filter(x => x !== o.id);
-                                                        setFormData({ ...formData, objetivosAsignados: updated });
-                                                    }}
+                                                    type="text"
+                                                    value={objetivosFilter}
+                                                    onChange={e => setObjetivosFilter(e.target.value)}
+                                                    placeholder="Buscar…"
+                                                    className="flex-1 text-xs bg-transparent outline-none text-slate-700 dark:text-slate-200 placeholder-slate-400"
                                                 />
-                                                <span className="text-xs font-bold text-teal-800 dark:text-teal-200 flex-1">{o.name}</span>
-                                                <span className="text-[9px] text-teal-500 dark:text-teal-400">{o.clientName}</span>
-                                            </label>
-                                        ))}
+                                                {objetivosFilter && (
+                                                    <button type="button" onClick={() => setObjetivosFilter('')} className="text-slate-400 hover:text-slate-600"><X size={11}/></button>
+                                                )}
+                                            </div>
+                                        )}
+                                        <div className="max-h-44 overflow-y-auto">
+                                            {filtered.length === 0
+                                                ? <p className="text-xs text-slate-400 text-center py-3">Sin resultados</p>
+                                                : filtered.map(o => {
+                                                    const checked = formData.objetivosAsignados.includes(o.id);
+                                                    return (
+                                                        <label key={o.id} className={`flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-slate-100 dark:border-slate-700/50 last:border-0 transition-colors ${checked ? 'bg-teal-50 dark:bg-teal-900/40' : 'bg-white dark:bg-slate-800 hover:bg-teal-50/50'}`}>
+                                                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${checked ? 'bg-teal-500 border-teal-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                                                                {checked && <Check size={11} className="text-white" strokeWidth={3}/>}
+                                                            </div>
+                                                            <span className={`text-xs font-bold flex-1 ${checked ? 'text-teal-800 dark:text-teal-200' : 'text-slate-700 dark:text-slate-300'}`}>{o.name}</span>
+                                                            <span className="text-[9px] font-bold uppercase text-slate-400">{o.clientName}</span>
+                                                            <input type="checkbox" className="sr-only" checked={checked} onChange={e => {
+                                                                const updated = e.target.checked
+                                                                    ? [...formData.objetivosAsignados, o.id]
+                                                                    : formData.objetivosAsignados.filter(x => x !== o.id);
+                                                                setFormData({ ...formData, objetivosAsignados: updated });
+                                                            }}/>
+                                                        </label>
+                                                    );
+                                                })
+                                            }
+                                        </div>
                                     </div>
-                                    {formData.objetivosAsignados.length > 0 && (
-                                        <p className="mt-1.5 text-[9px] text-teal-600 dark:text-teal-400 font-bold">{formData.objetivosAsignados.length} objetivo{formData.objetivosAsignados.length !== 1 ? 's' : ''} asignado{formData.objetivosAsignados.length !== 1 ? 's' : ''}</p>
-                                    )}
-                                </div>
-                            )}
+                                );
+                            })()}
 
-                            <div className="flex gap-3 pt-4">
+                          </div>{/* fin scroll */}
+                          <div className="shrink-0 px-8 pb-8 pt-4 border-t border-slate-100 dark:border-slate-700 flex gap-3">
                                 <button type="button" onClick={() => setIsModalOpen(false)}
                                     className="px-6 py-4 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-colors">
                                     Cancelar
