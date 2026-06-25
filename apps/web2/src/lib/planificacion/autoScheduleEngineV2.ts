@@ -2245,8 +2245,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     assignStart = DEFAULT_SHIFT_TIMES.N12;
                 }
 
-                // Empleados DISPONIBLES del puesto con la banda correcta; si no hay,
-                // ampliar a cualquier disponible del posPool (nunca cruzar posición).
+                // Empleados disponibles del puesto con la banda correcta.
+                // Si hay menos de qty en la banda correcta, suplementar con
+                // cualquier disponible del posPool (nunca cruzar posición).
                 const bandInGroupAvailable = group.filter(id => {
                     const primary = String(empPrimaryShift[id] || '').toUpperCase();
                     return primary === sCode
@@ -2254,13 +2255,19 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         && !ctx.absences[id]?.has(dateStr)
                         && cycleWorkDays[id]?.has(dateStr);
                 });
-                const poolSource = bandInGroupAvailable.length > 0 ? bandInGroupAvailable : group;
-                const candidates = poolSource.filter((empId) => {
-                    if (runtime[empId].assignedDays.has(dateStr)) return false;
-                    if (ctx.absences[empId]?.has(dateStr)) return false;
-                    if (!cycleWorkDays[empId]?.has(dateStr)) return false;
-                    return true;
-                });
+                const anyInGroupAvailable = bandInGroupAvailable.length < qty
+                    ? group.filter(id =>
+                        !runtime[id].assignedDays.has(dateStr)
+                        && !ctx.absences[id]?.has(dateStr)
+                        && cycleWorkDays[id]?.has(dateStr))
+                    : null;
+                // Preferred: banda correcta first, luego suplemento del grupo.
+                const candidates = anyInGroupAvailable !== null
+                    ? [
+                        ...bandInGroupAvailable,
+                        ...anyInGroupAvailable.filter(id => !bandInGroupAvailable.includes(id)),
+                    ]
+                    : bandInGroupAvailable;
 
                 // Sort: owner → cupo CCT libre (repartir carga T1) → rotación justa por banda.
                 const di = dayIndexMap.get(dateStr) ?? 0;
