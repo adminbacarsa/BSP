@@ -1,0 +1,1 @@
+export declare function updateLiquidacionOnTurnoComplete(db: FirebaseFirestore.Firestore, turnoId: string, after: FirebaseFirestore.DocumentData | null, before: FirebaseFirestore.DocumentData | null): Promise<void>;

@@ -17,7 +17,10 @@ export const crmService = {
     createdAt: new Date() 
   }),
   updateClient: (id: string, data: any) => updateDoc(doc(db, 'clients', id), data),
-  deleteClient: (id: string) => deleteDoc(doc(db, 'clients', id)),
+  deleteClient: (id: string) => updateDoc(doc(db, 'clients', id), {
+    status: 'INACTIVE',
+    inactiveAt: new Date().toISOString(),
+  }),
 
   // SEDES (OBJETIVOS)
   getObjectives: async (clientId: string) => {
@@ -27,7 +30,11 @@ export const crmService = {
   },
   addObjective: (data: any) => addDoc(collection(db, 'objectives'), { ...data, createdAt: new Date() }),
   updateObjective: (id: string, data: any) => updateDoc(doc(db, 'objectives', id), data),
-  deleteObjective: (id: string) => deleteDoc(doc(db, 'objectives', id)),
+  deleteObjective: (id: string) => updateDoc(doc(db, 'objectives', id), {
+    status: 'INACTIVE',
+    active: false,
+    inactiveAt: new Date().toISOString(),
+  }),
 
   // SERVICIOS (SLA)
   getServices: async (objectiveId: string) => {

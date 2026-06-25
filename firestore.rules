@@ -454,5 +454,26 @@ service cloud.firestore {
         && tenantMatches(resource.data);
       allow delete: if tenantAdminDelete();
     }
+
+    // Fichajes: solo Cloud Functions escriben; admin/empleado pueden leer los propios
+    match /fichajes/{fichajeId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+    }
+
+    // Agregados de liquidación mensual (pre-calculados server-side)
+    match /liquidacion_mensual/{docId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+      match /empleados/{empId} {
+        allow read: if tenantAdminRead();
+        allow write: if false;
+      }
+    }
+
+    match /liquidacion_turno_contrib/{turnoId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+    }
   }
 }

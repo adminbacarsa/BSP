@@ -1,5 +1,5 @@
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, query, orderBy } from 'firebase/firestore';
 
 export interface Employee {
   id?: string;
@@ -33,8 +33,11 @@ export const employeeService = {
 
       console.log(`✅ [Service] Encontrados ${snapshot.size} documentos.`);
 
-      return snapshot.docs.map(d => {
+      return snapshot.docs
+        .map(d => {
           const data = d.data();
+          const status = String(data.status ?? data.estado ?? 'active').toLowerCase();
+          if (status === 'inactive' || status === 'inactivo') return null;
           
           // Lógica de Nombres: Intentar separar, si no, usar completo
           let fName = data.firstName || data.nombre || '';
@@ -70,7 +73,7 @@ export const employeeService = {
               preferredObjectiveId: data.preferredObjectiveId || '',
               portalInvite: data.portalInvite || null,
           } as Employee;
-      });
+      }).filter((e): e is Employee => e !== null);
     } catch (e) {
       console.error("❌ Error cargando empleados:", e);
       return [];
@@ -79,5 +82,8 @@ export const employeeService = {
 
   add: async (data: Employee) => addDoc(collection(db, 'empleados'), data),
   update: (id: string, data: Partial<Employee>) => updateDoc(doc(db, 'empleados', id), data),
-  delete: (id: string) => deleteDoc(doc(db, 'empleados', id)),
+  delete: (id: string) => updateDoc(doc(db, 'empleados', id), {
+    status: 'INACTIVE',
+    inactiveAt: new Date().toISOString(),
+  }),
 };

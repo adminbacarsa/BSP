@@ -1,4 +1,4 @@
-﻿﻿import './bootstrap-env';
+﻿import './bootstrap-env';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -911,7 +911,7 @@ export const limpiarBaseDeDatos = functions.runWith({ timeoutSeconds: 540 }).htt
 // 0. Check-in desde el portal del empleado (GPS ya validado en cliente)
 export const requestCheckIn = functions.https.onCall(async (data, context) => {
     if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
-    const { shiftId, coords, recordedAt } = data;
+    const { shiftId, coords, recordedAt, idempotencyKey } = data;
     const db = admin.firestore();
 
     const shiftRef = db.collection('turnos').doc(shiftId);
@@ -920,8 +920,6 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
 
     const shiftData = shiftDoc.data()!;
 
-    // Verificar que el turno pertenece al empleado que hace la solicitud
-    // Excepción: superadmin puede registrar presente en nombre del empleado (modo preview/testing)
     const callerRole = String(context.auth.token?.role ?? context.auth.token?.['custom:role'] ?? '');
     const callerIsSuperAdmin = isSuperAdminBackupRole(callerRole);
 
@@ -929,7 +927,6 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     let empId: string;
     if (empSnap.empty) {
         if (callerIsSuperAdmin) {
-            // Superadmin en modo preview: usar el employeeId del turno directamente
             if (!shiftData.employeeId) throw new functions.https.HttpsError('not-found', 'Turno sin empleado asignado.');
             empId = shiftData.employeeId;
         } else {
@@ -942,232 +939,31 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
         }
     }
 
-    // Bug fix: si el turno ya fue marcado ausente, rechazar el check-in
-    // (el operador debe gestionar el ingreso manualmente para evitar estado inconsistente)
-    if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
-        throw new functions.https.HttpsError(
-            'failed-precondition',
-            'Tu turno fue registrado como ausencia. ContactÃ¡ al operador para gestionar tu ingreso.'
-        );
-    }
+    const { processPortalCheckIn } = await import('./fichajes/applyPortalCheckIn');
 
-    const nowTs = admin.firestore.Timestamp.now();
-    const now   = admin.firestore.FieldValue.serverTimestamp();
-    const nowMs = nowTs.toMillis();
-
-    // Regla de liquidaciÃ³n: realStartTime = hora planificada
-    // El guardia puede llegar antes o despuÃ©s pero el inicio para pago es siempre el planificado.
-    // ExcepciÃ³n: si fue adelantado para cubrir una ausencia (isEarlyStart = true),
-    // en ese caso realStartTime ya viene seteado desde la asignaciÃ³n del operador.
-    const scheduledStartTs = shiftData.startTime ?? null;
-    const isEarlyStart = shiftData.isEarlyStart === true;
-    const realStartTime = isEarlyStart
-        ? (shiftData.adjustedStartTime || scheduledStartTs || now)  // hora del adelanto asignado
-        : (scheduledStartTs || now);                                 // hora planificada normal
-
-    // Detectar llegada tarde (para flag de asistencia, no afecta pago)
-    const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
-    const isLate = scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000; // > 5 min despuÃ©s
-
-    await shiftRef.update({
-        isPresent: true,
-        status: 'PRESENT',
-        checkInTime: now,           // hora real de llegada (para asistencia/tracking)
-        realStartTime,              // hora planificada (para liquidaciÃ³n)
-        checkInRequestedAt: now,
-        checkInMethod: 'PORTAL_GPS',
-        checkInCoords: coords || null,
-        checkInRecordedAt: recordedAt || null,
-        isLate,
-    });
-
-    // Crear novedad para notificar al operador
     try {
-        await db.collection('novedades').add({
-            type: 'INGRESO_AUTOREGISTRO',
+        const result = await processPortalCheckIn(db, {
             shiftId,
-            employeeId: empId,
-            employeeName: shiftData.employeeName || '',
-            objectiveId: shiftData.objectiveId || '',
-            objectiveName: shiftData.objectiveName || '',
-            clientName: shiftData.clientName || '',
-            empresaId: shiftData.empresaId || null,
+            empId,
             coords: coords || null,
-            description: `Ingreso por portal: ${shiftData.employeeName || (await db.collection('empleados').doc(empId).get().then(d => { const x = d.data(); return x ? `${x.lastName || ''} ${x.firstName || ''}`.trim() : empId; }).catch(() => empId))}`,
-            createdAt: now,
-            status: 'unread',
-            viewed: false,
+            recordedAt: recordedAt || null,
+            idempotencyKey: idempotencyKey || null,
+            source: 'PORTAL_GPS',
         });
+        return { success: true, fichajeId: result.fichajeId, alreadyApplied: result.alreadyApplied === true };
     } catch (e) {
-        console.warn('[requestCheckIn] No se pudo crear novedad:', (e as Error)?.message);
-    }
-
-    // â"€â"€ AUTO-RELEVO: buscar y relevar al guardia presente en el mismo puesto â"€â"€
-    try {
-        const objectiveId  = shiftData.objectiveId  || '';
-        const positionName = (shiftData.positionName || '').trim().toLowerCase();
-        const empresaId    = shiftData.empresaId    || null;
-        const incomingName = shiftData.employeeName || 'Un guardia';
-        const objectiveName = shiftData.objectiveName || '';
-
-        if (objectiveId && positionName && empresaId) {
-            const activeSnap = await db.collection('turnos')
-                .where('empresaId', '==', empresaId)
-                .where('objectiveId', '==', objectiveId)
-                .where('isPresent', '==', true)
-                .where('isCompleted', '==', false)
-                .get();
-
-            const nowMs = nowTs.toMillis();
-            const incomingStartMs = shiftData.startTime?.toMillis?.() ?? nowMs;
-            const RELEVO_TOLERANCE_MS = 90 * 60 * 1000; // 90 min de tolerancia
-
-            const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-
-            const toRelieve = activeSnap.docs
-                .filter(d => {
-                    const dat = d.data();
-                    if ((dat.positionName || '').trim().toLowerCase() !== positionName) return false;
-                    if (d.id === shiftId || dat.employeeId === empId) return false;
-
-                    // Incluir: retenidos (esperando relevo) O a â‰¤15 min de terminar
-                    if (dat.isRetention === true) return true;
-                    const outEndMs = dat.endTime?.toMillis?.() ?? 0;
-                    if (outEndMs > 0 && (outEndMs - nowMs) <= FIFTEEN_MIN_MS) return true; // â‰¤15 min para terminar
-
-                    return false;
-                })
-                .sort((a, b) => {
-                    const da = a.data(), db2 = b.data();
-                    // 1. Retenidos primero (llevan tiempo extra)
-                    if (da.isRetention && !db2.isRetention) return -1;
-                    if (!da.isRetention && db2.isRetention) return 1;
-                    // 2. FIFO: quien tiene mÃ¡s tiempo trabajado se va primero
-                    const aStart = da.realStartTime?.toMillis?.() ?? da.checkInTime?.toMillis?.() ?? da.startTime?.toMillis?.() ?? 0;
-                    const bStart = db2.realStartTime?.toMillis?.() ?? db2.checkInTime?.toMillis?.() ?? db2.startTime?.toMillis?.() ?? 0;
-                    return aStart - bStart; // mÃ¡s antiguo primero
-                });
-
-            for (const outDoc of toRelieve) {
-                const outData      = outDoc.data();
-                const outEmpId     = outData.employeeId  as string;
-                const outName      = outData.employeeName || 'Guardia';
-                const outPosName   = outData.positionName || '';
-
-                // Horas completas: si el relevo es anticipado, usar la hora programada de fin
-                // para que el saliente cobre su turno completo sin culpa por llegada temprana
-                const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
-                const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
-                const outgoingRealEnd = isEarlyRelevo
-                    ? outData.endTime                                  // hora programada → horas completas
-                    : admin.firestore.FieldValue.serverTimestamp();    // ya pasÃ³ → hora real
-
-                // 1. Completar el turno del guardia saliente
-                await outDoc.ref.update({
-                    isCompleted:      true,
-                    isPresent:        false,
-                    status:           'COMPLETED',
-                    realEndTime:      outgoingRealEnd,
-                    relievedBy:       empId,
-                    relievedByName:   incomingName,
-                    relievedAt:       admin.firestore.FieldValue.serverTimestamp(),
-                    autoRelevo:       true,
-                    relievedEarly:    isEarlyRelevo,
-                });
-
-                // 2. Novedad de relevo para el operador
-                await db.collection('novedades').add({
-                    type:                  'RELEVO_AUTOMATICO',
-                    status:                'ATENDIDA',
-                    empresaId,
-                    objectiveId,
-                    objectiveName,
-                    positionName:          outPosName,
-                    employeeId:            empId,
-                    employeeName:          incomingName,
-                    relievedEmployeeId:    outEmpId,
-                    relievedEmployeeName:  outName,
-                    description:           `${incomingName} relevÃ³ a ${outName} en ${objectiveName}${outPosName ? ' — ' + outPosName : ''}`,
-                    createdAt:             admin.firestore.FieldValue.serverTimestamp(),
-                    autoProcessed:         true,
-                    source:                'AUTO_RELEVO',
-                });
-
-                // 3. Push notification al guardia saliente
-                const outEmpDoc = await db.collection('empleados').doc(outEmpId).get();
-                const outEmpUid = outEmpDoc.exists ? (outEmpDoc.data()?.uid as string | undefined) : undefined;
-
-                const [byEmpId, byUid] = await Promise.all([
-                    db.collection('device_tokens').where('employeeId', '==', outEmpId).get(),
-                    outEmpUid
-                        ? db.collection('device_tokens').where('uid', '==', outEmpUid).get()
-                        : Promise.resolve({ docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] }),
-                ]);
-
-                const tokenSet = new Set<string>();
-                [...byEmpId.docs, ...byUid.docs].forEach(d => {
-                    const t = d.data()?.token;
-                    if (typeof t === 'string' && t.length > 10) tokenSet.add(t);
-                });
-                const tokens = Array.from(tokenSet);
-
-                const notifTitle = 'âœ… Turno finalizado — relevado';
-                const notifBody  = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
-
-                // Guardar en user_notifications (siempre, aunque no haya token)
-                let notifDocId: string | null = null;
-                try {
-                    const notifRef = await db.collection('user_notifications').add({
-                        uid:        outEmpUid || null,
-                        employeeId: outEmpId,
-                        title:      notifTitle,
-                        body:       notifBody,
-                        type:       'RELEVO_AUTOMATICO',
-                        target:     'employee',
-                        turnoId:    outDoc.id,
-                        read:       false,
-                        readAt:     null,
-                        createdAt:  admin.firestore.FieldValue.serverTimestamp(),
-                    });
-                    notifDocId = notifRef.id;
-                } catch (e) {
-                    console.warn('[requestCheckIn] Error guardando notificaciÃ³n relevo:', (e as Error)?.message);
-                }
-
-                if (tokens.length > 0) {
-                    try {
-                        const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
-                        await admin.messaging().sendEachForMulticast({
-                            data: {
-                                type:           'RELEVO_AUTOMATICO',
-                                title:          notifTitle,
-                                body:           notifBody,
-                                turnoId:        outDoc.id,
-                                employeeId:     outEmpId,
-                                notificationId: notifDocId || '',
-                                link,
-                            },
-                            webpush: {
-                                headers:    { Urgency: 'high' },
-                                fcmOptions: { link },
-                            },
-                            tokens,
-                        });
-                        console.log(`[requestCheckIn] Relevo push enviado a ${outName} (${tokens.length} token/s)`);
-                    } catch (e) {
-                        console.warn('[requestCheckIn] Error enviando push relevo:', (e as Error)?.message);
-                    }
-                } else {
-                    console.warn(`[requestCheckIn] Sin tokens para ${outName} (${outEmpId})`);
-                }
-            }
+        const msg = (e as Error)?.message || '';
+        if (msg === 'SHIFT_ABSENT') {
+            throw new functions.https.HttpsError(
+                'failed-precondition',
+                'Tu turno fue registrado como ausencia. Contactá al operador para gestionar tu ingreso.',
+            );
         }
-    } catch (e) {
-        // El relevo no debe bloquear el check-in si falla
-        console.warn('[requestCheckIn] Error en auto-relevo:', (e as Error)?.message);
+        if (msg === 'TURNO_NOT_FOUND') {
+            throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+        }
+        throw new functions.https.HttpsError('internal', msg || 'Error al registrar fichaje.');
     }
-
-    return { success: true };
 });
 
 // 1. Fichada Manual (Operador de Radio / Supervisor)

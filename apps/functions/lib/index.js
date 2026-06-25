@@ -737,211 +737,55 @@ exports.limpiarBaseDeDatos = functions.runWith({ timeoutSeconds: 540 }).https.on
 exports.requestCheckIn = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
-    const { shiftId, coords, recordedAt } = data;
+    const { shiftId, coords, recordedAt, idempotencyKey } = data;
     const db = admin.firestore();
     const shiftRef = db.collection('turnos').doc(shiftId);
     const shiftDoc = await shiftRef.get();
     if (!shiftDoc.exists)
         throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
     const shiftData = shiftDoc.data();
+    const callerRole = String(context.auth.token?.role ?? context.auth.token?.['custom:role'] ?? '');
+    const callerIsSuperAdmin = (0, backup_auth_util_1.isSuperAdminBackupRole)(callerRole);
     const empSnap = await db.collection('empleados').where('uid', '==', context.auth.uid).limit(1).get();
-    if (empSnap.empty)
-        throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
-    const empId = empSnap.docs[0].id;
-    if (shiftData.employeeId !== empId)
-        throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
-    if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
-        throw new functions.https.HttpsError('failed-precondition', 'Tu turno fue registrado como ausencia. ContactÃ¡ al operador para gestionar tu ingreso.');
-    }
-    const nowTs = admin.firestore.Timestamp.now();
-    const now = admin.firestore.FieldValue.serverTimestamp();
-    const nowMs = nowTs.toMillis();
-    const scheduledStartTs = shiftData.startTime ?? null;
-    const isEarlyStart = shiftData.isEarlyStart === true;
-    const realStartTime = isEarlyStart
-        ? (shiftData.adjustedStartTime || scheduledStartTs || now)
-        : (scheduledStartTs || now);
-    const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
-    const isLate = scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000;
-    await shiftRef.update({
-        isPresent: true,
-        status: 'PRESENT',
-        checkInTime: now,
-        realStartTime,
-        checkInRequestedAt: now,
-        checkInMethod: 'PORTAL_GPS',
-        checkInCoords: coords || null,
-        checkInRecordedAt: recordedAt || null,
-        isLate,
-    });
-    try {
-        await db.collection('novedades').add({
-            type: 'INGRESO_AUTOREGISTRO',
-            shiftId,
-            employeeId: empId,
-            employeeName: shiftData.employeeName || '',
-            objectiveId: shiftData.objectiveId || '',
-            objectiveName: shiftData.objectiveName || '',
-            clientName: shiftData.clientName || '',
-            empresaId: shiftData.empresaId || null,
-            coords: coords || null,
-            description: `Ingreso por portal: ${shiftData.employeeName || empId}`,
-            createdAt: now,
-            status: 'unread',
-            viewed: false,
-        });
-    }
-    catch (e) {
-        console.warn('[requestCheckIn] No se pudo crear novedad:', e?.message);
-    }
-    try {
-        const objectiveId = shiftData.objectiveId || '';
-        const positionName = (shiftData.positionName || '').trim().toLowerCase();
-        const empresaId = shiftData.empresaId || null;
-        const incomingName = shiftData.employeeName || 'Un guardia';
-        const objectiveName = shiftData.objectiveName || '';
-        if (objectiveId && positionName && empresaId) {
-            const activeSnap = await db.collection('turnos')
-                .where('empresaId', '==', empresaId)
-                .where('objectiveId', '==', objectiveId)
-                .where('isPresent', '==', true)
-                .where('isCompleted', '==', false)
-                .get();
-            const nowMs = nowTs.toMillis();
-            const incomingStartMs = shiftData.startTime?.toMillis?.() ?? nowMs;
-            const RELEVO_TOLERANCE_MS = 90 * 60 * 1000;
-            const FIFTEEN_MIN_MS = 15 * 60 * 1000;
-            const toRelieve = activeSnap.docs
-                .filter(d => {
-                const dat = d.data();
-                if ((dat.positionName || '').trim().toLowerCase() !== positionName)
-                    return false;
-                if (d.id === shiftId || dat.employeeId === empId)
-                    return false;
-                if (dat.isRetention === true)
-                    return true;
-                const outEndMs = dat.endTime?.toMillis?.() ?? 0;
-                if (outEndMs > 0 && (outEndMs - nowMs) <= FIFTEEN_MIN_MS)
-                    return true;
-                return false;
-            })
-                .sort((a, b) => {
-                const da = a.data(), db2 = b.data();
-                if (da.isRetention && !db2.isRetention)
-                    return -1;
-                if (!da.isRetention && db2.isRetention)
-                    return 1;
-                const aStart = da.realStartTime?.toMillis?.() ?? da.checkInTime?.toMillis?.() ?? da.startTime?.toMillis?.() ?? 0;
-                const bStart = db2.realStartTime?.toMillis?.() ?? db2.checkInTime?.toMillis?.() ?? db2.startTime?.toMillis?.() ?? 0;
-                return aStart - bStart;
-            });
-            for (const outDoc of toRelieve) {
-                const outData = outDoc.data();
-                const outEmpId = outData.employeeId;
-                const outName = outData.employeeName || 'Guardia';
-                const outPosName = outData.positionName || '';
-                const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
-                const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
-                const outgoingRealEnd = isEarlyRelevo
-                    ? outData.endTime
-                    : admin.firestore.FieldValue.serverTimestamp();
-                await outDoc.ref.update({
-                    isCompleted: true,
-                    isPresent: false,
-                    status: 'COMPLETED',
-                    realEndTime: outgoingRealEnd,
-                    relievedBy: empId,
-                    relievedByName: incomingName,
-                    relievedAt: admin.firestore.FieldValue.serverTimestamp(),
-                    autoRelevo: true,
-                    relievedEarly: isEarlyRelevo,
-                });
-                await db.collection('novedades').add({
-                    type: 'RELEVO_AUTOMATICO',
-                    status: 'ATENDIDA',
-                    empresaId,
-                    objectiveId,
-                    objectiveName,
-                    positionName: outPosName,
-                    employeeId: empId,
-                    employeeName: incomingName,
-                    relievedEmployeeId: outEmpId,
-                    relievedEmployeeName: outName,
-                    description: `${incomingName} relevÃ³ a ${outName} en ${objectiveName}${outPosName ? ' — ' + outPosName : ''}`,
-                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                    autoProcessed: true,
-                    source: 'AUTO_RELEVO',
-                });
-                const outEmpDoc = await db.collection('empleados').doc(outEmpId).get();
-                const outEmpUid = outEmpDoc.exists ? outEmpDoc.data()?.uid : undefined;
-                const [byEmpId, byUid] = await Promise.all([
-                    db.collection('device_tokens').where('employeeId', '==', outEmpId).get(),
-                    outEmpUid
-                        ? db.collection('device_tokens').where('uid', '==', outEmpUid).get()
-                        : Promise.resolve({ docs: [] }),
-                ]);
-                const tokenSet = new Set();
-                [...byEmpId.docs, ...byUid.docs].forEach(d => {
-                    const t = d.data()?.token;
-                    if (typeof t === 'string' && t.length > 10)
-                        tokenSet.add(t);
-                });
-                const tokens = Array.from(tokenSet);
-                const notifTitle = 'âœ… Turno finalizado — relevado';
-                const notifBody = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
-                let notifDocId = null;
-                try {
-                    const notifRef = await db.collection('user_notifications').add({
-                        uid: outEmpUid || null,
-                        employeeId: outEmpId,
-                        title: notifTitle,
-                        body: notifBody,
-                        type: 'RELEVO_AUTOMATICO',
-                        turnoId: outDoc.id,
-                        read: false,
-                        readAt: null,
-                        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                    });
-                    notifDocId = notifRef.id;
-                }
-                catch (e) {
-                    console.warn('[requestCheckIn] Error guardando notificaciÃ³n relevo:', e?.message);
-                }
-                if (tokens.length > 0) {
-                    try {
-                        const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
-                        await admin.messaging().sendEachForMulticast({
-                            data: {
-                                type: 'RELEVO_AUTOMATICO',
-                                title: notifTitle,
-                                body: notifBody,
-                                turnoId: outDoc.id,
-                                employeeId: outEmpId,
-                                notificationId: notifDocId || '',
-                                link,
-                            },
-                            webpush: {
-                                headers: { Urgency: 'high' },
-                                fcmOptions: { link },
-                            },
-                            tokens,
-                        });
-                        console.log(`[requestCheckIn] Relevo push enviado a ${outName} (${tokens.length} token/s)`);
-                    }
-                    catch (e) {
-                        console.warn('[requestCheckIn] Error enviando push relevo:', e?.message);
-                    }
-                }
-                else {
-                    console.warn(`[requestCheckIn] Sin tokens para ${outName} (${outEmpId})`);
-                }
-            }
+    let empId;
+    if (empSnap.empty) {
+        if (callerIsSuperAdmin) {
+            if (!shiftData.employeeId)
+                throw new functions.https.HttpsError('not-found', 'Turno sin empleado asignado.');
+            empId = shiftData.employeeId;
+        }
+        else {
+            throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
         }
     }
-    catch (e) {
-        console.warn('[requestCheckIn] Error en auto-relevo:', e?.message);
+    else {
+        empId = empSnap.docs[0].id;
+        if (!callerIsSuperAdmin && shiftData.employeeId !== empId) {
+            throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
+        }
     }
-    return { success: true };
+    const { processPortalCheckIn } = await Promise.resolve().then(() => require('./fichajes/applyPortalCheckIn'));
+    try {
+        const result = await processPortalCheckIn(db, {
+            shiftId,
+            empId,
+            coords: coords || null,
+            recordedAt: recordedAt || null,
+            idempotencyKey: idempotencyKey || null,
+            source: 'PORTAL_GPS',
+        });
+        return { success: true, fichajeId: result.fichajeId, alreadyApplied: result.alreadyApplied === true };
+    }
+    catch (e) {
+        const msg = e?.message || '';
+        if (msg === 'SHIFT_ABSENT') {
+            throw new functions.https.HttpsError('failed-precondition', 'Tu turno fue registrado como ausencia. Contactá al operador para gestionar tu ingreso.');
+        }
+        if (msg === 'TURNO_NOT_FOUND') {
+            throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+        }
+        throw new functions.https.HttpsError('internal', msg || 'Error al registrar fichaje.');
+    }
 });
 exports.registrarFichadaManual = functions.https.onCall(async (data, context) => {
     if (!context.auth)
@@ -1384,7 +1228,7 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
     if (!hasAccess) {
         throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
     }
-    const { clientId, clientName, nombre, email, objectiveIds } = data;
+    const { clientId, clientName, nombre, email, objectiveIds, empresaId } = data;
     if (!clientId || !clientName || !nombre || !email) {
         throw new functions.https.HttpsError('invalid-argument', 'Se requieren clientId, clientName, nombre y email.');
     }
@@ -1428,6 +1272,15 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
         text: buildClientPortalEmailText(resetLink, clientName),
     });
     const existingSnap = await db.collection('client_users').where('uid', '==', uid).get();
+    let resolvedEmpresaId = empresaId || '';
+    if (!resolvedEmpresaId) {
+        try {
+            const clientDoc = await db.collection('clients').doc(clientId).get();
+            if (clientDoc.exists)
+                resolvedEmpresaId = clientDoc.data()?.empresaId || '';
+        }
+        catch { }
+    }
     const clientUserData = {
         uid,
         clientId,
@@ -1436,6 +1289,7 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
         email: normalizedEmail,
         activo: true,
         objectiveIds: objectiveIds || [],
+        ...(resolvedEmpresaId ? { empresaId: resolvedEmpresaId } : {}),
         portalInvite: {
             sent: true,
             sentAt: admin.firestore.FieldValue.serverTimestamp(),

@@ -5,6 +5,7 @@ const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys");
 const llegadaTardeUtils_1 = require("../ausencias/llegadaTardeUtils");
+const updateLiquidacionOnTurnoComplete_1 = require("../liquidacion/updateLiquidacionOnTurnoComplete");
 function formatDate(ts) {
     if (!ts)
         return '';
@@ -63,6 +64,12 @@ exports.onTurnoWrite = functions
     const db = admin.firestore();
     const after = change.after.exists ? change.after.data() : null;
     const before = change.before.exists ? change.before.data() : null;
+    try {
+        await (0, updateLiquidacionOnTurnoComplete_1.updateLiquidacionOnTurnoComplete)(db, change.after.id, after, before);
+    }
+    catch (e) {
+        console.warn('[onTurnoWrite] liquidacion incremental:', e?.message);
+    }
     if (after?.draft === true)
         return;
     const turn = after || before;

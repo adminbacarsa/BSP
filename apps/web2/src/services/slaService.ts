@@ -1,7 +1,7 @@
 
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
-import { empresaScopedQuery, filterSlaRowsByEmpresa, filterRowsByEmpresa, deleteDocForEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
+import { collection, addDoc, getDocs, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
+import { empresaScopedQuery, filterSlaRowsByEmpresa, filterRowsByEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 
 // Definición de Turno (variante)
 export interface ShiftVariant {
@@ -138,9 +138,10 @@ export const slaService = {
   },
 
   delete: (id: string, opts?: { empresaId: string; migracionCompleta: boolean }) => {
+    const payload = { status: 'inactive' as const, inactiveAt: new Date().toISOString() };
     if (opts?.empresaId) {
-      return deleteDocForEmpresa('servicios_sla', id, opts.empresaId, opts.migracionCompleta);
+      return updateDocForEmpresa('servicios_sla', id, payload, opts.empresaId, opts.migracionCompleta);
     }
-    return deleteDoc(doc(db, 'servicios_sla', id));
+    return updateDoc(doc(db, 'servicios_sla', id), payload);
   },
 };

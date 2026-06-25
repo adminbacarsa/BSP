@@ -450,21 +450,12 @@ export default function EmployeeDashboard() {
       where('startTime', '<=', Timestamp.fromDate(end))
     );
 
-    const unsub = onSnapshot(q, (snap) => {
-      const list: Shift[] = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as Shift))
-        .sort((a: any, b: any) => {
-          const ad = toDate(a.startTime)?.getTime() ?? 0;
-          const bd = toDate(b.startTime)?.getTime() ?? 0;
-          return ad - bd;
-        });
-
+    const applyShiftList = (list: Shift[]) => {
       const newMap = new Map<string, Shift>();
       list.forEach((s) => newMap.set(s.id, s));
 
       if (shiftInitialLoadDone.current) {
         const newAlerts: Array<{ id: string; type: 'MODIFIED' | 'ADDED' | 'REMOVED'; shift: Shift; prev?: Shift; at: Date }> = [];
-        // Detectar modificados y nuevos
         newMap.forEach((current, id) => {
           const previous = previousShiftRef.current.get(id);
           if (previous) {
@@ -477,7 +468,6 @@ export default function EmployeeDashboard() {
             newAlerts.push({ id: `added-${id}-${Date.now()}`, type: 'ADDED', shift: current, at: new Date() });
           }
         });
-        // Detectar eliminados
         previousShiftRef.current.forEach((previous, id) => {
           if (!newMap.has(id)) {
             newAlerts.push({ id: `removed-${id}-${Date.now()}`, type: 'REMOVED', shift: previous, at: new Date() });
@@ -493,13 +483,38 @@ export default function EmployeeDashboard() {
       previousShiftRef.current = newMap;
       setShifts(list);
       setLoadingShifts(false);
-    }, (e: any) => {
-      console.error('[dashboard] onSnapshot shifts error:', e?.code, e?.message);
-      addToast(`Error cargando cronograma (${e?.code || 'error'})`, 'error');
-      setLoadingShifts(false);
-    });
+    };
 
-    return unsub;
+    const loadShiftsOnce = async () => {
+      try {
+        const snap = await getDocs(q);
+        const list: Shift[] = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Shift))
+          .sort((a: any, b: any) => {
+            const ad = toDate(a.startTime)?.getTime() ?? 0;
+            const bd = toDate(b.startTime)?.getTime() ?? 0;
+            return ad - bd;
+          });
+        applyShiftList(list);
+      } catch (e: any) {
+        console.error('[dashboard] getDocs shifts error:', e?.code, e?.message);
+        addToast(`Error cargando cronograma (${e?.code || 'error'})`, 'error');
+        setLoadingShifts(false);
+      }
+    };
+
+    await loadShiftsOnce();
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadShiftsOnce();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const refreshInterval = setInterval(loadShiftsOnce, 5 * 60 * 1000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(refreshInterval);
+    };
   };
 
   const displayName = useMemo(() => {
@@ -1045,11 +1060,13 @@ export default function EmployeeDashboard() {
     const remaining: any[] = [];
     for (const item of list) {
       try {
+        const idempotencyKey = item.idempotencyKey || `ci_${item.shiftId}_${item.recordedAt || item.createdAt || ''}`;
         await callable({
           shiftId: item.shiftId,
           coords: item.coords,
           offline: true,
-          recordedAt: item.recordedAt || item.createdAt || new Date().toISOString()
+          recordedAt: item.recordedAt || item.createdAt || new Date().toISOString(),
+          idempotencyKey,
         });
       } catch {
         remaining.push(item);
@@ -1117,25 +1134,29 @@ export default function EmployeeDashboard() {
       }
 
       if (!navigator.onLine) {
+        const idempotencyKey = `ci_${shift.id}_${new Date().toISOString()}`;
         const list = loadPendingCheckins();
         list.push({
           shiftId: shift.id,
-          coords: { lat: coords.latitude, lng: coords.longitude },
+          coords: coords ? { lat: coords.latitude, lng: coords.longitude } : null,
           createdAt: new Date().toISOString(),
           recordedAt: new Date().toISOString(),
-          offline: true
+          offline: true,
+          idempotencyKey,
         });
         savePendingCheckins(list);
         addToast('Sin conexión. Presente guardado y se enviará luego.', 'info');
         return;
       }
 
+      const idempotencyKey = `ci_${shift.id}_${new Date().toISOString()}`;
       const callable = httpsCallable(functions, 'requestCheckIn');
       await callable({
         shiftId: shift.id,
-        coords: { lat: coords.latitude, lng: coords.longitude },
+        coords: coords ? { lat: coords.latitude, lng: coords.longitude } : null,
         offline: false,
-        recordedAt: new Date().toISOString()
+        recordedAt: new Date().toISOString(),
+        idempotencyKey,
       });
 
       addToast('Solicitud de presente enviada', 'success');
@@ -1144,13 +1165,15 @@ export default function EmployeeDashboard() {
       const message = (e?.message || '').toString().toLowerCase();
       const isNetwork = !navigator.onLine || message.includes('network') || message.includes('unavailable');
       if (isNetwork && coords) {
+        const idempotencyKey = `ci_${shift.id}_${new Date().toISOString()}`;
         const list = loadPendingCheckins();
         list.push({
           shiftId: shift.id,
           coords: { lat: coords.latitude, lng: coords.longitude },
           createdAt: new Date().toISOString(),
           recordedAt: new Date().toISOString(),
-          offline: true
+          offline: true,
+          idempotencyKey,
         });
         savePendingCheckins(list);
         addToast('Sin conexión. Presente guardado y se enviará luego.', 'info');

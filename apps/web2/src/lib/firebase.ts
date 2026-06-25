@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { initializeFirestore, getFirestore, memoryLocalCache, connectFirestoreEmulator } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, memoryLocalCache, persistentLocalCache, persistentMultipleTabManager, connectFirestoreEmulator } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
@@ -69,7 +69,7 @@ export function ensureFirebaseEmulatorsConnected(): void {
   }
 }
 
-// En emulador: sin IndexedDB (evita mezclar prod + localhost). En prod: persistencia offline.
+// En emulador: sin IndexedDB persistente (evita mezclar prod + localhost). En prod: cache persistente offline.
 let db;
 if (typeof window === 'undefined') {
   db = getFirestore(app);
@@ -88,10 +88,14 @@ if (typeof window === 'undefined') {
 } else {
   try {
     db = initializeFirestore(app, {
-      localCache: memoryLocalCache(),
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     });
   } catch {
-    db = getFirestore(app);
+    try {
+      db = initializeFirestore(app, { localCache: memoryLocalCache() });
+    } catch {
+      db = getFirestore(app);
+    }
   }
 }
 

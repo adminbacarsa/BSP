@@ -2,6 +2,7 @@ import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { ymCordobaParts, planificacionEstadoLookupDocIds } from '../assistant/planificacionEstadoKeys';
 import { checkLlegadaTardeReiterada } from '../ausencias/llegadaTardeUtils';
+import { updateLiquidacionOnTurnoComplete } from '../liquidacion/updateLiquidacionOnTurnoComplete';
 
 function formatDate(ts: any): string {
   if (!ts) return '';
@@ -60,6 +61,12 @@ export const onTurnoWrite = functions
     const db = admin.firestore();
     const after  = change.after.exists  ? change.after.data()!  : null;
     const before = change.before.exists ? change.before.data()! : null;
+
+    try {
+      await updateLiquidacionOnTurnoComplete(db, change.after.id, after, before);
+    } catch (e) {
+      console.warn('[onTurnoWrite] liquidacion incremental:', (e as Error)?.message);
+    }
 
     // No notificar turnos en borrador (se notificará cuando se publique)
     if (after?.draft === true) return;
