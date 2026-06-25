@@ -10,7 +10,7 @@ import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -486,6 +486,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               style={getLinkStyle('/admin/rrhh')}>
               <Users size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">RRHH</span>}
+            </Link>
+          )}
+
+          {canReadModule('SUPERVISION') && (
+            <Link href="/admin/supervision" prefetch={false} title="Supervisión"
+              className={getLinkHoverClass('/admin/supervision')}
+              style={getLinkStyle('/admin/supervision')}>
+              <Shield size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Supervisión</span>}
             </Link>
           )}
 
