@@ -2245,16 +2245,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     assignStart = DEFAULT_SHIFT_TIMES.N12;
                 }
 
-                // Solo empleados con la banda correcta (pool objetivo en bandas fijas).
-                const poolSource = ctx.rotateShifts === false && (fixedBandPoolByCode[sCode]?.length ?? 0) > 0
-                    ? fixedBandPoolByCode[sCode]
-                    : group;
+                // Empleados DISPONIBLES del puesto con la banda correcta; si no hay,
+                // ampliar a cualquier disponible del posPool (nunca cruzar posición).
+                const bandInGroupAvailable = group.filter(id => {
+                    const primary = String(empPrimaryShift[id] || '').toUpperCase();
+                    return primary === sCode
+                        && !runtime[id].assignedDays.has(dateStr)
+                        && !ctx.absences[id]?.has(dateStr)
+                        && cycleWorkDays[id]?.has(dateStr);
+                });
+                const poolSource = bandInGroupAvailable.length > 0 ? bandInGroupAvailable : group;
                 const candidates = poolSource.filter((empId) => {
                     if (runtime[empId].assignedDays.has(dateStr)) return false;
                     if (ctx.absences[empId]?.has(dateStr)) return false;
                     if (!cycleWorkDays[empId]?.has(dateStr)) return false;
-                    const primary = expectedShiftForDay(empId, dateStr, pos.positionName);
-                    if (primary && primary !== sCode) return false; // banda semanal
                     return true;
                 });
 
