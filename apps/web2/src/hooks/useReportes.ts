@@ -50,7 +50,7 @@ export function shouldBillShiftToObjective(shift: any): boolean {
 const OPERATIVE_CODES = ['M', 'T', 'N', 'D12', 'N12', 'PU', 'GU', 'FT']; // kept for compat
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
     'M':8, 'T':8, 'N':8, 'D12':12, 'N12':12, 'PU':12, 'GU':8, 'EN': 9, 'FT': 0,
-    'F':0, 'V':0, 'L':8, 'PG':8, 'A':8, 'E':8, 'FF':0, 'RET': 0, 'REF': 8, 'ESC': 8,
+    'F':0, 'V':0, 'L':8, 'PG':8, 'A':8, 'E':8, 'FF':0, 'RET': 0, 'REF': 8, 'RFZ': 8, 'TURA': 8, 'ESC': 8,
 };
 
 const PAID_DAY_DEFAULT_HOURS = 8;

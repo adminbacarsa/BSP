@@ -129,14 +129,14 @@ exports.onTurnoWrite = functions
             tokenSet.add(t); });
         const tokens = Array.from(tokenSet);
         const turnoId = change.after.id;
-        await db.collection('user_notifications').add({ uid: empUid || null, employeeId, title: retMsg.title, body: retMsg.body, type: 'RETENCION_AUTO', turnoId, read: false, readAt: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+        await db.collection('user_notifications').add({ uid: empUid || null, employeeId, title: retMsg.title, body: retMsg.body, type: 'RETENCION_AUTO', target: 'employee', turnoId, read: false, readAt: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
         if (tokens.length) {
             await admin.messaging().sendEachForMulticast({ tokens, notification: { title: retMsg.title, body: retMsg.body }, webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } } }).catch(e => console.warn('[onTurnoWrite] Retención push error:', e));
         }
         return;
     }
     if (after && before && !before.isCompleted && after.isCompleted === true &&
-        after.completionReason === 'AUTO_SHIFT_END') {
+        (after.completionReason === 'AUTO_SHIFT_END' || after.completionReason === 'AUTO_SHIFT_END_CUSTOM' || after.completionReason === 'AUTO_END_CF_RETENTION_TIMEOUT' || after.completionReason === 'AUTO_COVERAGE_COMPLETE')) {
         const completedEmployeeId = after.employeeId;
         if (!completedEmployeeId)
             return;
@@ -164,7 +164,7 @@ exports.onTurnoWrite = functions
         await db.collection('user_notifications').add({
             uid: empUidC || null, employeeId: completedEmployeeId,
             title: completedMsg.title, body: completedMsg.body,
-            type: 'TURNO_COMPLETADO', turnoId: turnoIdC,
+            type: 'TURNO_COMPLETADO', target: 'employee', turnoId: turnoIdC,
             read: false, readAt: null,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -176,6 +176,53 @@ exports.onTurnoWrite = functions
             }).catch(e => console.warn('[onTurnoWrite] Completado push error:', e));
         }
         return;
+    }
+    const rfzTuraCodes = new Set(['RFZ', 'TURA']);
+    if (after && before && rfzTuraCodes.has(String(after.code || '').toUpperCase())) {
+        const wasVacante = !before.employeeId || before.employeeId === 'VACANTE';
+        const nowHasEmployee = after.employeeId && after.employeeId !== 'VACANTE';
+        if (wasVacante && nowHasEmployee) {
+            const assignedEmployeeId = after.employeeId;
+            const objective = after.objectiveName || after.clientName || 'el objetivo';
+            const position = after.positionName || '';
+            const code = String(after.code || 'RFZ').toUpperCase();
+            const dateStr = formatDate(after.startTime);
+            const rfzMsg = {
+                title: code === 'TURA' ? '📅 Turno Agregado asignado' : '📅 Refuerzo de cliente asignado',
+                body: `${dateStr}${position ? ' · ' + position : ''} — ${objective}`,
+            };
+            const empDocR = await db.collection('empleados').doc(assignedEmployeeId).get();
+            const empUidR = empDocR.exists ? empDocR.data()?.uid : undefined;
+            const [byEmpIdR, byUidR] = await Promise.all([
+                db.collection('device_tokens').where('employeeId', '==', assignedEmployeeId).get(),
+                empUidR ? db.collection('device_tokens').where('uid', '==', empUidR).get() : Promise.resolve({ docs: [] }),
+            ]);
+            const tokenSetR = new Set();
+            [...byEmpIdR.docs, ...byUidR.docs].forEach(d => { const t = d.data()?.token; if (typeof t === 'string' && t.length > 10)
+                tokenSetR.add(t); });
+            const tokensR = Array.from(tokenSetR);
+            const turnoIdR = change.after.id;
+            await db.collection('user_notifications').add({
+                uid: empUidR || null,
+                employeeId: assignedEmployeeId,
+                title: rfzMsg.title,
+                body: rfzMsg.body,
+                type: 'TURNO_NUEVO',
+                target: 'employee',
+                turnoId: turnoIdR,
+                read: false,
+                readAt: null,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            if (tokensR.length) {
+                await admin.messaging().sendEachForMulticast({
+                    tokens: tokensR,
+                    notification: { title: rfzMsg.title, body: rfzMsg.body },
+                    webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
+                }).catch(e => console.warn('[onTurnoWrite] RFZ/TURA push error:', e));
+            }
+            return;
+        }
     }
     let eventType;
     const employeeId = (after || before)?.employeeId;
@@ -228,6 +275,7 @@ exports.onTurnoWrite = functions
             title: msg.title,
             body: msg.body,
             type: eventType,
+            target: 'employee',
             turnoId,
             read: false,
             readAt: null,

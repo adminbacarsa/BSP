@@ -229,6 +229,8 @@ const SHIFT_STYLES: any = {
     'LT':  'bg-orange-50 text-orange-700 border-orange-400 font-black',
     'RET': 'bg-white text-slate-500 border border-slate-300 font-bold',
     'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
+    'RFZ': 'bg-red-500 text-white border-red-600 font-black',
+    'TURA': 'bg-red-600 text-white border-red-700 font-black',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
     'PG':  'bg-white text-blue-700 border-blue-400 font-black',
     'LOCKED': 'bg-slate-200 text-slate-500 border-slate-300 pattern-grid',
@@ -248,7 +250,9 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'N12': 'Jornada Nocturna 12hs',
     'F': 'Franco Compensatorio',
     'RET': 'Guardia Retén',
-    'REF': 'Refuerzo (no cuenta cobertura SLA ni horas planificadas)',
+    'REF': 'Refuerzo interno (no cuenta cobertura SLA)',
+    'RFZ': 'Refuerzo solicitado por cliente (facturable)',
+    'TURA': 'Turno Agregado por cliente (facturable)',
     'ESC': 'Escuela / formación (no cuenta cobertura SLA ni horas planificadas)',
     'PU': 'Puesto Único / Especial',
     'A': 'ART',
@@ -306,7 +310,7 @@ const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 const PLANNING_ENGINE_VERSION = '2.8';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
-    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'ESC': 8, 'C': 8,
+    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'RFZ': 8, 'TURA': 8, 'ESC': 8, 'C': 8,
 };
 
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
@@ -495,6 +499,9 @@ export default function PlanificacionPage() {
     const [employees, setEmployees] = useState<any[]>([]);
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
     const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
+    const [turaMap, setTuraMap] = useState<Record<string, any>>({});       // parentShiftId → turno TURA
+    const [rfzVacantes, setRfzVacantes] = useState<any[]>([]);             // RFZ sin guardia asignado
+    const [rfzAsignando, setRfzAsignando] = useState<any>(null);          // RFZ vacante abierto para asignación
     // allShiftIds[empId_dateKey] = array de TODOS los doc IDs para esa clave.
     // shiftsMap solo guarda el último (sobrescribe), pero necesitamos borrar TODOS al guardar.
     const [allShiftIds, setAllShiftIds] = useState<Record<string, string[]>>({});
@@ -2278,9 +2285,24 @@ export default function PlanificacionPage() {
         const unsubS = onSnapshot(turnosQ, snap => {
             const map: any = {};
             const allIds: Record<string, string[]> = {};
+            const turaM: Record<string, any> = {};
+            const rfzVacs: any[] = [];
             snap.docs.forEach(d => {
                 const data = d.data();
                 if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+                const code = (data.code || data.type || '').toString().toUpperCase();
+
+                // TURA: indexar por parentShiftId para mostrar indicador en celda padre
+                if (code === 'TURA' && data.parentShiftId) {
+                    turaM[data.parentShiftId] = { id: d.id, ...data };
+                    return;
+                }
+                // RFZ sin guardia real: mostrar como fila vacante separada
+                if (code === 'RFZ' && (!data.employeeId || data.employeeId === 'VACANTE')) {
+                    rfzVacs.push({ id: d.id, ...data });
+                    return;
+                }
+
                 if (data.startTime?.seconds) {
                     const dateKey = getDateKey(data.startTime);
                     const key = `${data.employeeId}_${dateKey}`;
@@ -2307,6 +2329,8 @@ export default function PlanificacionPage() {
             });
             setShiftsMap(map);
             setAllShiftIds(allIds);
+            setTuraMap(turaM);
+            setRfzVacantes(rfzVacs);
         }, (e) => { console.error('[plan] turnos error:', e); toast.error(`Error cargando turnos: ${e.code || e.message}`); });
 
         // Actividad Reciente (audit_logs) - sin índices compuestos: traemos últimos N y filtramos en memoria.
@@ -5286,11 +5310,13 @@ export default function PlanificacionPage() {
                                         }
                                         if (isExtended) { style += ' ring-2 ring-violet-600 z-10'; }
                                         if (isEarly) { style += ' ring-2 ring-cyan-500 z-10'; }
-                                        if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; } 
-                                        if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; } 
+                                        if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; }
+                                        if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
                                         const activeShift = (p && !p.isDeleted) ? p : s;
+                                        // TURA: turno agregado por cliente → fondo rojo en celda padre
+                                        if (activeShift?.id && turaMap[activeShift.id]) { style = 'bg-red-500 text-white border-red-600 font-black'; }
                                         const isOtherObjectiveShift = isShiftAtOtherObjective(s, p, selectedObjective);
                                         if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (isOtherObjectiveShift && content != null) {
@@ -5357,6 +5383,40 @@ export default function PlanificacionPage() {
                                 </tr>
                             )}
                         </React.Fragment>
+                    );
+                })}
+                {/* ── Filas vacantes RFZ — refuerzos de cliente sin guardia asignado ── */}
+                {!isSnapshotView && rfzVacantes.filter(rfz => rfz.objectiveId === selectedObjective).map((rfz) => {
+                    const rfzStart = formatTime(rfz.startTime);
+                    const rfzEnd   = formatTime(rfz.endTime);
+                    return (
+                        <tr key={`rfz_${rfz.id}`} className="hover:bg-red-50/30">
+                            <td className="sticky left-0 z-20 bg-red-50 p-2 border-r border-b border-red-200 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8"
+                                style={{ width: nameColWidth, minWidth: nameColWidth }}>
+                                <div className="flex flex-col min-w-0">
+                                    <span className="text-[9px] font-black text-red-700 uppercase tracking-wide leading-tight">VACANTE RFZ</span>
+                                    <span className="text-[8px] text-red-500 font-bold truncate" title={rfz.positionName || ''}>
+                                        {rfz.positionName || 'Sin puesto'} · {rfzStart}–{rfzEnd}
+                                    </span>
+                                </div>
+                            </td>
+                            {daysInMonth.map((day) => {
+                                const dayStr = getDateKey(day);
+                                const isRfzDay = rfz.fecha === dayStr;
+                                const isCellWeekend = [0, 6].includes(day.getDay());
+                                return (
+                                    <td key={`rfz_${rfz.id}_${dayStr}`}
+                                        onClick={() => { if (isRfzDay) setRfzAsignando(rfz); }}
+                                        className={`border-b border-r p-0.5 text-center ${isCellWeekend ? 'bg-rose-50/40' : ''} ${isRfzDay ? 'cursor-pointer' : ''}`}>
+                                        {isRfzDay && (
+                                            <div className="w-full h-6 rounded flex items-center justify-center text-[9px] font-black bg-red-500 text-white border border-red-600 hover:bg-red-600 transition-colors">
+                                                RFZ
+                                            </div>
+                                        )}
+                                    </td>
+                                );
+                            })}
+                        </tr>
                     );
                 })}
             </tbody>
@@ -6915,6 +6975,22 @@ export default function PlanificacionPage() {
                                                     <span className="text-[9px] font-black uppercase bg-white/60 border border-current px-2 py-0.5 rounded-lg opacity-80 flex items-center gap-1"><CheckCircle size={9}/> Publicado</span>
                                                 )}
                                             </div>
+
+                                            {/* TURA — turno agregado por cliente */}
+                                            {turaMap[shift.id] && (() => {
+                                                const tura = turaMap[shift.id];
+                                                const tStart = tura.startTime ? formatTime(tura.startTime) : '--:--';
+                                                const tEnd   = tura.endTime   ? formatTime(tura.endTime)   : '--:--';
+                                                return (
+                                                    <div className="flex items-center gap-3 p-3 rounded-xl border border-red-200 bg-red-50 mb-4">
+                                                        <span className="shrink-0 text-[10px] font-black text-white bg-red-500 px-2 py-1 rounded-lg">TURA</span>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-xs font-black text-red-700 leading-tight">Turno Agregado — pedido del cliente</p>
+                                                            <p className="text-[11px] text-red-500 font-bold">{tStart} – {tEnd} · 8h</p>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
 
                                             {/* Info adicional */}
                                             <div className="space-y-2 mb-5">
@@ -9413,6 +9489,60 @@ export default function PlanificacionPage() {
                     </div>
                 </>,
                 document.body,
+            )}
+            {/* ── Modal asignar guardia a RFZ vacante ── */}
+            {rfzAsignando && (
+                <div className="fixed inset-0 bg-black/60 z-[75] flex items-center justify-center p-4"
+                    onClick={() => setRfzAsignando(null)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-4"
+                        onClick={e => e.stopPropagation()}>
+                        <div className="flex items-start gap-3">
+                            <span className="shrink-0 text-[10px] font-black text-white bg-red-500 px-2 py-1 rounded-lg">RFZ</span>
+                            <div>
+                                <h2 className="font-black text-slate-800 text-base leading-tight">Asignar guardia al refuerzo</h2>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    {rfzAsignando.positionName || 'Sin puesto'} · {formatTime(rfzAsignando.startTime)}–{formatTime(rfzAsignando.endTime)} · {rfzAsignando.fecha}
+                                </p>
+                                {rfzAsignando.solicitadoPorNombre && (
+                                    <p className="text-[10px] text-red-500 font-bold mt-0.5">
+                                        Solicitado por: {rfzAsignando.solicitadoPorNombre}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex flex-col max-h-64 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+                            {displayedEmployees.map(emp => (
+                                <button key={emp.id}
+                                    type="button"
+                                    onClick={async () => {
+                                        try {
+                                            await updateDoc(doc(db, 'turnos', rfzAsignando.id), {
+                                                employeeId: emp.id,
+                                                employeeName: emp.name,
+                                            });
+                                            setRfzAsignando(null);
+                                            toast.success(`${emp.name} asignado/a al turno RFZ`);
+                                        } catch {
+                                            toast.error('Error al asignar guardia');
+                                        }
+                                    }}
+                                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 text-left transition-colors">
+                                    <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-black text-slate-600 shrink-0">
+                                        {(emp.name || '?')[0]}
+                                    </div>
+                                    <span className="text-sm text-slate-700 font-semibold">{emp.name}</span>
+                                </button>
+                            ))}
+                            {displayedEmployees.length === 0 && (
+                                <p className="text-xs text-slate-400 text-center py-4">No hay empleados disponibles</p>
+                            )}
+                        </div>
+                        <button type="button" onClick={() => setRfzAsignando(null)}
+                            className="self-end text-xs text-slate-400 hover:text-slate-600">
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
             )}
             </div>
         </DashboardLayout>

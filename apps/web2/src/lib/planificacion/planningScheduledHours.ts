@@ -3,7 +3,7 @@ import { isDeploymentOrPoolShift, normalizeDeploymentShiftCode, shiftCountsForEm
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
   M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, EN: 9,
-  F: 0, FF: 0, FP: 0, FT: 0, V: 0, L: 0, A: 0, E: 0, AA: 0, PG: 0, RET: 0, REF: 0, ESC: 0, C: 8, GU: 8,
+  F: 0, FF: 0, FP: 0, FT: 0, V: 0, L: 0, A: 0, E: 0, AA: 0, PG: 0, RET: 0, REF: 0, RFZ: 8, TURA: 8, ESC: 0, C: 8, GU: 8,
 };
 
 export { isDeploymentOrPoolShift, normalizeDeploymentShiftCode as normalizeShiftCode } from './deploymentRoles';

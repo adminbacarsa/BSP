@@ -271,6 +271,7 @@ export default function SupervisionPage() {
     const startISO = `${sol.fecha}T${sol.startTime}:00`;
     const endISO   = `${fechaFin}T${sol.endTime}:00`;
 
+    const isAgregado = sol.tipo === 'AGREGADO_TURNO';
     const base = {
       empresaId:           sol.empresaId,
       objectiveId:         sol.objectiveId,
@@ -282,7 +283,7 @@ export default function SupervisionPage() {
       endTime:             endISO,
       origin:              'CLIENT_REQUEST',
       solicitudRefuerzoId: sol.id,
-      code:                'REF',
+      code:                isAgregado ? 'TURA' : 'RFZ',
       isPresent:           false,
       isAbsent:            false,
       isCompleted:         false,
@@ -290,7 +291,7 @@ export default function SupervisionPage() {
     };
 
     const ids: string[] = [];
-    if (sol.tipo === 'AGREGADO_TURNO') {
+    if (isAgregado) {
       let parentPositionName: string | null = null;
       if (sol.parentShiftId) {
         try {
@@ -307,11 +308,12 @@ export default function SupervisionPage() {
       });
       ids.push(ref.id);
     } else {
-      // REFUERZO_PUESTO: una vacante por pax solicitado
+      // REFUERZO_PUESTO: una vacante (RFZ) por pax solicitado
       const n = sol.cantidadPax ?? 1;
       for (let i = 0; i < n; i++) {
         const ref = await addDoc(collection(db, 'turnos'), {
           ...base,
+          employeeId:   'VACANTE',
           positionId:   sol.positionId   ?? null,
           positionName: sol.positionName ?? null,
         });
@@ -334,6 +336,30 @@ export default function SupervisionPage() {
         autorizadoAt:        Timestamp.now(),
         turnoIds,
         ...(nota ? { notaInterna: nota } as any : {}),
+      });
+      // Notificación a Planificación para que asigne el guardia
+      const sol = aprobarTarget;
+      const isAgregado = sol.tipo === 'AGREGADO_TURNO';
+      await addDoc(collection(db, 'novedades'), {
+        type:              'REFUERZO_CLIENTE_PENDIENTE',
+        tipoSolicitud:     isAgregado ? 'TURA' : 'RFZ',
+        status:            'pending',
+        empresaId:         sol.empresaId,
+        objectiveId:       sol.objectiveId,
+        objectiveName:     sol.objectiveName,
+        clientId:          sol.clientId,
+        clientName:        sol.clientName,
+        positionName:      sol.positionName   ?? null,
+        fecha:             sol.fecha,
+        startTime:         sol.startTime,
+        endTime:           sol.endTime,
+        cantidadPax:       sol.cantidadPax    ?? 1,
+        solicitadoPorNombre: sol.solicitadoPorNombre ?? null,
+        empleadoNombre:    isAgregado ? (sol.parentEmpleadoName ?? null) : null,
+        turnoIds,
+        autorizadoPorNombre: user.displayName || user.email || '',
+        createdAt:         Timestamp.now(),
+        reportedBy:        'SUPERVISION',
       });
       toast.success(
         turnoIds.length === 1
