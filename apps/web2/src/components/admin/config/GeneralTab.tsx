@@ -315,7 +315,7 @@ export default function GeneralTab() {
                     </Link>
 
                     <Link
-                        href="/cliente/dashboard"
+                        href={`/cliente/dashboard${empresaId ? `?empresaId=${encodeURIComponent(empresaId)}` : ''}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="group flex flex-col gap-3 p-5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-violet-300 hover:shadow-md transition-all"

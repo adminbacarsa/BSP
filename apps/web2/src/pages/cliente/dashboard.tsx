@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { db, auth } from '@/lib/firebase';
 import {
@@ -25,6 +26,7 @@ interface ClienteUser {
   nombre: string;
   email: string;
   objectiveIds?: string[];
+  empresaId?: string;
 }
 
 interface ObjetivoInfo {
@@ -1253,6 +1255,8 @@ function estadoRefuerzo(estado: SolicitudEstado) {
   return <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${m.cls}`}>{m.label}</span>;
 }
 
+interface SlaPosition { id: string; name: string; shifts: { code: string; name: string; startTime: string; endTime: string }[] }
+
 function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clienteUser: ClienteUser }) {
   const [tipo, setTipo] = useState<'REFUERZO_PUESTO' | 'AGREGADO_TURNO'>('REFUERZO_PUESTO');
   const [fecha, setFecha] = useState('');
@@ -1263,108 +1267,152 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [solicitudes, setSolicitudes] = useState<SolicitudRefuerzo[]>([]);
+
+  // Puestos del SLA activo
+  const [slaPositions, setSlaPositions] = useState<SlaPosition[]>([]);
+  const [selPosId, setSelPosId] = useState('');
+  const [selShiftCode, setSelShiftCode] = useState('');
+
+  // Guardias en turno (AGREGADO_TURNO)
   const [guardias, setGuardias] = useState<{ shiftId: string; nombre: string; empleadoId: string }[]>([]);
   const [guardiaSelId, setGuardiaSelId] = useState('');
 
-  // Historial de solicitudes de este objetivo
+  // Carga puestos del SLA activo del objetivo
+  useEffect(() => {
+    getDocs(query(
+      collection(db, 'servicios_sla'),
+      where('objectiveId', '==', objetivo.id),
+      where('status', '==', 'active'),
+    )).then(snap => {
+      // Usar solo el SLA con más puestos (evita duplicados entre contratos históricos)
+      let bestPositions: any[] = [];
+      snap.docs.forEach(d => {
+        const ps = d.data().positions || [];
+        if (ps.length > bestPositions.length) bestPositions = ps;
+      });
+      const posMap = new Map<string, SlaPosition>();
+      bestPositions.forEach((p: any) => {
+        const key = p.id || p.name;
+        if (!key || posMap.has(key)) return;
+        const shifts = (p.allowedShiftTypes || []).map((s: any) => ({
+          code: s.code, name: s.name || s.code,
+          startTime: s.startTime || '', endTime: s.endTime || '',
+        })).filter((s: any) => s.startTime);
+        if (shifts.length) posMap.set(key, { id: p.id || p.name, name: p.name, shifts });
+      });
+      setSlaPositions(Array.from(posMap.values()));
+    });
+  }, [objetivo.id]);
+
+  // Historial real-time
   useEffect(() => {
     return solicitudRefuerzoService.subscribeByClient(clienteUser.clientId, items =>
       setSolicitudes(items.filter(s => s.objectiveId === objetivo.id))
     );
   }, [objetivo.id, clienteUser.clientId]);
 
-  // Carga guardias activos del objetivo cuando tipo=AGREGADO_TURNO y fecha elegida
+  // Guardias en turno (AGREGADO_TURNO) — busca en turnos planificados del objetivo
   useEffect(() => {
     setGuardiaSelId('');
-    if (tipo !== 'AGREGADO_TURNO' || !fecha) { setGuardias([]); return; }
-    let cancelled = false;
-    getDocs(query(
-      collection(db, 'turnos'),
-      where('objectiveId', '==', objetivo.id),
-    )).then(snap => {
-      if (cancelled) return;
-      const list = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as any))
-        .filter((t: any) => {
-          const tFecha = t.fecha || (t.startTime ? String(t.startTime).slice(0, 10) : '');
-          return tFecha === fecha && !t.isAbsent && t.employeeId;
-        })
-        .map((t: any) => ({ shiftId: t.id, nombre: t.employeeName || t.employeeId, empleadoId: t.employeeId }));
-      // dedup por empleadoId
-      const seen = new Set<string>();
-      setGuardias(list.filter((g: any) => seen.has(g.empleadoId) ? false : !!seen.add(g.empleadoId)));
-    });
-    return () => { cancelled = true; };
+    setGuardias([]);
+    if (tipo !== 'AGREGADO_TURNO' || !fecha) return;
+
+    getDocs(query(collection(db, 'turnos'), where('objectiveId', '==', objetivo.id)))
+      .then(snap => {
+        const seen = new Set<string>();
+        const deduped = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as any))
+          .filter((t: any) => {
+            let tFecha: string = typeof t.fecha === 'string' ? t.fecha : '';
+            if (!tFecha && t.startTime?.seconds)
+              tFecha = new Date(t.startTime.seconds * 1000).toISOString().slice(0, 10);
+            return tFecha === fecha && !t.isAbsent && !t.isFranco
+              && t.employeeId && t.employeeId !== 'VACANTE'
+              && !seen.has(t.employeeId) && !!seen.add(t.employeeId);
+          });
+
+        if (deduped.length === 0) { setGuardias([]); return; }
+
+        Promise.all(deduped.map(async (t: any) => {
+          let nombre = t.employeeName || t.empleadoName || '';
+          if (!nombre) {
+            try {
+              const empSnap = await getDoc(doc(db, 'empleados', t.employeeId));
+              if (empSnap.exists()) {
+                const e = empSnap.data();
+                nombre = [e.apellido || e.lastName, e.nombre || e.firstName]
+                  .filter(Boolean).join(', ')
+                  || e.name || t.employeeId;
+              }
+            } catch { /* keep empty */ }
+          }
+          return { shiftId: t.id, nombre: nombre || t.employeeId, empleadoId: t.employeeId };
+        })).then(lista => setGuardias(lista)).catch(console.error);
+      })
+      .catch(console.error);
   }, [tipo, fecha, objetivo.id]);
 
-  const shiftStartMs = fecha && startTime ? new Date(`${fecha}T${startTime}`).getTime() : 0;
+  // Auto-seleccionar turno del puesto → llenar horarios
+  const selPosition = slaPositions.find(p => p.id === selPosId);
+  const selShift    = selPosition?.shifts.find(s => s.code === selShiftCode);
+  useEffect(() => {
+    if (selShift) { setStartTime(selShift.startTime); setEndTime(selShift.endTime); }
+  }, [selShift?.code, selPosId]);
+
+  const shiftStartMs  = fecha && startTime ? new Date(`${fecha}T${startTime}`).getTime() : 0;
   const horasRestantes = shiftStartMs ? (shiftStartMs - Date.now()) / 3600000 : 0;
   const anticipacionOk = horasRestantes >= MIN_HORAS_ANTICIPACION;
-
   const guardiaSelected = guardias.find(g => g.shiftId === guardiaSelId);
 
-  const canSubmit = fecha && startTime && endTime && motivo.trim() &&
-    anticipacionOk &&
-    (tipo === 'REFUERZO_PUESTO' ? cantidadPax >= 1 : !!guardiaSelId);
+  const canSubmit = fecha && startTime && endTime && motivo.trim() && anticipacionOk &&
+    (tipo === 'REFUERZO_PUESTO'
+      ? cantidadPax >= 1 && (slaPositions.length === 0 || !!selPosId)
+      : !!guardiaSelId);
 
   const resetForm = () => {
     setFecha(''); setStartTime(''); setEndTime(''); setMotivo('');
-    setCantidadPax(1); setGuardiaSelId(''); setShowForm(false);
+    setCantidadPax(1); setGuardiaSelId(''); setSelPosId(''); setSelShiftCode('');
+    setShowForm(false);
   };
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSaving(true);
     try {
-      const data: Omit<SolicitudRefuerzo, 'id'> = {
-        empresaId:          '', // se resuelve por clientId en rules; dejamos vacío o ponemos algo
-        clientId:           clienteUser.clientId,
-        clientName:         clienteUser.clientName,
-        objectiveId:        objetivo.id,
-        objectiveName:      objetivo.name,
-        tipo,
-        fecha,
-        startTime,
-        endTime,
-        motivo,
-        origen:             'PORTAL_CLIENTE',
-        estado:             'PENDIENTE',
-        solicitadoPorUid:   clienteUser.uid,
+      await solicitudRefuerzoService.create({
+        empresaId:           clienteUser.empresaId || '',
+        clientId:            clienteUser.clientId,
+        clientName:          clienteUser.clientName,
+        objectiveId:         objetivo.id,
+        objectiveName:       objetivo.name,
+        tipo, fecha, startTime, endTime, motivo,
+        origen:              'PORTAL_CLIENTE',
+        estado:              'PENDIENTE',
+        solicitadoPorUid:    clienteUser.uid,
         solicitadoPorNombre: clienteUser.nombre,
-        solicitadoAt:       Timestamp.now(),
+        solicitadoAt:        Timestamp.now(),
         ...(tipo === 'REFUERZO_PUESTO'
-          ? { cantidadPax }
-          : {
-              parentShiftId:      guardiaSelected?.shiftId,
-              parentEmpleadoId:   guardiaSelected?.empleadoId,
-              parentEmpleadoName: guardiaSelected?.nombre,
-            }
+          ? { cantidadPax, positionId: selPosId || undefined, positionName: selPosition?.name }
+          : { parentShiftId: guardiaSelected?.shiftId, parentEmpleadoId: guardiaSelected?.empleadoId, parentEmpleadoName: guardiaSelected?.nombre }
         ),
-      };
-      await solicitudRefuerzoService.create(data);
+      });
       resetForm();
     } catch (e: any) {
       alert(`Error: ${e?.message || 'No se pudo enviar'}`);
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const today = new Date().toISOString().split('T')[0];
 
   return (
     <div className="space-y-5">
-      {/* Botón nueva solicitud */}
       {!showForm && (
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-black transition-colors shadow"
-        >
+        <button onClick={() => setShowForm(true)}
+          className="flex items-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-black transition-colors shadow">
           <ShieldPlus size={16}/> Solicitar refuerzo / agregado
         </button>
       )}
 
-      {/* Formulario */}
       {showForm && (
         <div className="bg-white border-2 border-indigo-200 rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between">
@@ -1375,52 +1423,83 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
           {/* Tipo */}
           <div className="flex gap-2">
             {(['REFUERZO_PUESTO', 'AGREGADO_TURNO'] as const).map(t => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTipo(t)}
-                className={`flex-1 py-2 rounded-xl text-xs font-black border transition-colors ${
-                  tipo === t ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'
-                }`}
-              >
+              <button key={t} type="button" onClick={() => setTipo(t)}
+                className={`flex-1 py-2 rounded-xl text-xs font-black border transition-colors ${tipo === t ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
                 {t === 'REFUERZO_PUESTO' ? '+ Refuerzo de puesto' : '+ Agregado de turno'}
               </button>
             ))}
           </div>
           <p className="text-[11px] text-slate-500 -mt-1">
-            {tipo === 'REFUERZO_PUESTO'
-              ? 'Personal extra para el puesto en una fecha puntual.'
-              : 'Ampliar el horario de un guardia ya asignado al objetivo.'}
+            {tipo === 'REFUERZO_PUESTO' ? 'Personal extra para el puesto en una fecha puntual.' : 'Ampliar el horario de un guardia ya asignado al objetivo.'}
           </p>
 
-          {/* Fecha y horarios */}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
-              <input type="date" min={today} value={fecha} onChange={e => setFecha(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
+          {/* REFUERZO: puesto + turno del SLA */}
+          {tipo === 'REFUERZO_PUESTO' && slaPositions.length > 0 && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Puesto</label>
+                <select value={selPosId} onChange={e => { setSelPosId(e.target.value); setSelShiftCode(''); setStartTime(''); setEndTime(''); }}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400">
+                  <option value="">— Elegí un puesto —</option>
+                  {slaPositions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              {selPosition && (
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Turno del puesto</label>
+                  <div className="flex flex-wrap gap-2">
+                    {selPosition.shifts.map(s => (
+                      <button key={s.code} type="button"
+                        onClick={() => setSelShiftCode(s.code)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black border transition-colors ${selShiftCode === s.code ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-200 text-slate-600 hover:border-indigo-300'}`}>
+                        <span className="font-black">{s.code}</span>
+                        <span className="ml-1 font-normal text-[10px] opacity-80">{s.startTime}–{s.endTime}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-            <div>
-              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
-              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
-            </div>
-            <div>
-              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
-              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
-            </div>
+          )}
+
+          {/* Fecha */}
+          <div>
+            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
+            <input type="date" min={today} value={fecha} onChange={e => setFecha(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
           </div>
+
+          {/* Horarios — manual si no hay SLA o para AGREGADO */}
+          {(tipo === 'AGREGADO_TURNO' || slaPositions.length === 0 || !selShiftCode) && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
+                <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
+                <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
+              </div>
+            </div>
+          )}
+          {/* Horario auto-llenado (readonly) */}
+          {tipo === 'REFUERZO_PUESTO' && selShift && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-700">
+              <Clock size={13}/> Horario: {selShift.startTime} — {selShift.endTime}
+            </div>
+          )}
 
           {/* Alerta anticipación */}
           {fecha && startTime && !anticipacionOk && (
             <div className="flex items-center gap-2 px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold">
               <AlertCircle size={14}/> Mínimo {MIN_HORAS_ANTICIPACION}hs de anticipación
-              {horasRestantes > 0 && ` (quedan ${horasRestantes.toFixed(1)}hs)`}
+              {horasRestantes > 0 && ` (faltan ${horasRestantes.toFixed(1)}hs)`}
             </div>
           )}
 
-          {/* REFUERZO: cantidad pax */}
+          {/* Cantidad pax (REFUERZO) */}
           {tipo === 'REFUERZO_PUESTO' && (
             <div>
               <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cantidad de personas</label>
@@ -1429,21 +1508,20 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
             </div>
           )}
 
-          {/* AGREGADO: selector de guardia */}
+          {/* Guardia (AGREGADO) */}
           {tipo === 'AGREGADO_TURNO' && (
             <div>
               <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Guardia a ampliar</label>
-              {!fecha ? (
-                <p className="text-xs text-slate-400">Seleccioná la fecha primero</p>
-              ) : guardias.length === 0 ? (
-                <p className="text-xs text-slate-400">No hay guardias con turno asignado en esa fecha</p>
-              ) : (
-                <select value={guardiaSelId} onChange={e => setGuardiaSelId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400">
-                  <option value="">— Seleccioná un guardia —</option>
-                  {guardias.map(g => <option key={g.shiftId} value={g.shiftId}>{g.nombre}</option>)}
-                </select>
-              )}
+              {!fecha
+                ? <p className="text-xs text-slate-400">Seleccioná la fecha primero</p>
+                : guardias.length === 0
+                  ? <p className="text-xs text-slate-400">Sin guardias asignados en esa fecha</p>
+                  : <select value={guardiaSelId} onChange={e => setGuardiaSelId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400">
+                      <option value="">— Seleccioná un guardia —</option>
+                      {guardias.map(g => <option key={g.shiftId} value={g.shiftId}>{g.nombre}</option>)}
+                    </select>
+              }
             </div>
           )}
 
@@ -1469,32 +1547,26 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
       {/* Historial */}
       <div>
         <h4 className="text-xs font-black uppercase text-slate-500 mb-3">Mis solicitudes</h4>
-        {solicitudes.length === 0 ? (
-          <p className="text-xs text-slate-400 text-center py-6">Sin solicitudes para este objetivo</p>
-        ) : (
-          <div className="space-y-2">
-            {solicitudes.map(s => (
-              <div key={s.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-start gap-3">
-                <div className="flex-1 min-w-0">
+        {solicitudes.length === 0
+          ? <p className="text-xs text-slate-400 text-center py-6">Sin solicitudes para este objetivo</p>
+          : <div className="space-y-2">
+              {solicitudes.map(s => (
+                <div key={s.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3">
                   <div className="flex items-center gap-2 flex-wrap mb-0.5">
                     <span className="text-xs font-black text-slate-800">
-                      {s.tipo === 'REFUERZO_PUESTO' ? `+${s.cantidadPax ?? 1} refuerzo` : 'Agregado de turno'}
+                      {s.tipo === 'REFUERZO_PUESTO'
+                        ? `${s.positionName || 'Puesto'} — +${s.cantidadPax ?? 1} persona${(s.cantidadPax ?? 1) !== 1 ? 's' : ''}`
+                        : `Agregado · ${s.parentEmpleadoName || 'guardia'}`}
                     </span>
                     {estadoRefuerzo(s.estado)}
                   </div>
-                  <p className="text-[11px] text-slate-500">
-                    {s.fecha} · {s.startTime}–{s.endTime}
-                    {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && ` · ${s.parentEmpleadoName}`}
-                  </p>
+                  <p className="text-[11px] text-slate-500">{s.fecha} · {s.startTime}–{s.endTime}</p>
                   {s.motivo && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{s.motivo}</p>}
-                  {s.motivoRechazo && (
-                    <p className="text-[10px] text-rose-500 mt-0.5">Rechazo: {s.motivoRechazo}</p>
-                  )}
+                  {s.motivoRechazo && <p className="text-[10px] text-rose-500 mt-0.5">Rechazo: {s.motivoRechazo}</p>}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+        }
       </div>
     </div>
   );
@@ -1509,24 +1581,40 @@ function AdminClientSelectorScreen({
   onSelect: (cu: ClienteUser, obs: ObjetivoInfo[]) => void;
   onSignOut: () => void;
 }) {
+  const router = useRouter();
   const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [adminEmpresaId, setAdminEmpresaId] = useState('');
 
   useEffect(() => {
-    getDocs(query(collection(db, 'clients'), orderBy('name')))
-      .then(snap => setClients(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+    if (!router.isReady) return;
+    const paramEmpId = String(router.query.empresaId ?? '').trim();
+    if (paramEmpId) setAdminEmpresaId(paramEmpId);
+
+    const q = paramEmpId
+      ? query(collection(db, 'clients'), where('empresaId', '==', paramEmpId), orderBy('name'))
+      : query(collection(db, 'clients'), orderBy('name'));
+
+    getDocs(q)
+      .then(snap => {
+        const seen = new Set<string>();
+        setClients(snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as any))
+          .filter(c => seen.has(c.id) ? false : !!seen.add(c.id)));
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [router.isReady, router.query.empresaId, user.uid]);
 
   const filtered = clients.filter(c =>
     !search || (c.name || '').toLowerCase().includes(search.toLowerCase())
   );
 
   const handleSelect = (c: any) => {
+    const seenObs = new Set<string>();
     const obs: ObjetivoInfo[] = (c.objetivos || [])
-      .filter((o: any) => o.id && o.name)
+      .filter((o: any) => o.id && o.name && !seenObs.has(o.id) && seenObs.add(o.id))
       .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
     const cu: ClienteUser = {
       uid: user.uid,
@@ -1534,6 +1622,7 @@ function AdminClientSelectorScreen({
       clientName: c.name,
       nombre: user.displayName || user.email || 'Administrador',
       email: user.email || '',
+      empresaId: (c as any).empresaId || adminEmpresaId || '',
     };
     onSelect(cu, obs);
   };
@@ -1651,8 +1740,16 @@ export default function ClientePortal() {
     const clientSnap = await getDoc(doc(db, 'clients', cu.clientId));
     if (!clientSnap.exists()) return false;
     const clientData = clientSnap.data() as any;
+
+    // Propagar empresaId desde el doc clients si no viene en client_users
+    if (!cu.empresaId && clientData.empresaId) {
+      cu.empresaId = clientData.empresaId;
+    }
+
+    // Deduplicar objetivos por id
+    const seenObs = new Set<string>();
     let obs: ObjetivoInfo[] = (clientData.objetivos || [])
-      .filter((o: any) => o.id && o.name)
+      .filter((o: any) => o.id && o.name && !seenObs.has(o.id) && seenObs.add(o.id))
       .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
     if (cu.objectiveIds && cu.objectiveIds.length > 0) {
       obs = obs.filter(o => cu.objectiveIds!.includes(o.id));

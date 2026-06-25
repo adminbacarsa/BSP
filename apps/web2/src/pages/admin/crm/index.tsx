@@ -332,6 +332,7 @@ export default function CRMPage() {
           nombre: portalForm.nombre.trim(),
           email: portalForm.email.trim(),
           objectiveIds: portalObjectiveIds,
+          empresaId: empresaId || '',
         });
         toast.success('Acceso enviado por email al cliente');
       }

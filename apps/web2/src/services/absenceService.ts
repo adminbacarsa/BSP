@@ -1,6 +1,6 @@
 
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, where } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, where, onSnapshot } from 'firebase/firestore';
 import { empresaScopedQuery, deleteDocForEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 import { validateAbsenceDateRange, toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
 
@@ -80,5 +80,25 @@ export const absenceService = {
       return deleteDocForEmpresa('ausencias', id, opts.empresaId, opts.migracionCompleta);
     }
     return deleteDoc(doc(db, 'ausencias', id));
+  },
+
+  subscribePendientes(empresaId: string, cb: (items: Absence[]) => void) {
+    const q = query(
+      collection(db, 'ausencias'),
+      where('empresaId', '==', empresaId),
+      where('status', '==', 'Pendiente'),
+      orderBy('startDate', 'desc'),
+    );
+    return onSnapshot(q, snap => cb(
+      snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id, ...data,
+          startDate: toDateStr(data.startDate),
+          endDate: toDateStr(data.endDate),
+          status: data.status || 'Pendiente',
+        } as Absence;
+      })
+    ));
   },
 };

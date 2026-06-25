@@ -1711,12 +1711,13 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
     throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
   }
 
-  const { clientId, clientName, nombre, email, objectiveIds } = data as {
+  const { clientId, clientName, nombre, email, objectiveIds, empresaId } = data as {
     clientId: string;
     clientName: string;
     nombre: string;
     email: string;
     objectiveIds?: string[];
+    empresaId?: string;
   };
 
   if (!clientId || !clientName || !nombre || !email) {
@@ -1776,6 +1777,15 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
   // Crear o actualizar documento client_users
   const existingSnap = await db.collection('client_users').where('uid', '==', uid).get();
 
+  // Intentar obtener empresaId del doc clients si no vino en el payload
+  let resolvedEmpresaId = empresaId || '';
+  if (!resolvedEmpresaId) {
+    try {
+      const clientDoc = await db.collection('clients').doc(clientId).get();
+      if (clientDoc.exists) resolvedEmpresaId = clientDoc.data()?.empresaId || '';
+    } catch { /* ignore */ }
+  }
+
   const clientUserData: Record<string, any> = {
     uid,
     clientId,
@@ -1784,6 +1794,7 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
     email: normalizedEmail,
     activo: true,
     objectiveIds: objectiveIds || [],
+    ...(resolvedEmpresaId ? { empresaId: resolvedEmpresaId } : {}),
     portalInvite: {
       sent: true,
       sentAt: admin.firestore.FieldValue.serverTimestamp(),

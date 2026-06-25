@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
+import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
+import { absenceService } from '@/services/absenceService';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -295,7 +297,25 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { canReadModule } = useAuth();
   const { compactSidebar } = usePageHeader();
-  const { empresa } = useEmpresa();
+  const { empresa, empresaId } = useEmpresa();
+  const [pendientesCount, setPendientesCount] = useState(0);
+  const canViewSupervision = canReadModule('SUPERVISION');
+
+  useEffect(() => {
+    if (!empresaId || !canViewSupervision) return;
+    let refuerzos = 0;
+    let ausenciasPend = 0;
+    const update = () => setPendientesCount(refuerzos + ausenciasPend);
+    const unsubR = solicitudRefuerzoService.subscribeByEmpresa(empresaId, items => {
+      refuerzos = items.filter(s => s.estado === 'PENDIENTE').length;
+      update();
+    });
+    const unsubA = absenceService.subscribePendientes(empresaId, items => {
+      ausenciasPend = items.length;
+      update();
+    });
+    return () => { unsubR(); unsubA(); };
+  }, [empresaId, canViewSupervision]);
 
   const sidebarOpen = !compactSidebar && (isPinned || isHovered);
 
@@ -491,10 +511,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {canReadModule('SUPERVISION') && (
             <Link href="/admin/supervision" prefetch={false} title="Supervisión"
-              className={getLinkHoverClass('/admin/supervision')}
+              className={`${getLinkHoverClass('/admin/supervision')} relative`}
               style={getLinkStyle('/admin/supervision')}>
               <Shield size={18} className="shrink-0" />
-              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Supervisión</span>}
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Supervisión</span>}
+              {pendientesCount > 0 && (
+                <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center`}>
+                  {pendientesCount > 99 ? '99+' : pendientesCount}
+                </span>
+              )}
             </Link>
           )}
 
