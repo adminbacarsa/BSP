@@ -354,13 +354,31 @@ export default function BackupTab() {
     if (loadingLocal) return;
     setLastResult(null);
     setLoadingLocal(true);
-    const isEmpresaMode = localRestoreMode === 'empresa' && !!empresaId;
-    setProgress({ done: 0, total: 0, phase: `Subiendo ${file.name}…` });
+    let isEmpresaMode = localRestoreMode === 'empresa' && !!empresaId;
+    setProgress({ done: 0, total: 0, phase: `Validando backup…` });
     await new Promise<void>(r => requestAnimationFrame(() => r()));
     try {
       if (isEmpresaMode && !empresaId) {
         throw new Error('Seleccioná una empresa en el selector superior antes de importar.');
       }
+
+      // Pre-validación: si el archivo es manejable, detectar empresa del backup
+      if (isEmpresaMode && file.size < 30 * 1024 * 1024) {
+        try {
+          const text = await file.text();
+          const backup = JSON.parse(text) as Record<string, unknown>;
+          const meta = (backup._meta ?? {}) as Record<string, unknown>;
+          const backupEmpId = String(meta.empresaId ?? '').trim();
+          const detected = detectDominantEmpresaInPayload(backup);
+          const sourceEmp = backupEmpId || detected.empresaId;
+          if (sourceEmp && sourceEmp.toLowerCase() !== (empresaId || '').toLowerCase()) {
+            // Backup de otra empresa: cambiar automáticamente a modo completo
+            isEmpresaMode = false;
+            toast.info(`Backup de empresa «${sourceEmp}» importado en modo plataforma completa.`);
+          }
+        } catch { /* si no se puede parsear, continuar normalmente */ }
+      }
+
       await assertBridgeReachable();
 
       const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
@@ -414,7 +432,12 @@ export default function BackupTab() {
 
       const written = Number(data.written ?? 0);
       if (written === 0) {
-        throw new Error('Importación terminó sin documentos. Verificá empresa destino y el contenido del backup.');
+        throw new Error(
+          'Importación terminó sin documentos. ' +
+          (isEmpresaMode
+            ? `El backup puede pertenecer a otra empresa. Usá el botón "Plataforma completa" e intentá de nuevo.`
+            : 'Verificá que el backup tenga documentos válidos.'),
+        );
       }
 
       const version: LoadedVersion = {
