@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
@@ -299,7 +300,9 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
   const [pendientesCount, setPendientesCount] = useState(0);
+  const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
   const canViewSupervision = canReadModule('SUPERVISION');
+  const canViewPlanning = canReadModule('PLANNING');
 
   useEffect(() => {
     if (!empresaId || !canViewSupervision) return;
@@ -316,6 +319,18 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     });
     return () => { unsubR(); unsubA(); };
   }, [empresaId, canViewSupervision]);
+
+  useEffect(() => {
+    if (!empresaId || !canViewPlanning) return;
+    const q = query(
+      collection(db, 'novedades'),
+      where('empresaId', '==', empresaId),
+      where('type', '==', 'REFUERZO_CLIENTE_PENDIENTE'),
+      where('status', '==', 'pending'),
+    );
+    const unsub = onSnapshot(q, snap => setRfzPlanifCount(snap.size), () => {});
+    return unsub;
+  }, [empresaId, canViewPlanning]);
 
   const sidebarOpen = !compactSidebar && (isPinned || isHovered);
 
@@ -441,10 +456,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {canReadModule('PLANNING') && (
             <Link href="/admin/planificacion" prefetch={false} title="Planificador"
-              className={getLinkHoverClass('/admin/planificacion')}
+              className={`${getLinkHoverClass('/admin/planificacion')} relative`}
               style={getLinkStyle('/admin/planificacion')}>
               <Calendar size={18} className="shrink-0" />
-              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Planificador</span>}
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Planificador</span>}
+              {rfzPlanifCount > 0 && (
+                <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center`}>
+                  {rfzPlanifCount > 99 ? '99+' : rfzPlanifCount}
+                </span>
+              )}
             </Link>
           )}
 

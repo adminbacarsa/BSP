@@ -6,7 +6,7 @@ import {
 
 export type SolicitudTipo   = 'REFUERZO_PUESTO' | 'AGREGADO_TURNO';
 export type SolicitudEstado = 'PENDIENTE' | 'APROBADA' | 'RECHAZADA' | 'ASIGNADA' | 'COMPLETADA' | 'CANCELADA';
-export type SolicitudOrigen = 'PORTAL_CLIENTE' | 'MANUAL';
+export type SolicitudOrigen = 'PORTAL_CLIENTE' | 'MANUAL' | 'SUPERVISOR_MANUAL';
 
 export interface SolicitudRefuerzo {
   id?: string;
@@ -55,6 +55,7 @@ export interface SolicitudRefuerzo {
   guardiaOriginalId?: string;
   guardiaOriginalNombre?: string;
 
+  canalSolicitud?: 'TELEFONO' | 'EMAIL' | 'PRESENCIAL';
   horasTotales?: number;
 
   createdAt?: Timestamp | string;

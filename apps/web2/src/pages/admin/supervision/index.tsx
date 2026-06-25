@@ -209,10 +209,28 @@ export default function SupervisionPage() {
   const [solicitudes, setSolicitudes] = useState<SolicitudRefuerzo[]>([]);
   const [ausencias, setAusencias] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'PENDIENTE' | 'TODAS'>('PENDIENTE');
+  const [tab, setTab] = useState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS'>('PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [supervisorObjetivos, setSupervisorObjetivos] = useState<string[]>([]);
+
+  // Formulario manual supervisor
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [clientes, setClientes] = useState<{ id: string; name: string; objetivos: { id: string; name: string }[] }[]>([]);
+  const [mTipo, setMTipo]   = useState<'REFUERZO_PUESTO' | 'AGREGADO_TURNO'>('REFUERZO_PUESTO');
+  const [mClienteId, setMClienteId] = useState('');
+  const [mObjetivoId, setMObjetivoId] = useState('');
+  const [mFecha, setMFecha] = useState('');
+  const [mStart, setMStart] = useState('');
+  const [mEnd, setMEnd]     = useState('');
+  const [mMotivo, setMMotivo]     = useState('');
+  const [mSolicitante, setMSolicitante] = useState('');
+  const [mCanal, setMCanal] = useState<'TELEFONO' | 'EMAIL' | 'PRESENCIAL'>('TELEFONO');
+  const [mPax, setMPax]     = useState(1);
+  const [mPosicionNombre, setMPosicionNombre] = useState('');
+  const [mGuardiaAAmpliar, setMGuardiaAAmpliar] = useState('');
+  const [ausenciasFecha, setAusenciasFecha] = useState('');
 
   // Cargar objetivos asignados al supervisor actual
   useEffect(() => {
@@ -221,6 +239,24 @@ export default function SupervisionPage() {
       if (snap.exists()) setSupervisorObjetivos(snap.data().objetivosAsignados || []);
     });
   }, [user?.uid, isSuperAdmin]);
+
+  // Cargar clientes para el form manual
+  useEffect(() => {
+    if (!empresaId || !showManualForm) return;
+    getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name'))).then(snap => {
+      setClientes(snap.docs.map(d => ({
+        id: d.id,
+        name: d.data().name || d.data().fantasyName || d.id,
+        objetivos: (d.data().objetivos || []).map((o: any) => ({ id: o.id, name: o.name || o.id })),
+      })));
+    });
+  }, [empresaId, showManualForm]);
+
+  // Limpiar estado al cambiar empresa para evitar flash de datos anteriores
+  useEffect(() => {
+    setSolicitudes([]);
+    setAusencias([]);
+  }, [empresaId]);
 
   // Suscripciones en tiempo real
   useEffect(() => {
@@ -373,6 +409,105 @@ export default function SupervisionPage() {
     setAprobarTarget(null);
   }, [aprobarTarget, user]);
 
+  const resetManualForm = () => {
+    setMTipo('REFUERZO_PUESTO'); setMClienteId(''); setMObjetivoId('');
+    setMFecha(''); setMStart(''); setMEnd(''); setMMotivo('');
+    setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1);
+    setMPosicionNombre(''); setMGuardiaAAmpliar('');
+    setShowManualForm(false);
+  };
+
+  const handleCrearManual = async () => {
+    if (!user || !empresaId || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()) return;
+    setManualSaving(true);
+    try {
+      const cli = clientes.find(c => c.id === mClienteId);
+      const obj = cli?.objetivos.find(o => o.id === mObjetivoId);
+      const isOvernight = mEnd < mStart;
+      const nextDay = (d: string) => { const dt = new Date(d + 'T00:00:00'); dt.setDate(dt.getDate() + 1); return dt.toISOString().split('T')[0]; };
+      const fechaFin = isOvernight ? nextDay(mFecha) : mFecha;
+      const startISO = `${mFecha}T${mStart}:00`;
+      const endISO   = `${fechaFin}T${mEnd}:00`;
+
+      const isAgregado = mTipo === 'AGREGADO_TURNO';
+      const base = {
+        empresaId,
+        objectiveId:   mObjetivoId,
+        objectiveName: obj?.name || mObjetivoId,
+        clientId:      mClienteId,
+        clientName:    cli?.name || mClienteId,
+        fecha:         mFecha,
+        startTime:     startISO,
+        endTime:       endISO,
+        origin:        'CLIENT_REQUEST',
+        code:          isAgregado ? 'TURA' : 'RFZ',
+        isPresent: false, isAbsent: false, isCompleted: false, draft: false,
+      };
+      // Crear los turnos vacantes directamente (urgente, ya pasó el corte de planificación)
+      const n = isAgregado ? 1 : mPax;
+      const turnoIds: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const turnoExtra: Record<string, unknown> = { ...base, employeeId: 'VACANTE' };
+        if (!isAgregado && mPosicionNombre.trim()) turnoExtra.positionName = mPosicionNombre.trim();
+        if (isAgregado && mGuardiaAAmpliar.trim())  turnoExtra.parentEmpleadoName = mGuardiaAAmpliar.trim();
+        const r = await addDoc(collection(db, 'turnos'), turnoExtra);
+        turnoIds.push(r.id);
+      }
+      // Guardar la solicitud como ya aprobada
+      await solicitudRefuerzoService.create({
+        empresaId,
+        clientId:            mClienteId,
+        clientName:          cli?.name || mClienteId,
+        objectiveId:         mObjetivoId,
+        objectiveName:       obj?.name || mObjetivoId,
+        tipo:                mTipo,
+        fecha:               mFecha,
+        startTime:           mStart,
+        endTime:             mEnd,
+        motivo:              mMotivo.trim(),
+        origen:              'SUPERVISOR_MANUAL' as const,
+        estado:              'APROBADA' as const,
+        solicitadoPorUid:    user!.uid,
+        solicitadoPorNombre: mSolicitante.trim() || 'Sin especificar',
+        canalSolicitud:      mCanal,
+        solicitadoAt:        Timestamp.now(),
+        autorizadoPorUid:    user!.uid,
+        autorizadoPorNombre: user!.displayName || user!.email || '',
+        autorizadoAt:        Timestamp.now(),
+        turnoIds,
+        ...(!isAgregado ? { cantidadPax: mPax, positionName: mPosicionNombre.trim() || undefined } : {}),
+        ...(isAgregado  ? { parentEmpleadoName: mGuardiaAAmpliar.trim() || undefined } : {}),
+      });
+      // Novedad para OPERACIONES (vacante urgente, no alcanzó el plazo de planificación)
+      await addDoc(collection(db, 'novedades'), {
+        type:           'VACANTE_OPERATIVA',
+        subtype:        isAgregado ? 'TURA' : 'RFZ',
+        status:         'pending',
+        empresaId,
+        objectiveId:    mObjetivoId,
+        objectiveName:  obj?.name || mObjetivoId,
+        clientId:       mClienteId,
+        clientName:     cli?.name || mClienteId,
+        fecha:          mFecha,
+        startTime:      mStart,
+        endTime:        mEnd,
+        cantidadPax:    isAgregado ? 1 : mPax,
+        positionName:   !isAgregado && mPosicionNombre.trim() ? mPosicionNombre.trim() : null,
+        empleadoNombre: isAgregado && mGuardiaAAmpliar.trim() ? mGuardiaAAmpliar.trim() : null,
+        solicitadoPorNombre: mSolicitante.trim() || null,
+        canalSolicitud: mCanal,
+        turnoIds,
+        createdBy:      user.displayName || user.email || '',
+        createdAt:      Timestamp.now(),
+        origin:         'SUPERVISOR_MANUAL',
+      });
+      toast.success(`${n} turno${n > 1 ? 's' : ''} ${base.code} creado${n > 1 ? 's' : ''} como vacante operativa`);
+      resetManualForm();
+    } catch (e: any) {
+      toast.error(`Error: ${e?.message || 'No se pudo crear'}`);
+    } finally { setManualSaving(false); }
+  };
+
   const handleRechazar = useCallback(async (motivo: string) => {
     if (!rechazarTarget?.id || !user) return;
     const p = solicitudRefuerzoService.update(rechazarTarget.id, {
@@ -413,10 +548,14 @@ export default function SupervisionPage() {
               </p>
             </div>
           </div>
+          <button onClick={() => setShowManualForm(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-xs uppercase shadow transition-colors">
+            <Plus size={14}/> Cargar manual
+          </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {(['PENDIENTE', 'TODAS'] as const).map(t => (
             <button
               key={t}
@@ -428,108 +567,136 @@ export default function SupervisionPage() {
               {t === 'PENDIENTE' ? `Pendientes (${pendientes.length})` : `Todas (${solicitudes.length})`}
             </button>
           ))}
+          <button
+            onClick={() => setTab('AUSENCIAS')}
+            className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors flex items-center gap-1.5 ${
+              tab === 'AUSENCIAS' ? 'bg-amber-600 text-white' : 'bg-white dark:bg-slate-800 border text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Users size={12}/> Ausencias ({ausencias.length})
+          </button>
         </div>
 
-        {/* Lista */}
-        {loading ? (
-          <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-slate-400" size={28}/></div>
-        ) : visibles.length === 0 ? (
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
-            <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
-            <p className="text-slate-500 font-medium text-sm">
-              {tab === 'PENDIENTE' ? 'No hay solicitudes pendientes' : 'No hay solicitudes registradas'}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {visibles.map(s => (
-              <div key={s.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      {tipoBadge(s.tipo)}
-                      {estadoBadge(s.estado)}
-                      <span className="text-[9px] text-slate-400 font-mono">{fmtTs(s.solicitadoAt)}</span>
-                    </div>
-                    <p className="font-black text-sm text-slate-800 dark:text-white truncate">{s.objectiveName}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">{s.clientName}</p>
-                    <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                      <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                        📅 {s.fecha} · {s.startTime}–{s.endTime}
-                      </span>
-                      {s.tipo === 'REFUERZO_PUESTO' && (
-                        <>
-                          {s.cantidadPax && <span className="text-xs text-orange-600 font-bold">+{s.cantidadPax} pax</span>}
-                          {(s as any).positionName && (
-                            <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                              📌 {(s as any).positionName}
-                            </span>
-                          )}
-                        </>
+        {/* ── Tab Refuerzos / Solicitudes ── */}
+        {tab !== 'AUSENCIAS' && (
+          loading ? (
+            <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-slate-400" size={28}/></div>
+          ) : visibles.length === 0 ? (
+            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
+              <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
+              <p className="text-slate-500 font-medium text-sm">
+                {tab === 'PENDIENTE' ? 'No hay solicitudes pendientes' : 'No hay solicitudes registradas'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {visibles.map(s => (
+                <div key={s.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        {tipoBadge(s.tipo)}
+                        {estadoBadge(s.estado)}
+                        <span className="text-[9px] text-slate-400 font-mono">{fmtTs(s.solicitadoAt)}</span>
+                      </div>
+                      <p className="font-black text-sm text-slate-800 dark:text-white truncate">{s.objectiveName}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{s.clientName}</p>
+                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                          📅 {s.fecha} · {s.startTime}–{s.endTime}
+                        </span>
+                        {s.tipo === 'REFUERZO_PUESTO' && (
+                          <>
+                            {s.cantidadPax && <span className="text-xs text-orange-600 font-bold">+{s.cantidadPax} pax</span>}
+                            {(s as any).positionName && (
+                              <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
+                                📌 {(s as any).positionName}
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && (
+                          <span className="text-xs text-violet-600 font-bold flex items-center gap-1"><User size={10}/>{s.parentEmpleadoName}</span>
+                        )}
+                      </div>
+                      {s.solicitadoPorNombre && (
+                        <p className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
+                          <User size={10} className="shrink-0"/>
+                          Solicitado por <span className="font-bold text-slate-600 dark:text-slate-300 ml-1">{s.solicitadoPorNombre}</span>
+                        </p>
                       )}
-                      {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && (
-                        <span className="text-xs text-violet-600 font-bold flex items-center gap-1"><User size={10}/>{s.parentEmpleadoName}</span>
+                      {s.motivo && (
+                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1">
+                          <MessageSquare size={10} className="mt-0.5 shrink-0"/>
+                          <span className="italic">"{s.motivo}"</span>
+                        </p>
+                      )}
+                      {s.motivoRechazo && (
+                        <p className="mt-1 text-[11px] text-rose-500 flex items-start gap-1">
+                          <XCircle size={10} className="mt-0.5 shrink-0"/>
+                          <span>{s.motivoRechazo}</span>
+                        </p>
                       )}
                     </div>
-                    {s.solicitadoPorNombre && (
-                      <p className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
-                        <User size={10} className="shrink-0"/>
-                        Solicitado por <span className="font-bold text-slate-600 dark:text-slate-300 ml-1">{s.solicitadoPorNombre}</span>
-                      </p>
+                    {s.estado === 'PENDIENTE' && (
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          onClick={() => setRechazarTarget(s)}
+                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center gap-1"
+                        ><XCircle size={13}/> Rechazar</button>
+                        <button
+                          onClick={() => setAprobarTarget(s)}
+                          className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl font-black text-xs transition-colors flex items-center gap-1"
+                        ><CheckCircle size={13}/> Aprobar</button>
+                      </div>
                     )}
-                    {s.motivo && (
-                      <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1">
-                        <MessageSquare size={10} className="mt-0.5 shrink-0"/>
-                        <span className="italic">"{s.motivo}"</span>
-                      </p>
-                    )}
-                    {s.motivoRechazo && (
-                      <p className="mt-1 text-[11px] text-rose-500 flex items-start gap-1">
-                        <XCircle size={10} className="mt-0.5 shrink-0"/>
-                        <span>{s.motivoRechazo}</span>
-                      </p>
+                    {s.estado === 'APROBADA' && (
+                      <span className="text-[10px] text-teal-600 font-bold shrink-0">✓ {s.autorizadoPorNombre}</span>
                     )}
                   </div>
-
-                  {/* Acciones — solo para PENDIENTE */}
-                  {s.estado === 'PENDIENTE' && (
-                    <div className="flex gap-2 shrink-0">
-                      <button
-                        onClick={() => setRechazarTarget(s)}
-                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center gap-1"
-                      ><XCircle size={13}/> Rechazar</button>
-                      <button
-                        onClick={() => setAprobarTarget(s)}
-                        className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl font-black text-xs transition-colors flex items-center gap-1"
-                      ><CheckCircle size={13}/> Aprobar</button>
-                    </div>
-                  )}
-                  {s.estado === 'APROBADA' && (
-                    <span className="text-[10px] text-teal-600 font-bold shrink-0">✓ {s.autorizadoPorNombre}</span>
-                  )}
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )
         )}
 
-        {/* ── Ausencias / Licencias pendientes ── */}
-        {ausencias.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Users size={15} className="text-amber-500"/>
-              <h2 className="text-xs font-black uppercase text-slate-600 dark:text-slate-300 tracking-widest">
-                Ausencias / Licencias pendientes ({ausencias.length})
-              </h2>
+        {/* ── Tab Ausencias ── */}
+        {tab === 'AUSENCIAS' && (() => {
+          const ausFiltered = ausenciasFecha
+            ? ausencias.filter(a => a.startDate <= ausenciasFecha && a.endDate >= ausenciasFecha)
+            : ausencias;
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <label className="text-[10px] font-black uppercase text-slate-500">Filtrar por día</label>
+                <input type="date" value={ausenciasFecha} onChange={e => setAusenciasFecha(e.target.value)}
+                  className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-amber-400"/>
+                {ausenciasFecha && (
+                  <button onClick={() => setAusenciasFecha('')}
+                    className="text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
+                    <X size={11}/> Limpiar
+                  </button>
+                )}
+                <span className="text-[10px] text-slate-400 font-medium ml-auto">{ausFiltered.length} resultado{ausFiltered.length !== 1 ? 's' : ''}</span>
+              </div>
+              {ausFiltered.length === 0 ? (
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
+                  <Users size={32} className="mx-auto text-slate-300 mb-3"/>
+                  <p className="text-slate-500 font-medium text-sm">
+                    {ausenciasFecha ? `Sin ausencias pendientes para ${ausenciasFecha}` : 'Sin ausencias pendientes'}
+                  </p>
+                </div>
+              ) : (
+                ausFiltered.map(a => (
+                  <AusenciaCard key={a.id} ausencia={a}
+                    onAprobar={() => handleAprobarAusencia(a)}
+                    onRechazar={motivo => handleRechazarAusencia(a, motivo)}
+                  />
+                ))
+              )}
             </div>
-            {ausencias.map(a => (
-              <AusenciaCard key={a.id} ausencia={a}
-                onAprobar={() => handleAprobarAusencia(a)}
-                onRechazar={motivo => handleRechazarAusencia(a, motivo)}
-              />
-            ))}
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {rechazarTarget && (
@@ -545,6 +712,138 @@ export default function SupervisionPage() {
           onClose={() => setAprobarTarget(null)}
           onConfirm={handleAprobar}
         />
+      )}
+
+      {/* ── Modal carga manual supervisor ── */}
+      {showManualForm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md" onClick={() => !manualSaving && resetManualForm()}>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl border border-slate-100 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
+                <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-lg text-[10px]">Manual</span>
+                Cargar RFZ / TURA
+              </h3>
+              <button onClick={resetManualForm} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+            </div>
+            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
+              <AlertCircle size={12}/> Carga directa como vacante operativa — Operaciones recibe la notificación
+            </p>
+
+            {/* Tipo */}
+            <div className="flex gap-2">
+              {(['REFUERZO_PUESTO', 'AGREGADO_TURNO'] as const).map(t => (
+                <button key={t} type="button" onClick={() => setMTipo(t)}
+                  className={`flex-1 py-2 rounded-xl text-xs font-black uppercase border transition-colors ${mTipo === t ? 'bg-red-600 text-white border-red-600' : 'border-slate-200 text-slate-500 hover:border-red-300'}`}>
+                  {t === 'REFUERZO_PUESTO' ? 'RFZ Refuerzo' : 'TURA Agregado'}
+                </button>
+              ))}
+            </div>
+
+            {/* Cliente */}
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cliente</label>
+              <select value={mClienteId} onChange={e => { setMClienteId(e.target.value); setMObjetivoId(''); }}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400">
+                <option value="">— Seleccioná un cliente —</option>
+                {clientes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+
+            {/* Objetivo */}
+            {mClienteId && (
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Objetivo</label>
+                <select value={mObjetivoId} onChange={e => setMObjetivoId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400">
+                  <option value="">— Seleccioná un objetivo —</option>
+                  {(clientes.find(c => c.id === mClienteId)?.objetivos || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Fecha y horarios */}
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
+                <input type="date" value={mFecha} onChange={e => setMFecha(e.target.value)}
+                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
+                <input type="time" value={mStart} onChange={e => setMStart(e.target.value)}
+                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
+                <input type="time" value={mEnd} onChange={e => setMEnd(e.target.value)}
+                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+              </div>
+            </div>
+
+            {/* Campos específicos por tipo */}
+            {mTipo === 'REFUERZO_PUESTO' && (
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Puesto / posición</label>
+                  <input type="text" placeholder="Ej: Portería norte, Acceso vehicular…" value={mPosicionNombre} onChange={e => setMPosicionNombre(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cantidad</label>
+                  <input type="number" min={1} max={20} value={mPax} onChange={e => setMPax(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                </div>
+              </div>
+            )}
+            {mTipo === 'AGREGADO_TURNO' && (
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Guardia a ampliar</label>
+                <input type="text" placeholder="Nombre del guardia cuyo turno se extiende" value={mGuardiaAAmpliar} onChange={e => setMGuardiaAAmpliar(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                <p className="text-[9px] text-slate-400 mt-1">El horario de extensión se indica en los campos Inicio / Fin de arriba</p>
+              </div>
+            )}
+
+            {/* Solicitante y canal */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Solicitado por</label>
+                <input type="text" placeholder="Nombre del contacto cliente" value={mSolicitante} onChange={e => setMSolicitante(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Canal</label>
+                <select value={mCanal} onChange={e => setMCanal(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400">
+                  <option value="TELEFONO">Teléfono</option>
+                  <option value="EMAIL">Email</option>
+                  <option value="PRESENCIAL">Presencial</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Motivo */}
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Motivo</label>
+              <textarea rows={2} placeholder="Descripción del pedido..." value={mMotivo} onChange={e => setMMotivo(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold resize-none focus:outline-none focus:border-red-400"/>
+            </div>
+
+            <div className="flex gap-2">
+              <button type="button" onClick={resetManualForm} disabled={manualSaving}
+                className="flex-1 py-2.5 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">
+                Cancelar
+              </button>
+              <button type="button"
+                disabled={manualSaving || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()}
+                onClick={handleCrearManual}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
+                {manualSaving ? <RefreshCw size={14} className="animate-spin"/> : <Plus size={14}/>}
+                Crear vacante operativa
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </DashboardLayout>
   );

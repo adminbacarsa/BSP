@@ -1260,6 +1260,7 @@ interface SlaPosition { id: string; name: string; shifts: { code: string; name: 
 function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clienteUser: ClienteUser }) {
   const [tipo, setTipo] = useState<'REFUERZO_PUESTO' | 'AGREGADO_TURNO'>('REFUERZO_PUESTO');
   const [fecha, setFecha] = useState('');
+  const [fechasExtra, setFechasExtra] = useState<string[]>([]);  // fechas adicionales para TURA pre-programado
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [motivo, setMotivo] = useState('');
@@ -1360,8 +1361,10 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
   }, [selShift?.code, selPosId]);
 
   const shiftStartMs  = fecha && startTime ? new Date(`${fecha}T${startTime}`).getTime() : 0;
+  // Corte: el cliente puede enviar hasta 8hs antes de las 00:00 del día del turno (= 16:00 del día anterior)
+  const deadlineMs = fecha ? new Date(`${fecha}T00:00:00`).getTime() - MIN_HORAS_ANTICIPACION * 3600000 : 0;
   const horasRestantes = shiftStartMs ? (shiftStartMs - Date.now()) / 3600000 : 0;
-  const anticipacionOk = horasRestantes >= MIN_HORAS_ANTICIPACION;
+  const anticipacionOk = fecha ? Date.now() <= deadlineMs : false;
   const guardiaSelected = guardias.find(g => g.shiftId === guardiaSelId);
 
   const canSubmit = fecha && startTime && endTime && motivo.trim() && anticipacionOk &&
@@ -1370,7 +1373,7 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
       : !!guardiaSelId);
 
   const resetForm = () => {
-    setFecha(''); setStartTime(''); setEndTime(''); setMotivo('');
+    setFecha(''); setFechasExtra([]); setStartTime(''); setEndTime(''); setMotivo('');
     setCantidadPax(1); setGuardiaSelId(''); setSelPosId(''); setSelShiftCode('');
     setShowForm(false);
   };
@@ -1379,23 +1382,27 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
     if (!canSubmit) return;
     setSaving(true);
     try {
-      await solicitudRefuerzoService.create({
+      const base = {
         empresaId:           clienteUser.empresaId || '',
         clientId:            clienteUser.clientId,
         clientName:          clienteUser.clientName,
         objectiveId:         objetivo.id,
         objectiveName:       objetivo.name,
-        tipo, fecha, startTime, endTime, motivo,
-        origen:              'PORTAL_CLIENTE',
-        estado:              'PENDIENTE',
+        tipo, startTime, endTime, motivo,
+        origen:              'PORTAL_CLIENTE' as const,
+        estado:              'PENDIENTE' as const,
         solicitadoPorUid:    clienteUser.uid,
         solicitadoPorNombre: clienteUser.nombre,
         solicitadoAt:        Timestamp.now(),
-        ...(tipo === 'REFUERZO_PUESTO'
-          ? { cantidadPax, positionId: selPosId || undefined, positionName: selPosition?.name }
-          : { parentShiftId: guardiaSelected?.shiftId, parentEmpleadoId: guardiaSelected?.empleadoId, parentEmpleadoName: guardiaSelected?.nombre }
-        ),
-      });
+      };
+      const extras = tipo === 'REFUERZO_PUESTO'
+        ? { cantidadPax, positionId: selPosId || undefined, positionName: selPosition?.name }
+        : { parentShiftId: guardiaSelected?.shiftId, parentEmpleadoId: guardiaSelected?.empleadoId, parentEmpleadoName: guardiaSelected?.nombre };
+      // Para TURA pre-programado: crear una solicitud por cada fecha seleccionada
+      const fechasAEnviar = tipo === 'AGREGADO_TURNO' && fechasExtra.length > 0
+        ? [fecha, ...fechasExtra]
+        : [fecha];
+      await Promise.all(fechasAEnviar.map(f => solicitudRefuerzoService.create({ ...base, fecha: f, ...extras })));
       resetForm();
     } catch (e: any) {
       alert(`Error: ${e?.message || 'No se pudo enviar'}`);
@@ -1464,10 +1471,40 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
 
           {/* Fecha */}
           <div>
-            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
+            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+              {tipo === 'AGREGADO_TURNO' ? 'Primera fecha' : 'Fecha'}
+            </label>
             <input type="date" min={today} value={fecha} onChange={e => setFecha(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"/>
           </div>
+
+          {/* Fechas adicionales para TURA pre-programado */}
+          {tipo === 'AGREGADO_TURNO' && (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-500 block">Fechas adicionales (opcional)</label>
+              {fechasExtra.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {fechasExtra.map(f => (
+                    <span key={f} className="flex items-center gap-1 text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg border border-indigo-200">
+                      {f}
+                      <button type="button" onClick={() => setFechasExtra(prev => prev.filter(x => x !== f))}
+                        className="text-indigo-400 hover:text-rose-600 ml-0.5">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <input type="date" min={today}
+                value=""
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v && v !== fecha && !fechasExtra.includes(v)) setFechasExtra(prev => [...prev, v]);
+                  e.target.value = '';
+                }}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"
+                placeholder="Agregar otra fecha"/>
+              <p className="text-[9px] text-slate-400">Se creará una solicitud por cada fecha seleccionada</p>
+            </div>
+          )}
 
           {/* Horarios — manual si no hay SLA o para AGREGADO */}
           {(tipo === 'AGREGADO_TURNO' || slaPositions.length === 0 || !selShiftCode) && (
@@ -1492,10 +1529,10 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
           )}
 
           {/* Alerta anticipación */}
-          {fecha && startTime && !anticipacionOk && (
+          {fecha && !anticipacionOk && (
             <div className="flex items-center gap-2 px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold">
-              <AlertCircle size={14}/> Mínimo {MIN_HORAS_ANTICIPACION}hs de anticipación
-              {horasRestantes > 0 && ` (faltan ${horasRestantes.toFixed(1)}hs)`}
+              <AlertCircle size={14}/>
+              Plazo vencido — las solicitudes deben enviarse antes de las 16:00 del día anterior al turno
             </div>
           )}
 
