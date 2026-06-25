@@ -55,7 +55,7 @@ export interface SolicitudRefuerzo {
   guardiaOriginalId?: string;
   guardiaOriginalNombre?: string;
 
-  canalSolicitud?: 'TELEFONO' | 'EMAIL' | 'PRESENCIAL';
+  canalSolicitud?: 'TELEFONO' | 'WHATSAPP' | 'EMAIL' | 'PRESENCIAL';
   horasTotales?: number;
 
   createdAt?: Timestamp | string;

@@ -193,6 +193,14 @@ function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar }: {
   );
 }
 
+// ─── tipos locales ──────────────────────────────────────────────────────────
+
+interface SlaPosition {
+  id: string;
+  name: string;
+  shifts: { code: string; name: string; startTime: string; endTime: string }[];
+}
+
 // ─── Página principal ────────────────────────────────────────────────────────
 
 export default function SupervisionPage() {
@@ -219,10 +227,16 @@ export default function SupervisionPage() {
   const [mEnd, setMEnd]     = useState('');
   const [mMotivo, setMMotivo]     = useState('');
   const [mSolicitante, setMSolicitante] = useState('');
-  const [mCanal, setMCanal] = useState<'TELEFONO' | 'EMAIL' | 'PRESENCIAL'>('TELEFONO');
+  const [mCanal, setMCanal] = useState<'TELEFONO' | 'WHATSAPP' | 'EMAIL' | 'PRESENCIAL'>('TELEFONO');
   const [mPax, setMPax]     = useState(1);
   const [mPosicionNombre, setMPosicionNombre] = useState('');
   const [mGuardiaAAmpliar, setMGuardiaAAmpliar] = useState('');
+  const [mGuardiaEmpleadoId, setMGuardiaEmpleadoId]   = useState('');
+  const [mGuardiaShiftId, setMGuardiaShiftId]         = useState('');
+  const [slaPositions, setSlaPositions] = useState<SlaPosition[]>([]);
+  const [mSelPosId, setMSelPosId]       = useState('');
+  const [mSelShiftCode, setMSelShiftCode] = useState('');
+  const [guardias, setGuardias] = useState<{ shiftId: string; nombre: string; empleadoId: string }[]>();
   const todayStr = new Date().toISOString().split('T')[0];
   const [ausenciasFecha, setAusenciasFecha] = useState(todayStr);
   const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
@@ -247,6 +261,60 @@ export default function SupervisionPage() {
       })));
     });
   }, [empresaId, showManualForm]);
+
+  // Cargar puestos del SLA activo cuando cambia el objetivo (para RFZ)
+  useEffect(() => {
+    setSlaPositions([]); setMSelPosId(''); setMSelShiftCode('');
+    if (!mObjetivoId) return;
+    getDocs(query(collection(db, 'servicios_sla'), where('objectiveId', '==', mObjetivoId), where('status', '==', 'active')))
+      .then(snap => {
+        let best: any[] = [];
+        snap.docs.forEach(d => { const ps = d.data().positions || []; if (ps.length > best.length) best = ps; });
+        const posMap = new Map<string, SlaPosition>();
+        best.forEach((p: any) => {
+          const key = p.id || p.name;
+          if (!key || posMap.has(key)) return;
+          const shifts = (p.allowedShiftTypes || []).map((s: any) => ({
+            code: s.code, name: s.name || s.code,
+            startTime: s.startTime || '', endTime: s.endTime || '',
+          })).filter((s: any) => s.startTime);
+          if (shifts.length) posMap.set(key, { id: p.id || p.name, name: p.name, shifts });
+        });
+        setSlaPositions(Array.from(posMap.values()));
+      });
+  }, [mObjetivoId]);
+
+  // Cargar guardias con turno en el objetivo/fecha seleccionados (para TURA)
+  useEffect(() => {
+    setGuardias(undefined); setMGuardiaAAmpliar(''); setMGuardiaEmpleadoId(''); setMGuardiaShiftId('');
+    if (mTipo !== 'AGREGADO_TURNO' || !mObjetivoId || !mFecha) return;
+    setGuardias([]);
+    getDocs(query(collection(db, 'turnos'), where('objectiveId', '==', mObjetivoId)))
+      .then(snap => {
+        const seen = new Set<string>();
+        const del_dia = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter((t: any) => {
+          let tFecha: string = typeof t.fecha === 'string' ? t.fecha : '';
+          if (!tFecha && t.startTime?.seconds) tFecha = new Date(t.startTime.seconds * 1000).toISOString().slice(0, 10);
+          return tFecha === mFecha && !t.isAbsent && !t.isFranco
+            && t.employeeId && t.employeeId !== 'VACANTE'
+            && !seen.has(t.employeeId) && !!seen.add(t.employeeId);
+        });
+        if (!del_dia.length) { setGuardias([]); return; }
+        Promise.all(del_dia.map(async (t: any) => {
+          let nombre = t.employeeName || t.empleadoName || '';
+          if (!nombre) {
+            try {
+              const e = await getDoc(doc(db, 'empleados', t.employeeId));
+              if (e.exists()) {
+                const d = e.data();
+                nombre = [d.apellido || d.lastName, d.nombre || d.firstName].filter(Boolean).join(', ') || d.name || t.employeeId;
+              }
+            } catch { /* keep */ }
+          }
+          return { shiftId: t.id, nombre: nombre || t.employeeId, empleadoId: t.employeeId };
+        })).then(lista => setGuardias(lista));
+      });
+  }, [mTipo, mObjetivoId, mFecha]);
 
   // Limpiar estado al cambiar empresa para evitar flash de datos anteriores
   useEffect(() => {
@@ -410,6 +478,9 @@ export default function SupervisionPage() {
     setMFecha(''); setMStart(''); setMEnd(''); setMMotivo('');
     setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1);
     setMPosicionNombre(''); setMGuardiaAAmpliar('');
+    setMGuardiaEmpleadoId(''); setMGuardiaShiftId('');
+    setSlaPositions([]); setMSelPosId(''); setMSelShiftCode('');
+    setGuardias(undefined);
     setShowManualForm(false);
   };
 
@@ -446,6 +517,8 @@ export default function SupervisionPage() {
         const turnoExtra: Record<string, unknown> = { ...base, employeeId: 'VACANTE' };
         if (!isAgregado && mPosicionNombre.trim()) turnoExtra.positionName = mPosicionNombre.trim();
         if (isAgregado && mGuardiaAAmpliar.trim())  turnoExtra.parentEmpleadoName = mGuardiaAAmpliar.trim();
+        if (isAgregado && mGuardiaEmpleadoId)       turnoExtra.parentEmpleadoId   = mGuardiaEmpleadoId;
+        if (isAgregado && mGuardiaShiftId)          turnoExtra.parentShiftId      = mGuardiaShiftId;
         const r = await addDoc(collection(db, 'turnos'), turnoExtra);
         turnoIds.push(r.id);
       }
@@ -472,7 +545,11 @@ export default function SupervisionPage() {
         autorizadoAt:        Timestamp.now(),
         turnoIds,
         ...(!isAgregado ? { cantidadPax: mPax, positionName: mPosicionNombre.trim() || undefined } : {}),
-        ...(isAgregado  ? { parentEmpleadoName: mGuardiaAAmpliar.trim() || undefined } : {}),
+        ...(isAgregado  ? {
+          parentEmpleadoName: mGuardiaAAmpliar.trim() || undefined,
+          parentEmpleadoId:   mGuardiaEmpleadoId || undefined,
+          parentShiftId:      mGuardiaShiftId    || undefined,
+        } : {}),
       });
       // Novedad para OPERACIONES (vacante urgente, no alcanzó el plazo de planificación)
       await addDoc(collection(db, 'novedades'), {
@@ -800,6 +877,53 @@ export default function SupervisionPage() {
               </div>
             )}
 
+            {/* RFZ — Puesto del SLA + turnos disponibles */}
+            {mTipo === 'REFUERZO_PUESTO' && mObjetivoId && (
+              <>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Puesto</label>
+                    {slaPositions.length > 0 ? (
+                      <select value={mSelPosId} onChange={e => {
+                        const id = e.target.value;
+                        setMSelPosId(id); setMSelShiftCode(''); setMStart(''); setMEnd('');
+                        setMPosicionNombre(slaPositions.find(p => p.id === id)?.name || '');
+                      }} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400">
+                        <option value="">— Seleccioná un puesto —</option>
+                        {slaPositions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    ) : (
+                      <input type="text" placeholder="Ej: Portería norte, Acceso vehicular…" value={mPosicionNombre} onChange={e => setMPosicionNombre(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cantidad</label>
+                    <input type="number" min={1} max={20} value={mPax} onChange={e => setMPax(Number(e.target.value))}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                </div>
+                {mSelPosId && (() => {
+                  const shifts = slaPositions.find(p => p.id === mSelPosId)?.shifts || [];
+                  if (!shifts.length) return null;
+                  return (
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Turno del puesto</label>
+                      <div className="flex gap-2 flex-wrap">
+                        {shifts.map(s => (
+                          <button key={s.code} type="button"
+                            onClick={() => { setMSelShiftCode(s.code); setMStart(s.startTime); setMEnd(s.endTime); }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-colors ${mSelShiftCode === s.code ? 'bg-red-600 text-white border-red-600' : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-red-300'}`}>
+                            <span>{s.code}</span> <span className="font-normal opacity-75">{s.startTime}–{s.endTime}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+
             {/* Fecha y horarios */}
             <div className="grid grid-cols-3 gap-2">
               <div>
@@ -819,27 +943,40 @@ export default function SupervisionPage() {
               </div>
             </div>
 
-            {/* Campos específicos por tipo */}
-            {mTipo === 'REFUERZO_PUESTO' && (
-              <div className="grid grid-cols-3 gap-2">
-                <div className="col-span-2">
-                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Puesto / posición</label>
-                  <input type="text" placeholder="Ej: Portería norte, Acceso vehicular…" value={mPosicionNombre} onChange={e => setMPosicionNombre(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
-                </div>
-                <div>
-                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cantidad</label>
-                  <input type="number" min={1} max={20} value={mPax} onChange={e => setMPax(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
-                </div>
-              </div>
-            )}
-            {mTipo === 'AGREGADO_TURNO' && (
+            {/* TURA — Guardia a ampliar (carga de turnos del día) */}
+            {mTipo === 'AGREGADO_TURNO' && mObjetivoId && (
               <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Guardia a ampliar</label>
-                <input type="text" placeholder="Nombre del guardia cuyo turno se extiende" value={mGuardiaAAmpliar} onChange={e => setMGuardiaAAmpliar(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
-                <p className="text-[9px] text-slate-400 mt-1">El horario de extensión se indica en los campos Inicio / Fin de arriba</p>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                  Guardia a ampliar
+                  {!mFecha && <span className="text-slate-300 font-normal ml-1">(seleccioná fecha primero)</span>}
+                </label>
+                {guardias === undefined && mFecha && (
+                  <div className="flex items-center gap-2 py-2 text-xs text-slate-400">
+                    <RefreshCw size={12} className="animate-spin"/> Buscando guardias…
+                  </div>
+                )}
+                {Array.isArray(guardias) && guardias.length === 0 && mFecha && (
+                  <p className="text-xs text-slate-400 py-1">Sin guardias con turno ese día — ingresá el nombre manualmente</p>
+                )}
+                {Array.isArray(guardias) && guardias.length > 0 && (
+                  <div className="flex gap-2 flex-wrap">
+                    {guardias.map(g => (
+                      <button key={g.shiftId} type="button"
+                        onClick={() => { setMGuardiaShiftId(g.shiftId); setMGuardiaEmpleadoId(g.empleadoId); setMGuardiaAAmpliar(g.nombre); }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1 ${mGuardiaShiftId === g.shiftId ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-violet-300'}`}>
+                        <User size={10}/> {g.nombre}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {(!Array.isArray(guardias) || guardias.length === 0) && (
+                  <input type="text" placeholder="Nombre del guardia cuyo turno se extiende" value={mGuardiaAAmpliar}
+                    onChange={e => setMGuardiaAAmpliar(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400 mt-1"/>
+                )}
+                {mGuardiaAAmpliar && (
+                  <p className="text-[10px] text-violet-600 font-bold mt-1">✓ {mGuardiaAAmpliar}</p>
+                )}
               </div>
             )}
 
@@ -855,6 +992,7 @@ export default function SupervisionPage() {
                 <select value={mCanal} onChange={e => setMCanal(e.target.value as any)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400">
                   <option value="TELEFONO">Teléfono</option>
+                  <option value="WHATSAPP">WhatsApp</option>
                   <option value="EMAIL">Email</option>
                   <option value="PRESENCIAL">Presencial</option>
                 </select>
