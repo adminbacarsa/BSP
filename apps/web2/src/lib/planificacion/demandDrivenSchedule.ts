@@ -1952,8 +1952,13 @@ function fillScheduleFromPendulum(
         }
 
         for (const code of bandOrder) {
-            const pending = sortCandidates(workersByBand[code] || [], params, code, inCurrent);
             for (const slot of openSlots.filter(s => !s.filled && s.code === code)) {
+                const posPool = params.positionGroups[slot.pos.positionName] || [];
+                // Respetar posPool; si está vacío (nombre no registrado) usar todos
+                const poolToUse = posPool.length > 0
+                    ? (workersByBand[code] || []).filter(id => posPool.includes(id))
+                    : (workersByBand[code] || []);
+                const pending = sortCandidates(poolToUse, params, code, inCurrent);
                 for (const empId of pending) {
                     if (params.runtime[empId].assignedDays.has(day.dateStr)) continue;
                     if (tryFillOneSlot(params, slot.pos, day.dateStr, day.dayLetter, code, inCurrent, {
@@ -1971,7 +1976,10 @@ function fillScheduleFromPendulum(
             const pri = (c: string) => (c === 'M' ? 0 : c === 'T' ? 1 : c === 'N' ? 2 : 3);
             return pri(a.code) - pri(b.code);
         })) {
-            const phasePool = globalPool.filter(empId => {
+            const slotPosPool = params.positionGroups[slot.pos.positionName] || [];
+            // Rescue phase: preferir empleados del posPool; caer a globalPool solo si el pool está agotado
+            const rescueSource = slotPosPool.length > 0 ? slotPosPool : globalPool;
+            const phasePool = rescueSource.filter(empId => {
                 if (params.runtime[empId].assignedDays.has(day.dateStr)) return false;
                 if (!params.cycleWorkDays[empId]?.has(day.dateStr)) return false;
                 if (ctx.absences[empId]?.has(day.dateStr)) return false;
@@ -1994,6 +2002,7 @@ function fillScheduleFromPendulum(
                 }
             }
             if (slot.filled) continue;
+            // Último recurso: globalPool completo (cubre casos donde posPool es insuficiente)
             const rescuePool = globalPool.filter(empId =>
                 isAvailableForSlot(empId, day.dateStr, slot.code, params, globalPool, {}),
             );
