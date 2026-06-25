@@ -127,8 +127,9 @@ function AprobarModal({ solicitud, onClose, onConfirm }: {
 
 // ─── Ausencia card ──────────────────────────────────────────────────────────
 
-function AusenciaCard({ ausencia, onAprobar, onRechazar }: {
+function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar }: {
   ausencia: Absence;
+  showActions?: boolean;
   onAprobar: () => void;
   onRechazar: (motivo: string) => void;
 }) {
@@ -136,30 +137,30 @@ function AusenciaCard({ ausencia, onAprobar, onRechazar }: {
   const [motivoRechazo, setMotivoRechazo] = useState('');
 
   const tipoColor: Record<string, string> = {
-    Vacaciones: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    Enfermedad: 'bg-blue-100 text-blue-700 border-blue-200',
-    Licencia:   'bg-violet-100 text-violet-700 border-violet-200',
-    ART:        'bg-amber-100 text-amber-700 border-amber-200',
+    Vacaciones:      'bg-emerald-100 text-emerald-700 border-emerald-200',
+    Enfermedad:      'bg-blue-100 text-blue-700 border-blue-200',
+    Licencia:        'bg-violet-100 text-violet-700 border-violet-200',
+    ART:             'bg-amber-100 text-amber-700 border-amber-200',
+    NO_PRESENTACION: 'bg-rose-100 text-rose-700 border-rose-200',
   };
   const colorCls = tipoColor[ausencia.type] || 'bg-slate-100 text-slate-600 border-slate-200';
+  const label = ausencia.type === 'NO_PRESENTACION' ? 'No se presentó' : ausencia.type;
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${colorCls}`}>{ausencia.type}</span>
-            <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-700 border border-amber-200">Pendiente</span>
+            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${colorCls}`}>{label}</span>
+            {showActions && (
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-700 border border-amber-200">Pendiente</span>
+            )}
           </div>
           <p className="font-black text-sm text-slate-800 dark:text-white">{ausencia.employeeName}</p>
-          <p className="text-xs font-bold text-slate-500 mt-0.5">
-            📅 {ausencia.startDate} → {ausencia.endDate}
-          </p>
-          {ausencia.reason && (
-            <p className="mt-1 text-[11px] text-slate-500 italic">"{ausencia.reason}"</p>
-          )}
+          <p className="text-xs font-bold text-slate-500 mt-0.5">📅 {ausencia.startDate} → {ausencia.endDate}</p>
+          {ausencia.reason && <p className="mt-1 text-[11px] text-slate-500 italic">"{ausencia.reason}"</p>}
         </div>
-        {!showRechazo && (
+        {showActions && !showRechazo && (
           <div className="flex gap-2 shrink-0">
             <button onClick={() => setShowRechazo(true)}
               className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center gap-1">
@@ -172,23 +173,15 @@ function AusenciaCard({ ausencia, onAprobar, onRechazar }: {
           </div>
         )}
       </div>
-      {showRechazo && (
+      {showActions && showRechazo && (
         <div className="mt-3 space-y-2">
-          <textarea
-            autoFocus
-            placeholder="Motivo del rechazo (requerido)..."
-            value={motivoRechazo}
+          <textarea autoFocus placeholder="Motivo del rechazo (requerido)..." value={motivoRechazo}
             onChange={e => setMotivoRechazo(e.target.value)}
-            className="w-full p-2.5 border-2 border-slate-200 rounded-xl text-xs resize-none outline-none focus:border-rose-400"
-            rows={2}
-          />
+            className="w-full p-2.5 border-2 border-slate-200 rounded-xl text-xs resize-none outline-none focus:border-rose-400" rows={2}/>
           <div className="flex gap-2">
             <button onClick={() => setShowRechazo(false)}
-              className="flex-1 py-2 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">
-              Cancelar
-            </button>
-            <button
-              disabled={!motivoRechazo.trim()}
+              className="flex-1 py-2 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">Cancelar</button>
+            <button disabled={!motivoRechazo.trim()}
               onClick={() => { onRechazar(motivoRechazo.trim()); setShowRechazo(false); }}
               className="flex-1 py-2 bg-rose-600 text-white rounded-xl font-black text-xs hover:bg-rose-700 disabled:opacity-40 transition-colors">
               Confirmar rechazo
@@ -209,7 +202,7 @@ export default function SupervisionPage() {
   const [solicitudes, setSolicitudes] = useState<SolicitudRefuerzo[]>([]);
   const [ausencias, setAusencias] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS'>('PENDIENTE');
+  const [tab, setTab] = useState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [supervisorObjetivos, setSupervisorObjetivos] = useState<string[]>([]);
@@ -230,7 +223,8 @@ export default function SupervisionPage() {
   const [mPax, setMPax]     = useState(1);
   const [mPosicionNombre, setMPosicionNombre] = useState('');
   const [mGuardiaAAmpliar, setMGuardiaAAmpliar] = useState('');
-  const [ausenciasFecha, setAusenciasFecha] = useState('');
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [ausenciasFecha, setAusenciasFecha] = useState(todayStr);
 
   // Cargar objetivos asignados al supervisor actual
   useEffect(() => {
@@ -555,146 +549,167 @@ export default function SupervisionPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 flex-wrap">
-          {(['PENDIENTE', 'TODAS'] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
-                tab === t ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900' : 'bg-white dark:bg-slate-800 border text-slate-500 hover:bg-slate-50'
-              }`}
-            >
-              {t === 'PENDIENTE' ? `Pendientes (${pendientes.length})` : `Todas (${solicitudes.length})`}
-            </button>
-          ))}
-          <button
-            onClick={() => setTab('AUSENCIAS')}
-            className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors flex items-center gap-1.5 ${
-              tab === 'AUSENCIAS' ? 'bg-amber-600 text-white' : 'bg-white dark:bg-slate-800 border text-slate-500 hover:bg-slate-50'
-            }`}
-          >
-            <Users size={12}/> Ausencias ({ausencias.length})
-          </button>
-        </div>
+        {(() => {
+          const noPresentes = ausencias.filter(a => a.type === 'NO_PRESENTACION');
+          const licencias   = ausencias.filter(a => a.type !== 'NO_PRESENTACION');
+          return (
+            <>
+              <div className="flex gap-2 flex-wrap">
+                {(['PENDIENTE', 'TODAS'] as const).map(t => (
+                  <button key={t} onClick={() => setTab(t)}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
+                      tab === t ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900' : 'bg-white dark:bg-slate-800 border text-slate-500 hover:bg-slate-50'
+                    }`}>
+                    {t === 'PENDIENTE' ? `Pendientes (${pendientes.length})` : `Todas (${solicitudes.length})`}
+                  </button>
+                ))}
+                <button onClick={() => setTab('AUSENCIAS')}
+                  className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors flex items-center gap-1.5 ${
+                    tab === 'AUSENCIAS' ? 'bg-rose-600 text-white' : 'bg-white dark:bg-slate-800 border text-slate-500 hover:bg-slate-50'
+                  }`}>
+                  <AlertCircle size={12}/> Ausencias ({noPresentes.length})
+                </button>
+                <button onClick={() => setTab('VACACIONES')}
+                  className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors flex items-center gap-1.5 ${
+                    tab === 'VACACIONES' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-slate-800 border text-slate-500 hover:bg-slate-50'
+                  }`}>
+                  <Users size={12}/> Vac / Lic ({licencias.length})
+                </button>
+              </div>
 
-        {/* ── Tab Refuerzos / Solicitudes ── */}
-        {tab !== 'AUSENCIAS' && (
-          loading ? (
-            <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-slate-400" size={28}/></div>
-          ) : visibles.length === 0 ? (
-            <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
-              <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
-              <p className="text-slate-500 font-medium text-sm">
-                {tab === 'PENDIENTE' ? 'No hay solicitudes pendientes' : 'No hay solicitudes registradas'}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {visibles.map(s => (
-                <div key={s.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        {tipoBadge(s.tipo)}
-                        {estadoBadge(s.estado)}
-                        <span className="text-[9px] text-slate-400 font-mono">{fmtTs(s.solicitadoAt)}</span>
-                      </div>
-                      <p className="font-black text-sm text-slate-800 dark:text-white truncate">{s.objectiveName}</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{s.clientName}</p>
-                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                        <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                          📅 {s.fecha} · {s.startTime}–{s.endTime}
-                        </span>
-                        {s.tipo === 'REFUERZO_PUESTO' && (
-                          <>
-                            {s.cantidadPax && <span className="text-xs text-orange-600 font-bold">+{s.cantidadPax} pax</span>}
-                            {(s as any).positionName && (
-                              <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                                📌 {(s as any).positionName}
+              {/* ── Tab Refuerzos ── */}
+              {(tab === 'PENDIENTE' || tab === 'TODAS') && (
+                loading ? (
+                  <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-slate-400" size={28}/></div>
+                ) : visibles.length === 0 ? (
+                  <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
+                    <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
+                    <p className="text-slate-500 font-medium text-sm">
+                      {tab === 'PENDIENTE' ? 'No hay solicitudes pendientes' : 'No hay solicitudes registradas'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {visibles.map(s => (
+                      <div key={s.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              {tipoBadge(s.tipo)}
+                              {estadoBadge(s.estado)}
+                              <span className="text-[9px] text-slate-400 font-mono">{fmtTs(s.solicitadoAt)}</span>
+                            </div>
+                            <p className="font-black text-sm text-slate-800 dark:text-white truncate">{s.objectiveName}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{s.clientName}</p>
+                            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                                📅 {s.fecha} · {s.startTime}–{s.endTime}
                               </span>
+                              {s.tipo === 'REFUERZO_PUESTO' && (
+                                <>
+                                  {s.cantidadPax && <span className="text-xs text-orange-600 font-bold">+{s.cantidadPax} pax</span>}
+                                  {(s as any).positionName && (
+                                    <span className="text-xs text-slate-500 font-medium flex items-center gap-1">📌 {(s as any).positionName}</span>
+                                  )}
+                                </>
+                              )}
+                              {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && (
+                                <span className="text-xs text-violet-600 font-bold flex items-center gap-1"><User size={10}/>{s.parentEmpleadoName}</span>
+                              )}
+                            </div>
+                            {s.solicitadoPorNombre && (
+                              <p className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
+                                <User size={10} className="shrink-0"/>
+                                Solicitado por <span className="font-bold text-slate-600 dark:text-slate-300 ml-1">{s.solicitadoPorNombre}</span>
+                              </p>
                             )}
-                          </>
-                        )}
-                        {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && (
-                          <span className="text-xs text-violet-600 font-bold flex items-center gap-1"><User size={10}/>{s.parentEmpleadoName}</span>
-                        )}
+                            {s.motivo && (
+                              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1">
+                                <MessageSquare size={10} className="mt-0.5 shrink-0"/>
+                                <span className="italic">"{s.motivo}"</span>
+                              </p>
+                            )}
+                            {s.motivoRechazo && (
+                              <p className="mt-1 text-[11px] text-rose-500 flex items-start gap-1">
+                                <XCircle size={10} className="mt-0.5 shrink-0"/>
+                                <span>{s.motivoRechazo}</span>
+                              </p>
+                            )}
+                          </div>
+                          {s.estado === 'PENDIENTE' && (
+                            <div className="flex gap-2 shrink-0">
+                              <button onClick={() => setRechazarTarget(s)}
+                                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center gap-1">
+                                <XCircle size={13}/> Rechazar
+                              </button>
+                              <button onClick={() => setAprobarTarget(s)}
+                                className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl font-black text-xs transition-colors flex items-center gap-1">
+                                <CheckCircle size={13}/> Aprobar
+                              </button>
+                            </div>
+                          )}
+                          {s.estado === 'APROBADA' && (
+                            <span className="text-[10px] text-teal-600 font-bold shrink-0">✓ {s.autorizadoPorNombre}</span>
+                          )}
+                        </div>
                       </div>
-                      {s.solicitadoPorNombre && (
-                        <p className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
-                          <User size={10} className="shrink-0"/>
-                          Solicitado por <span className="font-bold text-slate-600 dark:text-slate-300 ml-1">{s.solicitadoPorNombre}</span>
-                        </p>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {/* ── Tab Ausencias (NO_PRESENTACION) — solo informativo ── */}
+              {tab === 'AUSENCIAS' && (() => {
+                const ausFiltered = noPresentes.filter(a =>
+                  !ausenciasFecha || (a.startDate <= ausenciasFecha && a.endDate >= ausenciasFecha)
+                );
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <label className="text-[10px] font-black uppercase text-slate-500">Día</label>
+                      <input type="date" value={ausenciasFecha} onChange={e => setAusenciasFecha(e.target.value)}
+                        className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-rose-400"/>
+                      {ausenciasFecha !== todayStr && (
+                        <button onClick={() => setAusenciasFecha(todayStr)}
+                          className="text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
+                          <X size={11}/> Hoy
+                        </button>
                       )}
-                      {s.motivo && (
-                        <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1">
-                          <MessageSquare size={10} className="mt-0.5 shrink-0"/>
-                          <span className="italic">"{s.motivo}"</span>
-                        </p>
-                      )}
-                      {s.motivoRechazo && (
-                        <p className="mt-1 text-[11px] text-rose-500 flex items-start gap-1">
-                          <XCircle size={10} className="mt-0.5 shrink-0"/>
-                          <span>{s.motivoRechazo}</span>
-                        </p>
-                      )}
+                      <span className="text-[10px] text-slate-400 font-medium ml-auto">{ausFiltered.length} resultado{ausFiltered.length !== 1 ? 's' : ''}</span>
                     </div>
-                    {s.estado === 'PENDIENTE' && (
-                      <div className="flex gap-2 shrink-0">
-                        <button
-                          onClick={() => setRechazarTarget(s)}
-                          className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center gap-1"
-                        ><XCircle size={13}/> Rechazar</button>
-                        <button
-                          onClick={() => setAprobarTarget(s)}
-                          className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl font-black text-xs transition-colors flex items-center gap-1"
-                        ><CheckCircle size={13}/> Aprobar</button>
+                    {ausFiltered.length === 0 ? (
+                      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
+                        <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
+                        <p className="text-slate-500 font-medium text-sm">Sin ausencias para {ausenciasFecha || 'este período'}</p>
                       </div>
-                    )}
-                    {s.estado === 'APROBADA' && (
-                      <span className="text-[10px] text-teal-600 font-bold shrink-0">✓ {s.autorizadoPorNombre}</span>
+                    ) : (
+                      ausFiltered.map(a => (
+                        <AusenciaCard key={a.id} ausencia={a} showActions={false}
+                          onAprobar={() => {}} onRechazar={() => {}}/>
+                      ))
                     )}
                   </div>
-                </div>
-              ))}
-            </div>
-          )
-        )}
+                );
+              })()}
 
-        {/* ── Tab Ausencias ── */}
-        {tab === 'AUSENCIAS' && (() => {
-          const ausFiltered = ausenciasFecha
-            ? ausencias.filter(a => a.startDate <= ausenciasFecha && a.endDate >= ausenciasFecha)
-            : ausencias;
-          return (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <label className="text-[10px] font-black uppercase text-slate-500">Filtrar por día</label>
-                <input type="date" value={ausenciasFecha} onChange={e => setAusenciasFecha(e.target.value)}
-                  className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-amber-400"/>
-                {ausenciasFecha && (
-                  <button onClick={() => setAusenciasFecha('')}
-                    className="text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
-                    <X size={11}/> Limpiar
-                  </button>
-                )}
-                <span className="text-[10px] text-slate-400 font-medium ml-auto">{ausFiltered.length} resultado{ausFiltered.length !== 1 ? 's' : ''}</span>
-              </div>
-              {ausFiltered.length === 0 ? (
-                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
-                  <Users size={32} className="mx-auto text-slate-300 mb-3"/>
-                  <p className="text-slate-500 font-medium text-sm">
-                    {ausenciasFecha ? `Sin ausencias pendientes para ${ausenciasFecha}` : 'Sin ausencias pendientes'}
-                  </p>
-                </div>
-              ) : (
-                ausFiltered.map(a => (
-                  <AusenciaCard key={a.id} ausencia={a}
-                    onAprobar={() => handleAprobarAusencia(a)}
-                    onRechazar={motivo => handleRechazarAusencia(a, motivo)}
-                  />
-                ))
+              {/* ── Tab Vacaciones / Licencias — con autorización ── */}
+              {tab === 'VACACIONES' && (
+                licencias.length === 0 ? (
+                  <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
+                    <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
+                    <p className="text-slate-500 font-medium text-sm">Sin solicitudes de vacaciones o licencias pendientes</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {licencias.map(a => (
+                      <AusenciaCard key={a.id} ausencia={a} showActions={true}
+                        onAprobar={() => handleAprobarAusencia(a)}
+                        onRechazar={motivo => handleRechazarAusencia(a, motivo)}/>
+                    ))}
+                  </div>
+                )
               )}
-            </div>
+            </>
           );
         })()}
       </div>
