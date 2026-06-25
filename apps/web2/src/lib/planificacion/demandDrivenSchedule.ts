@@ -2002,10 +2002,13 @@ function fillScheduleFromPendulum(
                 }
             }
             if (slot.filled) continue;
-            // Último recurso: globalPool completo (cubre casos donde posPool es insuficiente)
-            const rescuePool = globalPool.filter(empId =>
+            // Último recurso: posPool con criterios relajados primero; globalPool solo si posPool agotado
+            const ultimoPosPool = slotPosPool.filter(empId =>
                 isAvailableForSlot(empId, day.dateStr, slot.code, params, globalPool, {}),
             );
+            const rescuePool = ultimoPosPool.length > 0
+                ? ultimoPosPool
+                : globalPool.filter(empId => isAvailableForSlot(empId, day.dateStr, slot.code, params, globalPool, {}));
             const rescueSorted = sortCandidates(rescuePool, params, slot.code, inCurrent, { preferRemainingBudget: true });
             for (const empId of rescueSorted) {
                 const sh = shiftDefForCode(slot.pos, day.dayLetter, slot.code, ctx.autoCycles, shiftHoursH);
