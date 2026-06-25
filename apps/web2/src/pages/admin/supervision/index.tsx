@@ -152,9 +152,14 @@ function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar }: {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${colorCls}`}>{label}</span>
-            {showActions && (
-              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-700 border border-amber-200">Pendiente</span>
-            )}
+            {(() => {
+              const s = ausencia.status;
+              const sc = s === 'Pendiente' ? 'bg-amber-100 text-amber-700 border-amber-200'
+                : s === 'Autorizada' || s === 'Justificada' ? 'bg-teal-100 text-teal-700 border-teal-200'
+                : s === 'Rechazada' || s === 'Injustificada' ? 'bg-rose-100 text-rose-700 border-rose-200'
+                : 'bg-slate-100 text-slate-500 border-slate-200';
+              return <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${sc}`}>{s}</span>;
+            })()}
           </div>
           <p className="font-black text-sm text-slate-800 dark:text-white">{ausencia.employeeName}</p>
           <p className="text-xs font-bold text-slate-500 mt-0.5">📅 {ausencia.startDate} → {ausencia.endDate}</p>
@@ -234,6 +239,7 @@ export default function SupervisionPage() {
 
   const [solicitudes, setSolicitudes] = useState<SolicitudRefuerzo[]>([]);
   const [ausencias, setAusencias] = useState<Absence[]>([]);
+  const [vacaciones, setVacaciones] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
@@ -345,6 +351,7 @@ export default function SupervisionPage() {
   useEffect(() => {
     setSolicitudes([]);
     setAusencias([]);
+    setVacaciones([]);
   }, [empresaId]);
 
   // Suscripciones en tiempo real
@@ -358,7 +365,10 @@ export default function SupervisionPage() {
     const unsubAus = absenceService.subscribePendientes(empresaId, items => {
       setAusencias(items);
     });
-    return () => { unsubSol(); unsubAus(); };
+    const unsubVac = absenceService.subscribeAllByEmpresa(empresaId, items => {
+      setVacaciones(items.filter(a => a.type !== 'NO_PRESENTACION' && a.status !== 'Rechazada' && a.status !== 'Injustificada'));
+    });
+    return () => { unsubSol(); unsubAus(); unsubVac(); };
   }, [empresaId, isSuperAdmin, supervisorObjetivos]);
 
   const pendientes = solicitudes.filter(s => s.estado === 'PENDIENTE');
@@ -677,7 +687,7 @@ export default function SupervisionPage() {
                   className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors flex items-center gap-1.5 ${
                     tab === 'VACACIONES' ? 'bg-emerald-600 text-white' : 'bg-white dark:bg-slate-800 border text-slate-500 hover:bg-slate-50'
                   }`}>
-                  <Users size={12}/> Vac / Lic ({licencias.length})
+                  <Users size={12}/> Vac / Lic ({vacaciones.filter(a => a.status === 'Pendiente').length > 0 ? `${vacaciones.filter(a => a.status === 'Pendiente').length} pend.` : vacaciones.length})
                 </button>
               </div>
 
@@ -801,16 +811,18 @@ export default function SupervisionPage() {
                 );
               })()}
 
-              {/* ── Tab Vacaciones / Licencias — con autorización ── */}
+              {/* ── Tab Vacaciones / Licencias — historial + autorización pendientes ── */}
               {tab === 'VACACIONES' && (() => {
                 const mesStart = licenciasMes ? `${licenciasMes}-01` : '';
                 const mesEnd   = licenciasMes
                   ? new Date(Number(licenciasMes.slice(0,4)), Number(licenciasMes.slice(5,7)), 0)
                       .toISOString().split('T')[0]
                   : '';
-                const licFiltered = licenciasMes
-                  ? licencias.filter(a => a.startDate <= mesEnd && a.endDate >= mesStart)
-                  : licencias;
+                const vacFiltered = licenciasMes
+                  ? vacaciones.filter(a => a.startDate <= mesEnd && a.endDate >= mesStart)
+                  : vacaciones;
+                const pendientes = vacFiltered.filter(a => a.status === 'Pendiente');
+                const autorizadas = vacFiltered.filter(a => a.status !== 'Pendiente');
                 return (
                   <div className="space-y-3">
                     <div className="flex items-center gap-3 flex-wrap">
@@ -823,19 +835,31 @@ export default function SupervisionPage() {
                           <X size={11}/> Mes actual
                         </button>
                       )}
-                      <span className="text-[10px] text-slate-400 font-medium ml-auto">{licFiltered.length} resultado{licFiltered.length !== 1 ? 's' : ''}</span>
+                      <span className="text-[10px] text-slate-400 font-medium ml-auto">{vacFiltered.length} resultado{vacFiltered.length !== 1 ? 's' : ''}</span>
                     </div>
-                    {licFiltered.length === 0 ? (
+                    {vacFiltered.length === 0 ? (
                       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
                         <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
-                        <p className="text-slate-500 font-medium text-sm">Sin solicitudes pendientes para {licenciasMes || 'este período'}</p>
+                        <p className="text-slate-500 font-medium text-sm">Sin vacaciones/licencias para {licenciasMes || 'este período'}</p>
                       </div>
                     ) : (
-                      licFiltered.map(a => (
-                        <AusenciaCard key={a.id} ausencia={a} showActions={true}
-                          onAprobar={() => handleAprobarAusencia(a)}
-                          onRechazar={motivo => handleRechazarAusencia(a, motivo)}/>
-                      ))
+                      <>
+                        {pendientes.length > 0 && (
+                          <p className="text-[10px] font-black uppercase text-amber-600 px-1">Pendientes de autorización ({pendientes.length})</p>
+                        )}
+                        {pendientes.map(a => (
+                          <AusenciaCard key={a.id} ausencia={a} showActions={true}
+                            onAprobar={() => handleAprobarAusencia(a)}
+                            onRechazar={motivo => handleRechazarAusencia(a, motivo)}/>
+                        ))}
+                        {autorizadas.length > 0 && (
+                          <p className="text-[10px] font-black uppercase text-teal-600 px-1 mt-2">Autorizadas / En curso ({autorizadas.length})</p>
+                        )}
+                        {autorizadas.map(a => (
+                          <AusenciaCard key={a.id} ausencia={a} showActions={false}
+                            onAprobar={() => {}} onRechazar={() => {}}/>
+                        ))}
+                      </>
                     )}
                   </div>
                 );

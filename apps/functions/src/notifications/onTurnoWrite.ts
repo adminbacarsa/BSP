@@ -244,6 +244,32 @@ export const onTurnoWrite = functions
             webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
           }).catch(e => console.warn('[onTurnoWrite] RFZ/TURA push error:', e));
         }
+
+        // Actualizar solicitud_refuerzo a ASIGNADA si el turno tiene vínculo
+        const solicitudId: string | undefined = after.solicitudRefuerzoId;
+        if (solicitudId) {
+          try {
+            await db.collection('solicitudes_refuerzo').doc(solicitudId).update({
+              estado: 'ASIGNADA',
+              turnoIds: admin.firestore.FieldValue.arrayUnion(turnoIdR),
+              empleadoIds: admin.firestore.FieldValue.arrayUnion(assignedEmployeeId),
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            // Marcar novedad REFUERZO_CLIENTE_PENDIENTE asociada como leída
+            const novSnap = await db.collection('novedades')
+              .where('solicitudRefuerzoId', '==', solicitudId)
+              .where('type', '==', 'REFUERZO_CLIENTE_PENDIENTE')
+              .where('status', '==', 'pending')
+              .limit(5).get();
+            if (!novSnap.empty) {
+              const batch = db.batch();
+              novSnap.docs.forEach(d => batch.update(d.ref, { status: 'read', viewed: true }));
+              await batch.commit();
+            }
+          } catch (e) {
+            console.warn('[onTurnoWrite] RFZ solicitud/novedad update error:', e);
+          }
+        }
         return;
       }
     }

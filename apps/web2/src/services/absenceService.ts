@@ -82,6 +82,25 @@ export const absenceService = {
     return deleteDoc(doc(db, 'ausencias', id));
   },
 
+  subscribeAllByEmpresa(empresaId: string, cb: (items: Absence[]) => void) {
+    const q = query(
+      collection(db, 'ausencias'),
+      where('empresaId', '==', empresaId),
+      orderBy('startDate', 'desc'),
+    );
+    return onSnapshot(q, snap => cb(
+      snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id, ...data,
+          startDate: toDateStr(data.startDate),
+          endDate: toDateStr(data.endDate),
+          status: data.status || 'Pendiente',
+        } as Absence;
+      })
+    ));
+  },
+
   subscribePendientes(empresaId: string, cb: (items: Absence[]) => void) {
     const q = query(
       collection(db, 'ausencias'),
