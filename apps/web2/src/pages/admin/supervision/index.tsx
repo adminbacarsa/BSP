@@ -282,7 +282,7 @@ export default function SupervisionPage() {
       endTime:             endISO,
       origin:              'CLIENT_REQUEST',
       solicitudRefuerzoId: sol.id,
-      shiftCode:           'REF',
+      code:                'REF',
       isPresent:           false,
       isAbsent:            false,
       isCompleted:         false,
@@ -291,11 +291,19 @@ export default function SupervisionPage() {
 
     const ids: string[] = [];
     if (sol.tipo === 'AGREGADO_TURNO') {
+      let parentPositionName: string | null = null;
+      if (sol.parentShiftId) {
+        try {
+          const ps = await getDoc(doc(db, 'turnos', sol.parentShiftId));
+          if (ps.exists()) parentPositionName = ps.data().positionName || null;
+        } catch { /* keep null */ }
+      }
       const ref = await addDoc(collection(db, 'turnos'), {
         ...base,
         employeeId:    sol.parentEmpleadoId  ?? null,
         employeeName:  sol.parentEmpleadoName ?? null,
         parentShiftId: sol.parentShiftId      ?? null,
+        positionName:  parentPositionName,
       });
       ids.push(ref.id);
     } else {

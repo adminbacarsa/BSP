@@ -57,7 +57,7 @@ const PAID_DAY_DEFAULT_HOURS = 8;
 
 const isOperationalOriginShift = (shift: any): boolean => {
     const o = String(shift?.origin || '').toUpperCase();
-    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
+    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL' || o === 'CLIENT_REQUEST') return true;
     if (shift?.resolvedBy === 'OPERACIONES') return true;
     if (shift?.isReten === true) return true;
     return false;
