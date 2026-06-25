@@ -225,6 +225,8 @@ export default function SupervisionPage() {
   const [mGuardiaAAmpliar, setMGuardiaAAmpliar] = useState('');
   const todayStr = new Date().toISOString().split('T')[0];
   const [ausenciasFecha, setAusenciasFecha] = useState(todayStr);
+  const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
+  const [licenciasMes, setLicenciasMes] = useState(currentMonthStr);
 
   // Cargar objetivos asignados al supervisor actual
   useEffect(() => {
@@ -693,22 +695,44 @@ export default function SupervisionPage() {
               })()}
 
               {/* ── Tab Vacaciones / Licencias — con autorización ── */}
-              {tab === 'VACACIONES' && (
-                licencias.length === 0 ? (
-                  <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
-                    <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
-                    <p className="text-slate-500 font-medium text-sm">Sin solicitudes de vacaciones o licencias pendientes</p>
-                  </div>
-                ) : (
+              {tab === 'VACACIONES' && (() => {
+                const mesStart = licenciasMes ? `${licenciasMes}-01` : '';
+                const mesEnd   = licenciasMes
+                  ? new Date(Number(licenciasMes.slice(0,4)), Number(licenciasMes.slice(5,7)), 0)
+                      .toISOString().split('T')[0]
+                  : '';
+                const licFiltered = licenciasMes
+                  ? licencias.filter(a => a.startDate <= mesEnd && a.endDate >= mesStart)
+                  : licencias;
+                return (
                   <div className="space-y-3">
-                    {licencias.map(a => (
-                      <AusenciaCard key={a.id} ausencia={a} showActions={true}
-                        onAprobar={() => handleAprobarAusencia(a)}
-                        onRechazar={motivo => handleRechazarAusencia(a, motivo)}/>
-                    ))}
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <label className="text-[10px] font-black uppercase text-slate-500">Mes</label>
+                      <input type="month" value={licenciasMes} onChange={e => setLicenciasMes(e.target.value)}
+                        className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-emerald-400"/>
+                      {licenciasMes !== currentMonthStr && (
+                        <button onClick={() => setLicenciasMes(currentMonthStr)}
+                          className="text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
+                          <X size={11}/> Mes actual
+                        </button>
+                      )}
+                      <span className="text-[10px] text-slate-400 font-medium ml-auto">{licFiltered.length} resultado{licFiltered.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    {licFiltered.length === 0 ? (
+                      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center">
+                        <CheckCircle size={32} className="mx-auto text-slate-300 mb-3"/>
+                        <p className="text-slate-500 font-medium text-sm">Sin solicitudes pendientes para {licenciasMes || 'este período'}</p>
+                      </div>
+                    ) : (
+                      licFiltered.map(a => (
+                        <AusenciaCard key={a.id} ausencia={a} showActions={true}
+                          onAprobar={() => handleAprobarAusencia(a)}
+                          onRechazar={motivo => handleRechazarAusencia(a, motivo)}/>
+                      ))
+                    )}
                   </div>
-                )
-              )}
+                );
+              })()}
             </>
           );
         })()}
