@@ -1305,12 +1305,12 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
     });
   }, [objetivo.id]);
 
-  // Historial real-time
+  // Historial real-time — consulta por objectiveId para evitar cross-empresa
   useEffect(() => {
-    return solicitudRefuerzoService.subscribeByClient(clienteUser.clientId, items =>
-      setSolicitudes(items.filter(s => s.objectiveId === objetivo.id))
+    return solicitudRefuerzoService.subscribeByObjectiveIds([objetivo.id], items =>
+      setSolicitudes(items)
     );
-  }, [objetivo.id, clienteUser.clientId]);
+  }, [objetivo.id]);
 
   // Guardias en turno (AGREGADO_TURNO) — busca en turnos planificados del objetivo
   useEffect(() => {
