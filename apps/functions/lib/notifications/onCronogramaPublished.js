@@ -84,6 +84,7 @@ exports.onCronogramaPublished = functions
                 title,
                 body,
                 type: 'CRONOGRAMA_PUBLICADO',
+                target: 'employee',
                 objectiveId,
                 year,
                 month,
