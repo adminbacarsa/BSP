@@ -4294,12 +4294,9 @@ export default function PlanificacionPage() {
                     ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch { return null; } })()
                     : null;
             const useFloaterPipeline = !!strictPipeline;
-            // Solo usar path clásico fijo-banda cuando rotateShifts ya es false
-            // (p.ej. all qty=1 + dotación exacta). Si rotateShifts=true (qty>1 u otro
-            // motivo detectado por resolveRotateShifts), respetar esa decisión.
             const gen = strictPipeline?.generation ?? generateScheduleV4({
                 ...baseGenCtx,
-                ...(useStrictPipeline && !genBrain.rotateShifts ? { rotateShifts: false, demandDriven: false } : {}),
+                ...(useStrictPipeline ? { rotateShifts: false, demandDriven: false } : {}),
             });
 
             // Análisis de cobertura de ausencias pre-declaradas (V/L/E/A/PG)
