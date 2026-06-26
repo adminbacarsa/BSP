@@ -64,21 +64,30 @@ export interface SolicitudRefuerzo {
 
 const COL = 'solicitudes_refuerzo';
 
+/** Firestore rechaza valores undefined; los quitamos antes de escribir. */
+function stripUndefined<T extends Record<string, any>>(obj: T): T {
+  const out: Record<string, any> = {};
+  Object.keys(obj).forEach((k) => {
+    if (obj[k] !== undefined) out[k] = obj[k];
+  });
+  return out as T;
+}
+
 export const solicitudRefuerzoService = {
   async create(data: Omit<SolicitudRefuerzo, 'id'>): Promise<string> {
-    const ref = await addDoc(collection(db, COL), {
+    const ref = await addDoc(collection(db, COL), stripUndefined({
       ...data,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
-    });
+    }));
     return ref.id;
   },
 
   async update(id: string, patch: Partial<SolicitudRefuerzo>): Promise<void> {
-    await updateDoc(doc(db, COL, id), {
+    await updateDoc(doc(db, COL, id), stripUndefined({
       ...patch,
       updatedAt: Timestamp.now(),
-    });
+    }));
   },
 
   async getByEmpresa(empresaId: string): Promise<SolicitudRefuerzo[]> {
