@@ -516,6 +516,7 @@ export default function PlanificacionPage() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [sortDropOpen, setSortDropOpen] = useState(false);
     const [bandDropOpen, setBandDropOpen] = useState(false);
 
     const [employees, setEmployees] = useState<any[]>([]);
@@ -6504,7 +6505,60 @@ export default function PlanificacionPage() {
                                     </button>
                                 )}
                                 <div className="flex items-center gap-0.5">
-                                    <button onClick={() => startFilterTransition(() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
+                                    <div className="relative">
+                                        {(() => {
+                                            const SORT_OPTIONS: { key: typeof sortBy; label: string; Icon: typeof ArrowDownWideNarrow }[] = [
+                                                { key: 'activity', label: 'Actividad', Icon: ArrowDownWideNarrow },
+                                                { key: 'name', label: 'Nombre', Icon: ArrowDownAZ },
+                                                { key: 'client', label: 'Cliente', Icon: Briefcase },
+                                                { key: 'band', label: 'Banda', Icon: Clock },
+                                                { key: 'position', label: 'Puesto', Icon: LayoutGrid },
+                                            ];
+                                            const activeSort = SORT_OPTIONS.find(o => o.key === sortBy) || SORT_OPTIONS[0];
+                                            const ActiveIcon = activeSort.Icon;
+                                            return (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setBandDropOpen(false);
+                                                            setSortDropOpen(p => !p);
+                                                        }}
+                                                        className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200 flex items-center gap-1"
+                                                        title={`Orden: ${activeSort.label}`}
+                                                    >
+                                                        <ActiveIcon size={18}/>
+                                                        <ChevronDown size={12} className={sortDropOpen ? 'rotate-180 transition-transform' : 'transition-transform'}/>
+                                                    </button>
+                                                    {sortDropOpen && (
+                                                        <div className="absolute top-full right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50 py-1 min-w-[168px]">
+                                                            <p className="px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-700 mb-1">
+                                                                Ordenar por
+                                                            </p>
+                                                            {SORT_OPTIONS.map(({ key, label, Icon }) => {
+                                                                const active = sortBy === key;
+                                                                return (
+                                                                    <button
+                                                                        key={key}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            startFilterTransition(() => setSortBy(key));
+                                                                            setSortDropOpen(false);
+                                                                        }}
+                                                                        className={`w-full px-3 py-2 text-left text-[11px] font-bold flex items-center gap-2 transition-colors ${active ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
+                                                                    >
+                                                                        <Icon size={14} className="shrink-0"/>
+                                                                        {label}
+                                                                        {active && <Check size={12} className="ml-auto text-indigo-600"/>}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
                                     <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
                                 </div>
                                 <div className="relative" title="Filtrar por banda horaria">
@@ -6520,7 +6574,7 @@ export default function PlanificacionPage() {
                                         const activeCls = bandFilter ? BAND_COLORS[bandFilter] : 'text-slate-600 border-slate-300 bg-slate-100';
                                         return (<>
                                             <button
-                                                onClick={() => setBandDropOpen(p => !p)}
+                                                onClick={() => { setSortDropOpen(false); setBandDropOpen(p => !p); }}
                                                 className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-colors flex items-center gap-1 ${activeCls}`}
                                             >
                                                 {bandFilter ?? 'ALL'}
