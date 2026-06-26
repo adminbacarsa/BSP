@@ -92,5 +92,17 @@ const installWeb2 = spawnSync(npm, ['install', '--ignore-scripts'], {
 });
 if (installWeb2.status !== 0) process.exit(installWeb2.status ?? 1);
 
+const deployFunctions = args.some((a) => a === '--functions' || a === '--all');
+if (deployFunctions) {
+  const functionsDir = path.join(DEPLOY_DIR, 'apps', 'functions');
+  console.log('\n▶ npm install apps/functions ...');
+  const installFunctions = spawnSync(npm, ['install', '--ignore-scripts'], {
+    cwd: functionsDir,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (installFunctions.status !== 0) process.exit(installFunctions.status ?? 1);
+}
+
 syncEnvLocal();
 runDeploy(DEPLOY_DIR, args);
