@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.setEmployeePortalPassword = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -24,6 +25,9 @@ const labor_agreement_service_1 = require("./data-management/labor-agreement.ser
 const runPlatformAssistant_1 = require("./assistant/runPlatformAssistant");
 const assistantInteractionLog_1 = require("./assistant/assistantInteractionLog");
 const planningGeminiServer_1 = require("./assistant/planningGeminiServer");
+const runAutoSchedule_1 = require("./scheduling/runAutoSchedule");
+const runAjustarCrono_1 = require("./scheduling/runAjustarCrono");
+const runEquilibrarCrono_1 = require("./scheduling/runEquilibrarCrono");
 const planificacionEstadoKeys_1 = require("./assistant/planificacionEstadoKeys");
 const lookupClientByCuitHandler_1 = require("./afip/lookupClientByCuitHandler");
 const empresaAfipCredentialsHandler_1 = require("./afip/empresaAfipCredentialsHandler");
@@ -624,6 +628,15 @@ exports.optimizePlanningGemini = process.env.FUNCTIONS_EMULATOR === 'true'
     : functions
         .runWith({ ...optimizePlanningGeminiRuntime, secrets: ['GEMINI_API_KEY'] })
         .https.onCall(optimizePlanningGeminiHandler);
+exports.runAutoSchedule = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .https.onCall(runAutoSchedule_1.runAutoScheduleHandler);
+exports.runAjustarCrono = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .https.onCall(runAjustarCrono_1.runAjustarCronoHandler);
+exports.runEquilibrarCrono = functions
+    .runWith({ timeoutSeconds: 180, memory: '512MB' })
+    .https.onCall(runEquilibrarCrono_1.runEquilibrarCronoHandler);
 exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
@@ -1260,6 +1273,23 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
         else {
             throw e;
         }
+    }
+    try {
+        const existingClientUserSnap = await db.collection('client_users').where('uid', '==', uid).get();
+        const conflict = existingClientUserSnap.docs
+            .map(d => d.data())
+            .find(cu => {
+            const cuClientId = String(cu?.clientId || '').trim();
+            return cuClientId && cuClientId !== clientId;
+        });
+        if (conflict) {
+            throw new functions.https.HttpsError('already-exists', `El email ${normalizedEmail} ya está vinculado al cliente "${conflict.clientName || conflict.clientId}". ` +
+                'Un usuario de portal sólo puede pertenecer a un cliente. Usá otro email o eliminá el acceso anterior desde la ficha de ese cliente.');
+        }
+    }
+    catch (e) {
+        if (e instanceof functions.https.HttpsError)
+            throw e;
     }
     const resetLink = await admin.auth().generatePasswordResetLink(normalizedEmail, {
         url: 'https://comtroldata.web.app/cliente/dashboard',

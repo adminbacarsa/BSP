@@ -15,6 +15,9 @@ export declare const platformHealthCheck: functions.HttpsFunction & functions.Ru
 export declare const checkSystemHealth: functions.HttpsFunction & functions.Runnable<any>;
 export declare const chatPlatformAssistant: functions.HttpsFunction & functions.Runnable<any>;
 export declare const optimizePlanningGemini: functions.HttpsFunction & functions.Runnable<any>;
+export declare const runAutoSchedule: functions.HttpsFunction & functions.Runnable<any>;
+export declare const runAjustarCrono: functions.HttpsFunction & functions.Runnable<any>;
+export declare const runEquilibrarCrono: functions.HttpsFunction & functions.Runnable<any>;
 export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Runnable<any>;
 export declare const syncSystemUserClaims: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
