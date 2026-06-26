@@ -216,7 +216,9 @@ service cloud.firestore {
     }
 
     match /clients/{clientId} {
-      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
+      allow read: if tenantAdminRead()
+        || (request.auth != null && !isAdmin())
+        || (isClientUser() && clientUserClientId() == clientId);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
