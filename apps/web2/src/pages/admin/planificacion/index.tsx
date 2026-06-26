@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 
 type PlanificacionDotacionEntry = { positionName: string; shiftCode?: string };
 type PlanificacionDotacionMap = Record<string, PlanificacionDotacionEntry>;
@@ -2423,7 +2423,20 @@ export default function PlanificacionPage() {
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .filter(d => !d.data().viewed)  // safety net: excluir ya vistas
                 .filter(d => !d.data().priority || d.data().priority === 'high')
-                .map(d => ({ id: d.id, source: 'NOVEDAD', ...d.data(), msg: d.data().description }));
+                .filter(d => d.data().actionTarget !== 'OPERACIONES')
+                .map(d => {
+                    const data = d.data();
+                    const fallbackTitle = data.type === 'REFUERZO_CLIENTE_PENDIENTE'
+                        ? `${data.tipoSolicitud || 'RFZ'} · ${data.positionName || data.objectiveName || 'Refuerzo cliente'}`
+                        : (data.title || data.type || 'Novedad');
+                    return {
+                        id: d.id,
+                        source: 'NOVEDAD',
+                        ...data,
+                        title: data.title || fallbackTitle,
+                        msg: data.description || data.details || data.msg || '',
+                    };
+                });
             setNotifications(alerts);
             setHasUnread(alerts.length > 0);
         }, (e) => console.error('[plan] novedades error:', e));
@@ -2454,11 +2467,46 @@ export default function PlanificacionPage() {
             }).catch(() => {});
     }, [selectedObjective, currentDate, empresaId]);
 
+    // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
+    // Si el mes actual no tiene datos propios, hereda del mes anterior (una sola vez al abrir el mes).
     useEffect(() => {
-        const { pos, shift } = buildDotacionMapsFromEmployees(employees);
-        setEmpDefaultPos(pos);
-        setEmpDefaultShift(shift);
-    }, [employees]);
+        const { pos: basePos, shift: baseShift } = buildDotacionMapsFromEmployees(employees);
+        setEmpDefaultPos(basePos);
+        setEmpDefaultShift(baseShift);
+        if (!selectedObjective) return;
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const stateKey = `${selectedObjective}_${year}_${month}`;
+        const applyOverlay = (monthlyPos: Record<string,string>, monthlyShift: Record<string,string>) => {
+            if (Object.keys(monthlyPos).length === 0) return false;
+            const merged = { ...basePos };
+            const mergedS = { ...baseShift };
+            for (const [id, p] of Object.entries(monthlyPos)) merged[`${id}___${selectedObjective}`] = p;
+            for (const [id, s] of Object.entries(monthlyShift)) mergedS[`${id}___${selectedObjective}`] = s;
+            setEmpDefaultPos(merged);
+            setEmpDefaultShift(mergedS);
+            return true;
+        };
+        getDoc(doc(db, 'planificacion_estados', stateKey)).then(snap => {
+            const d = snap.data();
+            if (applyOverlay(d?.defaultPositionByEmp || {}, d?.defaultShiftByEmp || {})) return;
+            // Sin datos propios → intentar heredar del mes anterior
+            const prevMonth = month === 1 ? 12 : month - 1;
+            const prevYear = month === 1 ? year - 1 : year;
+            getDoc(doc(db, 'planificacion_estados', `${selectedObjective}_${prevYear}_${prevMonth}`)).then(prevSnap => {
+                const prev = prevSnap.data();
+                const prevPos: Record<string,string> = prev?.defaultPositionByEmp || {};
+                const prevSh: Record<string,string> = prev?.defaultShiftByEmp || {};
+                if (applyOverlay(prevPos, prevSh)) {
+                    // Guardar herencia en el mes actual para no volver a leer el mes anterior
+                    setDoc(doc(db, 'planificacion_estados', stateKey), {
+                        defaultPositionByEmp: prevPos,
+                        defaultShiftByEmp: prevSh,
+                    }, { merge: true }).catch(() => {});
+                }
+            }).catch(() => {});
+        }).catch(() => {});
+    }, [employees, selectedObjective, currentDate]);
 
     useEffect(() => {
         if (dotacionMigratedRef.current || typeof window === 'undefined' || !employees.length) return;
@@ -2524,14 +2572,19 @@ export default function PlanificacionPage() {
             toast.info(`Navegando a: ${objLabel}`);
         }
 
+        // Refuerzo / agregado solicitado por cliente (portal → planificación)
+        const isRefuerzoCliente = notif.type === 'REFUERZO_CLIENTE_PENDIENTE';
+
         // Ausencias que requieren gestión de cobertura
-        const isVacancyAbsence = notif.type &&
+        const isVacancyAbsence = !isRefuerzoCliente && notif.type &&
             (notif.type === 'Vacaciones' || notif.type.includes('Licencia') || notif.type === 'PG Permiso Gremial');
 
-        if (notif.date || notif.startDate) {
+        const rawFechaRefuerzo = isRefuerzoCliente ? (notif.fecha || notif.date) : null;
+
+        if (rawFechaRefuerzo || notif.date || notif.startDate) {
             try {
                 let targetDate: Date | null = null;
-                const rawDate = notif.date || notif.startDate;
+                const rawDate = rawFechaRefuerzo || notif.date || notif.startDate;
 
                 if (typeof rawDate === 'string') {
                     const parts = rawDate.split('-');
@@ -2543,6 +2596,14 @@ export default function PlanificacionPage() {
                 if (targetDate) {
                     // Navegar al mes correcto SIEMPRE (antes de abrir cualquier modal)
                     setCurrentDate(new Date(targetDate.getFullYear(), targetDate.getMonth(), 1));
+
+                    if (isRefuerzoCliente) {
+                        const instruccion = notif.description || notif.msg
+                            || `Asigná ${notif.tipoSolicitud === 'TURA' ? 'TURA' : 'REF/RFZ'} en el cronograma para el ${targetDate.toLocaleDateString('es-AR')}.`;
+                        toast.info(instruccion, { duration: 9000 });
+                        return;
+                    }
+
                     const targetEmp = employees.find(e => e.id === notif.employeeId || e.name === notif.employeeName);
 
                     if (targetEmp) {
@@ -2733,7 +2794,6 @@ export default function PlanificacionPage() {
     const saveEmpPos = async (empId: string, posName: string | null, shiftCode?: string | null) => {
         if (!selectedObjective) return;
         const key = `${empId}___${selectedObjective}`;
-        const emp = employees.find((e) => e.id === empId);
         const prevPosMap = { ...empDefaultPos };
         const prevShiftMap = { ...empDefaultShift };
         const newPosMap = { ...empDefaultPos };
@@ -2744,16 +2804,26 @@ export default function PlanificacionPage() {
         setEmpDefaultShift(newShiftMap);
         setEmpPosPicker(null);
         try {
-            const nextDotacion: PlanificacionDotacionMap = { ...(emp?.planificacionDotacion || {}) };
-            if (posName) {
-                nextDotacion[selectedObjective] = {
-                    positionName: posName,
-                    ...(shiftCode ? { shiftCode: shiftCode.toUpperCase() } : {}),
-                };
-            } else {
-                delete nextDotacion[selectedObjective];
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth() + 1;
+            const stateKey = `${selectedObjective}_${year}_${month}`;
+            const stateRef = doc(db, 'planificacion_estados', stateKey);
+            const posField = `defaultPositionByEmp.${empId}`;
+            const shiftField = `defaultShiftByEmp.${empId}`;
+            const update: Record<string, any> = {
+                [posField]: posName ?? deleteField(),
+                [shiftField]: shiftCode ? shiftCode.toUpperCase() : deleteField(),
+            };
+            try {
+                await updateDoc(stateRef, update);
+            } catch (e: any) {
+                if (e?.code === 'not-found') {
+                    await setDoc(stateRef, {
+                        defaultPositionByEmp: posName ? { [empId]: posName } : {},
+                        defaultShiftByEmp: shiftCode ? { [empId]: shiftCode.toUpperCase() } : {},
+                    }, { merge: true });
+                } else throw e;
             }
-            await updateDoc(doc(db, 'empleados', empId), { planificacionDotacion: nextDotacion });
         } catch {
             setEmpDefaultPos(prevPosMap);
             setEmpDefaultShift(prevShiftMap);
