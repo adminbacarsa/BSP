@@ -474,6 +474,25 @@ const isShiftConsolidated = (shift: any) => {
     return false;
 };
 
+/** Normaliza documento RFZ para vista de celda / modal de turno. */
+const rfzDocToShiftView = (rfz: any) => ({
+    id: rfz.id,
+    ...rfz,
+    code: 'RFZ',
+    type: rfz.type || 'Refuerzo Cliente',
+    name: 'Refuerzo Cliente',
+    objectiveId: rfz.objectiveId,
+    startTime: rfz.startTime,
+    endTime: rfz.endTime,
+    positionName: rfz.positionName,
+    draft: rfz.draft,
+    hours: rfz.hours,
+    isRfz: true,
+    origin: rfz.origin || 'CLIENT_REQUEST',
+    employeeId: rfz.employeeId,
+    employeeName: rfz.employeeName,
+});
+
 export default function PlanificacionPage() {
     const { empresaId, empresa } = useEmpresa();
     const { isSuperAdmin } = useAuth();
@@ -1122,6 +1141,20 @@ export default function PlanificacionPage() {
             rfz.draft === true,
         );
     }, [selectedObjective, currentDate, rfzTodos]);
+
+    /** RFZ asignados indexados por empleado+fecha para mostrar en la fila del guardia. */
+    const rfzByEmpDate = useMemo(() => {
+        const m: Record<string, any> = {};
+        if (!selectedObjective) return m;
+        const monthPrefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+        for (const rfz of rfzTodos) {
+            if (rfz.objectiveId !== selectedObjective) continue;
+            if (!String(rfz.fecha || '').startsWith(monthPrefix)) continue;
+            if (!rfz.employeeId || rfz.employeeId === 'VACANTE') continue;
+            m[`${rfz.employeeId}_${rfz.fecha}`] = rfz;
+        }
+        return m;
+    }, [rfzTodos, selectedObjective, currentDate]);
 
     const addModalEmployeeCandidates = useMemo(() => {
         const q = addSearchTerm.toLowerCase();
@@ -3760,12 +3793,15 @@ export default function PlanificacionPage() {
             const day = daysInMonth[selection.start.c]; 
             const dateStr = getDateKey(day); 
             const key = `${emp.id}_${dateStr}`; 
+            const rfzOnCell = rfzByEmpDate[key];
             const shift = pendingChanges[key] || shiftsMap[key]; 
             const absence = absencesMap[key]; 
             if (selection.start.r === selection.end.r && selection.start.c === selection.end.c) { setSelection({ start: null, end: null }); } 
             {
                 // Si la celda tiene borrado pendiente, tratar como vacía para permitir reasignar sin guardar
-                const effectiveShift = pendingChanges[key]?.isDeleted ? null : shift;
+                const effectiveShift = pendingChanges[key]?.isDeleted
+                    ? null
+                    : (shift || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
                 const empPreferred = empDefaultPos[`${emp.id}___${selectedObjective}`];
                 const defaultPos = effectiveShift?.positionName || empPreferred || dominantPosition.positionName;
                 setActivePosition(defaultPos);
@@ -5484,6 +5520,7 @@ export default function PlanificacionPage() {
                                     {daysInMonth.map((day, dayIndex) => {
                                         const key = `${emp.id}_${getDateKey(day)}`;
                                         const s = shiftsMap[key]; const p = pendingChanges[key];
+                                        const rfzOnCell = rfzByEmpDate[key];
                                         const selected = !isSnapshotView && isCellSelected(idx, dayIndex);
                                         const isLockedDate = !isSnapshotView && isDateLocked(getDateKey(day));
                                         const isCellWeekend = [0, 6].includes(day.getDay());
@@ -5517,6 +5554,10 @@ export default function PlanificacionPage() {
                                         if (isLockedDate && !p) { style = SHIFT_STYLES['PAST']; if (s) content = s.code; }
                                         else if (p) { if(p.isDeleted) { content=<X size={12}/>; style="bg-rose-50 text-rose-300"; } else { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { content=p.code; const baseStyle = SHIFT_STYLES[p.code]; style = baseStyle ? `${baseStyle} ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}` : `bg-amber-100 text-amber-700 font-black ring-2 ring-amber-400 ${isSwap ? swapStyle : ''}`; if (content === 'REF' || content === 'ESC') content = cellLabelForDeployment(String(content), p.deploymentBand); } } }
                                         else if (s) { if (!isLockedDate) { if(isFT) { style=SHIFT_STYLES['FT']; content="FT"; } else if(isFF) { style=SHIFT_STYLES['FF']; content="FF"; } else { style=`${getDefaultStyle(s.code)} ${isSwap ? swapStyle : ''}`; content=s.code; } } }
+                                        else if (rfzOnCell && !p) {
+                                            content = 'RFZ';
+                                            style = `${SHIFT_STYLES['RFZ']}${rfzOnCell.draft ? ' ring-2 ring-amber-400' : ''}`;
+                                        }
                                         const _deployBand = (p && !p.isDeleted ? p.deploymentBand : s?.deploymentBand);
                                         if (content === 'REF' || content === 'ESC') {
                                             content = cellLabelForDeployment(String(content), _deployBand);
@@ -5527,9 +5568,10 @@ export default function PlanificacionPage() {
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
-                                        const activeShift = (p && !p.isDeleted) ? p : s;
+                                        const activeShift = (p && !p.isDeleted) ? p : (s || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
                                         // TURA: turno agregado por cliente → fondo rojo en celda padre
                                         if (activeShift?.id && turaMap[activeShift.id]) { style = 'bg-red-500 text-white border-red-600 font-black'; }
+                                        const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
                                         const isOtherObjectiveShift = isShiftAtOtherObjective(s, p, selectedObjective);
                                         if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (isOtherObjectiveShift && content != null) {
@@ -5542,8 +5584,8 @@ export default function PlanificacionPage() {
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
                                                 : ' ring-2 ring-violet-600 ring-offset-1 z-20';
                                         }
-                                        const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || null;
-                                        const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : null;
+                                        const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
+                                        const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
                                         const cellRange = cellCode
                                             ? (SHIFT_RANGES[cellCode] || (
                                                 activeShift?.startTime && activeShift?.endTime
@@ -5559,7 +5601,7 @@ export default function PlanificacionPage() {
                                             ? String(absence.inferredCode || inferAbsenceCode(absence) || content || '').toUpperCase()
                                             : String(cellCode || '').toUpperCase();
                                         const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || pending?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : null; const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}` : (_exclHint || _otherObjHint || null), pos: _isRet ? null : (cellPosName || null), range: _isRet ? null : cellRange, x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}</div></td>;
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || pending?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}` : (_exclHint || _otherObjHint || _rfzHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{hasRfzOverlay && (<div className="absolute top-0 right-0 text-[7px] font-black bg-red-600 text-white px-0.5 rounded-bl">RFZ</div>)}{rfzOnCell && !s && !p && !absence && rfzOnCell.draft && (<div className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full bg-amber-400 border border-white" title="Sin publicar"/>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -5598,9 +5640,10 @@ export default function PlanificacionPage() {
                         </React.Fragment>
                     );
                 })}
-                {/* ── Filas de refuerzo RFZ — del cliente (vacantes + asignados), solo del mes visible ── */}
+                {/* ── Filas de refuerzo RFZ VACANTE — solo sin guardia asignado (asignados van en fila del empleado) ── */}
                 {!isSnapshotView && rfzTodos.filter(rfz => {
                     if (rfz.objectiveId !== selectedObjective) return false;
+                    if (rfz.employeeId && rfz.employeeId !== 'VACANTE') return false;
                     const mp = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                     return String(rfz.fecha || '').startsWith(mp);
                 }).map((rfz) => {
@@ -7290,6 +7333,26 @@ export default function PlanificacionPage() {
                                                     </div>
                                                 );
                                             })()}
+
+                                            {/* RFZ — refuerzo de cliente asignado a este guardia */}
+                                            {code === 'RFZ' && (
+                                                <div className="flex items-start gap-3 p-3 rounded-xl border border-red-200 bg-red-50 mb-4">
+                                                    <span className="shrink-0 text-[10px] font-black text-white bg-red-500 px-2 py-1 rounded-lg">RFZ</span>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-xs font-black text-red-700 leading-tight">Refuerzo solicitado por cliente</p>
+                                                        <p className="text-[11px] text-red-500 font-bold">{plannedStart} – {plannedEnd} · {hours > 0 ? `${hours}h` : ''}</p>
+                                                        {shift?.autorizadoPorNombre && (
+                                                            <p className="text-[10px] text-red-400 font-bold mt-0.5">Autorizó: {shift.autorizadoPorNombre}</p>
+                                                        )}
+                                                        {shift?.solicitadoPorNombre && (
+                                                            <p className="text-[10px] text-red-400 font-bold">Solicitó: {shift.solicitadoPorNombre}</p>
+                                                        )}
+                                                        {shift?.isFrancoTrabajado && (
+                                                            <p className="text-[10px] text-amber-600 font-black mt-0.5">Franco Trabajado (FT)</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
 
                                             {/* Info adicional */}
                                             <div className="space-y-2 mb-5">
