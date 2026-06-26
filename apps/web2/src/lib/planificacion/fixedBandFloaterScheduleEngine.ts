@@ -213,6 +213,9 @@ function buildSubgroupsFor24hs(
     positionGroups: Record<string, string[]>,
 ): string[][] {
     const result: string[][] = [];
+    // Empleados de puestos 24hs con dotación insuficiente para armar subgrupo completo.
+    // Se redistribuyen como flotantes al final, en vez de quedar idle.
+    const stranded: string[] = [];
     for (const [posName, groupIds] of Object.entries(positionGroups)) {
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos || !is24hs(pos)) continue;
@@ -222,7 +225,11 @@ function buildSubgroupsFor24hs(
         const only12h = codes.length > 0 && codes.every(c => BANDS_12H.has(c));
         const subgroupSize = only12h ? 3 : 4; // 4+2 → 3 emp/subgrupo; 6+2 → 4 emp/subgrupo
         const subgroupCount = Math.min(qty, Math.floor(groupIds.length / subgroupSize));
-        if (subgroupCount === 0) continue;
+        if (subgroupCount === 0) {
+            // Insuficientes para subgrupo propio → redistribuir como flotantes
+            stranded.push(...groupIds);
+            continue;
+        }
         // Subgrupos de N regulares según ciclo
         const subs: string[][] = [];
         for (let i = 0; i < subgroupCount; i++) {
@@ -232,6 +239,10 @@ function buildSubgroupsFor24hs(
         const floaters = groupIds.slice(subgroupCount * subgroupSize);
         floaters.forEach((id, fi) => { subs[fi % subs.length].push(id); });
         result.push(...subs);
+    }
+    // Redistribuir stranded como flotantes extra en los subgrupos existentes
+    if (stranded.length > 0 && result.length > 0) {
+        stranded.forEach((id, i) => { result[i % result.length].push(id); });
     }
     return result;
 }
