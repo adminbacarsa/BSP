@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   collection, query, where, orderBy, getDocs, addDoc,
   doc, updateDoc, serverTimestamp, Timestamp, limit,
@@ -21,10 +21,10 @@ type CorrectionType =
 
 const TIPO_LABELS: Record<CorrectionType, string> = {
   AJUSTE_HORAS:             'Ajuste de Horas',
-  CORRECCION_PRESENCIA:     'Correcci?n Presencia',
-  CORRECCION_CODIGO:        'Correcci?n C?digo',
-  RETENCION_FALTANTE:       'Retenci?n No Registrada',
-  CORRECCION_PLANIFICACION: 'Correcci?n Planificaci?n',
+  CORRECCION_PRESENCIA:     'Corrección Presencia',
+  CORRECCION_CODIGO:        'Corrección Código',
+  RETENCION_FALTANTE:       'Retención No Registrada',
+  CORRECCION_PLANIFICACION: 'Corrección Planificación',
 };
 
 const TIPO_COLORS: Record<CorrectionType, string> = {
@@ -183,12 +183,12 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
             id: `audit_${log.id}`,
             source: 'audit_logs' as const,
             employeeId: empId,
-            employeeName: log.employeeName || emp?.name || '?',
+            employeeName: log.employeeName || emp?.name || '—',
             tipo: 'CORRECCION_PLANIFICACION' as CorrectionType,
             fecha: Timestamp.fromDate(fecha),
             motivo,
             creadoPor: log.actorUid,
-            creadoPorNombre: log.actorName || '?',
+            creadoPorNombre: log.actorName || '—',
             creadoEn: log.timestamp,
             origen: 'PLANIFICACION',
           };
@@ -203,7 +203,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
       setCorrections(merged);
     } catch (e) {
       console.error('[CorreccionesTab] loadCorrections:', e);
-      addToast('No se pudieron cargar las correcciones. Revis? la consola.', 'error');
+      addToast('No se pudieron cargar las correcciones. Revisá la consola.', 'error');
     } finally {
       setLoading(false);
     }
@@ -211,7 +211,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
 
   useEffect(() => { loadCorrections(); }, [loadCorrections]);
 
-  // Cargar turnos del d?a cuando cambia empleado/fecha en el modal
+  // Cargar turnos del día cuando cambia empleado/fecha en el modal
   useEffect(() => {
     if (!form.employeeId || !form.fecha || form.tipo === 'AJUSTE_HORAS') {
       setTurnos([]);
@@ -242,12 +242,12 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
   };
 
   const handleSave = async () => {
-    if (!form.employeeId)                               { addToast('Seleccion? un empleado', 'error'); return; }
-    if (!form.fecha)                                    { addToast('Seleccion? una fecha', 'error'); return; }
+    if (!form.employeeId)                               { addToast('Seleccioná un empleado', 'error'); return; }
+    if (!form.fecha)                                    { addToast('Seleccioná una fecha', 'error'); return; }
     if (!form.motivo.trim())                            { addToast('El motivo es obligatorio', 'error'); return; }
-    if (form.tipo === 'AJUSTE_HORAS' && !form.horas && !form.minutos)   { addToast('Ingres? horas o minutos a ajustar', 'error'); return; }
-    if (form.tipo === 'CORRECCION_CODIGO' && !form.codigoDespues) { addToast('Seleccion? el c?digo nuevo', 'error'); return; }
-    if (form.tipo === 'RETENCION_FALTANTE' && !form.retencionHoras && !form.retencionMinutos) { addToast('Ingres? la duraci?n de la retenci?n', 'error'); return; }
+    if (form.tipo === 'AJUSTE_HORAS' && !form.horas && !form.minutos)   { addToast('Ingresá horas o minutos a ajustar', 'error'); return; }
+    if (form.tipo === 'CORRECCION_CODIGO' && !form.codigoDespues) { addToast('Seleccioná el código nuevo', 'error'); return; }
+    if (form.tipo === 'RETENCION_FALTANTE' && !form.retencionHoras && !form.retencionMinutos) { addToast('Ingresá la duración de la retención', 'error'); return; }
 
     setSaving(true);
     try {
@@ -311,12 +311,12 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
           isAbsent:  false,
           draft:     false,
           createdAt: serverTimestamp(),
-          notes: `Retenci?n manual ÿÿÿ ${form.motivo}`,
+          notes: `Retención manual — ${form.motivo}`,
         });
       }
 
       await addDoc(collection(db, 'ajustes_horas'), corrData);
-      addToast('Correcci?n registrada', 'success');
+      addToast('Corrección registrada', 'success');
       setShowModal(false);
       loadCorrections();
     } catch (e: any) {
@@ -343,7 +343,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
 
   const fmtDateTime = (ts: unknown) => {
     const d = toDate(ts);
-    if (!d) return '?';
+    if (!d) return '—';
     return d.toLocaleString('es-AR', {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
@@ -353,7 +353,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
   return (
     <div className="flex-1 flex gap-4 overflow-hidden">
 
-      {/* ÿÿÿÿÿÿ Panel izquierdo: lista de empleados ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ */}
+      {/* Panel izquierdo: lista de empleados */}
       <div className="w-[260px] bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden shrink-0">
         <div className="px-3 pt-3 pb-2 border-b border-slate-100 dark:border-slate-700">
           <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-3 py-2 rounded-xl border border-slate-100 dark:border-slate-700">
@@ -387,10 +387,10 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
         </div>
       </div>
 
-      {/* ÿÿÿÿÿÿ Panel derecho ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ */}
+      {/* Panel derecho */}
       <div className="flex-1 flex flex-col gap-3 overflow-hidden min-w-0">
 
-        {/* Header: periodo + bot?n */}
+        {/* Header: periodo + boton */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <select value={month} onChange={e => setMonth(Number(e.target.value))}
@@ -408,7 +408,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
           {canAdjust && (
             <button onClick={() => handleOpenModal()}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-black shadow transition-colors">
-              <Plus size={14}/> Nueva Correcci?n
+              <Plus size={14}/> Nueva Correcci&oacute;n
             </button>
           )}
         </div>
@@ -444,10 +444,10 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
           ) : corrections.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-32 gap-2 text-slate-400">
               <Clock size={24}/>
-              <p className="text-xs font-bold">Sin correcciones en este per?odo</p>
+              <p className="text-xs font-bold">Sin correcciones en este per&iacute;odo</p>
               {canAdjust && (
                 <button onClick={() => handleOpenModal()} className="text-indigo-500 text-xs font-black hover:underline">
-                  + Nueva correcci?n
+                  + Nueva correcci&oacute;n
                 </button>
               )}
             </div>
@@ -484,26 +484,26 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
                       )}
                       {c.tipo === 'CORRECCION_PRESENCIA' && (
                         <span className={`font-black ${c.isPresente ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          ÿÿÿ {c.isPresente ? 'Presente' : 'Ausente'}
+                          {c.isPresente ? 'Presente' : 'Ausente'}
                         </span>
                       )}
                       {c.tipo === 'CORRECCION_CODIGO' && (
-                        <span className="font-black text-amber-700">{c.codigoAntes} ? {c.codigoDespues}</span>
+                        <span className="font-black text-amber-700">{c.codigoAntes} &rarr; {c.codigoDespues}</span>
                       )}
                       {c.tipo === 'CORRECCION_PLANIFICACION' && (
                         <span className="font-black text-violet-700">
                           {c.codigoAntes && c.codigoDespues
-                            ? `${c.codigoAntes} ? ${c.codigoDespues}`
-                            : c.objectiveName || 'Planificaci?n'}
+                            ? `${c.codigoAntes} → ${c.codigoDespues}`
+                            : c.objectiveName || 'Planificación'}
                         </span>
                       )}
                       {c.tipo === 'RETENCION_FALTANTE' && (
-                        <span className="font-black text-rose-700">{fmtHorasMinutos(c.retencionHoras || 0)} retenci?n</span>
+                        <span className="font-black text-rose-700">{fmtHorasMinutos(c.retencionHoras || 0)} retenci&oacute;n</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-slate-500 max-w-[200px] truncate" title={c.motivo}>{c.motivo}</td>
                     <td className="px-4 py-3 text-slate-400 whitespace-nowrap text-[10px]">{fmtDateTime(c.creadoEn)}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap font-bold">{c.creadoPorNombre || '\u2014'}</td>
+                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap font-bold">{c.creadoPorNombre || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -512,12 +512,12 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
         </div>
       </div>
 
-      {/* ÿÿÿÿÿÿ MODAL Nueva Correcci?n ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ */}
+      {/* MODAL Nueva Correccion */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-black text-slate-800 dark:text-white">Nueva Correcci?n de Registro</h3>
+              <h3 className="font-black text-slate-800 dark:text-white">Nueva Correcci&oacute;n de Registro</h3>
               <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={18}/></button>
             </div>
 
@@ -530,7 +530,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
                   onChange={e => setForm(f => ({ ...f, employeeId: e.target.value, turnoId: '', codigoAntes: '' }))}
                   className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800"
                 >
-                  <option value="">ÿÿÿ Seleccionar ÿÿÿ</option>
+                  <option value="">&mdash; Seleccionar &mdash;</option>
                   {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
               </div>
@@ -546,7 +546,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
 
               {/* Tipo */}
               <div>
-                <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">Tipo de Correcci?n</label>
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">Tipo de Correcci&oacute;n</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(['AJUSTE_HORAS','CORRECCION_PRESENCIA','CORRECCION_CODIGO','RETENCION_FALTANTE'] as CorrectionType[]).map(t => (
                     <button key={t} onClick={() => setForm(f => ({ ...f, tipo: t }))}
@@ -565,7 +565,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
                     <div className="flex rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0">
                       <button type="button" onClick={() => setForm(f => ({ ...f, horas: f.horas.startsWith('-') ? f.horas : f.horas ? `-${f.horas}` : '-0' }))}
                         className={`px-3 py-2 text-xs font-black transition-colors ${form.horas.startsWith('-') ? 'bg-rose-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200'}`}>
-                        ÿÿÿ Restar
+                        &minus; Restar
                       </button>
                       <button type="button" onClick={() => setForm(f => ({ ...f, horas: f.horas.replace(/^-/, '') }))}
                         className={`px-3 py-2 text-xs font-black transition-colors ${!form.horas.startsWith('-') ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:bg-slate-200'}`}>
@@ -595,7 +595,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
               {(form.tipo === 'CORRECCION_PRESENCIA' || form.tipo === 'CORRECCION_CODIGO') && (
                 <div>
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    Turno del d?a {loadingTurnos ? '(cargandoÿÿÿ)' : `(${turnos.length} encontrado${turnos.length !== 1 ? 's' : ''})`}
+                    Turno del d&iacute;a {loadingTurnos ? '(cargando…)' : `(${turnos.length} encontrado${turnos.length !== 1 ? 's' : ''})`}
                   </label>
                   {turnos.length === 0 && !loadingTurnos ? (
                     <p className="text-xs text-slate-400 italic px-1">No se encontraron turnos para ese empleado y fecha.</p>
@@ -609,7 +609,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
                     >
                       {turnos.map(t => (
                         <option key={(t as any).id} value={(t as any).id}>
-                          {(t as any).code || '?'} ÿÿÿ {(t as any).isPresent ? 'ÿÿÿ Presente' : 'ÿÿÿ No marcado'} ÿÿÿ {(t as any).objectiveName || 'Sin objetivo'}
+                          {(t as any).code || '?'} &middot; {(t as any).isPresent ? '✓ Presente' : '○ No marcado'} &middot; {(t as any).objectiveName || 'Sin objetivo'}
                         </option>
                       ))}
                     </select>
@@ -638,17 +638,17 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
               {form.tipo === 'CORRECCION_CODIGO' && (
                 <div className="flex gap-3 items-end">
                   <div className="flex-1">
-                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">C?digo actual</label>
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">C&oacute;digo actual</label>
                     <input value={form.codigoAntes} readOnly
                       className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 text-slate-400"
                     />
                   </div>
-                  <span className="text-slate-400 pb-2 text-lg">ÿÿÿ</span>
+                  <span className="text-slate-400 pb-2 text-lg">&rarr;</span>
                   <div className="flex-1">
-                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">C?digo nuevo</label>
+                    <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">C&oacute;digo nuevo</label>
                     <select value={form.codigoDespues} onChange={e => setForm(f => ({ ...f, codigoDespues: e.target.value }))}
                       className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800">
-                      <option value="">ÿÿÿ Seleccionar ÿÿÿ</option>
+                      <option value="">&mdash; Seleccionar &mdash;</option>
                       {SHIFT_CODES.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
@@ -658,7 +658,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
               {/* RETENCION_FALTANTE */}
               {form.tipo === 'RETENCION_FALTANTE' && (
                 <div>
-                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">Duraci?n de la retenci?n</label>
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">Duraci&oacute;n de la retenci&oacute;n</label>
                   <div className="flex items-center gap-2">
                     <input type="number" min="0" max="12" placeholder="0"
                       value={form.retencionHoras} onChange={e => setForm(f => ({ ...f, retencionHoras: e.target.value }))}
@@ -671,7 +671,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
                     />
                     <span className="text-xs font-bold text-slate-500">min</span>
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">Se crear? un turno de tipo RET a partir del egreso del turno del d?a.</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Se crear&aacute; un turno de tipo RET a partir del egreso del turno del d&iacute;a.</p>
                 </div>
               )}
 
@@ -680,7 +680,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider block mb-1">
                   Motivo <span className="text-rose-500">*</span>
                 </label>
-                <textarea placeholder="Describ? el motivo de la correcci?nÿÿÿ"
+                <textarea placeholder="Describí el motivo de la corrección…"
                   value={form.motivo} onChange={e => setForm(f => ({ ...f, motivo: e.target.value }))}
                   rows={3}
                   className="w-full border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-700 dark:text-white dark:bg-slate-800 resize-none"
@@ -696,7 +696,7 @@ export default function CorreccionesTab({ employees, canAdjust }: Props) {
               <button onClick={handleSave} disabled={saving}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-black bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white transition-colors">
                 {saving ? <RefreshCw size={14} className="animate-spin"/> : <Save size={14}/>}
-                {saving ? 'Guardandoÿÿÿ' : 'Guardar'}
+                {saving ? 'Guardando…' : 'Guardar'}
               </button>
             </div>
           </div>
