@@ -3095,6 +3095,50 @@ export default function PlanificacionPage() {
                 });
             });
 
+            const registerPlanificacionCorreccion = (
+                empId: string,
+                empName: string,
+                dateStr: string,
+                actionDetail: string,
+                codigoAntes: string,
+                codigoDespues: string,
+            ) => {
+                if (!correctionMode) return;
+                const [y, m, d] = dateStr.split('-').map(Number);
+                const corrFechaTs = Timestamp.fromDate(new Date(y, m - 1, d, 12, 0, 0));
+                const tipoCorr =
+                    codigoAntes && codigoDespues && codigoAntes !== codigoDespues && codigoDespues !== '(eliminado)'
+                        ? 'CORRECCION_CODIGO'
+                        : 'CORRECCION_PLANIFICACION';
+                logData.push({ empId, date: dateStr, action: 'CORRECCION_SUPERADMIN' });
+                batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
+                    action: 'CORRECCION_SUPERADMIN',
+                    module: 'PLANIFICADOR',
+                    details: `[CORRECCIÓN] ${actionDetail}`,
+                    timestamp: serverTimestamp(),
+                    actorName: realActorName,
+                    actorUid: auth.currentUser?.uid,
+                    employeeId: empId,
+                    employeeName: empName,
+                    fecha: corrFechaTs,
+                }, empresaId));
+                batch.set(doc(collection(db, 'ajustes_horas')), stampEmpresaId({
+                    employeeId: empId,
+                    employeeName: empName,
+                    tipo: tipoCorr,
+                    fecha: corrFechaTs,
+                    motivo: actionDetail,
+                    codigoAntes,
+                    codigoDespues,
+                    objectiveId: selectedObjective,
+                    objectiveName: getObjectiveName(selectedObjective),
+                    origen: 'PLANIFICACION',
+                    creadoPor: auth.currentUser?.uid || '',
+                    creadoPorNombre: realActorName,
+                    creadoEn: serverTimestamp(),
+                }, empresaId));
+            };
+
             try {
                 for (const [key, change] of Object.entries(pendingChanges)) {
                     const [empId, dateStr] = key.split('_');
@@ -3118,6 +3162,14 @@ export default function PlanificacionPage() {
                         actionType = 'ELIMINACION_MASIVA';
                         actionDetail = `Borró turno de ${empName} el ${dateStr}`;
                         deleteAllExisting();
+                        registerPlanificacionCorreccion(
+                            empId,
+                            empName,
+                            dateStr,
+                            actionDetail,
+                            existing?.code || '',
+                            '(eliminado)',
+                        );
                     } else {
                         deleteAllExisting();
 
@@ -3188,16 +3240,28 @@ export default function PlanificacionPage() {
                             ...deploymentFieldsForFirestore(change),
                         }, empresaId));
 
-                        logData.push({ empId, date: dateStr, action: correctionMode ? 'CORRECCION_SUPERADMIN' : actionType });
-                        if (isPublished || correctionMode) {
-                            batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
-                                action: correctionMode ? 'CORRECCION_SUPERADMIN' : actionType,
-                                module: 'PLANIFICADOR',
-                                details: correctionMode ? `[CORRECCIÓN] ${actionDetail}` : actionDetail,
-                                timestamp: serverTimestamp(),
-                                actorName: realActorName,
-                                actorUid: auth.currentUser?.uid,
-                            }, empresaId));
+                        if (correctionMode) {
+                            const codigoNuevo = change.isFrancoCompensatorio ? 'FF' : change.code;
+                            registerPlanificacionCorreccion(
+                                empId,
+                                empName,
+                                dateStr,
+                                actionDetail,
+                                existing?.code || '',
+                                codigoNuevo,
+                            );
+                        } else {
+                            logData.push({ empId, date: dateStr, action: actionType });
+                            if (isPublished) {
+                                batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
+                                    action: actionType,
+                                    module: 'PLANIFICADOR',
+                                    details: actionDetail,
+                                    timestamp: serverTimestamp(),
+                                    actorName: realActorName,
+                                    actorUid: auth.currentUser?.uid,
+                                }, empresaId));
+                            }
                         }
                     }
                 }
