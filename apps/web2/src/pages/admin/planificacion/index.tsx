@@ -1113,6 +1113,16 @@ export default function PlanificacionPage() {
         return [...notifications, ...sinteticas];
     }, [notifications, rfzVacantes]);
 
+    const rfzDraftPendientesMes = useMemo(() => {
+        if (!selectedObjective) return [];
+        const monthPrefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+        return rfzTodos.filter(rfz =>
+            rfz.objectiveId === selectedObjective &&
+            String(rfz.fecha || '').startsWith(monthPrefix) &&
+            rfz.draft === true,
+        );
+    }, [selectedObjective, currentDate, rfzTodos]);
+
     const addModalEmployeeCandidates = useMemo(() => {
         const q = addSearchTerm.toLowerCase();
         let list = employees.filter(e => e.status !== 'inactivo' && e.name.toLowerCase().includes(q));
@@ -2509,6 +2519,39 @@ export default function PlanificacionPage() {
             }).catch(() => {});
     }, [selectedObjective, currentDate, empresaId]);
 
+    // RFZ en borrador sobre cronograma ya publicado → modo corrección + re-publicar pendiente.
+    const activateRfzCorrectionFlow = useCallback((opts?: { republishOnly?: boolean }) => {
+        if (!selectedObjective) return;
+        const lookupKey = planificacionPublishLookupKey(
+            selectedObjective,
+            currentDate.getFullYear(),
+            currentDate.getMonth() + 1,
+        );
+        if (!publishStatusMap[lookupKey]) return;
+        setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
+        if (!opts?.republishOnly && isSuperAdmin) setCorrectionMode(true);
+    }, [selectedObjective, currentDate, publishStatusMap, isSuperAdmin]);
+
+    useEffect(() => {
+        if (!selectedObjective) return;
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
+        if (!publishStatusMap[lookupKey]) return;
+        const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+        const draftRfz = rfzTodos.filter(rfz =>
+            rfz.objectiveId === selectedObjective &&
+            String(rfz.fecha || '').startsWith(monthPrefix) &&
+            rfz.draft === true,
+        );
+        if (draftRfz.length === 0) return;
+        const asignadosSinPublicar = draftRfz.some(rfz => rfz.employeeId && rfz.employeeId !== 'VACANTE');
+        if (asignadosSinPublicar) {
+            setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
+        }
+        if (isSuperAdmin) setCorrectionMode(true);
+    }, [selectedObjective, currentDate, rfzTodos, publishStatusMap, isSuperAdmin]);
+
     // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
     // Si el mes actual no tiene datos propios, hereda del mes anterior (una sola vez al abrir el mes).
     useEffect(() => {
@@ -2593,6 +2636,7 @@ export default function PlanificacionPage() {
                 if (y && m) setCurrentDate(new Date(y, m - 1, 1));
             }
             setForceShowAll(true);
+            activateRfzCorrectionFlow();
             setRfzAsignando(notif.__rfz);
             return;
         }
@@ -3286,6 +3330,7 @@ export default function PlanificacionPage() {
             // 4. Actualizar estado local
             setPublishStatusMap(prev => ({ ...prev, [publishLookupKey]: { publishedAt: new Date(), publishedBy: actorName } }));
             setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: false }));
+            setCorrectionMode(false);
             const totalPublished = draftsSnap.docs.length + rfzPublished;
             toast.success(
                 rfzPublished > 0
@@ -5586,7 +5631,11 @@ export default function PlanificacionPage() {
                                 const isCellWeekend = [0, 6].includes(day.getDay());
                                 return (
                                     <td key={`rfz_${rfz.id}_${dayStr}`}
-                                        onClick={() => { if (isRfzDay) setRfzAsignando(rfz); }}
+                                        onClick={() => {
+                                            if (!isRfzDay) return;
+                                            activateRfzCorrectionFlow();
+                                            setRfzAsignando(rfz);
+                                        }}
                                         className={`border-b border-r p-0.5 text-center ${isCellWeekend ? 'bg-rose-50/40' : ''} ${isRfzDay ? 'cursor-pointer' : ''}`}>
                                         {isRfzDay && (
                                             <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black border transition-colors ${asignado
@@ -6368,6 +6417,24 @@ export default function PlanificacionPage() {
                         </div>
                     ) : (
                         <>
+                        {(() => {
+                            const publishLookupKey = planificacionPublishLookupKey(
+                                selectedObjective,
+                                currentDate.getFullYear(),
+                                currentDate.getMonth() + 1,
+                            );
+                            const cronogramaPublicado = !!publishStatusMap[publishLookupKey];
+                            if (!cronogramaPublicado || rfzDraftPendientesMes.length === 0) return null;
+                            const asignados = rfzDraftPendientesMes.filter(rfz => rfz.employeeId && rfz.employeeId !== 'VACANTE');
+                            return (
+                                <div className="mx-2 mb-1 flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl text-xs font-black no-print">
+                                    <AlertTriangle size={14}/>
+                                    {asignados.length > 0
+                                        ? `${asignados.length} refuerzo(s) RFZ asignado(s) sin publicar — usá RE-PUBLICAR para notificar a los guardias.`
+                                        : `${rfzDraftPendientesMes.length} refuerzo(s) RFZ pendiente(s) — asigná guardia y re-publicá el cronograma.`}
+                                </div>
+                            );
+                        })()}
                         {correctionMode && (
                             <>
                             <div className="mx-2 mb-1 flex items-center gap-2 bg-rose-600 text-white px-4 py-2 rounded-xl text-xs font-black no-print">
@@ -9796,11 +9863,22 @@ export default function PlanificacionPage() {
                                                         employeeName: emp.name,
                                                         ...(cat.franco ? { isFrancoTrabajado: true, coveredFromFranco: true } : {}),
                                                     });
+                                                    activateRfzCorrectionFlow();
                                                     setRfzAsignando(null);
+                                                    const lookupKey = planificacionPublishLookupKey(
+                                                        selectedObjective,
+                                                        currentDate.getFullYear(),
+                                                        currentDate.getMonth() + 1,
+                                                    );
+                                                    const yaPublicado = !!publishStatusMap[lookupKey];
                                                     toast.success(
-                                                        cat.franco
-                                                            ? `${emp.name} asignado/a al RFZ (Franco Trabajado). Guardá y republicá para notificarle.`
-                                                            : `${emp.name} asignado/a al RFZ. Guardá y republicá para notificarle.`,
+                                                        yaPublicado
+                                                            ? (cat.franco
+                                                                ? `${emp.name} asignado/a al RFZ (Franco Trabajado). Modo corrección activo — re-publicá para notificarle.`
+                                                                : `${emp.name} asignado/a al RFZ. Modo corrección activo — re-publicá para notificarle.`)
+                                                            : (cat.franco
+                                                                ? `${emp.name} asignado/a al RFZ (Franco Trabajado). Publicá el cronograma para notificarle.`
+                                                                : `${emp.name} asignado/a al RFZ. Publicá el cronograma para notificarle.`),
                                                     );
                                                 } catch {
                                                     toast.error('Error al asignar guardia');

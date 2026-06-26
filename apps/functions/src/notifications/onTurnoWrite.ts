@@ -85,6 +85,35 @@ async function sendEmployeeTurnoPush(
   }
 }
 
+async function markSolicitudAsignada(
+  db: admin.firestore.Firestore,
+  solicitudId: string,
+  turnoId: string,
+  employeeId: string,
+): Promise<void> {
+  if (!solicitudId) return;
+  try {
+    await db.collection('solicitudes_refuerzo').doc(solicitudId).update({
+      estado: 'ASIGNADA',
+      turnoIds: admin.firestore.FieldValue.arrayUnion(turnoId),
+      empleadoIds: admin.firestore.FieldValue.arrayUnion(employeeId),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const novSnap = await db.collection('novedades')
+      .where('solicitudRefuerzoId', '==', solicitudId)
+      .where('type', '==', 'REFUERZO_CLIENTE_PENDIENTE')
+      .where('status', '==', 'pending')
+      .limit(5).get();
+    if (!novSnap.empty) {
+      const batch = db.batch();
+      novSnap.docs.forEach(d => batch.update(d.ref, { status: 'read', viewed: true }));
+      await batch.commit();
+    }
+  } catch (e) {
+    console.warn('[onTurnoWrite] markSolicitudAsignada error:', e);
+  }
+}
+
 export const onTurnoWrite = functions
   .runWith({ timeoutSeconds: 30, memory: '128MB' })
   .firestore.document('turnos/{turnoId}')
@@ -302,30 +331,7 @@ export const onTurnoWrite = functions
         }
 
         // Actualizar solicitud_refuerzo a ASIGNADA si el turno tiene vínculo
-        const solicitudId: string | undefined = after.solicitudRefuerzoId;
-        if (solicitudId) {
-          try {
-            await db.collection('solicitudes_refuerzo').doc(solicitudId).update({
-              estado: 'ASIGNADA',
-              turnoIds: admin.firestore.FieldValue.arrayUnion(turnoIdR),
-              empleadoIds: admin.firestore.FieldValue.arrayUnion(assignedEmployeeId),
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            // Marcar novedad REFUERZO_CLIENTE_PENDIENTE asociada como leída
-            const novSnap = await db.collection('novedades')
-              .where('solicitudRefuerzoId', '==', solicitudId)
-              .where('type', '==', 'REFUERZO_CLIENTE_PENDIENTE')
-              .where('status', '==', 'pending')
-              .limit(5).get();
-            if (!novSnap.empty) {
-              const batch = db.batch();
-              novSnap.docs.forEach(d => batch.update(d.ref, { status: 'read', viewed: true }));
-              await batch.commit();
-            }
-          } catch (e) {
-            console.warn('[onTurnoWrite] RFZ solicitud/novedad update error:', e);
-          }
-        }
+        await markSolicitudAsignada(db, after.solicitudRefuerzoId, turnoIdR, assignedEmployeeId);
         return;
       }
     }
@@ -349,6 +355,9 @@ export const onTurnoWrite = functions
         'TURNO_NUEVO',
         change.after.id,
       );
+      // El RFZ se asignó en borrador (no se cerró el ciclo de la solicitud en ese momento):
+      // al publicar recién marcamos la solicitud ASIGNADA y limpiamos la novedad pendiente.
+      await markSolicitudAsignada(db, after.solicitudRefuerzoId, change.after.id, after.employeeId);
       return;
     }
 
