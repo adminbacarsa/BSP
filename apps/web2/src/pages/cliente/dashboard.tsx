@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { db, auth } from '@/lib/firebase';
@@ -1262,6 +1262,7 @@ function estadoRefuerzo(estado: SolicitudEstado) {
 }
 
 interface SlaPosition { id: string; name: string; shifts: { code: string; name: string; startTime: string; endTime: string }[] }
+type GuardiaEnTurno = { shiftId: string; nombre: string; empleadoId: string };
 
 function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clienteUser: ClienteUser }) {
   const [tipo, setTipo] = useState<'REFUERZO_PUESTO' | 'AGREGADO_TURNO'>('REFUERZO_PUESTO');
@@ -1280,9 +1281,9 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
   const [selPosId, setSelPosId] = useState('');
   const [selShiftCode, setSelShiftCode] = useState('');
 
-  // Guardias en turno (AGREGADO_TURNO)
-  const [guardias, setGuardias] = useState<{ shiftId: string; nombre: string; empleadoId: string }[]>([]);
-  const [guardiaSelId, setGuardiaSelId] = useState('');
+  // Guardias en turno (AGREGADO_TURNO), indexados por fecha para soportar múltiples días.
+  const [guardiasByFecha, setGuardiasByFecha] = useState<Record<string, GuardiaEnTurno[]>>({});
+  const [guardiaSelPorFecha, setGuardiaSelPorFecha] = useState<Record<string, string>>({});
 
   // Carga puestos del SLA activo del objetivo
   useEffect(() => {
@@ -1333,49 +1334,91 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
     );
   }, [objetivo.id, clienteUser.clientId, reloadSolicitudes]);
 
-  // Guardias en turno (AGREGADO_TURNO) — busca en turnos planificados del objetivo
+  const fechasAgregadoTurno = useMemo(() => {
+    if (tipo !== 'AGREGADO_TURNO') return fecha ? [fecha] : [];
+    return Array.from(new Set([fecha, ...fechasExtra].filter(Boolean))).sort();
+  }, [tipo, fecha, fechasExtra]);
+
+  const formatFechaCorta = (value: string) => {
+    if (!value) return '';
+    const [y, m, d] = value.split('-');
+    return `${d}/${m}/${y}`;
+  };
+
+  const dateKeyFromTurno = (turno: any) => {
+    if (typeof turno.fecha === 'string' && turno.fecha) return turno.fecha;
+    if (turno.startTime?.seconds) {
+      const d = new Date(turno.startTime.seconds * 1000);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    return '';
+  };
+
+  // Guardias en turno (AGREGADO_TURNO) — busca por clientId y agrupa por fecha.
   useEffect(() => {
-    setGuardiaSelId('');
-    setGuardias([]);
-    if (tipo !== 'AGREGADO_TURNO' || !fecha) return;
+    if (tipo !== 'AGREGADO_TURNO' || fechasAgregadoTurno.length === 0) {
+      setGuardiasByFecha({});
+      setGuardiaSelPorFecha({});
+      return;
+    }
 
     // Las reglas autorizan al usuario de portal a leer turnos por su clientId (no por objectiveId).
     // Consultamos por clientId y filtramos objetivo + fecha en memoria.
     getDocs(query(collection(db, 'turnos'), where('clientId', '==', clienteUser.clientId)))
       .then(snap => {
+        const fechasSet = new Set(fechasAgregadoTurno);
         const seen = new Set<string>();
-        const deduped = snap.docs
+        const byFecha: Record<string, any[]> = {};
+        snap.docs
           .map(d => ({ id: d.id, ...d.data() } as any))
-          .filter((t: any) => {
-            if (t.objectiveId !== objetivo.id) return false;
-            let tFecha: string = typeof t.fecha === 'string' ? t.fecha : '';
-            if (!tFecha && t.startTime?.seconds)
-              tFecha = new Date(t.startTime.seconds * 1000).toISOString().slice(0, 10);
-            return tFecha === fecha && !t.isAbsent && !t.isFranco
-              && t.employeeId && t.employeeId !== 'VACANTE'
-              && !seen.has(t.employeeId) && !!seen.add(t.employeeId);
+          .forEach((t: any) => {
+            if (t.objectiveId !== objetivo.id) return;
+            const tFecha = dateKeyFromTurno(t);
+            if (!fechasSet.has(tFecha)) return;
+            const code = String(t.code || t.type || '').toUpperCase();
+            if (['F', 'FF', 'FP', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RFZ', 'TURA'].includes(code)) return;
+            if (t.isAbsent || t.isFranco || t.draft === true) return;
+            if (!t.employeeId || t.employeeId === 'VACANTE') return;
+            const uniqueKey = `${tFecha}_${t.employeeId}`;
+            if (seen.has(uniqueKey)) return;
+            seen.add(uniqueKey);
+            if (!byFecha[tFecha]) byFecha[tFecha] = [];
+            byFecha[tFecha].push(t);
           });
 
-        if (deduped.length === 0) { setGuardias([]); return; }
-
-        Promise.all(deduped.map(async (t: any) => {
-          let nombre = t.employeeName || t.empleadoName || '';
-          if (!nombre) {
-            try {
-              const empSnap = await getDoc(doc(db, 'empleados', t.employeeId));
-              if (empSnap.exists()) {
-                const e = empSnap.data();
-                nombre = [e.apellido || e.lastName, e.nombre || e.firstName]
-                  .filter(Boolean).join(', ')
-                  || e.name || t.employeeId;
-              }
-            } catch { /* keep empty */ }
-          }
-          return { shiftId: t.id, nombre: nombre || t.employeeId, empleadoId: t.employeeId };
-        })).then(lista => setGuardias(lista)).catch(console.error);
+        Promise.all(Object.entries(byFecha).flatMap(([f, rows]) =>
+          rows.map(async (t: any) => {
+            let nombre = t.employeeName || t.empleadoName || '';
+            if (!nombre) {
+              try {
+                const empSnap = await getDoc(doc(db, 'empleados', t.employeeId));
+                if (empSnap.exists()) {
+                  const e = empSnap.data();
+                  nombre = [e.apellido || e.lastName, e.nombre || e.firstName]
+                    .filter(Boolean).join(', ')
+                    || e.name || t.employeeId;
+                }
+              } catch { /* keep empty */ }
+            }
+            return { fecha: f, guardia: { shiftId: t.id, nombre: nombre || t.employeeId, empleadoId: t.employeeId } as GuardiaEnTurno };
+          }),
+        )).then(items => {
+          const next: Record<string, GuardiaEnTurno[]> = {};
+          fechasAgregadoTurno.forEach(f => { next[f] = []; });
+          items.forEach(({ fecha: f, guardia }) => { next[f].push(guardia); });
+          Object.values(next).forEach(list => list.sort((a, b) => a.nombre.localeCompare(b.nombre)));
+          setGuardiasByFecha(next);
+          setGuardiaSelPorFecha(prev => {
+            const clean: Record<string, string> = {};
+            fechasAgregadoTurno.forEach(f => {
+              if (prev[f] && next[f]?.some(g => g.shiftId === prev[f])) clean[f] = prev[f];
+            });
+            return clean;
+          });
+        }).catch(console.error);
       })
       .catch(console.error);
-  }, [tipo, fecha, objetivo.id, clienteUser.clientId]);
+  }, [tipo, fechasAgregadoTurno.join('|'), objetivo.id, clienteUser.clientId]);
 
   // Auto-seleccionar turno del puesto → llenar horarios
   const selPosition = slaPositions.find(p => p.id === selPosId);
@@ -1389,16 +1432,28 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
   const deadlineMs = fecha ? new Date(`${fecha}T00:00:00`).getTime() - MIN_HORAS_ANTICIPACION * 3600000 : 0;
   const horasRestantes = shiftStartMs ? (shiftStartMs - Date.now()) / 3600000 : 0;
   const anticipacionOk = fecha ? Date.now() <= deadlineMs : false;
-  const guardiaSelected = guardias.find(g => g.shiftId === guardiaSelId);
+  const agregadoAnticipacionOk = tipo !== 'AGREGADO_TURNO'
+    ? anticipacionOk
+    : fechasAgregadoTurno.length > 0 && fechasAgregadoTurno.every(f =>
+        Date.now() <= new Date(`${f}T00:00:00`).getTime() - MIN_HORAS_ANTICIPACION * 3600000,
+      );
+  const agregadoGuardiasOk = tipo !== 'AGREGADO_TURNO'
+    ? true
+    : fechasAgregadoTurno.length > 0 && fechasAgregadoTurno.every(f =>
+        !!guardiaSelPorFecha[f] && !!guardiasByFecha[f]?.some(g => g.shiftId === guardiaSelPorFecha[f]),
+      );
+  const fechasAgregadoVencidas = tipo === 'AGREGADO_TURNO'
+    ? fechasAgregadoTurno.filter(f => Date.now() > new Date(`${f}T00:00:00`).getTime() - MIN_HORAS_ANTICIPACION * 3600000)
+    : [];
 
-  const canSubmit = fecha && startTime && endTime && motivo.trim() && anticipacionOk &&
+  const canSubmit = fecha && startTime && endTime && motivo.trim() && (tipo === 'AGREGADO_TURNO' ? agregadoAnticipacionOk : anticipacionOk) &&
     (tipo === 'REFUERZO_PUESTO'
       ? cantidadPax >= 1 && (slaPositions.length === 0 || !!selPosId)
-      : !!guardiaSelId);
+      : agregadoGuardiasOk);
 
   const resetForm = () => {
     setFecha(''); setFechasExtra([]); setStartTime(''); setEndTime(''); setMotivo('');
-    setCantidadPax(1); setGuardiaSelId(''); setSelPosId(''); setSelShiftCode('');
+    setCantidadPax(1); setGuardiaSelPorFecha({}); setGuardiasByFecha({}); setSelPosId(''); setSelShiftCode('');
     setShowForm(false);
   };
 
@@ -1419,15 +1474,22 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
         solicitadoPorNombre: clienteUser.nombre,
         solicitadoAt:        Timestamp.now(),
       };
-      const extras = tipo === 'REFUERZO_PUESTO'
-        ? { cantidadPax, positionId: selPosId || undefined, positionName: selPosition?.name }
-        : { parentShiftId: guardiaSelected?.shiftId, parentEmpleadoId: guardiaSelected?.empleadoId, parentEmpleadoName: guardiaSelected?.nombre };
       // Para TURA pre-programado: crear una solicitud por cada fecha seleccionada
       const fechasAEnviar = tipo === 'AGREGADO_TURNO' && fechasExtra.length > 0
-        ? [fecha, ...fechasExtra]
+        ? fechasAgregadoTurno
         : [fecha];
       const creadas: SolicitudRefuerzo[] = [];
       for (const f of fechasAEnviar) {
+        const guardiaSelected = tipo === 'AGREGADO_TURNO'
+          ? guardiasByFecha[f]?.find(g => g.shiftId === guardiaSelPorFecha[f])
+          : undefined;
+        const extras = tipo === 'REFUERZO_PUESTO'
+          ? { cantidadPax, positionId: selPosId || undefined, positionName: selPosition?.name }
+          : {
+              parentShiftId: guardiaSelected?.shiftId,
+              parentEmpleadoId: guardiaSelected?.empleadoId,
+              parentEmpleadoName: guardiaSelected?.nombre,
+            };
         const payload = { ...base, fecha: f, ...extras };
         const id = await solicitudRefuerzoService.create(payload);
         creadas.push({ id, ...payload } as SolicitudRefuerzo);
@@ -1567,10 +1629,12 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
           )}
 
           {/* Alerta anticipación */}
-          {fecha && !anticipacionOk && (
+          {fecha && ((tipo === 'AGREGADO_TURNO' && !agregadoAnticipacionOk) || (tipo !== 'AGREGADO_TURNO' && !anticipacionOk)) && (
             <div className="flex items-center gap-2 px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-bold">
               <AlertCircle size={14}/>
-              Plazo vencido — las solicitudes deben enviarse antes de las 16:00 del día anterior al turno
+              {tipo === 'AGREGADO_TURNO' && fechasAgregadoVencidas.length > 1
+                ? `Plazo vencido en ${fechasAgregadoVencidas.map(formatFechaCorta).join(', ')} — las solicitudes deben enviarse antes de las 16:00 del día anterior al turno`
+                : 'Plazo vencido — las solicitudes deben enviarse antes de las 16:00 del día anterior al turno'}
             </div>
           )}
 
@@ -1589,13 +1653,48 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
               <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Guardia a ampliar</label>
               {!fecha
                 ? <p className="text-xs text-slate-400">Seleccioná la fecha primero</p>
-                : guardias.length === 0
-                  ? <p className="text-xs text-slate-400">Sin guardias asignados en esa fecha</p>
-                  : <select value={guardiaSelId} onChange={e => setGuardiaSelId(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400">
-                      <option value="">— Seleccioná un guardia —</option>
-                      {guardias.map(g => <option key={g.shiftId} value={g.shiftId}>{g.nombre}</option>)}
-                    </select>
+                : fechasAgregadoTurno.length <= 1
+                  ? (() => {
+                      const list = guardiasByFecha[fecha] || [];
+                      return list.length === 0
+                        ? <p className="text-xs text-slate-400">Sin guardias asignados en esa fecha</p>
+                        : (
+                          <select value={guardiaSelPorFecha[fecha] || ''} onChange={e => setGuardiaSelPorFecha(prev => ({ ...prev, [fecha]: e.target.value }))}
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400">
+                            <option value="">— Seleccioná un guardia —</option>
+                            {list.map(g => <option key={g.shiftId} value={g.shiftId}>{g.nombre}</option>)}
+                          </select>
+                        );
+                    })()
+                  : (
+                    <div className="space-y-2">
+                      <p className="text-[10px] text-slate-400 font-bold">
+                        Elegí el guardia de cada fecha. Cada día puede tener una dotación distinta.
+                      </p>
+                      {fechasAgregadoTurno.map(f => {
+                        const list = guardiasByFecha[f] || [];
+                        const vencida = fechasAgregadoVencidas.includes(f);
+                        return (
+                          <div key={f} className={`rounded-xl border p-3 ${vencida ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span className="text-xs font-black text-slate-700">{formatFechaCorta(f)}</span>
+                              {vencida && <span className="text-[9px] font-black text-rose-600 bg-white px-2 py-0.5 rounded-full border border-rose-200">Plazo vencido</span>}
+                            </div>
+                            {list.length === 0
+                              ? <p className="text-xs text-slate-400">Sin guardias asignados en esta fecha</p>
+                              : (
+                                <select value={guardiaSelPorFecha[f] || ''} onChange={e => setGuardiaSelPorFecha(prev => ({ ...prev, [f]: e.target.value }))}
+                                  disabled={vencida}
+                                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400 disabled:opacity-60">
+                                  <option value="">— Seleccioná un guardia —</option>
+                                  {list.map(g => <option key={g.shiftId} value={g.shiftId}>{g.nombre}</option>)}
+                                </select>
+                              )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
               }
             </div>
           )}
