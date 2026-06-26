@@ -1031,6 +1031,8 @@ export interface V2GenerateStats {
     idleEmployeeIds?: string[];
     /** Empleados redistribuidos desde puestos con dotación insuficiente para el ciclo 6+2. */
     strandedEmployeeIds?: string[];
+    /** Empleados movidos automáticamente desde su puesto asignado en legajos a otro puesto con déficit. */
+    relocatedEmployeeIds?: string[];
     /** Slots sin cobertura por día: key=dateStr → lista de {positionName, code, missing}. */
     uncoveredSlotsByDay?: Record<string, { positionName: string; code: string; missing: number }[]>;
     /** Puestos con más empleados asignados que los necesarios según el ciclo. */

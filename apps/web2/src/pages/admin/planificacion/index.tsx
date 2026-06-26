@@ -495,7 +495,9 @@ const rfzDocToShiftView = (rfz: any) => ({
 
 export default function PlanificacionPage() {
     const { empresaId, empresa } = useEmpresa();
-    const { isSuperAdmin } = useAuth();
+    const { isSuperAdmin, rolePermissions } = useAuth();
+    const canPublishPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('publish');
+    const canCorrectPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('correct');
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
@@ -681,6 +683,7 @@ export default function PlanificacionPage() {
         uncoveredSlots: number;
         idleEmployeeIds?: string[];
         strandedEmployeeIds?: string[];
+        relocatedEmployeeIds?: string[];
         primaryShiftByEmp?: Record<string, string | null>;
         positionGroups?: Record<string, string[]>;
         employeeRetCount?: Record<string, number>;
@@ -2564,8 +2567,8 @@ export default function PlanificacionPage() {
         );
         if (!publishStatusMap[lookupKey]) return;
         setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
-        if (!opts?.republishOnly && isSuperAdmin) setCorrectionMode(true);
-    }, [selectedObjective, currentDate, publishStatusMap, isSuperAdmin]);
+        if (!opts?.republishOnly && canCorrectPlanning) setCorrectionMode(true);
+    }, [selectedObjective, currentDate, publishStatusMap, canCorrectPlanning]);
 
     useEffect(() => {
         if (!selectedObjective) return;
@@ -2584,8 +2587,8 @@ export default function PlanificacionPage() {
         if (asignadosSinPublicar) {
             setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
         }
-        if (isSuperAdmin) setCorrectionMode(true);
-    }, [selectedObjective, currentDate, rfzTodos, publishStatusMap, isSuperAdmin]);
+        if (canCorrectPlanning) setCorrectionMode(true);
+    }, [selectedObjective, currentDate, rfzTodos, publishStatusMap, canCorrectPlanning]);
 
     // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
     // Si el mes actual no tiene datos propios, hereda del mes anterior (una sola vez al abrir el mes).
@@ -3321,7 +3324,7 @@ export default function PlanificacionPage() {
     };
 
     const handlePublish = async () => {
-        if (!selectedObjective) return;
+        if (!selectedObjective || !canPublishPlanning) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
@@ -4812,6 +4815,7 @@ export default function PlanificacionPage() {
                     : (gen.stats.uncoveredSlots ?? 0),
                 idleEmployeeIds: gen.stats.idleEmployeeIds,
                 strandedEmployeeIds: gen.stats.strandedEmployeeIds,
+                relocatedEmployeeIds: gen.stats.relocatedEmployeeIds,
                 primaryShiftByEmp: gen.stats.primaryShiftByEmp,
                 positionGroups: gen.stats.positionGroups,
                 employeeRetCount: gen.stats.employeeRetCount,
@@ -6306,7 +6310,7 @@ export default function PlanificacionPage() {
                                                 <Ghost size={12}/> BORRADOR
                                             </span>
                                         )}
-                                        {(!published || needsRepublish) && (
+                                        {canPublishPlanning && (!published || needsRepublish) && (
                                             <button
                                                 onClick={handlePublish}
                                                 disabled={isPublishing}
@@ -6319,10 +6323,10 @@ export default function PlanificacionPage() {
                                                 {published ? 'RE-PUBLICAR' : 'PUBLICAR'}
                                             </button>
                                         )}
-                                        {published && isSuperAdmin && (
+                                        {published && canCorrectPlanning && (
                                             <button
                                                 onClick={() => setCorrectionMode(v => !v)}
-                                                title="Modo Corrección: permite editar directamente sin FT/FF"
+                                                title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
                                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
                                             >
                                                 <ShieldAlert size={12}/>
@@ -9447,33 +9451,58 @@ export default function PlanificacionPage() {
                                     </div>
                                 )}
 
-                                {/* Aviso: empleados redistribuidos desde puestos con dotación insuficiente */}
-                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (autoV2GenStats?.strandedEmployeeIds?.length ?? 0) > 0 && (() => {
-                                    const strandedNames = (autoV2GenStats!.strandedEmployeeIds || []).map(id => {
+                                {/* Aviso: empleados movidos automáticamente por asignación incorrecta de puestos */}
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (() => {
+                                    const relocated = autoV2GenStats?.relocatedEmployeeIds || [];
+                                    const stranded  = autoV2GenStats?.strandedEmployeeIds  || [];
+                                    if (relocated.length === 0 && stranded.length === 0) return null;
+                                    const getName = (id: string) => {
                                         const emp = displayedEmployees.find((e: any) => e.id === id);
                                         return emp ? (emp.name || emp.nombre || id) : id;
-                                    });
+                                    };
                                     return (
-                                        <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5">
+                                        <div className="rounded-xl border-2 border-orange-400 bg-orange-50 px-3 py-2.5 space-y-2">
                                             <div className="flex items-start gap-2">
-                                                <span className="text-amber-600 mt-0.5 text-base">⚠</span>
+                                                <span className="text-orange-600 mt-0.5 text-base font-black">!</span>
+                                                <div className="flex-1">
+                                                    <p className="text-[11px] font-black text-orange-900 uppercase tracking-wide mb-0.5">
+                                                        Puestos con dotación incorrecta — corregidos automáticamente
+                                                    </p>
+                                                    <p className="text-[10px] text-orange-800 leading-relaxed">
+                                                        El engine detectó puestos con más o menos empleados de los necesarios para el ciclo 6+2 (qty × 4 por puesto)
+                                                        y rebalanceó la asignación para generar cobertura correcta.
+                                                        <strong className="block mt-0.5">Corregí la asignación de puestos en los legajos para que coincida con el SLA.</strong>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {relocated.length > 0 && (
                                                 <div>
-                                                    <p className="text-[11px] font-black text-amber-800 uppercase tracking-wide mb-0.5">
-                                                        {strandedNames.length} empleado{strandedNames.length !== 1 ? 's' : ''} redistribuido{strandedNames.length !== 1 ? 's' : ''}
+                                                    <p className="text-[9px] font-black text-orange-700 uppercase mb-1">
+                                                        {relocated.length} movido{relocated.length !== 1 ? 's' : ''} de su puesto (legajo incorrecto):
                                                     </p>
-                                                    <p className="text-[10px] text-amber-700 leading-relaxed">
-                                                        Su puesto asignado tiene dotación insuficiente para armar un ciclo 6+2 (mínimo 4 por subgrupo). Fueron agregados como flotantes al subgrupo más cercano.
-                                                        <br />Revisá la asignación de puestos en los legajos para corregirlo antes de generar.
-                                                    </p>
-                                                    <div className="mt-1.5 flex flex-wrap gap-1">
-                                                        {strandedNames.map((n, i) => (
-                                                            <span key={i} className="bg-amber-200 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase">
-                                                                {n}
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {relocated.map((id, i) => (
+                                                            <span key={i} className="bg-orange-200 text-orange-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase">
+                                                                {getName(id)}
                                                             </span>
                                                         ))}
                                                     </div>
                                                 </div>
-                                            </div>
+                                            )}
+                                            {stranded.length > 0 && (
+                                                <div>
+                                                    <p className="text-[9px] font-black text-orange-700 uppercase mb-1">
+                                                        {stranded.length} sin puesto válido (faltan empleados en el servicio):
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {stranded.map((id, i) => (
+                                                            <span key={i} className="bg-amber-200 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase">
+                                                                {getName(id)}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     );
                                 })()}

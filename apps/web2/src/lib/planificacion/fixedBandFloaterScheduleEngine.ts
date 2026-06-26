@@ -200,6 +200,64 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
 }
 
 /**
+ * Calcula la dotación mínima que necesita cada puesto 24hs para su ciclo completo.
+ * 8h (M/T/N): qty × 4 empleados. 12h (D12/N12): qty × 3 empleados.
+ */
+function neededCountFor24hPos(pos: V2PositionDef): number {
+    const qty = Math.max(1, Number(pos.qty) || 1);
+    const codes = (pos.shifts || []).map(s => String(s.code || '').toUpperCase());
+    const only12h = codes.length > 0 && codes.every(c => BANDS_12H.has(c));
+    return qty * (only12h ? 3 : 4);
+}
+
+/**
+ * Rebalancea la dotación entre puestos 24hs cuando los legajos tienen asignaciones incorrectas.
+ * Si un puesto tiene más empleados de los que necesita (qty×subgroupSize) y otro tiene menos,
+ * mueve el excedente del sobre-dotado al sub-dotado. Así el engine genera cobertura correcta
+ * incluso cuando los legajos están mal asignados.
+ * Retorna los IDs movidos para que el wizard los muestre como advertencia.
+ */
+function rebalance24hPositionGroups(
+    ctx: V2EngineContext,
+    positionGroups: Record<string, string[]>,
+): { groups: Record<string, string[]>; relocatedIds: string[] } {
+    const relocatedIds: string[] = [];
+    // copia mutable
+    const groups: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(positionGroups)) groups[k] = [...v];
+
+    const posInfo = ctx.positions
+        .filter(p => is24hs(p) && !(Array.isArray(p.activeDays) && p.activeDays.length < 7))
+        .map(p => ({ name: p.positionName, needed: neededCountFor24hPos(p) }));
+
+    // Iteramos hasta que no haya más para mover (máx 200 iteraciones por seguridad)
+    for (let iter = 0; iter < 200; iter++) {
+        // Puesto con mayor déficit
+        let defName = '';
+        let defAmt = 0;
+        // Puesto con mayor superávit
+        let surName = '';
+        let surAmt = 0;
+        for (const { name, needed } of posInfo) {
+            const have = (groups[name] || []).length;
+            if (have < needed) {
+                const d = needed - have;
+                if (d > defAmt) { defAmt = d; defName = name; }
+            } else if (have > needed) {
+                const s = have - needed;
+                if (s > surAmt) { surAmt = s; surName = name; }
+            }
+        }
+        if (!defName || !surName) break;
+        // Mueve un empleado del sobre-dotado al sub-dotado
+        const movedId = groups[surName].pop()!;
+        (groups[defName] = groups[defName] || []).push(movedId);
+        relocatedIds.push(movedId);
+    }
+    return { groups, relocatedIds };
+}
+
+/**
  * Divide grupos en subgrupos de 4 regulares + sobrantes como flotantes.
  * qty = puestos concurrentes por turno = número de subgrupos de 4.
  * Los primeros qty×4 empleados (o menos si no alcanza) forman los subgrupos regulares.
@@ -496,7 +554,9 @@ function patchRetForAbsences(
 }
 
 export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2GenerateResult {
-    const positionGroups = buildPositionGroups(ctx);
+    const rawPositionGroups = buildPositionGroups(ctx);
+    // Corregir asignaciones incorrectas: mover excedentes de puestos sobre-dotados a sub-dotados
+    const { groups: positionGroups, relocatedIds } = rebalance24hPositionGroups(ctx, rawPositionGroups);
     // Subgrupos independientes por slot concurrente (qty>1 → N subgrupos de 4-5 c/u)
     const { subgroups, strandedIds } = buildSubgroupsFor24hs(ctx, positionGroups);
     // empToPosition: usado para L-V y patchRetForAbsences
@@ -702,6 +762,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             positionGroups,
             idleEmployeeIds: ctx.employees.filter(e => openingSlotByEmp[e.id] === undefined).map(e => e.id),
             strandedEmployeeIds: strandedIds.length > 0 ? strandedIds : undefined,
+            relocatedEmployeeIds: relocatedIds.length > 0 ? relocatedIds : undefined,
             primaryShiftByEmp,
             slaDeficitRemaining,
             slaHoursClosed: slaDeficitRemaining <= 0.5,
