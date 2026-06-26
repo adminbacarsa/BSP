@@ -495,6 +495,7 @@ export default function PlanificacionPage() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [bandDropOpen, setBandDropOpen] = useState(false);
 
     const [employees, setEmployees] = useState<any[]>([]);
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
@@ -6155,11 +6156,9 @@ export default function PlanificacionPage() {
                                     <button onClick={() => startFilterTransition(() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
                                     <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
                                 </div>
-                                <div className="flex items-center gap-0.5" title="Filtrar por banda horaria">
-                                    {[null,'M','T','N','D12','N12','RET'].map(b => {
-                                        const active = bandFilter === b;
-                                        const label = b ?? 'All';
-                                        const colors: Record<string, string> = {
+                                <div className="relative" title="Filtrar por banda horaria">
+                                    {(() => {
+                                        const BAND_COLORS: Record<string, string> = {
                                             M: 'text-blue-700 border-blue-400 bg-blue-50',
                                             T: 'text-orange-600 border-orange-400 bg-orange-50',
                                             N: 'text-indigo-700 border-indigo-500 bg-indigo-50',
@@ -6167,14 +6166,32 @@ export default function PlanificacionPage() {
                                             N12: 'text-purple-700 border-purple-500 bg-purple-50',
                                             RET: 'text-amber-700 border-amber-500 bg-amber-50',
                                         };
-                                        const cls = b ? colors[b] : 'text-slate-600 border-slate-300 bg-slate-100';
-                                        return (
-                                            <button key={label} onClick={() => startFilterTransition(() => setBandFilter(b))}
-                                                className={`px-1.5 py-1 text-[9px] font-black uppercase border transition-colors first:rounded-l-lg last:rounded-r-lg ${active ? cls + ' shadow-inner' : 'border-transparent bg-slate-100 text-slate-400 hover:' + cls}`}
-                                                title={b ? { M: 'Mañana', T: 'Tarde', N: 'Noche', D12: 'Diurno 12h', N12: 'Nocturno 12h', RET: 'Retén' }[b] ?? b : 'Ver todas las bandas'}
-                                            >{label}</button>
-                                        );
-                                    })}
+                                        const activeCls = bandFilter ? BAND_COLORS[bandFilter] : 'text-slate-600 border-slate-300 bg-slate-100';
+                                        return (<>
+                                            <button
+                                                onClick={() => setBandDropOpen(p => !p)}
+                                                className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-colors flex items-center gap-1 ${activeCls}`}
+                                            >
+                                                {bandFilter ?? 'ALL'}
+                                                <ChevronDown size={10}/>
+                                            </button>
+                                            {bandDropOpen && (
+                                                <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[72px]">
+                                                    {[null,'M','T','N','D12','N12','RET'].map(b => {
+                                                        const label = b ?? 'ALL';
+                                                        const active = bandFilter === b;
+                                                        const textCls = b ? BAND_COLORS[b].split(' ')[0] : 'text-slate-600';
+                                                        return (
+                                                            <button key={label}
+                                                                onClick={() => { startFilterTransition(() => setBandFilter(b)); setBandDropOpen(false); }}
+                                                                className={`w-full px-3 py-1.5 text-left text-[10px] font-black uppercase hover:bg-slate-50 transition-colors ${active ? textCls : 'text-slate-400'}`}
+                                                            >{label}</button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </>);
+                                    })()}
                                 </div>
                                 {customOrderMap[selectedObjective || '__all__'] && !forceShowAll && (
                                     <button onClick={clearCustomOrder} className="p-2 bg-indigo-100 text-indigo-600 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors text-[9px] font-black uppercase flex items-center gap-1" title="Hay orden personalizado — click para restablecer orden automático"><Grip size={12}/><X size={10}/></button>
