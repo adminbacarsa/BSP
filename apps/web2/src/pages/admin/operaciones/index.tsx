@@ -1296,6 +1296,8 @@ const TYPE_META: Record<string, { label: string; bg: string; text: string; borde
     FRANCO_TRABAJADO:             { label: 'FRANCO TRAB.',    bg: 'bg-indigo-600', text: 'text-white',     border: 'border-indigo-500' },
     ADELANTO_TURNO:               { label: 'ADELANTO',        bg: 'bg-indigo-500', text: 'text-white',     border: 'border-indigo-400' },
     RRHH_NOVEDAD:                 { label: 'RRHH',            bg: 'bg-purple-600', text: 'text-white',     border: 'border-purple-500' },
+    REFUERZO_CLIENTE_PENDIENTE:   { label: 'REFUERZO CLIENTE', bg: 'bg-violet-600', text: 'text-white',   border: 'border-violet-500' },
+    VACANTE_OPERATIVA:            { label: 'VACANTE RFZ/TURA', bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-500' },
 };
 const DEFAULT_META = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
 
@@ -1357,7 +1359,9 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
 
                 {/* Header */}
                 <div className={`${meta.bg} px-4 py-3 flex items-center justify-between`}>
-                    <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>{meta.label}</span>
+                    <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>
+                        {novedad.title ? String(novedad.title).slice(0, 48) : meta.label}
+                    </span>
                     <div className="flex items-center gap-2">
                         {ts && (
                             <span className="text-[10px] font-mono text-white/70">
@@ -1388,6 +1392,30 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                         <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2">
                             <MapPin size={13} className="text-white/40 shrink-0"/>
                             <span className="text-white/90 text-xs font-bold">{novedad.objectiveName}</span>
+                        </div>
+                    )}
+
+                    {/* Refuerzo / vacante cliente */}
+                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') && (
+                        <div className="space-y-1.5 text-xs text-white/80">
+                            {novedad.tipoSolicitud && (
+                                <p><span className="text-white/50">Tipo:</span> <span className="font-bold text-white">{novedad.tipoSolicitud}</span></p>
+                            )}
+                            {(novedad.fecha || novedad.startTime) && (
+                                <p><span className="text-white/50">Cuándo:</span> {novedad.fecha || '—'} · {novedad.startTime || ''}{novedad.endTime ? `–${novedad.endTime}` : ''}</p>
+                            )}
+                            {novedad.cantidadPax != null && novedad.tipoSolicitud === 'RFZ' && (
+                                <p><span className="text-white/50">Personas:</span> {novedad.cantidadPax}</p>
+                            )}
+                            {novedad.horasVendidasEstimadas != null && (
+                                <p><span className="text-white/50">Hs. vendidas (pactadas):</span> {novedad.horasVendidasEstimadas}h</p>
+                            )}
+                            {novedad.parentEmpleadoName && (
+                                <p><span className="text-white/50">Guardia base:</span> {novedad.parentEmpleadoName}</p>
+                            )}
+                            {novedad.motivo && (
+                                <p className="text-white/60 italic">{novedad.motivo}</p>
+                            )}
                         </div>
                     )}
 
@@ -2202,6 +2230,23 @@ export default function OperacionesPage() {
                 } else {
                     logic.setViewTab('VACANTES');
                     toast.info('Usá el botón CUBRIR en la vacante correspondiente');
+                }
+
+            } else if (novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') {
+                const turnoIds: string[] = Array.isArray(novedad.turnoIds) ? novedad.turnoIds : [];
+                const vacShift = turnoIds.length
+                    ? logic.processedData.find((s: any) => turnoIds.includes(s.id))
+                    : logic.processedData.find((s: any) =>
+                        s.solicitudRefuerzoId === novedad.solicitudRefuerzoId ||
+                        (s.origin === 'CLIENT_REQUEST' && s.objectiveId === novedad.objectiveId && s.isUnassigned)
+                    );
+                if (vacShift) {
+                    setCoverageData({ isOpen: true, shift: vacShift });
+                    logic.setViewTab('VACANTES');
+                    toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'RFZ'}`);
+                } else {
+                    logic.setViewTab('VACANTES');
+                    toast.info(novedad.description || 'Buscá la vacante RFZ/TURA en la pestaña VACANTES');
                 }
 
             } else if (novedad.type === 'ADELANTO_TURNO' || novedad.type === 'CONVOCATORIA_RETEN' || novedad.type === 'RETENCION' || novedad.type === 'FRANCO_TRABAJADO') {

@@ -17,6 +17,7 @@ import {
 } from '@/services/solicitudRefuerzoService';
 import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
+import { buildRefuerzoNovedadPayload } from '@/lib/refuerzo/refuerzoDisplay';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -395,7 +396,10 @@ export default function SupervisionPage() {
   }, [user]);
 
   // Crea los turnos reales en Firestore al aprobar una solicitud
-  async function crearTurnosParaSolicitud(sol: SolicitudRefuerzo): Promise<string[]> {
+  async function crearTurnosParaSolicitud(
+    sol: SolicitudRefuerzo,
+    opts?: { draft?: boolean },
+  ): Promise<string[]> {
     const nextDayDate = (dateStr: string) => {
       const d = new Date(dateStr + 'T00:00:00');
       d.setDate(d.getDate() + 1);
@@ -422,7 +426,7 @@ export default function SupervisionPage() {
       isPresent:           false,
       isAbsent:            false,
       isCompleted:         false,
-      draft:               false,
+      draft:               opts?.draft ?? false,
     };
 
     const ids: string[] = [];
@@ -460,48 +464,71 @@ export default function SupervisionPage() {
 
   const handleAprobar = useCallback(async (nota: string) => {
     if (!aprobarTarget?.id || !user) return;
+    const sol = aprobarTarget;
+    if (sol.estado !== 'PENDIENTE') {
+      toast.error('Esta solicitud ya fue procesada');
+      setAprobarTarget(null);
+      return;
+    }
+    const vaAPlanificacion = sol.origen === 'PORTAL_CLIENTE';
+
     try {
-      toast.loading('Aprobando y generando turno…', { id: 'aprobar' });
-      const turnoIds = await crearTurnosParaSolicitud(aprobarTarget);
-      const estadoFinal = aprobarTarget.tipo === 'AGREGADO_TURNO' ? 'ASIGNADA' : 'APROBADA';
-      await solicitudRefuerzoService.update(aprobarTarget.id, {
-        estado:              estadoFinal,
-        autorizadoPorUid:    user.uid,
-        autorizadoPorNombre: user.displayName || user.email || '',
-        autorizadoAt:        Timestamp.now(),
-        turnoIds,
-        ...(nota ? { notaInterna: nota } as any : {}),
-      });
-      // Notificación a Planificación para que asigne el guardia
-      const sol = aprobarTarget;
-      const isAgregado = sol.tipo === 'AGREGADO_TURNO';
-      await addDoc(collection(db, 'novedades'), {
-        type:              'REFUERZO_CLIENTE_PENDIENTE',
-        tipoSolicitud:     isAgregado ? 'TURA' : 'RFZ',
-        status:            'pending',
-        empresaId:         sol.empresaId,
-        objectiveId:       sol.objectiveId,
-        objectiveName:     sol.objectiveName,
-        clientId:          sol.clientId,
-        clientName:        sol.clientName,
-        positionName:      sol.positionName   ?? null,
-        fecha:             sol.fecha,
-        startTime:         sol.startTime,
-        endTime:           sol.endTime,
-        cantidadPax:       sol.cantidadPax    ?? 1,
-        solicitadoPorNombre: sol.solicitadoPorNombre ?? null,
-        empleadoNombre:    isAgregado ? (sol.parentEmpleadoName ?? null) : null,
-        turnoIds,
-        autorizadoPorNombre: user.displayName || user.email || '',
-        createdAt:         Timestamp.now(),
-        reportedBy:        'SUPERVISION',
-      });
-      toast.success(
-        turnoIds.length === 1
-          ? `Aprobada — turno creado (${turnoIds[0].slice(0, 6)}…)`
-          : `Aprobada — ${turnoIds.length} turnos creados`,
-        { id: 'aprobar' },
-      );
+      if (vaAPlanificacion) {
+        toast.loading('Aprobando — enviando a Planificación…', { id: 'aprobar' });
+        const turnoIds = await crearTurnosParaSolicitud(sol, { draft: true });
+        await solicitudRefuerzoService.update(sol.id, {
+          estado:              'APROBADA',
+          autorizadoPorUid:    user.uid,
+          autorizadoPorNombre: user.displayName || user.email || '',
+          autorizadoAt:        Timestamp.now(),
+          actionTarget:        'PLANIFICACION',
+          turnoIds,
+          ...(nota ? { notaInterna: nota } as any : {}),
+        });
+        await addDoc(collection(db, 'novedades'), {
+          ...buildRefuerzoNovedadPayload(sol, {
+            reportedBy: 'SUPERVISION',
+            actionTarget: 'PLANIFICACION',
+            turnoIds,
+          }),
+          autorizadoPorNombre: user.displayName || user.email || '',
+          createdAt: Timestamp.now(),
+        });
+        toast.success(
+          turnoIds.length === 1
+            ? 'Aprobada — asigná guardia al RFZ en Planificación (fila VACANTE RFZ)'
+            : `Aprobada — ${turnoIds.length} vacantes RFZ en Planificación`,
+          { id: 'aprobar' },
+        );
+      } else {
+        toast.loading('Aprobando y generando turno…', { id: 'aprobar' });
+        const turnoIds = await crearTurnosParaSolicitud(sol);
+        const estadoFinal = sol.tipo === 'AGREGADO_TURNO' ? 'ASIGNADA' : 'APROBADA';
+        await solicitudRefuerzoService.update(sol.id, {
+          estado:              estadoFinal,
+          autorizadoPorUid:    user.uid,
+          autorizadoPorNombre: user.displayName || user.email || '',
+          autorizadoAt:        Timestamp.now(),
+          turnoIds,
+          actionTarget:        'OPERACIONES',
+          ...(nota ? { notaInterna: nota } as any : {}),
+        });
+        await addDoc(collection(db, 'novedades'), {
+          ...buildRefuerzoNovedadPayload(sol, {
+            reportedBy: 'SUPERVISION',
+            actionTarget: 'OPERACIONES',
+            turnoIds,
+          }),
+          autorizadoPorNombre: user.displayName || user.email || '',
+          createdAt: Timestamp.now(),
+        });
+        toast.success(
+          turnoIds.length === 1
+            ? `Aprobada — turno creado (${turnoIds[0].slice(0, 6)}…)`
+            : `Aprobada — ${turnoIds.length} turnos creados`,
+          { id: 'aprobar' },
+        );
+      }
     } catch (e: any) {
       toast.error(`Error: ${e?.message || 'No se pudo aprobar'}`, { id: 'aprobar' });
     }
@@ -587,24 +614,35 @@ export default function SupervisionPage() {
         } : {}),
       });
       // Novedad para OPERACIONES (vacante urgente, no alcanzó el plazo de planificación)
-      await addDoc(collection(db, 'novedades'), {
-        type:           'VACANTE_OPERATIVA',
-        subtype:        isAgregado ? 'TURA' : 'RFZ',
-        status:         'pending',
+      const manualSol: SolicitudRefuerzo = {
         empresaId,
-        objectiveId:    mObjetivoId,
-        objectiveName:  obj?.name || mObjetivoId,
-        clientId:       mClienteId,
-        clientName:     cli?.name || mClienteId,
-        fecha:          mFecha,
-        startTime:      mStart,
-        endTime:        mEnd,
-        cantidadPax:    isAgregado ? 1 : mPax,
-        positionName:   !isAgregado && mPosicionNombre.trim() ? mPosicionNombre.trim() : null,
-        empleadoNombre: isAgregado && mGuardiaAAmpliar.trim() ? mGuardiaAAmpliar.trim() : null,
-        solicitadoPorNombre: mSolicitante.trim() || null,
+        clientId:            mClienteId,
+        clientName:          cli?.name || mClienteId,
+        objectiveId:         mObjetivoId,
+        objectiveName:       obj?.name || mObjetivoId,
+        tipo:                mTipo,
+        fecha:               mFecha,
+        startTime:           mStart,
+        endTime:             mEnd,
+        motivo:              mMotivo.trim(),
+        origen:              'SUPERVISOR_MANUAL',
+        estado:              'APROBADA',
+        solicitadoPorUid:    user!.uid,
+        solicitadoPorNombre: mSolicitante.trim() || 'Sin especificar',
+        solicitadoAt:        Timestamp.now(),
+        cantidadPax:         isAgregado ? 1 : mPax,
+        positionName:        !isAgregado && mPosicionNombre.trim() ? mPosicionNombre.trim() : undefined,
+        parentEmpleadoName:  isAgregado && mGuardiaAAmpliar.trim() ? mGuardiaAAmpliar.trim() : undefined,
+        parentEmpleadoId:    isAgregado ? mGuardiaEmpleadoId || undefined : undefined,
+        parentShiftId:       isAgregado ? mGuardiaShiftId || undefined : undefined,
+      };
+      await addDoc(collection(db, 'novedades'), {
+        ...buildRefuerzoNovedadPayload(manualSol, {
+          reportedBy: 'SUPERVISION',
+          actionTarget: 'OPERACIONES',
+          turnoIds,
+        }),
         canalSolicitud: mCanal,
-        turnoIds,
         createdBy:      user.displayName || user.email || '',
         createdAt:      Timestamp.now(),
         origin:         'SUPERVISOR_MANUAL',

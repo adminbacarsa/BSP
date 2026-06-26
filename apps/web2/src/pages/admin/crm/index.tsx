@@ -107,6 +107,12 @@ import {
 import type { ClientRef } from '@/lib/crm/clientDataMatch';
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
+import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
+import {
+  applyRefuerzoHorasVendidasToGrids,
+  applyRefuerzoHorasVendidasToBreakdown,
+  solicitudIdsBilledInRange,
+} from '@/lib/refuerzo/refuerzoProforma';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -1302,6 +1308,8 @@ export default function CRMPage() {
       const slaExclusion = buildSlaExclusionContext(servicesForProforma, start, end);
 
       const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa });
+      const solicitudesRefuerzo = await solicitudRefuerzoService.getByClient(selectedClient.id);
+      const billedSolicitudIds = solicitudIdsBilledInRange(solicitudesRefuerzo, { start, end });
       const planned = { total: 0, byObjective: {} as any };
       const executed = { total: 0, byObjective: {} as any };
 
@@ -1320,6 +1328,7 @@ export default function CRMPage() {
 
       turnosList.forEach((t) => {
         if (!isCrmPlannedEligibleShift(t, slaExclusion)) return;
+        if (t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
 
         const plannedStart = toDateSafe(t.startTime);
@@ -1358,6 +1367,9 @@ export default function CRMPage() {
         add(planned, objectiveName, positionName, dateKey, hrs);
       });
 
+      const refuerzoHorasVendidas = applyRefuerzoHorasVendidasToBreakdown(planned, solicitudesRefuerzo, { start, end }, normalize);
+      applyRefuerzoHorasVendidasToBreakdown(executed, solicitudesRefuerzo, { start, end }, normalize);
+
       const breakdownSource = proformaDetailMode === 'executed' ? executed : proformaDetailMode === 'planned' ? planned : (clientContracts || []).some((c) => c.type === 'abierto') ? executed : planned;
       const breakdown = Object.values(breakdownSource.byObjective)
         .map((o: any) => ({
@@ -1393,9 +1405,12 @@ export default function CRMPage() {
       });
       setEmpMetaMap(empMeta);
 
-      const turnos = turnosList.filter((t) => isCrmPlannedEligibleShift(t, slaExclusion)) as any[];
+      const turnos = turnosList.filter((t) =>
+        isCrmPlannedEligibleShift(t, slaExclusion) &&
+        !(t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))),
+      ) as any[];
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
-      const grids = buildProformaObjectiveGrids({
+      const baseGrids = buildProformaObjectiveGrids({
         turnos,
         empMeta,
         clientId: selectedClient.id,
@@ -1407,6 +1422,7 @@ export default function CRMPage() {
         mode: proformaDetailMode,
         useExecutedForAuto,
       });
+      const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
       const summary = buildProformaSummary(grids);
       setProformaBundle({
         clientName: selectedClient.name || '',
@@ -1424,9 +1440,10 @@ export default function CRMPage() {
 
       const modeIsExecuted = proformaDetailMode === 'executed' || (proformaDetailMode === 'auto' && useExecutedForAuto);
       const gridTotal = Math.round(grids.reduce((a: number, g: any) => a + g.grandTotal.total, 0));
+      const plannedBase = Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end }, slaExclusion));
       setProformaTotals({
-        planned: Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end }, slaExclusion)),
-        executed: modeIsExecuted ? gridTotal : Math.round(executed.total),
+        planned: plannedBase + Math.round(refuerzoHorasVendidas),
+        executed: modeIsExecuted ? gridTotal + Math.round(refuerzoHorasVendidas) : Math.round(executed.total),
         loading: false,
       });
     } catch (e) {

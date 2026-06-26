@@ -734,6 +734,8 @@ const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; b
     FRANCO_TRABAJADO:             { label: 'FRANCO TRAB.',   bg: 'bg-indigo-600', text: 'text-white', border: 'border-indigo-500' },
     ADELANTO_TURNO:               { label: 'ADELANTO',       bg: 'bg-indigo-500', text: 'text-white', border: 'border-indigo-400' },
     RRHH_NOVEDAD:                 { label: 'RRHH',           bg: 'bg-purple-600', text: 'text-white', border: 'border-purple-500' },
+    REFUERZO_CLIENTE_PENDIENTE:   { label: 'REFUERZO CLIENTE', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
+    VACANTE_OPERATIVA:            { label: 'VACANTE RFZ/TURA', bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-500' },
 };
 const DEFAULT_META_MAP = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
 const AUTO_CLOSE_MAP = 3000;
@@ -790,7 +792,9 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                 </div>
                 {/* Header */}
                 <div className={`${meta.bg} px-4 py-3 flex items-center justify-between`}>
-                    <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>{meta.label}</span>
+                    <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>
+                        {novedad.title ? String(novedad.title).slice(0, 48) : meta.label}
+                    </span>
                     <div className="flex items-center gap-2">
                         {ts && (
                             <span className="text-[10px] font-mono text-white/70">
@@ -823,6 +827,28 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                         <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5">
                             <span className="text-white/40 text-[10px] shrink-0">Cliente</span>
                             <span className="text-white/70 text-xs">{novedad.clientName}</span>
+                        </div>
+                    )}
+                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') && (
+                        <div className="space-y-1.5 text-xs text-white/80">
+                            {novedad.tipoSolicitud && (
+                                <p><span className="text-white/50">Tipo:</span> <span className="font-bold text-white">{novedad.tipoSolicitud}</span></p>
+                            )}
+                            {(novedad.fecha || novedad.startTime) && (
+                                <p><span className="text-white/50">Cuándo:</span> {novedad.fecha || '—'} · {novedad.startTime || ''}{novedad.endTime ? `–${novedad.endTime}` : ''}</p>
+                            )}
+                            {novedad.cantidadPax != null && novedad.tipoSolicitud === 'RFZ' && (
+                                <p><span className="text-white/50">Personas:</span> {novedad.cantidadPax}</p>
+                            )}
+                            {novedad.horasVendidasEstimadas != null && (
+                                <p><span className="text-white/50">Hs. vendidas (pactadas):</span> {novedad.horasVendidasEstimadas}h</p>
+                            )}
+                            {novedad.parentEmpleadoName && (
+                                <p><span className="text-white/50">Guardia base:</span> {novedad.parentEmpleadoName}</p>
+                            )}
+                            {novedad.motivo && (
+                                <p className="text-white/60 italic">{novedad.motivo}</p>
+                            )}
                         </div>
                     )}
                     {novedad.description && (
@@ -1126,6 +1152,22 @@ export default function TacticalMapView() {
                         setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
                     } else { setCoverageData({ isOpen: true, shift: vacShift }); }
                 } else { toast.info('Vacante no encontrada. Verificá en mapa.'); }
+            } else if (novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') {
+                const turnoIds: string[] = Array.isArray(novedad.turnoIds) ? novedad.turnoIds : [];
+                const vacShift = turnoIds.length
+                    ? logic.processedData.find((s: any) => turnoIds.includes(s.id))
+                    : logic.processedData.find((s: any) =>
+                        s.solicitudRefuerzoId === novedad.solicitudRefuerzoId ||
+                        (s.origin === 'CLIENT_REQUEST' && s.objectiveId === novedad.objectiveId && s.isUnassigned)
+                    );
+                if (vacShift) {
+                    setCoverageData({ isOpen: true, shift: vacShift });
+                    logic.setViewTab('VACANTES');
+                    toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'RFZ'}`);
+                } else {
+                    logic.setViewTab('VACANTES');
+                    toast.info(novedad.description || 'Buscá la vacante RFZ/TURA en la pestaña VACANTES');
+                }
             } else if (novedad.type === 'ADELANTO_TURNO' || novedad.type === 'CONVOCATORIA_RETEN' || novedad.type === 'RETENCION' || novedad.type === 'FRANCO_TRABAJADO') {
                 const targetShift = novedad.shiftId
                     ? logic.processedData.find((s: any) => s.id === novedad.shiftId)
@@ -1379,6 +1421,8 @@ export default function TacticalMapView() {
                     RELEVO_INMINENTE:            { label: 'RELEVO',  bg: 'bg-blue-100 text-blue-800',           border: 'border-l-blue-600' },
                     RECARGO_12H:                 { label: 'REC+12',  bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
                     RETENCION_DETECTADA:         { label: 'REC',     bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
+                    REFUERZO_CLIENTE_PENDIENTE:  { label: 'RFZ CLI', bg: 'bg-violet-100 text-violet-800',       border: 'border-l-violet-500' },
+                    VACANTE_OPERATIVA:           { label: 'VAC RFZ', bg: 'bg-fuchsia-100 text-fuchsia-800',     border: 'border-l-fuchsia-500' },
                 };
                 const getNovMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
 
@@ -1391,9 +1435,11 @@ export default function TacticalMapView() {
                             className={`px-3 py-2 flex items-center gap-2 border-l-4 ${meta.border} border-b border-slate-50 hover:bg-slate-50/80 transition-colors cursor-pointer`}>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[11px] font-bold text-slate-800 leading-snug truncate">
-                                    {n.employeeName && n.objectiveName
-                                        ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                        : n.objectiveName || n.employeeName || n.type}
+                                    {n.title
+                                        ? String(n.title)
+                                        : n.employeeName && n.objectiveName
+                                            ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
+                                            : n.objectiveName || n.employeeName || n.type}
                                     {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
                                 </p>
                                 <p className="text-[9px] text-slate-400 leading-tight truncate">{n.description || '-'}</p>
@@ -1642,7 +1688,7 @@ export default function TacticalMapView() {
                     <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-3">
                             <span className="text-xs font-black uppercase tracking-widest text-slate-500">
-                                {(TYPE_META_MAP as any)[detailNovedad?.type]?.label || detailNovedad?.type}
+                                {detailNovedad.title ? String(detailNovedad.title).slice(0, 48) : (TYPE_META_MAP as any)[detailNovedad?.type]?.label || detailNovedad?.type}
                             </span>
                             <button onClick={() => setDetailNovedad(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
                                 <X size={16}/>
@@ -1653,6 +1699,17 @@ export default function TacticalMapView() {
                         )}
                         {detailNovedad.objectiveName && (
                             <p className="text-xs text-slate-500 mb-1">{detailNovedad.objectiveName}</p>
+                        )}
+                        {(detailNovedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || detailNovedad.type === 'VACANTE_OPERATIVA') && (
+                            <div className="text-xs text-slate-600 mb-3 space-y-1">
+                                {detailNovedad.fecha && <p><span className="text-slate-400">Fecha:</span> {detailNovedad.fecha}</p>}
+                                {(detailNovedad.startTime || detailNovedad.endTime) && (
+                                    <p><span className="text-slate-400">Horario:</span> {detailNovedad.startTime || ''}{detailNovedad.endTime ? `–${detailNovedad.endTime}` : ''}</p>
+                                )}
+                                {detailNovedad.horasVendidasEstimadas != null && (
+                                    <p><span className="text-slate-400">Hs. pactadas:</span> {detailNovedad.horasVendidasEstimadas}h</p>
+                                )}
+                            </div>
                         )}
                         {detailNovedad.description && (
                             <p className="text-sm text-slate-600 mb-4 leading-relaxed">{detailNovedad.description}</p>

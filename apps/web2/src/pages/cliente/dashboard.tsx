@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { db, auth } from '@/lib/firebase';
@@ -1311,12 +1311,24 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
     });
   }, [objetivo.id]);
 
+  // Recarga puntual (fallback si el listener se cae, p.ej. índice en construcción)
+  const reloadSolicitudes = useCallback(async () => {
+    try {
+      const items = await solicitudRefuerzoService.getByObjectiveIds([objetivo.id]);
+      setSolicitudes(items);
+    } catch (e) {
+      console.error('[RefuerzosTab] reloadSolicitudes:', e);
+    }
+  }, [objetivo.id]);
+
   // Historial real-time — consulta por objectiveId para evitar cross-empresa
   useEffect(() => {
-    return solicitudRefuerzoService.subscribeByObjectiveIds([objetivo.id], items =>
-      setSolicitudes(items)
+    return solicitudRefuerzoService.subscribeByObjectiveIds(
+      [objetivo.id],
+      items => setSolicitudes(items),
+      () => { reloadSolicitudes(); },
     );
-  }, [objetivo.id]);
+  }, [objetivo.id, reloadSolicitudes]);
 
   // Guardias en turno (AGREGADO_TURNO) — busca en turnos planificados del objetivo
   useEffect(() => {
@@ -1410,6 +1422,8 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
         : [fecha];
       await Promise.all(fechasAEnviar.map(f => solicitudRefuerzoService.create({ ...base, fecha: f, ...extras })));
       resetForm();
+      // Refresco inmediato: no dependemos solo del listener real-time
+      reloadSolicitudes();
     } catch (e: any) {
       alert(`Error: ${e?.message || 'No se pudo enviar'}`);
     } finally { setSaving(false); }

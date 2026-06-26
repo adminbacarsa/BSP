@@ -156,6 +156,31 @@ export const onTurnoWrite = functions
       return; // ya procesamos, no seguir
     }
 
+    // ── Solicitud refuerzo: COMPLETADA cuando todos los turnos vinculados finalizaron ──
+    if (after && before && !before.isCompleted && after.isCompleted === true) {
+      const solicitudId: string | undefined = after.solicitudRefuerzoId;
+      if (solicitudId) {
+        try {
+          const solDoc = await db.collection('solicitudes_refuerzo').doc(solicitudId).get();
+          if (solDoc.exists) {
+            const data = solDoc.data() || {};
+            const turnoIds: string[] = Array.isArray(data.turnoIds) ? data.turnoIds : [];
+            const idsToCheck = turnoIds.length > 0 ? turnoIds : [change.after.id];
+            const snaps = await Promise.all(idsToCheck.map((id) => db.collection('turnos').doc(id).get()));
+            const allDone = snaps.every((d) => d.exists && d.data()?.isCompleted === true);
+            if (allDone && data.estado !== 'COMPLETADA') {
+              await db.collection('solicitudes_refuerzo').doc(solicitudId).update({
+                estado: 'COMPLETADA',
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('[onTurnoWrite] solicitud COMPLETADA error:', e);
+        }
+      }
+    }
+
     // ── TURNO COMPLETADO AUTOMÁTICAMENTE → push al guardia ──────────────────
     // Se dispara cuando el sistema cierra el turno (completionReason: AUTO_SHIFT_END).
     // El guardia recibe una notificación de finalización en su app.

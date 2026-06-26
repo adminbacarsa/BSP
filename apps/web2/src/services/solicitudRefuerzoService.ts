@@ -36,6 +36,7 @@ export interface SolicitudRefuerzo {
 
   // Workflow
   estado: SolicitudEstado;
+  actionTarget?: 'PLANIFICACION' | 'OPERACIONES';
   solicitadoPorUid: string;
   solicitadoPorNombre: string;
   solicitadoAt: Timestamp | string;
@@ -121,31 +122,55 @@ export const solicitudRefuerzoService = {
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo));
   },
 
-  subscribeByEmpresa(empresaId: string, cb: (items: SolicitudRefuerzo[]) => void) {
+  subscribeByEmpresa(
+    empresaId: string,
+    cb: (items: SolicitudRefuerzo[]) => void,
+    onError?: (e: Error) => void,
+  ) {
     const q = query(
       collection(db, COL),
       where('empresaId', '==', empresaId),
       orderBy('solicitadoAt', 'desc'),
     );
-    return onSnapshot(q, snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))));
+    return onSnapshot(
+      q,
+      snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))),
+      err => { console.error('[solicitudRefuerzo] subscribeByEmpresa error:', err); onError?.(err); },
+    );
   },
 
-  subscribeByObjectiveIds(objectiveIds: string[], cb: (items: SolicitudRefuerzo[]) => void) {
+  subscribeByObjectiveIds(
+    objectiveIds: string[],
+    cb: (items: SolicitudRefuerzo[]) => void,
+    onError?: (e: Error) => void,
+  ) {
     if (!objectiveIds.length) { cb([]); return () => {}; }
     const q = query(
       collection(db, COL),
       where('objectiveId', 'in', objectiveIds.slice(0, 10)),
       orderBy('solicitadoAt', 'desc'),
     );
-    return onSnapshot(q, snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))));
+    return onSnapshot(
+      q,
+      snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))),
+      err => { console.error('[solicitudRefuerzo] subscribeByObjectiveIds error:', err); onError?.(err); },
+    );
   },
 
-  subscribeByClient(clientId: string, cb: (items: SolicitudRefuerzo[]) => void) {
+  subscribeByClient(
+    clientId: string,
+    cb: (items: SolicitudRefuerzo[]) => void,
+    onError?: (e: Error) => void,
+  ) {
     const q = query(
       collection(db, COL),
       where('clientId', '==', clientId),
       orderBy('solicitadoAt', 'desc'),
     );
-    return onSnapshot(q, snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))));
+    return onSnapshot(
+      q,
+      snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))),
+      err => { console.error('[solicitudRefuerzo] subscribeByClient error:', err); onError?.(err); },
+    );
   },
 };

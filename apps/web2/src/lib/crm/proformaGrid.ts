@@ -11,7 +11,7 @@ import {
 import type { SlaExclusionContext } from './slaExclusionForPlanned';
 import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
 
-const SHIFT_CODE_HOURS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8, GU: 8, EN: 9 };
+const SHIFT_CODE_HOURS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8, GU: 8, EN: 9, RFZ: 8, TURA: 8 };
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const NON_WORK_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'FT', 'RET', 'REF', 'ESC']);
 

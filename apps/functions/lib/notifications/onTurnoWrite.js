@@ -142,6 +142,30 @@ exports.onTurnoWrite = functions
         }
         return;
     }
+    if (after && before && !before.isCompleted && after.isCompleted === true) {
+        const solicitudId = after.solicitudRefuerzoId;
+        if (solicitudId) {
+            try {
+                const solDoc = await db.collection('solicitudes_refuerzo').doc(solicitudId).get();
+                if (solDoc.exists) {
+                    const data = solDoc.data() || {};
+                    const turnoIds = Array.isArray(data.turnoIds) ? data.turnoIds : [];
+                    const idsToCheck = turnoIds.length > 0 ? turnoIds : [change.after.id];
+                    const snaps = await Promise.all(idsToCheck.map((id) => db.collection('turnos').doc(id).get()));
+                    const allDone = snaps.every((d) => d.exists && d.data()?.isCompleted === true);
+                    if (allDone && data.estado !== 'COMPLETADA') {
+                        await db.collection('solicitudes_refuerzo').doc(solicitudId).update({
+                            estado: 'COMPLETADA',
+                            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        });
+                    }
+                }
+            }
+            catch (e) {
+                console.warn('[onTurnoWrite] solicitud COMPLETADA error:', e);
+            }
+        }
+    }
     if (after && before && !before.isCompleted && after.isCompleted === true &&
         (after.completionReason === 'AUTO_SHIFT_END' || after.completionReason === 'AUTO_SHIFT_END_CUSTOM' || after.completionReason === 'AUTO_END_CF_RETENTION_TIMEOUT' || after.completionReason === 'AUTO_COVERAGE_COMPLETE')) {
         const completedEmployeeId = after.employeeId;
@@ -227,6 +251,30 @@ exports.onTurnoWrite = functions
                     notification: { title: rfzMsg.title, body: rfzMsg.body },
                     webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
                 }).catch(e => console.warn('[onTurnoWrite] RFZ/TURA push error:', e));
+            }
+            const solicitudId = after.solicitudRefuerzoId;
+            if (solicitudId) {
+                try {
+                    await db.collection('solicitudes_refuerzo').doc(solicitudId).update({
+                        estado: 'ASIGNADA',
+                        turnoIds: admin.firestore.FieldValue.arrayUnion(turnoIdR),
+                        empleadoIds: admin.firestore.FieldValue.arrayUnion(assignedEmployeeId),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    });
+                    const novSnap = await db.collection('novedades')
+                        .where('solicitudRefuerzoId', '==', solicitudId)
+                        .where('type', '==', 'REFUERZO_CLIENTE_PENDIENTE')
+                        .where('status', '==', 'pending')
+                        .limit(5).get();
+                    if (!novSnap.empty) {
+                        const batch = db.batch();
+                        novSnap.docs.forEach(d => batch.update(d.ref, { status: 'read', viewed: true }));
+                        await batch.commit();
+                    }
+                }
+                catch (e) {
+                    console.warn('[onTurnoWrite] RFZ solicitud/novedad update error:', e);
+                }
             }
             return;
         }
