@@ -2705,6 +2705,27 @@ export default function PlanificacionPage() {
     const getEmpDefaultPos = (empId: string) => empDefaultPos[`${empId}___${selectedObjective}`] || null;
     const getEmpDefaultShift = (empId: string) => empDefaultShift[`${empId}___${selectedObjective}`] || null;
 
+    const clearAllPositions = async () => {
+        if (!selectedObjective) return;
+        if (!confirm('¿Quitar todos los puestos asignados en este mes?')) return;
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const stateKey = `${selectedObjective}_${year}_${month}`;
+        const prefix = `___${selectedObjective}`;
+        const newPos = Object.fromEntries(Object.entries(empDefaultPos).filter(([k]) => !k.endsWith(prefix)));
+        const newShift = Object.fromEntries(Object.entries(empDefaultShift).filter(([k]) => !k.endsWith(prefix)));
+        setEmpDefaultPos(newPos);
+        setEmpDefaultShift(newShift);
+        try {
+            await setDoc(doc(db, 'planificacion_estados', stateKey), {
+                defaultPositionByEmp: {},
+                defaultShiftByEmp: {},
+            }, { merge: true });
+        } catch {
+            toast.error('No se pudo limpiar los puestos');
+        }
+    };
+
     const computeEmpPosPickerLayout = (anchorRect: DOMRect) => {
         const margin = 8;
         const width = 260;
@@ -6120,6 +6141,16 @@ export default function PlanificacionPage() {
                                     <ArrowLeftRight size={16} className="text-rose-600 shrink-0"/>
                                     <span className="text-[10px] font-black text-rose-700 uppercase tracking-tight hidden sm:inline">Ajustar</span>
                                 </button>
+                                {selectedObjective && Object.keys(empDefaultPos).some(k => k.endsWith(`___${selectedObjective}`)) && (
+                                    <button
+                                        onClick={clearAllPositions}
+                                        className="p-2 bg-slate-100 rounded-lg hover:bg-orange-50 hover:text-orange-600 transition-colors flex items-center gap-1.5 px-2.5"
+                                        title="Quitar todos los puestos asignados en este mes"
+                                    >
+                                        <X size={14} className="text-orange-500 shrink-0"/>
+                                        <span className="text-[10px] font-black text-orange-600 uppercase tracking-tight hidden sm:inline">Puestos</span>
+                                    </button>
+                                )}
                                 <div className="flex items-center gap-0.5">
                                     <button onClick={() => startFilterTransition(() => setSortBy(prev => prev === 'activity' ? 'name' : prev === 'name' ? 'client' : prev === 'client' ? 'band' : prev === 'band' ? 'position' : 'activity'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200" title={sortBy === 'activity' ? "Ordenado por Actividad" : sortBy === 'name' ? "Ordenado por Nombre" : sortBy === 'client' ? "Ordenado por Cliente" : sortBy === 'band' ? "Ordenado por Banda" : "Ordenado por Puesto"}>{sortBy === 'activity' ? <ArrowDownWideNarrow size={18}/> : sortBy === 'name' ? <ArrowDownAZ size={18}/> : sortBy === 'band' ? <Clock size={18}/> : sortBy === 'position' ? <LayoutGrid size={18}/> : <Briefcase size={18}/>}</button>
                                     <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
