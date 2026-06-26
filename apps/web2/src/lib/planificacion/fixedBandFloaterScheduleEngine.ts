@@ -121,10 +121,12 @@ function positionCapacity(pos: V2PositionDef): number {
         return qty * (only12h ? 3 : 4);
     }
 
-    // Custom con rotación (L-D pero no coverageType=24hs): 2 empleados por pax por banda activa.
-    // Custom sin rotación (L-V): 1 empleado por pax.
+    // Puestos custom (no 24hs):
+    // - Sin bandas M/T/N (shifts propios como EN, RO, etc.): 1 empleado por pax.
+    // - Con bandas M/T/N pero no 24hs (rotación L-D): 2 empleados por pax por banda.
     if (sevenDays) {
         const activeBands = (pos.shifts || []).filter(s => WORK_BANDS.has(String(s.code || '').toUpperCase())).length;
+        if (activeBands === 0) return qty;
         return qty * Math.max(1, activeBands) * 2;
     }
 
@@ -177,9 +179,9 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
         }
     }
 
-    // Empleados sin puesto explícito → distribuir a todos los puestos usando fill ratio.
-    // El ratio (empleados_actuales / capacidad) garantiza distribución proporcional;
-    // positionCapacity() calcula la capacidad según tipo de turno y ciclo CCT.
+    // Empleados sin puesto → distribuir a todos los puestos por fill-ratio.
+    // positionCapacity() garantiza que puestos custom (EN, RO) reciban qty empleados
+    // y puestos 24hs reciban qty×4; el fill-ratio balancea automáticamente.
     if (unassigned.length > 0) {
         const targets = ctx.positions.filter(p => positionGroups[p.positionName] !== undefined);
         if (targets.length > 0) {
