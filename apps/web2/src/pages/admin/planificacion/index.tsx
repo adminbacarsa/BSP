@@ -9714,11 +9714,13 @@ export default function PlanificacionPage() {
                             </div>
                         </div>
                         <p className="text-[10px] text-slate-400 font-bold -mt-1">
-                            Solo guardias disponibles ese día: sin turno, en RET (stand-by) o de franco.
+                            Solo guardias disponibles ese día (sin turno, RET o franco). Se prioriza titular y quien conoce el objetivo.
                         </p>
-                        <div className="flex flex-col max-h-64 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+                        <div className="flex flex-col max-h-72 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
                             {(() => {
                                 const fecha = rfzAsignando.fecha;
+                                const objId = rfzAsignando.objectiveId;
+                                const cliId = rfzAsignando.clientId;
                                 const categorizar = (emp: any) => {
                                     const key = `${emp.id}_${fecha}`;
                                     const pend = pendingChanges[key];
@@ -9729,41 +9731,66 @@ export default function PlanificacionPage() {
                                     if (['F', 'FF', 'FP'].includes(code)) return { rank: 2, label: 'De franco → FT', cls: 'bg-amber-100 text-amber-700', franco: true };
                                     return null;
                                 };
+                                // Experiencia (igual que Operaciones): 3 titular, 2 conoce objetivo, 1 mismo cliente.
+                                const expLevel = (emp: any): number => {
+                                    if (objId && emp.preferredObjectiveId === objId) return 3;
+                                    const expMap: Record<string, any> = emp.experienciaObjetivos || {};
+                                    const entry = objId ? expMap[objId] : null;
+                                    if (entry) {
+                                        const total = (entry.turnosRegulares ?? 0) + (entry.turnosRefuerzo ?? 0) + (entry.turnosConvocado ?? 0) + (entry.turnosEscuela ?? 0);
+                                        if (total > 0) return 2;
+                                    }
+                                    if (cliId && emp.clientId === cliId) return 1;
+                                    return 0;
+                                };
+                                const expBadge = (lv: number) =>
+                                    lv === 3 ? { label: '★ Titular', cls: 'bg-emerald-100 text-emerald-700' }
+                                  : lv === 2 ? { label: '◆ Conoce el objetivo', cls: 'bg-blue-50 text-blue-600' }
+                                  : lv === 1 ? { label: 'Mismo cliente', cls: 'bg-slate-100 text-slate-500' }
+                                  : null;
                                 const candidatos = (displayedEmployees as any[])
-                                    .map(emp => ({ emp, cat: categorizar(emp) }))
-                                    .filter((x): x is { emp: any; cat: NonNullable<ReturnType<typeof categorizar>> } => x.cat !== null)
-                                    .sort((a, b) => (a.cat.rank - b.cat.rank) || String(a.emp.name).localeCompare(String(b.emp.name)));
+                                    .map(emp => ({ emp, cat: categorizar(emp), exp: expLevel(emp) }))
+                                    .filter((x): x is { emp: any; cat: NonNullable<ReturnType<typeof categorizar>>; exp: number } => x.cat !== null)
+                                    .sort((a, b) => (a.cat.rank - b.cat.rank) || (b.exp - a.exp) || String(a.emp.name).localeCompare(String(b.emp.name)));
                                 if (candidatos.length === 0) {
                                     return <p className="text-xs text-slate-400 text-center py-4">No hay guardias disponibles (sin turno, RET o franco) ese día</p>;
                                 }
-                                return candidatos.map(({ emp, cat }) => (
-                                    <button key={emp.id}
-                                        type="button"
-                                        onClick={async () => {
-                                            try {
-                                                await updateDoc(doc(db, 'turnos', rfzAsignando.id), {
-                                                    employeeId: emp.id,
-                                                    employeeName: emp.name,
-                                                    ...(cat.franco ? { isFrancoTrabajado: true, coveredFromFranco: true } : {}),
-                                                });
-                                                setRfzAsignando(null);
-                                                toast.success(
-                                                    cat.franco
-                                                        ? `${emp.name} asignado/a al RFZ (Franco Trabajado). Guardá y republicá para notificarle.`
-                                                        : `${emp.name} asignado/a al RFZ. Guardá y republicá para notificarle.`,
-                                                );
-                                            } catch {
-                                                toast.error('Error al asignar guardia');
-                                            }
-                                        }}
-                                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 text-left transition-colors">
-                                        <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-black text-slate-600 shrink-0">
-                                            {(emp.name || '?')[0]}
-                                        </div>
-                                        <span className="text-sm text-slate-700 font-semibold flex-1 truncate">{emp.name}</span>
-                                        <span className={`shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full ${cat.cls}`}>{cat.label}</span>
-                                    </button>
-                                ));
+                                return candidatos.map(({ emp, cat, exp }) => {
+                                    const eb = expBadge(exp);
+                                    return (
+                                        <button key={emp.id}
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await updateDoc(doc(db, 'turnos', rfzAsignando.id), {
+                                                        employeeId: emp.id,
+                                                        employeeName: emp.name,
+                                                        ...(cat.franco ? { isFrancoTrabajado: true, coveredFromFranco: true } : {}),
+                                                    });
+                                                    setRfzAsignando(null);
+                                                    toast.success(
+                                                        cat.franco
+                                                            ? `${emp.name} asignado/a al RFZ (Franco Trabajado). Guardá y republicá para notificarle.`
+                                                            : `${emp.name} asignado/a al RFZ. Guardá y republicá para notificarle.`,
+                                                    );
+                                                } catch {
+                                                    toast.error('Error al asignar guardia');
+                                                }
+                                            }}
+                                            className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 text-left transition-colors">
+                                            <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-black text-slate-600 shrink-0">
+                                                {(emp.name || '?')[0]}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="block text-sm text-slate-700 font-semibold truncate">{emp.name}</span>
+                                                {eb && (
+                                                    <span className={`inline-block mt-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-full ${eb.cls}`}>{eb.label}</span>
+                                                )}
+                                            </div>
+                                            <span className={`shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full ${cat.cls}`}>{cat.label}</span>
+                                        </button>
+                                    );
+                                });
                             })()}
                         </div>
                         <button type="button" onClick={() => setRfzAsignando(null)}

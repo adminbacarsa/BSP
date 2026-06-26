@@ -20,6 +20,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import {
   filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
   collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, TenantIsolationError,
+  empresaCollectionQuery,
 } from '@/lib/multiempresa';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 import {
@@ -199,19 +200,21 @@ export default function ServiciosSLAPage() {
       };
   }, [empresaId, scopeEmpresa]);
 
-  // Suscripción turnos RFZ/TURA — extras solicitados por cliente
+  // Suscripción turnos RFZ/TURA — extras solicitados por cliente.
+  // Nota: se filtra el código en memoria (evita índice compuesto empresaId+code que no existe
+  // y que haría fallar la query silenciosamente, dejando la lista vacía).
   useEffect(() => {
     if (!empresaId) return;
-    const q = query(
-      collection(db, 'turnos'),
-      where('empresaId', '==', empresaId),
-      where('code', 'in', ['RFZ', 'TURA']),
-    );
+    const q = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
     const unsub = onSnapshot(q, snap => {
-      setRfzTuraExtras(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, () => {});
+      const rows = snap.docs
+        .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+        .map(d => ({ id: d.id, ...(d.data() as any) }))
+        .filter(t => ['RFZ', 'TURA'].includes(String(t.code || '').toUpperCase()));
+      setRfzTuraExtras(rows);
+    }, (e) => console.error('[servicios] RFZ/TURA extras error:', e));
     return unsub;
-  }, [empresaId]);
+  }, [empresaId, scopeEmpresa, migracionCompleta]);
 
   const loadDataFallback = async (clientIds?: Set<string>) => {
     const ids = clientIds ?? new Set(clients.map((c) => c.id));
