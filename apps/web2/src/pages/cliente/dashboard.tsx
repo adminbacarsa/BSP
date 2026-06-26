@@ -27,6 +27,7 @@ interface ClienteUser {
   email: string;
   objectiveIds?: string[];
   empresaId?: string;
+  empresaName?: string;
 }
 
 interface ObjetivoInfo {
@@ -324,7 +325,12 @@ function ObjetivosGrid({
           </div>
           <div>
             <p className="font-black text-slate-900 text-sm leading-tight">{clienteUser.clientName}</p>
-            <p className="text-[11px] text-slate-400 font-medium">Portal de Clientes</p>
+            <p className="text-[11px] text-slate-400 font-medium">
+              Portal de Clientes
+              {clienteUser.empresaName && (
+                <span className="ml-1.5 text-indigo-600 font-bold">· {clienteUser.empresaName}</span>
+              )}
+            </p>
           </div>
         </div>
         <button
@@ -1648,18 +1654,29 @@ function AdminClientSelectorScreen({
     !search || (c.name || '').toLowerCase().includes(search.toLowerCase())
   );
 
+  const [adminEmpresaName, setAdminEmpresaName] = useState('');
+
+  useEffect(() => {
+    if (!adminEmpresaId) return;
+    getDoc(doc(db, 'empresas', adminEmpresaId))
+      .then(snap => { if (snap.exists()) setAdminEmpresaName((snap.data() as any).name || adminEmpresaId); })
+      .catch(() => {});
+  }, [adminEmpresaId]);
+
   const handleSelect = (c: any) => {
     const seenObs = new Set<string>();
     const obs: ObjetivoInfo[] = (c.objetivos || [])
       .filter((o: any) => o.id && o.name && !seenObs.has(o.id) && seenObs.add(o.id))
       .map((o: any) => ({ id: o.id, name: o.name, address: o.address }));
+    const empId = (c as any).empresaId || adminEmpresaId || '';
     const cu: ClienteUser = {
       uid: user.uid,
       clientId: c.id,
       clientName: c.name,
       nombre: user.displayName || user.email || 'Administrador',
       email: user.email || '',
-      empresaId: (c as any).empresaId || adminEmpresaId || '',
+      empresaId: empId,
+      empresaName: adminEmpresaName || empId,
     };
     onSelect(cu, obs);
   };
@@ -1673,9 +1690,16 @@ function AdminClientSelectorScreen({
           </div>
           <div>
             <p className="font-black text-slate-900 text-sm leading-tight">Portal de Clientes</p>
-            <span className="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
-              <ShieldCheck size={10} aria-hidden="true"/> Modo admin
-            </span>
+            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+              <span className="inline-flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                <ShieldCheck size={10} aria-hidden="true"/> Modo admin
+              </span>
+              {adminEmpresaName && (
+                <span className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  {adminEmpresaName}
+                </span>
+              )}
+            </div>
           </div>
         </div>
         <button onClick={onSignOut} className="flex items-center gap-1.5 text-slate-400 hover:text-slate-700 text-xs font-bold transition-colors p-2">
@@ -1781,6 +1805,11 @@ export default function ClientePortal() {
     // Propagar empresaId desde el doc clients si no viene en client_users
     if (!cu.empresaId && clientData.empresaId) {
       cu.empresaId = clientData.empresaId;
+    }
+    // Resolver nombre de empresa para mostrarlo en el header del portal
+    if (cu.empresaId && !cu.empresaName) {
+      const empSnap = await getDoc(doc(db, 'empresas', cu.empresaId));
+      if (empSnap.exists()) cu.empresaName = (empSnap.data() as any).name || cu.empresaId;
     }
 
     // Deduplicar objetivos por id
