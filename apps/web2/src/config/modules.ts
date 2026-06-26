@@ -18,5 +18,7 @@ export const PERMISSION_ACTIONS: { key: string; label: string; onlyModules?: str
     { key: 'create', label: 'Crear' },
     { key: 'update', label: 'Editar' },
     { key: 'delete', label: 'Borrar' },
+    { key: 'publish', label: 'Publicar', onlyModules: ['PLANNING'] },
+    { key: 'correct', label: 'Corregir', onlyModules: ['PLANNING'] },
     { key: 'adjust', label: 'Ajustar', onlyModules: ['RRHH'] },
 ];

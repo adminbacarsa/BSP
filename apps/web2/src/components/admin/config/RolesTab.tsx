@@ -8,6 +8,24 @@ import { useEmpresa } from '@/context/EmpresaContext';
 
 interface IRole { id: string; name: string; permissions: Record<string, string[]>; empresaId?: string; }
 
+const actionBadgeLabel = (action: string) => {
+    if (action === 'publish') return 'Pub';
+    if (action === 'correct') return 'Cor';
+    if (action === 'adjust') return 'Aju';
+    return action.charAt(0);
+};
+
+const actionBadgeClass = (action: string) => {
+    if (action === 'read') return 'bg-blue-100 text-blue-700';
+    if (action === 'create') return 'bg-emerald-100 text-emerald-700';
+    if (action === 'update') return 'bg-amber-100 text-amber-700';
+    if (action === 'delete') return 'bg-rose-100 text-rose-700';
+    if (action === 'publish') return 'bg-indigo-100 text-indigo-700';
+    if (action === 'correct') return 'bg-violet-100 text-violet-700';
+    if (action === 'adjust') return 'bg-teal-100 text-teal-700';
+    return 'bg-slate-100 text-slate-700';
+};
+
 export default function RolesTab() {
     const { isSuperAdmin } = useAuth();
     const { empresaId } = useEmpresa();
@@ -109,7 +127,7 @@ export default function RolesTab() {
                                 return (
                                     <div key={modKey} className="text-xs bg-slate-50 dark:bg-slate-900 p-2 rounded-lg flex justify-between items-center border dark:border-slate-700">
                                         <span className="font-bold text-slate-600 dark:text-slate-400 truncate w-1/2">{modLabel}</span>
-                                        <div className="flex gap-1">{actions.map(a => <span key={a} className={`w-5 h-5 flex items-center justify-center rounded text-[9px] font-black uppercase ${a==='read'?'bg-blue-100 text-blue-700':a==='create'?'bg-emerald-100 text-emerald-700':a==='update'?'bg-amber-100 text-amber-700':'bg-rose-100 text-rose-700'}`}>{a.charAt(0)}</span>)}</div>
+                                        <div className="flex gap-1 flex-wrap justify-end">{actions.map(a => <span key={a} className={`px-1.5 h-5 flex items-center justify-center rounded text-[9px] font-black uppercase ${actionBadgeClass(a)}`}>{actionBadgeLabel(a)}</span>)}</div>
                                     </div>
                                 );
                             })}
