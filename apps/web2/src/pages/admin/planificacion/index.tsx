@@ -5547,16 +5547,23 @@ export default function PlanificacionPage() {
                         </React.Fragment>
                     );
                 })}
-                {/* ── Filas vacantes RFZ — refuerzos de cliente sin guardia asignado ── */}
-                {!isSnapshotView && rfzVacantes.filter(rfz => rfz.objectiveId === selectedObjective).map((rfz) => {
+                {/* ── Filas vacantes RFZ — refuerzos de cliente sin guardia asignado (solo del mes visible) ── */}
+                {!isSnapshotView && rfzVacantes.filter(rfz => {
+                    if (rfz.objectiveId !== selectedObjective) return false;
+                    const mp = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+                    return String(rfz.fecha || '').startsWith(mp);
+                }).map((rfz) => {
                     const rfzStart = formatTime(rfz.startTime);
                     const rfzEnd   = formatTime(rfz.endTime);
+                    const rfzFechaCorta = rfz.fecha ? String(rfz.fecha).split('-').reverse().slice(0, 2).join('/') : '';
                     return (
                         <tr key={`rfz_${rfz.id}`} className="hover:bg-red-50/30">
                             <td className="sticky left-0 z-20 bg-red-50 p-2 border-r border-b border-red-200 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8"
                                 style={{ width: nameColWidth, minWidth: nameColWidth }}>
                                 <div className="flex flex-col min-w-0">
-                                    <span className="text-[9px] font-black text-red-700 uppercase tracking-wide leading-tight">VACANTE RFZ</span>
+                                    <span className="text-[9px] font-black text-red-700 uppercase tracking-wide leading-tight">
+                                        VACANTE RFZ{rfzFechaCorta ? ` · ${rfzFechaCorta}` : ''}
+                                    </span>
                                     <span className="text-[8px] text-red-500 font-bold truncate" title={rfz.positionName || ''}>
                                         {rfz.positionName || 'Sin puesto'} · {rfzStart}–{rfzEnd}
                                     </span>
