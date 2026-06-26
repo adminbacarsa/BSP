@@ -8999,6 +8999,52 @@ export default function PlanificacionPage() {
                                                             💡 <strong>{autoPlanningBrainReport.recommendedAlternative}</strong> también es viable — clic para aplicar
                                                         </button>
                                                     )}
+                                                    {/* Acción rápida: sobran personas → desasignar del objetivo */}
+                                                    {autoPlanningBrainReport.diagnosis.balance === 'surplus' && (autoPlanningBrainReport.diagnosis.headcountDelta ?? 0) > 0 && (
+                                                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 space-y-1">
+                                                            <p className="text-[9px] font-black uppercase text-amber-800">Sobra personal · desasignar del objetivo</p>
+                                                            <div className="max-h-28 overflow-y-auto space-y-0.5">
+                                                                {planningDotacionEmployees.map(emp => (
+                                                                    <div key={emp.id} className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-amber-100">
+                                                                        <span className="text-[10px] font-bold text-slate-800 truncate">{emp.nombre || emp.name}</span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleUnassignEmployee(emp).then(() => setAutoWizardStep('configure'))}
+                                                                            className="shrink-0 text-[9px] font-black text-rose-600 hover:text-rose-800 uppercase px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 hover:border-rose-400 transition-colors"
+                                                                        >Quitar</button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    {/* Acción rápida: faltan personas → asignar sin objetivo */}
+                                                    {(autoPlanningBrainReport.diagnosis.balance === 'short' || autoPlanningBrainReport.diagnosis.balance === 'hours_short') && (
+                                                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 space-y-1">
+                                                            <p className="text-[9px] font-black uppercase text-rose-800">Falta personal · incorporar al objetivo</p>
+                                                            {(() => {
+                                                                const pool = employees.filter((e: any) => e.status !== 'inactivo' && (!e.preferredObjectiveId || e.preferredObjectiveId === ''));
+                                                                if (!pool.length) return <p className="text-[10px] text-rose-700 font-bold">No hay empleados sin objetivo en la empresa.</p>;
+                                                                return (
+                                                                    <div className="max-h-28 overflow-y-auto space-y-0.5">
+                                                                        {pool.map((emp: any) => (
+                                                                            <div key={emp.id} className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-rose-100">
+                                                                                <span className="text-[10px] font-bold text-slate-800 truncate">{emp.nombre || emp.name}</span>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={async () => {
+                                                                                        await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective });
+                                                                                        toast.success(`${emp.nombre || emp.name} incorporado al objetivo`);
+                                                                                        setAutoWizardStep('configure');
+                                                                                    }}
+                                                                                    className="shrink-0 text-[9px] font-black text-emerald-600 hover:text-emerald-800 uppercase px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 hover:border-emerald-400 transition-colors"
+                                                                                >Asignar</button>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
@@ -9051,6 +9097,32 @@ export default function PlanificacionPage() {
                                                 {autoV2Report.reasons.map((r, i) => <li key={i}>{r}</li>)}
                                             </ul>
                                         )}
+                                        {/* Acción rápida: incorporar empleados sin objetivo */}
+                                        {(() => {
+                                            const pool = employees.filter((e: any) => e.status !== 'inactivo' && (!e.preferredObjectiveId || e.preferredObjectiveId === ''));
+                                            if (!pool.length) return null;
+                                            return (
+                                                <div className="mt-3 rounded-lg border border-rose-300 bg-white px-2 py-1.5 space-y-1">
+                                                    <p className="text-[9px] font-black uppercase text-rose-800">Incorporar al objetivo · sin objetivo asignado</p>
+                                                    <div className="max-h-28 overflow-y-auto space-y-0.5">
+                                                        {pool.map((emp: any) => (
+                                                            <div key={emp.id} className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-rose-50 border border-rose-100">
+                                                                <span className="text-[10px] font-bold text-slate-800 truncate">{emp.nombre || emp.name}</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={async () => {
+                                                                        await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective });
+                                                                        toast.success(`${emp.nombre || emp.name} incorporado — volvé a analizar`);
+                                                                        setAutoWizardStep('configure');
+                                                                    }}
+                                                                    className="shrink-0 text-[9px] font-black text-emerald-600 hover:text-emerald-800 uppercase px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 hover:border-emerald-400 transition-colors"
+                                                                >Asignar</button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 )}
 
