@@ -1271,7 +1271,6 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
         html: buildClientPortalEmailHtml(resetLink, clientName),
         text: buildClientPortalEmailText(resetLink, clientName),
     });
-    const existingSnap = await db.collection('client_users').where('uid', '==', uid).get();
     let resolvedEmpresaId = empresaId || '';
     if (!resolvedEmpresaId) {
         try {
@@ -1297,15 +1296,26 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
             sentBy: callerAuth.uid,
         },
     };
-    if (!existingSnap.empty) {
-        await existingSnap.docs[0].ref.update(clientUserData);
-    }
-    else {
-        await db.collection('client_users').add({
-            ...clientUserData,
-            creadoEn: admin.firestore.FieldValue.serverTimestamp(),
+    const canonicalRef = db.collection('client_users').doc(uid);
+    const canonicalSnap = await canonicalRef.get();
+    await canonicalRef.set({
+        ...clientUserData,
+        ...(canonicalSnap.exists ? {} : { creadoEn: admin.firestore.FieldValue.serverTimestamp() }),
+    }, { merge: true });
+    try {
+        const legacySnap = await db.collection('client_users').where('uid', '==', uid).get();
+        const batch = db.batch();
+        let hasLegacy = false;
+        legacySnap.docs.forEach((d) => {
+            if (d.id !== uid) {
+                batch.delete(d.ref);
+                hasLegacy = true;
+            }
         });
+        if (hasLegacy)
+            await batch.commit();
     }
+    catch { }
     return { success: true, alreadyExisted, email: normalizedEmail };
 });
 var onNovedadCreated_1 = require("./notifications/onNovedadCreated");

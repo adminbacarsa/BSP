@@ -1570,9 +1570,6 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
     text: buildClientPortalEmailText(resetLink, clientName),
   });
 
-  // Crear o actualizar documento client_users
-  const existingSnap = await db.collection('client_users').where('uid', '==', uid).get();
-
   // Intentar obtener empresaId del doc clients si no vino en el payload
   let resolvedEmpresaId = empresaId || '';
   if (!resolvedEmpresaId) {
@@ -1599,14 +1596,31 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
     },
   };
 
-  if (!existingSnap.empty) {
-    await existingSnap.docs[0].ref.update(clientUserData);
-  } else {
-    await db.collection('client_users').add({
+  // El doc canónico de client_users usa el UID como ID (el portal lee con
+  // getDoc(doc('client_users', uid)) y las reglas asumen docId == uid).
+  const canonicalRef = db.collection('client_users').doc(uid);
+  const canonicalSnap = await canonicalRef.get();
+  await canonicalRef.set(
+    {
       ...clientUserData,
-      creadoEn: admin.firestore.FieldValue.serverTimestamp(),
+      ...(canonicalSnap.exists ? {} : { creadoEn: admin.firestore.FieldValue.serverTimestamp() }),
+    },
+    { merge: true },
+  );
+
+  // Migrar/limpiar docs legacy con ID autogenerado para el mismo uid (evita duplicados en el CRM).
+  try {
+    const legacySnap = await db.collection('client_users').where('uid', '==', uid).get();
+    const batch = db.batch();
+    let hasLegacy = false;
+    legacySnap.docs.forEach((d) => {
+      if (d.id !== uid) {
+        batch.delete(d.ref);
+        hasLegacy = true;
+      }
     });
-  }
+    if (hasLegacy) await batch.commit();
+  } catch { /* ignore */ }
 
   return { success: true, alreadyExisted, email: normalizedEmail };
 });

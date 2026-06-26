@@ -371,7 +371,9 @@ service cloud.firestore {
     }
 
     match /client_users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read: if (request.auth != null && request.auth.uid == userId)
+        || isSuperAdmin()
+        || (isAdmin() && tenantMatches(resource.data));
       allow write: if isSuperAdmin() || isAdmin();
     }
 
