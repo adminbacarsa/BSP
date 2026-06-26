@@ -1339,12 +1339,15 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
     setGuardias([]);
     if (tipo !== 'AGREGADO_TURNO' || !fecha) return;
 
-    getDocs(query(collection(db, 'turnos'), where('objectiveId', '==', objetivo.id)))
+    // Las reglas autorizan al usuario de portal a leer turnos por su clientId (no por objectiveId).
+    // Consultamos por clientId y filtramos objetivo + fecha en memoria.
+    getDocs(query(collection(db, 'turnos'), where('clientId', '==', clienteUser.clientId)))
       .then(snap => {
         const seen = new Set<string>();
         const deduped = snap.docs
           .map(d => ({ id: d.id, ...d.data() } as any))
           .filter((t: any) => {
+            if (t.objectiveId !== objetivo.id) return false;
             let tFecha: string = typeof t.fecha === 'string' ? t.fecha : '';
             if (!tFecha && t.startTime?.seconds)
               tFecha = new Date(t.startTime.seconds * 1000).toISOString().slice(0, 10);
@@ -1372,7 +1375,7 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
         })).then(lista => setGuardias(lista)).catch(console.error);
       })
       .catch(console.error);
-  }, [tipo, fecha, objetivo.id]);
+  }, [tipo, fecha, objetivo.id, clienteUser.clientId]);
 
   // Auto-seleccionar turno del puesto → llenar horarios
   const selPosition = slaPositions.find(p => p.id === selPosId);

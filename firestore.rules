@@ -160,6 +160,22 @@ service cloud.firestore {
         : '';
     }
 
+    function clientUserEmpresaId() {
+      return isClientUser()
+        ? get(/databases/$(database)/documents/client_users/$(request.auth.uid)).data.get('empresaId', '')
+        : '';
+    }
+
+    // Turno legible por usuario de portal: pertenece a su cliente.
+    function clientUserMatchesTurno(data) {
+      return isClientUser() && clientUserClientId() != '' && clientUserClientId() == data.get('clientId', '');
+    }
+
+    // Empleado legible por usuario de portal: misma empresa (para mostrar nombres en "agregar turno").
+    function clientUserMatchesEmpleado(data) {
+      return isClientUser() && clientUserEmpresaId() != '' && data.get('empresaId', '') == clientUserEmpresaId();
+    }
+
     function clientUserMatchesSolicitud(data) {
       return isClientUser() && clientUserClientId() == data.get('clientId', '');
     }
@@ -181,14 +197,18 @@ service cloud.firestore {
     }
 
     match /turnos/{shiftId} {
-      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
+      allow read: if tenantAdminRead()
+        || (request.auth != null && !isAdmin())
+        || clientUserMatchesTurno(resource.data);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }
 
     match /empleados/{employeeId} {
-      allow read: if tenantAdminRead() || (request.auth != null && !isAdmin());
+      allow read: if tenantAdminRead()
+        || (request.auth != null && !isAdmin())
+        || clientUserMatchesEmpleado(resource.data);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate() || request.auth != null;
       allow delete: if tenantAdminDelete();

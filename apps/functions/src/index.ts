@@ -1563,6 +1563,28 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
     }
   }
 
+  // Anti-secuestro de cliente: un usuario de portal (1 Auth uid) pertenece a UN solo cliente.
+  // Si el email ya está vinculado a otro clientId, bloquear (no reasignar) antes de enviar email.
+  try {
+    const existingClientUserSnap = await db.collection('client_users').where('uid', '==', uid).get();
+    const conflict = existingClientUserSnap.docs
+      .map(d => d.data())
+      .find(cu => {
+        const cuClientId = String(cu?.clientId || '').trim();
+        return cuClientId && cuClientId !== clientId;
+      });
+    if (conflict) {
+      throw new functions.https.HttpsError(
+        'already-exists',
+        `El email ${normalizedEmail} ya está vinculado al cliente "${conflict.clientName || conflict.clientId}". ` +
+        'Un usuario de portal sólo puede pertenecer a un cliente. Usá otro email o eliminá el acceso anterior desde la ficha de ese cliente.',
+      );
+    }
+  } catch (e: any) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    // Error de lectura → continuar (no bloquear por fallo transitorio de Firestore).
+  }
+
   // Generar enlace de reset
   const resetLink = await admin.auth().generatePasswordResetLink(normalizedEmail, {
     url: 'https://comtroldata.web.app/cliente/dashboard',

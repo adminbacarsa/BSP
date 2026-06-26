@@ -412,8 +412,19 @@ export default function SupervisionPage() {
 
     const isAgregado = sol.tipo === 'AGREGADO_TURNO';
     const horasPactadas = calcRefuerzoPactadaHours(sol.startTime, sol.endTime);
+
+    // El turno DEBE llevar empresaId para aparecer en Planificación (la grilla filtra por empresa).
+    // Si la solicitud (portal) no lo trae, lo resolvemos del cliente.
+    let resolvedEmpresaId = String(sol.empresaId || '').trim();
+    if (!resolvedEmpresaId && sol.clientId) {
+      try {
+        const cDoc = await getDoc(doc(db, 'clients', sol.clientId));
+        if (cDoc.exists()) resolvedEmpresaId = String(cDoc.data().empresaId || '').trim();
+      } catch { /* keep empty */ }
+    }
+
     const base = {
-      empresaId:           sol.empresaId,
+      empresaId:           resolvedEmpresaId,
       objectiveId:         sol.objectiveId,
       clientId:            sol.clientId,
       clientName:          sol.clientName,

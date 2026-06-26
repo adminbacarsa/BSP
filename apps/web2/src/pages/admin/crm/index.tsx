@@ -347,6 +347,7 @@ export default function CRMPage() {
     } catch (e: any) {
       const msg = e?.message || '';
       if (msg.includes('no configurado')) setPortalError('Servicio de email no configurado en el servidor.');
+      else if (msg.includes('ya está vinculado')) setPortalError(msg);
       else setPortalError('Error al guardar. Intentá nuevamente.');
     } finally {
       setPortalSaving(false);
