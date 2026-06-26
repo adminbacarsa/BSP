@@ -1,6 +1,30 @@
 {
   "indexes": [
     {
+      "collectionGroup": "solicitudes_refuerzo",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId",    "order": "ASCENDING"  },
+        { "fieldPath": "solicitadoAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "solicitudes_refuerzo",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "objectiveId",  "order": "ASCENDING"  },
+        { "fieldPath": "solicitadoAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "solicitudes_refuerzo",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clientId",     "order": "ASCENDING"  },
+        { "fieldPath": "solicitadoAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "alerts",
       "queryScope": "COLLECTION",
       "fields": [
