@@ -43,6 +43,7 @@ import {
   writeAssistantInteractionLog,
 } from './assistant/assistantInteractionLog';
 import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/planningGeminiServer';
+import { runAutoScheduleHandler } from './scheduling/runAutoSchedule';
 import { ymCordobaParts, planificacionEstadoLookupDocIds } from './assistant/planificacionEstadoKeys';
 import { lookupClientByCuitHandler } from './afip/lookupClientByCuitHandler';
 import {
@@ -769,6 +770,12 @@ export const optimizePlanningGemini =
     : functions
         .runWith({ ...optimizePlanningGeminiRuntime, secrets: ['GEMINI_API_KEY'] })
         .https.onCall(optimizePlanningGeminiHandler);
+
+// --- MOTOR DE PLANIFICACIÓN AUTOMÁTICA ---
+
+export const runAutoSchedule = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
+    .https.onCall(runAutoScheduleHandler);
 
 // --- FUNCIONES DE SISTEMA INYECTADAS POR SCRIPT ---
 
