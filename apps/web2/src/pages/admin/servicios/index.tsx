@@ -941,7 +941,19 @@ export default function ServiciosSLAPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {groupedServices.map(group => {
-                const latestSrv = group.services[0];
+                // Contrato vigente en el mes mostrado (kpi) — si no hay, el más reciente.
+                const srvCubreKpiMes = (srv: ServiceSLA & { id: string }) => {
+                  const mStart = new Date(kpiYear, kpiMonth, 1);
+                  const mEnd = new Date(kpiYear, kpiMonth + 1, 0);
+                  const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
+                  const sEnd = parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10));
+                  return !!sStart && !!sEnd && !(sStart > mEnd || sEnd < mStart);
+                };
+                const currentSrv = group.services.find(srvCubreKpiMes) || group.services[0];
+                const orderedServices = currentSrv
+                  ? [currentSrv, ...group.services.filter(s => s !== currentSrv)]
+                  : group.services;
+                const latestSrv = currentSrv;
                 const hasActive = group.services.some(s => isSlaContractActive(s.status));
                 const isExpanded = expandedGroups.has(group.key);
                 return (
@@ -994,7 +1006,7 @@ export default function ServiciosSLAPage() {
                           <span className="text-slate-300">{isExpanded ? '▲' : '▼'}</span>
                         </button>
                         <div className="space-y-2">
-                          {(isExpanded ? group.services : group.services.slice(0,1)).map(srv => {
+                          {(isExpanded ? orderedServices : orderedServices.slice(0,1)).map(srv => {
                             const total = serviceTotals.get(serviceSlaRowKey(srv)) ?? 0;
                             const slaR = getResolvedSlaForMargin(srv);
                             return (

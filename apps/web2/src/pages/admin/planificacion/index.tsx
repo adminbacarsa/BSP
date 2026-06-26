@@ -502,6 +502,7 @@ export default function PlanificacionPage() {
     const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
     const [turaMap, setTuraMap] = useState<Record<string, any>>({});       // parentShiftId → turno TURA
     const [rfzVacantes, setRfzVacantes] = useState<any[]>([]);             // RFZ sin guardia asignado
+    const [rfzTodos, setRfzTodos] = useState<any[]>([]);                  // RFZ del mes (asignados + vacantes) para fila de refuerzos
     const [rfzAsignando, setRfzAsignando] = useState<any>(null);          // RFZ vacante abierto para asignación
     // allShiftIds[empId_dateKey] = array de TODOS los doc IDs para esa clave.
     // shiftsMap solo guarda el último (sobrescribe), pero necesitamos borrar TODOS al guardar.
@@ -2323,6 +2324,7 @@ export default function PlanificacionPage() {
             const allIds: Record<string, string[]> = {};
             const turaM: Record<string, any> = {};
             const rfzVacs: any[] = [];
+            const rfzAll: any[] = [];
             snap.docs.forEach(d => {
                 const data = d.data();
                 if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
@@ -2333,9 +2335,12 @@ export default function PlanificacionPage() {
                     turaM[data.parentShiftId] = { id: d.id, ...data };
                     return;
                 }
-                // RFZ sin guardia real: mostrar como fila vacante separada
-                if (code === 'RFZ' && (!data.employeeId || data.employeeId === 'VACANTE')) {
-                    rfzVacs.push({ id: d.id, ...data });
+                // RFZ: siempre como fila de refuerzo separada (asignado o vacante).
+                // Su startTime suele ser string ISO → no entra en shiftsMap (grilla regular).
+                if (code === 'RFZ') {
+                    const rfzData = { id: d.id, ...data };
+                    rfzAll.push(rfzData);
+                    if (!data.employeeId || data.employeeId === 'VACANTE') rfzVacs.push(rfzData);
                     return;
                 }
 
@@ -2367,6 +2372,7 @@ export default function PlanificacionPage() {
             setAllShiftIds(allIds);
             setTuraMap(turaM);
             setRfzVacantes(rfzVacs);
+            setRfzTodos(rfzAll);
         }, (e) => { console.error('[plan] turnos error:', e); toast.error(`Error cargando turnos: ${e.code || e.message}`); });
 
         // Actividad Reciente (audit_logs) - sin índices compuestos: traemos últimos N y filtramos en memoria.
@@ -5547,8 +5553,8 @@ export default function PlanificacionPage() {
                         </React.Fragment>
                     );
                 })}
-                {/* ── Filas vacantes RFZ — refuerzos de cliente sin guardia asignado (solo del mes visible) ── */}
-                {!isSnapshotView && rfzVacantes.filter(rfz => {
+                {/* ── Filas de refuerzo RFZ — del cliente (vacantes + asignados), solo del mes visible ── */}
+                {!isSnapshotView && rfzTodos.filter(rfz => {
                     if (rfz.objectiveId !== selectedObjective) return false;
                     const mp = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                     return String(rfz.fecha || '').startsWith(mp);
@@ -5556,16 +5562,21 @@ export default function PlanificacionPage() {
                     const rfzStart = formatTime(rfz.startTime);
                     const rfzEnd   = formatTime(rfz.endTime);
                     const rfzFechaCorta = rfz.fecha ? String(rfz.fecha).split('-').reverse().slice(0, 2).join('/') : '';
+                    const asignado = !!rfz.employeeId && rfz.employeeId !== 'VACANTE';
+                    const guardiaNombre = asignado
+                        ? (rfz.employeeName || employees.find(e => e.id === rfz.employeeId)?.name || 'Guardia')
+                        : null;
+                    const pendiente = asignado && rfz.draft === true;
                     return (
-                        <tr key={`rfz_${rfz.id}`} className="hover:bg-red-50/30">
-                            <td className="sticky left-0 z-20 bg-red-50 p-2 border-r border-b border-red-200 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8"
+                        <tr key={`rfz_${rfz.id}`} className={asignado ? 'hover:bg-emerald-50/30' : 'hover:bg-red-50/30'}>
+                            <td className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${asignado ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}
                                 style={{ width: nameColWidth, minWidth: nameColWidth }}>
                                 <div className="flex flex-col min-w-0">
-                                    <span className="text-[9px] font-black text-red-700 uppercase tracking-wide leading-tight">
-                                        VACANTE RFZ{rfzFechaCorta ? ` · ${rfzFechaCorta}` : ''}
+                                    <span className={`text-[9px] font-black uppercase tracking-wide leading-tight ${asignado ? 'text-emerald-700' : 'text-red-700'}`}>
+                                        {asignado ? (guardiaNombre as string) : 'VACANTE RFZ'}{rfzFechaCorta ? ` · ${rfzFechaCorta}` : ''}
                                     </span>
-                                    <span className="text-[8px] text-red-500 font-bold truncate" title={rfz.positionName || ''}>
-                                        {rfz.positionName || 'Sin puesto'} · {rfzStart}–{rfzEnd}
+                                    <span className={`text-[8px] font-bold truncate ${asignado ? 'text-emerald-600' : 'text-red-500'}`} title={rfz.positionName || ''}>
+                                        REFUERZO · {rfz.positionName || 'Sin puesto'} · {rfzStart}–{rfzEnd}{pendiente ? ' · sin publicar' : ''}
                                     </span>
                                 </div>
                             </td>
@@ -5578,7 +5589,10 @@ export default function PlanificacionPage() {
                                         onClick={() => { if (isRfzDay) setRfzAsignando(rfz); }}
                                         className={`border-b border-r p-0.5 text-center ${isCellWeekend ? 'bg-rose-50/40' : ''} ${isRfzDay ? 'cursor-pointer' : ''}`}>
                                         {isRfzDay && (
-                                            <div className="w-full h-6 rounded flex items-center justify-center text-[9px] font-black bg-red-500 text-white border border-red-600 hover:bg-red-600 transition-colors">
+                                            <div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black border transition-colors ${asignado
+                                                ? (pendiente ? 'bg-amber-500 text-white border-amber-600 hover:bg-amber-600' : 'bg-emerald-500 text-white border-emerald-600 hover:bg-emerald-600')
+                                                : 'bg-red-500 text-white border-red-600 hover:bg-red-600'}`}
+                                                title={asignado ? `RFZ asignado a ${guardiaNombre}${pendiente ? ' (pendiente de publicar)' : ''}` : 'Vacante RFZ — tocá para asignar'}>
                                                 RFZ
                                             </div>
                                         )}
@@ -6482,6 +6496,14 @@ export default function PlanificacionPage() {
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/REF/ESC/francos/licencias.'
                         : 'Suma de horas planificadas en el mes calendario para este objetivo (sin RET, REF, ESC, francos ni licencias). Compará con Vendidas del SLA.';
+                    // Extras del mes (RFZ + TURA) de este objetivo — se facturan en CRM aparte del SLA base.
+                    const monthPrefixExtras = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+                    const extrasList = [
+                        ...rfzTodos.filter((r: any) => r.objectiveId === selectedObjective && String(r.fecha || '').startsWith(monthPrefixExtras)),
+                        ...Object.values(turaMap).filter((t: any) => t.objectiveId === selectedObjective && String(t.fecha || '').startsWith(monthPrefixExtras)),
+                    ];
+                    const extrasHrs = extrasList.reduce((a: number, t: any) => a + (Number(t.hours) || 0), 0);
+                    const extrasCount = extrasList.length;
                     return (
                     <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2 flex items-center gap-3 divide-x divide-slate-100 dark:divide-slate-700" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                         <div className="text-center pr-3" title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva).">
@@ -6544,6 +6566,13 @@ export default function PlanificacionPage() {
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Cap. CCT</p>
                                 <p className="text-sm font-black text-indigo-600 leading-tight underline decoration-dotted">Ver</p>
                             </button>
+                        )}
+                        {extrasCount > 0 && (
+                            <div className="text-center px-3" title={`Refuerzos del mes (RFZ + TURA) de este objetivo: ${extrasCount} turno(s), ${extrasHrs.toFixed(0)}h. Se facturan en CRM/pre-factura aparte de las horas vendidas del SLA base; no entran en la validación de publicación.`}>
+                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Extras</p>
+                                <p className="text-sm font-black text-rose-600 leading-tight">+{extrasHrs.toFixed(0)}h</p>
+                                <p className="text-[8px] font-bold text-rose-400 leading-none mt-0.5">{extrasCount} ref.</p>
+                            </div>
                         )}
                         {slaVendidas > 0 && (
                             <div className={`text-center pl-3 ${slaMismatch ? 'rounded-lg bg-rose-50 px-2 py-0.5' : ''}`}>
