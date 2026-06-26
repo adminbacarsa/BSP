@@ -1060,79 +1060,60 @@ export default function ServiciosSLAPage() {
                           )}
                         </div>
                       </div>
+
+                      {/* ── Refuerzos del mes (RFZ/TURA) integrados al servicio ── */}
+                      {(() => {
+                        const groupExtras = rfzTuraExtras.filter(t => {
+                          if (!t.fecha) return false;
+                          const [yy, mm] = String(t.fecha).split('-').map(Number);
+                          if (yy !== kpiYear || mm !== kpiMonth + 1) return false;
+                          return t.objectiveId === group.key
+                            || group.services.some(s => s.objectiveId === t.objectiveId)
+                            || (!!group.objectiveName && t.objectiveName === group.objectiveName);
+                        });
+                        if (groupExtras.length === 0) return null;
+                        const extraHrs = groupExtras.reduce((a, t) => a + (t.hours || 8), 0);
+                        const baseHrs = group.services.reduce((a, s) => a + getServiceHoursForKpiMonth(s), 0);
+                        return (
+                          <div className="mt-3 border-t border-dashed border-red-200 dark:border-red-900/40 pt-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-[9px] font-black uppercase text-red-500 tracking-widest flex items-center gap-1">
+                                <AlertCircle size={10}/> Refuerzos del mes · {kpiCurrent.label}
+                              </span>
+                              <span className="text-[9px] font-black bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-200">
+                                {groupExtras.length} turno{groupExtras.length !== 1 ? 's' : ''} · +{extraHrs} h
+                              </span>
+                            </div>
+                            <div className="space-y-1 mb-2">
+                              {groupExtras.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).map(t => (
+                                <div key={t.id} className="flex items-center gap-2 text-[10px]">
+                                  <span className={`shrink-0 font-black px-1 py-0.5 rounded ${t.code === 'TURA' ? 'bg-red-600 text-white' : 'bg-red-500 text-white'}`}>{t.code}</span>
+                                  <span className="font-bold text-slate-600 dark:text-slate-300 w-16 shrink-0">{t.fecha}</span>
+                                  <span className="text-slate-500 dark:text-slate-400 flex-1 truncate">{t.positionName || t.employeeName || 'Sin asignar'}</span>
+                                  <span className={`shrink-0 font-bold ${t.employeeId && t.employeeId !== 'VACANTE' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                    {t.employeeId && t.employeeId !== 'VACANTE' ? 'Asignado' : 'Vacante'}
+                                  </span>
+                                  <span className="shrink-0 font-black text-red-500">{t.hours || 8}h</span>
+                                </div>
+                              ))}
+                            </div>
+                            {baseHrs > 0 && (
+                              <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-1.5">
+                                <span className="text-[9px] font-black uppercase text-slate-500">SLA del mes c/ refuerzos</span>
+                                <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
+                                  {baseHrs} + {extraHrs} = {baseHrs + extraHrs} h
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 );
               })}
             </div>
           )}
-
-          {/* ── Extras del mes — RFZ / TURA ── */}
-          {(() => {
-            const extrasDelMes = rfzTuraExtras.filter(t => {
-              if (!t.fecha) return false;
-              const [y, m] = t.fecha.split('-').map(Number);
-              return y === kpiYear && m === kpiMonth + 1;
-            });
-            if (extrasDelMes.length === 0) return null;
-            const totalHsExtras = extrasDelMes.reduce((acc, t) => acc + (t.hours || 8), 0);
-            const grouped: Record<string, any[]> = {};
-            extrasDelMes.forEach(t => {
-              const k = `${t.objectiveName || t.clientName || t.objectiveId || '—'}`;
-              if (!grouped[k]) grouped[k] = [];
-              grouped[k].push(t);
-            });
-            return (
-              <div className="mt-6">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-red-100 rounded-lg"><AlertCircle size={13} className="text-red-600"/></div>
-                    <div>
-                      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Extras del mes</p>
-                      <p className="text-[9px] text-slate-400">Turnos RFZ y TURA solicitados por clientes — {kpiCurrent.label}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-black bg-red-100 text-red-700 px-2 py-1 rounded-lg">
-                      {extrasDelMes.length} turno{extrasDelMes.length !== 1 ? 's' : ''}
-                    </span>
-                    <span className="text-[9px] font-black bg-red-50 text-red-600 px-2 py-1 rounded-lg border border-red-200">
-                      {totalHsExtras} hs extra
-                    </span>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {Object.entries(grouped).map(([objName, turnos]) => (
-                    <div key={objName} className="bg-white dark:bg-slate-800 rounded-xl border border-red-100 dark:border-red-900/40 shadow-sm overflow-hidden">
-                      <div className="h-0.5 w-full bg-red-400"/>
-                      <div className="px-4 py-2.5 border-b border-red-50 dark:border-red-900/30 flex items-center gap-2">
-                        <MapPin size={11} className="text-red-500 shrink-0"/>
-                        <span className="text-xs font-black text-slate-700 dark:text-white uppercase">{objName}</span>
-                        <span className="ml-auto text-[9px] font-bold text-red-500">{turnos.reduce((a, t) => a + (t.hours || 8), 0)} hs</span>
-                      </div>
-                      <div className="divide-y divide-slate-50 dark:divide-slate-700/50">
-                        {turnos.sort((a, b) => (a.fecha || '').localeCompare(b.fecha || '')).map(t => (
-                          <div key={t.id} className="flex items-center gap-3 px-4 py-2">
-                            <span className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded ${t.code === 'TURA' ? 'bg-red-600 text-white' : 'bg-red-500 text-white'}`}>{t.code}</span>
-                            <span className="text-xs font-bold text-slate-600 dark:text-slate-300 w-20 shrink-0">{t.fecha || '—'}</span>
-                            <span className="text-xs text-slate-500 dark:text-slate-400 flex-1 truncate">
-                              {t.positionName || t.employeeName || 'Sin asignar'}
-                            </span>
-                            {t.employeeId && t.employeeId !== 'VACANTE' ? (
-                              <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded shrink-0">Asignado</span>
-                            ) : (
-                              <span className="text-[9px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded shrink-0">Vacante</span>
-                            )}
-                            <span className="text-[9px] font-black text-red-500 shrink-0">{t.hours || 8}h</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
 
           <ServiceShiftSchemeModal
             open={shiftModal.open}

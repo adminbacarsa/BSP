@@ -1311,24 +1311,27 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
     });
   }, [objetivo.id]);
 
-  // Recarga puntual (fallback si el listener se cae, p.ej. índice en construcción)
+  // Recarga puntual (fallback si el listener se cae, p.ej. índice en construcción).
+  // Consulta por clientId (lo que autorizan las reglas para client_user) y filtra
+  // el objetivo en el cliente. Consultar por objectiveId puede denegar toda la
+  // query si algún doc tiene otro clientId (las reglas no filtran).
   const reloadSolicitudes = useCallback(async () => {
     try {
-      const items = await solicitudRefuerzoService.getByObjectiveIds([objetivo.id]);
-      setSolicitudes(items);
+      const items = await solicitudRefuerzoService.getByClient(clienteUser.clientId);
+      setSolicitudes(items.filter(s => s.objectiveId === objetivo.id));
     } catch (e) {
       console.error('[RefuerzosTab] reloadSolicitudes:', e);
     }
-  }, [objetivo.id]);
+  }, [objetivo.id, clienteUser.clientId]);
 
-  // Historial real-time — consulta por objectiveId para evitar cross-empresa
+  // Historial real-time — consulta por clientId y filtra el objetivo en el cliente
   useEffect(() => {
-    return solicitudRefuerzoService.subscribeByObjectiveIds(
-      [objetivo.id],
-      items => setSolicitudes(items),
+    return solicitudRefuerzoService.subscribeByClient(
+      clienteUser.clientId,
+      items => setSolicitudes(items.filter(s => s.objectiveId === objetivo.id)),
       () => { reloadSolicitudes(); },
     );
-  }, [objetivo.id, reloadSolicitudes]);
+  }, [objetivo.id, clienteUser.clientId, reloadSolicitudes]);
 
   // Guardias en turno (AGREGADO_TURNO) — busca en turnos planificados del objetivo
   useEffect(() => {
@@ -1420,9 +1423,21 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
       const fechasAEnviar = tipo === 'AGREGADO_TURNO' && fechasExtra.length > 0
         ? [fecha, ...fechasExtra]
         : [fecha];
-      await Promise.all(fechasAEnviar.map(f => solicitudRefuerzoService.create({ ...base, fecha: f, ...extras })));
+      const creadas: SolicitudRefuerzo[] = [];
+      for (const f of fechasAEnviar) {
+        const payload = { ...base, fecha: f, ...extras };
+        const id = await solicitudRefuerzoService.create(payload);
+        creadas.push({ id, ...payload } as SolicitudRefuerzo);
+      }
       resetForm();
-      // Refresco inmediato: no dependemos solo del listener real-time
+      // Inserción optimista: el usuario ve la solicitud al instante sin depender
+      // del listener real-time ni de un re-fetch (que puede demorar por índices).
+      setSolicitudes(prev => {
+        const ids = new Set(prev.map(p => p.id));
+        const nuevas = creadas.filter(c => !ids.has(c.id));
+        return [...nuevas, ...prev];
+      });
+      // Reconciliación posterior (dedupe por id) cuando el backend responda.
       reloadSolicitudes();
     } catch (e: any) {
       alert(`Error: ${e?.message || 'No se pudo enviar'}`);

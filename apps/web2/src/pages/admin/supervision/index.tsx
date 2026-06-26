@@ -17,7 +17,7 @@ import {
 } from '@/services/solicitudRefuerzoService';
 import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
-import { buildRefuerzoNovedadPayload } from '@/lib/refuerzo/refuerzoDisplay';
+import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -411,6 +411,7 @@ export default function SupervisionPage() {
     const endISO   = `${fechaFin}T${sol.endTime}:00`;
 
     const isAgregado = sol.tipo === 'AGREGADO_TURNO';
+    const horasPactadas = calcRefuerzoPactadaHours(sol.startTime, sol.endTime);
     const base = {
       empresaId:           sol.empresaId,
       objectiveId:         sol.objectiveId,
@@ -420,13 +421,19 @@ export default function SupervisionPage() {
       fecha:               sol.fecha,
       startTime:           startISO,
       endTime:             endISO,
+      hours:               horasPactadas,
       origin:              'CLIENT_REQUEST',
       solicitudRefuerzoId: sol.id,
       code:                isAgregado ? 'TURA' : 'RFZ',
       isPresent:           false,
       isAbsent:            false,
       isCompleted:         false,
-      draft:               opts?.draft ?? false,
+      // TURA = extensión de un guardia ya publicado → se auto-publica (notifica al instante).
+      // RFZ = vacante a asignar en Planificación → queda en borrador hasta republicar.
+      draft:               isAgregado ? false : (opts?.draft ?? false),
+      autorizadoPorUid:    user?.uid ?? null,
+      autorizadoPorNombre: user?.displayName || user?.email || null,
+      autorizadoAt:        Timestamp.now(),
     };
 
     const ids: string[] = [];
@@ -559,6 +566,7 @@ export default function SupervisionPage() {
       const endISO   = `${fechaFin}T${mEnd}:00`;
 
       const isAgregado = mTipo === 'AGREGADO_TURNO';
+      const horasPactadas = calcRefuerzoPactadaHours(mStart, mEnd);
       const base = {
         empresaId,
         objectiveId:   mObjetivoId,
@@ -568,9 +576,13 @@ export default function SupervisionPage() {
         fecha:         mFecha,
         startTime:     startISO,
         endTime:       endISO,
+        hours:         horasPactadas,
         origin:        'CLIENT_REQUEST',
         code:          isAgregado ? 'TURA' : 'RFZ',
         isPresent: false, isAbsent: false, isCompleted: false, draft: false,
+        autorizadoPorUid:    user!.uid,
+        autorizadoPorNombre: user!.displayName || user!.email || null,
+        autorizadoAt:        Timestamp.now(),
       };
       // Crear los turnos vacantes directamente (urgente, ya pasó el corte de planificación)
       const n = isAgregado ? 1 : mPax;

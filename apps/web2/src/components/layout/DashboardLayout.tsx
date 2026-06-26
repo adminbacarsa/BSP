@@ -16,7 +16,6 @@ import {
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
-import { absenceService } from '@/services/absenceService';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -307,18 +306,12 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!empresaId || !canViewSupervision) return;
-    let refuerzos = 0;
-    let ausenciasPend = 0;
-    const update = () => setPendientesCount(refuerzos + ausenciasPend);
+    // El badge de Supervisión cuenta SOLO refuerzos pendientes (lo que el supervisor
+    // tiene para tratar). Las ausencias/vacaciones tienen su propio flujo y no se cuentan acá.
     const unsubR = solicitudRefuerzoService.subscribeByEmpresa(empresaId, items => {
-      refuerzos = items.filter(s => s.estado === 'PENDIENTE').length;
-      update();
+      setPendientesCount(items.filter(s => s.estado === 'PENDIENTE').length);
     });
-    const unsubA = absenceService.subscribePendientes(empresaId, items => {
-      ausenciasPend = items.length;
-      update();
-    });
-    return () => { unsubR(); unsubA(); };
+    return () => { unsubR(); };
   }, [empresaId, canViewSupervision]);
 
   useEffect(() => {

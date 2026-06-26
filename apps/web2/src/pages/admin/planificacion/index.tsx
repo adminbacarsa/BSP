@@ -1077,6 +1077,41 @@ export default function PlanificacionPage() {
         [displayedEmployees, selectedObjective],
     );
 
+    // Bell de planificación = novedades + vacantes RFZ derivadas de turnos (scope confiable, independiente del pipeline de novedades).
+    const bellNotifications = useMemo(() => {
+        const novedadSolIds = new Set(
+            (notifications || [])
+                .map((n: any) => n.solicitudRefuerzoId)
+                .filter(Boolean)
+                .map((x: any) => String(x)),
+        );
+        const sinteticas = (rfzVacantes || [])
+            .filter((rfz: any) => !rfz.solicitudRefuerzoId || !novedadSolIds.has(String(rfz.solicitudRefuerzoId)))
+            .map((rfz: any) => {
+                const s = formatTime(rfz.startTime);
+                const e = formatTime(rfz.endTime);
+                return {
+                    id: `rfzvac_${rfz.id}`,
+                    source: 'NOVEDAD',
+                    type: 'REFUERZO_CLIENTE_PENDIENTE',
+                    tipoSolicitud: 'RFZ',
+                    title: `RFZ · ${rfz.positionName || 'Refuerzo'} · ${rfz.objectiveName || ''}`.trim(),
+                    msg: `Vacante de refuerzo sin asignar (${s}–${e}) del ${rfz.fecha}. Tocá para asignar guardia.`,
+                    objectiveId: rfz.objectiveId,
+                    objectiveName: rfz.objectiveName,
+                    clientId: rfz.clientId,
+                    clientName: rfz.clientName,
+                    fecha: rfz.fecha,
+                    startTime: rfz.startTime,
+                    endTime: rfz.endTime,
+                    solicitudRefuerzoId: rfz.solicitudRefuerzoId,
+                    createdAt: rfz.autorizadoAt || rfz.createdAt,
+                    __rfz: rfz,
+                };
+            });
+        return [...notifications, ...sinteticas];
+    }, [notifications, rfzVacantes]);
+
     const addModalEmployeeCandidates = useMemo(() => {
         const q = addSearchTerm.toLowerCase();
         let list = employees.filter(e => e.status !== 'inactivo' && e.name.toLowerCase().includes(q));
@@ -2543,6 +2578,18 @@ export default function PlanificacionPage() {
     // 🛑 V8.20: Handler Restaurado
     const handleNotificationClick = async (notif: any) => {
         setShowNotifications(false);
+        // Vacante RFZ sintética (derivada de turnos): abrir directamente el modal de asignación.
+        if (typeof notif?.id === 'string' && notif.id.startsWith('rfzvac_') && notif.__rfz) {
+            if (notif.clientId) setSelectedClient(notif.clientId);
+            if (notif.objectiveId) setSelectedObjective(notif.objectiveId);
+            if (typeof notif.fecha === 'string') {
+                const [y, m] = notif.fecha.split('-').map(Number);
+                if (y && m) setCurrentDate(new Date(y, m - 1, 1));
+            }
+            setForceShowAll(true);
+            setRfzAsignando(notif.__rfz);
+            return;
+        }
         if (notif.id) {
             try {
                 // Las notificaciones siempre vienen de 'novedades' — nunca de 'ausencias'
@@ -3200,6 +3247,24 @@ export default function PlanificacionPage() {
             draftsSnap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .forEach(d => batch.update(d.ref, { draft: false }));
+            // Refuerzos RFZ en borrador: guardan startTime como string ISO (no Timestamp), por lo que
+            // no entran en la query por rango anterior. Se incluyen por objetivo + código + fecha del mes.
+            let rfzPublished = 0;
+            try {
+                const rfzDraftSnap = await getDocs(query(
+                    collection(db, 'turnos'),
+                    where('objectiveId', '==', selectedObjective),
+                    where('code', '==', 'RFZ'),
+                    where('draft', '==', true),
+                ));
+                const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+                rfzDraftSnap.docs
+                    .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                    .filter(d => String(d.data().fecha || '').startsWith(monthPrefix))
+                    .forEach(d => { batch.update(d.ref, { draft: false }); rfzPublished++; });
+            } catch (e) {
+                console.warn('[plan] publish RFZ draft sweep error:', e);
+            }
             await batch.commit();
             // 3. Registrar en audit_logs
             await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
@@ -3215,7 +3280,12 @@ export default function PlanificacionPage() {
             // 4. Actualizar estado local
             setPublishStatusMap(prev => ({ ...prev, [publishLookupKey]: { publishedAt: new Date(), publishedBy: actorName } }));
             setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: false }));
-            toast.success(`Cronograma publicado — ${draftsSnap.docs.length} turno(s) notificado(s)`);
+            const totalPublished = draftsSnap.docs.length + rfzPublished;
+            toast.success(
+                rfzPublished > 0
+                    ? `Cronograma publicado — ${totalPublished} turno(s) notificado(s) (incluye ${rfzPublished} refuerzo/s RFZ)`
+                    : `Cronograma publicado — ${totalPublished} turno(s) notificado(s)`,
+            );
         } catch (e) {
             console.error(e);
             toast.error('Error al publicar');
@@ -6038,7 +6108,7 @@ export default function PlanificacionPage() {
                                         }}
                                         className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl relative"
                                     >
-                                        <Bell size={18}/>{hasUnread && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
+                                        <Bell size={18}/>{(hasUnread || bellNotifications.length > 0) && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
                                     </button>
                                 </div>
                                 {showNotifications && typeof document !== 'undefined' && createPortal(
@@ -6066,7 +6136,7 @@ export default function PlanificacionPage() {
                                                 </div>
                                             </div>
                                             <div className="max-h-80 overflow-y-auto custom-scrollbar">
-                                                {notifications.length > 0 ? notifications.map((notif, i) => (
+                                                {bellNotifications.length > 0 ? bellNotifications.map((notif, i) => (
                                                     <div key={i} className="p-3 border-b last:border-0 hover:bg-slate-50 flex gap-3 items-start cursor-pointer group" onClick={() => handleNotificationClick(notif)}>
                                                         <div className={`p-2 rounded-full ${notif.title?.includes('⚠️') ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-500'}`}>
                                                             {notif.source === 'NOVEDAD' ? <AlertTriangle size={16}/> : <CalendarX size={16}/>}
@@ -7099,12 +7169,20 @@ export default function PlanificacionPage() {
                                                 const tura = turaMap[shift.id];
                                                 const tStart = tura.startTime ? formatTime(tura.startTime) : '--:--';
                                                 const tEnd   = tura.endTime   ? formatTime(tura.endTime)   : '--:--';
+                                                const tHours = Number(tura.hours) > 0 ? Number(tura.hours) : (SHIFT_HOURS_LOOKUP['TURA'] ?? 8);
+                                                const tHoursLabel = Number.isInteger(tHours) ? `${tHours}` : tHours.toFixed(1);
                                                 return (
-                                                    <div className="flex items-center gap-3 p-3 rounded-xl border border-red-200 bg-red-50 mb-4">
+                                                    <div className="flex items-start gap-3 p-3 rounded-xl border border-red-200 bg-red-50 mb-4">
                                                         <span className="shrink-0 text-[10px] font-black text-white bg-red-500 px-2 py-1 rounded-lg">TURA</span>
                                                         <div className="flex-1 min-w-0">
                                                             <p className="text-xs font-black text-red-700 leading-tight">Turno Agregado — pedido del cliente</p>
-                                                            <p className="text-[11px] text-red-500 font-bold">{tStart} – {tEnd} · 8h</p>
+                                                            <p className="text-[11px] text-red-500 font-bold">{tStart} – {tEnd} · {tHoursLabel}h</p>
+                                                            {tura.autorizadoPorNombre && (
+                                                                <p className="text-[10px] text-red-400 font-bold mt-0.5">Autorizó: {tura.autorizadoPorNombre}</p>
+                                                            )}
+                                                            {tura.solicitadoPorNombre && (
+                                                                <p className="text-[10px] text-red-400 font-bold">Solicitó: {tura.solicitadoPorNombre}</p>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 );
@@ -9628,32 +9706,58 @@ export default function PlanificacionPage() {
                                 )}
                             </div>
                         </div>
+                        <p className="text-[10px] text-slate-400 font-bold -mt-1">
+                            Solo guardias disponibles ese día: sin turno, en RET (stand-by) o de franco.
+                        </p>
                         <div className="flex flex-col max-h-64 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
-                            {displayedEmployees.map(emp => (
-                                <button key={emp.id}
-                                    type="button"
-                                    onClick={async () => {
-                                        try {
-                                            await updateDoc(doc(db, 'turnos', rfzAsignando.id), {
-                                                employeeId: emp.id,
-                                                employeeName: emp.name,
-                                            });
-                                            setRfzAsignando(null);
-                                            toast.success(`${emp.name} asignado/a al turno RFZ`);
-                                        } catch {
-                                            toast.error('Error al asignar guardia');
-                                        }
-                                    }}
-                                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 text-left transition-colors">
-                                    <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-black text-slate-600 shrink-0">
-                                        {(emp.name || '?')[0]}
-                                    </div>
-                                    <span className="text-sm text-slate-700 font-semibold">{emp.name}</span>
-                                </button>
-                            ))}
-                            {displayedEmployees.length === 0 && (
-                                <p className="text-xs text-slate-400 text-center py-4">No hay empleados disponibles</p>
-                            )}
+                            {(() => {
+                                const fecha = rfzAsignando.fecha;
+                                const categorizar = (emp: any) => {
+                                    const key = `${emp.id}_${fecha}`;
+                                    const pend = pendingChanges[key];
+                                    const shift = pend ? (pend.isDeleted ? null : pend) : shiftsMap[key];
+                                    const code = String(shift?.code || '').toUpperCase();
+                                    if (!shift || !code) return { rank: 0, label: 'Sin turno', cls: 'bg-emerald-100 text-emerald-700', franco: false };
+                                    if (code === 'RET') return { rank: 1, label: 'RET (stand-by)', cls: 'bg-sky-100 text-sky-700', franco: false };
+                                    if (['F', 'FF', 'FP'].includes(code)) return { rank: 2, label: 'De franco → FT', cls: 'bg-amber-100 text-amber-700', franco: true };
+                                    return null;
+                                };
+                                const candidatos = (displayedEmployees as any[])
+                                    .map(emp => ({ emp, cat: categorizar(emp) }))
+                                    .filter((x): x is { emp: any; cat: NonNullable<ReturnType<typeof categorizar>> } => x.cat !== null)
+                                    .sort((a, b) => (a.cat.rank - b.cat.rank) || String(a.emp.name).localeCompare(String(b.emp.name)));
+                                if (candidatos.length === 0) {
+                                    return <p className="text-xs text-slate-400 text-center py-4">No hay guardias disponibles (sin turno, RET o franco) ese día</p>;
+                                }
+                                return candidatos.map(({ emp, cat }) => (
+                                    <button key={emp.id}
+                                        type="button"
+                                        onClick={async () => {
+                                            try {
+                                                await updateDoc(doc(db, 'turnos', rfzAsignando.id), {
+                                                    employeeId: emp.id,
+                                                    employeeName: emp.name,
+                                                    ...(cat.franco ? { isFrancoTrabajado: true, coveredFromFranco: true } : {}),
+                                                });
+                                                setRfzAsignando(null);
+                                                toast.success(
+                                                    cat.franco
+                                                        ? `${emp.name} asignado/a al RFZ (Franco Trabajado). Guardá y republicá para notificarle.`
+                                                        : `${emp.name} asignado/a al RFZ. Guardá y republicá para notificarle.`,
+                                                );
+                                            } catch {
+                                                toast.error('Error al asignar guardia');
+                                            }
+                                        }}
+                                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 text-left transition-colors">
+                                        <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-black text-slate-600 shrink-0">
+                                            {(emp.name || '?')[0]}
+                                        </div>
+                                        <span className="text-sm text-slate-700 font-semibold flex-1 truncate">{emp.name}</span>
+                                        <span className={`shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full ${cat.cls}`}>{cat.label}</span>
+                                    </button>
+                                ));
+                            })()}
                         </div>
                         <button type="button" onClick={() => setRfzAsignando(null)}
                             className="self-end text-xs text-slate-400 hover:text-slate-600">

@@ -54,6 +54,37 @@ function buildMessage(type: string, after: any, before: any, turnoId: string): {
   }
 }
 
+async function sendEmployeeTurnoPush(
+  db: admin.firestore.Firestore,
+  employeeId: string,
+  msg: { title: string; body: string },
+  type: string,
+  turnoId: string,
+): Promise<void> {
+  if (!employeeId || employeeId === 'VACANTE') return;
+  const empDoc = await db.collection('empleados').doc(employeeId).get();
+  const empUid: string | undefined = empDoc.exists ? empDoc.data()?.uid : undefined;
+  const [byEmpId, byUid] = await Promise.all([
+    db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
+    empUid ? db.collection('device_tokens').where('uid', '==', empUid).get() : Promise.resolve({ docs: [] as any[] }),
+  ]);
+  const tokenSet = new Set<string>();
+  [...byEmpId.docs, ...byUid.docs].forEach(d => { const t = d.data()?.token; if (typeof t === 'string' && t.length > 10) tokenSet.add(t); });
+  await db.collection('user_notifications').add({
+    uid: empUid || null, employeeId, title: msg.title, body: msg.body,
+    type, target: 'employee', turnoId, read: false, readAt: null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  const tokens = Array.from(tokenSet);
+  if (tokens.length) {
+    await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: { title: msg.title, body: msg.body },
+      webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
+    }).catch(e => console.warn('[onTurnoWrite] push error:', e));
+  }
+}
+
 export const onTurnoWrite = functions
   .runWith({ timeoutSeconds: 30, memory: '128MB' })
   .firestore.document('turnos/{turnoId}')
@@ -297,6 +328,28 @@ export const onTurnoWrite = functions
         }
         return;
       }
+    }
+
+    // ── RFZ/TURA: republicación (draft true→false) de un turno YA asignado → push al guardia ──
+    // (la asignación se hizo en borrador; al republicar recién se notifica al guardia)
+    if (after && before && rfzTuraCodes.has(String(after.code || '').toUpperCase())
+        && before.draft === true && after.draft === false
+        && after.employeeId && after.employeeId !== 'VACANTE') {
+      const code = String(after.code || 'RFZ').toUpperCase();
+      const objective = after.objectiveName || after.clientName || 'el objetivo';
+      const position = after.positionName || '';
+      const dateStr = formatDate(after.startTime);
+      await sendEmployeeTurnoPush(
+        db,
+        after.employeeId,
+        {
+          title: code === 'TURA' ? '📅 Turno Agregado asignado' : '📅 Refuerzo de cliente asignado',
+          body: `${dateStr}${position ? ' · ' + position : ''} — ${objective}`,
+        },
+        'TURNO_NUEVO',
+        change.after.id,
+      );
+      return;
     }
 
     // Determinar tipo de evento
