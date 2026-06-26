@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { initializeFirestore, getFirestore, memoryLocalCache, persistentLocalCache, persistentMultipleTabManager, connectFirestoreEmulator } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, memoryLocalCache, connectFirestoreEmulator } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
@@ -69,7 +69,9 @@ export function ensureFirebaseEmulatorsConnected(): void {
   }
 }
 
-// En emulador: sin IndexedDB persistente (evita mezclar prod + localhost). En prod: cache persistente offline.
+// Cache en memoria (estable en todos los navegadores). La persistencia IndexedDB
+// quedó descartada: si IndexedDB se bloquea (multipestaña/storage restringido),
+// los getDoc nunca resuelven y el login se cuelga ("pensando" infinito).
 let db;
 if (typeof window === 'undefined') {
   db = getFirestore(app);
@@ -88,14 +90,10 @@ if (typeof window === 'undefined') {
 } else {
   try {
     db = initializeFirestore(app, {
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      localCache: memoryLocalCache(),
     });
   } catch {
-    try {
-      db = initializeFirestore(app, { localCache: memoryLocalCache() });
-    } catch {
-      db = getFirestore(app);
-    }
+    db = getFirestore(app);
   }
 }
 
