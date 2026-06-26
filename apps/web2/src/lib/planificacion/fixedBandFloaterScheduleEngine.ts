@@ -100,6 +100,37 @@ function is24hs(pos: V2PositionDef): boolean {
     return cov === '24hs' || cov === '24' || cov === '24h';
 }
 
+const BANDS_8H = new Set(['M', 'T', 'N']);
+const BANDS_12H = new Set(['D12', 'N12']);
+
+/**
+ * Empleados necesarios para cubrir 1 pax de este puesto con el ciclo 6+2 (8h) o 4+2 (12h).
+ *
+ * 24hs M/T/N (8h, 6+2) : qty × 4  — 3 trabajando + 1 franco rotativo
+ * 24hs D12/N12 (12h, 4+2): qty × 3  — 2 trabajando + 1 franco rotativo
+ * L-V / custom sin rotación: qty × 1  — 1 empleado por pax (descanso = fin de semana)
+ * L-D single banda         : qty × 2  — 2 empleados para cubrir los francos del ciclo
+ */
+function positionCapacity(pos: V2PositionDef): number {
+    const qty = Math.max(1, Number(pos.qty) || 1);
+    const sevenDays = !Array.isArray(pos.activeDays) || pos.activeDays.length >= 7;
+
+    if (is24hs(pos) && sevenDays) {
+        const codes = (pos.shifts || []).map(s => String(s.code || '').toUpperCase());
+        const only12h = codes.length > 0 && codes.every(c => BANDS_12H.has(c));
+        return qty * (only12h ? 3 : 4);
+    }
+
+    // Custom con rotación (L-D pero no coverageType=24hs): 2 empleados por pax por banda activa.
+    // Custom sin rotación (L-V): 1 empleado por pax.
+    if (sevenDays) {
+        const activeBands = (pos.shifts || []).filter(s => WORK_BANDS.has(String(s.code || '').toUpperCase())).length;
+        return qty * Math.max(1, activeBands) * 2;
+    }
+
+    return qty;
+}
+
 function shiftMeta(pos: V2PositionDef, code: string): Pick<V2Assignment, 'name' | 'hours' | 'startTime' | 'endTime'> {
     const upper = code.toUpperCase();
     const sh = (pos.shifts || []).find(s => String(s.code || '').toUpperCase() === upper);
@@ -146,18 +177,18 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
         }
     }
 
-    // Empleados sin puesto explícito → distribuir a puestos 24hs de 7 días.
-    // Asignación al puesto con menos empleados actuales para equilibrar carga.
-    // Si no hay puestos 24hs disponibles, quedan idle.
+    // Empleados sin puesto explícito → distribuir a todos los puestos usando fill ratio.
+    // El ratio (empleados_actuales / capacidad) garantiza distribución proporcional;
+    // positionCapacity() calcula la capacidad según tipo de turno y ciclo CCT.
     if (unassigned.length > 0) {
-        const targets = ctx.positions.filter(p =>
-            is24hs(p) && (!Array.isArray(p.activeDays) || p.activeDays.length >= 7),
-        );
+        const targets = ctx.positions.filter(p => positionGroups[p.positionName] !== undefined);
         if (targets.length > 0) {
             for (const empId of unassigned) {
-                const leastFull = targets.reduce((best, p) =>
-                    positionGroups[p.positionName].length < positionGroups[best.positionName].length ? p : best,
-                );
+                const leastFull = targets.reduce((best, p) => {
+                    const ratioP = positionGroups[p.positionName].length / positionCapacity(p);
+                    const ratioB = positionGroups[best.positionName].length / positionCapacity(best);
+                    return ratioP < ratioB ? p : best;
+                });
                 positionGroups[leastFull.positionName].push(empId);
             }
         }
@@ -185,15 +216,18 @@ function buildSubgroupsFor24hs(
         if (!pos || !is24hs(pos)) continue;
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
-        const subgroupCount = Math.min(qty, Math.floor(groupIds.length / 4));
+        const codes = (pos.shifts || []).map(s => String(s.code || '').toUpperCase());
+        const only12h = codes.length > 0 && codes.every(c => BANDS_12H.has(c));
+        const subgroupSize = only12h ? 3 : 4; // 4+2 → 3 emp/subgrupo; 6+2 → 4 emp/subgrupo
+        const subgroupCount = Math.min(qty, Math.floor(groupIds.length / subgroupSize));
         if (subgroupCount === 0) continue;
-        // Subgrupos de 4 regulares (índices 0-3)
+        // Subgrupos de N regulares según ciclo
         const subs: string[][] = [];
         for (let i = 0; i < subgroupCount; i++) {
-            subs.push(groupIds.slice(i * 4, i * 4 + 4));
+            subs.push(groupIds.slice(i * subgroupSize, i * subgroupSize + subgroupSize));
         }
-        // Sobrantes → flotantes en round-robin (índice ≥4 dentro del subgrupo → RET en días laborales)
-        const floaters = groupIds.slice(subgroupCount * 4);
+        // Sobrantes → flotantes en round-robin
+        const floaters = groupIds.slice(subgroupCount * subgroupSize);
         floaters.forEach((id, fi) => { subs[fi % subs.length].push(id); });
         result.push(...subs);
     }
