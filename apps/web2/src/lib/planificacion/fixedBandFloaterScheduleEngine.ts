@@ -638,8 +638,59 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         employeeMonthlyHours, employeeCycleHours, cutoffDay,
     );
 
-    // RET sin cubrir: el empleado queda en stand-by visible (0h facturable).
-    // NO convertir a banda natural — evita sobrecontar horas vs SLA vendidas.
+    // RET residuales: convertir a banda natural del ciclo (crono limpio).
+    // Excepción: si el acumulado ya cubre el SLA y sumar este empleado lo excedería,
+    // queda como RET (0h) — es el empleado genuinamente sobrante.
+    {
+        const slaTarget = Math.max(0, ctx.slaVendidas || 0);
+        let runningHours = Object.values(employeeMonthlyHours).reduce((s, h) => s + h, 0);
+
+        // Agrupar RETs residuales por empleado para decidir per-employee
+        const retSlotsByEmp = new Map<string, Array<{ idx: number; naturalCode: string; meta: ReturnType<typeof shiftMeta>; di: number }>>();
+        for (let i = 0; i < assignments.length; i++) {
+            const a = assignments[i];
+            if (a.code !== 'RET') continue;
+            const opening = openingSlotByEmp[a.empId];
+            if (opening === undefined) continue;
+            const di = ctx.daysInMonth.findIndex(d => ctx.getDateKey(d) === a.dateStr);
+            if (di < 0) continue;
+            const naturalCode = CYCLE_24_MTN[(opening + di) % 24] as string;
+            if (!WORK_BANDS.has(naturalCode)) continue;
+            const posName = empToPosition[a.empId] ?? '';
+            const pos = ctx.positions.find(p => p.positionName === posName);
+            if (!pos) continue;
+            const meta = shiftMeta(pos, naturalCode);
+            if (!retSlotsByEmp.has(a.empId)) retSlotsByEmp.set(a.empId, []);
+            retSlotsByEmp.get(a.empId)!.push({ idx: i, naturalCode, meta, di });
+        }
+
+        for (const [empId, slots] of retSlotsByEmp) {
+            const empAddedHours = slots.reduce((s, sl) => s + sl.meta.hours, 0);
+            // Si el SLA ya está cubierto y este empleado lo excede: es sobrante → queda RET
+            if (slaTarget > 0 && runningHours >= slaTarget) continue;
+            // Convertir todos los RETs de este empleado a banda natural
+            for (const sl of slots) {
+                const day = ctx.daysInMonth[sl.di];
+                assignments[sl.idx] = {
+                    empId,
+                    dateStr: assignments[sl.idx].dateStr,
+                    positionName: empToPosition[empId] ?? '',
+                    code: sl.naturalCode,
+                    name: sl.meta.name,
+                    hours: sl.meta.hours,
+                    startTime: sl.meta.startTime,
+                    ...(sl.meta.endTime ? { endTime: sl.meta.endTime } : {}),
+                };
+                employeeMonthlyHours[empId] = (employeeMonthlyHours[empId] || 0) + sl.meta.hours;
+                if (day) {
+                    const inCurrent = day.getDate() <= cutoffDay;
+                    if (inCurrent) employeeCycleHours.current[empId] = (employeeCycleHours.current[empId] || 0) + sl.meta.hours;
+                    else employeeCycleHours.next[empId] = (employeeCycleHours.next[empId] || 0) + sl.meta.hours;
+                }
+            }
+            runningHours += empAddedHours;
+        }
+    }
 
     const totalBillableHours = Object.values(employeeMonthlyHours).reduce((s, h) => s + h, 0);
     const slaTarget = Math.max(0, ctx.slaVendidas || 0);
