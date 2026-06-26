@@ -211,7 +211,7 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
 function buildSubgroupsFor24hs(
     ctx: V2EngineContext,
     positionGroups: Record<string, string[]>,
-): string[][] {
+): { subgroups: string[][]; strandedIds: string[] } {
     const result: string[][] = [];
     // Empleados de puestos 24hs con dotación insuficiente para armar subgrupo completo.
     // Se redistribuyen como flotantes al final, en vez de quedar idle.
@@ -244,7 +244,7 @@ function buildSubgroupsFor24hs(
     if (stranded.length > 0 && result.length > 0) {
         stranded.forEach((id, i) => { result[i % result.length].push(id); });
     }
-    return result;
+    return { subgroups: result, strandedIds: stranded };
 }
 
 // Cold-starts POR SUBGRUPO con deduplicación POR ZONA de banda.
@@ -498,7 +498,7 @@ function patchRetForAbsences(
 export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2GenerateResult {
     const positionGroups = buildPositionGroups(ctx);
     // Subgrupos independientes por slot concurrente (qty>1 → N subgrupos de 4-5 c/u)
-    const subgroups = buildSubgroupsFor24hs(ctx, positionGroups);
+    const { subgroups, strandedIds } = buildSubgroupsFor24hs(ctx, positionGroups);
     // empToPosition: usado para L-V y patchRetForAbsences
     const empToPosition: Record<string, string> = {};
     for (const [posName, ids] of Object.entries(positionGroups)) {
@@ -701,6 +701,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             employeesOver200: [],
             positionGroups,
             idleEmployeeIds: ctx.employees.filter(e => openingSlotByEmp[e.id] === undefined).map(e => e.id),
+            strandedEmployeeIds: strandedIds.length > 0 ? strandedIds : undefined,
             primaryShiftByEmp,
             slaDeficitRemaining,
             slaHoursClosed: slaDeficitRemaining <= 0.5,

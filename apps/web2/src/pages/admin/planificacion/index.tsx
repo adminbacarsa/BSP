@@ -679,6 +679,7 @@ export default function PlanificacionPage() {
         cellsSkippedOverwrite?: number;
         uncoveredSlots: number;
         idleEmployeeIds?: string[];
+        strandedEmployeeIds?: string[];
         primaryShiftByEmp?: Record<string, string | null>;
         positionGroups?: Record<string, string[]>;
         employeeRetCount?: Record<string, number>;
@@ -4735,6 +4736,7 @@ export default function PlanificacionPage() {
                     ? coverage.coverage.uncoveredSlots
                     : (gen.stats.uncoveredSlots ?? 0),
                 idleEmployeeIds: gen.stats.idleEmployeeIds,
+                strandedEmployeeIds: gen.stats.strandedEmployeeIds,
                 primaryShiftByEmp: gen.stats.primaryShiftByEmp,
                 positionGroups: gen.stats.positionGroups,
                 employeeRetCount: gen.stats.employeeRetCount,
@@ -9358,6 +9360,37 @@ export default function PlanificacionPage() {
                                         </div>
                                     </div>
                                 )}
+
+                                {/* Aviso: empleados redistribuidos desde puestos con dotación insuficiente */}
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (autoV2GenStats?.strandedEmployeeIds?.length ?? 0) > 0 && (() => {
+                                    const strandedNames = (autoV2GenStats!.strandedEmployeeIds || []).map(id => {
+                                        const emp = displayedEmployees.find((e: any) => e.id === id);
+                                        return emp ? (emp.name || emp.nombre || id) : id;
+                                    });
+                                    return (
+                                        <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5">
+                                            <div className="flex items-start gap-2">
+                                                <span className="text-amber-600 mt-0.5 text-base">⚠</span>
+                                                <div>
+                                                    <p className="text-[11px] font-black text-amber-800 uppercase tracking-wide mb-0.5">
+                                                        {strandedNames.length} empleado{strandedNames.length !== 1 ? 's' : ''} redistribuido{strandedNames.length !== 1 ? 's' : ''}
+                                                    </p>
+                                                    <p className="text-[10px] text-amber-700 leading-relaxed">
+                                                        Su puesto asignado tiene dotación insuficiente para armar un ciclo 6+2 (mínimo 4 por subgrupo). Fueron agregados como flotantes al subgrupo más cercano.
+                                                        <br />Revisá la asignación de puestos en los legajos para corregirlo antes de generar.
+                                                    </p>
+                                                    <div className="mt-1.5 flex flex-wrap gap-1">
+                                                        {strandedNames.map((n, i) => (
+                                                            <span key={i} className="bg-amber-200 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase">
+                                                                {n}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* Panel de cobertura de ausencias — visible si hay gaps (siempre se analiza con pipeline floater) */}
                                 {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoCoverageGaps.length > 0 && (() => {
