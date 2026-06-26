@@ -14,7 +14,7 @@ import {
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
-    PowerOff, LockKeyhole, Ghost, Maximize2, Copy, ClipboardPaste, Wand2, BarChart3, PanelLeft, LayoutList
+    PowerOff, LockKeyhole, Ghost, Maximize2, Copy, ClipboardPaste, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList
 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -155,6 +155,7 @@ import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/schedu
 import { verifyScheduleForm } from '@/lib/planificacion/scheduleFormValidator';
 import { rebalanceScheduleForm, type FormRebalanceLogEntry } from '@/lib/planificacion/scheduleFormRebalancer';
 import AjustarCronoOperativoModal from '@/components/admin/planificacion/AjustarCronoOperativoModal';
+import EquilibrarCronoModal from '@/components/admin/planificacion/EquilibrarCronoModal';
 import {
     buildPlanningSnapshotFromGrid,
     diffPlanningSnapshots,
@@ -513,6 +514,7 @@ export default function PlanificacionPage() {
     const [isShowAllPending, startShowAllTransition] = useTransition();
     const [isFilterPending, startFilterTransition] = useTransition();
     const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
+    const [showEquilibrarModal, setShowEquilibrarModal] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -6483,6 +6485,7 @@ export default function PlanificacionPage() {
                                     const _pubKey2 = selectedObjective ? planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
                                     const _blocked2 = !!(_pubKey2 && publishStatusMap[_pubKey2]) && !correctionMode;
                                     return (
+                                <>
                                 <button
                                     onClick={() => setShowAjustarCronoModal(true)}
                                     disabled={!selectedObjective || _blocked2}
@@ -6492,6 +6495,16 @@ export default function PlanificacionPage() {
                                     <ArrowLeftRight size={16} className="text-rose-600 shrink-0"/>
                                     <span className="text-[10px] font-black text-rose-700 uppercase tracking-tight hidden sm:inline">Ajustar</span>
                                 </button>
+                                <button
+                                    onClick={() => setShowEquilibrarModal(true)}
+                                    disabled={!selectedObjective || _blocked2}
+                                    title={_blocked2 ? 'Crono publicado — entrá en CORREGIR para equilibrar' : 'Equilibrar horas: rotar posiciones por bloque para igualar horas entre todos los empleados'}
+                                    className="p-2 bg-slate-100 rounded-lg hover:bg-emerald-50 hover:text-emerald-600 transition-colors disabled:opacity-40 flex items-center gap-1.5 px-2.5"
+                                >
+                                    <BarChart2 size={16} className="text-emerald-600 shrink-0"/>
+                                    <span className="text-[10px] font-black text-emerald-700 uppercase tracking-tight hidden sm:inline">Equilibrar</span>
+                                </button>
+                                </>
                                     );
                                 })()}
                                 {selectedObjective && Object.keys(empDefaultPos).some(k => k.endsWith(`___${selectedObjective}`)) && (
@@ -10321,6 +10334,30 @@ export default function PlanificacionPage() {
                 </div>
             )}
             </div>
+
+            {/* ── MODAL AJUSTAR CRONO ── */}
+            <AjustarCronoOperativoModal
+                open={showAjustarCronoModal}
+                onClose={() => setShowAjustarCronoModal(false)}
+                empresaId={empresaId || ''}
+                fechaInicial={currentDate}
+                fechaHastaInicial={currentDate}
+                objetivoInicial={selectedObjectiveData ? { id: selectedObjectiveData.id, nombre: selectedObjectiveData.nombre || selectedObjectiveData.name || '' } : undefined}
+                clients={clients}
+                gridSnapshot={{ shiftsMap, pendingChanges }}
+            />
+
+            {/* ── MODAL EQUILIBRAR CRONO ── */}
+            <EquilibrarCronoModal
+                open={showEquilibrarModal}
+                onClose={() => setShowEquilibrarModal(false)}
+                empresaId={empresaId || ''}
+                objectiveId={selectedObjective || ''}
+                objectiveNombre={selectedObjectiveData?.nombre || selectedObjectiveData?.name || selectedObjective || ''}
+                year={currentDate.getFullYear()}
+                month={currentDate.getMonth() + 1}
+                employees={planningDotacionEmployees}
+            />
         </DashboardLayout>
     );
 }
