@@ -2,10 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2, AlertTriangle, Zap, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { getAuth } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
 import type { AjustarCronoOperativoProps } from '@/types/ajustesCrono.types';
 import {
-    applyAjusteOperativoMasivo,
     eachDayInRange,
     flattenObjetivosFromClients,
     gridHasPendingInRange,
@@ -13,7 +12,7 @@ import {
     type AjusteOperativoPreviewSlot,
 } from '@/lib/ajustesCrono/ajustesCronoService';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, functions } from '@/lib/firebase';
 import { filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 const MOTIVOS_RAPIDOS = ['Evento especial', 'Refuerzo operativo', 'Fin de semana'];
@@ -143,31 +142,42 @@ export default function AjustarCronoOperativoModal({
             toast.error('Guardá la planificación antes de comprimir (hay cambios sin guardar en el rango).');
             return;
         }
-        const auth = getAuth();
-        const creadoPor = auth.currentUser?.email || auth.currentUser?.displayName || 'admin';
         setSaving(true);
-        setProgress('Iniciando…');
+        setProgress('Comprimiendo…');
         try {
-            const res = await applyAjusteOperativoMasivo({
+            const fn = httpsCallable<{
+                empresaId: string;
+                objectiveId: string;
+                objectiveNombre?: string;
+                fechaDesde: string;
+                fechaHasta: string;
+                motivo?: string;
+                destinoObjetivoId?: string;
+                destinoObjetivoNombre?: string;
+            }, {
+                ok: boolean;
+                retenesLiberados: number;
+                slotsAplicados: number;
+                slotsOmitidos: number;
+                errores: string[];
+            }>(functions, 'runAjustarCrono');
+            const res = await fn({
                 empresaId,
-                creadoPor,
-                fechaInicio: desdeDate,
-                fechaFin: hastaDate,
-                objectiveIds: [servicio.id],
-                objetivoNombres,
+                objectiveId: servicio.id,
+                objectiveNombre: servicio.nombre,
+                fechaDesde,
+                fechaHasta,
                 motivo: motivo.trim() || 'Evento — ajuste operativo',
-                destinoObjetivoId: destinoId || undefined,
-                destinoObjetivoNombre: destinoSel?.nombre,
-                onProgress: setProgress,
+                ...(destinoId ? { destinoObjetivoId: destinoId, destinoObjetivoNombre: destinoSel?.nombre } : {}),
             });
-            if (res.retenesLiberados === 0) {
-                toast.error('No se pudo liberar ningún guardia en el rango elegido.');
+            if (!res.data.ok || res.data.retenesLiberados === 0) {
+                toast.error(res.data.errores?.[0] || 'No se pudo liberar ningún guardia en el rango elegido.');
                 return;
             }
-            toast.success(`${res.retenesLiberados} guardia(s) liberados a RET · ${res.slotsAplicados} día(s)`);
+            toast.success(`${res.data.retenesLiberados} guardia(s) liberados a RET · ${res.data.slotsAplicados} día(s)`);
             onClose();
         } catch (e: any) {
-            toast.error(e?.message || 'Error al aplicar.');
+            toast.error(e?.message || e?.details || 'Error al aplicar.');
         } finally {
             setSaving(false);
             setProgress('');

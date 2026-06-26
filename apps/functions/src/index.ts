@@ -44,6 +44,7 @@ import {
 } from './assistant/assistantInteractionLog';
 import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/planningGeminiServer';
 import { runAutoScheduleHandler } from './scheduling/runAutoSchedule';
+import { runAjustarCronoHandler } from './scheduling/runAjustarCrono';
 import { ymCordobaParts, planificacionEstadoLookupDocIds } from './assistant/planificacionEstadoKeys';
 import { lookupClientByCuitHandler } from './afip/lookupClientByCuitHandler';
 import {
@@ -776,6 +777,10 @@ export const optimizePlanningGemini =
 export const runAutoSchedule = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
     .https.onCall(runAutoScheduleHandler);
+
+export const runAjustarCrono = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
+    .https.onCall(runAjustarCronoHandler);
 
 // --- FUNCIONES DE SISTEMA INYECTADAS POR SCRIPT ---
 
