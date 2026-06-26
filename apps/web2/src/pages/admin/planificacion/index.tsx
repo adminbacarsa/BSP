@@ -6280,6 +6280,11 @@ export default function PlanificacionPage() {
                                     >
                                         {prevMonthLoading ? <Loader2 size={18} className="animate-spin text-teal-600"/> : <CalendarSearch size={18}/>}
                                     </button>
+                                    {(() => {
+                                        const _pubKey = selectedObjective ? planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
+                                        const _isPublished = !!(_pubKey && publishStatusMap[_pubKey]);
+                                        const _blocked = _isPublished && !correctionMode;
+                                        return (
                                     <button
                                         onClick={() => {
                                             setAutoV2Report(null);
@@ -6290,14 +6295,15 @@ export default function PlanificacionPage() {
                                             authorizedOver200IdsRef.current = new Set();
                                             setAuthorizedOver200Ids(new Set());
                                         }}
-                                        disabled={!selectedObjective || autoV2Loading}
-                                        title="Automatizar: viabilidad + generación según SLA, CCT 200h, cobertura y dotación"
+                                        disabled={!selectedObjective || autoV2Loading || _blocked}
+                                        title={_blocked ? 'Crono publicado — entrá en CORREGIR para usar AUTO' : 'Automatizar: viabilidad + generación según SLA, CCT 200h, cobertura y dotación'}
                                         className="p-2 bg-slate-100 rounded-r-lg hover:bg-amber-50 hover:text-amber-600 transition-colors disabled:opacity-40 border-l border-slate-200 flex items-center gap-1.5 px-2.5"
                                     >
                                         {autoV2Loading
                                             ? <Loader2 size={18} className="animate-spin text-amber-600"/>
                                             : <><Wand2 size={16} className="text-amber-600 shrink-0"/><span className="text-[10px] font-black text-amber-700 uppercase tracking-tight hidden sm:inline">Auto</span></>}
                                     </button>
+                                        ); })()}
                                 </div>
                                 <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
                                 <button
@@ -6316,15 +6322,21 @@ export default function PlanificacionPage() {
                                 >
                                     <Maximize2 size={18}/>
                                 </button>
+                                {(() => {
+                                    const _pubKey2 = selectedObjective ? planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
+                                    const _blocked2 = !!(_pubKey2 && publishStatusMap[_pubKey2]) && !correctionMode;
+                                    return (
                                 <button
                                     onClick={() => setShowAjustarCronoModal(true)}
-                                    disabled={!selectedObjective}
-                                    title="Ajustar Crono: comprimir a 12h o liberar retenes para un rango de días"
+                                    disabled={!selectedObjective || _blocked2}
+                                    title={_blocked2 ? 'Crono publicado — entrá en CORREGIR para usar Ajustar' : 'Ajustar Crono: comprimir a 12h o liberar retenes para un rango de días'}
                                     className="p-2 bg-slate-100 rounded-lg hover:bg-rose-50 hover:text-rose-600 transition-colors disabled:opacity-40 flex items-center gap-1.5 px-2.5"
                                 >
                                     <ArrowLeftRight size={16} className="text-rose-600 shrink-0"/>
                                     <span className="text-[10px] font-black text-rose-700 uppercase tracking-tight hidden sm:inline">Ajustar</span>
                                 </button>
+                                    );
+                                })()}
                                 {selectedObjective && Object.keys(empDefaultPos).some(k => k.endsWith(`___${selectedObjective}`)) && (
                                     <button
                                         onClick={clearAllPositions}

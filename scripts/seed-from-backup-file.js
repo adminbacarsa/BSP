@@ -95,10 +95,11 @@ async function deleteCollectionWhereEmpresa(colName, empId) {
   return deleted;
 }
 
-/** Limpia Firestore completo usando la REST API del emulador (instantáneo). */
+/** Limpia Firestore completo usando la REST API del emulador (instantáneo).
+ *  Si el endpoint retorna 500 (bug conocido del emulador), borra colección por colección como fallback. */
 async function clearEmulatorFull() {
   process.stdout.write('Limpiando Firestore completo (REST API)... ');
-  await new Promise((resolve, reject) => {
+  const ok = await new Promise((resolve) => {
     const req = http.request({
       hostname: '127.0.0.1',
       port: 8080,
@@ -106,13 +107,28 @@ async function clearEmulatorFull() {
       method: 'DELETE',
     }, res => {
       res.resume();
-      if (res.statusCode === 200 || res.statusCode === 204) resolve();
-      else reject(new Error(`REST emulator clear: HTTP ${res.statusCode}`));
+      resolve(res.statusCode === 200 || res.statusCode === 204);
     });
-    req.on('error', reject);
+    req.on('error', () => resolve(false));
     req.end();
   });
-  console.log('OK');
+  if (ok) { console.log('OK'); return; }
+  // Fallback: borrar colección por colección
+  console.log('fallback — borrando por colección...');
+  const allCols = [...EMPRESA_SCOPED_COLS, 'empresas', 'system_config', 'feriados_nacionales'];
+  for (const col of allCols) {
+    let deleted = 0;
+    while (true) {
+      const snap = await db.collection(col).limit(400).get();
+      if (snap.empty) break;
+      const batch = db.batch();
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      deleted += snap.size;
+    }
+    if (deleted) process.stdout.write(`  ${col}: ${deleted} docs\n`);
+  }
+  console.log('Limpieza completa (fallback OK)');
 }
 
 async function clearEmpresa(empId) {
