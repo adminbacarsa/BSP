@@ -578,6 +578,7 @@ export default function PlanificacionPage() {
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, { publishedAt: any; publishedBy: string } | null>>({});
     const [needsRepublishMap, setNeedsRepublishMap] = useState<Record<string, boolean>>({});
     const [isPublishing, setIsPublishing] = useState(false);
+    const [isUnpublishing, setIsUnpublishing] = useState(false);
     const [correctionMode, setCorrectionMode] = useState(false);
     const [cellEditMode, setCellEditMode] = useState(false);
     // 🛑 SYNC-CORE: Estado activo inicial null para forzar limpieza
@@ -3443,6 +3444,80 @@ export default function PlanificacionPage() {
         }
     };
 
+    const handleUnpublish = async () => {
+        if (!selectedObjective || !isSuperAdmin || isUnpublishing) return;
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
+        const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
+        const primaryDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
+        const legacyDocId = buildPlanificacionEstadoDocId('', selectedObjective, year, month);
+
+        const confirmed = confirm(
+            `[SUPERADMIN]\n\n¿Despublicar el cronograma de ${objectiveName} — ${String(month).padStart(2, '0')}/${year}?\n\n` +
+            'Esto vuelve el objetivo/mes a BORRADOR y deja de mostrarlo como cronograma publicado. No borra turnos ni toca coberturas operativas.'
+        );
+        if (!confirmed) return;
+
+        setIsUnpublishing(true);
+        try {
+            const auth = getAuth();
+            const actorName = auth.currentUser?.displayName || auth.currentUser?.email || 'Sistema';
+            const firstDay = new Date(year, month - 1, 1);
+            const lastDay = new Date(year, month, 0, 23, 59, 59, 999);
+            const shiftSnap = await getDocs(query(
+                collection(db, 'turnos'),
+                where('objectiveId', '==', selectedObjective),
+            ));
+            const batch = writeBatch(db);
+            let restoredDrafts = 0;
+
+            shiftSnap.docs
+                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .filter(d => {
+                    const data = d.data();
+                    const start = data.startTime?.toDate?.();
+                    if (!start || start < firstDay || start > lastDay) return false;
+                    if (isOperationalOriginShift(data)) return false;
+                    const code = String(data.code || '').toUpperCase();
+                    if (code === 'RFZ' || code === 'TURA') return false;
+                    return data.draft !== true;
+                })
+                .forEach(d => {
+                    batch.update(d.ref, { draft: true });
+                    restoredDrafts++;
+                });
+
+            batch.delete(doc(db, 'planificacion_estados', primaryDocId));
+            if (legacyDocId !== primaryDocId) {
+                batch.delete(doc(db, 'planificacion_estados', legacyDocId));
+            }
+            batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
+                action: 'DESPUBLICACION_CRONOGRAMA',
+                module: 'PLANIFICADOR',
+                details: `Cronograma despublicado — ${objectiveName} · ${month}/${year} · ${restoredDrafts} turno(s) vuelven a borrador`,
+                timestamp: serverTimestamp(),
+                actorName,
+                actorUid: auth.currentUser?.uid || null,
+                objectiveId: selectedObjective,
+                objectiveName,
+                year,
+                month,
+            }, empresaId));
+
+            await batch.commit();
+            setPublishStatusMap(prev => ({ ...prev, [publishLookupKey]: null }));
+            setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: false }));
+            setCorrectionMode(false);
+            toast.success(`Cronograma despublicado — ${restoredDrafts} turno(s) vuelven a borrador`);
+        } catch (e) {
+            console.error(e);
+            toast.error('Error al despublicar');
+        } finally {
+            setIsUnpublishing(false);
+        }
+    };
+
     const resolveConflict = async (type: 'SPLIT' | 'FULL_COVERAGE') => { if (!selectedCell?.currentShift) return; const batch = writeBatch(db); const shiftId = selectedCell.currentShift.id; if (selectedCell.absence) { batch.update(doc(db, 'turnos', shiftId), { status: 'ABSENT', comments: 'Cubierto por ausencia' }); } else { batch.update(doc(db, 'turnos', shiftId), { hasNovedad: false, comments: 'Novedad resuelta' }); } if (type === 'SPLIT') { if (conflictNeighbors?.prev) { batch.update(doc(db, 'turnos', conflictNeighbors.prev.id), { isExtended: true, comments: 'Extensión por cobertura' }); } if (conflictNeighbors?.next) { batch.update(doc(db, 'turnos', conflictNeighbors.next.id), { isEarlyStart: true, comments: 'Adelanto por cobertura' }); } toast.success("Cobertura aplicada: Extensión + Adelanto"); } else { setShowConflictModal(false); setFrancoMode('FT_SELECTION'); return; } await batch.commit(); setShowConflictModal(false); setSelectedCell(null); };
     const handleRRHHSubmit = () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
@@ -6252,6 +6327,17 @@ export default function PlanificacionPage() {
                                             >
                                                 <ShieldAlert size={12}/>
                                                 {correctionMode ? 'CORRECCIÓN ACTIVA' : 'CORREGIR'}
+                                            </button>
+                                        )}
+                                        {published && isSuperAdmin && (
+                                            <button
+                                                onClick={handleUnpublish}
+                                                disabled={isUnpublishing}
+                                                title="SuperAdmin: despublica solo este objetivo y mes. No borra turnos."
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border bg-white text-slate-600 border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                                            >
+                                                {isUnpublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarX size={12}/>}
+                                                DESPUBLICAR
                                             </button>
                                         )}
                                     </div>
