@@ -50,7 +50,11 @@ const runEquilibrarCronoHandler = async (data, context) => {
         .where('objectiveId', '==', objectiveId)
         .where('startTime', '>=', bounds.start)
         .where('startTime', '<=', bounds.end)
-        .get();
+        .get().catch(async () => {
+        return db().collection('turnos')
+            .where('objectiveId', '==', objectiveId)
+            .get();
+    });
     const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
     const allTurnos = [];
     let skippedOps = 0, skippedNoTs = 0, skippedOtherMonth = 0;

@@ -31,6 +31,7 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/empleados'))       return 'Empleados';
   if (pathname.startsWith('/admin/cotizador'))       return 'Cotizador';
   if (pathname.startsWith('/admin/analisis'))        return 'Análisis';
+  if (pathname.startsWith('/admin/supervision'))     return 'Supervisión';
   if (pathname.startsWith('/admin/kpis'))            return 'KPIs';
   return null;
 }
@@ -295,6 +296,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const [isHovered, setIsHovered]     = useState(false);
   const [topbarVisible, setTopbarVisible] = useState(false);
   const router = useRouter();
+  const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
   const { canReadModule } = useAuth();
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
@@ -607,15 +609,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
       ) : (
         <div className="flex-1 transition-all duration-300 ease-in-out lg:ml-16 min-w-0">
           <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
-          {/* pb-20 en mobile para dejar espacio al bottom nav */}
-          <main className="p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8 overflow-x-hidden">
+          {/* Supervisión usa su propia bottom nav en mobile */}
+          <main className={`overflow-x-hidden ${isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8'}`}>
             {children}
           </main>
         </div>
       )}
 
       {/* ── BOTTOM NAVIGATION (mobile) ────────────────────────────────── */}
-      <BottomNav />
+      {!isSupervisionApp && <BottomNav />}
     </>
   );
 }

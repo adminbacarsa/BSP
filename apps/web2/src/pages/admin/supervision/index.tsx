@@ -1,14 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, orderBy, onSnapshot, doc, getDoc, addDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, orderBy, doc, getDoc, addDoc } from 'firebase/firestore';
 import {
-  Shield, Clock, CheckCircle, XCircle, Users, AlertCircle,
-  ChevronRight, RefreshCw, Plus, X, MessageSquare, User
+  Shield, CheckCircle, XCircle, Users, AlertCircle,
+  RefreshCw, Plus, X, MessageSquare, User, Search,
 } from 'lucide-react';
 import {
   solicitudRefuerzoService,
@@ -18,14 +18,17 @@ import {
 import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
 import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
+import {
+  fmtTs, urgencyLevel, hoursSincePending, pendingHoursLabel, URGENCY_STYLES,
+  type SupervisionMainTab,
+} from '@/lib/supervision/supervisionUtils';
+import { useSupervisorScope } from '@/hooks/useSupervisorScope';
+import SupervisionBottomNav from '@/components/admin/supervision/SupervisionBottomNav';
+import SupervisionTablero from '@/components/admin/supervision/SupervisionTablero';
+import SupervisionNovedades from '@/components/admin/supervision/SupervisionNovedades';
+import SupervisionMas from '@/components/admin/supervision/SupervisionMas';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
-
-function fmtTs(ts: Timestamp | string | undefined): string {
-  if (!ts) return '—';
-  const d = ts instanceof Timestamp ? ts.toDate() : new Date(ts as string);
-  return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-}
 
 function estadoBadge(estado: SolicitudEstado) {
   const map: Record<SolicitudEstado, { label: string; cls: string }> = {
@@ -128,11 +131,12 @@ function AprobarModal({ solicitud, onClose, onConfirm }: {
 
 // ─── Ausencia card ──────────────────────────────────────────────────────────
 
-function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar }: {
+function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar, onGenerarRefuerzo }: {
   ausencia: Absence;
   showActions?: boolean;
   onAprobar: () => void;
   onRechazar: (motivo: string) => void;
+  onGenerarRefuerzo?: () => void;
 }) {
   const [showRechazo, setShowRechazo] = useState(false);
   const [motivoRechazo, setMotivoRechazo] = useState('');
@@ -166,6 +170,15 @@ function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar }: {
           <p className="text-xs font-bold text-slate-500 mt-0.5">📅 {ausencia.startDate} → {ausencia.endDate}</p>
           {ausencia.reason && <p className="mt-1 text-[11px] text-slate-500 italic">"{ausencia.reason}"</p>}
         </div>
+        {onGenerarRefuerzo && ausencia.type === 'NO_PRESENTACION' && (
+          <button
+            type="button"
+            onClick={onGenerarRefuerzo}
+            className="mt-3 w-full py-2.5 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-xl font-black text-xs uppercase flex items-center justify-center gap-1 border border-orange-200"
+          >
+            <Plus size={13} /> Generar refuerzo
+          </button>
+        )}
         {showActions && !showRechazo && (
           <div className="flex gap-2 shrink-0">
             <button onClick={() => setShowRechazo(true)}
@@ -237,15 +250,19 @@ interface SlaPosition {
 export default function SupervisionPage() {
   const { user, isSuperAdmin } = useAuth();
   const { empresaId } = useEmpresa();
+  const { scopedObjectives, objectiveIds, assignedIds } = useSupervisorScope(user?.uid, empresaId, isSuperAdmin);
 
   const [solicitudes, setSolicitudes] = useState<SolicitudRefuerzo[]>([]);
   const [ausencias, setAusencias] = useState<Absence[]>([]);
   const [vacaciones, setVacaciones] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mainTab, setMainTab] = useState<SupervisionMainTab>('TABLERO');
   const [tab, setTab] = useState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
-  const [supervisorObjetivos, setSupervisorObjetivos] = useState<string[]>([]);
+  const [busqueda, setBusqueda] = useState('');
+  const [filtroObjetivo, setFiltroObjetivo] = useState('');
+  const supervisorObjetivos = objectiveIds;
 
   // Formulario manual supervisor
   const [showManualForm, setShowManualForm] = useState(false);
@@ -273,14 +290,6 @@ export default function SupervisionPage() {
   const [ausenciasFecha, setAusenciasFecha] = useState(todayStr);
   const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
   const [licenciasMes, setLicenciasMes] = useState(currentMonthStr);
-
-  // Cargar objetivos asignados al supervisor actual
-  useEffect(() => {
-    if (!user?.uid || isSuperAdmin) return;
-    getDoc(doc(db, 'system_users', user.uid)).then(snap => {
-      if (snap.exists()) setSupervisorObjetivos(snap.data().objetivosAsignados || []);
-    });
-  }, [user?.uid, isSuperAdmin]);
 
   // Cargar clientes para el form manual
   useEffect(() => {
@@ -373,7 +382,30 @@ export default function SupervisionPage() {
   }, [empresaId, isSuperAdmin, supervisorObjetivos]);
 
   const pendientes = solicitudes.filter(s => s.estado === 'PENDIENTE');
-  const visibles = tab === 'PENDIENTE' ? pendientes : solicitudes;
+  const visiblesBase = tab === 'PENDIENTE' ? pendientes : solicitudes;
+  const visibles = useMemo(() => {
+    let list = visiblesBase;
+    if (filtroObjetivo) list = list.filter(s => s.objectiveId === filtroObjetivo);
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase();
+      list = list.filter(s =>
+        s.objectiveName?.toLowerCase().includes(q) ||
+        s.clientName?.toLowerCase().includes(q) ||
+        s.motivo?.toLowerCase().includes(q) ||
+        s.solicitadoPorNombre?.toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [visiblesBase, filtroObjetivo, busqueda]);
+
+  const abrirRefuerzoDesdeAusencia = useCallback((a: Absence, fechaDia: string) => {
+    setMainTab('BANDEJA');
+    setTab('PENDIENTE');
+    setMTipo('REFUERZO_PUESTO');
+    setMFecha(fechaDia || todayStr);
+    setMMotivo(`Cobertura por ausencia de ${a.employeeName}${a.reason ? ` — ${a.reason}` : ''}`);
+    setShowManualForm(true);
+  }, [todayStr]);
 
   const handleAprobarAusencia = useCallback(async (a: Absence) => {
     if (!a.id || !user) return;
@@ -695,35 +727,68 @@ export default function SupervisionPage() {
     setRechazarTarget(null);
   }, [rechazarTarget, user]);
 
+  const userName = user?.displayName || user?.email || 'Supervisor';
+  const bandejaBadge = pendientes.length + ausencias.filter(a => a.type !== 'NO_PRESENTACION' && a.status === 'Pendiente').length;
+
   return (
     <DashboardLayout>
       <Head><title>Supervisión — COSP</title></Head>
-      <Toaster richColors position="top-right"/>
+      <Toaster richColors position="top-center"/>
 
-      <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-6">
-
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-teal-50 dark:bg-teal-900/30 rounded-xl text-teal-600 dark:text-teal-400">
-              <Shield size={22}/>
+      <div className="flex flex-col min-h-[calc(100dvh-3.5rem)] lg:min-h-0 -mx-3 sm:-mx-5 lg:mx-0">
+        <div className="sticky top-0 z-40 bg-[var(--app-bg)]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-700/80 px-4 py-3 lg:rounded-2xl lg:mx-0 lg:mb-4 lg:border lg:shadow-sm">
+          <div className="flex items-center justify-between gap-3 max-w-5xl mx-auto">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="p-2.5 bg-teal-50 dark:bg-teal-900/30 rounded-xl text-teal-600 shrink-0">
+                <Shield size={20}/>
+              </div>
+              <div className="min-w-0">
+                <h1 className="font-black text-lg text-slate-900 dark:text-white uppercase tracking-tight truncate">Supervisión</h1>
+                <p className="text-[10px] text-slate-500 font-medium truncate">
+                  {isSuperAdmin ? 'Vista completa' : `${assignedIds.length} objetivo${assignedIds.length !== 1 ? 's' : ''}`}
+                  {pendientes.length > 0 && ` · ${pendientes.length} pend.`}
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="font-black text-xl text-slate-900 dark:text-white uppercase tracking-tight">Supervisión</h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                {isSuperAdmin ? 'Todas las solicitudes' : `${supervisorObjetivos.length} objetivo${supervisorObjetivos.length !== 1 ? 's' : ''} asignado${supervisorObjetivos.length !== 1 ? 's' : ''}`}
-                {' · '}{pendientes.length} refuerzo{pendientes.length !== 1 ? 's' : ''} pendiente{pendientes.length !== 1 ? 's' : ''}
-                {ausencias.length > 0 && ` · ${ausencias.length} ausencia${ausencias.length !== 1 ? 's' : ''} pendiente${ausencias.length !== 1 ? 's' : ''}`}
-              </p>
-            </div>
+            {mainTab === 'BANDEJA' && (
+              <button
+                type="button"
+                onClick={() => setShowManualForm(true)}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform"
+              >
+                <Plus size={14}/> Urgente
+              </button>
+            )}
           </div>
-          <button onClick={() => setShowManualForm(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-xs uppercase shadow transition-colors">
-            <Plus size={14}/> Cargar manual
-          </button>
         </div>
 
-        {/* Tabs */}
+        <div className="flex-1 px-4 pt-3 pb-28 lg:pb-6 max-w-5xl mx-auto w-full overflow-x-hidden">
+          {mainTab === 'TABLERO' && (
+            <SupervisionTablero objectiveIds={objectiveIds} isSuperAdmin={isSuperAdmin} />
+          )}
+
+          {mainTab === 'NOVEDADES' && user?.uid && (
+            <SupervisionNovedades
+              objectiveIds={objectiveIds.length ? objectiveIds : scopedObjectives.map(o => o.id)}
+              objectives={scopedObjectives}
+              userUid={user.uid}
+              userName={userName}
+            />
+          )}
+
+          {mainTab === 'MAS' && empresaId && user?.uid && (
+            <SupervisionMas
+              empresaId={empresaId}
+              objectiveIds={objectiveIds}
+              objectives={scopedObjectives}
+              userUid={user.uid}
+              userName={userName}
+              isSuperAdmin={isSuperAdmin}
+            />
+          )}
+
+          {mainTab === 'BANDEJA' && (
+      <div className="space-y-4">
         {(() => {
           const noPresentes = ausencias.filter(a => a.type === 'NO_PRESENTACION');
           const licencias   = ausencias.filter(a => a.type !== 'NO_PRESENTACION');
@@ -752,6 +817,31 @@ export default function SupervisionPage() {
                 </button>
               </div>
 
+              {(tab === 'PENDIENTE' || tab === 'TODAS') && (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="search"
+                      value={busqueda}
+                      onChange={e => setBusqueda(e.target.value)}
+                      placeholder="Buscar cliente, objetivo, motivo…"
+                      className="w-full pl-9 pr-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 rounded-2xl text-xs font-medium"
+                    />
+                  </div>
+                  <select
+                    value={filtroObjetivo}
+                    onChange={e => setFiltroObjetivo(e.target.value)}
+                    className="px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 rounded-2xl text-xs font-bold min-w-[140px]"
+                  >
+                    <option value="">Todos los objetivos</option>
+                    {scopedObjectives.map(o => (
+                      <option key={o.id} value={o.id}>{o.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* ── Tab Refuerzos ── */}
               {(tab === 'PENDIENTE' || tab === 'TODAS') && (
                 loading ? (
@@ -765,13 +855,19 @@ export default function SupervisionPage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {visibles.map(s => (
+                    {visibles.map(s => {
+                      const urg = urgencyLevel(s.fecha);
+                      const urgStyle = URGENCY_STYLES[urg];
+                      const pendH = s.estado === 'PENDIENTE' ? pendingHoursLabel(hoursSincePending(s.solicitadoAt)) : null;
+                      return (
                       <div key={s.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap mb-1">
                               {tipoBadge(s.tipo)}
                               {estadoBadge(s.estado)}
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${urgStyle.cls}`}>{urgStyle.label}</span>
+                              {pendH && <span className="text-[9px] font-bold text-amber-600">{pendH}</span>}
                               <span className="text-[9px] text-slate-400 font-mono">{fmtTs(s.solicitadoAt)}</span>
                             </div>
                             <p className="font-black text-sm text-slate-800 dark:text-white truncate">{s.objectiveName}</p>
@@ -817,13 +913,13 @@ export default function SupervisionPage() {
                             )}
                           </div>
                           {s.estado === 'PENDIENTE' && (
-                            <div className="flex gap-2 shrink-0">
+                            <div className="flex gap-2 shrink-0 w-full sm:w-auto">
                               <button onClick={() => setRechazarTarget(s)}
-                                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center gap-1">
+                                className="flex-1 sm:flex-none px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center justify-center gap-1">
                                 <XCircle size={13}/> Rechazar
                               </button>
                               <button onClick={() => setAprobarTarget(s)}
-                                className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl font-black text-xs transition-colors flex items-center gap-1">
+                                className="flex-1 sm:flex-none px-3 py-2.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl font-black text-xs transition-colors flex items-center justify-center gap-1">
                                 <CheckCircle size={13}/> Aprobar
                               </button>
                             </div>
@@ -833,7 +929,7 @@ export default function SupervisionPage() {
                           )}
                         </div>
                       </div>
-                    ))}
+                    );})}
                   </div>
                 )
               )}
@@ -865,7 +961,8 @@ export default function SupervisionPage() {
                     ) : (
                       ausFiltered.map(a => (
                         <AusenciaCard key={a.id} ausencia={a} showActions={false}
-                          onAprobar={() => {}} onRechazar={() => {}}/>
+                          onAprobar={() => {}} onRechazar={() => {}}
+                          onGenerarRefuerzo={() => abrirRefuerzoDesdeAusencia(a, ausenciasFecha)}/>
                       ))
                     )}
                   </div>
@@ -929,6 +1026,16 @@ export default function SupervisionPage() {
           );
         })()}
       </div>
+          )}
+
+        </div>
+
+        <SupervisionBottomNav
+          active={mainTab}
+          onChange={setMainTab}
+          badges={{ BANDEJA: bandejaBadge }}
+        />
+      </div>
 
       {rechazarTarget && (
         <RechazarModal
@@ -947,8 +1054,8 @@ export default function SupervisionPage() {
 
       {/* ── Modal carga manual supervisor ── */}
       {showManualForm && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md" onClick={() => !manualSaving && resetManualForm()}>
-          <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-lg p-6 shadow-2xl border border-slate-100 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[80] flex flex-col justify-end bg-slate-900/60 backdrop-blur-md" onClick={() => !manualSaving && resetManualForm()}>
+          <div className="bg-white dark:bg-slate-800 rounded-t-3xl w-full max-w-lg mx-auto lg:rounded-2xl lg:my-auto lg:max-h-[90vh] p-6 shadow-2xl border border-slate-100 dark:border-slate-700 space-y-4 max-h-[92dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
                 <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-lg text-[10px]">Manual</span>

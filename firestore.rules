@@ -499,5 +499,19 @@ service cloud.firestore {
       allow read: if tenantAdminRead();
       allow write: if false;
     }
+
+    match /supervision_visitas/{docId} {
+      allow read: if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
+    match /objetivo_consignas/{docId} {
+      allow read: if request.auth != null;
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
   }
 }

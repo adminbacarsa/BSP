@@ -123,12 +123,21 @@ export const runEquilibrarCronoHandler = async (
     const errores: string[] = [];
 
     // ── 1. CARGAR TURNOS DEL MES ─────────────────────────────────────────────
+    // Solo filtramos por objectiveId (índice simple, funciona en emulador y prod).
+    // El rango de fecha lo hacemos en memoria con monthPrefix para evitar depender
+    // del índice compuesto (objectiveId, startTime) que el emulador no siempre carga.
     const bounds = monthBoundsAR(year, month);
     const snap = await db().collection('turnos')
         .where('objectiveId', '==', objectiveId)
         .where('startTime', '>=', bounds.start)
         .where('startTime', '<=', bounds.end)
-        .get();
+        .get().catch(async () => {
+            // Fallback sin filtro de fecha: necesario cuando el emulador no tiene
+            // el índice compuesto (objectiveId, startTime) activo.
+            return db().collection('turnos')
+                .where('objectiveId', '==', objectiveId)
+                .get();
+        });
 
     const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
     const allTurnos: TurnoRow[] = [];
