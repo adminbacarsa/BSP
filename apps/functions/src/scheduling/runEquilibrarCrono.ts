@@ -77,12 +77,14 @@ function tsToDateStrAR(ts: admin.firestore.Timestamp): string {
     return `${y}-${m}-${dd}`;
 }
 
-/** Límites del mes completo en UTC para query Firestore (AR = UTC-3). */
+/** Límites amplios del mes para query Firestore: ±1 día de margen para cubrir cualquier TZ. */
 function monthBoundsAR(year: number, month: number) {
     const m = month - 1;
     return {
-        start: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m, 1, 3, 0, 0))),
-        end:   admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m + 1, 1, 2, 59, 59))),
+        // Empezamos un día antes (por si algún turno fue guardado en UTC u otro TZ)
+        start: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m, 1, 0, 0, 0))),
+        // Terminamos un día después
+        end:   admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m + 1, 2, 23, 59, 59))),
     };
 }
 
@@ -128,19 +130,25 @@ export const runEquilibrarCronoHandler = async (
         .where('startTime', '<=', bounds.end)
         .get();
 
+    const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
     const allTurnos: TurnoRow[] = [];
+    let skippedOps = 0, skippedNoTs = 0, skippedOtherMonth = 0;
+
     for (const doc of snap.docs) {
         const d = doc.data();
-        if (isOperacional(d)) continue;
-        if (!d.startTime || !d.endTime) continue;
+        if (isOperacional(d)) { skippedOps++; continue; }
+        if (!d.startTime || !d.endTime) { skippedNoTs++; continue; }
         const code = String(d.code || '').toUpperCase();
         const isFranco  = d.isFranco === true || FRANCO_CODES.has(code);
         const isAbsence = ABSENCE_CODES.has(code);
+        const dateStr = tsToDateStrAR(d.startTime as admin.firestore.Timestamp);
+        // Filtro en memoria por mes/año: cubre cualquier offset de TZ en los datos guardados
+        if (!dateStr.startsWith(monthPrefix)) { skippedOtherMonth++; continue; }
         allTurnos.push({
             id: doc.id,
             empId:    String(d.employeeId || ''),
             empName:  String(d.employeeName || d.employeeId || ''),
-            dateStr:  tsToDateStrAR(d.startTime as admin.firestore.Timestamp),
+            dateStr,
             posName:  String(d.positionName || ''),
             code,
             hours:    Number(d.hours) || 0,
@@ -154,8 +162,9 @@ export const runEquilibrarCronoHandler = async (
     }
 
     if (allTurnos.length === 0) {
+        const diag = `(query: ${snap.docs.length} docs, ops: ${skippedOps}, sinTs: ${skippedNoTs}, otroMes: ${skippedOtherMonth})`;
         return { ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
-                 horasAntes: {}, horasDespues: {}, errores: ['No se encontraron turnos para este objetivo/mes.'] };
+                 horasAntes: {}, horasDespues: {}, errores: [`No se encontraron turnos para este objetivo/mes. ${diag}`] };
     }
 
     // ── 2. PERFILES DE POSICIÓN ──────────────────────────────────────────────

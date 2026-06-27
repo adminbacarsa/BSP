@@ -21,8 +21,8 @@ function tsToDateStrAR(ts) {
 function monthBoundsAR(year, month) {
     const m = month - 1;
     return {
-        start: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m, 1, 3, 0, 0))),
-        end: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m + 1, 1, 2, 59, 59))),
+        start: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m, 1, 0, 0, 0))),
+        end: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m + 1, 2, 23, 59, 59))),
     };
 }
 function rebuildTs(dateStr, prof) {
@@ -51,21 +51,32 @@ const runEquilibrarCronoHandler = async (data, context) => {
         .where('startTime', '>=', bounds.start)
         .where('startTime', '<=', bounds.end)
         .get();
+    const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
     const allTurnos = [];
+    let skippedOps = 0, skippedNoTs = 0, skippedOtherMonth = 0;
     for (const doc of snap.docs) {
         const d = doc.data();
-        if (isOperacional(d))
+        if (isOperacional(d)) {
+            skippedOps++;
             continue;
-        if (!d.startTime || !d.endTime)
+        }
+        if (!d.startTime || !d.endTime) {
+            skippedNoTs++;
             continue;
+        }
         const code = String(d.code || '').toUpperCase();
         const isFranco = d.isFranco === true || FRANCO_CODES.has(code);
         const isAbsence = ABSENCE_CODES.has(code);
+        const dateStr = tsToDateStrAR(d.startTime);
+        if (!dateStr.startsWith(monthPrefix)) {
+            skippedOtherMonth++;
+            continue;
+        }
         allTurnos.push({
             id: doc.id,
             empId: String(d.employeeId || ''),
             empName: String(d.employeeName || d.employeeId || ''),
-            dateStr: tsToDateStrAR(d.startTime),
+            dateStr,
             posName: String(d.positionName || ''),
             code,
             hours: Number(d.hours) || 0,
@@ -78,8 +89,9 @@ const runEquilibrarCronoHandler = async (data, context) => {
         });
     }
     if (allTurnos.length === 0) {
+        const diag = `(query: ${snap.docs.length} docs, ops: ${skippedOps}, sinTs: ${skippedNoTs}, otroMes: ${skippedOtherMonth})`;
         return { ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
-            horasAntes: {}, horasDespues: {}, errores: ['No se encontraron turnos para este objetivo/mes.'] };
+            horasAntes: {}, horasDespues: {}, errores: [`No se encontraron turnos para este objetivo/mes. ${diag}`] };
     }
     const posProfiles = {};
     const posQtyByDay = {};

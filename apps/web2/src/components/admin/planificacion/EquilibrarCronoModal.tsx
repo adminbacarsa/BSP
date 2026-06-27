@@ -109,17 +109,30 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                     {/* Resultado */}
                     {result && (
                         <div className="space-y-3">
-                            <div className={`rounded-xl border-2 px-3 py-2.5 ${result.ok && result.turnosActualizados > 0 ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <CheckCircle2 size={16} className={result.ok ? 'text-emerald-600' : 'text-slate-400'} />
-                                    <span className="font-black text-sm text-slate-800">
-                                        {result.turnosActualizados > 0
-                                            ? `${result.turnosActualizados} turnos actualizados · ${result.empleadosRotados} empleados rotados`
-                                            : result.errores?.[0] || 'Sin cambios necesarios'}
-                                    </span>
+                            {(() => {
+                                const noData = !result.ok && result.errores?.[0]?.includes('No se encontraron turnos');
+                                return (
+                                <div className={`rounded-xl border-2 px-3 py-2.5 ${result.ok && result.turnosActualizados > 0 ? 'border-emerald-300 bg-emerald-50' : noData ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <CheckCircle2 size={16} className={result.ok ? 'text-emerald-600' : noData ? 'text-amber-500' : 'text-slate-400'} />
+                                        <span className="font-black text-sm text-slate-800">
+                                            {result.turnosActualizados > 0
+                                                ? `${result.turnosActualizados} turnos actualizados · ${result.empleadosRotados} empleados rotados`
+                                                : noData ? 'El cronograma no está guardado aún'
+                                                : result.errores?.[0] || 'Sin cambios necesarios'}
+                                        </span>
+                                    </div>
+                                    {noData ? (
+                                        <>
+                                            <p className="text-[11px] text-amber-700 font-medium">Guardá el borrador del crono (botón <strong>Guardar</strong>) y luego volvé a equilibrar.</p>
+                                            <p className="text-[10px] text-amber-600/70 mt-0.5 font-mono">{result.errores?.[0]}</p>
+                                        </>
+                                    ) : (
+                                        <p className="text-[10px] text-slate-500">{result.bloquesProcesados} bloques procesados</p>
+                                    )}
                                 </div>
-                                <p className="text-[10px] text-slate-500">{result.bloquesProcesados} bloques procesados</p>
-                            </div>
+                                );
+                            })()}
 
                             {/* Tabla antes/después */}
                             {result.turnosActualizados > 0 && (() => {
