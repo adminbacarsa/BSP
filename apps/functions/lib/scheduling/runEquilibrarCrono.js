@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runEquilibrarCrono = exports.runEquilibrarCronoHandler = void 0;
 const functions = require("firebase-functions/v1");
-const admin = require("firebase-admin");
-const db = () => admin.firestore();
+const firestore_1 = require("firebase-admin/firestore");
+const db = () => (0, firestore_1.getFirestore)();
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG']);
 function isOperacional(d) {
@@ -21,8 +21,8 @@ function tsToDateStrAR(ts) {
 function monthBoundsAR(year, month) {
     const m = month - 1;
     return {
-        start: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m, 1, 0, 0, 0))),
-        end: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m + 1, 2, 23, 59, 59))),
+        start: firestore_1.Timestamp.fromDate(new Date(Date.UTC(year, m, 1, 0, 0, 0))),
+        end: firestore_1.Timestamp.fromDate(new Date(Date.UTC(year, m + 1, 2, 23, 59, 59))),
     };
 }
 function rebuildTs(dateStr, prof) {
@@ -31,8 +31,8 @@ function rebuildTs(dateStr, prof) {
     const endDayOffset = prof.endNextDay ? d + 1 : d;
     const endDate = new Date(Date.UTC(y, m - 1, endDayOffset, prof.endUTCHour, 0, 0));
     return {
-        startTime: admin.firestore.Timestamp.fromDate(startDate),
-        endTime: admin.firestore.Timestamp.fromDate(endDate),
+        startTime: firestore_1.Timestamp.fromDate(startDate),
+        endTime: firestore_1.Timestamp.fromDate(endDate),
     };
 }
 const RUNTIME = { timeoutSeconds: 180, memory: '512MB' };

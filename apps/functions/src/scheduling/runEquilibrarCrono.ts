@@ -1,7 +1,8 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { Timestamp, getFirestore } from 'firebase-admin/firestore';
 
-const db = () => admin.firestore();
+const db = () => getFirestore();
 
 // ── INTERFACES ───────────────────────────────────────────────────────────────
 
@@ -33,8 +34,8 @@ interface TurnoRow {
     code: string;
     hours: number;
     name: string;
-    startTime: admin.firestore.Timestamp;
-    endTime: admin.firestore.Timestamp;
+    startTime: Timestamp;
+    endTime: Timestamp;
     isFranco: boolean;
     isAbsence: boolean;
     isDraft: boolean;
@@ -68,7 +69,7 @@ function isOperacional(d: FirebaseFirestore.DocumentData): boolean {
 }
 
 /** Convierte un Timestamp a YYYY-MM-DD en zona AR (UTC-3). */
-function tsToDateStrAR(ts: admin.firestore.Timestamp): string {
+function tsToDateStrAR(ts: Timestamp): string {
     const ms = ts.toMillis() - 3 * 60 * 60 * 1000;
     const d = new Date(ms);
     const y = d.getUTCFullYear();
@@ -82,9 +83,9 @@ function monthBoundsAR(year: number, month: number) {
     const m = month - 1;
     return {
         // Empezamos un día antes (por si algún turno fue guardado en UTC u otro TZ)
-        start: admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m, 1, 0, 0, 0))),
+        start: Timestamp.fromDate(new Date(Date.UTC(year, m, 1, 0, 0, 0))),
         // Terminamos un día después
-        end:   admin.firestore.Timestamp.fromDate(new Date(Date.UTC(year, m + 1, 2, 23, 59, 59))),
+        end:   Timestamp.fromDate(new Date(Date.UTC(year, m + 1, 2, 23, 59, 59))),
     };
 }
 
@@ -98,8 +99,8 @@ function rebuildTs(dateStr: string, prof: PosProfile) {
     const endDayOffset = prof.endNextDay ? d + 1 : d;
     const endDate   = new Date(Date.UTC(y, m - 1, endDayOffset, prof.endUTCHour, 0, 0));
     return {
-        startTime: admin.firestore.Timestamp.fromDate(startDate),
-        endTime:   admin.firestore.Timestamp.fromDate(endDate),
+        startTime: Timestamp.fromDate(startDate),
+        endTime:   Timestamp.fromDate(endDate),
     };
 }
 
@@ -152,7 +153,7 @@ export const runEquilibrarCronoHandler = async (
         const code = String(d.code || '').toUpperCase();
         const isFranco  = d.isFranco === true || FRANCO_CODES.has(code);
         const isAbsence = ABSENCE_CODES.has(code);
-        const dateStr = tsToDateStrAR(d.startTime as admin.firestore.Timestamp);
+        const dateStr = tsToDateStrAR(d.startTime as Timestamp);
         // Filtro en memoria por mes/año: cubre cualquier offset de TZ en los datos guardados
         if (!dateStr.startsWith(monthPrefix)) { skippedOtherMonth++; continue; }
         allTurnos.push({
@@ -164,8 +165,8 @@ export const runEquilibrarCronoHandler = async (
             code,
             hours:    Number(d.hours) || 0,
             name:     String(d.name || code),
-            startTime: d.startTime as admin.firestore.Timestamp,
-            endTime:   d.endTime   as admin.firestore.Timestamp,
+            startTime: d.startTime as Timestamp,
+            endTime:   d.endTime   as Timestamp,
             isFranco,
             isAbsence,
             isDraft: d.draft === true,
@@ -283,7 +284,7 @@ export const runEquilibrarCronoHandler = async (
     const sortedPos = [...positions].sort((a, b) => b.hours - a.hours);
 
     const blockQueue = [...allBlocks];
-    const updates: Map<string, { posName: string; code: string; hours: number; name: string; startTime: admin.firestore.Timestamp; endTime: admin.firestore.Timestamp }> = new Map();
+    const updates: Map<string, { posName: string; code: string; hours: number; name: string; startTime: Timestamp; endTime: Timestamp }> = new Map();
     const rotadosSet = new Set<string>();
     let bloquesProcesados = 0;
     // Horas acumuladas por empleado en ESTA pasada (arranca en 0, no en horasAntes)
