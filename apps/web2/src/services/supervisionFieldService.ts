@@ -125,6 +125,10 @@ export const supervisionFieldService = {
     objectiveIds: string[] | null,
     onData: (items: SupervisionVisita[]) => void,
   ): () => void {
+    if (objectiveIds !== null && !objectiveIds.length) {
+      onData([]);
+      return () => {};
+    }
     const q = objectiveIds?.length
       ? query(
           collection(db, VISITAS),
@@ -157,6 +161,10 @@ export const supervisionFieldService = {
     objectiveIds: string[] | null,
     onData: (items: ObjetivoConsigna[]) => void,
   ): () => void {
+    if (objectiveIds !== null && !objectiveIds.length) {
+      onData([]);
+      return () => {};
+    }
     const q = objectiveIds?.length
       ? query(
           collection(db, CONSIGNAS),

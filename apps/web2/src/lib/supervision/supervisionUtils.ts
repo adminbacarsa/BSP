@@ -1,4 +1,6 @@
 import { Timestamp } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export type SupervisionMainTab = 'TABLERO' | 'BANDEJA' | 'NOVEDADES' | 'MAS';
 
@@ -64,3 +66,64 @@ export const URGENCY_STYLES: Record<UrgencyLevel, { cls: string; label: string }
   MANANA: { cls: 'bg-amber-100 text-amber-700 border-amber-200', label: 'Mañana' },
   NORMAL: { cls: 'bg-slate-100 text-slate-500 border-slate-200', label: 'Programado' },
 };
+
+/** Ausencia con campos opcionales usados para filtrar por objetivo del supervisor */
+export type ScopedAbsence = {
+  id?: string;
+  objectiveId?: string;
+  shiftId?: string;
+  clientId?: string;
+  [key: string]: unknown;
+};
+
+/**
+ * Resuelve objectiveId de ausencias vía shiftId (cache) y filtra por alcance del supervisor.
+ * Si objectiveIds está vacío y canViewAll es false → sin resultados.
+ */
+export async function filterAbsencesByObjectives<T extends ScopedAbsence>(
+  items: T[],
+  objectiveIds: string[],
+  canViewAll: boolean,
+  shiftObjectiveCache: Map<string, string>,
+): Promise<T[]> {
+  if (canViewAll) return items;
+  if (!objectiveIds.length) return [];
+
+  const scope = new Set(objectiveIds);
+  const missingShiftIds = new Set<string>();
+
+  items.forEach(a => {
+    const oid = String(a.objectiveId || '').trim();
+    const sid = String(a.shiftId || '').trim();
+    if (!oid && sid && !shiftObjectiveCache.has(sid)) missingShiftIds.add(sid);
+  });
+
+  await Promise.all(
+    [...missingShiftIds].map(async sid => {
+      try {
+        const snap = await getDoc(doc(db, 'turnos', sid));
+        shiftObjectiveCache.set(sid, snap.exists() ? String(snap.data()?.objectiveId || '').trim() : '');
+      } catch {
+        shiftObjectiveCache.set(sid, '');
+      }
+    }),
+  );
+
+  return items.filter(a => {
+    const oid = String(a.objectiveId || '').trim()
+      || shiftObjectiveCache.get(String(a.shiftId || '').trim())
+      || '';
+    return oid && scope.has(oid);
+  });
+}
+
+export function filterSolicitudesByObjectives<T extends { objectiveId: string }>(
+  items: T[],
+  objectiveIds: string[],
+  canViewAll: boolean,
+): T[] {
+  if (canViewAll) return items;
+  if (!objectiveIds.length) return [];
+  const scope = new Set(objectiveIds);
+  return items.filter(s => scope.has(s.objectiveId));
+}

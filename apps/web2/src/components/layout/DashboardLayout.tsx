@@ -5,7 +5,7 @@ import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { auth, db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, writeBatch, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, writeBatch, doc, getDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
@@ -16,6 +16,7 @@ import {
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
+import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtils';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -297,7 +298,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const [topbarVisible, setTopbarVisible] = useState(false);
   const router = useRouter();
   const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
-  const { canReadModule } = useAuth();
+  const { canReadModule, user, isSuperAdmin } = useAuth();
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
   const [pendientesCount, setPendientesCount] = useState(0);
@@ -307,14 +308,36 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const canViewPlanning = canReadModule('PLANNING');
 
   useEffect(() => {
-    if (!empresaId || !canViewSupervision) return;
-    // El badge de Supervisión cuenta SOLO refuerzos pendientes (lo que el supervisor
-    // tiene para tratar). Las ausencias/vacaciones tienen su propio flujo y no se cuentan acá.
-    const unsubR = solicitudRefuerzoService.subscribeByEmpresa(empresaId, items => {
-      setPendientesCount(items.filter(s => s.estado === 'PENDIENTE').length);
-    });
-    return () => { unsubR(); };
-  }, [empresaId, canViewSupervision]);
+    if (!empresaId || !canViewSupervision || !user?.uid) return;
+
+    let assignedIds: string[] = [];
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+
+    const startSubscription = () => {
+      unsub?.();
+      unsub = solicitudRefuerzoService.subscribeByEmpresa(empresaId, items => {
+        const canViewAll = isSuperAdmin;
+        const scoped = filterSolicitudesByObjectives(items, assignedIds, canViewAll);
+        if (!cancelled) setPendientesCount(scoped.filter(s => s.estado === 'PENDIENTE').length);
+      });
+    };
+
+    getDoc(doc(db, 'system_users', user.uid))
+      .then(snap => {
+        if (cancelled) return;
+        assignedIds = snap.exists() ? (snap.data().objetivosAsignados || []) : [];
+        startSubscription();
+      })
+      .catch(() => {
+        if (!cancelled) startSubscription();
+      });
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, [empresaId, canViewSupervision, user?.uid, isSuperAdmin]);
 
   useEffect(() => {
     if (!empresaId || !canViewPlanning) return;

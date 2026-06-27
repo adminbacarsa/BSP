@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { Toaster, toast } from 'sonner';
@@ -20,6 +20,7 @@ import { Timestamp } from 'firebase/firestore';
 import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
 import {
   fmtTs, urgencyLevel, hoursSincePending, pendingHoursLabel, URGENCY_STYLES,
+  filterAbsencesByObjectives, filterSolicitudesByObjectives,
   type SupervisionMainTab,
 } from '@/lib/supervision/supervisionUtils';
 import { useSupervisorScope } from '@/hooks/useSupervisorScope';
@@ -250,19 +251,19 @@ interface SlaPosition {
 export default function SupervisionPage() {
   const { user, isSuperAdmin } = useAuth();
   const { empresaId } = useEmpresa();
-  const { scopedObjectives, objectiveIds, assignedIds } = useSupervisorScope(user?.uid, empresaId, isSuperAdmin);
+  const { scopedObjectives, objectiveIds, assignedIds, canViewAllObjectives } = useSupervisorScope(user?.uid, empresaId, isSuperAdmin);
+  const shiftObjectiveCache = useRef(new Map<string, string>());
 
   const [solicitudes, setSolicitudes] = useState<SolicitudRefuerzo[]>([]);
   const [ausencias, setAusencias] = useState<Absence[]>([]);
   const [vacaciones, setVacaciones] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mainTab, setMainTab] = useState<SupervisionMainTab>('TABLERO');
+  const [mainTab, setMainTab] = useState<SupervisionMainTab>('BANDEJA');
   const [tab, setTab] = useState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [busqueda, setBusqueda] = useState('');
   const [filtroObjetivo, setFiltroObjetivo] = useState('');
-  const supervisorObjetivos = objectiveIds;
 
   // Formulario manual supervisor
   const [showManualForm, setShowManualForm] = useState(false);
@@ -291,17 +292,20 @@ export default function SupervisionPage() {
   const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
   const [licenciasMes, setLicenciasMes] = useState(currentMonthStr);
 
-  // Cargar clientes para el form manual
+  // Cargar clientes para el form manual (solo objetivos del supervisor)
   useEffect(() => {
     if (!empresaId || !showManualForm) return;
+    const allowed = new Set(objectiveIds);
     getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name'))).then(snap => {
       setClientes(snap.docs.map(d => ({
         id: d.id,
         name: d.data().name || d.data().fantasyName || d.id,
-        objetivos: (d.data().objetivos || []).map((o: any) => ({ id: o.id, name: o.name || o.id })),
-      })));
+        objetivos: (d.data().objetivos || [])
+          .map((o: any) => ({ id: o.id, name: o.name || o.id }))
+          .filter((o: { id: string }) => canViewAllObjectives || allowed.has(o.id)),
+      })).filter(c => c.objetivos.length > 0));
     });
-  }, [empresaId, showManualForm]);
+  }, [empresaId, showManualForm, objectiveIds, canViewAllObjectives]);
 
   // Cargar puestos del SLA activo cuando cambia el objetivo (para RFZ)
   useEffect(() => {
@@ -364,22 +368,33 @@ export default function SupervisionPage() {
     setVacaciones([]);
   }, [empresaId]);
 
-  // Suscripciones en tiempo real
+  // Suscripciones en tiempo real (filtradas por objetivos asignados)
   useEffect(() => {
     if (!empresaId) return;
     setLoading(true);
     const unsubSol = solicitudRefuerzoService.subscribeByEmpresa(empresaId, items => {
-      setSolicitudes(isSuperAdmin ? items : items.filter(s => supervisorObjetivos.includes(s.objectiveId)));
+      setSolicitudes(filterSolicitudesByObjectives(items, objectiveIds, canViewAllObjectives));
       setLoading(false);
     });
     const unsubAus = absenceService.subscribePendientes(empresaId, items => {
-      setAusencias(items);
+      void filterAbsencesByObjectives(
+        items as any[],
+        objectiveIds,
+        canViewAllObjectives,
+        shiftObjectiveCache.current,
+      ).then(setAusencias);
     });
     const unsubVac = absenceService.subscribeAllByEmpresa(empresaId, items => {
-      setVacaciones(items.filter(a => a.type !== 'NO_PRESENTACION' && a.status !== 'Rechazada' && a.status !== 'Injustificada'));
+      const base = items.filter(a => a.type !== 'NO_PRESENTACION' && a.status !== 'Rechazada' && a.status !== 'Injustificada');
+      void filterAbsencesByObjectives(
+        base as any[],
+        objectiveIds,
+        canViewAllObjectives,
+        shiftObjectiveCache.current,
+      ).then(setVacaciones);
     });
     return () => { unsubSol(); unsubAus(); unsubVac(); };
-  }, [empresaId, isSuperAdmin, supervisorObjetivos]);
+  }, [empresaId, objectiveIds, canViewAllObjectives]);
 
   const pendientes = solicitudes.filter(s => s.estado === 'PENDIENTE');
   const visiblesBase = tab === 'PENDIENTE' ? pendientes : solicitudes;
@@ -745,7 +760,11 @@ export default function SupervisionPage() {
               <div className="min-w-0">
                 <h1 className="font-black text-lg text-slate-900 dark:text-white uppercase tracking-tight truncate">Supervisión</h1>
                 <p className="text-[10px] text-slate-500 font-medium truncate">
-                  {isSuperAdmin ? 'Vista completa' : `${assignedIds.length} objetivo${assignedIds.length !== 1 ? 's' : ''}`}
+                  {isSuperAdmin
+                    ? 'Vista completa — todos los objetivos'
+                    : assignedIds.length
+                      ? `${assignedIds.length} objetivo${assignedIds.length !== 1 ? 's' : ''} asignado${assignedIds.length !== 1 ? 's' : ''}`
+                      : 'Sin objetivos asignados'}
                   {pendientes.length > 0 && ` · ${pendientes.length} pend.`}
                 </p>
               </div>
@@ -760,16 +779,37 @@ export default function SupervisionPage() {
               </button>
             )}
           </div>
+          <div className="hidden lg:flex gap-2 max-w-5xl mx-auto mt-4">
+            {([
+              ['BANDEJA', 'Bandeja'],
+              ['TABLERO', 'Tablero'],
+              ['NOVEDADES', 'Novedades'],
+              ['MAS', 'Más'],
+            ] as [SupervisionMainTab, string][]).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setMainTab(id)}
+                className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
+                  mainTab === id
+                    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
+                    : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex-1 px-4 pt-3 pb-28 lg:pb-6 max-w-5xl mx-auto w-full overflow-x-hidden">
           {mainTab === 'TABLERO' && (
-            <SupervisionTablero objectiveIds={objectiveIds} isSuperAdmin={isSuperAdmin} />
+            <SupervisionTablero objectiveIds={objectiveIds} canViewAllObjectives={canViewAllObjectives} />
           )}
 
           {mainTab === 'NOVEDADES' && user?.uid && (
             <SupervisionNovedades
-              objectiveIds={objectiveIds.length ? objectiveIds : scopedObjectives.map(o => o.id)}
+              objectiveIds={objectiveIds}
               objectives={scopedObjectives}
               userUid={user.uid}
               userName={userName}
@@ -784,6 +824,7 @@ export default function SupervisionPage() {
               userUid={user.uid}
               userName={userName}
               isSuperAdmin={isSuperAdmin}
+              canViewAllObjectives={canViewAllObjectives}
             />
           )}
 

@@ -3,8 +3,8 @@ import { LayoutGrid, Inbox, FileText, MoreHorizontal } from 'lucide-react';
 import type { SupervisionMainTab } from '@/lib/supervision/supervisionUtils';
 
 const TABS: { id: SupervisionMainTab; label: string; icon: React.ElementType }[] = [
-  { id: 'TABLERO', label: 'Tablero', icon: LayoutGrid },
   { id: 'BANDEJA', label: 'Bandeja', icon: Inbox },
+  { id: 'TABLERO', label: 'Tablero', icon: LayoutGrid },
   { id: 'NOVEDADES', label: 'Novedades', icon: FileText },
   { id: 'MAS', label: 'Más', icon: MoreHorizontal },
 ];

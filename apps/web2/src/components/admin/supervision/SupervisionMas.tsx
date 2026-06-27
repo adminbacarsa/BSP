@@ -183,6 +183,7 @@ export default function SupervisionMas({
   userUid,
   userName,
   isSuperAdmin,
+  canViewAllObjectives,
 }: {
   empresaId: string;
   objectiveIds: string[];
@@ -190,6 +191,7 @@ export default function SupervisionMas({
   userUid: string;
   userName: string;
   isSuperAdmin: boolean;
+  canViewAllObjectives: boolean;
 }) {
   const [section, setSection] = useState<MasSection>('VISITAS');
   const [visitas, setVisitas] = useState<SupervisionVisita[]>([]);
@@ -197,14 +199,13 @@ export default function SupervisionMas({
   const [showVisita, setShowVisita] = useState(false);
   const [showConsigna, setShowConsigna] = useState(false);
 
-  const scopeIds = isSuperAdmin ? null : (objectiveIds.length ? objectiveIds : null);
-
   useEffect(() => {
     if (!empresaId) return;
-    const u1 = supervisionFieldService.subscribeVisitas(empresaId, scopeIds, setVisitas);
-    const u2 = supervisionFieldService.subscribeConsignas(empresaId, scopeIds, setConsignas);
+    const ids = objectiveIds.length ? objectiveIds : (canViewAllObjectives ? null : []);
+    const u1 = supervisionFieldService.subscribeVisitas(empresaId, ids, setVisitas);
+    const u2 = supervisionFieldService.subscribeConsignas(empresaId, ids, setConsignas);
     return () => { u1(); u2(); };
-  }, [empresaId, scopeIds]);
+  }, [empresaId, objectiveIds, canViewAllObjectives]);
 
   const visitasDelMes = visitas.filter(v => {
     const d = v.createdAt?.toDate?.();

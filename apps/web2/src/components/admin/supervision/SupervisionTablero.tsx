@@ -5,14 +5,14 @@ import { COVERAGE_STATUS_STYLES } from '@/lib/supervision/supervisionUtils';
 
 export default function SupervisionTablero({
   objectiveIds,
-  isSuperAdmin,
+  canViewAllObjectives,
 }: {
   objectiveIds: string[];
-  isSuperAdmin: boolean;
+  canViewAllObjectives: boolean;
 }) {
   const { objectiveSummaries, totals, isReady, isStable, todayShifts } = useSupervisionTablero(
-    objectiveIds.length ? objectiveIds : null,
-    isSuperAdmin,
+    objectiveIds,
+    canViewAllObjectives,
   );
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
@@ -64,7 +64,7 @@ export default function SupervisionTablero({
       ) : filtered.length === 0 ? (
         <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-10 text-center shadow-sm">
           <p className="text-slate-500 text-sm font-medium">
-            {!isSuperAdmin && !objectiveIds.length
+            {!canViewAllObjectives && !objectiveIds.length
               ? 'No tenés objetivos asignados. Pedí a RRHH/Config que te asignen en tu usuario.'
               : 'Sin turnos operativos hoy en tus objetivos'}
           </p>

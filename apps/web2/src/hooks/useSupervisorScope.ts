@@ -10,6 +10,11 @@ export type SupervisorObjective = {
   clientName: string;
 };
 
+/**
+ * Alcance del módulo Supervisión:
+ * - SuperAdmin → siempre ve todos los objetivos de la empresa.
+ * - Supervisor → solo objetivosAsignados en system_users.
+ */
 export function useSupervisorScope(
   userUid: string | undefined,
   empresaId: string | undefined,
@@ -42,6 +47,8 @@ export function useSupervisorScope(
       .finally(() => setLoading(false));
   }, [empresaId]);
 
+  const canViewAllObjectives = isSuperAdmin;
+
   const scopedObjectives = useMemo(() => {
     if (isSuperAdmin) return allObjectives;
     if (!assignedIds.length) return [];
@@ -59,6 +66,7 @@ export function useSupervisorScope(
     allObjectives,
     scopedObjectives,
     objectiveIds,
+    canViewAllObjectives,
     loading,
   };
 }

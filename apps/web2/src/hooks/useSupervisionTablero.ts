@@ -17,20 +17,19 @@ export type ObjectiveLiveSummary = {
 const isSameDay = (d1: Date, d2: Date) =>
   d1.toLocaleDateString('en-CA') === d2.toLocaleDateString('en-CA');
 
-export function useSupervisionTablero(
-  objectiveIds: string[] | null,
-  isSuperAdmin: boolean,
-) {
+export function useSupervisionTablero(objectiveIds: string[], canViewAllObjectives: boolean) {
   const monitor = useOperacionesMonitor();
 
   const scopedShifts = useMemo(() => {
     let list = monitor.processedData;
-    if (!isSuperAdmin && objectiveIds?.length) {
+    if (!canViewAllObjectives && objectiveIds.length) {
       const set = new Set(objectiveIds);
       list = list.filter((s: any) => set.has(s.objectiveId));
+    } else if (!canViewAllObjectives && !objectiveIds.length) {
+      list = [];
     }
     return list;
-  }, [monitor.processedData, objectiveIds, isSuperAdmin]);
+  }, [monitor.processedData, objectiveIds, canViewAllObjectives]);
 
   const todayShifts = useMemo(() => {
     const now = monitor.now;
