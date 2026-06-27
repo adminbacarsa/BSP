@@ -120,24 +120,26 @@ export const runEquilibrarCronoHandler = async (
         throw new functions.https.HttpsError('invalid-argument', 'empresaId, objectiveId, year y month (1–12) son requeridos.');
     }
 
+    try {
+
     const errores: string[] = [];
 
     // ── 1. CARGAR TURNOS DEL MES ─────────────────────────────────────────────
-    // Solo filtramos por objectiveId (índice simple, funciona en emulador y prod).
-    // El rango de fecha lo hacemos en memoria con monthPrefix para evitar depender
-    // del índice compuesto (objectiveId, startTime) que el emulador no siempre carga.
+    // Intentamos con rango de fecha (índice compuesto). Si el emulador no tiene
+    // el índice activo, reintentamos solo con objectiveId y filtramos en memoria.
     const bounds = monthBoundsAR(year, month);
-    const snap = await db().collection('turnos')
-        .where('objectiveId', '==', objectiveId)
-        .where('startTime', '>=', bounds.start)
-        .where('startTime', '<=', bounds.end)
-        .get().catch(async () => {
-            // Fallback sin filtro de fecha: necesario cuando el emulador no tiene
-            // el índice compuesto (objectiveId, startTime) activo.
-            return db().collection('turnos')
-                .where('objectiveId', '==', objectiveId)
-                .get();
-        });
+    let snap: FirebaseFirestore.QuerySnapshot;
+    try {
+        snap = await db().collection('turnos')
+            .where('objectiveId', '==', objectiveId)
+            .where('startTime', '>=', bounds.start)
+            .where('startTime', '<=', bounds.end)
+            .get();
+    } catch (_queryErr) {
+        snap = await db().collection('turnos')
+            .where('objectiveId', '==', objectiveId)
+            .get();
+    }
 
     const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
     const allTurnos: TurnoRow[] = [];
@@ -395,6 +397,18 @@ export const runEquilibrarCronoHandler = async (
         horasDespues,
         errores,
     };
+
+    } catch (e: any) {
+        // Exponer el error real en la respuesta para facilitar diagnóstico
+        // en lugar de devolver un genérico INTERNAL
+        const msg = (e instanceof functions.https.HttpsError)
+            ? (() => { throw e; })()
+            : (e?.message || String(e));
+        return {
+            ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
+            horasAntes: {}, horasDespues: {}, errores: [`Error: ${msg}`],
+        };
+    }
 };
 
 export const runEquilibrarCrono = functions
