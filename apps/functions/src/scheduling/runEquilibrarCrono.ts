@@ -251,79 +251,95 @@ export const runEquilibrarCronoHandler = async (
                  horasAntes, horasDespues: horasAntes, errores: ['No se detectaron bloques de trabajo.'] };
     }
 
-    // ── 5. ASIGNACIÓN GREEDY POR GRUPO DE INICIO ────────────────────────────
-    // Para cada fecha de inicio, agrupa los bloques que arrancan ese día.
-    // Arma el pool de slots (posiciones que ese grupo cubre actualmente),
-    // ordena empleados por horas acumuladas ASC y slots por horas DESC,
-    // y reasigna: menos horas → posición más pesada.
-    allBlocks.sort((a, b) => a.startDate.localeCompare(b.startDate));
+    // ── 5. ASIGNACIÓN GREEDY GLOBAL ─────────────────────────────────────────
+    // Greedy con cola de prioridad: el bloque cuyo empleado tiene MENOS horas
+    // acumuladas hasta ese momento recibe la posición más pesada disponible.
+    // Esto garantiza rotación cruzada entre subgrupos distintos del ciclo 6+2.
+    //
+    // Los "slots" por posición/día se inicializan desde la distribución actual
+    // para preservar la cobertura del objetivo (misma cantidad de personas
+    // por posición cada día).
 
-    const blocksByStart: Record<string, Block[]> = {};
-    for (const b of allBlocks) {
-        (blocksByStart[b.startDate] = blocksByStart[b.startDate] || []).push(b);
+    // Slots disponibles: cuántos empleados pueden estar en cada posición por día
+    const slotsAvail: Record<string, Record<string, number>> = {};
+    for (const t of allTurnos) {
+        if (t.isFranco || t.isAbsence || !t.posName) continue;
+        if (!slotsAvail[t.posName]) slotsAvail[t.posName] = {};
+        slotsAvail[t.posName][t.dateStr] = (slotsAvail[t.posName][t.dateStr] || 0) + 1;
     }
 
-    // Horas proyectadas (se actualizan bloque a bloque para decisiones futuras)
-    const projected: Record<string, number> = { ...horasAntes };
+    // Posiciones ordenadas por horas DESC (más pesada primero)
+    const sortedPos = [...positions].sort((a, b) => b.hours - a.hours);
 
-    const updates: Map<string, Partial<Pick<TurnoRow, 'posName' | 'code' | 'hours' | 'name' | 'startTime' | 'endTime'>>> = new Map();
+    const blockQueue = [...allBlocks];
+    const updates: Map<string, { posName: string; code: string; hours: number; name: string; startTime: admin.firestore.Timestamp; endTime: admin.firestore.Timestamp }> = new Map();
     const rotadosSet = new Set<string>();
     let bloquesProcesados = 0;
+    // Horas acumuladas por empleado en ESTA pasada (arranca en 0, no en horasAntes)
+    const runningHours: Record<string, number> = {};
 
-    // Ordenar las fechas de inicio
-    const startDates = Object.keys(blocksByStart).sort();
+    while (blockQueue.length > 0) {
+        // Seleccionar el bloque del empleado con menos horas acumuladas
+        blockQueue.sort((a, b) => {
+            const ha = runningHours[a.empId] || 0;
+            const hb = runningHours[b.empId] || 0;
+            return ha !== hb ? ha - hb : a.startDate.localeCompare(b.startDate);
+        });
+        const block = blockQueue.shift()!;
+        const blockDates = block.shifts.map(s => s.dateStr);
 
-    for (const startDate of startDates) {
-        const group = blocksByStart[startDate];
-
-        // Pool de slots: colección de posiciones que cubre este grupo (puede repetirse si qty>1)
-        // Derivado de la posición actual del primer turno de cada bloque.
-        const slotPool: PosProfile[] = [];
-        for (const block of group) {
-            const currentPos = posProfiles[block.shifts[0].posName];
-            if (currentPos) slotPool.push(currentPos);
+        // Buscar la posición más pesada que tenga slots en TODOS los días del bloque
+        let assignedPos: PosProfile | null = null;
+        for (const pos of sortedPos) {
+            if (blockDates.every(d => (slotsAvail[pos.posName]?.[d] ?? 0) > 0)) {
+                assignedPos = pos;
+                break;
+            }
         }
-        if (slotPool.length === 0) continue;
 
-        // Ordenar: empleados por horas proyectadas ASC, slots por horas DESC
-        group.sort((a, b) => (projected[a.empId] || 0) - (projected[b.empId] || 0));
-        slotPool.sort((a, b) => b.hours - a.hours);
+        // Fallback: si ninguna tiene slots en todos los días, tomar la más liviana disponible
+        if (!assignedPos) {
+            for (let pi = sortedPos.length - 1; pi >= 0; pi--) {
+                if (blockDates.every(d => (slotsAvail[sortedPos[pi].posName]?.[d] ?? 0) > 0)) {
+                    assignedPos = sortedPos[pi];
+                    break;
+                }
+            }
+        }
 
-        for (let i = 0; i < group.length; i++) {
-            const block = group[i];
-            const targetProf = slotPool[i % slotPool.length];
+        if (!assignedPos) {
+            // Sin slots disponibles — preservar posición actual sin consumir slot
+            const orig = posProfiles[block.shifts[0]?.posName];
+            if (orig) {
+                runningHours[block.empId] = (runningHours[block.empId] || 0)
+                    + block.shifts.length * orig.hours;
+            }
+            bloquesProcesados++;
+            continue;
+        }
 
-            // Actualizar cada turno del bloque si la posición cambia
-            for (const shift of block.shifts) {
-                if (shift.posName === targetProf.posName) continue; // ya está en el lugar correcto
+        // Consumir slots y registrar cambios
+        for (const shift of block.shifts) {
+            if (slotsAvail[assignedPos.posName]?.[shift.dateStr] !== undefined)
+                slotsAvail[assignedPos.posName][shift.dateStr]--;
 
-                // Respetar cap 200h: si asignar este turno haría superar 200h, mantener liviano
-                const capHrs = 200;
-                const afterHrs = (projected[block.empId] || 0) + targetProf.hours;
-                const profFallback = slotPool[slotPool.length - 1]; // más liviano disponible
-                const assignProf = afterHrs > capHrs && targetProf.hours > profFallback.hours
-                    ? profFallback
-                    : targetProf;
-
-                if (shift.posName === assignProf.posName) continue;
-
-                const ts = rebuildTs(shift.dateStr, assignProf);
+            if (shift.posName !== assignedPos.posName) {
+                const ts = rebuildTs(shift.dateStr, assignedPos);
                 updates.set(shift.id, {
-                    posName: assignProf.posName,
-                    code:    assignProf.code,
-                    hours:   assignProf.hours,
-                    name:    assignProf.name,
+                    posName:   assignedPos.posName,
+                    code:      assignedPos.code,
+                    hours:     assignedPos.hours,
+                    name:      assignedPos.name,
                     startTime: ts.startTime,
                     endTime:   ts.endTime,
                 });
                 rotadosSet.add(block.empId);
             }
-
-            // Actualizar horas proyectadas con las horas de la posición asignada
-            const blockHrs = block.shifts.length * targetProf.hours;
-            projected[block.empId] = (projected[block.empId] || 0) + blockHrs;
-            bloquesProcesados++;
         }
+
+        runningHours[block.empId] = (runningHours[block.empId] || 0)
+            + block.shifts.length * assignedPos.hours;
+        bloquesProcesados++;
     }
 
     const turnosActualizados = updates.size;

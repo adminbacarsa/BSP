@@ -165,57 +165,71 @@ const runEquilibrarCronoHandler = async (data, context) => {
         return { ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
             horasAntes, horasDespues: horasAntes, errores: ['No se detectaron bloques de trabajo.'] };
     }
-    allBlocks.sort((a, b) => a.startDate.localeCompare(b.startDate));
-    const blocksByStart = {};
-    for (const b of allBlocks) {
-        (blocksByStart[b.startDate] = blocksByStart[b.startDate] || []).push(b);
+    const slotsAvail = {};
+    for (const t of allTurnos) {
+        if (t.isFranco || t.isAbsence || !t.posName)
+            continue;
+        if (!slotsAvail[t.posName])
+            slotsAvail[t.posName] = {};
+        slotsAvail[t.posName][t.dateStr] = (slotsAvail[t.posName][t.dateStr] || 0) + 1;
     }
-    const projected = { ...horasAntes };
+    const sortedPos = [...positions].sort((a, b) => b.hours - a.hours);
+    const blockQueue = [...allBlocks];
     const updates = new Map();
     const rotadosSet = new Set();
     let bloquesProcesados = 0;
-    const startDates = Object.keys(blocksByStart).sort();
-    for (const startDate of startDates) {
-        const group = blocksByStart[startDate];
-        const slotPool = [];
-        for (const block of group) {
-            const currentPos = posProfiles[block.shifts[0].posName];
-            if (currentPos)
-                slotPool.push(currentPos);
+    const runningHours = {};
+    while (blockQueue.length > 0) {
+        blockQueue.sort((a, b) => {
+            const ha = runningHours[a.empId] || 0;
+            const hb = runningHours[b.empId] || 0;
+            return ha !== hb ? ha - hb : a.startDate.localeCompare(b.startDate);
+        });
+        const block = blockQueue.shift();
+        const blockDates = block.shifts.map(s => s.dateStr);
+        let assignedPos = null;
+        for (const pos of sortedPos) {
+            if (blockDates.every(d => (slotsAvail[pos.posName]?.[d] ?? 0) > 0)) {
+                assignedPos = pos;
+                break;
+            }
         }
-        if (slotPool.length === 0)
+        if (!assignedPos) {
+            for (let pi = sortedPos.length - 1; pi >= 0; pi--) {
+                if (blockDates.every(d => (slotsAvail[sortedPos[pi].posName]?.[d] ?? 0) > 0)) {
+                    assignedPos = sortedPos[pi];
+                    break;
+                }
+            }
+        }
+        if (!assignedPos) {
+            const orig = posProfiles[block.shifts[0]?.posName];
+            if (orig) {
+                runningHours[block.empId] = (runningHours[block.empId] || 0)
+                    + block.shifts.length * orig.hours;
+            }
+            bloquesProcesados++;
             continue;
-        group.sort((a, b) => (projected[a.empId] || 0) - (projected[b.empId] || 0));
-        slotPool.sort((a, b) => b.hours - a.hours);
-        for (let i = 0; i < group.length; i++) {
-            const block = group[i];
-            const targetProf = slotPool[i % slotPool.length];
-            for (const shift of block.shifts) {
-                if (shift.posName === targetProf.posName)
-                    continue;
-                const capHrs = 200;
-                const afterHrs = (projected[block.empId] || 0) + targetProf.hours;
-                const profFallback = slotPool[slotPool.length - 1];
-                const assignProf = afterHrs > capHrs && targetProf.hours > profFallback.hours
-                    ? profFallback
-                    : targetProf;
-                if (shift.posName === assignProf.posName)
-                    continue;
-                const ts = rebuildTs(shift.dateStr, assignProf);
+        }
+        for (const shift of block.shifts) {
+            if (slotsAvail[assignedPos.posName]?.[shift.dateStr] !== undefined)
+                slotsAvail[assignedPos.posName][shift.dateStr]--;
+            if (shift.posName !== assignedPos.posName) {
+                const ts = rebuildTs(shift.dateStr, assignedPos);
                 updates.set(shift.id, {
-                    posName: assignProf.posName,
-                    code: assignProf.code,
-                    hours: assignProf.hours,
-                    name: assignProf.name,
+                    posName: assignedPos.posName,
+                    code: assignedPos.code,
+                    hours: assignedPos.hours,
+                    name: assignedPos.name,
                     startTime: ts.startTime,
                     endTime: ts.endTime,
                 });
                 rotadosSet.add(block.empId);
             }
-            const blockHrs = block.shifts.length * targetProf.hours;
-            projected[block.empId] = (projected[block.empId] || 0) + blockHrs;
-            bloquesProcesados++;
         }
+        runningHours[block.empId] = (runningHours[block.empId] || 0)
+            + block.shifts.length * assignedPos.hours;
+        bloquesProcesados++;
     }
     const turnosActualizados = updates.size;
     if (turnosActualizados === 0) {
