@@ -15,6 +15,18 @@ export interface RunEquilibrarCronoInput {
     dryRun?: boolean;
 }
 
+/** Un cambio propuesto por Equilibrar en formato listo para pendingChanges del front. */
+export interface EquilibrarProposedChange {
+    empId: string;
+    dateStr: string;        // YYYY-MM-DD en zona AR
+    positionName: string;
+    code: string;
+    name: string;
+    hours: number;
+    startTimeStr: string;   // "HH:MM" en hora local AR
+    endTimeStr: string;     // "HH:MM" en hora local AR
+}
+
 export interface RunEquilibrarCronoOutput {
     ok: boolean;
     empleadosRotados: number;
@@ -24,6 +36,8 @@ export interface RunEquilibrarCronoOutput {
     horasDespues: Record<string, number>; // empId → hs después
     errores: string[];
     dryRun?: boolean;
+    /** Lista de cambios propuestos en formato pendingChanges para el front */
+    proposedChanges?: EquilibrarProposedChange[];
     /** dryRun=true: indica si el plan estaba publicado al momento del preview */
     isPublished?: boolean;
     /** dryRun=false: indica si el plan fue movido a BORRADOR al aplicar los cambios */
@@ -359,6 +373,29 @@ export const runEquilibrarCronoHandler = async (
         }
     }
 
+    // ── 6b. CAMBIOS PROPUESTOS (formato pendingChanges del front) ────────────
+    // Convertimos las timestamps UTC a strings "HH:MM" en hora AR (UTC-3)
+    // para que handleSaveAll del front pueda crear los turnos correctamente.
+    const proposedChanges: EquilibrarProposedChange[] = [];
+    for (const [docId, fields] of updates.entries()) {
+        const original = allTurnos.find(t => t.id === docId);
+        if (!original) continue;
+        const toAR = (ms: number) => {
+            const d = new Date(ms - 3 * 3600000);
+            return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+        };
+        proposedChanges.push({
+            empId:        original.empId,
+            dateStr:      original.dateStr,
+            positionName: fields.posName,
+            code:         fields.code,
+            name:         fields.name,
+            hours:        fields.hours,
+            startTimeStr: toAR(fields.startTime.toMillis()),
+            endTimeStr:   toAR(fields.endTime.toMillis()),
+        });
+    }
+
     // ── 7. ESTADO DE PUBLICACIÓN ────────────────────────────────────────────
     // Verificamos si el plan está publicado en planificacion_estados.
     // Lo hacemos SIEMPRE (dry-run y no-dry) para informar al usuario.
@@ -371,7 +408,7 @@ export const runEquilibrarCronoHandler = async (
 
     if (turnosActualizados === 0) {
         return { ok: true, empleadosRotados: 0, bloquesProcesados, turnosActualizados: 0,
-                 horasAntes, horasDespues: horasAntes, dryRun, isPublished,
+                 horasAntes, horasDespues: horasAntes, dryRun, isPublished, proposedChanges: [],
                  errores: ['Las horas ya están equilibradas — no se realizaron cambios.'] };
     }
 
@@ -387,6 +424,7 @@ export const runEquilibrarCronoHandler = async (
             errores,
             dryRun: true,
             isPublished,
+            proposedChanges,
         };
     }
 
@@ -442,6 +480,7 @@ export const runEquilibrarCronoHandler = async (
         horasAntes,
         horasDespues,
         errores,
+        proposedChanges,
         wasPublished: isPublished,
     };
 

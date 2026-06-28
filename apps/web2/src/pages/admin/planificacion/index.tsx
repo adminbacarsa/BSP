@@ -10357,6 +10357,25 @@ export default function PlanificacionPage() {
                 year={currentDate.getFullYear()}
                 month={currentDate.getMonth() + 1}
                 employees={planningDotacionEmployees}
+                onApplyPending={(changes) => {
+                    const newPending: Record<string, any> = { ...pendingChanges };
+                    for (const c of changes) {
+                        newPending[`${c.empId}_${c.dateStr}`] = {
+                            code:         c.code,
+                            name:         c.name,
+                            hours:        c.hours,
+                            positionName: c.positionName,
+                            startTime:    c.startTimeStr,
+                            endTime:      c.endTimeStr,
+                            isFranco:     false,
+                            isTemp:       true,
+                            swapWith:     null,
+                            swapDate:     null,
+                            comments:     'Equilibrar horas',
+                        };
+                    }
+                    setPendingChanges(newPending);
+                }}
             />
         </DashboardLayout>
     );

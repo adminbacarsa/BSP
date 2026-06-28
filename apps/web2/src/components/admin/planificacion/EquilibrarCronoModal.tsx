@@ -5,6 +5,17 @@ import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
 
+export interface EquilibrarProposedChange {
+    empId: string;
+    dateStr: string;
+    positionName: string;
+    code: string;
+    name: string;
+    hours: number;
+    startTimeStr: string;
+    endTimeStr: string;
+}
+
 interface Props {
     open: boolean;
     onClose: () => void;
@@ -15,6 +26,8 @@ interface Props {
     month: number;
     /** Lista de empleados del objetivo para mostrar nombres */
     employees: { id: string; name?: string; nombre?: string }[];
+    /** Cuando el usuario confirma, recibe los cambios para inyectarlos en pendingChanges */
+    onApplyPending?: (changes: EquilibrarProposedChange[]) => void;
 }
 
 interface EquilibrarOutput {
@@ -26,13 +39,14 @@ interface EquilibrarOutput {
     horasDespues: Record<string, number>;
     errores: string[];
     dryRun?: boolean;
+    proposedChanges?: EquilibrarProposedChange[];
     isPublished?: boolean;
     wasPublished?: boolean;
 }
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-export default function EquilibrarCronoModal({ open, onClose, empresaId, objectiveId, objectiveNombre, year, month, employees }: Props) {
+export default function EquilibrarCronoModal({ open, onClose, empresaId, objectiveId, objectiveNombre, year, month, employees, onApplyPending }: Props) {
     const [running, setRunning]   = useState(false);
     const [preview, setPreview]   = useState<EquilibrarOutput | null>(null);
     const [result, setResult]     = useState<EquilibrarOutput | null>(null);
@@ -55,22 +69,17 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
         }
     };
 
-    const handleApply = async () => {
-        setRunning(true);
-        try {
-            const fn = httpsCallable<object, EquilibrarOutput>(functions, 'runEquilibrarCrono');
-            const res = await fn({ empresaId, objectiveId, year, month, dryRun: false });
-            setPreview(null);
-            setResult(res.data);
-            if (res.data.ok && res.data.turnosActualizados > 0) {
-                toast.success(`${res.data.empleadosRotados} empleados rotados · ${res.data.turnosActualizados} turnos actualizados`);
-            } else if (res.data.errores?.length) {
-                toast.info(res.data.errores[0]);
-            }
-        } catch (e: any) {
-            toast.error(e?.message || 'Error al aplicar.');
-        } finally {
-            setRunning(false);
+    const handleApply = () => {
+        if (!preview?.proposedChanges?.length) return;
+        if (onApplyPending) {
+            // Inyectar en pendingChanges del padre — GUARDAR/DESCARTAR funcionan normalmente
+            onApplyPending(preview.proposedChanges);
+            onClose();
+            toast.success(
+                `${preview.empleadosRotados} empleados rotados · ${preview.proposedChanges.length} cambios pendientes.\n` +
+                `Revisá el cronograma y usá GUARDAR o DESCARTAR.`,
+                { duration: 6000 },
+            );
         }
     };
 
@@ -274,12 +283,11 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                             {preview!.turnosActualizados > 0 && (
                                 <button
                                     type="button"
-                                    disabled={running}
                                     onClick={handleApply}
-                                    className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 flex items-center justify-center gap-2"
+                                    className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center gap-2"
                                 >
-                                    {running ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-                                    {running ? 'Aplicando…' : 'Confirmar y aplicar'}
+                                    <Zap size={16} />
+                                    {'Aplicar como cambios pendientes'}
                                 </button>
                             )}
                             {preview!.turnosActualizados === 0 && (

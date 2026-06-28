@@ -6,6 +6,16 @@ export interface RunEquilibrarCronoInput {
     month: number;
     dryRun?: boolean;
 }
+export interface EquilibrarProposedChange {
+    empId: string;
+    dateStr: string;
+    positionName: string;
+    code: string;
+    name: string;
+    hours: number;
+    startTimeStr: string;
+    endTimeStr: string;
+}
 export interface RunEquilibrarCronoOutput {
     ok: boolean;
     empleadosRotados: number;
@@ -15,6 +25,7 @@ export interface RunEquilibrarCronoOutput {
     horasDespues: Record<string, number>;
     errores: string[];
     dryRun?: boolean;
+    proposedChanges?: EquilibrarProposedChange[];
     isPublished?: boolean;
     wasPublished?: boolean;
 }

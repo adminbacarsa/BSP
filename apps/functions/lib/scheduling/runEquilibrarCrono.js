@@ -242,6 +242,26 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     + (fields.hours - original.hours);
             }
         }
+        const proposedChanges = [];
+        for (const [docId, fields] of updates.entries()) {
+            const original = allTurnos.find(t => t.id === docId);
+            if (!original)
+                continue;
+            const toAR = (ms) => {
+                const d = new Date(ms - 3 * 3600000);
+                return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+            };
+            proposedChanges.push({
+                empId: original.empId,
+                dateStr: original.dateStr,
+                positionName: fields.posName,
+                code: fields.code,
+                name: fields.name,
+                hours: fields.hours,
+                startTimeStr: toAR(fields.startTime.toMillis()),
+                endTimeStr: toAR(fields.endTime.toMillis()),
+            });
+        }
         const planDocId = `${empresaId}_${objectiveId}_${year}_${month}`;
         const planDocIdLegacy = `${objectiveId}_${year}_${month}`;
         const planRef = db().collection('planificacion_estados').doc(planDocId);
@@ -250,7 +270,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
         const isPublished = planSnap.exists || planSnapLegacy.exists;
         if (turnosActualizados === 0) {
             return { ok: true, empleadosRotados: 0, bloquesProcesados, turnosActualizados: 0,
-                horasAntes, horasDespues: horasAntes, dryRun, isPublished,
+                horasAntes, horasDespues: horasAntes, dryRun, isPublished, proposedChanges: [],
                 errores: ['Las horas ya están equilibradas — no se realizaron cambios.'] };
         }
         if (dryRun) {
@@ -264,6 +284,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
                 errores,
                 dryRun: true,
                 isPublished,
+                proposedChanges,
             };
         }
         if (planSnap.exists)
@@ -313,6 +334,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
             horasAntes,
             horasDespues,
             errores,
+            proposedChanges,
             wasPublished: isPublished,
         };
     }
