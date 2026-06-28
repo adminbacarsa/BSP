@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { MapPin, ClipboardList, Navigation, Plus, X, RefreshCw, Trash2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { MapPin, ClipboardList, Navigation, Plus, X, RefreshCw, Trash2, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
@@ -7,6 +7,7 @@ import {
   supervisionFieldService,
   SupervisionVisita,
   ObjetivoConsigna,
+  ConsignaLectura,
 } from '@/services/supervisionFieldService';
 import { fmtTs } from '@/lib/supervision/supervisionUtils';
 import type { SupervisorObjective } from '@/hooks/useSupervisorScope';
@@ -196,16 +197,29 @@ export default function SupervisionMas({
   const [section, setSection] = useState<MasSection>('VISITAS');
   const [visitas, setVisitas] = useState<SupervisionVisita[]>([]);
   const [consignas, setConsignas] = useState<ObjetivoConsigna[]>([]);
+  const [lecturas, setLecturas] = useState<ConsignaLectura[]>([]);
   const [showVisita, setShowVisita] = useState(false);
   const [showConsigna, setShowConsigna] = useState(false);
+  const [expandedConsigna, setExpandedConsigna] = useState<string | null>(null);
 
   useEffect(() => {
     if (!empresaId) return;
     const ids = objectiveIds.length ? objectiveIds : (canViewAllObjectives ? null : []);
     const u1 = supervisionFieldService.subscribeVisitas(empresaId, ids, setVisitas);
     const u2 = supervisionFieldService.subscribeConsignas(empresaId, ids, setConsignas);
-    return () => { u1(); u2(); };
+    const u3 = supervisionFieldService.subscribeConsignaLecturas(ids, setLecturas);
+    return () => { u1(); u2(); u3(); };
   }, [empresaId, objectiveIds, canViewAllObjectives]);
+
+  const lecturasPorConsigna = useMemo(() => {
+    const map = new Map<string, ConsignaLectura[]>();
+    lecturas.forEach(l => {
+      const arr = map.get(l.consignaId) || [];
+      arr.push(l);
+      map.set(l.consignaId, arr);
+    });
+    return map;
+  }, [lecturas]);
 
   const visitasDelMes = visitas.filter(v => {
     const d = v.createdAt?.toDate?.();
@@ -278,7 +292,10 @@ export default function SupervisionMas({
           <div className="space-y-2">
             {consignas.length === 0 ? (
               <p className="text-center text-slate-500 text-sm py-8">Sin consignas activas</p>
-            ) : consignas.map(c => (
+            ) : consignas.map(c => {
+              const lect = c.id ? (lecturasPorConsigna.get(c.id) || []) : [];
+              const open = expandedConsigna === c.id;
+              return (
               <div key={c.id} className="bg-white rounded-2xl border p-4 shadow-sm">
                 <div className="flex justify-between items-start gap-2">
                   <div className="min-w-0 flex-1">
@@ -298,8 +315,38 @@ export default function SupervisionMas({
                     </button>
                   )}
                 </div>
+                <button
+                  type="button"
+                  disabled={lect.length === 0}
+                  onClick={() => setExpandedConsigna(open ? null : (c.id || null))}
+                  className={`mt-3 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-[11px] font-bold border transition-colors ${
+                    lect.length > 0
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      : 'bg-slate-50 border-slate-200 text-slate-400'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle2 size={13} />
+                    {lect.length > 0 ? `Leída por ${lect.length} guardia${lect.length !== 1 ? 's' : ''}` : 'Sin lecturas registradas'}
+                  </span>
+                  {lect.length > 0 && (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+                </button>
+                {open && lect.length > 0 && (
+                  <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+                    {lect
+                      .slice()
+                      .sort((a, b) => (b.readAt?.toMillis?.() ?? 0) - (a.readAt?.toMillis?.() ?? 0))
+                      .map(l => (
+                        <div key={l.id} className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="font-bold text-slate-700 truncate">{l.userName}</span>
+                          <span className="text-slate-400 font-mono shrink-0">{fmtTs(l.readAt)}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

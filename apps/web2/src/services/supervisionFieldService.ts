@@ -56,9 +56,20 @@ export type ObjetivoConsigna = {
   updatedAt?: Timestamp;
 };
 
+export type ConsignaLectura = {
+  id?: string;
+  consignaId: string;
+  objectiveId: string;
+  objectiveName?: string;
+  userUid: string;
+  userName: string;
+  readAt?: Timestamp;
+};
+
 const LIBRO = 'libro_guardia';
 const VISITAS = 'supervision_visitas';
 const CONSIGNAS = 'objetivo_consignas';
+const CONSIGNA_LECTURAS = 'objetivo_consigna_lecturas';
 
 export const supervisionFieldService = {
   subscribeLibroByObjectives(
@@ -197,6 +208,37 @@ export const supervisionFieldService = {
 
   async deactivateConsigna(id: string): Promise<void> {
     await updateDoc(doc(db, CONSIGNAS, id), { status: 'INACTIVE', updatedAt: serverTimestamp() });
+  },
+
+  subscribeConsignaLecturas(
+    objectiveIds: string[] | null,
+    onData: (items: ConsignaLectura[]) => void,
+  ): () => void {
+    if (objectiveIds !== null && !objectiveIds.length) {
+      onData([]);
+      return () => {};
+    }
+    const chunks: string[][] = objectiveIds
+      ? (() => { const c: string[][] = []; for (let i = 0; i < objectiveIds.length; i += 10) c.push(objectiveIds.slice(i, i + 10)); return c; })()
+      : [[]];
+    const unsubs: (() => void)[] = [];
+    const maps = chunks.map(() => new Map<string, ConsignaLectura>());
+    const emit = () => {
+      const merged = new Map<string, ConsignaLectura>();
+      maps.forEach(m => m.forEach((v, k) => merged.set(k, v)));
+      onData(Array.from(merged.values()));
+    };
+    chunks.forEach((ids, idx) => {
+      const q = ids.length
+        ? query(collection(db, CONSIGNA_LECTURAS), where('objectiveId', 'in', ids))
+        : query(collection(db, CONSIGNA_LECTURAS), limit(500));
+      unsubs.push(onSnapshot(q, snap => {
+        maps[idx].clear();
+        snap.docs.forEach(d => maps[idx].set(d.id, { id: d.id, ...d.data() } as ConsignaLectura));
+        emit();
+      }, () => { maps[idx].clear(); emit(); }));
+    });
+    return () => unsubs.forEach(u => u());
   },
 
   async loadObjectivesForEmpresa(empresaId: string): Promise<{ id: string; name: string; clientId: string; clientName: string }[]> {

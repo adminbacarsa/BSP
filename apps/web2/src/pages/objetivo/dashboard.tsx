@@ -3,7 +3,7 @@ import Head from 'next/head';
 import { db, auth, storage } from '@/lib/firebase';
 import {
   collection, query, where, orderBy, onSnapshot,
-  addDoc, deleteDoc, serverTimestamp, getDocs, getDoc, doc, Timestamp
+  addDoc, deleteDoc, serverTimestamp, getDocs, getDoc, doc, Timestamp, setDoc
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -92,6 +92,25 @@ interface ClienteConObjetivos {
   id: string;
   name: string;
   objetivos: ObjetivoInfo[];
+}
+
+interface ObjetivoConsigna {
+  id: string;
+  objectiveId: string;
+  objectiveName?: string;
+  texto: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  creadoPorNombre?: string;
+  createdAt?: any;
+}
+
+interface ConsignaLectura {
+  id: string;
+  consignaId: string;
+  objectiveId: string;
+  userUid: string;
+  userName: string;
+  readAt?: any;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1541,6 +1560,8 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
 }) {
   const [showNueva,  setShowNueva]  = useState(false);
   const [showAcceso, setShowAcceso] = useState(false);
+  const [consignas, setConsignas] = useState<ObjetivoConsigna[]>([]);
+  const [lecturas, setLecturas] = useState<ConsignaLectura[]>([]);
   const listEndRef = useRef<HTMLDivElement>(null);
   const [horaActual, setHoraActual] = useState(() =>
     new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })
@@ -1551,6 +1572,59 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
     ), 30000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, 'objetivo_consignas'),
+      where('objectiveId', '==', objetivo.id),
+      where('status', '==', 'ACTIVE'),
+    );
+    const unsub = onSnapshot(q, snap => {
+      const rows = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as ObjetivoConsigna))
+        .sort((a, b) => {
+          const ta = toDate(a.createdAt)?.getTime() ?? 0;
+          const tb = toDate(b.createdAt)?.getTime() ?? 0;
+          return tb - ta;
+        });
+      setConsignas(rows);
+    }, () => setConsignas([]));
+    return unsub;
+  }, [objetivo.id]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      setLecturas([]);
+      return;
+    }
+    const q = query(
+      collection(db, 'objetivo_consigna_lecturas'),
+      where('objectiveId', '==', objetivo.id),
+      where('userUid', '==', uid),
+    );
+    const unsub = onSnapshot(q, snap => {
+      setLecturas(snap.docs.map(d => ({ id: d.id, ...d.data() } as ConsignaLectura)));
+    }, () => setLecturas([]));
+    return unsub;
+  }, [objetivo.id]);
+
+  const leidasSet = new Set(lecturas.map(l => l.consignaId));
+  const consignasPendientes = consignas.filter(c => !leidasSet.has(c.id));
+
+  const marcarConsignaLeida = async (consigna: ObjetivoConsigna) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const lecturaId = `${consigna.id}_${uid}`;
+    await setDoc(doc(db, 'objetivo_consigna_lecturas', lecturaId), {
+      consignaId: consigna.id,
+      objectiveId: objetivo.id,
+      objectiveName: objetivo.name,
+      userUid: uid,
+      userName: empNombre,
+      readAt: serverTimestamp(),
+    }, { merge: true });
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -1610,6 +1684,57 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
 
       {/* Feed */}
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-28 flex flex-col gap-3">
+        {consignas.length > 0 && (
+          <section className="rounded-2xl border border-violet-200 bg-violet-50 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-violet-100 flex items-center justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-violet-700 flex items-center gap-1.5">
+                  <Lock size={11} /> Consignas vigentes
+                </p>
+                <p className="text-[11px] text-violet-500 font-medium mt-0.5">
+                  {consignasPendientes.length > 0
+                    ? `${consignasPendientes.length} pendiente${consignasPendientes.length !== 1 ? 's' : ''} de lectura`
+                    : 'Todas leídas por este usuario'}
+                </p>
+              </div>
+              <span className="px-2 py-1 rounded-full bg-white text-violet-700 text-[10px] font-black border border-violet-100">
+                {consignas.length}
+              </span>
+            </div>
+            <div className="divide-y divide-violet-100">
+              {consignas.map(consigna => {
+                const leida = leidasSet.has(consigna.id);
+                return (
+                  <article key={consigna.id} className="px-4 py-3 bg-white/55">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-slate-800 whitespace-pre-wrap">{consigna.texto}</p>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          {consigna.creadoPorNombre ? `Emitida por ${consigna.creadoPorNombre}` : 'Consigna operativa'}
+                          {consigna.createdAt ? ` · ${fmtEntryDate(consigna.createdAt)} ${fmtEntryTime(consigna.createdAt)}` : ''}
+                        </p>
+                      </div>
+                      {leida ? (
+                        <span className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-black border border-emerald-200">
+                          <CheckCircle2 size={11} /> Leída
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => marcarConsignaLeida(consigna)}
+                          className="shrink-0 px-3 py-2 rounded-xl bg-violet-600 text-white text-[10px] font-black uppercase shadow-sm active:scale-95"
+                        >
+                          Leído
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {entries.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mb-3">
