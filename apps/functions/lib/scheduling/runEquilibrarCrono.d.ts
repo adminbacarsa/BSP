@@ -4,6 +4,7 @@ export interface RunEquilibrarCronoInput {
     objectiveId: string;
     year: number;
     month: number;
+    dryRun?: boolean;
 }
 export interface RunEquilibrarCronoOutput {
     ok: boolean;
@@ -13,6 +14,7 @@ export interface RunEquilibrarCronoOutput {
     horasAntes: Record<string, number>;
     horasDespues: Record<string, number>;
     errores: string[];
+    dryRun?: boolean;
 }
 export declare const runEquilibrarCronoHandler: (data: RunEquilibrarCronoInput, context: functions.https.CallableContext) => Promise<RunEquilibrarCronoOutput>;
 export declare const runEquilibrarCrono: functions.HttpsFunction & functions.Runnable<any>;

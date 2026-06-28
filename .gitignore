@@ -61,6 +61,19 @@ scripts/**/*.csr
 .env.development.local
 .env.test.local
 .env.production.local
+*.env.local.bak*
+*.env.local.prod-tmp
+*.env.local.emu-bak
+
+# --- Artefactos locales de deploy / diagnósticos ---
+.firebase/
+informe-directorio-*/
+scripts/_tmp-*
+scripts/generar-informe-directorio-*.py
+apps/functions/scripts/test-*.mjs
+apps/functions/scripts/fix-*.js
+apps/web2/deploy-prod.bat
+apps/web2/cap
 
 # --- Editor y Sistema ---
 .vscode/*
