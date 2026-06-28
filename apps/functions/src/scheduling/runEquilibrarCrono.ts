@@ -1,6 +1,6 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
-import { Timestamp, getFirestore } from 'firebase-admin/firestore';
+import { Timestamp, getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 const db = () => getFirestore();
 
@@ -23,8 +23,11 @@ export interface RunEquilibrarCronoOutput {
     horasAntes: Record<string, number>;   // empId → hs antes
     horasDespues: Record<string, number>; // empId → hs después
     errores: string[];
-    /** Solo presente en dryRun=true: lista de cambios propuestos para confirmar. */
     dryRun?: boolean;
+    /** dryRun=true: indica si el plan estaba publicado al momento del preview */
+    isPublished?: boolean;
+    /** dryRun=false: indica si el plan fue movido a BORRADOR al aplicar los cambios */
+    wasPublished?: boolean;
 }
 
 // ── TIPOS INTERNOS ───────────────────────────────────────────────────────────
@@ -195,7 +198,6 @@ export const runEquilibrarCronoHandler = async (
     // Derivar el perfil típico de cada posición desde los turnos existentes.
     // Se usa el PRIMER turno de trabajo de cada posición como plantilla de horario.
     const posProfiles: Record<string, PosProfile> = {};
-    const posQtyByDay: Record<string, Record<string, Set<string>>> = {};
 
     for (const t of allTurnos) {
         if (t.isFranco || t.isAbsence || !t.posName) continue;
@@ -215,16 +217,6 @@ export const runEquilibrarCronoHandler = async (
                 endNextDay,
             };
         }
-
-        // Calcular qty máximo observado por día
-        if (!posQtyByDay[t.posName]) posQtyByDay[t.posName] = {};
-        if (!posQtyByDay[t.posName][t.dateStr]) posQtyByDay[t.posName][t.dateStr] = new Set();
-        posQtyByDay[t.posName][t.dateStr].add(t.empId);
-    }
-
-    const posQty: Record<string, number> = {};
-    for (const [posName, byDay] of Object.entries(posQtyByDay)) {
-        posQty[posName] = Math.max(...Object.values(byDay).map(s => s.size));
     }
 
     const positions = Object.values(posProfiles);
@@ -275,95 +267,84 @@ export const runEquilibrarCronoHandler = async (
                  horasAntes, horasDespues: horasAntes, errores: ['No se detectaron bloques de trabajo.'] };
     }
 
-    // ── 5. ASIGNACIÓN GREEDY GLOBAL ─────────────────────────────────────────
-    // Greedy con cola de prioridad: el bloque cuyo empleado tiene MENOS horas
-    // acumuladas hasta ese momento recibe la posición más pesada disponible.
-    // Esto garantiza rotación cruzada entre subgrupos distintos del ciclo 6+2.
-    //
-    // Los "slots" por posición/día se inicializan desde la distribución actual
-    // para preservar la cobertura del objetivo (misma cantidad de personas
-    // por posición cada día).
-
-    // Slots disponibles: cuántos empleados pueden estar en cada posición por día
-    const slotsAvail: Record<string, Record<string, number>> = {};
-    for (const t of allTurnos) {
-        if (t.isFranco || t.isAbsence || !t.posName) continue;
-        if (!slotsAvail[t.posName]) slotsAvail[t.posName] = {};
-        slotsAvail[t.posName][t.dateStr] = (slotsAvail[t.posName][t.dateStr] || 0) + 1;
-    }
+    // ── 5. ASIGNACIÓN GREEDY POR GRUPO DE RANGO ─────────────────────────────────
+    // Agrupamos los bloques por (startDate, endDate) exacto. Dentro de cada grupo
+    // TODOS los bloques tienen el mismo rango de fechas, por lo que intercambiar
+    // posiciones entre ellos nunca crea huecos de cobertura.
+    // El contador de horas (runningHours) es GLOBAL: la primera posición pesada de
+    // cada grupo va al empleado con menos horas acumuladas hasta ese momento.
 
     // Posiciones ordenadas por horas DESC (más pesada primero)
     const sortedPos = [...positions].sort((a, b) => b.hours - a.hours);
 
-    const blockQueue = [...allBlocks];
     const updates: Map<string, { posName: string; code: string; hours: number; name: string; startTime: Timestamp; endTime: Timestamp }> = new Map();
     const rotadosSet = new Set<string>();
     let bloquesProcesados = 0;
-    // Horas acumuladas por empleado en ESTA pasada (arranca en 0, no en horasAntes)
     const runningHours: Record<string, number> = {};
 
-    while (blockQueue.length > 0) {
-        // Seleccionar el bloque del empleado con menos horas acumuladas
-        blockQueue.sort((a, b) => {
+    // Agrupar bloques por (startDate, endDate)
+    const blocksByRange: Record<string, Block[]> = {};
+    for (const block of allBlocks) {
+        const endDate = block.shifts[block.shifts.length - 1].dateStr;
+        const key = `${block.startDate}__${endDate}`;
+        if (!blocksByRange[key]) blocksByRange[key] = [];
+        blocksByRange[key].push(block);
+    }
+
+    // Procesar grupos en orden cronológico
+    for (const key of Object.keys(blocksByRange).sort()) {
+        const group = blocksByRange[key];
+
+        // Ordenar empleados del grupo: menos horas acumuladas primero, empId como desempate
+        group.sort((a, b) => {
             const ha = runningHours[a.empId] || 0;
             const hb = runningHours[b.empId] || 0;
-            return ha !== hb ? ha - hb : a.startDate.localeCompare(b.startDate);
+            return ha !== hb ? ha - hb : a.empId.localeCompare(b.empId);
         });
-        const block = blockQueue.shift()!;
-        const blockDates = block.shifts.map(s => s.dateStr);
 
-        // Buscar la posición más pesada que tenga slots en TODOS los días del bloque
-        let assignedPos: PosProfile | null = null;
-        for (const pos of sortedPos) {
-            if (blockDates.every(d => (slotsAvail[pos.posName]?.[d] ?? 0) > 0)) {
-                assignedPos = pos;
-                break;
-            }
+        // Pool de posiciones del grupo (multiset de posNames)
+        const groupPool: Record<string, number> = {};
+        for (const block of group) {
+            const origPos = block.shifts[0]?.posName;
+            if (origPos) groupPool[origPos] = (groupPool[origPos] || 0) + 1;
         }
 
-        // Fallback: si ninguna tiene slots en todos los días, tomar la más liviana disponible
-        if (!assignedPos) {
-            for (let pi = sortedPos.length - 1; pi >= 0; pi--) {
-                if (blockDates.every(d => (slotsAvail[sortedPos[pi].posName]?.[d] ?? 0) > 0)) {
-                    assignedPos = sortedPos[pi];
+        for (const block of group) {
+            let assigned: PosProfile | null = null;
+            for (const pos of sortedPos) {
+                if ((groupPool[pos.posName] || 0) > 0) {
+                    assigned = pos;
+                    groupPool[pos.posName]--;
                     break;
                 }
             }
-        }
 
-        if (!assignedPos) {
-            // Sin slots disponibles — preservar posición actual sin consumir slot
-            const orig = posProfiles[block.shifts[0]?.posName];
-            if (orig) {
-                runningHours[block.empId] = (runningHours[block.empId] || 0)
-                    + block.shifts.length * orig.hours;
+            if (!assigned) {
+                const origPos = block.shifts[0]?.posName;
+                const orig = origPos ? posProfiles[origPos] : null;
+                if (orig) runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * orig.hours;
+                bloquesProcesados++;
+                continue;
             }
+
+            for (const shift of block.shifts) {
+                if (shift.posName !== assigned.posName) {
+                    const ts = rebuildTs(shift.dateStr, assigned);
+                    updates.set(shift.id, {
+                        posName:   assigned.posName,
+                        code:      assigned.code,
+                        hours:     assigned.hours,
+                        name:      assigned.name,
+                        startTime: ts.startTime,
+                        endTime:   ts.endTime,
+                    });
+                    rotadosSet.add(block.empId);
+                }
+            }
+
+            runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * assigned.hours;
             bloquesProcesados++;
-            continue;
         }
-
-        // Consumir slots y registrar cambios
-        for (const shift of block.shifts) {
-            if (slotsAvail[assignedPos.posName]?.[shift.dateStr] !== undefined)
-                slotsAvail[assignedPos.posName][shift.dateStr]--;
-
-            if (shift.posName !== assignedPos.posName) {
-                const ts = rebuildTs(shift.dateStr, assignedPos);
-                updates.set(shift.id, {
-                    posName:   assignedPos.posName,
-                    code:      assignedPos.code,
-                    hours:     assignedPos.hours,
-                    name:      assignedPos.name,
-                    startTime: ts.startTime,
-                    endTime:   ts.endTime,
-                });
-                rotadosSet.add(block.empId);
-            }
-        }
-
-        runningHours[block.empId] = (runningHours[block.empId] || 0)
-            + block.shifts.length * assignedPos.hours;
-        bloquesProcesados++;
     }
 
     const turnosActualizados = updates.size;
@@ -378,9 +359,19 @@ export const runEquilibrarCronoHandler = async (
         }
     }
 
+    // ── 7. ESTADO DE PUBLICACIÓN ────────────────────────────────────────────
+    // Verificamos si el plan está publicado en planificacion_estados.
+    // Lo hacemos SIEMPRE (dry-run y no-dry) para informar al usuario.
+    const planDocId       = `${empresaId}_${objectiveId}_${year}_${month}`;
+    const planDocIdLegacy = `${objectiveId}_${year}_${month}`;
+    const planRef         = db().collection('planificacion_estados').doc(planDocId);
+    const planRefLegacy   = db().collection('planificacion_estados').doc(planDocIdLegacy);
+    const [planSnap, planSnapLegacy] = await Promise.all([planRef.get(), planRefLegacy.get()]);
+    const isPublished = planSnap.exists || planSnapLegacy.exists;
+
     if (turnosActualizados === 0) {
         return { ok: true, empleadosRotados: 0, bloquesProcesados, turnosActualizados: 0,
-                 horasAntes, horasDespues: horasAntes, dryRun,
+                 horasAntes, horasDespues: horasAntes, dryRun, isPublished,
                  errores: ['Las horas ya están equilibradas — no se realizaron cambios.'] };
     }
 
@@ -395,10 +386,16 @@ export const runEquilibrarCronoHandler = async (
             horasDespues,
             errores,
             dryRun: true,
+            isPublished,
         };
     }
 
-    // ── 7. BATCH WRITE (500 ops max por lote) ───────────────────────────────
+    // ── 8. MODO BORRADOR: despublicar si estaba publicado ───────────────────
+    // Si el plan estaba publicado, lo movemos a BORRADOR antes de aplicar cambios.
+    if (planSnap.exists)       await planRef.delete();
+    if (planSnapLegacy.exists) await planRefLegacy.delete();
+
+    // ── 9. BATCH WRITE (400 ops max por lote) ───────────────────────────────
     const entries = Array.from(updates.entries());
     const BATCH_MAX = 400;
     for (let i = 0; i < entries.length; i += BATCH_MAX) {
@@ -416,6 +413,27 @@ export const runEquilibrarCronoHandler = async (
         await batch.commit();
     }
 
+    // ── 10. HISTORIAL DE ACTIVIDAD ──────────────────────────────────────────
+    try {
+        await db().collection('audit_logs').add({
+            action:     'EQUILIBRAR_CRONOGRAMA',
+            module:     'PLANIFICADOR',
+            label:      'Equilibrar horas',
+            detail:     `${rotadosSet.size} emp. rotados · ${turnosActualizados} turnos actualizados${isPublished ? ' · plan movido a BORRADOR' : ''}`,
+            empresaId,
+            objectiveId,
+            year,
+            month,
+            actor:      context.auth!.token?.name || context.auth!.token?.email || context.auth!.uid,
+            actorUid:   context.auth!.uid,
+            actorEmail: context.auth!.token?.email || '',
+            actorName:  context.auth!.token?.name  || '',
+            timestamp:  FieldValue.serverTimestamp(),
+        });
+    } catch (_logErr) {
+        // No bloquear la respuesta si falla el log
+    }
+
     return {
         ok: true,
         empleadosRotados:   rotadosSet.size,
@@ -424,6 +442,7 @@ export const runEquilibrarCronoHandler = async (
         horasAntes,
         horasDespues,
         errores,
+        wasPublished: isPublished,
     };
 
     } catch (e: any) {

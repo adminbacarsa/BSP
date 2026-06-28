@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, BarChart2, CheckCircle2, AlertTriangle, Eye, Zap } from 'lucide-react';
+import { X, Loader2, BarChart2, CheckCircle2, AlertTriangle, Eye, Zap, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
@@ -26,6 +26,8 @@ interface EquilibrarOutput {
     horasDespues: Record<string, number>;
     errores: string[];
     dryRun?: boolean;
+    isPublished?: boolean;
+    wasPublished?: boolean;
 }
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -144,6 +146,26 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                                 <p className="font-black text-[12px] text-amber-800">Vista previa — sin cambios aplicados</p>
                                 <p className="text-[11px] text-amber-700">Revisá el impacto en horas y confirmá para guardar los cambios.</p>
                             </div>
+                        </div>
+                    )}
+
+                    {/* Aviso plan publicado */}
+                    {isPreview && preview!.isPublished && (
+                        <div className="rounded-xl border border-orange-300 bg-orange-50 px-3 py-2 flex items-start gap-2">
+                            <BookOpen size={14} className="text-orange-500 mt-0.5 shrink-0" />
+                            <p className="text-[11px] text-orange-800">
+                                <span className="font-black">El cronograma está publicado.</span> Al confirmar, se moverá automáticamente a <span className="font-black">BORRADOR</span> para que puedas revisar y volver a publicar.
+                            </p>
+                        </div>
+                    )}
+
+                    {/* Aviso plan movido a BORRADOR tras aplicar */}
+                    {result && result.wasPublished && (
+                        <div className="rounded-xl border border-blue-300 bg-blue-50 px-3 py-2 flex items-start gap-2">
+                            <BookOpen size={14} className="text-blue-500 mt-0.5 shrink-0" />
+                            <p className="text-[11px] text-blue-800">
+                                <span className="font-black">Plan movido a BORRADOR.</span> Los cambios se aplicaron. Revisá el cronograma y volvé a publicar cuando esté listo.
+                            </p>
                         </div>
                     )}
 

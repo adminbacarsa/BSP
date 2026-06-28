@@ -111,7 +111,6 @@ const runEquilibrarCronoHandler = async (data, context) => {
                 horasAntes: {}, horasDespues: {}, errores: [`No se encontraron turnos para este objetivo/mes. ${diag}`] };
         }
         const posProfiles = {};
-        const posQtyByDay = {};
         for (const t of allTurnos) {
             if (t.isFranco || t.isAbsence || !t.posName)
                 continue;
@@ -130,15 +129,6 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     endNextDay,
                 };
             }
-            if (!posQtyByDay[t.posName])
-                posQtyByDay[t.posName] = {};
-            if (!posQtyByDay[t.posName][t.dateStr])
-                posQtyByDay[t.posName][t.dateStr] = new Set();
-            posQtyByDay[t.posName][t.dateStr].add(t.empId);
-        }
-        const posQty = {};
-        for (const [posName, byDay] of Object.entries(posQtyByDay)) {
-            posQty[posName] = Math.max(...Object.values(byDay).map(s => s.size));
         }
         const positions = Object.values(posProfiles);
         if (positions.length < 2) {
@@ -182,71 +172,66 @@ const runEquilibrarCronoHandler = async (data, context) => {
             return { ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
                 horasAntes, horasDespues: horasAntes, errores: ['No se detectaron bloques de trabajo.'] };
         }
-        const slotsAvail = {};
-        for (const t of allTurnos) {
-            if (t.isFranco || t.isAbsence || !t.posName)
-                continue;
-            if (!slotsAvail[t.posName])
-                slotsAvail[t.posName] = {};
-            slotsAvail[t.posName][t.dateStr] = (slotsAvail[t.posName][t.dateStr] || 0) + 1;
-        }
         const sortedPos = [...positions].sort((a, b) => b.hours - a.hours);
-        const blockQueue = [...allBlocks];
         const updates = new Map();
         const rotadosSet = new Set();
         let bloquesProcesados = 0;
         const runningHours = {};
-        while (blockQueue.length > 0) {
-            blockQueue.sort((a, b) => {
+        const blocksByRange = {};
+        for (const block of allBlocks) {
+            const endDate = block.shifts[block.shifts.length - 1].dateStr;
+            const key = `${block.startDate}__${endDate}`;
+            if (!blocksByRange[key])
+                blocksByRange[key] = [];
+            blocksByRange[key].push(block);
+        }
+        for (const key of Object.keys(blocksByRange).sort()) {
+            const group = blocksByRange[key];
+            group.sort((a, b) => {
                 const ha = runningHours[a.empId] || 0;
                 const hb = runningHours[b.empId] || 0;
-                return ha !== hb ? ha - hb : a.startDate.localeCompare(b.startDate);
+                return ha !== hb ? ha - hb : a.empId.localeCompare(b.empId);
             });
-            const block = blockQueue.shift();
-            const blockDates = block.shifts.map(s => s.dateStr);
-            let assignedPos = null;
-            for (const pos of sortedPos) {
-                if (blockDates.every(d => (slotsAvail[pos.posName]?.[d] ?? 0) > 0)) {
-                    assignedPos = pos;
-                    break;
-                }
+            const groupPool = {};
+            for (const block of group) {
+                const origPos = block.shifts[0]?.posName;
+                if (origPos)
+                    groupPool[origPos] = (groupPool[origPos] || 0) + 1;
             }
-            if (!assignedPos) {
-                for (let pi = sortedPos.length - 1; pi >= 0; pi--) {
-                    if (blockDates.every(d => (slotsAvail[sortedPos[pi].posName]?.[d] ?? 0) > 0)) {
-                        assignedPos = sortedPos[pi];
+            for (const block of group) {
+                let assigned = null;
+                for (const pos of sortedPos) {
+                    if ((groupPool[pos.posName] || 0) > 0) {
+                        assigned = pos;
+                        groupPool[pos.posName]--;
                         break;
                     }
                 }
-            }
-            if (!assignedPos) {
-                const orig = posProfiles[block.shifts[0]?.posName];
-                if (orig) {
-                    runningHours[block.empId] = (runningHours[block.empId] || 0)
-                        + block.shifts.length * orig.hours;
+                if (!assigned) {
+                    const origPos = block.shifts[0]?.posName;
+                    const orig = origPos ? posProfiles[origPos] : null;
+                    if (orig)
+                        runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * orig.hours;
+                    bloquesProcesados++;
+                    continue;
                 }
+                for (const shift of block.shifts) {
+                    if (shift.posName !== assigned.posName) {
+                        const ts = rebuildTs(shift.dateStr, assigned);
+                        updates.set(shift.id, {
+                            posName: assigned.posName,
+                            code: assigned.code,
+                            hours: assigned.hours,
+                            name: assigned.name,
+                            startTime: ts.startTime,
+                            endTime: ts.endTime,
+                        });
+                        rotadosSet.add(block.empId);
+                    }
+                }
+                runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * assigned.hours;
                 bloquesProcesados++;
-                continue;
             }
-            for (const shift of block.shifts) {
-                if (slotsAvail[assignedPos.posName]?.[shift.dateStr] !== undefined)
-                    slotsAvail[assignedPos.posName][shift.dateStr]--;
-                if (shift.posName !== assignedPos.posName) {
-                    const ts = rebuildTs(shift.dateStr, assignedPos);
-                    updates.set(shift.id, {
-                        posName: assignedPos.posName,
-                        code: assignedPos.code,
-                        hours: assignedPos.hours,
-                        name: assignedPos.name,
-                        startTime: ts.startTime,
-                        endTime: ts.endTime,
-                    });
-                    rotadosSet.add(block.empId);
-                }
-            }
-            runningHours[block.empId] = (runningHours[block.empId] || 0)
-                + block.shifts.length * assignedPos.hours;
-            bloquesProcesados++;
         }
         const turnosActualizados = updates.size;
         const horasDespues = { ...horasAntes };
@@ -257,9 +242,15 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     + (fields.hours - original.hours);
             }
         }
+        const planDocId = `${empresaId}_${objectiveId}_${year}_${month}`;
+        const planDocIdLegacy = `${objectiveId}_${year}_${month}`;
+        const planRef = db().collection('planificacion_estados').doc(planDocId);
+        const planRefLegacy = db().collection('planificacion_estados').doc(planDocIdLegacy);
+        const [planSnap, planSnapLegacy] = await Promise.all([planRef.get(), planRefLegacy.get()]);
+        const isPublished = planSnap.exists || planSnapLegacy.exists;
         if (turnosActualizados === 0) {
             return { ok: true, empleadosRotados: 0, bloquesProcesados, turnosActualizados: 0,
-                horasAntes, horasDespues: horasAntes, dryRun,
+                horasAntes, horasDespues: horasAntes, dryRun, isPublished,
                 errores: ['Las horas ya están equilibradas — no se realizaron cambios.'] };
         }
         if (dryRun) {
@@ -272,8 +263,13 @@ const runEquilibrarCronoHandler = async (data, context) => {
                 horasDespues,
                 errores,
                 dryRun: true,
+                isPublished,
             };
         }
+        if (planSnap.exists)
+            await planRef.delete();
+        if (planSnapLegacy.exists)
+            await planRefLegacy.delete();
         const entries = Array.from(updates.entries());
         const BATCH_MAX = 400;
         for (let i = 0; i < entries.length; i += BATCH_MAX) {
@@ -290,6 +286,25 @@ const runEquilibrarCronoHandler = async (data, context) => {
             }
             await batch.commit();
         }
+        try {
+            await db().collection('audit_logs').add({
+                action: 'EQUILIBRAR_CRONOGRAMA',
+                module: 'PLANIFICADOR',
+                label: 'Equilibrar horas',
+                detail: `${rotadosSet.size} emp. rotados · ${turnosActualizados} turnos actualizados${isPublished ? ' · plan movido a BORRADOR' : ''}`,
+                empresaId,
+                objectiveId,
+                year,
+                month,
+                actor: context.auth.token?.name || context.auth.token?.email || context.auth.uid,
+                actorUid: context.auth.uid,
+                actorEmail: context.auth.token?.email || '',
+                actorName: context.auth.token?.name || '',
+                timestamp: firestore_1.FieldValue.serverTimestamp(),
+            });
+        }
+        catch (_logErr) {
+        }
         return {
             ok: true,
             empleadosRotados: rotadosSet.size,
@@ -298,6 +313,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
             horasAntes,
             horasDespues,
             errores,
+            wasPublished: isPublished,
         };
     }
     catch (e) {
