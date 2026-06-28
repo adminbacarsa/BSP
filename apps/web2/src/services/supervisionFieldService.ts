@@ -38,6 +38,13 @@ export type SupervisionVisita = {
   lat?: number;
   lng?: number;
   imageUrl?: string;
+  resultado?: 'OK' | 'OBSERVADO' | 'CRITICO';
+  accionRequerida?: string;
+  checklist?: {
+    key: string;
+    label: string;
+    estado: 'OK' | 'OBSERVADO' | 'NO_APLICA';
+  }[];
   createdAt?: Timestamp;
 };
 

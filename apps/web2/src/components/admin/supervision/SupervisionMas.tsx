@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { MapPin, ClipboardList, Navigation, Plus, X, RefreshCw, Trash2, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
+import { MapPin, ClipboardList, Navigation, Plus, X, RefreshCw, Trash2, CheckCircle2, ChevronDown, ChevronUp, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
@@ -13,6 +13,23 @@ import { fmtTs } from '@/lib/supervision/supervisionUtils';
 import type { SupervisorObjective } from '@/hooks/useSupervisorScope';
 
 type MasSection = 'VISITAS' | 'CONSIGNAS';
+
+type ChecklistEstado = 'OK' | 'OBSERVADO' | 'NO_APLICA';
+
+const VISITA_CHECKLIST = [
+  { key: 'guardia_puesto', label: 'Guardia en puesto', critico: true },
+  { key: 'uniforme_presentacion', label: 'Uniforme y presentación', critico: false },
+  { key: 'libro_guardia', label: 'Libro de guardia al día', critico: false },
+  { key: 'consignas', label: 'Consignas conocidas', critico: true },
+  { key: 'perimetro_accesos', label: 'Perímetro y accesos', critico: true },
+  { key: 'comunicaciones', label: 'Comunicación operativa', critico: true },
+] as const;
+
+const RESULTADO_STYLES = {
+  OK: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+  OBSERVADO: 'bg-amber-50 border-amber-200 text-amber-700',
+  CRITICO: 'bg-rose-50 border-rose-200 text-rose-700',
+} as const;
 
 function VisitaSheet({
   empresaId,
@@ -29,6 +46,10 @@ function VisitaSheet({
 }) {
   const [objectiveId, setObjectiveId] = useState('');
   const [obs, setObs] = useState('');
+  const [accionRequerida, setAccionRequerida] = useState('');
+  const [checklist, setChecklist] = useState<Record<string, ChecklistEstado>>(() => (
+    VISITA_CHECKLIST.reduce((acc, item) => ({ ...acc, [item.key]: 'OK' }), {} as Record<string, ChecklistEstado>)
+  ));
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -47,8 +68,23 @@ function VisitaSheet({
 
   const save = async () => {
     const obj = objectives.find(o => o.id === objectiveId);
-    if (!obj || !obs.trim()) {
-      toast.error('Completá objetivo y observaciones');
+    const items = VISITA_CHECKLIST.map(item => ({
+      key: item.key,
+      label: item.label,
+      estado: checklist[item.key] || 'OK',
+    }));
+    const observados = VISITA_CHECKLIST.filter(item => checklist[item.key] === 'OBSERVADO');
+    const resultado = observados.some(item => item.critico)
+      ? 'CRITICO'
+      : observados.length > 0
+        ? 'OBSERVADO'
+        : 'OK';
+    if (!obj) {
+      toast.error('Completá el objetivo');
+      return;
+    }
+    if (resultado !== 'OK' && !accionRequerida.trim()) {
+      toast.error('Indicá acción requerida para las observaciones');
       return;
     }
     setSaving(true);
@@ -68,7 +104,10 @@ function VisitaSheet({
         clientName: obj.clientName,
         supervisorUid: userUid,
         supervisorNombre: userName,
-        observaciones: obs.trim(),
+        observaciones: obs.trim() || (resultado === 'OK' ? 'Ronda sin observaciones.' : 'Ronda con observaciones.'),
+        resultado,
+        checklist: items,
+        ...(accionRequerida.trim() && { accionRequerida: accionRequerida.trim() }),
         ...(coords && { lat: coords.lat, lng: coords.lng }),
         ...(imageUrl && { imageUrl }),
       });
@@ -92,7 +131,39 @@ function VisitaSheet({
           <option value="">— Objetivo —</option>
           {objectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
         </select>
-        <textarea value={obs} onChange={e => setObs(e.target.value)} rows={4} placeholder="Observaciones de la ronda/visita…" className="w-full px-3 py-3 rounded-2xl border text-sm resize-none bg-slate-50" />
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-black uppercase text-slate-500">Checklist de ronda</p>
+            <span className="text-[10px] font-bold text-slate-400">OK / Obs / N/A</span>
+          </div>
+          {VISITA_CHECKLIST.map(item => (
+            <div key={item.key} className="rounded-xl bg-white border border-slate-100 p-2">
+              <p className="text-xs font-black text-slate-700 mb-2">{item.label}</p>
+              <div className="grid grid-cols-3 gap-1">
+                {(['OK', 'OBSERVADO', 'NO_APLICA'] as const).map(value => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setChecklist(prev => ({ ...prev, [item.key]: value }))}
+                    className={`py-2 rounded-xl text-[10px] font-black border transition-colors ${
+                      checklist[item.key] === value
+                        ? value === 'OK'
+                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                          : value === 'OBSERVADO'
+                            ? 'bg-amber-500 border-amber-500 text-white'
+                            : 'bg-slate-700 border-slate-700 text-white'
+                        : 'bg-white border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    {value === 'NO_APLICA' ? 'N/A' : value === 'OBSERVADO' ? 'Obs' : 'OK'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <textarea value={obs} onChange={e => setObs(e.target.value)} rows={3} placeholder="Observaciones generales de la ronda/visita…" className="w-full px-3 py-3 rounded-2xl border text-sm resize-none bg-slate-50" />
+        <textarea value={accionRequerida} onChange={e => setAccionRequerida(e.target.value)} rows={2} placeholder="Acción requerida si marcaste observaciones…" className="w-full px-3 py-3 rounded-2xl border text-sm resize-none bg-slate-50" />
         <div className="flex gap-2">
           <button type="button" onClick={captureGeo} className={`flex-1 py-3 rounded-2xl text-xs font-black uppercase border flex items-center justify-center gap-1 ${coords ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
             <MapPin size={14} /> {coords ? 'GPS OK' : 'Tomar GPS'}
@@ -273,7 +344,38 @@ export default function SupervisionMas({
                   <span className="text-[9px] text-slate-400 font-mono">{fmtTs(v.createdAt)}</span>
                 </div>
                 <p className="text-xs text-slate-500 mb-2">{v.clientName}</p>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-black ${RESULTADO_STYLES[v.resultado || 'OK']}`}>
+                    {(v.resultado || 'OK') === 'OK' ? <ShieldCheck size={12} /> : <AlertTriangle size={12} />}
+                    {v.resultado || 'OK'}
+                  </span>
+                  {v.checklist && (
+                    <span className="text-[10px] font-bold text-slate-400">
+                      {v.checklist.filter(i => i.estado === 'OBSERVADO').length} observaciones
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{v.observaciones}</p>
+                {v.accionRequerida && (
+                  <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-[10px] font-black uppercase text-amber-700">Acción requerida</p>
+                    <p className="text-xs text-amber-800">{v.accionRequerida}</p>
+                  </div>
+                )}
+                {v.checklist && v.checklist.some(i => i.estado !== 'OK') && (
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
+                    {v.checklist.filter(i => i.estado !== 'OK').map(item => (
+                      <div key={item.key} className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 border border-slate-100 px-2 py-1.5">
+                        <span className="text-[11px] font-bold text-slate-600 truncate">{item.label}</span>
+                        <span className={`text-[9px] font-black rounded-full px-2 py-0.5 ${
+                          item.estado === 'OBSERVADO' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'
+                        }`}>
+                          {item.estado === 'NO_APLICA' ? 'N/A' : item.estado}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {v.lat != null && v.lng != null && (
                   <p className="text-[10px] text-indigo-600 mt-2 flex items-center gap-1"><MapPin size={10} /> GPS registrado</p>
                 )}
