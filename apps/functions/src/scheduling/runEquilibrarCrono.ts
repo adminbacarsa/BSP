@@ -11,6 +11,8 @@ export interface RunEquilibrarCronoInput {
     objectiveId: string;
     year: number;   // ej. 2026
     month: number;  // 1–12
+    /** Si true, calcula cambios pero NO los escribe en Firestore. */
+    dryRun?: boolean;
 }
 
 export interface RunEquilibrarCronoOutput {
@@ -21,6 +23,8 @@ export interface RunEquilibrarCronoOutput {
     horasAntes: Record<string, number>;   // empId → hs antes
     horasDespues: Record<string, number>; // empId → hs después
     errores: string[];
+    /** Solo presente en dryRun=true: lista de cambios propuestos para confirmar. */
+    dryRun?: boolean;
 }
 
 // ── TIPOS INTERNOS ───────────────────────────────────────────────────────────
@@ -116,7 +120,7 @@ export const runEquilibrarCronoHandler = async (
         throw new functions.https.HttpsError('unauthenticated', 'Se requiere autenticación.');
     }
 
-    const { empresaId, objectiveId, year, month } = data;
+    const { empresaId, objectiveId, year, month, dryRun = false } = data;
     if (!empresaId || !objectiveId || !year || !month || month < 1 || month > 12) {
         throw new functions.https.HttpsError('invalid-argument', 'empresaId, objectiveId, year y month (1–12) son requeridos.');
     }
@@ -363,13 +367,38 @@ export const runEquilibrarCronoHandler = async (
     }
 
     const turnosActualizados = updates.size;
+
+    // ── 6. HORAS DESPUÉS (siempre, incluso en dry-run) ──────────────────────
+    const horasDespues: Record<string, number> = { ...horasAntes };
+    for (const [docId, fields] of updates.entries()) {
+        const original = allTurnos.find(t => t.id === docId);
+        if (original && fields.hours !== undefined) {
+            horasDespues[original.empId] = (horasDespues[original.empId] || 0)
+                + (fields.hours! - original.hours);
+        }
+    }
+
     if (turnosActualizados === 0) {
         return { ok: true, empleadosRotados: 0, bloquesProcesados, turnosActualizados: 0,
-                 horasAntes, horasDespues: horasAntes,
+                 horasAntes, horasDespues: horasAntes, dryRun,
                  errores: ['Las horas ya están equilibradas — no se realizaron cambios.'] };
     }
 
-    // ── 6. BATCH WRITE (500 ops max por lote) ───────────────────────────────
+    // En modo dry-run devolvemos el preview sin escribir en Firestore
+    if (dryRun) {
+        return {
+            ok: true,
+            empleadosRotados: rotadosSet.size,
+            bloquesProcesados,
+            turnosActualizados,
+            horasAntes,
+            horasDespues,
+            errores,
+            dryRun: true,
+        };
+    }
+
+    // ── 7. BATCH WRITE (500 ops max por lote) ───────────────────────────────
     const entries = Array.from(updates.entries());
     const BATCH_MAX = 400;
     for (let i = 0; i < entries.length; i += BATCH_MAX) {
@@ -385,16 +414,6 @@ export const runEquilibrarCronoHandler = async (
             });
         }
         await batch.commit();
-    }
-
-    // ── 7. HORAS DESPUÉS ────────────────────────────────────────────────────
-    const horasDespues: Record<string, number> = { ...horasAntes };
-    for (const [docId, fields] of updates.entries()) {
-        const original = allTurnos.find(t => t.id === docId);
-        if (original && fields.hours !== undefined) {
-            horasDespues[original.empId] = (horasDespues[original.empId] || 0)
-                + (fields.hours! - original.hours);
-        }
     }
 
     return {

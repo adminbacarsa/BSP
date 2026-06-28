@@ -40,7 +40,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Se requiere autenticación.');
     }
-    const { empresaId, objectiveId, year, month } = data;
+    const { empresaId, objectiveId, year, month, dryRun = false } = data;
     if (!empresaId || !objectiveId || !year || !month || month < 1 || month > 12) {
         throw new functions.https.HttpsError('invalid-argument', 'empresaId, objectiveId, year y month (1–12) son requeridos.');
     }
@@ -249,10 +249,30 @@ const runEquilibrarCronoHandler = async (data, context) => {
             bloquesProcesados++;
         }
         const turnosActualizados = updates.size;
+        const horasDespues = { ...horasAntes };
+        for (const [docId, fields] of updates.entries()) {
+            const original = allTurnos.find(t => t.id === docId);
+            if (original && fields.hours !== undefined) {
+                horasDespues[original.empId] = (horasDespues[original.empId] || 0)
+                    + (fields.hours - original.hours);
+            }
+        }
         if (turnosActualizados === 0) {
             return { ok: true, empleadosRotados: 0, bloquesProcesados, turnosActualizados: 0,
-                horasAntes, horasDespues: horasAntes,
+                horasAntes, horasDespues: horasAntes, dryRun,
                 errores: ['Las horas ya están equilibradas — no se realizaron cambios.'] };
+        }
+        if (dryRun) {
+            return {
+                ok: true,
+                empleadosRotados: rotadosSet.size,
+                bloquesProcesados,
+                turnosActualizados,
+                horasAntes,
+                horasDespues,
+                errores,
+                dryRun: true,
+            };
         }
         const entries = Array.from(updates.entries());
         const BATCH_MAX = 400;
@@ -269,14 +289,6 @@ const runEquilibrarCronoHandler = async (data, context) => {
                 });
             }
             await batch.commit();
-        }
-        const horasDespues = { ...horasAntes };
-        for (const [docId, fields] of updates.entries()) {
-            const original = allTurnos.find(t => t.id === docId);
-            if (original && fields.hours !== undefined) {
-                horasDespues[original.empId] = (horasDespues[original.empId] || 0)
-                    + (fields.hours - original.hours);
-            }
         }
         return {
             ok: true,

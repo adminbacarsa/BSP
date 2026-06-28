@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, BarChart2, CheckCircle2 } from 'lucide-react';
+import { X, Loader2, BarChart2, CheckCircle2, AlertTriangle, Eye, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
@@ -25,23 +25,40 @@ interface EquilibrarOutput {
     horasAntes: Record<string, number>;
     horasDespues: Record<string, number>;
     errores: string[];
+    dryRun?: boolean;
 }
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 export default function EquilibrarCronoModal({ open, onClose, empresaId, objectiveId, objectiveNombre, year, month, employees }: Props) {
     const [running, setRunning]   = useState(false);
+    const [preview, setPreview]   = useState<EquilibrarOutput | null>(null);
     const [result, setResult]     = useState<EquilibrarOutput | null>(null);
 
     const empMap: Record<string, string> = {};
     employees.forEach(e => { empMap[e.id] = e.name || e.nombre || e.id; });
 
-    const handleRun = async () => {
+    const handlePreview = async () => {
         setRunning(true);
+        setPreview(null);
         setResult(null);
         try {
             const fn = httpsCallable<object, EquilibrarOutput>(functions, 'runEquilibrarCrono');
-            const res = await fn({ empresaId, objectiveId, year, month });
+            const res = await fn({ empresaId, objectiveId, year, month, dryRun: true });
+            setPreview(res.data);
+        } catch (e: any) {
+            toast.error(e?.message || 'Error al previsualizar.');
+        } finally {
+            setRunning(false);
+        }
+    };
+
+    const handleApply = async () => {
+        setRunning(true);
+        try {
+            const fn = httpsCallable<object, EquilibrarOutput>(functions, 'runEquilibrarCrono');
+            const res = await fn({ empresaId, objectiveId, year, month, dryRun: false });
+            setPreview(null);
             setResult(res.data);
             if (res.data.ok && res.data.turnosActualizados > 0) {
                 toast.success(`${res.data.empleadosRotados} empleados rotados · ${res.data.turnosActualizados} turnos actualizados`);
@@ -49,13 +66,21 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                 toast.info(res.data.errores[0]);
             }
         } catch (e: any) {
-            toast.error(e?.message || 'Error al equilibrar.');
+            toast.error(e?.message || 'Error al aplicar.');
         } finally {
             setRunning(false);
         }
     };
 
+    const handleReset = () => {
+        setPreview(null);
+        setResult(null);
+    };
+
     if (!open || typeof document === 'undefined') return null;
+
+    const current = result ?? preview;
+    const isPreview = !!preview && !result;
 
     return createPortal(
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
@@ -70,6 +95,11 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                             <h3 className="font-black text-lg flex items-center gap-2 text-emerald-900">
                                 <BarChart2 className="text-emerald-600" size={20} />
                                 Equilibrar horas
+                                {isPreview && (
+                                    <span className="text-[10px] font-black uppercase bg-amber-100 text-amber-700 border border-amber-300 rounded-full px-2 py-0.5">
+                                        Vista previa
+                                    </span>
+                                )}
                             </h3>
                             <p className="text-[11px] text-emerald-700/80 mt-0.5">
                                 Rota posiciones por bloque de trabajo para igualar horas entre todos los empleados del objetivo.
@@ -94,50 +124,63 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                     </div>
 
                     {/* Descripción del algoritmo */}
-                    {!result && (
+                    {!current && (
                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600 space-y-1">
                             <p className="font-black text-slate-700 mb-1">¿Qué hace?</p>
                             <ul className="space-y-0.5 list-disc list-inside">
                                 <li>Detecta los bloques de trabajo (rachas de 6 días) de cada empleado.</li>
                                 <li>Por cada bloque, rota quién cubre qué posición: el de menos horas acumuladas toma la posición más pesada (EN, RO).</li>
                                 <li>Puede cambiar de banda (M → N) entre bloques — el franco garantiza el descanso.</li>
-                                <li>Nadie supera las 200h CCT por ciclo.</li>
+                                <li>Primero muestra una <strong>vista previa</strong> — podés revisar y confirmar o descartar.</li>
                             </ul>
                         </div>
                     )}
 
+                    {/* Preview banner */}
+                    {isPreview && (
+                        <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2 flex items-start gap-2">
+                            <Eye size={15} className="text-amber-600 mt-0.5 shrink-0" />
+                            <div>
+                                <p className="font-black text-[12px] text-amber-800">Vista previa — sin cambios aplicados</p>
+                                <p className="text-[11px] text-amber-700">Revisá el impacto en horas y confirmá para guardar los cambios.</p>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Resultado */}
-                    {result && (
+                    {current && (
                         <div className="space-y-3">
                             {(() => {
-                                const noData = !result.ok && result.errores?.[0]?.includes('No se encontraron turnos');
+                                const noData = !current.ok && current.errores?.[0]?.includes('No se encontraron turnos');
+                                const alreadyOk = current.ok && current.turnosActualizados === 0;
                                 return (
-                                <div className={`rounded-xl border-2 px-3 py-2.5 ${result.ok && result.turnosActualizados > 0 ? 'border-emerald-300 bg-emerald-50' : noData ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+                                <div className={`rounded-xl border-2 px-3 py-2.5 ${result && current.turnosActualizados > 0 ? 'border-emerald-300 bg-emerald-50' : isPreview && current.turnosActualizados > 0 ? 'border-amber-200 bg-amber-50' : noData ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
                                     <div className="flex items-center gap-2 mb-1">
-                                        <CheckCircle2 size={16} className={result.ok ? 'text-emerald-600' : noData ? 'text-amber-500' : 'text-slate-400'} />
+                                        {result ? <CheckCircle2 size={16} className="text-emerald-600" /> : isPreview ? <Eye size={16} className="text-amber-500" /> : <AlertTriangle size={16} className="text-amber-500" />}
                                         <span className="font-black text-sm text-slate-800">
-                                            {result.turnosActualizados > 0
-                                                ? `${result.turnosActualizados} turnos actualizados · ${result.empleadosRotados} empleados rotados`
+                                            {current.turnosActualizados > 0
+                                                ? `${current.turnosActualizados} turnos ${isPreview ? 'a actualizar' : 'actualizados'} · ${current.empleadosRotados} empleados rotados`
                                                 : noData ? 'El cronograma no está guardado aún'
-                                                : result.errores?.[0] || 'Sin cambios necesarios'}
+                                                : alreadyOk ? 'Las horas ya están equilibradas'
+                                                : current.errores?.[0] || 'Sin cambios necesarios'}
                                         </span>
                                     </div>
                                     {noData ? (
                                         <>
                                             <p className="text-[11px] text-amber-700 font-medium">Guardá el borrador del crono (botón <strong>Guardar</strong>) y luego volvé a equilibrar.</p>
-                                            <p className="text-[10px] text-amber-600/70 mt-0.5 font-mono">{result.errores?.[0]}</p>
+                                            <p className="text-[10px] text-amber-600/70 mt-0.5 font-mono">{current.errores?.[0]}</p>
                                         </>
                                     ) : (
-                                        <p className="text-[10px] text-slate-500">{result.bloquesProcesados} bloques procesados</p>
+                                        <p className="text-[10px] text-slate-500">{current.bloquesProcesados} bloques procesados</p>
                                     )}
                                 </div>
                                 );
                             })()}
 
                             {/* Tabla antes/después */}
-                            {result.turnosActualizados > 0 && (() => {
-                                const empIds = Object.keys(result.horasAntes).sort((a, b) =>
-                                    (result.horasDespues[b] || 0) - (result.horasDespues[a] || 0));
+                            {current.turnosActualizados > 0 && (() => {
+                                const empIds = Object.keys(current.horasAntes).sort((a, b) =>
+                                    (current.horasDespues[b] || 0) - (current.horasDespues[a] || 0));
                                 return (
                                     <div className="overflow-x-auto rounded-xl border border-slate-200">
                                         <table className="w-full text-[11px]">
@@ -145,14 +188,14 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                                                 <tr>
                                                     <th className="text-left px-3 py-1.5 font-black uppercase">Empleado</th>
                                                     <th className="text-right px-3 py-1.5 font-black uppercase">Antes</th>
-                                                    <th className="text-right px-3 py-1.5 font-black uppercase">Después</th>
+                                                    <th className="text-right px-3 py-1.5 font-black uppercase">{isPreview ? 'Sería' : 'Después'}</th>
                                                     <th className="text-right px-3 py-1.5 font-black uppercase">Δ</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {empIds.map(id => {
-                                                    const antes   = Math.round(result.horasAntes[id] || 0);
-                                                    const despues = Math.round(result.horasDespues[id] || 0);
+                                                    const antes   = Math.round(current.horasAntes[id] || 0);
+                                                    const despues = Math.round(current.horasDespues[id] || 0);
                                                     const delta   = despues - antes;
                                                     return (
                                                         <tr key={id} className="border-t border-slate-100">
@@ -171,8 +214,8 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                                 );
                             })()}
 
-                            {result.errores?.length > 0 && (
-                                <p className="text-[10px] text-amber-700 font-bold">{result.errores.join(' · ')}</p>
+                            {current.errores?.length > 0 && current.turnosActualizados > 0 && (
+                                <p className="text-[10px] text-amber-700 font-bold">{current.errores.join(' · ')}</p>
                             )}
                         </div>
                     )}
@@ -180,19 +223,57 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
 
                 {/* Footer */}
                 <div className="p-4 border-t bg-slate-50 flex gap-2">
-                    <button type="button" onClick={onClose} disabled={running}
-                        className="flex-1 px-4 py-3 rounded-xl text-xs font-black uppercase text-slate-600 hover:bg-slate-200">
-                        {result ? 'Cerrar' : 'Cancelar'}
-                    </button>
-                    {!result && (
-                        <button
-                            type="button"
-                            disabled={running}
-                            onClick={handleRun}
-                            className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 flex items-center justify-center gap-2"
-                        >
-                            {running ? <Loader2 size={16} className="animate-spin" /> : <BarChart2 size={16} />}
-                            {running ? 'Equilibrando…' : 'Equilibrar horas'}
+                    {/* Estado inicial: botón "Previsualizar" */}
+                    {!current && (
+                        <>
+                            <button type="button" onClick={onClose} disabled={running}
+                                className="flex-1 px-4 py-3 rounded-xl text-xs font-black uppercase text-slate-600 hover:bg-slate-200">
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={running}
+                                onClick={handlePreview}
+                                className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40 flex items-center justify-center gap-2"
+                            >
+                                {running ? <Loader2 size={16} className="animate-spin" /> : <Eye size={16} />}
+                                {running ? 'Calculando…' : 'Previsualizar cambios'}
+                            </button>
+                        </>
+                    )}
+
+                    {/* Estado preview: descartar o confirmar */}
+                    {isPreview && (
+                        <>
+                            <button type="button" onClick={handleReset} disabled={running}
+                                className="flex-1 px-4 py-3 rounded-xl text-xs font-black uppercase text-slate-600 hover:bg-slate-200">
+                                Descartar
+                            </button>
+                            {preview!.turnosActualizados > 0 && (
+                                <button
+                                    type="button"
+                                    disabled={running}
+                                    onClick={handleApply}
+                                    className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 flex items-center justify-center gap-2"
+                                >
+                                    {running ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
+                                    {running ? 'Aplicando…' : 'Confirmar y aplicar'}
+                                </button>
+                            )}
+                            {preview!.turnosActualizados === 0 && (
+                                <button type="button" onClick={onClose}
+                                    className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-slate-200 text-slate-600 hover:bg-slate-300">
+                                    Cerrar
+                                </button>
+                            )}
+                        </>
+                    )}
+
+                    {/* Estado resultado final */}
+                    {result && (
+                        <button type="button" onClick={onClose}
+                            className="flex-1 px-4 py-3 rounded-xl text-xs font-black uppercase text-slate-600 hover:bg-slate-200">
+                            Cerrar
                         </button>
                     )}
                 </div>
