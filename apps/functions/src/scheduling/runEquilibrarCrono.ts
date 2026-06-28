@@ -163,7 +163,15 @@ export const runEquilibrarCronoHandler = async (
             dateStr,
             posName:  String(d.positionName || ''),
             code,
-            hours:    Number(d.hours) || 0,
+            hours:    (() => {
+                let h = Number(d.hours) || 0;
+                if (!h) {
+                    const diffMs = (d.endTime as Timestamp).toMillis() - (d.startTime as Timestamp).toMillis();
+                    if (diffMs > 0 && diffMs <= 24 * 3600000)
+                        h = Math.round(diffMs / 3600000 * 2) / 2;
+                }
+                return h;
+            })(),
             name:     String(d.name || code),
             startTime: d.startTime as Timestamp,
             endTime:   d.endTime   as Timestamp,
