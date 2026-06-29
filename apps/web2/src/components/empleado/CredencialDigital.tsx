@@ -705,7 +705,8 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             {/* ══ FRENTE — template único ══ */}
             {isH ? (
               // Horizontal: foto izq | datos der
-              <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', borderRadius: 12, overflow: 'hidden', background: bg, display: 'flex' } as React.CSSProperties}>
+              <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' } as React.CSSProperties}>
+              <div style={{ position: 'absolute', inset: 0, borderRadius: 12, overflow: 'hidden', background: bg, display: 'flex' }}>
                 {photoZoneH}
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '18px 16px 14px' }}>
                   <p style={{ color: tema.accent, fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 4 }}>{credTitulo}</p>
@@ -721,6 +722,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                   </div>
                 </div>
                 {stripeTop}
+              </div>
               </div>
             ) : (
               // Vertical: ID badge profesional — rediseño full-bleed
@@ -843,13 +845,17 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
             )}
 
             {/* ══ DORSO — QR ══ */}
+            {/* NOTA: outer div NO tiene overflow/borderRadius para evitar aplanamiento 2D en Safari/iOS */}
             <div style={{
               position: 'absolute', inset: 0,
               backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
-              transform: 'rotateY(180deg)', borderRadius: 12, overflow: 'hidden',
-              background: `linear-gradient(158deg, ${tema.h1} 0%, #0c1a28 42%, ${tema.h2}bb 100%)`,
+              transform: 'rotateY(180deg)',
               pointerEvents: flipped ? 'auto' : 'none',
             } as React.CSSProperties}>
+            <div style={{
+              position: 'absolute', inset: 0, borderRadius: 12, overflow: 'hidden',
+              background: `linear-gradient(158deg, ${tema.h1} 0%, #0c1a28 42%, ${tema.h2}bb 100%)`,
+            }}>
               <div style={{ position: 'absolute', inset: 0, opacity: 0.05, pointerEvents: 'none', backgroundImage: `repeating-linear-gradient(45deg, ${tema.accent} 0px, ${tema.accent} 1px, transparent 1px, transparent 10px)` }}/>
               <div style={{ marginTop: 32, height: 44, background: 'linear-gradient(180deg, #050505 0%, #121212 50%, #050505 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07)' }}/>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '18px 24px 0', gap: 10 }}>
@@ -882,6 +888,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
               </div>
               <button onClick={() => setFlipped(false)} style={{ position: 'absolute', bottom: 16, right: 14, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px', borderRadius: 20, background: `${tema.accent}18`, border: `1px solid ${tema.accent}45`, color: tema.accent, fontSize: 7, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer' }}>← Frente</button>
               <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 7, background: `linear-gradient(90deg, ${tema.h2}, ${tema.accent}80, ${tema.h2})` }}/>
+            </div>
             </div>
 
           </div>{/* flipper */}
