@@ -2072,6 +2072,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const sEnd = sh.endTime || undefined;
         if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > HARD_MAX_HOURS) return false;
         if (assignmentBreaksBandTransition(assignments, empId, dateStr, sCode)) return false;
+        if (nextAssignmentBreaksBandTransition(assignments, empId, dateStr, sCode)) return false;
         if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) return false;
         writeAssignment(empId, dateStr, pos.positionName, sCode, sh.name || sCode, sHrs, sStart, inCurrent, sEnd);
         return true;
@@ -2968,6 +2969,29 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             priorAssignments: syntheticPrevAssignments,
             cycleWorkDays,
         });
+    }
+
+    // Último pase: convertir a RET cualquier transición N→T/M o T→M que sobrevivió todos los guards.
+    if (ctx.rotateShifts !== false) {
+        for (const emp of ctx.employees) {
+            for (const day of ctx.daysInMonth) {
+                const dateStr = ctx.getDateKey(day);
+                const a = assignments.find(x =>
+                    x.empId === emp.id && x.dateStr === dateStr && (x.hours ?? 0) > 0 && !x.isFranco,
+                );
+                if (!a) continue;
+                if (assignmentBreaksBandTransition(assignments, emp.id, dateStr, String(a.code))) {
+                    stats.totalBillableHours = Math.max(0, (stats.totalBillableHours || 0) - (Number(a.hours) || 0));
+                    a.code = 'RET';
+                    a.name = 'Retén';
+                    a.hours = 0;
+                    a.positionName = '';
+                    a.startTime = '00:00';
+                    a.isReten = true;
+                    delete a.endTime;
+                }
+            }
+        }
     }
 
     // Empleados que pasaron 200h en el ciclo actual (no debería pasar pero auditamos)
