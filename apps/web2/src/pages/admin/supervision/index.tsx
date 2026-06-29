@@ -5,7 +5,7 @@ import { Toaster, toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, orderBy, doc, getDoc, addDoc } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, getDoc, addDoc } from 'firebase/firestore';
 import {
   Shield, CheckCircle, XCircle, Users, AlertCircle,
   RefreshCw, Plus, X, MessageSquare, User, Search,
@@ -28,6 +28,7 @@ import SupervisionBottomNav from '@/components/admin/supervision/SupervisionBott
 import SupervisionTablero from '@/components/admin/supervision/SupervisionTablero';
 import SupervisionNovedades from '@/components/admin/supervision/SupervisionNovedades';
 import SupervisionMas from '@/components/admin/supervision/SupervisionMas';
+import SupervisionClienteObjetivoPicker from '@/components/admin/supervision/SupervisionClienteObjetivoPicker';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -263,12 +264,12 @@ export default function SupervisionPage() {
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [busqueda, setBusqueda] = useState('');
+  const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroObjetivo, setFiltroObjetivo] = useState('');
 
   // Formulario manual supervisor
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualSaving, setManualSaving] = useState(false);
-  const [clientes, setClientes] = useState<{ id: string; name: string; objetivos: { id: string; name: string }[] }[]>([]);
   const [mTipo, setMTipo]   = useState<'REFUERZO_PUESTO' | 'AGREGADO_TURNO'>('REFUERZO_PUESTO');
   const [mClienteId, setMClienteId] = useState('');
   const [mObjetivoId, setMObjetivoId] = useState('');
@@ -291,21 +292,6 @@ export default function SupervisionPage() {
   const [ausenciasFecha, setAusenciasFecha] = useState(todayStr);
   const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
   const [licenciasMes, setLicenciasMes] = useState(currentMonthStr);
-
-  // Cargar clientes para el form manual (solo objetivos del supervisor)
-  useEffect(() => {
-    if (!empresaId || !showManualForm) return;
-    const allowed = new Set(objectiveIds);
-    getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name'))).then(snap => {
-      setClientes(snap.docs.map(d => ({
-        id: d.id,
-        name: d.data().name || d.data().fantasyName || d.id,
-        objetivos: (d.data().objetivos || [])
-          .map((o: any) => ({ id: o.id, name: o.name || o.id }))
-          .filter((o: { id: string }) => canViewAllObjectives || allowed.has(o.id)),
-      })).filter(c => c.objetivos.length > 0));
-    });
-  }, [empresaId, showManualForm, objectiveIds, canViewAllObjectives]);
 
   // Cargar puestos del SLA activo cuando cambia el objetivo (para RFZ)
   useEffect(() => {
@@ -400,6 +386,12 @@ export default function SupervisionPage() {
   const visiblesBase = tab === 'PENDIENTE' ? pendientes : solicitudes;
   const visibles = useMemo(() => {
     let list = visiblesBase;
+    if (filtroCliente) {
+      const objectiveIdsForClient = new Set(
+        scopedObjectives.filter(obj => obj.clientId === filtroCliente).map(obj => obj.id),
+      );
+      list = list.filter(item => objectiveIdsForClient.has(item.objectiveId));
+    }
     if (filtroObjetivo) list = list.filter(s => s.objectiveId === filtroObjetivo);
     if (busqueda.trim()) {
       const q = busqueda.toLowerCase();
@@ -411,7 +403,7 @@ export default function SupervisionPage() {
       );
     }
     return list;
-  }, [visiblesBase, filtroObjetivo, busqueda]);
+  }, [visiblesBase, filtroCliente, filtroObjetivo, busqueda, scopedObjectives]);
 
   const abrirRefuerzoDesdeAusencia = useCallback((a: Absence, fechaDia: string) => {
     setMainTab('BANDEJA');
@@ -615,8 +607,7 @@ export default function SupervisionPage() {
     if (!user || !empresaId || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()) return;
     setManualSaving(true);
     try {
-      const cli = clientes.find(c => c.id === mClienteId);
-      const obj = cli?.objetivos.find(o => o.id === mObjetivoId);
+      const selectedObjective = scopedObjectives.find(obj => obj.id === mObjetivoId);
       const isOvernight = mEnd < mStart;
       const nextDay = (d: string) => { const dt = new Date(d + 'T00:00:00'); dt.setDate(dt.getDate() + 1); return dt.toISOString().split('T')[0]; };
       const fechaFin = isOvernight ? nextDay(mFecha) : mFecha;
@@ -628,9 +619,9 @@ export default function SupervisionPage() {
       const base = {
         empresaId,
         objectiveId:   mObjetivoId,
-        objectiveName: obj?.name || mObjetivoId,
+        objectiveName: selectedObjective?.name || mObjetivoId,
         clientId:      mClienteId,
-        clientName:    cli?.name || mClienteId,
+        clientName:    selectedObjective?.clientName || mClienteId,
         fecha:         mFecha,
         startTime:     startISO,
         endTime:       endISO,
@@ -658,9 +649,9 @@ export default function SupervisionPage() {
       await solicitudRefuerzoService.create({
         empresaId,
         clientId:            mClienteId,
-        clientName:          cli?.name || mClienteId,
+        clientName:          selectedObjective?.clientName || mClienteId,
         objectiveId:         mObjetivoId,
-        objectiveName:       obj?.name || mObjetivoId,
+        objectiveName:       selectedObjective?.name || mObjetivoId,
         tipo:                mTipo,
         fecha:               mFecha,
         startTime:           mStart,
@@ -687,9 +678,9 @@ export default function SupervisionPage() {
       const manualSol: SolicitudRefuerzo = {
         empresaId,
         clientId:            mClienteId,
-        clientName:          cli?.name || mClienteId,
+        clientName:          selectedObjective?.clientName || mClienteId,
         objectiveId:         mObjetivoId,
-        objectiveName:       obj?.name || mObjetivoId,
+        objectiveName:       selectedObjective?.name || mObjetivoId,
         tipo:                mTipo,
         fecha:               mFecha,
         startTime:           mStart,
@@ -870,16 +861,17 @@ export default function SupervisionPage() {
                       className="w-full pl-9 pr-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 rounded-2xl text-xs font-medium"
                     />
                   </div>
-                  <select
-                    value={filtroObjetivo}
-                    onChange={e => setFiltroObjetivo(e.target.value)}
-                    className="px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 rounded-2xl text-xs font-bold min-w-[140px]"
-                  >
-                    <option value="">Todos los objetivos</option>
-                    {scopedObjectives.map(o => (
-                      <option key={o.id} value={o.id}>{o.name}</option>
-                    ))}
-                  </select>
+                  <div className="sm:w-[320px]">
+                    <SupervisionClienteObjetivoPicker
+                      objectives={scopedObjectives}
+                      clientId={filtroCliente}
+                      objectiveId={filtroObjetivo}
+                      onClientChange={setFiltroCliente}
+                      onObjectiveChange={setFiltroObjetivo}
+                      allowAll
+                      compact
+                    />
+                  </div>
                 </div>
               )}
 
@@ -1118,27 +1110,13 @@ export default function SupervisionPage() {
               ))}
             </div>
 
-            {/* Cliente */}
-            <div>
-              <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cliente</label>
-              <select value={mClienteId} onChange={e => { setMClienteId(e.target.value); setMObjetivoId(''); }}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400">
-                <option value="">— Seleccioná un cliente —</option>
-                {clientes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-
-            {/* Objetivo */}
-            {mClienteId && (
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Objetivo</label>
-                <select value={mObjetivoId} onChange={e => setMObjetivoId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400">
-                  <option value="">— Seleccioná un objetivo —</option>
-                  {(clientes.find(c => c.id === mClienteId)?.objetivos || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                </select>
-              </div>
-            )}
+            <SupervisionClienteObjetivoPicker
+              objectives={scopedObjectives}
+              clientId={mClienteId}
+              objectiveId={mObjetivoId}
+              onClientChange={setMClienteId}
+              onObjectiveChange={setMObjetivoId}
+            />
 
             {/* RFZ — Puesto del SLA + turnos disponibles */}
             {mTipo === 'REFUERZO_PUESTO' && mObjetivoId && (

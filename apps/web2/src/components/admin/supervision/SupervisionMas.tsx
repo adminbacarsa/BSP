@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { MapPin, ClipboardList, Navigation, Plus, X, RefreshCw, Trash2, CheckCircle2, ChevronDown, ChevronUp, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { MapPin, ClipboardList, Navigation, Plus, X, RefreshCw, Trash2, CheckCircle2, ChevronDown, ChevronUp, AlertTriangle, ShieldCheck, User } from 'lucide-react';
 import { toast } from 'sonner';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
@@ -11,6 +11,7 @@ import {
 } from '@/services/supervisionFieldService';
 import { fmtTs } from '@/lib/supervision/supervisionUtils';
 import type { SupervisorObjective } from '@/hooks/useSupervisorScope';
+import SupervisionClienteObjetivoPicker from '@/components/admin/supervision/SupervisionClienteObjetivoPicker';
 
 type MasSection = 'VISITAS' | 'CONSIGNAS';
 
@@ -44,6 +45,7 @@ function VisitaSheet({
   userName: string;
   onClose: () => void;
 }) {
+  const [clientId, setClientId] = useState('');
   const [objectiveId, setObjectiveId] = useState('');
   const [obs, setObs] = useState('');
   const [accionRequerida, setAccionRequerida] = useState('');
@@ -53,6 +55,21 @@ function VisitaSheet({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const resumen = useMemo(() => {
+    let ok = 0, obs = 0, na = 0;
+    let resultado: 'OK' | 'OBSERVADO' | 'CRITICO' = 'OK';
+    VISITA_CHECKLIST.forEach(item => {
+      const estado = checklist[item.key] || 'OK';
+      if (estado === 'OK') ok++;
+      else if (estado === 'NO_APLICA') na++;
+      else {
+        obs++;
+        resultado = item.critico ? 'CRITICO' : (resultado === 'CRITICO' ? 'CRITICO' : 'OBSERVADO');
+      }
+    });
+    return { ok, obs, na, resultado };
+  }, [checklist]);
 
   const captureGeo = () => {
     if (!navigator.geolocation) {
@@ -73,12 +90,7 @@ function VisitaSheet({
       label: item.label,
       estado: checklist[item.key] || 'OK',
     }));
-    const observados = VISITA_CHECKLIST.filter(item => checklist[item.key] === 'OBSERVADO');
-    const resultado = observados.some(item => item.critico)
-      ? 'CRITICO'
-      : observados.length > 0
-        ? 'OBSERVADO'
-        : 'OK';
+    const resultado = resumen.resultado;
     if (!obj) {
       toast.error('Completá el objetivo');
       return;
@@ -127,40 +139,81 @@ function VisitaSheet({
           <h3 className="font-black text-slate-900 dark:text-white">Registrar visita</h3>
           <button type="button" onClick={onClose} className="p-2 rounded-xl bg-slate-100"><X size={16} /></button>
         </div>
-        <select value={objectiveId} onChange={e => setObjectiveId(e.target.value)} className="w-full px-3 py-3 rounded-2xl border text-sm font-bold bg-slate-50">
-          <option value="">— Objetivo —</option>
-          {objectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+        <SupervisionClienteObjetivoPicker
+          objectives={objectives}
+          clientId={clientId}
+          objectiveId={objectiveId}
+          onClientChange={setClientId}
+          onObjectiveChange={setObjectiveId}
+        />
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <p className="text-[10px] font-black uppercase text-slate-500">Checklist de ronda</p>
-            <span className="text-[10px] font-bold text-slate-400">OK / Obs / N/A</span>
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-black ${RESULTADO_STYLES[resumen.resultado]}`}>
+              {resumen.resultado === 'OK' ? <ShieldCheck size={11} /> : <AlertTriangle size={11} />}
+              {resumen.resultado}
+            </span>
           </div>
-          {VISITA_CHECKLIST.map(item => (
-            <div key={item.key} className="rounded-xl bg-white border border-slate-100 p-2">
-              <p className="text-xs font-black text-slate-700 mb-2">{item.label}</p>
-              <div className="grid grid-cols-3 gap-1">
-                {(['OK', 'OBSERVADO', 'NO_APLICA'] as const).map(value => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setChecklist(prev => ({ ...prev, [item.key]: value }))}
-                    className={`py-2 rounded-xl text-[10px] font-black border transition-colors ${
-                      checklist[item.key] === value
-                        ? value === 'OK'
-                          ? 'bg-emerald-600 border-emerald-600 text-white'
-                          : value === 'OBSERVADO'
-                            ? 'bg-amber-500 border-amber-500 text-white'
-                            : 'bg-slate-700 border-slate-700 text-white'
-                        : 'bg-white border-slate-200 text-slate-500'
-                    }`}
-                  >
-                    {value === 'NO_APLICA' ? 'N/A' : value === 'OBSERVADO' ? 'Obs' : 'OK'}
-                  </button>
-                ))}
-              </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-2 py-1.5 text-center">
+              <p className="text-base font-black text-emerald-700 leading-none">{resumen.ok}</p>
+              <p className="text-[9px] font-black uppercase text-emerald-600 mt-0.5">OK</p>
             </div>
-          ))}
+            <div className="rounded-xl bg-amber-50 border border-amber-200 px-2 py-1.5 text-center">
+              <p className="text-base font-black text-amber-700 leading-none">{resumen.obs}</p>
+              <p className="text-[9px] font-black uppercase text-amber-600 mt-0.5">Obs</p>
+            </div>
+            <div className="rounded-xl bg-slate-100 border border-slate-200 px-2 py-1.5 text-center">
+              <p className="text-base font-black text-slate-600 leading-none">{resumen.na}</p>
+              <p className="text-[9px] font-black uppercase text-slate-500 mt-0.5">N/A</p>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            {VISITA_CHECKLIST.map(item => {
+              const estado = checklist[item.key] || 'OK';
+              return (
+                <div
+                  key={item.key}
+                  className={`flex items-center justify-between gap-2 rounded-xl bg-white border px-2.5 py-2 ${
+                    estado === 'OBSERVADO'
+                      ? 'border-amber-200'
+                      : estado === 'NO_APLICA'
+                        ? 'border-slate-200'
+                        : 'border-slate-100'
+                  }`}
+                >
+                  <div className="min-w-0 flex items-center gap-1.5">
+                    {item.critico && <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" title="Crítico" />}
+                    <span className="text-xs font-bold text-slate-700 truncate">{item.label}</span>
+                  </div>
+                  <div className="flex rounded-lg border border-slate-200 overflow-hidden shrink-0">
+                    {(['OK', 'OBSERVADO', 'NO_APLICA'] as const).map(value => {
+                      const active = estado === value;
+                      const activeCls = value === 'OK'
+                        ? 'bg-emerald-600 text-white'
+                        : value === 'OBSERVADO'
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-slate-600 text-white';
+                      return (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setChecklist(prev => ({ ...prev, [item.key]: value }))}
+                          className={`px-2.5 py-1 text-[10px] font-black transition-colors border-l first:border-l-0 border-slate-200 ${
+                            active ? activeCls : 'bg-white text-slate-400 hover:bg-slate-50'
+                          }`}
+                        >
+                          {value === 'NO_APLICA' ? 'N/A' : value === 'OBSERVADO' ? 'Obs' : 'OK'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
         <textarea value={obs} onChange={e => setObs(e.target.value)} rows={3} placeholder="Observaciones generales de la ronda/visita…" className="w-full px-3 py-3 rounded-2xl border text-sm resize-none bg-slate-50" />
         <textarea value={accionRequerida} onChange={e => setAccionRequerida(e.target.value)} rows={2} placeholder="Acción requerida si marcaste observaciones…" className="w-full px-3 py-3 rounded-2xl border text-sm resize-none bg-slate-50" />
@@ -194,6 +247,7 @@ function ConsignaSheet({
   userName: string;
   onClose: () => void;
 }) {
+  const [clientId, setClientId] = useState('');
   const [objectiveId, setObjectiveId] = useState('');
   const [texto, setTexto] = useState('');
   const [saving, setSaving] = useState(false);
@@ -235,10 +289,13 @@ function ConsignaSheet({
         <p className="text-[10px] text-violet-700 bg-violet-50 border border-violet-200 rounded-xl px-3 py-2 font-bold">
           Orden permanente visible para guardias del objetivo
         </p>
-        <select value={objectiveId} onChange={e => setObjectiveId(e.target.value)} className="w-full px-3 py-3 rounded-2xl border text-sm font-bold bg-slate-50">
-          <option value="">— Objetivo —</option>
-          {objectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
+        <SupervisionClienteObjetivoPicker
+          objectives={objectives}
+          clientId={clientId}
+          objectiveId={objectiveId}
+          onClientChange={setClientId}
+          onObjectiveChange={setObjectiveId}
+        />
         <textarea value={texto} onChange={e => setTexto(e.target.value)} rows={4} placeholder="Ej: Portón norte cerrado con llave 24hs…" className="w-full px-3 py-3 rounded-2xl border text-sm resize-none bg-slate-50" />
         <button type="button" disabled={saving} onClick={save} className="w-full py-4 bg-violet-600 text-white rounded-2xl font-black text-sm uppercase disabled:opacity-50">
           Publicar consigna
@@ -337,51 +394,86 @@ export default function SupervisionMas({
           <div className="space-y-2">
             {visitas.length === 0 ? (
               <p className="text-center text-slate-500 text-sm py-8">Sin visitas registradas</p>
-            ) : visitas.map(v => (
-              <div key={v.id} className="bg-white rounded-2xl border p-4 shadow-sm">
-                <div className="flex justify-between gap-2 mb-1">
-                  <p className="font-black text-sm text-slate-800">{v.objectiveName}</p>
-                  <span className="text-[9px] text-slate-400 font-mono">{fmtTs(v.createdAt)}</span>
-                </div>
-                <p className="text-xs text-slate-500 mb-2">{v.clientName}</p>
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-black ${RESULTADO_STYLES[v.resultado || 'OK']}`}>
-                    {(v.resultado || 'OK') === 'OK' ? <ShieldCheck size={12} /> : <AlertTriangle size={12} />}
-                    {v.resultado || 'OK'}
+            ) : visitas.map(v => {
+              const resultado = v.resultado || 'OK';
+              const okCount = v.checklist?.filter(i => i.estado === 'OK').length ?? 0;
+              const obsCount = v.checklist?.filter(i => i.estado === 'OBSERVADO').length ?? 0;
+              const naCount = v.checklist?.filter(i => i.estado === 'NO_APLICA').length ?? 0;
+              const accent = resultado === 'CRITICO'
+                ? 'border-l-rose-500'
+                : resultado === 'OBSERVADO'
+                  ? 'border-l-amber-500'
+                  : 'border-l-emerald-500';
+              return (
+              <div key={v.id} className={`bg-white rounded-2xl border border-l-4 ${accent} p-4 shadow-sm`}>
+                <div className="flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <p className="font-black text-sm text-slate-800 truncate">{v.objectiveName}</p>
+                    <p className="text-xs text-slate-500">{v.clientName}</p>
+                  </div>
+                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-black shrink-0 ${RESULTADO_STYLES[resultado]}`}>
+                    {resultado === 'OK' ? <ShieldCheck size={12} /> : <AlertTriangle size={12} />}
+                    {resultado}
                   </span>
-                  {v.checklist && (
-                    <span className="text-[10px] font-bold text-slate-400">
-                      {v.checklist.filter(i => i.estado === 'OBSERVADO').length} observaciones
-                    </span>
-                  )}
                 </div>
-                <p className="text-sm text-slate-700 whitespace-pre-wrap">{v.observaciones}</p>
+
+                <div className="flex items-center gap-2 mt-2 text-[10px] font-bold text-slate-400">
+                  <span className="flex items-center gap-1"><User size={10} /> {v.supervisorNombre}</span>
+                  <span>·</span>
+                  <span className="font-mono">{fmtTs(v.createdAt)}</span>
+                </div>
+
+                {v.checklist && v.checklist.length > 0 && (
+                  <div className="flex gap-1.5 mt-2">
+                    <span className="rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 text-[10px] font-black">{okCount} OK</span>
+                    <span className="rounded-lg bg-amber-50 border border-amber-200 text-amber-700 px-2 py-0.5 text-[10px] font-black">{obsCount} Obs</span>
+                    <span className="rounded-lg bg-slate-100 border border-slate-200 text-slate-600 px-2 py-0.5 text-[10px] font-black">{naCount} N/A</span>
+                  </div>
+                )}
+
+                {v.observaciones && v.observaciones !== 'Ronda sin observaciones.' && (
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap mt-2">{v.observaciones}</p>
+                )}
+
                 {v.accionRequerida && (
                   <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
                     <p className="text-[10px] font-black uppercase text-amber-700">Acción requerida</p>
                     <p className="text-xs text-amber-800">{v.accionRequerida}</p>
                   </div>
                 )}
+
                 {v.checklist && v.checklist.some(i => i.estado !== 'OK') && (
-                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
+                  <div className="mt-2 space-y-1">
                     {v.checklist.filter(i => i.estado !== 'OK').map(item => (
-                      <div key={item.key} className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 border border-slate-100 px-2 py-1.5">
+                      <div key={item.key} className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 border border-slate-100 px-2.5 py-1.5">
                         <span className="text-[11px] font-bold text-slate-600 truncate">{item.label}</span>
-                        <span className={`text-[9px] font-black rounded-full px-2 py-0.5 ${
+                        <span className={`text-[9px] font-black rounded-full px-2 py-0.5 shrink-0 ${
                           item.estado === 'OBSERVADO' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'
                         }`}>
-                          {item.estado === 'NO_APLICA' ? 'N/A' : item.estado}
+                          {item.estado === 'NO_APLICA' ? 'N/A' : 'Observado'}
                         </span>
                       </div>
                     ))}
                   </div>
                 )}
-                {v.lat != null && v.lng != null && (
-                  <p className="text-[10px] text-indigo-600 mt-2 flex items-center gap-1"><MapPin size={10} /> GPS registrado</p>
-                )}
+
+                <div className="flex items-center gap-3 mt-2">
+                  {v.lat != null && v.lng != null && (
+                    <a
+                      href={`https://www.google.com/maps?q=${v.lat},${v.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-black text-indigo-600 flex items-center gap-1 hover:underline"
+                    >
+                      <MapPin size={11} /> Ver ubicación
+                    </a>
+                  )}
+                </div>
+
                 {v.imageUrl && <img src={v.imageUrl} alt="" className="mt-2 rounded-xl max-h-32 w-full object-cover" />}
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}

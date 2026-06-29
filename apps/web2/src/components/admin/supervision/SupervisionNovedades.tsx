@@ -6,6 +6,7 @@ import { storage } from '@/lib/firebase';
 import { supervisionFieldService, LibroGuardiaEntry } from '@/services/supervisionFieldService';
 import { fmtTs } from '@/lib/supervision/supervisionUtils';
 import type { SupervisorObjective } from '@/hooks/useSupervisorScope';
+import SupervisionClienteObjetivoPicker from '@/components/admin/supervision/SupervisionClienteObjetivoPicker';
 
 const TIPOS = [
   { id: 'novedad', label: 'Novedad', etiqueta: 'HALLAZGO', gravedad: 'MEDIA' },
@@ -89,6 +90,7 @@ function NuevaNovedadSheet({
   onSaved: () => void;
   defaultObjectiveId?: string;
 }) {
+  const [clientId, setClientId] = useState(defaultObjectiveId ? (objectives.find(o => o.id === defaultObjectiveId)?.clientId || '') : '');
   const [objectiveId, setObjectiveId] = useState(defaultObjectiveId || '');
   const [tipoIdx, setTipoIdx] = useState(0);
   const [texto, setTexto] = useState('');
@@ -153,19 +155,13 @@ function NuevaNovedadSheet({
           <button type="button" onClick={onClose} className="p-2 rounded-xl bg-slate-100 dark:bg-slate-700"><X size={16} /></button>
         </div>
         <div className="px-5 pb-6 space-y-4 overflow-y-auto flex-1">
-          <div>
-            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Objetivo</label>
-            <select
-              value={objectiveId}
-              onChange={e => setObjectiveId(e.target.value)}
-              className="w-full px-3 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold"
-            >
-              <option value="">— Seleccioná —</option>
-              {objectives.map(o => (
-                <option key={o.id} value={o.id}>{o.name} · {o.clientName}</option>
-              ))}
-            </select>
-          </div>
+          <SupervisionClienteObjetivoPicker
+            objectives={objectives}
+            clientId={clientId}
+            objectiveId={objectiveId}
+            onClientChange={setClientId}
+            onObjectiveChange={setObjectiveId}
+          />
           <div className="grid grid-cols-3 gap-2">
             {TIPOS.map((t, i) => (
               <button
@@ -233,6 +229,7 @@ export default function SupervisionNovedades({
   const [entries, setEntries] = useState<LibroGuardiaEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
+  const [filterClient, setFilterClient] = useState('');
   const [filterObj, setFilterObj] = useState('');
   const [soloIncidentes, setSoloIncidentes] = useState(false);
 
@@ -252,24 +249,31 @@ export default function SupervisionNovedades({
 
   const filtered = useMemo(() => {
     let list = entries;
+    if (filterClient) {
+      const objectiveIdsForClient = new Set(
+        objectives.filter(obj => obj.clientId === filterClient).map(obj => obj.id),
+      );
+      list = list.filter(entry => objectiveIdsForClient.has(entry.objectiveId));
+    }
     if (filterObj) list = list.filter(e => e.objectiveId === filterObj);
     if (soloIncidentes) {
       list = list.filter(e => e.etiqueta === 'INCIDENTE' || e.etiqueta === 'SINIESTRO' || e.estadoIncidente);
     }
     return list;
-  }, [entries, filterObj, soloIncidentes]);
+  }, [entries, filterClient, filterObj, soloIncidentes, objectives]);
 
   return (
     <div className="space-y-4 pb-20">
-      <div className="flex gap-2 flex-wrap">
-        <select
-          value={filterObj}
-          onChange={e => setFilterObj(e.target.value)}
-          className="flex-1 min-w-[140px] px-3 py-2.5 bg-white border border-slate-200 rounded-2xl text-xs font-bold"
-        >
-          <option value="">Todos los objetivos</option>
-          {objectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
+      <div className="flex flex-col gap-3">
+        <SupervisionClienteObjetivoPicker
+          objectives={objectives}
+          clientId={filterClient}
+          objectiveId={filterObj}
+          onClientChange={setFilterClient}
+          onObjectiveChange={setFilterObj}
+          allowAll
+          compact
+        />
         <button
           type="button"
           onClick={() => setSoloIncidentes(v => !v)}
