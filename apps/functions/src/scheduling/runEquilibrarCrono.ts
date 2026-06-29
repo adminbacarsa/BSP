@@ -295,14 +295,15 @@ export const runEquilibrarCronoHandler = async (
     }
 
     // ── 5. ASIGNACIÓN GREEDY POR GRUPO DE RANGO ─────────────────────────────────
-    // Clave de posición: "${posName}__${code}" — banda y puesto como unidad.
-    // Esto garantiza que al reasignar se mantengan los conteos exactos por
-    // (posicionFísica × código de turno) y no se rompa la cobertura SLA.
+    // currentHours arranca desde horasAntes (no desde 0): el greedy sabe de
+    // entrada quién ya tiene muchas o pocas horas y asigna los bloques pesados
+    // a los empleados con menor carga acumulada real.
     //
-    // Bloques mixtos (turnos con distintos posName/code dentro del mismo bloque
-    // de 6 días) se dejan intactos — son transiciones de banda y no se rotan.
+    // Restricción N→M: si el bloque anterior del empleado termina a la misma
+    // hora UTC que el nuevo empieza (ej. nocturno sale 7am → matutino entra 7am)
+    // y no hay ningún día franco de por medio, se saltea ese slot y se prueba
+    // el siguiente disponible. Secuencia mínima válida: N → F → M.
 
-    // Claves de slot ordenadas por horas DESC (pesado primero), luego por nombre
     const sortedSlotKeys = slotKeys.slice().sort((a, b) => {
         const hd = posProfiles[b].hours - posProfiles[a].hours;
         return hd !== 0 ? hd : a.localeCompare(b);
@@ -311,7 +312,30 @@ export const runEquilibrarCronoHandler = async (
     const updates: Map<string, { posName: string; code: string; hours: number; name: string; startTime: Timestamp; endTime: Timestamp }> = new Map();
     const rotadosSet = new Set<string>();
     let bloquesProcesados = 0;
-    const runningHours: Record<string, number> = {};
+
+    // Inicializar desde las horas reales del cronograma
+    const currentHours: Record<string, number> = { ...horasAntes };
+
+    // Rastreo por empleado para la restricción de transición N→M
+    const lastBlockEndDate: Record<string, string> = {};
+    const lastAssignedSlotKey: Record<string, string> = {};
+
+    const violaTransicion = (empId: string, candidate: PosProfile, blockFirstDay: string): boolean => {
+        const prevKey = lastAssignedSlotKey[empId];
+        const prevEnd = lastBlockEndDate[empId];
+        if (!prevKey || !prevEnd) return false;
+        const prevSlot = posProfiles[prevKey];
+        if (!prevSlot) return false;
+        // El turno previo termina a la misma hora UTC en que el candidato empieza
+        if (prevSlot.endUTCHour !== candidate.startUTCHour) return false;
+        // Brecha de días entre último día del bloque anterior y primer día del nuevo
+        const gapDays = Math.round(
+            (new Date(blockFirstDay + 'T12:00:00Z').getTime()
+           - new Date(prevEnd       + 'T12:00:00Z').getTime()) / 86400000
+        );
+        // Solo es conflicto si no hay ningún franco entre ellos (gap ≤ 1 día)
+        return gapDays <= 1;
+    };
 
     // Agrupar bloques por (startDate, endDate)
     const blocksByRange: Record<string, Block[]> = {};
@@ -322,18 +346,25 @@ export const runEquilibrarCronoHandler = async (
         blocksByRange[key].push(block);
     }
 
-    // Procesar grupos en orden cronológico
     for (const rangeKey of Object.keys(blocksByRange).sort()) {
         const group = blocksByRange[rangeKey];
 
-        // Ordenar empleados del grupo: menos horas acumuladas primero, empId como desempate
+        // Restar la contribución original de los bloques puros de este grupo
+        // para que el sort compare horas "sin contar este grupo"
+        for (const block of group) {
+            if (!block.isPure || !block.slotKey) continue;
+            const prof = posProfiles[block.slotKey];
+            if (prof) currentHours[block.empId] = (currentHours[block.empId] || 0) - block.shifts.length * prof.hours;
+        }
+
+        // Ordenar: menos horas acumuladas → recibe el slot más pesado disponible
         group.sort((a, b) => {
-            const ha = runningHours[a.empId] || 0;
-            const hb = runningHours[b.empId] || 0;
+            const ha = currentHours[a.empId] || 0;
+            const hb = currentHours[b.empId] || 0;
             return ha !== hb ? ha - hb : a.empId.localeCompare(b.empId);
         });
 
-        // Pool de slots SOLO de bloques puros (posName+code constante en todo el bloque)
+        // Pool de slots solo de bloques puros
         const groupPool: Record<string, number> = {};
         for (const block of group) {
             if (block.isPure && block.slotKey)
@@ -341,31 +372,49 @@ export const runEquilibrarCronoHandler = async (
         }
 
         for (const block of group) {
+            const blockEndDate = block.shifts[block.shifts.length - 1].dateStr;
+
             if (!block.isPure) {
-                // Bloque mixto: contabilizar horas originales sin tocar Firestore
-                const origHours = block.shifts.reduce((sum, s) => sum + s.hours, 0);
-                runningHours[block.empId] = (runningHours[block.empId] || 0) + origHours;
+                // Bloque mixto: su contribución ya está en currentHours (no fue restada)
                 bloquesProcesados++;
+                lastBlockEndDate[block.empId] = blockEndDate;
+                lastAssignedSlotKey[block.empId] = block.slotKey || lastAssignedSlotKey[block.empId] || '';
                 continue;
             }
 
+            // Elegir el slot más pesado disponible que no viole la restricción N→M
             let assigned: PosProfile | null = null;
             for (const sk of sortedSlotKeys) {
-                if ((groupPool[sk] || 0) > 0) {
-                    assigned = posProfiles[sk];
-                    groupPool[sk]--;
-                    break;
+                if ((groupPool[sk] || 0) <= 0) continue;
+                const candidate = posProfiles[sk];
+                if (violaTransicion(block.empId, candidate, block.startDate)) continue;
+                assigned = candidate;
+                groupPool[sk]--;
+                break;
+            }
+
+            if (!assigned) {
+                // No hay slot válido sin violar N→M: mantener original para no romper cobertura
+                if ((groupPool[block.slotKey] || 0) > 0) {
+                    assigned = posProfiles[block.slotKey]!;
+                    groupPool[block.slotKey]--;
                 }
             }
 
             if (!assigned) {
+                // Edge case: agregar horas originales y continuar
                 const orig = posProfiles[block.slotKey];
-                if (orig) runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * orig.hours;
+                if (orig) currentHours[block.empId] = (currentHours[block.empId] || 0) + block.shifts.length * orig.hours;
+                lastBlockEndDate[block.empId] = blockEndDate;
+                lastAssignedSlotKey[block.empId] = block.slotKey;
                 bloquesProcesados++;
                 continue;
             }
 
+            currentHours[block.empId] = (currentHours[block.empId] || 0) + block.shifts.length * assigned.hours;
+
             const assignedSlotKey = `${assigned.posName}__${assigned.code}`;
+            let changed = false;
             for (const shift of block.shifts) {
                 if (`${shift.posName}__${shift.code}` !== assignedSlotKey) {
                     const ts = rebuildTs(shift.dateStr, assigned);
@@ -377,26 +426,22 @@ export const runEquilibrarCronoHandler = async (
                         startTime: ts.startTime,
                         endTime:   ts.endTime,
                     });
-                    rotadosSet.add(block.empId);
+                    changed = true;
                 }
             }
+            if (changed) rotadosSet.add(block.empId);
 
-            runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * assigned.hours;
+            lastBlockEndDate[block.empId] = blockEndDate;
+            lastAssignedSlotKey[block.empId] = assignedSlotKey;
             bloquesProcesados++;
         }
     }
 
     const turnosActualizados = updates.size;
 
-    // ── 6. HORAS DESPUÉS (siempre, incluso en dry-run) ──────────────────────
-    const horasDespues: Record<string, number> = { ...horasAntes };
-    for (const [docId, fields] of updates.entries()) {
-        const original = allTurnos.find(t => t.id === docId);
-        if (original && fields.hours !== undefined) {
-            horasDespues[original.empId] = (horasDespues[original.empId] || 0)
-                + (fields.hours! - original.hours);
-        }
-    }
+    // ── 6. HORAS DESPUÉS ────────────────────────────────────────────────────
+    // currentHours ya refleja la redistribución (diferencial aplicado en el loop)
+    const horasDespues: Record<string, number> = { ...currentHours };
 
     // ── 6b. CAMBIOS PROPUESTOS (formato pendingChanges del front) ────────────
     // Convertimos las timestamps UTC a strings "HH:MM" en hora AR (UTC-3)

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Loader2, BarChart2, CheckCircle2, AlertTriangle, Eye, Zap, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
@@ -50,6 +50,14 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
     const [running, setRunning]   = useState(false);
     const [preview, setPreview]   = useState<EquilibrarOutput | null>(null);
     const [result, setResult]     = useState<EquilibrarOutput | null>(null);
+
+    useEffect(() => {
+        if (open) {
+            setPreview(null);
+            setResult(null);
+            setRunning(false);
+        }
+    }, [open]);
 
     const empMap: Record<string, string> = {};
     employees.forEach(e => { empMap[e.id] = e.name || e.nombre || e.id; });

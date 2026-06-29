@@ -187,7 +187,23 @@ const runEquilibrarCronoHandler = async (data, context) => {
         const updates = new Map();
         const rotadosSet = new Set();
         let bloquesProcesados = 0;
-        const runningHours = {};
+        const currentHours = { ...horasAntes };
+        const lastBlockEndDate = {};
+        const lastAssignedSlotKey = {};
+        const violaTransicion = (empId, candidate, blockFirstDay) => {
+            const prevKey = lastAssignedSlotKey[empId];
+            const prevEnd = lastBlockEndDate[empId];
+            if (!prevKey || !prevEnd)
+                return false;
+            const prevSlot = posProfiles[prevKey];
+            if (!prevSlot)
+                return false;
+            if (prevSlot.endUTCHour !== candidate.startUTCHour)
+                return false;
+            const gapDays = Math.round((new Date(blockFirstDay + 'T12:00:00Z').getTime()
+                - new Date(prevEnd + 'T12:00:00Z').getTime()) / 86400000);
+            return gapDays <= 1;
+        };
         const blocksByRange = {};
         for (const block of allBlocks) {
             const endDate = block.shifts[block.shifts.length - 1].dateStr;
@@ -198,9 +214,16 @@ const runEquilibrarCronoHandler = async (data, context) => {
         }
         for (const rangeKey of Object.keys(blocksByRange).sort()) {
             const group = blocksByRange[rangeKey];
+            for (const block of group) {
+                if (!block.isPure || !block.slotKey)
+                    continue;
+                const prof = posProfiles[block.slotKey];
+                if (prof)
+                    currentHours[block.empId] = (currentHours[block.empId] || 0) - block.shifts.length * prof.hours;
+            }
             group.sort((a, b) => {
-                const ha = runningHours[a.empId] || 0;
-                const hb = runningHours[b.empId] || 0;
+                const ha = currentHours[a.empId] || 0;
+                const hb = currentHours[b.empId] || 0;
                 return ha !== hb ? ha - hb : a.empId.localeCompare(b.empId);
             });
             const groupPool = {};
@@ -209,28 +232,42 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     groupPool[block.slotKey] = (groupPool[block.slotKey] || 0) + 1;
             }
             for (const block of group) {
+                const blockEndDate = block.shifts[block.shifts.length - 1].dateStr;
                 if (!block.isPure) {
-                    const origHours = block.shifts.reduce((sum, s) => sum + s.hours, 0);
-                    runningHours[block.empId] = (runningHours[block.empId] || 0) + origHours;
                     bloquesProcesados++;
+                    lastBlockEndDate[block.empId] = blockEndDate;
+                    lastAssignedSlotKey[block.empId] = block.slotKey || lastAssignedSlotKey[block.empId] || '';
                     continue;
                 }
                 let assigned = null;
                 for (const sk of sortedSlotKeys) {
-                    if ((groupPool[sk] || 0) > 0) {
-                        assigned = posProfiles[sk];
-                        groupPool[sk]--;
-                        break;
+                    if ((groupPool[sk] || 0) <= 0)
+                        continue;
+                    const candidate = posProfiles[sk];
+                    if (violaTransicion(block.empId, candidate, block.startDate))
+                        continue;
+                    assigned = candidate;
+                    groupPool[sk]--;
+                    break;
+                }
+                if (!assigned) {
+                    if ((groupPool[block.slotKey] || 0) > 0) {
+                        assigned = posProfiles[block.slotKey];
+                        groupPool[block.slotKey]--;
                     }
                 }
                 if (!assigned) {
                     const orig = posProfiles[block.slotKey];
                     if (orig)
-                        runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * orig.hours;
+                        currentHours[block.empId] = (currentHours[block.empId] || 0) + block.shifts.length * orig.hours;
+                    lastBlockEndDate[block.empId] = blockEndDate;
+                    lastAssignedSlotKey[block.empId] = block.slotKey;
                     bloquesProcesados++;
                     continue;
                 }
+                currentHours[block.empId] = (currentHours[block.empId] || 0) + block.shifts.length * assigned.hours;
                 const assignedSlotKey = `${assigned.posName}__${assigned.code}`;
+                let changed = false;
                 for (const shift of block.shifts) {
                     if (`${shift.posName}__${shift.code}` !== assignedSlotKey) {
                         const ts = rebuildTs(shift.dateStr, assigned);
@@ -242,22 +279,18 @@ const runEquilibrarCronoHandler = async (data, context) => {
                             startTime: ts.startTime,
                             endTime: ts.endTime,
                         });
-                        rotadosSet.add(block.empId);
+                        changed = true;
                     }
                 }
-                runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * assigned.hours;
+                if (changed)
+                    rotadosSet.add(block.empId);
+                lastBlockEndDate[block.empId] = blockEndDate;
+                lastAssignedSlotKey[block.empId] = assignedSlotKey;
                 bloquesProcesados++;
             }
         }
         const turnosActualizados = updates.size;
-        const horasDespues = { ...horasAntes };
-        for (const [docId, fields] of updates.entries()) {
-            const original = allTurnos.find(t => t.id === docId);
-            if (original && fields.hours !== undefined) {
-                horasDespues[original.empId] = (horasDespues[original.empId] || 0)
-                    + (fields.hours - original.hours);
-            }
-        }
+        const horasDespues = { ...currentHours };
         const proposedChanges = [];
         for (const [docId, fields] of updates.entries()) {
             const original = allTurnos.find(t => t.id === docId);
