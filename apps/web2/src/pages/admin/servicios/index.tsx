@@ -19,7 +19,7 @@ import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdviso
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
   filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
-  collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, TenantIsolationError,
+  collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, deleteDocsByIdsForEmpresa, TenantIsolationError,
   empresaCollectionQuery,
 } from '@/lib/multiempresa';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
@@ -979,7 +979,7 @@ export default function ServiciosSLAPage() {
                     {value}{unit && <span className="text-xs font-bold text-slate-400 ml-1">{unit}</span>}
                   </p>
                 </div>
-              )}
+              ))}
             </div>
           </div>
 
@@ -1297,7 +1297,7 @@ export default function ServiciosSLAPage() {
                                   </span>
                                   <span className="shrink-0 font-black text-red-500">{t.hours || 8}h</span>
                                 </div>
-                              )}
+                              ))}
                             </div>
                             {baseHrs > 0 && (
                               <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-1.5">
@@ -1358,7 +1358,7 @@ export default function ServiciosSLAPage() {
                       {value}{unit && <span className="text-xs font-bold text-slate-400 ml-1">{unit}</span>}
                     </p>
                   </div>
-                )}
+                ))}
               </div>
 
               {/* Histórico · timeline horizontal */}
@@ -1397,7 +1397,7 @@ export default function ServiciosSLAPage() {
                           </p>
                         </div>
                       </div>
-                    )}
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1475,10 +1475,10 @@ export default function ServiciosSLAPage() {
                         <div className="flex flex-wrap gap-1">
                           {pos.allowedShiftTypes.map(v => (
                             <span key={v.code} className="text-[8px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">{v.code} · {v.hours}h</span>
-                          )}
+                          ))}
                         </div>
                       </div>
-                    )}
+                    ))}
                   </div>
                 </div>
                 {/* Análisis Operativo */}
@@ -1535,7 +1535,7 @@ export default function ServiciosSLAPage() {
                                   {Math.round(hxg)} <span className="text-[9px]">hs</span>
                                 </td>
                               </tr>
-                            )}
+                            ))}
                           </tbody>
                           {viability.length > 1 && (
                             <tfoot className="bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
@@ -1714,7 +1714,7 @@ export default function ServiciosSLAPage() {
                                      {slaGlobal.size > 0 && <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">Todos los puestos: {makeSummary(slaGlobal)}</p>}
                                      {form.positions.map(p => (p.excludedDates?.length ?? 0) > 0 && (
                                          <p key={p.id} className="text-[9px] font-bold text-rose-500 dark:text-rose-400">{p.name || p.id}: {makeSummary(new Set(p.excludedDates))}</p>
-                                     )}
+                                     ))}
                                  </div>
                              )}
                              {showExcludedDatesPicker && (
@@ -1728,7 +1728,7 @@ export default function ServiciosSLAPage() {
                                                  className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${excludedDatesScope === scope ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-rose-400'}`}>
                                                  {scope === 'ALL' ? 'Todos los puestos' : scope}
                                              </button>
-                                         )}
+                                         ))}
                                      </div>
                                      {months.length > 0 ? (
                                          <div className="p-4 bg-white dark:bg-slate-900 space-y-4">
@@ -1807,7 +1807,7 @@ export default function ServiciosSLAPage() {
                                   <div className="flex gap-2 justify-end"><span className="text-[8px] text-slate-400 font-bold" title="Nocturnas">{Math.round(m.nightHours)}N</span><span className="text-[8px] text-amber-500/70 font-bold" title="Fin de semana">{Math.round(m.weekendHours)}F</span></div>
                                 </div>
                             </div>
-                        )}
+                        ))}
                     </div>
                  </div>
                </div>
@@ -1852,7 +1852,7 @@ export default function ServiciosSLAPage() {
                              <button onClick={() => removePosition(pos.id)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-rose-500 hover:bg-rose-100 transition-colors"><X size={14}/></button>
                            </div>
                         </div>
-                     )}
+                     ))}
                   </div>
                </div>
             </div>
@@ -2000,7 +2000,7 @@ export default function ServiciosSLAPage() {
                                             <div className="flex gap-1">
                                                 {['L','M','X','J','V','S','D'].map(day => (
                                                     <button key={day} onClick={() => toggleNewShiftDay(day)} className={`w-7 h-7 rounded text-[9px] font-black transition-colors ${newCustomShift.days.includes(day) ? 'bg-slate-900 text-white' : 'bg-white border text-slate-400'}`}>{day}</button>
-                                                )}
+                                                ))}
                                             </div>
                                             <div className="flex gap-1">
                                                 {editingShiftCode && <button onClick={cancelEditShift} className="bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-300 flex items-center gap-1"><X size={12}/> Cancelar</button>}
@@ -2034,7 +2034,7 @@ export default function ServiciosSLAPage() {
                                                             {d}
                                                             <button onClick={() => setNewCustomShift(prev => ({ ...prev, specificDates: prev.specificDates.filter(x => x !== d) }))} className="hover:text-rose-500 leading-none"><X size={8}/></button>
                                                         </span>
-                                                    )}
+                                                    ))}
                                                 </div>
                                             )}
                                             <div className="flex justify-end gap-1">
