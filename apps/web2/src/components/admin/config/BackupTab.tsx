@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { collection, query, orderBy, limit, onSnapshot, Timestamp, doc as fsDoc, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag } from 'lucide-react';
+import { HardDrive, RefreshCw, CheckCircle, AlertTriangle, ExternalLink, Clock, Database, FileJson, RotateCcw, ShieldAlert, X, Upload, Tag, Trash2, RefreshCcw } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
 import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
@@ -221,6 +221,8 @@ export default function BackupTab() {
     sourceEmpresaId?: string;
   } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [loadingLocal, setLoadingLocal] = useState(false);
   const [loadingLocalSecs, setLoadingLocalSecs] = useState(0);
   const [restoring, setRestoring] = useState(false);
@@ -295,6 +297,38 @@ export default function BackupTab() {
     } catch (e: any) {
       setLastResult({ ok: false, msg: e?.message || 'Error al crear backup' });
     } finally { setRunning(false); }
+  };
+
+  const handleSyncDrive = async () => {
+    setSyncing(true); setLastResult(null);
+    try {
+      await refreshAuthTokenForBackup();
+      const fn = httpsCallable(functions, 'syncBackups');
+      const res: any = await fn({ empresaId: empresaId || '' });
+      const removed = Number(res?.data?.removed ?? 0);
+      const checked = Number(res?.data?.checked ?? 0);
+      setLastResult({
+        ok: true,
+        msg: removed > 0
+          ? `Sincronizado: se quitaron ${removed} backup(s) que ya no están en Drive (de ${checked} verificados).`
+          : `Sincronizado: el historial ya coincide con Drive (${checked} verificados).`,
+      });
+    } catch (e: any) {
+      setLastResult({ ok: false, msg: e?.message || 'Error al sincronizar con Drive' });
+    } finally { setSyncing(false); }
+  };
+
+  const handleDeleteBackup = async (b: BackupRecord) => {
+    if (!confirm(`¿Eliminar "${b.fileName}"? Se borrará el archivo en Drive y el registro del historial. Esta acción no se puede deshacer.`)) return;
+    setDeletingId(b.id); setLastResult(null);
+    try {
+      await refreshAuthTokenForBackup();
+      const fn = httpsCallable(functions, 'deleteBackup');
+      await fn({ docId: b.id, empresaId: empresaId || '' });
+      setLastResult({ ok: true, msg: `Backup "${b.fileName}" eliminado.` });
+    } catch (e: any) {
+      setLastResult({ ok: false, msg: e?.message || 'Error al eliminar backup' });
+    } finally { setDeletingId(null); }
   };
 
   const validateBackupJsonForEmpresa = (backup: Record<string, unknown>) => {
@@ -622,11 +656,19 @@ export default function BackupTab() {
           </div>
         </div>
         {!IS_EMULATOR && (
-          <button onClick={handleRunBackup} disabled={running}
-            className="flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-black text-sm shadow-lg transition-all hover:scale-105 disabled:scale-100">
-            <RefreshCw size={16} className={running ? 'animate-spin' : ''} />
-            {running ? 'Ejecutando...' : 'Crear backup ahora'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={handleSyncDrive} disabled={syncing || running}
+              className="flex items-center gap-2 px-4 py-3 bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 border border-slate-200 rounded-xl font-black text-sm shadow-sm transition-all disabled:scale-100"
+              title="Quita del historial los backups que ya borraste en Drive">
+              <RefreshCcw size={16} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? 'Sincronizando...' : 'Sincronizar con Drive'}
+            </button>
+            <button onClick={handleRunBackup} disabled={running || syncing}
+              className="flex items-center gap-2 px-5 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl font-black text-sm shadow-lg transition-all hover:scale-105 disabled:scale-100">
+              <RefreshCw size={16} className={running ? 'animate-spin' : ''} />
+              {running ? 'Ejecutando...' : 'Crear backup ahora'}
+            </button>
+          </div>
         )}
       </div>
 
@@ -891,6 +933,13 @@ export default function BackupTab() {
                   </>
                   );
                 })()}
+                {!IS_EMULATOR && (
+                  <button onClick={() => handleDeleteBackup(b)} disabled={deletingId === b.id}
+                    title="Eliminar backup (Drive + historial)"
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-black text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-slate-200 hover:border-rose-200 transition-colors disabled:opacity-50">
+                    {deletingId === b.id ? <RefreshCw size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                  </button>
+                )}
               </div>
             </div>
           ))}

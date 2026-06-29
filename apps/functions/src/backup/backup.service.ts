@@ -200,6 +200,111 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
   };
 }
 
+export interface SyncDriveBackupsResult {
+  checked: number;
+  removed: number;
+  kept: number;
+  removedIds: string[];
+}
+
+/**
+ * Reconcilia `system_backups` con Google Drive: elimina los documentos cuyo
+ * archivo `driveFileId` ya no existe (borrado manualmente o movido a papelera).
+ * No toca documentos sin `driveFileId` (registros de error / informativos).
+ */
+export async function syncDriveBackups(opts: { empresaId?: string; scopeEmpresa?: boolean } = {}): Promise<SyncDriveBackupsResult> {
+  const db = admin.firestore();
+  const empresaId = String(opts.empresaId ?? '').trim();
+  const scopeEmpresa = opts.scopeEmpresa === true && !!empresaId;
+
+  const { google } = await import('googleapis');
+  const auth = new google.auth.GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/drive'],
+  });
+  const drive = google.drive({ version: 'v3', auth });
+
+  let query: FirebaseFirestore.Query = db.collection('system_backups');
+  if (scopeEmpresa) query = query.where('empresaId', '==', empresaId);
+  const snap = await query.get();
+
+  let checked = 0;
+  let removed = 0;
+  let kept = 0;
+  const removedIds: string[] = [];
+
+  // Cache de existencia por fileId para no consultar dos veces el mismo archivo
+  const existenceCache = new Map<string, boolean>();
+
+  for (const docSnap of snap.docs) {
+    const data = docSnap.data() as Record<string, unknown>;
+    const driveFileId = String(data.driveFileId ?? '').trim();
+    if (!driveFileId) { kept++; continue; }
+    checked++;
+
+    let exists = existenceCache.get(driveFileId);
+    if (exists === undefined) {
+      try {
+        const res = await drive.files.get({
+          fileId: driveFileId,
+          fields: 'id, trashed',
+          supportsAllDrives: true,
+        });
+        exists = !res.data.trashed;
+      } catch (e: any) {
+        const code = e?.code || e?.response?.status;
+        if (code === 404) exists = false;
+        else { kept++; existenceCache.set(driveFileId, true); continue; } // error transitorio: no borrar
+      }
+      existenceCache.set(driveFileId, exists);
+    }
+
+    if (exists) { kept++; continue; }
+
+    await docSnap.ref.delete();
+    removed++;
+    removedIds.push(docSnap.id);
+  }
+
+  return { checked, removed, kept, removedIds };
+}
+
+/** Borra un backup puntual: elimina el archivo en Drive (si existe) y el doc de Firestore. */
+export async function deleteDriveBackup(
+  docId: string,
+  opts: { empresaId?: string; scopeEmpresa?: boolean; isSuper?: boolean } = {},
+): Promise<{ deleted: boolean; driveDeleted: boolean }> {
+  const db = admin.firestore();
+  const ref = db.collection('system_backups').doc(docId);
+  const docSnap = await ref.get();
+  if (!docSnap.exists) return { deleted: false, driveDeleted: false };
+
+  const data = docSnap.data() as Record<string, unknown>;
+  if (!opts.isSuper && opts.scopeEmpresa) {
+    const docEmp = String(data.empresaId ?? '').trim();
+    if (docEmp !== String(opts.empresaId ?? '').trim()) {
+      throw new Error('El backup pertenece a otra empresa.');
+    }
+  }
+
+  const driveFileId = String(data.driveFileId ?? '').trim();
+  let driveDeleted = false;
+  if (driveFileId) {
+    try {
+      const { google } = await import('googleapis');
+      const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/drive'] });
+      const drive = google.drive({ version: 'v3', auth });
+      await drive.files.delete({ fileId: driveFileId, supportsAllDrives: true });
+      driveDeleted = true;
+    } catch (e: any) {
+      const code = e?.code || e?.response?.status;
+      if (code !== 404) throw e; // 404 = ya no estaba; cualquier otro error sube
+    }
+  }
+
+  await ref.delete();
+  return { deleted: true, driveDeleted };
+}
+
 /** Carpeta Drive: env de la función o último backup OK en Firestore (scheduled y manual comparten config). */
 export async function resolveDriveBackupFolderId(): Promise<string | null> {
   const fromEnv = String(process.env.DRIVE_BACKUP_FOLDER_ID ?? '').trim();

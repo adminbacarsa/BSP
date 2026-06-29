@@ -2,7 +2,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { runBackup, resolveDriveBackupFolderId } from './backup/backup.service';
+import { runBackup, resolveDriveBackupFolderId, syncDriveBackups, deleteDriveBackup } from './backup/backup.service';
 import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
 import { runRestore, runRestoreFromStorage, RestoreMode } from './backup/restore.service';
 import { assertRestoreRequestAllowed, executeRestoreJob, RestoreRequestPayload } from './backup/restore-job.runner';
@@ -2715,6 +2715,47 @@ export const triggerBackup = functions
         await db.collection('system_backups').add(errDoc);
       }
       throw new functions.https.HttpsError('internal', e?.message || 'Error al ejecutar backup');
+    }
+  });
+
+/** Reconcilia el historial con Google Drive: borra de system_backups los registros cuyo archivo ya no existe. */
+export const syncBackups = functions
+  .runWith({ timeoutSeconds: 300, memory: '512MB' })
+  .https.onCall(async (data, context) => {
+    await assertBackupCallableAllowed(context);
+    const caller = await resolveBackupCaller(context.auth!.uid, context.auth!.token?.role);
+    const claimedEmpresa = String((data as { empresaId?: string })?.empresaId ?? '').trim();
+    const empresaId = caller.isSuper ? claimedEmpresa : (caller.profileEmpresa || 'bacarsa');
+    const scopeEmpresa = !caller.isSuper;
+    try {
+      const result = await syncDriveBackups({ empresaId, scopeEmpresa });
+      return result;
+    } catch (e: any) {
+      throw new functions.https.HttpsError('internal', e?.message || 'Error al sincronizar backups con Drive');
+    }
+  });
+
+/** Borra un backup puntual (archivo en Drive + registro en Firestore). */
+export const deleteBackup = functions
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+  .https.onCall(async (data, context) => {
+    await assertBackupCallableAllowed(context);
+    const caller = await resolveBackupCaller(context.auth!.uid, context.auth!.token?.role);
+    const docId = String((data as { docId?: string })?.docId ?? '').trim();
+    if (!docId) throw new functions.https.HttpsError('invalid-argument', 'docId requerido');
+    const empresaId = caller.isSuper
+      ? String((data as { empresaId?: string })?.empresaId ?? '').trim()
+      : (caller.profileEmpresa || 'bacarsa');
+    try {
+      const result = await deleteDriveBackup(docId, { empresaId, scopeEmpresa: !caller.isSuper, isSuper: caller.isSuper });
+      if (!result.deleted) throw new functions.https.HttpsError('not-found', 'El backup ya no existe.');
+      return result;
+    } catch (e: any) {
+      if (e instanceof functions.https.HttpsError) throw e;
+      if (/pertenece a otra empresa/i.test(e?.message || '')) {
+        throw new functions.https.HttpsError('permission-denied', e.message);
+      }
+      throw new functions.https.HttpsError('internal', e?.message || 'Error al borrar backup');
     }
   });
 
