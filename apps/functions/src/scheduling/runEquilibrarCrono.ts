@@ -451,10 +451,99 @@ export const runEquilibrarCronoHandler = async (
         }
     }
 
+    // ── 5b. SEGUNDO PASE: ajuste día a día para empleados aún sobre 200h ────────
+    // El pase de bloques falla cuando un bloque pesado no tiene ningún compañero
+    // con exactamente el mismo rango de fechas. Este pase trabaja shift a shift:
+    // busca, en ese día específico, cualquier empleado con turno más liviano y hace
+    // el intercambio si no viola N→M y no lleva al candidato sobre 200h.
+    const HORA_TOPE = 200;
+    const sobreUmbral = Object.keys(currentHours).filter(id => (currentHours[id] || 0) > HORA_TOPE);
+
+    if (sobreUmbral.length > 0) {
+        // Índice fecha → turnos de ese día
+        const turnosPorFecha: Record<string, TurnoRow[]> = {};
+        for (const t of allTurnos) {
+            if (t.isFranco || t.isAbsence || !t.posName) continue;
+            if (!turnosPorFecha[t.dateStr]) turnosPorFecha[t.dateStr] = [];
+            turnosPorFecha[t.dateStr].push(t);
+        }
+
+        const getEffectiveProf = (t: TurnoRow): PosProfile | null => {
+            const u = updates.get(t.id);
+            const sk = u ? `${u.posName}__${u.code}` : `${t.posName}__${t.code}`;
+            return posProfiles[sk] || null;
+        };
+
+        // Verifica N→M a partir del turno real del día anterior (no del estado de bloques)
+        const violaDiaAnterior = (empId: string, newProf: PosProfile, dateStr: string): boolean => {
+            const prevMs  = new Date(dateStr + 'T12:00:00Z').getTime() - 86400000;
+            const prevDate = new Date(prevMs).toISOString().slice(0, 10);
+            const prevShift = (turnosPorFecha[prevDate] || []).find(t => t.empId === empId);
+            if (!prevShift) return false;
+            const prevProf = getEffectiveProf(prevShift);
+            return !!prevProf && prevProf.endUTCHour === newProf.startUTCHour;
+        };
+
+        for (const empId of sobreUmbral) {
+            // Ordenar turnos del empleado del más pesado al más liviano (estado post pase 1)
+            const misShifts = allTurnos
+                .filter(t => t.empId === empId && !t.isFranco && !t.isAbsence && t.posName)
+                .sort((a, b) => (getEffectiveProf(b)?.hours || 0) - (getEffectiveProf(a)?.hours || 0));
+
+            for (const shift of misShifts) {
+                if ((currentHours[empId] || 0) <= HORA_TOPE) break;
+
+                const profActual = getEffectiveProf(shift);
+                if (!profActual || profActual.hours <= 8) continue; // ya es turno estándar
+
+                // Candidatos: empleados que ese día tienen un turno más liviano y
+                // no superarían 200h al recibir el pesado
+                const candidatos = (turnosPorFecha[shift.dateStr] || []).filter(other => {
+                    if (other.empId === empId) return false;
+                    const profOther = getEffectiveProf(other);
+                    if (!profOther || profOther.hours >= profActual.hours) return false;
+                    const nuevasHrs = (currentHours[other.empId] || 0) - profOther.hours + profActual.hours;
+                    if (nuevasHrs > HORA_TOPE) return false;
+                    if (violaDiaAnterior(other.empId, profActual, shift.dateStr)) return false;
+                    return true;
+                });
+
+                if (candidatos.length === 0) continue;
+
+                // El de menos horas acumuladas toma el turno pesado
+                candidatos.sort((a, b) => (currentHours[a.empId] || 0) - (currentHours[b.empId] || 0));
+                const comp     = candidatos[0];
+                const profComp = getEffectiveProf(comp)!;
+
+                // Verificar también que empId no quede con N→M al recibir el slot liviano
+                if (violaDiaAnterior(empId, profComp, shift.dateStr)) continue;
+
+                const tsEmp  = rebuildTs(shift.dateStr, profComp);
+                const tsComp = rebuildTs(shift.dateStr, profActual);
+
+                updates.set(shift.id, {
+                    posName: profComp.posName, code: profComp.code,
+                    hours:   profComp.hours,   name: profComp.name,
+                    startTime: tsEmp.startTime, endTime: tsEmp.endTime,
+                });
+                updates.set(comp.id, {
+                    posName: profActual.posName, code: profActual.code,
+                    hours:   profActual.hours,   name: profActual.name,
+                    startTime: tsComp.startTime, endTime: tsComp.endTime,
+                });
+
+                currentHours[empId]      = (currentHours[empId]      || 0) - profActual.hours + profComp.hours;
+                currentHours[comp.empId] = (currentHours[comp.empId] || 0) - profComp.hours   + profActual.hours;
+                rotadosSet.add(empId);
+                rotadosSet.add(comp.empId);
+            }
+        }
+    }
+
     const turnosActualizados = updates.size;
 
     // ── 6. HORAS DESPUÉS ────────────────────────────────────────────────────
-    // currentHours ya refleja la redistribución (diferencial aplicado en el loop)
+    // currentHours refleja la redistribución de ambos pases
     const horasDespues: Record<string, number> = { ...currentHours };
 
     // ── 6b. CAMBIOS PROPUESTOS (formato pendingChanges del front) ────────────
