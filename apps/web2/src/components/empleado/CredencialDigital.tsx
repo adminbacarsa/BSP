@@ -723,84 +723,122 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                 {stripeTop}
               </div>
             ) : (
-              // Vertical: ID badge profesional — layout apilado tipo tarjeta
-              <div style={{ position: 'relative', width: '100%', backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', borderRadius: 12, overflow: 'hidden', background: bg, display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
-                {/* Header con gradiente + pattern */}
-                <div style={{ background: `linear-gradient(135deg, ${tema.h1} 0%, ${tema.h2} 100%)`, padding: '12px 14px 10px', flexShrink: 0, position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(135deg, ${tema.accent}12 0px, ${tema.accent}12 1px, transparent 1px, transparent 14px)`, pointerEvents: 'none' }}/>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
-                    {logoEl(26)}
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{ color: '#fff', fontSize: 12, fontWeight: 900, letterSpacing: '0.04em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 6px rgba(0,0,0,0.4)' }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
-                      <p style={{ color: tema.accent, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.15em', marginTop: 1 }}>{credTitulo}</p>
+              // Vertical: ID badge profesional — rediseño full-bleed
+              <div style={{ position: 'relative', width: '100%', backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', borderRadius: 14, overflow: 'hidden', background: bg, display: 'flex', flexDirection: 'column' } as React.CSSProperties}>
+
+                {/* ── Fondo con patrón de seguridad ── */}
+                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
+                  backgroundImage: `repeating-linear-gradient(135deg, ${tema.accent}08 0px, ${tema.accent}08 1px, transparent 1px, transparent 18px),
+                                    repeating-linear-gradient(45deg, ${tema.accent}05 0px, ${tema.accent}05 1px, transparent 1px, transparent 18px)` }}/>
+
+                {/* ── Zona foto full-bleed ── */}
+                <div style={{ position: 'relative', width: '100%', height: 220, flexShrink: 0, overflow: 'hidden' }}>
+                  {/* Foto */}
+                  <div ref={photoContRef} style={{ position: 'absolute', inset: 0, pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
+                    {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}><RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p></div>}
+                    {fotoMostrada ? (
+                      <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, transform: esCutout ? 'none' : `scale(${photoScale})`, transformOrigin: `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 8px 24px rgba(0,0,0,0.9))' : 'none', willChange: 'transform', pointerEvents: 'none', userSelect: 'none' }}/>
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', background: `linear-gradient(170deg, ${tema.h2}ee, ${tema.h1})`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+                        <svg viewBox="0 0 60 80" width="38%" height="auto" opacity="0.25"><circle cx="30" cy="22" r="14" fill="#fff"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="#fff"/></svg>
+                        {!viewOnly && <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Agregar foto</p>}
+                      </div>
+                    )}
+                    {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', bottom: 48, right: 8, width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="10" height="10" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.8)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
+                  </div>
+                  {/* Gradiente foto → fondo */}
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '55%', background: `linear-gradient(to top, ${bg} 0%, ${bg}cc 30%, transparent 100%)`, pointerEvents: 'none' }}/>
+                  {/* Header glassmorphism sobre la foto */}
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 12px 8px', background: 'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, transparent 100%)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', pointerEvents: 'none' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {logoEl(22)}
+                      <div>
+                        <p style={{ color: '#fff', fontSize: 10, fontWeight: 900, letterSpacing: '0.05em', textShadow: '0 1px 4px rgba(0,0,0,0.8)', lineHeight: 1.2 }}>{(empresaDisplay || 'SEGURIDAD PRIVADA').toUpperCase()}</p>
+                        <p style={{ color: tema.accent, fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.18em', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>{credTitulo}</p>
+                      </div>
+                    </div>
+                    {/* Ícono verificado */}
+                    <div style={{ width: 24, height: 24, borderRadius: '50%', background: `${tema.accent}33`, border: `1.5px solid ${tema.accent}88`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={tema.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     </div>
                   </div>
-                </div>
-                {/* Barra accent */}
-                <div style={{ height: 3, background: `linear-gradient(90deg, ${tema.accent}, ${tema.h2}60)`, flexShrink: 0 }}/>
-                {/* Foto centrada */}
-                <div style={{ padding: '12px 18px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <div style={{ width: '52%', aspectRatio: '3/4', overflow: 'hidden', borderRadius: 10, border: `2px solid ${tema.accent}`, position: 'relative', boxShadow: `0 0 0 4px ${tema.accent}20, 0 8px 24px rgba(0,0,0,0.5)` }}>
-                    <div ref={photoContRef} style={{ position: 'absolute', inset: 0, pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
-                      {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}><RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p></div>}
-                      {fotoMostrada ? (
-                        <img src={fotoMostrada} alt="Foto" draggable={false} style={{ width: '100%', height: '100%', objectFit: esCutout ? 'contain' : 'cover', objectPosition: esCutout ? 'bottom center' : `${photoOff.x}% ${photoOff.y}%`, transform: esCutout ? 'none' : `scale(${photoScale})`, transformOrigin: `${photoOff.x}% ${photoOff.y}%`, filter: esCutout ? 'drop-shadow(0 6px 18px rgba(0,0,0,0.8))' : 'none', willChange: 'transform', pointerEvents: 'none', userSelect: 'none' }}/>
-                      ) : (
-                        <div style={{ width: '100%', height: '100%', background: `linear-gradient(170deg, ${tema.h2}cc, ${tema.h1})`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                          <svg viewBox="0 0 60 80" width="50%" height="auto" opacity="0.35"><circle cx="30" cy="22" r="14" fill="#fff"/><path d="M 4 80 Q 4 52 30 48 Q 56 52 56 80 Z" fill="#fff"/></svg>
-                          {!viewOnly && <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 7, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Sin foto</p>}
-                        </div>
-                      )}
-                      {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', bottom: 6, right: 6, width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="10" height="10" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.8)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
-                    </div>
-                  </div>
-                  {/* Badge cargo */}
-                  <div style={{ marginTop: 10, background: tema.accent, borderRadius: 6, padding: '4px 18px' }}>
-                    <p style={{ color: '#000', fontSize: 8, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.12em' }}>{empData.category || 'Vigilador'}</p>
+                  {/* Badge cargo — anclado al fondo de la foto */}
+                  <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 5, background: tema.accent, borderRadius: 20, padding: '4px 14px 4px 10px', boxShadow: `0 2px 12px ${tema.accent}55`, whiteSpace: 'nowrap' }}>
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="rgba(0,0,0,0.7)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <p style={{ color: 'rgba(0,0,0,0.8)', fontSize: 7.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.14em' }}>{empData.category || 'Vigilador'}</p>
                   </div>
                 </div>
-                {/* Nombre */}
-                <div style={{ padding: '10px 14px 0', textAlign: 'center' }}>
-                  <p style={{ color: '#fff', fontSize: 15, fontWeight: 900, lineHeight: 1.2, letterSpacing: '0.02em' }}>{apellidoNombre || nombre || '—'}</p>
+
+                {/* ── Barra accent ── */}
+                <div style={{ height: 2.5, background: `linear-gradient(90deg, transparent, ${tema.accent}, ${tema.accent}60, transparent)`, flexShrink: 0, zIndex: 1 }}/>
+
+                {/* ── Nombre ── */}
+                <div style={{ padding: '10px 14px 4px', textAlign: 'center', position: 'relative', zIndex: 1 }}>
+                  <p style={{ color: '#fff', fontSize: 16, fontWeight: 900, lineHeight: 1.2, letterSpacing: '0.02em', textShadow: '0 1px 8px rgba(0,0,0,0.5)' }}>{apellidoNombre || nombre || '—'}</p>
                 </div>
-                {/* Separador */}
-                <div style={{ margin: '8px 14px', height: 1, background: `linear-gradient(90deg, transparent, ${tema.accent}50, transparent)` }}/>
-                {/* Datos en grilla */}
-                <div style={{ padding: '0 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 10px' }}>
+
+                {/* ── Datos ── */}
+                <div style={{ padding: '6px 14px 0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px', position: 'relative', zIndex: 1 }}>
                   {empData.fileNumber && (
-                    <div>
-                      <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>Legajo</p>
-                      <p style={{ color: '#fff', fontSize: 16, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>#{empData.fileNumber}</p>
+                    <div style={{ background: `${tema.accent}0f`, borderRadius: 8, padding: '5px 8px', border: `1px solid ${tema.accent}20` }}>
+                      <p style={{ color: `${tema.accent}bb`, fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 1 }}>Legajo</p>
+                      <p style={{ color: '#fff', fontSize: 13, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>#{empData.fileNumber}</p>
                     </div>
                   )}
                   {empData.dni && (
-                    <div>
-                      <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>DNI</p>
-                      <p style={{ color: '#fff', fontSize: 16, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>{empData.dni}</p>
+                    <div style={{ background: `${tema.accent}0f`, borderRadius: 8, padding: '5px 8px', border: `1px solid ${tema.accent}20` }}>
+                      <p style={{ color: `${tema.accent}bb`, fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 1 }}>DNI</p>
+                      <p style={{ color: '#fff', fontSize: 13, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1 }}>{empData.dni}</p>
+                    </div>
+                  )}
+                  {empData.cuil && (
+                    <div style={{ gridColumn: '1 / -1', background: `rgba(255,255,255,0.04)`, borderRadius: 8, padding: '4px 8px', border: `1px solid rgba(255,255,255,0.08)`, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <p style={{ color: `${tema.accent}bb`, fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', flexShrink: 0 }}>CUIL</p>
+                      <p style={{ color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
                     </div>
                   )}
                 </div>
-                {empData.cuil && (
-                  <div style={{ padding: '6px 14px 0' }}>
-                    <p style={{ color: `${tema.accent}99`, fontSize: 6.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>CUIL</p>
-                    <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>{empData.cuil}</p>
-                  </div>
-                )}
-                {/* Verificacion */}
-                <div style={{ padding: '8px 14px 0' }}>
-                  {verSection()}
+
+                {/* ── Separador ── */}
+                <div style={{ margin: '8px 14px 0', height: 1, background: `linear-gradient(90deg, transparent, ${tema.accent}30, transparent)`, zIndex: 1 }}/>
+
+                {/* ── Código de verificación ── */}
+                <div style={{ padding: '6px 14px 0', position: 'relative', zIndex: 1 }}>
+                  {(() => {
+                    const pctVal = verPct / 100;
+                    const barColor = pctVal > 0.5 ? tema.accent : pctVal > 0.25 ? '#f59e0b' : '#ef4444';
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={barColor} strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em' }}>Código de verificación</p>
+                          </div>
+                          <p style={{ color: '#fff', fontSize: 20, fontWeight: 900, fontFamily: 'monospace', letterSpacing: '0.18em', lineHeight: 1 }}>{verCode}</p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <p style={{ color: barColor, fontSize: 8, fontWeight: 800, fontFamily: 'monospace', marginBottom: 4 }}>{String(Math.floor(verRemaining / 60)).padStart(1,'0')}:{String(verRemaining % 60).padStart(2,'0')}</p>
+                          <div style={{ width: 52, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${verPct}%`, background: barColor, borderRadius: 2, transition: 'width 1s linear, background 0.5s' }}/>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
-                {/* Footer */}
-                <div style={{ flexShrink: 0, marginTop: 10, background: `linear-gradient(90deg, ${tema.h2}cc, ${tema.h1}cc)`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px 10px', borderTop: `1px solid ${tema.accent}30` }}>
-                  {credPie ? (
-                    <div>
-                      <p style={{ color: `${tema.accent}99`, fontSize: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>Sector</p>
-                      <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontWeight: 700 }}>{credPie}</p>
-                    </div>
-                  ) : <div/>}
+
+                {/* ── Footer ── */}
+                <div style={{ flexShrink: 0, marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 14px 10px', borderTop: `1px solid ${tema.accent}20`, position: 'relative', zIndex: 1 }}>
+                  <div>
+                    {credPie ? (
+                      <>
+                        <p style={{ color: `${tema.accent}88`, fontSize: 5.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 1 }}>Sector</p>
+                        <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: 8.5, fontWeight: 700 }}>{credPie}</p>
+                      </>
+                    ) : <p style={{ color: 'rgba(255,255,255,0.15)', fontSize: 6.5, fontFamily: 'monospace' }}>COSP · {new Date().getFullYear()}</p>}
+                  </div>
                   {qrBtn()}
                 </div>
-                {stripeTop}
               </div>
             )}
 
