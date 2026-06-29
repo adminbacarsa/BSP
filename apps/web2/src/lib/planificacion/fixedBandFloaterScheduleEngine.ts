@@ -10,6 +10,7 @@ import {
     type V2GenerateResult,
     type V2PositionDef,
 } from './autoScheduleEngineV2';
+import { assignmentBreaksBandTransition } from './rotativeBandGuard';
 
 /** Ciclo 24 días: M→T→N con 2F entre bandas (sin N→M directo). */
 export const CYCLE_24_MTN: readonly string[] = [
@@ -530,6 +531,7 @@ function patchRetForAbsences(
                     const ai = aIdx.get(`${retId}__${dateStr}`);
                     if (ai === undefined) continue;
                     if (assignments[ai].code !== 'RET') continue; // ya cubrió otra brecha
+                    if (assignmentBreaksBandTransition(assignments, retId, dateStr, neededBand)) continue;
                     const meta = shiftMeta(pos, neededBand);
                     assignments[ai] = {
                         empId: retId,
@@ -739,6 +741,29 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             const inCurrent = day.getDate() <= cutoffDay;
             if (inCurrent) employeeCycleHours.current[a.empId] = (employeeCycleHours.current[a.empId] || 0) + meta.hours;
             else employeeCycleHours.next[a.empId] = (employeeCycleHours.next[a.empId] || 0) + meta.hours;
+        }
+    }
+
+    // Pase final: cualquier transición N→T/M o T→M que sobrevivió revierte a RET.
+    for (const emp of ctx.employees) {
+        for (let di = 0; di < ctx.daysInMonth.length; di++) {
+            const dateStr = ctx.getDateKey(ctx.daysInMonth[di]);
+            const ai = assignments.findIndex(x =>
+                x.empId === emp.id && x.dateStr === dateStr && (x.hours ?? 0) > 0 && !x.isFranco,
+            );
+            if (ai < 0) continue;
+            if (assignmentBreaksBandTransition(assignments, emp.id, dateStr, String(assignments[ai].code))) {
+                employeeMonthlyHours[emp.id] = Math.max(0, (employeeMonthlyHours[emp.id] || 0) - (Number(assignments[ai].hours) || 0));
+                assignments[ai] = {
+                    empId: emp.id,
+                    dateStr,
+                    positionName: '',
+                    code: 'RET',
+                    name: 'Retén',
+                    hours: 0,
+                    startTime: '00:00',
+                };
+            }
         }
     }
 
