@@ -6682,11 +6682,11 @@ export default function PlanificacionPage() {
                 </div>
 
                 {/* --- ÁREA PRINCIPAL DE LA GRILLA (PLANIFICACIÓN + COMPARACIÓN SPLIT VIEW) --- */}
-                <div className={`flex-1 min-h-0 overflow-hidden relative z-0 custom-scrollbar ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
+                <div className={`flex-1 min-h-0 overflow-hidden relative z-0 flex flex-col ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
                     {isProcessing && <div className="absolute inset-0 bg-white/50 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" size={40}/></div>}
                     
                     {!selectedObjective ? (
-                        <div className="flex flex-col items-center justify-center h-full gap-3 select-none">
+                        <div className="flex flex-col items-center justify-center flex-1 gap-3 select-none">
                             <div className="w-16 h-16 rounded-xl bg-slate-100 flex items-center justify-center">
                                 <Calendar size={32} className="text-slate-300" aria-hidden="true"/>
                             </div>
@@ -6762,7 +6762,7 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className={`h-full min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || isShowAllPending) ? 'opacity-60' : ''} ${correctionMode ? 'pb-2' : ''}`}>
+                            <div className={`flex-1 min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || isShowAllPending) ? 'opacity-60' : ''} ${correctionMode ? 'pb-2' : ''}`}>
                                 {renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined)}
                             </div>
                         )}
