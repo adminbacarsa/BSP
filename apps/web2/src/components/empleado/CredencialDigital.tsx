@@ -413,7 +413,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
     const SC = 2;
     const CARD_W = 420;
     const isH = orientacion === 'horizontal';
-    const CARD_H = isH ? 500 : 720;
+    const CARD_H = isH ? 500 : 800;
 
     const cv = document.createElement('canvas');
     cv.width = CARD_W * SC; cv.height = CARD_H * SC;
@@ -745,7 +745,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                                     repeating-linear-gradient(45deg, ${tema.accent}05 0px, ${tema.accent}05 1px, transparent 1px, transparent 18px)` }}/>
 
                 {/* ── Zona foto full-bleed ── */}
-                <div style={{ position: 'relative', width: '100%', height: 280, flexShrink: 0, overflow: 'hidden' }}>
+                <div style={{ position: 'relative', width: '100%', height: 340, flexShrink: 0, overflow: 'hidden' }}>
                   {/* Foto */}
                   <div ref={photoContRef} style={{ position: 'absolute', inset: 0, pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
                     {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}><RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p></div>}
