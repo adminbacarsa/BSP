@@ -646,7 +646,7 @@ export default function SupervisionPage() {
         turnoIds.push(r.id);
       }
       // Guardar la solicitud como ya aprobada
-      await solicitudRefuerzoService.create({
+      const solicitudId = await solicitudRefuerzoService.create({
         empresaId,
         clientId:            mClienteId,
         clientName:          selectedObjective?.clientName || mClienteId,
@@ -676,6 +676,7 @@ export default function SupervisionPage() {
       });
       // Novedad para OPERACIONES (vacante urgente, no alcanzó el plazo de planificación)
       const manualSol: SolicitudRefuerzo = {
+        id:                  solicitudId,
         empresaId,
         clientId:            mClienteId,
         clientName:          selectedObjective?.clientName || mClienteId,
