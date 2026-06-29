@@ -40,6 +40,31 @@ const isSameDay = (d1: any, d2: any) => { if (!d1 || !d2) return false; return t
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => { if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity; const R = 6371; const dLat = (lat2 - lat1) * (Math.PI / 180); const dLon = (lon2 - lon1) * (Math.PI / 180); const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return R * c; };
 const estimateEta = (dist: number) => Math.round((dist / 30) * 60);
 
+const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
+    const code = String(shift?.code || '').toUpperCase();
+    if (code === 'RFZ' || shift?.isRfzVacante) return 'RFZ';
+    if (code === 'TURA') return 'TURA';
+    const type = String(shift?.type || '').toUpperCase();
+    if (type === 'RFZ') return 'RFZ';
+    if (type === 'TURA') return 'TURA';
+    return null;
+};
+
+const getGuardAvatarLabel = (shift: any, name: string): string => {
+    const ref = getRefuerzoLabel(shift);
+    if (ref) return ref;
+    if (shift?.isUnassigned && !shift?.isReportedToPlanning) return '!';
+    return (name[0] || '?').toUpperCase();
+};
+
+const getGuardAvatarClass = (shift: any): string => {
+    const ref = getRefuerzoLabel(shift);
+    if (ref === 'RFZ') return 'bg-red-100 text-red-700';
+    if (ref === 'TURA') return 'bg-violet-100 text-violet-700';
+    if (shift?.isUnassigned && !shift?.isReportedToPlanning) return 'bg-rose-100 text-rose-600';
+    return 'bg-slate-200 text-slate-600';
+};
+
 // --- COMPONENTE LISTA ---
 const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhatsapp, onPhone, context }: any) => {
     const styles: any = { cyan: { border: 'border-cyan-200', dot: 'bg-cyan-500', text: 'text-cyan-700', bg: 'bg-cyan-50', btn: 'bg-cyan-600 hover:bg-cyan-700' }, purple: { border: 'border-purple-200', dot: 'bg-purple-500', text: 'text-purple-700', bg: 'bg-purple-50', btn: 'bg-purple-600 hover:bg-purple-700' }, slate: { border: 'border-slate-200', dot: 'bg-slate-400', text: 'text-slate-600', bg: 'bg-white', btn: 'bg-slate-800 hover:bg-slate-900' } };
@@ -1590,10 +1615,15 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
 
     let name = shift.isUnassigned ? (shift.employeeName || 'VACANTE') : (shift.employeeName || 'Desconocido');
     if (shift.isReportedToPlanning) name = name.replace('VACANTE: ', '');
+    const refuerzoLabel = getRefuerzoLabel(shift);
+    const avatarLabel = getGuardAvatarLabel(shift, name);
+    const avatarClass = getGuardAvatarClass(shift);
 
     // Badge de estado
     let badge = null;
     if (shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
+    else if (refuerzoLabel && shift.isUnassigned) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-fuchsia-600 text-white shrink-0">VACANTE {refuerzoLabel}</span>;
+    else if (refuerzoLabel) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${refuerzoLabel === 'TURA' ? 'bg-violet-600' : 'bg-red-600'}`}>{refuerzoLabel}</span>;
     else if (shift.isUnassigned)     badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ATENCIÓN: relevo pendiente</span>;
     else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
@@ -1613,8 +1643,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     if (isCompact) return (
         <div className={`relative flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200/80 mb-1 shadow-sm hover:shadow-md transition-all ${rowBg}`}>
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${accentColor}`}/>
-            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ml-1 ${shift.isUnassigned && !shift.isReportedToPlanning ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-600'}`}>
-                {shift.isUnassigned && !shift.isReportedToPlanning ? '!' : (name[0] || '?')}
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black shrink-0 ml-1 ${avatarClass} ${refuerzoLabel ? 'text-[8px] tracking-tight' : 'text-[10px]'}`}>
+                {avatarLabel}
             </div>
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 leading-tight">
@@ -1662,8 +1692,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {/* Fila 1: nombre + badge + hora */}
                 <div className="flex items-start justify-between gap-2 mb-1">
                     <div className="flex items-center gap-2 min-w-0">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black shrink-0 ${shift.isUnassigned && !shift.isReportedToPlanning ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-600'}`}>
-                            {shift.isUnassigned && !shift.isReportedToPlanning ? '!' : (name[0] || '?')}
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black shrink-0 ${avatarClass} ${refuerzoLabel ? 'text-[9px] tracking-tight' : 'text-[11px]'}`}>
+                            {avatarLabel}
                         </div>
                         <div className="min-w-0">
                             <span className={`text-[13px] font-black block truncate ${shift.isUnassigned ? 'text-rose-600' : 'text-slate-800'}`}>{name}</span>

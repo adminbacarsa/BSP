@@ -287,7 +287,7 @@ export default function SupervisionPage() {
   const [slaPositions, setSlaPositions] = useState<SlaPosition[]>([]);
   const [mSelPosId, setMSelPosId]       = useState('');
   const [mSelShiftCode, setMSelShiftCode] = useState('');
-  const [guardias, setGuardias] = useState<{ shiftId: string; nombre: string; empleadoId: string }[]>();
+  const [guardias, setGuardias] = useState<{ shiftId: string; nombre: string; empleadoId: string; horario: string; code: string; puesto: string }[]>();
   const todayStr = new Date().toISOString().split('T')[0];
   const [ausenciasFecha, setAusenciasFecha] = useState(todayStr);
   const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
@@ -320,6 +320,17 @@ export default function SupervisionPage() {
     setGuardias(undefined); setMGuardiaAAmpliar(''); setMGuardiaEmpleadoId(''); setMGuardiaShiftId('');
     if (mTipo !== 'AGREGADO_TURNO' || !mObjetivoId || !mFecha) return;
     setGuardias([]);
+    const fmtHora = (val: any): string => {
+      if (!val) return '';
+      try {
+        let d: Date | null = null;
+        if (typeof val === 'string') d = new Date(val);
+        else if (val.seconds) d = new Date(val.seconds * 1000);
+        else if (val.toDate) d = val.toDate();
+        if (!d || isNaN(d.getTime())) return '';
+        return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+      } catch { return ''; }
+    };
     getDocs(query(collection(db, 'turnos'), where('objectiveId', '==', mObjetivoId)))
       .then(snap => {
         const seen = new Set<string>();
@@ -342,7 +353,17 @@ export default function SupervisionPage() {
               }
             } catch { /* keep */ }
           }
-          return { shiftId: t.id, nombre: nombre || t.employeeId, empleadoId: t.employeeId };
+          const hi = fmtHora(t.startTime);
+          const hf = fmtHora(t.endTime);
+          const horario = hi && hf ? `${hi}–${hf}` : (hi || '');
+          return {
+            shiftId: t.id,
+            nombre: nombre || t.employeeId,
+            empleadoId: t.employeeId,
+            horario,
+            code: String(t.code || t.type || '').toUpperCase(),
+            puesto: t.positionName || '',
+          };
         })).then(lista => setGuardias(lista));
       });
   }, [mTipo, mObjetivoId, mFecha]);
@@ -1201,14 +1222,25 @@ export default function SupervisionPage() {
                   <p className="text-xs text-slate-400 py-1">Sin guardias con turno ese día — ingresá el nombre manualmente</p>
                 )}
                 {Array.isArray(guardias) && guardias.length > 0 && (
-                  <div className="flex gap-2 flex-wrap">
-                    {guardias.map(g => (
-                      <button key={g.shiftId} type="button"
-                        onClick={() => { setMGuardiaShiftId(g.shiftId); setMGuardiaEmpleadoId(g.empleadoId); setMGuardiaAAmpliar(g.nombre); }}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1 ${mGuardiaShiftId === g.shiftId ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-violet-300'}`}>
-                        <User size={10}/> {g.nombre}
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {guardias.map(g => {
+                      const activo = mGuardiaShiftId === g.shiftId;
+                      return (
+                        <button key={g.shiftId} type="button"
+                          onClick={() => { setMGuardiaShiftId(g.shiftId); setMGuardiaEmpleadoId(g.empleadoId); setMGuardiaAAmpliar(g.nombre); }}
+                          className={`px-3 py-2 rounded-xl text-xs font-bold border transition-colors flex items-start gap-2 text-left ${activo ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-violet-300'}`}>
+                          <User size={12} className="mt-0.5 shrink-0"/>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{g.nombre}</span>
+                            <span className={`block mt-0.5 text-[10px] font-bold ${activo ? 'text-violet-100' : 'text-slate-500'}`}>
+                              {g.horario
+                                ? <>{g.code && <span className={`px-1 py-0.5 rounded mr-1 ${activo ? 'bg-violet-500' : 'bg-slate-200 text-slate-600'}`}>{g.code}</span>}{g.horario}{g.puesto ? ` · ${g.puesto}` : ''}</>
+                                : <span className="italic opacity-70">Sin horario</span>}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 {(!Array.isArray(guardias) || guardias.length === 0) && (

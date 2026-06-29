@@ -377,6 +377,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // para excluir guardias que no llegaron aunque isAbsent=false en Firestore
 
             const isUnassigned = !isValidEmployee;
+            const shiftCode = String(shift.code || shift.type || '').toUpperCase();
+            // RFZ publicado sin guardia = refuerzo por ausencia pendiente de asignar en Planificación
+            const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
+            if (isRfzVacante) finalEmpName = 'VACANTE: RFZ';
             // isOperationalVacancy: usado para la generación de vacantes virtuales y deduplicación.
             // Para el DISPLAY (contador OBJ, stats, tab VACANTES) se usa isUnassigned directamente
             // para incluir también las devueltas — ambas representan puestos sin cobertura real.
@@ -384,8 +388,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isFranco = !!shift.isFranco || shift.objectiveName === 'FRANCO';
             
             const isSinCobertura = !!shift.isSinCobertura;
-            // Descartar docs reales vacantes no-devueltos EXCEPTO los autosinc_ SIN COBERTURA
-            if (isUnassigned && !isReportedToPlanning && !isSinCobertura) return null; 
+            // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA y RFZ por ausencia
+            if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante) return null;
 
             const isEarlyStartScheduled = !!shift.isEarlyStart;
             const isEarlyStart = isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
@@ -470,7 +474,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
-                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField, isSinCobertura
+                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField, isSinCobertura,
+                isRfzVacante, isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',
+                vacancyOrigin: isRfzVacante ? 'ABSENCE' : shift.vacancyOrigin,
             };
         }).filter(Boolean);
 

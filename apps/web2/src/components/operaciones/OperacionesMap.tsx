@@ -4,6 +4,16 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Shield, Clock, AlertTriangle, Siren, Navigation, UserCheck, PlayCircle, LogOut, Building2 } from 'lucide-react';
 
+const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
+    const code = String(shift?.code || '').toUpperCase();
+    if (code === 'RFZ' || shift?.isRfzVacante) return 'RFZ';
+    if (code === 'TURA') return 'TURA';
+    const type = String(shift?.type || '').toUpperCase();
+    if (type === 'RFZ') return 'RFZ';
+    if (type === 'TURA') return 'TURA';
+    return null;
+};
+
 // --- ICONOS DINÁMICOS ---
 const createCustomIcon = (color: string, type: 'SHIELD' | 'ALERT' | 'SIREN' | 'CHECK' | 'OFF') => {
     let svgPath = "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z";
@@ -166,6 +176,7 @@ const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover
                     const t2 = end ? end.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
 
                     let statusLabel = 'PLAN'; let statusColor = '#94a3b8';
+                    const refuerzoLabel = getRefuerzoLabel(shift);
                     if (shift.isFranco)                                                       { statusLabel = 'FRANCO';   statusColor = '#3b82f6'; }
                     else if (shift.isSinCobertura)                                             { statusLabel = 'SIN COB.'; statusColor = '#475569'; }
                     else if (shift.isPresent && shift.manualRetentionType === 'extended')      { statusLabel = `+${shift.manualRetentionHours}h MAN`; statusColor = '#d97706'; }
@@ -178,10 +189,23 @@ const PopupContent = ({ marker, onOpenCoverage, onOpenAttendance, onOpenHandover
                     else if (shift.isPotentialAbsence)                                         { statusLabel = 'AUSENCIA'; statusColor = '#dc2626'; }
                     else if (diffMin > 5)                                                      { statusLabel = 'TARDE';    statusColor = '#d97706'; }
                     else if (diffMin >= -15)                                                   { statusLabel = 'EN HORA';  statusColor = '#4f46e5'; }
+                    if (refuerzoLabel) {
+                        statusLabel = shift.isUnassigned ? `VAC ${refuerzoLabel}` : refuerzoLabel;
+                        statusColor = refuerzoLabel === 'TURA' ? '#7c3aed' : '#dc2626';
+                    }
+
+                    const displayName = refuerzoLabel && !shift.isUnassigned
+                        ? `${shift.employeeName || 'VACANTE'}`
+                        : (shift.employeeName || 'VACANTE');
 
                     return (
                         <div key={shift.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', borderLeft: `3px solid ${s.borderColor}`, background: idx % 2 === 0 ? s.background : '#ffffff', padding: '3px 12px', minHeight: '28px', borderBottom: '1px solid #f1f5f9' }}>
-                            <span style={{ flex: '0 0 180px', fontSize: '11px', fontWeight: 700, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shift.employeeName || 'VACANTE'}</span>
+                            <span style={{ flex: '0 0 180px', fontSize: '11px', fontWeight: 700, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {refuerzoLabel && (
+                                    <span style={{ fontSize: '8px', fontWeight: 900, color: 'white', background: refuerzoLabel === 'TURA' ? '#7c3aed' : '#dc2626', borderRadius: '4px', padding: '1px 4px', flexShrink: 0 }}>{refuerzoLabel}</span>
+                                )}
+                                {displayName}
+                            </span>
                             <span style={{ flex: '0 0 100px', fontSize: '10px', fontFamily: 'monospace', color: '#334155', fontWeight: 600, whiteSpace: 'nowrap' }}>{t1}{t2 ? `–${t2}` : ''}</span>
                             <span style={{ flex: 1, fontSize: '10px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shift.positionName || '—'}</span>
                             <span style={{ width: '52px', fontSize: '8px', fontWeight: 800, color: 'white', background: statusColor, borderRadius: '4px', padding: '2px 0', textAlign: 'center', flexShrink: 0 }}>{statusLabel}</span>
