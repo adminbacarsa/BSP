@@ -441,6 +441,7 @@ function tryFillOneSlot(
         const restOk = options?.allowSlaClose
             ? passesAgreementRest(empId, dateStr, code, sStart, sHrs)
                 && !assignmentBreaksBandTransition(params.assignments, empId, dateStr, code)
+                && !nextAssignmentBreaksBandTransition(params.assignments, empId, dateStr, code)
             : rotate
                 ? canAssignBand(params, empId, dateStr, code, sStart, sHrs)
                 : passesAgreementRest(empId, dateStr, code, sStart, sHrs);
@@ -2257,7 +2258,11 @@ export function alignAssignmentsToPendulum(
         const aiHrs = Number(ai.hours) || 8;
         const ajHrs = Number(aj.hours) || 8;
         return passesAgreementRest(ai.empId, dateStr, String(ai.code), ai.startTime, aiHrs)
-            && passesAgreementRest(aj.empId, dateStr, String(aj.code), aj.startTime, ajHrs);
+            && passesAgreementRest(aj.empId, dateStr, String(aj.code), aj.startTime, ajHrs)
+            && !assignmentBreaksBandTransition(assignments, ai.empId, dateStr, String(ai.code))
+            && !nextAssignmentBreaksBandTransition(assignments, ai.empId, dateStr, String(ai.code))
+            && !assignmentBreaksBandTransition(assignments, aj.empId, dateStr, String(aj.code))
+            && !nextAssignmentBreaksBandTransition(assignments, aj.empId, dateStr, String(aj.code));
     };
 
     for (let pass = 0; pass < 24; pass++) {
@@ -2430,7 +2435,11 @@ export function repairForbiddenAfterNightTransitions(
                 const curHrs = Number(curA.hours) || 8;
                 const peerHrs = Number(peer.hours) || 8;
                 const ok = passesAgreementRest(curA.empId, curDs, String(curA.code), curA.startTime, curHrs)
-                    && passesAgreementRest(peer.empId, curDs, String(peer.code), peer.startTime, peerHrs);
+                    && passesAgreementRest(peer.empId, curDs, String(peer.code), peer.startTime, peerHrs)
+                    && !assignmentBreaksBandTransition(assignments, curA.empId, curDs, String(curA.code))
+                    && !nextAssignmentBreaksBandTransition(assignments, curA.empId, curDs, String(curA.code))
+                    && !assignmentBreaksBandTransition(assignments, peer.empId, curDs, String(peer.code))
+                    && !nextAssignmentBreaksBandTransition(assignments, peer.empId, curDs, String(peer.code));
                 if (ok) {
                     fixed++;
                     repaired = true;
