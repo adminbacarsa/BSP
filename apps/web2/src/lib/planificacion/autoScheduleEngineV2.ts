@@ -60,7 +60,7 @@ import { fillCycleBaseRotativeAssignments } from './cycleBaseSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
 import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
-import { normBand } from './rotativeBandGuard';
+import { assignmentBreaksBandTransition, normBand } from './rotativeBandGuard';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -2071,6 +2071,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
         const sEnd = sh.endTime || undefined;
         if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > HARD_MAX_HOURS) return false;
+        if (assignmentBreaksBandTransition(assignments, empId, dateStr, sCode)) return false;
         if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) return false;
         writeAssignment(empId, dateStr, pos.positionName, sCode, sh.name || sCode, sHrs, sStart, inCurrent, sEnd);
         return true;
