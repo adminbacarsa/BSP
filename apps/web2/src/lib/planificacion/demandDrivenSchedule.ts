@@ -439,6 +439,7 @@ function tryFillOneSlot(
         }
         const restOk = options?.allowSlaClose
             ? passesAgreementRest(empId, dateStr, code, sStart, sHrs)
+                && !assignmentBreaksBandTransition(params.assignments, empId, dateStr, code)
             : rotate
                 ? canAssignBand(params, empId, dateStr, code, sStart, sHrs)
                 : passesAgreementRest(empId, dateStr, code, sStart, sHrs);
