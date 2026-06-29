@@ -61,7 +61,19 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const [empresaLocal, setEmpresaLocal]   = useState(empresaNombre || '');
   const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 20 });
   const photoOffRef                       = useRef({ x: 50, y: 20 });
-  const [flipped, setFlipped]             = useState(false);
+  const [showBack, setShowBack]           = useState(false);
+  const [cardRotY, setCardRotY]           = useState(0);
+  const isFlippingRef                     = useRef(false);
+  const flipCard = (toBack: boolean) => {
+    if (isFlippingRef.current) return;
+    isFlippingRef.current = true;
+    setCardRotY(90);                         // fase 1: rotar a 90° (borde, invisible)
+    setTimeout(() => {
+      setShowBack(toBack);                   // swap de contenido en el punto medio
+      setCardRotY(0);                        // fase 2: volver a 0° (nuevo contenido)
+      setTimeout(() => { isFlippingRef.current = false; }, 400);
+    }, 320);
+  };
   const [credModelo, setCredModelo]       = useState<string>('gradiente');
   const [verCode, setVerCode]             = useState('--- ---');
   const [verRemaining, setVerRemaining]   = useState(60);
@@ -652,7 +664,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   );
 
   const qrBtn = () => (
-    <button onClick={() => setFlipped(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 20, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)', cursor: 'pointer' }}>
+    <button onClick={() => flipCard(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 20, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)', cursor: 'pointer' }}>
       {qrDataUrl && <img src={qrDataUrl} alt="" style={{ width: 14, height: 14, opacity: 0.65, borderRadius: 2 }}/>}
       <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 6.5, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Ver QR</p>
     </button>
@@ -688,24 +700,24 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
       <div className="relative" style={{ width: '100%' }}>
 
         {/* Perspectiva 3D */}
-        <div style={{ perspective: '1200px' }}>
+        <div style={{ perspective: '900px' }}>
           <div
             onMouseMove={onCardMouseMove}
             style={{
               position: 'relative', width: '100%',
               height: isH ? 'min(500px, calc(100svw * 1.19))' : 'auto',
-              transformStyle: 'preserve-3d',
-              transition: 'transform 0.75s cubic-bezier(0.4, 0, 0.2, 1)',
-              transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+              transition: cardRotY === 90
+                ? 'transform 320ms cubic-bezier(0.4, 0, 1, 1)'
+                : 'transform 320ms cubic-bezier(0, 0, 0.2, 1)',
+              transform: `rotateY(${cardRotY}deg)`,
               touchAction: 'none',
               borderRadius: 12,
             }}
           >
 
-            {/* ══ FRENTE — template único ══ */}
-            {isH ? (
+            {/* frente */}
+            {!showBack && (isH ? (
               // Horizontal: foto izq | datos der
-              <div style={{ position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' } as React.CSSProperties}>
               <div style={{ position: 'absolute', inset: 0, borderRadius: 12, overflow: 'hidden', background: bg, display: 'flex' }}>
                 {photoZoneH}
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '18px 16px 14px' }}>
@@ -722,7 +734,6 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                   </div>
                 </div>
                 {stripeTop}
-              </div>
               </div>
             ) : (
               // Vertical: ID badge profesional — rediseño full-bleed
@@ -842,18 +853,12 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                   {qrBtn()}
                 </div>
               </div>
-            )}
+            ))}
 
-            {/* ══ DORSO — QR ══ */}
-            {/* NOTA: outer div NO tiene overflow/borderRadius para evitar aplanamiento 2D en Safari/iOS */}
+            {/* dorso */}
+            {showBack && (
             <div style={{
-              position: 'absolute', inset: 0,
-              backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden',
-              transform: 'rotateY(180deg)',
-              pointerEvents: flipped ? 'auto' : 'none',
-            } as React.CSSProperties}>
-            <div style={{
-              position: 'absolute', inset: 0, borderRadius: 12, overflow: 'hidden',
+              position: 'relative', width: '100%', borderRadius: 12, overflow: 'hidden',
               background: `linear-gradient(158deg, ${tema.h1} 0%, #0c1a28 42%, ${tema.h2}bb 100%)`,
             }}>
               <div style={{ position: 'absolute', inset: 0, opacity: 0.05, pointerEvents: 'none', backgroundImage: `repeating-linear-gradient(45deg, ${tema.accent} 0px, ${tema.accent} 1px, transparent 1px, transparent 10px)` }}/>
@@ -886,10 +891,10 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                   Esta credencial es propiedad de {empresaDisplay || 'la empresa'}. En caso de encontrarla, devolver a su titular.
                 </p>
               </div>
-              <button onClick={() => setFlipped(false)} style={{ position: 'absolute', bottom: 16, right: 14, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px', borderRadius: 20, background: `${tema.accent}18`, border: `1px solid ${tema.accent}45`, color: tema.accent, fontSize: 7, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer' }}>← Frente</button>
+              <button onClick={() => flipCard(false)} style={{ position: 'absolute', bottom: 16, right: 14, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px', borderRadius: 20, background: `${tema.accent}18`, border: `1px solid ${tema.accent}45`, color: tema.accent, fontSize: 7, fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer' }}>← Frente</button>
               <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 7, background: `linear-gradient(90deg, ${tema.h2}, ${tema.accent}80, ${tema.h2})` }}/>
             </div>
-            </div>
+            )}
 
           </div>{/* flipper */}
         </div>{/* perspectiva */}
