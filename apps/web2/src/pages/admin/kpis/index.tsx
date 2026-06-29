@@ -104,6 +104,7 @@ export default function KpisPage() {
   const [auditLogsRaw, setAuditLogsRaw] = useState<Record<string, unknown>[]>([]);
   const [slaRaw,       setSlaRaw]       = useState<Record<string, unknown>[]>([]);
   const [empleadosRaw, setEmpleadosRaw] = useState<Record<string, unknown>[]>([]);
+  const [clientsRaw,   setClientsRaw]   = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
     if (!empresaId) return;
@@ -113,12 +114,13 @@ export default function KpisPage() {
     const startTs = Timestamp.fromDate(sd);
     async function go() {
       try {
-        const [tSnap, aSnap, auSnap, sSnap, eSnap] = await Promise.all([
+        const [tSnap, aSnap, auSnap, sSnap, eSnap, cSnap] = await Promise.all([
           getDocs(query(collection(db, 'turnos'),     where('startTime',  '>=', startTs))),
           getDocs(collection(db, 'ausencias')),
           getDocs(query(collection(db, 'audit_logs'), where('timestamp',  '>=', startTs))),
           getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa)),
           getDocs(collection(db, 'empleados')),
+          getDocs(collection(db, 'clients')),
         ]);
         if (!cancelled) {
           setTurnosRaw(tSnap.docs.map(d=>({id:d.id,...d.data()})));
@@ -126,6 +128,7 @@ export default function KpisPage() {
           setAuditLogsRaw(auSnap.docs.map(d=>({id:d.id,...d.data()})));
           setSlaRaw(sSnap.docs.map(d=>({id:d.id,...(d.data() as Record<string,unknown>)})));
           setEmpleadosRaw(eSnap.docs.map(d=>({id:d.id,...d.data()})));
+          setClientsRaw(cSnap.docs.map(d=>({id:d.id,...d.data()})));
           setLoading(false);
         }
       } catch(e) { console.error('[KPIs]',e); if(!cancelled) setLoading(false); }
@@ -134,6 +137,25 @@ export default function KpisPage() {
   }, [empresaId, days, refreshKey, scopeEmpresa]);
 
   const fd = (d: Record<string,unknown>) => belongsToEmpresaView(d as {empresaId?:unknown}, empresaId, migracionCompleta);
+
+  // Mapa objectiveId → {name, clientName, clientId} construido desde colección clients
+  const objMap = useMemo(() => {
+    const m = new Map<string, {name:string; clientName:string; clientId:string}>();
+    clientsRaw.forEach(c => {
+      const clientName = String(c.name ?? c.nombre ?? c.razonSocial ?? '');
+      const clientId   = String(c.id ?? '');
+      const objetivos  = Array.isArray(c.objetivos) ? c.objetivos : [];
+      objetivos.forEach((o: any) => {
+        const oid = String(o.id ?? o.objectiveId ?? '').trim();
+        if (oid) m.set(oid, { name: String(o.name ?? o.nombre ?? oid), clientName, clientId });
+      });
+      // Algunos clientes son a su vez el objetivo (sin array objetivos)
+      if (objetivos.length === 0 && clientId) {
+        m.set(clientId, { name: clientName, clientName, clientId });
+      }
+    });
+    return m;
+  }, [clientsRaw]);
 
   const { turnos, audit, slas } = useMemo(() => {
     const t = turnosRaw.filter(fd);
@@ -185,8 +207,18 @@ export default function KpisPage() {
     });
     const m:Record<string,ServiceRow>={};
     turnos.forEach(t=>{
-      const oid=String(t.objectiveId??''); if(!oid) return;
-      if(!m[oid]) m[oid]={objectiveId:oid,objectiveName:String(t.objectiveName??'Sin objetivo'),clientId:String(t.clientId??''),clientName:String(t.clientName??'Sin cliente'),hsEjecutadas:0,hsPlanificadas:0,hsPerdidas:0,presentes:0,ausentes:0,tardanzas:0,retenciones:0,vacantes:0};
+      const oid=String(t.objectiveId??t.objetivoId??'').trim(); if(!oid) return;
+      if(!m[oid]) {
+        // Enriquecer con objMap (clients collection) — los turnos planificados no tienen nombre directo
+        const info = objMap.get(oid);
+        m[oid]={
+          objectiveId:oid,
+          objectiveName: info?.name || String(t.objectiveName??'') || oid,
+          clientId:      info?.clientId || String(t.clientId??''),
+          clientName:    info?.clientName || String(t.clientName??'Sin cliente'),
+          hsEjecutadas:0,hsPlanificadas:0,hsPerdidas:0,presentes:0,ausentes:0,tardanzas:0,retenciones:0,vacantes:0,
+        };
+      }
       const r=m[oid],hs=shiftHours(t);
       if(t.isPresent===true||t.isCompleted===true){r.hsEjecutadas+=hs;r.presentes++;}
       if(t.isAbsent===true){r.hsPerdidas+=hs;r.ausentes++;}
@@ -195,7 +227,7 @@ export default function KpisPage() {
     });
     Object.keys(m).forEach(o=>{m[o].tardanzas=tm[o]??0;m[o].retenciones=rm[o]??0;});
     return Object.values(m);
-  }, [turnos, audit]);
+  }, [turnos, audit, objMap]);
 
   const cliRows = useMemo<ClientRow[]>(() => {
     const m:Record<string,ClientRow>={};
