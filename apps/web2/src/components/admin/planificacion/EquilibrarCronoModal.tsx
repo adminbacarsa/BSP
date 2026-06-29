@@ -292,21 +292,27 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                             {/* Excluir puestos de la rotación */}
                             {current.puestosEncontrados && current.puestosEncontrados.length > 1 && (
                                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                    <p className="text-[10px] font-black uppercase text-slate-500 mb-2">Excluir puestos de la rotación</p>
-                                    <div className="space-y-1">
-                                        {current.puestosEncontrados.map(puesto => (
-                                            <label key={puesto} className="flex items-center gap-2 cursor-pointer group">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={puestosExentos.has(puesto)}
-                                                    onChange={() => toggleExento(puesto)}
-                                                    className="w-3.5 h-3.5 accent-emerald-600 cursor-pointer"
-                                                />
-                                                <span className={`text-[11px] font-medium ${puestosExentos.has(puesto) ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                                    <p className="text-[10px] font-black uppercase text-slate-500 mb-2">
+                                        Excluir de la rotación — tocá para excluir / volver a incluir
+                                    </p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {current.puestosEncontrados.map(puesto => {
+                                            const excluido = puestosExentos.has(puesto);
+                                            return (
+                                                <button
+                                                    key={puesto}
+                                                    type="button"
+                                                    onClick={() => toggleExento(puesto)}
+                                                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-all select-none ${
+                                                        excluido
+                                                            ? 'bg-slate-100 border-slate-300 text-slate-400 line-through'
+                                                            : 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100 active:bg-emerald-200'
+                                                    }`}
+                                                >
                                                     {puesto}
-                                                </span>
-                                            </label>
-                                        ))}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                     {puestosExentos.size > 0 && (
                                         <p className="text-[10px] text-amber-700 mt-2">
