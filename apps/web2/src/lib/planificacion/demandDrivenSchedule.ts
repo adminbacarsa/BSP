@@ -173,7 +173,9 @@ function tryFillSlotFromFrancoRescue(
     });
 
     const sorted = options?.allowSlaClose
-        ? [...candidates].filter(empId => passesAgreementRest(empId, dateStr, code, sStart, sHrs))
+        ? [...candidates].filter(empId =>
+            passesAgreementRest(empId, dateStr, code, sStart, sHrs)
+            && !assignmentBreaksBandTransition(params.assignments, empId, dateStr, code))
         : sortCandidates(candidates, params, code, inCurrent, { preferRemainingBudget: true });
 
     for (const empId of sorted) {
@@ -1083,8 +1085,7 @@ function trySwapBandOnSamePosition(
     const sStart = sh.startTime || DEFAULT_START[targetCode] || '07:00';
     const sEnd = sh.endTime;
 
-    if (!passesAgreementRest(donor.empId, dateStr, targetCode, sStart, sHrs)
-        && !canAssignBand(params, donor.empId, dateStr, targetCode, sStart, sHrs)) {
+    if (!canAssignBand(params, donor.empId, dateStr, targetCode, sStart, sHrs)) {
         return false;
     }
 
