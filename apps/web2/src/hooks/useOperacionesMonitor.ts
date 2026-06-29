@@ -128,6 +128,10 @@ const countPresentOnSlot = (
 export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const [now, setNow] = useState(new Date());
     const [rawShifts, setRawShifts] = useState<any[]>([]);
+    // RFZ/TURA se guardan con startTime/endTime como string ISO (no Timestamp), por lo que el
+    // listener principal de `turnos` (que filtra por rango Timestamp) NO los devuelve. Se traen
+    // en un listener aparte filtrando por `code` y se mergean en mergedRawShifts.
+    const [rawRefuerzos, setRawRefuerzos] = useState<any[]>([]);
     const [employees, setEmployees] = useState<any[]>([]);
     const [objectives, setObjectives] = useState<any[]>([]);
     const [servicesSLA, setServicesSLA] = useState<any[]>([]);
@@ -260,8 +264,35 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             console.warn('[useOperacionesMonitor] turnos listener error, forzando reconexión:', err.code);
             setRefreshKey(k => k + 1);
         });
-        return () => unsub();
+
+        // Refuerzos (RFZ) y turnos agregados (TURA): startTime/endTime son string ISO, así que el
+        // rango Timestamp del listener principal los excluye. Listener aparte por `code` (filtro de
+        // campo único → no requiere índice compuesto) y filtrado de empresa + ventana en memoria.
+        const startMs = start.getTime();
+        const endMs = end.getTime();
+        const refuerzosQ = query(collection(db, 'turnos'), where('code', 'in', ['RFZ', 'TURA']));
+        const unsubRfz = onSnapshot(refuerzosQ, (snap) => {
+            setRawRefuerzos(snap.docs
+                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) }))
+                .filter((s: any) => {
+                    const t = s.shiftDateObj instanceof Date ? s.shiftDateObj.getTime() : NaN;
+                    return !isNaN(t) && t >= startMs && t <= endMs;
+                }));
+        }, (err) => {
+            console.warn('[useOperacionesMonitor] refuerzos listener error:', err.code);
+        });
+
+        return () => { unsub(); unsubRfz(); };
     }, [empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);
+
+    // Unifica turnos regulares (Timestamp) + refuerzos RFZ/TURA (string ISO). Dedup por id.
+    const mergedRawShifts = useMemo(() => {
+        const map = new Map<string, any>();
+        rawShifts.forEach(s => map.set(s.id, s));
+        rawRefuerzos.forEach(s => { if (!map.has(s.id)) map.set(s.id, s); });
+        return Array.from(map.values());
+    }, [rawShifts, rawRefuerzos]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);
     const filteredObjectives = useMemo(() => selectedClientId ? objectives.filter(o => o.clientId === selectedClientId) : objectives, [objectives, selectedClientId]);
@@ -282,7 +313,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const filteredSLA = filterSlaRowsByEmpresa(servicesSLA, empresaId, scopeEmpresa, clientIds);
         const activeSlaMap = new Set(filteredSLA.map((s: any) => s.objectiveId));
 
-        const realShifts = rawShifts.map(shift => {
+        const realShifts = mergedRawShifts.map(shift => {
             if (!shift.shiftDateObj) return null;
             if (shift.draft === true) return null;
             // COVERED: solo descartar si es una vacante real (employeeId=VACANTE)
@@ -463,7 +494,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Vacantes "virtuales" = huecos del SLA vs turnos reales. Si no hay ningún documento
             // en `turnos` para este objetivo hoy (p. ej. base vaciada o aún sin planificar),
             // no generar tarjetas fantasma: el contador de vacantes reflejaba solo SLA activo.
-            const hasRawShiftTodayForObjective = rawShifts.some((s: any) => {
+            const hasRawShiftTodayForObjective = mergedRawShifts.some((s: any) => {
                 if (!s.objectiveId || s.objectiveId !== sla.objectiveId) return false;
                 const d = s.shiftDateObj || getSafeDate(s.startTime);
                 return d && isSameDay(d, now);
@@ -736,7 +767,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
 
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
-    }, [rawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
+    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 
     // ... Resto del hook igual ...
     const listData = useMemo(() => {
@@ -1182,7 +1213,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         filteredObjectives,
         employees,
         servicesSLA,
-        rawShifts,
+        rawShifts: mergedRawShifts,
         objectives,
         now,
     };
