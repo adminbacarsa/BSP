@@ -60,7 +60,7 @@ import { fillCycleBaseRotativeAssignments } from './cycleBaseSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
 import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
-import { assignmentBreaksBandTransition, normBand } from './rotativeBandGuard';
+import { assignmentBreaksBandTransition, nextAssignmentBreaksBandTransition, normBand } from './rotativeBandGuard';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -2313,6 +2313,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                         }
                         continue;
                     }
+                    if (assignmentBreaksBandTransition(assignments, empId, dateStr, assignCode)) continue;
+                    if (nextAssignmentBreaksBandTransition(assignments, empId, dateStr, assignCode)) continue;
                     if (!passesAgreementRest(empId, dateStr, assignCode, assignStart, assignHrs)) continue;
                     writeAssignment(empId, dateStr, pos.positionName, assignCode, sh.name || assignCode, assignHrs, assignStart, inCurrentCycle, assignEnd);
                     if (extensionMode && assignCode === 'D12') extD12Assigns.push(assignments[assignments.length - 1]);
@@ -2411,6 +2413,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     }
                     continue;
                 }
+                if (assignmentBreaksBandTransition(assignments, emp.id, dateStr2, sCode2)) continue;
+                if (nextAssignmentBreaksBandTransition(assignments, emp.id, dateStr2, sCode2)) continue;
                 if (!passesAgreementRest(emp.id, dateStr2, sCode2, sStart2, sHrs2)) continue;
                 writeAssignment(emp.id, dateStr2, posName2, sCode2, sh2.name || sCode2, sHrs2, sStart2, inCurr2, sEnd2);
                 // Eliminar del uncoveredSlotsByDay si la brecha se cerró

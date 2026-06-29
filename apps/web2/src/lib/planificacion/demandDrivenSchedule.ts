@@ -15,7 +15,7 @@ import {
 } from './autoScheduleEngineV2';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import { addDaysStr, forbiddenEveningToMorningWithoutBreak, forbiddenNightToMorningWithoutBreak, forbiddenNightToNonNightWithoutBreak } from './restBetweenShifts';
-import { assignmentBreaksBandTransition, bandMatchesExpected, normBand, pendulumMatchesApretarSlot } from './rotativeBandGuard';
+import { assignmentBreaksBandTransition, nextAssignmentBreaksBandTransition, bandMatchesExpected, normBand, pendulumMatchesApretarSlot } from './rotativeBandGuard';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT']);
 
@@ -47,6 +47,7 @@ function canAssignBand(
     sHrs: number,
 ): boolean {
     if (assignmentBreaksBandTransition(params.assignments, empId, dateStr, code)) return false;
+    if (nextAssignmentBreaksBandTransition(params.assignments, empId, dateStr, code)) return false;
     return params.passesAgreementRest(empId, dateStr, code, sStart, sHrs);
 }
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
@@ -1316,6 +1317,8 @@ function bruteForceFrancoToGap(
         if (ctx.absences[empId]?.has(dateStr)) continue;
         const a = assignments.find(x => x.empId === empId && x.dateStr === dateStr);
         if (!a || !isFrancoAssignment(a)) continue;
+        if (assignmentBreaksBandTransition(assignments, empId, dateStr, code)) continue;
+        if (nextAssignmentBreaksBandTransition(assignments, empId, dateStr, code)) continue;
         if (!passesAgreementRest(empId, dateStr, code, sStart, sHrs)) continue;
 
         const st = runtime[empId];

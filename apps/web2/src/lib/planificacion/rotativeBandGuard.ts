@@ -26,7 +26,7 @@ export function pendulumMatchesApretarSlot(expected: string | null | undefined, 
     return false;
 }
 
-/** Bloquea N→T/M y T→M consecutivos sin franco intermedio. */
+/** Bloquea N→T/M y T→M consecutivos sin franco intermedio (busca hacia atrás). */
 export function assignmentBreaksBandTransition(
     assignments: V2Assignment[],
     empId: string,
@@ -47,6 +47,35 @@ export function assignmentBreaksBandTransition(
                 || forbiddenEveningToMorningWithoutBreak(c, nextCode);
         }
         d = addDaysStr(d, -1);
+    }
+    return false;
+}
+
+/**
+ * Verifica hacia adelante: si asignar `newCode` en `dateStr` crearía una
+ * transición prohibida N→T/M o T→M con el PRÓXIMO turno real comprometido.
+ * Complementa assignmentBreaksBandTransition (que solo mira hacia atrás).
+ */
+export function nextAssignmentBreaksBandTransition(
+    assignments: V2Assignment[],
+    empId: string,
+    dateStr: string,
+    newCode: string,
+): boolean {
+    let d = addDaysStr(dateStr, 1);
+    for (let i = 0; i < 21; i++) {
+        const a = assignments.find(x => x.empId === empId && x.dateStr === d);
+        if (!a) {
+            d = addDaysStr(d, 1);
+            continue;
+        }
+        const c = normBand(a.code);
+        if (FRANCO_SET.has(c)) return false;
+        if ((a.hours ?? 0) > 0) {
+            return forbiddenNightToNonNightWithoutBreak(newCode, c)
+                || forbiddenEveningToMorningWithoutBreak(newCode, c);
+        }
+        d = addDaysStr(d, 1);
     }
     return false;
 }
