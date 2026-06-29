@@ -144,10 +144,12 @@ export default function KpisPage() {
   const gk = useMemo(() => {
     const emps = empleadosRaw.filter(fd);
     const ea = emps.filter(e=>e.isAvailable===true).length;
-    const pre = turnos.filter(t=>t.isPresent===true).length;
-    const aus = turnos.filter(t=>t.isAbsent===true).length;
-    const tot = pre+aus;
-    const cov = tot>0?Math.round(pre/tot*100):0;
+    // Cobertura: usar audit_logs PRESENTE vs turnos isAbsent (más confiable que isPresent flag)
+    const ing  = audit.filter(a=>a.action==='PRESENTE').length;
+    const aus  = turnos.filter(t=>t.isAbsent===true).length;
+    const tot  = ing + aus;
+    const cov  = tot>0?Math.round(ing/tot*100):0;
+    // Ausentismo: % de empleados DISTINTOS con al menos 1 ausencia en el período
     const sd=new Date(); sd.setDate(sd.getDate()-days); sd.setHours(0,0,0,0);
     const ed=new Date();
     const ausP = ausenciasRaw.filter(fd).filter(a=>{
@@ -155,10 +157,10 @@ export default function KpisPage() {
       const e=a.endDate?new Date(String(a.endDate)):s;
       return s<=ed&&e>=sd;
     });
-    const ausm = ea>0?Math.round(ausP.length/ea*100):0;
+    const empConAusencia = new Set(ausP.map(a=>String(a.employeeId??'')).filter(Boolean)).size;
+    const ausm = ea>0?Math.min(100,Math.round(empConAusencia/ea*100)):0;
     const tard = audit.filter(a=>a.action==='LLEGADA_TARDE').length;
     const ret  = audit.filter(a=>a.action==='RETENCION').length;
-    const ing  = audit.filter(a=>a.action==='PRESENTE').length;
     const baj  = audit.filter(a=>['BAJA_CUBIERTA','BAJA_PROTOCOLO','INTERRUPT'].includes(String(a.action??''))).length;
     const hsE  = turnos.filter(t=>t.isCompleted===true||t.isPresent===true).reduce((a,t)=>a+shiftHours(t),0);
     const hsP  = turnos.filter(t=>t.isAbsent===true).reduce((a,t)=>a+shiftHours(t),0);
@@ -299,8 +301,8 @@ export default function KpisPage() {
           {tab==='resumen' && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <KpiCard label="Cobertura"       value={`${gk.cov}%`}               icon={<Shield size={18}/>}        color="emerald" subtitle="Presentes / (Presentes + Ausentes)"/>
-                <KpiCard label="Ausentismo"      value={`${gk.ausm}%`}              icon={<TrendingDown size={18}/>}   color="rose"    subtitle="Ausencias / empleados activos"/>
+                <KpiCard label="Cobertura"       value={`${gk.cov}%`}               icon={<Shield size={18}/>}        color="emerald" subtitle="Ingresos / (Ingresos + Ausentes)"/>
+                <KpiCard label="Ausentismo"      value={`${gk.ausm}%`}              icon={<TrendingDown size={18}/>}   color="rose"    subtitle="Empleados con ausencia / activos"/>
                 <KpiCard label="Hs ejecutadas"   value={fmt1(gk.hsE)}               icon={<CheckCircle size={18}/>}   color="blue"    subtitle={`Total horas trabajadas en ${days}d`}/>
                 <KpiCard label="Hs perdidas"     value={fmt1(gk.hsP)}               icon={<AlertTriangle size={18}/>} color="rose"    subtitle="Horas en turnos con ausencia"/>
                 <KpiCard label="Tardanzas"       value={String(gk.tard)}            icon={<Clock size={18}/>}         color="amber"   subtitle={`Últimos ${days} días`}/>
