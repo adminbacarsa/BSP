@@ -114,12 +114,13 @@ const runEquilibrarCronoHandler = async (data, context) => {
         for (const t of allTurnos) {
             if (t.isFranco || t.isAbsence || !t.posName)
                 continue;
-            if (!posProfiles[t.posName]) {
+            const slotKey = `${t.posName}__${t.code}`;
+            if (!posProfiles[slotKey]) {
                 const startD = t.startTime.toDate();
                 const endD = t.endTime.toDate();
                 const endNextDay = endD.getUTCDate() !== startD.getUTCDate()
                     || endD.getUTCMonth() !== startD.getUTCMonth();
-                posProfiles[t.posName] = {
+                posProfiles[slotKey] = {
                     posName: t.posName,
                     code: t.code,
                     hours: t.hours,
@@ -130,10 +131,10 @@ const runEquilibrarCronoHandler = async (data, context) => {
                 };
             }
         }
-        const positions = Object.values(posProfiles);
-        if (positions.length < 2) {
+        const slotKeys = Object.keys(posProfiles);
+        if (slotKeys.length < 2) {
             return { ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
-                horasAntes: {}, horasDespues: {}, errores: ['Se necesitan al menos 2 posiciones para equilibrar.'] };
+                horasAntes: {}, horasDespues: {}, errores: ['Se necesitan al menos 2 tipos de turno distintos para equilibrar.'] };
         }
         const horasAntes = {};
         for (const t of allTurnos) {
@@ -148,6 +149,13 @@ const runEquilibrarCronoHandler = async (data, context) => {
             byEmp[t.empId].push(t);
         }
         const allBlocks = [];
+        const pushBlock = (empId, cur) => {
+            if (cur.length === 0)
+                return;
+            const slotKey = `${cur[0].posName}__${cur[0].code}`;
+            const isPure = cur.every(s => `${s.posName}__${s.code}` === slotKey);
+            allBlocks.push({ empId, empName: cur[0].empName, startDate: cur[0].dateStr, shifts: cur, slotKey, isPure });
+        };
         for (const [empId, shifts] of Object.entries(byEmp)) {
             shifts.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
             const work = shifts.filter(s => !s.isFranco && !s.isAbsence && s.posName);
@@ -162,17 +170,20 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     cur.push(work[i]);
                 }
                 else {
-                    allBlocks.push({ empId, empName: cur[0].empName, startDate: cur[0].dateStr, shifts: cur });
+                    pushBlock(empId, cur);
                     cur = [work[i]];
                 }
             }
-            allBlocks.push({ empId, empName: cur[0].empName, startDate: cur[0].dateStr, shifts: cur });
+            pushBlock(empId, cur);
         }
         if (allBlocks.length === 0) {
             return { ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
                 horasAntes, horasDespues: horasAntes, errores: ['No se detectaron bloques de trabajo.'] };
         }
-        const sortedPos = [...positions].sort((a, b) => b.hours - a.hours);
+        const sortedSlotKeys = slotKeys.slice().sort((a, b) => {
+            const hd = posProfiles[b].hours - posProfiles[a].hours;
+            return hd !== 0 ? hd : a.localeCompare(b);
+        });
         const updates = new Map();
         const rotadosSet = new Set();
         let bloquesProcesados = 0;
@@ -185,8 +196,8 @@ const runEquilibrarCronoHandler = async (data, context) => {
                 blocksByRange[key] = [];
             blocksByRange[key].push(block);
         }
-        for (const key of Object.keys(blocksByRange).sort()) {
-            const group = blocksByRange[key];
+        for (const rangeKey of Object.keys(blocksByRange).sort()) {
+            const group = blocksByRange[rangeKey];
             group.sort((a, b) => {
                 const ha = runningHours[a.empId] || 0;
                 const hb = runningHours[b.empId] || 0;
@@ -194,29 +205,34 @@ const runEquilibrarCronoHandler = async (data, context) => {
             });
             const groupPool = {};
             for (const block of group) {
-                const origPos = block.shifts[0]?.posName;
-                if (origPos)
-                    groupPool[origPos] = (groupPool[origPos] || 0) + 1;
+                if (block.isPure && block.slotKey)
+                    groupPool[block.slotKey] = (groupPool[block.slotKey] || 0) + 1;
             }
             for (const block of group) {
+                if (!block.isPure) {
+                    const origHours = block.shifts.reduce((sum, s) => sum + s.hours, 0);
+                    runningHours[block.empId] = (runningHours[block.empId] || 0) + origHours;
+                    bloquesProcesados++;
+                    continue;
+                }
                 let assigned = null;
-                for (const pos of sortedPos) {
-                    if ((groupPool[pos.posName] || 0) > 0) {
-                        assigned = pos;
-                        groupPool[pos.posName]--;
+                for (const sk of sortedSlotKeys) {
+                    if ((groupPool[sk] || 0) > 0) {
+                        assigned = posProfiles[sk];
+                        groupPool[sk]--;
                         break;
                     }
                 }
                 if (!assigned) {
-                    const origPos = block.shifts[0]?.posName;
-                    const orig = origPos ? posProfiles[origPos] : null;
+                    const orig = posProfiles[block.slotKey];
                     if (orig)
                         runningHours[block.empId] = (runningHours[block.empId] || 0) + block.shifts.length * orig.hours;
                     bloquesProcesados++;
                     continue;
                 }
+                const assignedSlotKey = `${assigned.posName}__${assigned.code}`;
                 for (const shift of block.shifts) {
-                    if (shift.posName !== assigned.posName) {
+                    if (`${shift.posName}__${shift.code}` !== assignedSlotKey) {
                         const ts = rebuildTs(shift.dateStr, assigned);
                         updates.set(shift.id, {
                             posName: assigned.posName,
