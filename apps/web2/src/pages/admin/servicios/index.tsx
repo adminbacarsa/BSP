@@ -11,7 +11,7 @@ import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
-  Clock, Layers
+  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List
 } from 'lucide-react';
 import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSchemeModal';
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
@@ -61,6 +61,42 @@ function formatHmLinear(linearMin: number): string {
   const hh = Math.floor(x / 60);
   const mm = x % 60;
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+type SrvGroupItem = { key: string; clientName: string; objectiveName: string; services: (ServiceSLA & { id: string })[] };
+type ClientGroupItem = { clientId: string; clientName: string; objectives: SrvGroupItem[]; totalActiveObjs: number; totalHoursKpi: number; totalPositions: number; hasActive: boolean };
+
+function buildClientGroups(
+  groupedServices: SrvGroupItem[],
+  getHours: (srv: ServiceSLA & { id: string }) => number
+): ClientGroupItem[] {
+  const map: Record<string, SrvGroupItem[]> = {};
+  groupedServices.forEach(g => {
+    const cid = g.services[0]?.clientId || g.clientName;
+    if (!map[cid]) map[cid] = [];
+    map[cid].push(g);
+  });
+  return Object.entries(map).map(([cid, objs]) => {
+    const totalHoursKpi = objs.reduce(
+      (s, g) => s + g.services.reduce((s2, srv) => s2 + getHours(srv), 0), 0
+    );
+    const totalPositions = objs.reduce((s, g) => {
+      const srv = g.services[0];
+      return s + (srv?.positions?.reduce((s2, p) => s2 + (p.quantity || 1), 0) || 0);
+    }, 0);
+    const totalActiveObjs = objs.filter(og =>
+      og.services.some(s => isSlaContractActive(s.status))
+    ).length;
+    return {
+      clientId: cid,
+      clientName: objs[0].clientName,
+      objectives: objs,
+      totalActiveObjs,
+      totalHoursKpi,
+      totalPositions,
+      hasActive: totalActiveObjs > 0,
+    };
+  }).sort((a, b) => a.clientName.localeCompare(b.clientName, 'es'));
 }
 
 export default function ServiciosSLAPage() {
@@ -740,6 +776,10 @@ export default function ServiciosSLAPage() {
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
   const [srvSearch, setSrvSearch] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [listMode, setListMode] = useState<'objectives' | 'clients'>('objectives');
+  const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
+  const toggleClient = (id: string) =>
+    setExpandedClients(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [rfzTuraExtras, setRfzTuraExtras] = useState<any[]>([]);
   const [shiftModal, setShiftModal] = useState<{
     open: boolean;
@@ -749,7 +789,6 @@ export default function ServiciosSLAPage() {
   const toggleGroup = (key: string) =>
     setExpandedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
-  type SrvGroupItem = { key: string; clientName: string; objectiveName: string; services: (ServiceSLA & { id: string })[] };
 
   const groupedServices = useMemo((): SrvGroupItem[] => {
     const q = srvSearch.toLowerCase().trim();
@@ -769,6 +808,7 @@ export default function ServiciosSLAPage() {
       services: items.sort((a, b) => (b.startDate||'').localeCompare(a.startDate||'')),
     }));
   }, [services, srvSearch, clientNameById]);
+
 
   const kpiHistory = useMemo(() => {
     const MONTHS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -863,6 +903,8 @@ export default function ServiciosSLAPage() {
     [getServiceHoursForKpiMonth, kpiMonth, kpiYear],
   );
 
+  const clientGroups = buildClientGroups(groupedServices, getServiceHoursForKpiMonth);
+
   return (
     <DashboardLayout>
       {view === 'list' && (
@@ -893,6 +935,22 @@ export default function ServiciosSLAPage() {
             />
           </div>
 
+          {/* Toggle de vista */}
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 w-fit">
+            <button
+              onClick={() => setListMode('objectives')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${listMode === 'objectives' ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <LayoutGrid size={11}/> Por Objetivo
+            </button>
+            <button
+              onClick={() => setListMode('clients')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${listMode === 'clients' ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+            >
+              <Building2 size={11}/> Por Cliente
+            </button>
+          </div>
+
           {/* KPIs */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -921,24 +979,153 @@ export default function ServiciosSLAPage() {
                     {value}{unit && <span className="text-xs font-bold text-slate-400 ml-1">{unit}</span>}
                   </p>
                 </div>
-              ))}
+              )}
             </div>
           </div>
 
           {/* Contador */}
           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
-            {groupedServices.length} objetivo{groupedServices.length !== 1 ? 's' : ''}
+            {listMode === 'clients'
+              ? `${clientGroups.length} cliente${clientGroups.length !== 1 ? 's' : ''} · ${groupedServices.length} objetivo${groupedServices.length !== 1 ? 's' : ''}`
+              : `${groupedServices.length} objetivo${groupedServices.length !== 1 ? 's' : ''}`}
             {srvSearch && ` · búsqueda: "${srvSearch}"`}
           </p>
 
-          {/* Grid de grupos */}
-          {loading ? (
+          {/* Vista por cliente */}
+          {listMode === 'clients' && (
+            loading ? (
+              <div className="flex items-center justify-center py-16 text-slate-400">
+                <RotateCw size={20} className="animate-spin mr-2"/> Cargando...
+              </div>
+            ) : clientGroups.length === 0 ? (
+              <div className="text-center py-16 text-slate-400 text-sm font-bold">No se encontraron clientes.</div>
+            ) : (
+              <div className="space-y-3">
+                {clientGroups.map(cg => {
+                  const isExp = expandedClients.has(cg.clientId);
+                  return (
+                    <div key={cg.clientId} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden">
+                      {/* Accent */}
+                      <div className={`h-1 w-full ${cg.hasActive ? 'bg-indigo-600' : 'bg-slate-300'}`}/>
+                      {/* Header clickeable */}
+                      <button
+                        onClick={() => toggleClient(cg.clientId)}
+                        className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-left"
+                      >
+                        <div className="p-2.5 rounded-xl shrink-0" style={{ background: cg.hasActive ? '#4f46e51a' : '#94a3b81a' }}>
+                          <Building2 size={16} color={cg.hasActive ? '#4f46e5' : '#94a3b8'}/>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-black text-sm text-slate-800 dark:text-white uppercase truncate">{cg.clientName}</h3>
+                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase shrink-0 ${cg.hasActive ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-400'}`}>
+                              {cg.hasActive ? 'Activo' : 'Inactivo'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-4 mt-1.5 flex-wrap">
+                            <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                              <MapPin size={9}/> {cg.objectives.length} objetivo{cg.objectives.length !== 1 ? 's' : ''}
+                              {cg.totalActiveObjs > 0 && cg.totalActiveObjs < cg.objectives.length && (
+                                <span className="text-emerald-500">({cg.totalActiveObjs} activo{cg.totalActiveObjs !== 1 ? 's' : ''})</span>
+                              )}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                              <Clock size={9}/> {cg.totalHoursKpi.toLocaleString('es-AR')} h/mes
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                              <Users size={9}/> {cg.totalPositions} puesto{cg.totalPositions !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-slate-300 dark:text-slate-600">
+                          {isExp ? <ChevronDown size={16}/> : <ChevronRight size={16}/>}
+                        </div>
+                      </button>
+
+                      {/* Objetivos expandidos */}
+                      {isExp && (
+                        <div className="border-t border-slate-100 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/60">
+                          {cg.objectives.map(group => {
+                            const srvCubreKpiMes = (srv: ServiceSLA & { id: string }) => {
+                              const mStart = new Date(kpiYear, kpiMonth, 1);
+                              const mEnd = new Date(kpiYear, kpiMonth + 1, 0);
+                              const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
+                              const sEnd = parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10));
+                              return !!sStart && !!sEnd && !(sStart > mEnd || sEnd < mStart);
+                            };
+                            const currentSrv = group.services.find(srvCubreKpiMes) || group.services[0];
+                            const hasObjActive = group.services.some(s => isSlaContractActive(s.status));
+                            const slaR = getResolvedSlaForMargin(currentSrv);
+                            const total = serviceTotals.get(serviceSlaRowKey(currentSrv)) ?? 0;
+                            return (
+                              <div key={group.key} className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                                {/* Indicador activo */}
+                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasObjActive ? 'bg-emerald-400' : 'bg-slate-300'}`}/>
+                                {/* Nombre objetivo */}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-black text-slate-700 dark:text-white uppercase truncate flex items-center gap-1.5">
+                                    <MapPin size={9} className="text-indigo-400 shrink-0"/>{group.objectiveName}
+                                  </p>
+                                  <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                                    <span className="text-[9px] font-mono font-bold text-slate-400">
+                                      {currentSrv.startDate} → {currentSrv.endDate}
+                                    </span>
+                                    {group.services.length > 1 && (
+                                      <span className="text-[9px] font-black text-indigo-400">{group.services.length} contratos</span>
+                                    )}
+                                    {currentSrv.positions.length > 0 && (
+                                      <span className="text-[9px] text-slate-400 flex items-center gap-0.5">
+                                        <Users size={8}/> {currentSrv.positions.reduce((s, p) => s + (p.quantity || 1), 0)} puesto{currentSrv.positions.reduce((s, p) => s + (p.quantity || 1), 0) !== 1 ? 's' : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                {/* SLA + horas */}
+                                <div className="text-right shrink-0">
+                                  <p className="text-base font-black text-indigo-600 dark:text-indigo-400 tabular-nums leading-tight">
+                                    {slaR.sla}<span className="text-[9px] font-bold ml-0.5">h</span>
+                                    <span className="text-[8px] font-black text-slate-400 uppercase ml-1">SLA</span>
+                                  </p>
+                                  <p className="text-[8px] font-bold text-slate-400 tabular-nums">Total: {total} h</p>
+                                </div>
+                                {/* Badge estado */}
+                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase shrink-0 ${hasObjActive ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                                  {hasObjActive ? 'Activo' : 'Inactivo'}
+                                </span>
+                                {/* Acciones */}
+                                <div className="flex gap-1 shrink-0">
+                                  <button onClick={() => handleNewVersion(currentSrv)} title="Nueva versión" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">
+                                    <Copy size={11}/>
+                                  </button>
+                                  <button onClick={() => handleEdit(currentSrv)} title="Editar" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
+                                    <Edit2 size={11}/>
+                                  </button>
+                                  <button onClick={() => currentSrv.id && handleDelete(currentSrv.id)} title="Eliminar" className="p-1.5 rounded-lg bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
+                                    <Trash2 size={11}/>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          )}
+
+          {/* Grid de grupos (vista por objetivo) */}
+          {listMode === 'objectives' && loading && (
             <div className="flex items-center justify-center py-16 text-slate-400">
               <RotateCw size={20} className="animate-spin mr-2"/> Cargando...
             </div>
-          ) : groupedServices.length === 0 ? (
+          )}
+          {listMode === 'objectives' && !loading && groupedServices.length === 0 && (
             <div className="text-center py-16 text-slate-400 text-sm font-bold">No se encontraron contratos.</div>
-          ) : (
+          )}
+          {listMode === 'objectives' && !loading && groupedServices.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {groupedServices.map(group => {
                 // Contrato vigente en el mes mostrado (kpi) — si no hay, el más reciente.
@@ -1110,7 +1297,7 @@ export default function ServiciosSLAPage() {
                                   </span>
                                   <span className="shrink-0 font-black text-red-500">{t.hours || 8}h</span>
                                 </div>
-                              ))}
+                              )}
                             </div>
                             {baseHrs > 0 && (
                               <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-1.5">
@@ -1171,7 +1358,7 @@ export default function ServiciosSLAPage() {
                       {value}{unit && <span className="text-xs font-bold text-slate-400 ml-1">{unit}</span>}
                     </p>
                   </div>
-                ))}
+                )}
               </div>
 
               {/* Histórico · timeline horizontal */}
@@ -1210,7 +1397,7 @@ export default function ServiciosSLAPage() {
                           </p>
                         </div>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
               </div>
@@ -1288,10 +1475,10 @@ export default function ServiciosSLAPage() {
                         <div className="flex flex-wrap gap-1">
                           {pos.allowedShiftTypes.map(v => (
                             <span key={v.code} className="text-[8px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">{v.code} · {v.hours}h</span>
-                          ))}
+                          )}
                         </div>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
                 {/* Análisis Operativo */}
@@ -1348,7 +1535,7 @@ export default function ServiciosSLAPage() {
                                   {Math.round(hxg)} <span className="text-[9px]">hs</span>
                                 </td>
                               </tr>
-                            ))}
+                            )}
                           </tbody>
                           {viability.length > 1 && (
                             <tfoot className="bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-700">
@@ -1527,7 +1714,7 @@ export default function ServiciosSLAPage() {
                                      {slaGlobal.size > 0 && <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">Todos los puestos: {makeSummary(slaGlobal)}</p>}
                                      {form.positions.map(p => (p.excludedDates?.length ?? 0) > 0 && (
                                          <p key={p.id} className="text-[9px] font-bold text-rose-500 dark:text-rose-400">{p.name || p.id}: {makeSummary(new Set(p.excludedDates))}</p>
-                                     ))}
+                                     )}
                                  </div>
                              )}
                              {showExcludedDatesPicker && (
@@ -1541,7 +1728,7 @@ export default function ServiciosSLAPage() {
                                                  className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${excludedDatesScope === scope ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-rose-400'}`}>
                                                  {scope === 'ALL' ? 'Todos los puestos' : scope}
                                              </button>
-                                         ))}
+                                         )}
                                      </div>
                                      {months.length > 0 ? (
                                          <div className="p-4 bg-white dark:bg-slate-900 space-y-4">
@@ -1620,7 +1807,7 @@ export default function ServiciosSLAPage() {
                                   <div className="flex gap-2 justify-end"><span className="text-[8px] text-slate-400 font-bold" title="Nocturnas">{Math.round(m.nightHours)}N</span><span className="text-[8px] text-amber-500/70 font-bold" title="Fin de semana">{Math.round(m.weekendHours)}F</span></div>
                                 </div>
                             </div>
-                        ))}
+                        )}
                     </div>
                  </div>
                </div>
@@ -1665,7 +1852,7 @@ export default function ServiciosSLAPage() {
                              <button onClick={() => removePosition(pos.id)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-rose-500 hover:bg-rose-100 transition-colors"><X size={14}/></button>
                            </div>
                         </div>
-                     ))}
+                     )}
                   </div>
                </div>
             </div>
@@ -1813,7 +2000,7 @@ export default function ServiciosSLAPage() {
                                             <div className="flex gap-1">
                                                 {['L','M','X','J','V','S','D'].map(day => (
                                                     <button key={day} onClick={() => toggleNewShiftDay(day)} className={`w-7 h-7 rounded text-[9px] font-black transition-colors ${newCustomShift.days.includes(day) ? 'bg-slate-900 text-white' : 'bg-white border text-slate-400'}`}>{day}</button>
-                                                ))}
+                                                )}
                                             </div>
                                             <div className="flex gap-1">
                                                 {editingShiftCode && <button onClick={cancelEditShift} className="bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-300 flex items-center gap-1"><X size={12}/> Cancelar</button>}
@@ -1847,7 +2034,7 @@ export default function ServiciosSLAPage() {
                                                             {d}
                                                             <button onClick={() => setNewCustomShift(prev => ({ ...prev, specificDates: prev.specificDates.filter(x => x !== d) }))} className="hover:text-rose-500 leading-none"><X size={8}/></button>
                                                         </span>
-                                                    ))}
+                                                    )}
                                                 </div>
                                             )}
                                             <div className="flex justify-end gap-1">
