@@ -5,6 +5,7 @@ export interface RunEquilibrarCronoInput {
     year: number;
     month: number;
     dryRun?: boolean;
+    puestosExentos?: string[];
 }
 export interface EquilibrarProposedChange {
     empId: string;
@@ -28,6 +29,7 @@ export interface RunEquilibrarCronoOutput {
     proposedChanges?: EquilibrarProposedChange[];
     isPublished?: boolean;
     wasPublished?: boolean;
+    puestosEncontrados?: string[];
 }
 export declare const runEquilibrarCronoHandler: (data: RunEquilibrarCronoInput, context: functions.https.CallableContext) => Promise<RunEquilibrarCronoOutput>;
 export declare const runEquilibrarCrono: functions.HttpsFunction & functions.Runnable<any>;

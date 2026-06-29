@@ -13,6 +13,8 @@ export interface RunEquilibrarCronoInput {
     month: number;  // 1–12
     /** Si true, calcula cambios pero NO los escribe en Firestore. */
     dryRun?: boolean;
+    /** positionName values que no participan en la rotación. */
+    puestosExentos?: string[];
 }
 
 /** Un cambio propuesto por Equilibrar en formato listo para pendingChanges del front. */
@@ -42,6 +44,8 @@ export interface RunEquilibrarCronoOutput {
     isPublished?: boolean;
     /** dryRun=false: indica si el plan fue movido a BORRADOR al aplicar los cambios */
     wasPublished?: boolean;
+    /** Puestos encontrados en el período — permite al front mostrar checkboxes de exclusión */
+    puestosEncontrados?: string[];
 }
 
 // ── TIPOS INTERNOS ───────────────────────────────────────────────────────────
@@ -245,6 +249,9 @@ export const runEquilibrarCronoHandler = async (
                  horasAntes: {}, horasDespues: {}, errores: ['Se necesitan al menos 2 tipos de turno distintos para equilibrar.'] };
     }
 
+    const exentosSet = new Set<string>(data.puestosExentos || []);
+    const puestosEncontrados = [...new Set(Object.values(posProfiles).map(p => p.posName))].sort();
+
     // ── 3. HORAS ANTES ──────────────────────────────────────────────────────
     const horasAntes: Record<string, number> = {};
     for (const t of allTurnos) {
@@ -304,10 +311,12 @@ export const runEquilibrarCronoHandler = async (
     // y no hay ningún día franco de por medio, se saltea ese slot y se prueba
     // el siguiente disponible. Secuencia mínima válida: N → F → M.
 
-    const sortedSlotKeys = slotKeys.slice().sort((a, b) => {
-        const hd = posProfiles[b].hours - posProfiles[a].hours;
-        return hd !== 0 ? hd : a.localeCompare(b);
-    });
+    const sortedSlotKeys = slotKeys
+        .filter(k => !exentosSet.has(posProfiles[k].posName))
+        .sort((a, b) => {
+            const hd = posProfiles[b].hours - posProfiles[a].hours;
+            return hd !== 0 ? hd : a.localeCompare(b);
+        });
 
     const updates: Map<string, { posName: string; code: string; hours: number; name: string; startTime: Timestamp; endTime: Timestamp }> = new Map();
     const rotadosSet = new Set<string>();
@@ -369,10 +378,10 @@ export const runEquilibrarCronoHandler = async (
             return ha !== hb ? ha - hb : a.empId.localeCompare(b.empId);
         });
 
-        // Pool de slots solo de bloques puros
+        // Pool de slots: solo bloques puros y no exentos
         const groupPool: Record<string, number> = {};
         for (const block of group) {
-            if (block.isPure && block.slotKey)
+            if (block.isPure && block.slotKey && !exentosSet.has(posProfiles[block.slotKey]?.posName || ''))
                 groupPool[block.slotKey] = (groupPool[block.slotKey] || 0) + 1;
         }
 
@@ -384,6 +393,14 @@ export const runEquilibrarCronoHandler = async (
                 bloquesProcesados++;
                 lastBlockEndDate[block.empId] = blockEndDate;
                 lastAssignedSlotKey[block.empId] = block.slotKey || lastAssignedSlotKey[block.empId] || '';
+                continue;
+            }
+
+            // Bloque exento: conserva posición actual, no participa en la rotación
+            if (exentosSet.has(posProfiles[block.slotKey]?.posName || '')) {
+                bloquesProcesados++;
+                lastBlockEndDate[block.empId] = blockEndDate;
+                lastAssignedSlotKey[block.empId] = block.slotKey;
                 continue;
             }
 
@@ -474,7 +491,7 @@ export const runEquilibrarCronoHandler = async (
             return posProfiles[sk] || null;
         };
 
-        // Verifica N→M a partir del turno real del día anterior (no del estado de bloques)
+        // Verifica que el turno previo no termine justo cuando empieza el nuevo (N→M)
         const violaDiaAnterior = (empId: string, newProf: PosProfile, dateStr: string): boolean => {
             const prevMs  = new Date(dateStr + 'T12:00:00Z').getTime() - 86400000;
             const prevDate = new Date(prevMs).toISOString().slice(0, 10);
@@ -482,6 +499,16 @@ export const runEquilibrarCronoHandler = async (
             if (!prevShift) return false;
             const prevProf = getEffectiveProf(prevShift);
             return !!prevProf && prevProf.endUTCHour === newProf.startUTCHour;
+        };
+
+        // Verifica que el turno siguiente no empiece justo cuando termina el nuevo (N→M forward)
+        const violaDiaSiguiente = (empId: string, newProf: PosProfile, dateStr: string): boolean => {
+            const nextMs   = new Date(dateStr + 'T12:00:00Z').getTime() + 86400000;
+            const nextDate = new Date(nextMs).toISOString().slice(0, 10);
+            const nextShift = (turnosPorFecha[nextDate] || []).find(t => t.empId === empId);
+            if (!nextShift) return false;
+            const nextProf = getEffectiveProf(nextShift);
+            return !!nextProf && newProf.endUTCHour === nextProf.startUTCHour;
         };
 
         for (const empId of sobreUmbral) {
@@ -495,16 +522,19 @@ export const runEquilibrarCronoHandler = async (
 
                 const profActual = getEffectiveProf(shift);
                 if (!profActual || profActual.hours <= 8) continue; // ya es turno estándar
+                if (exentosSet.has(profActual.posName)) continue;   // no tocar posición exenta
 
                 // Candidatos: empleados que ese día tienen un turno más liviano y
-                // no superarían 200h al recibir el pesado
+                // no superarían 200h al recibir el pesado, respetando N→M en ambas direcciones
                 const candidatos = (turnosPorFecha[shift.dateStr] || []).filter(other => {
                     if (other.empId === empId) return false;
                     const profOther = getEffectiveProf(other);
                     if (!profOther || profOther.hours >= profActual.hours) return false;
+                    if (exentosSet.has(profOther.posName)) return false; // no quitar de posición exenta
                     const nuevasHrs = (currentHours[other.empId] || 0) - profOther.hours + profActual.hours;
                     if (nuevasHrs > HORA_TOPE) return false;
                     if (violaDiaAnterior(other.empId, profActual, shift.dateStr)) return false;
+                    if (violaDiaSiguiente(other.empId, profActual, shift.dateStr)) return false;
                     return true;
                 });
 
@@ -515,8 +545,9 @@ export const runEquilibrarCronoHandler = async (
                 const comp     = candidatos[0];
                 const profComp = getEffectiveProf(comp)!;
 
-                // Verificar también que empId no quede con N→M al recibir el slot liviano
+                // Verificar N→M para empId al recibir el slot liviano (ambas direcciones)
                 if (violaDiaAnterior(empId, profComp, shift.dateStr)) continue;
+                if (violaDiaSiguiente(empId, profComp, shift.dateStr)) continue;
 
                 const tsEmp  = rebuildTs(shift.dateStr, profComp);
                 const tsComp = rebuildTs(shift.dateStr, profActual);
@@ -582,6 +613,7 @@ export const runEquilibrarCronoHandler = async (
     if (turnosActualizados === 0) {
         return { ok: true, empleadosRotados: 0, bloquesProcesados, turnosActualizados: 0,
                  horasAntes, horasDespues: horasAntes, dryRun, isPublished, proposedChanges: [],
+                 puestosEncontrados,
                  errores: ['Las horas ya están equilibradas — no se realizaron cambios.'] };
     }
 
@@ -598,6 +630,7 @@ export const runEquilibrarCronoHandler = async (
             dryRun: true,
             isPublished,
             proposedChanges,
+            puestosEncontrados,
         };
     }
 
@@ -655,6 +688,7 @@ export const runEquilibrarCronoHandler = async (
         errores,
         proposedChanges,
         wasPublished: isPublished,
+        puestosEncontrados,
     };
 
     } catch (e: any) {

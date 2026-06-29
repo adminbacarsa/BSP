@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, BarChart2, CheckCircle2, AlertTriangle, Eye, Zap, BookOpen } from 'lucide-react';
+import { X, Loader2, BarChart2, CheckCircle2, AlertTriangle, Eye, Zap, BookOpen, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
@@ -42,39 +42,59 @@ interface EquilibrarOutput {
     proposedChanges?: EquilibrarProposedChange[];
     isPublished?: boolean;
     wasPublished?: boolean;
+    puestosEncontrados?: string[];
 }
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 export default function EquilibrarCronoModal({ open, onClose, empresaId, objectiveId, objectiveNombre, year, month, employees, onApplyPending }: Props) {
-    const [running, setRunning]   = useState(false);
-    const [preview, setPreview]   = useState<EquilibrarOutput | null>(null);
-    const [result, setResult]     = useState<EquilibrarOutput | null>(null);
+    const [running, setRunning]         = useState(false);
+    const [preview, setPreview]         = useState<EquilibrarOutput | null>(null);
+    const [result, setResult]           = useState<EquilibrarOutput | null>(null);
+    const [puestosExentos, setPuestosExentos] = useState<Set<string>>(new Set());
+    const [exclusionesChanged, setExclusionesChanged] = useState(false);
 
     useEffect(() => {
         if (open) {
             setPreview(null);
             setResult(null);
             setRunning(false);
+            setPuestosExentos(new Set());
+            setExclusionesChanged(false);
         }
     }, [open]);
 
     const empMap: Record<string, string> = {};
     employees.forEach(e => { empMap[e.id] = e.name || e.nombre || e.id; });
 
-    const handlePreview = async () => {
+    const runPreview = useCallback(async (exentos: Set<string>) => {
         setRunning(true);
         setPreview(null);
         setResult(null);
+        setExclusionesChanged(false);
         try {
             const fn = httpsCallable<object, EquilibrarOutput>(functions, 'runEquilibrarCrono');
-            const res = await fn({ empresaId, objectiveId, year, month, dryRun: true });
+            const res = await fn({
+                empresaId, objectiveId, year, month, dryRun: true,
+                puestosExentos: exentos.size > 0 ? [...exentos] : undefined,
+            });
             setPreview(res.data);
         } catch (e: any) {
             toast.error(e?.message || 'Error al previsualizar.');
         } finally {
             setRunning(false);
         }
+    }, [empresaId, objectiveId, year, month]);
+
+    const handlePreview = () => runPreview(puestosExentos);
+
+    const toggleExento = (puesto: string) => {
+        setPuestosExentos(prev => {
+            const next = new Set(prev);
+            if (next.has(puesto)) next.delete(puesto); else next.add(puesto);
+            return next;
+        });
+        setExclusionesChanged(true);
     };
 
     const handleApply = () => {
@@ -268,6 +288,33 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                             {current.errores?.length > 0 && current.turnosActualizados > 0 && (
                                 <p className="text-[10px] text-amber-700 font-bold">{current.errores.join(' · ')}</p>
                             )}
+
+                            {/* Excluir puestos de la rotación */}
+                            {current.puestosEncontrados && current.puestosEncontrados.length > 1 && (
+                                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                    <p className="text-[10px] font-black uppercase text-slate-500 mb-2">Excluir puestos de la rotación</p>
+                                    <div className="space-y-1">
+                                        {current.puestosEncontrados.map(puesto => (
+                                            <label key={puesto} className="flex items-center gap-2 cursor-pointer group">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={puestosExentos.has(puesto)}
+                                                    onChange={() => toggleExento(puesto)}
+                                                    className="w-3.5 h-3.5 accent-emerald-600 cursor-pointer"
+                                                />
+                                                <span className={`text-[11px] font-medium ${puestosExentos.has(puesto) ? 'text-slate-400 line-through' : 'text-slate-700'}`}>
+                                                    {puesto}
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    {puestosExentos.size > 0 && (
+                                        <p className="text-[10px] text-amber-700 mt-2">
+                                            {puestosExentos.size === 1 ? '1 puesto excluido' : `${puestosExentos.size} puestos excluidos`} — recalculá para ver el impacto.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -293,24 +340,35 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                         </>
                     )}
 
-                    {/* Estado preview: descartar o confirmar */}
+                    {/* Estado preview: descartar / recalcular / confirmar */}
                     {isPreview && (
                         <>
                             <button type="button" onClick={handleReset} disabled={running}
                                 className="flex-1 px-4 py-3 rounded-xl text-xs font-black uppercase text-slate-600 hover:bg-slate-200">
                                 Descartar
                             </button>
-                            {preview!.turnosActualizados > 0 && (
+                            {exclusionesChanged && (
+                                <button
+                                    type="button"
+                                    disabled={running}
+                                    onClick={handlePreview}
+                                    className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40 flex items-center justify-center gap-2"
+                                >
+                                    {running ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                    {running ? 'Calculando…' : 'Recalcular'}
+                                </button>
+                            )}
+                            {!exclusionesChanged && preview!.turnosActualizados > 0 && (
                                 <button
                                     type="button"
                                     onClick={handleApply}
                                     className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700 flex items-center justify-center gap-2"
                                 >
                                     <Zap size={16} />
-                                    {'Aplicar como cambios pendientes'}
+                                    Aplicar como cambios pendientes
                                 </button>
                             )}
-                            {preview!.turnosActualizados === 0 && (
+                            {!exclusionesChanged && preview!.turnosActualizados === 0 && (
                                 <button type="button" onClick={onClose}
                                     className="flex-[2] px-4 py-3 rounded-xl text-xs font-black uppercase bg-slate-200 text-slate-600 hover:bg-slate-300">
                                     Cerrar

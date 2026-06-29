@@ -136,6 +136,8 @@ const runEquilibrarCronoHandler = async (data, context) => {
             return { ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
                 horasAntes: {}, horasDespues: {}, errores: ['Se necesitan al menos 2 tipos de turno distintos para equilibrar.'] };
         }
+        const exentosSet = new Set(data.puestosExentos || []);
+        const puestosEncontrados = [...new Set(Object.values(posProfiles).map(p => p.posName))].sort();
         const horasAntes = {};
         for (const t of allTurnos) {
             if (!t.isFranco && !t.isAbsence) {
@@ -180,7 +182,9 @@ const runEquilibrarCronoHandler = async (data, context) => {
             return { ok: false, empleadosRotados: 0, bloquesProcesados: 0, turnosActualizados: 0,
                 horasAntes, horasDespues: horasAntes, errores: ['No se detectaron bloques de trabajo.'] };
         }
-        const sortedSlotKeys = slotKeys.slice().sort((a, b) => {
+        const sortedSlotKeys = slotKeys
+            .filter(k => !exentosSet.has(posProfiles[k].posName))
+            .sort((a, b) => {
             const hd = posProfiles[b].hours - posProfiles[a].hours;
             return hd !== 0 ? hd : a.localeCompare(b);
         });
@@ -225,7 +229,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
             });
             const groupPool = {};
             for (const block of group) {
-                if (block.isPure && block.slotKey)
+                if (block.isPure && block.slotKey && !exentosSet.has(posProfiles[block.slotKey]?.posName || ''))
                     groupPool[block.slotKey] = (groupPool[block.slotKey] || 0) + 1;
             }
             for (const block of group) {
@@ -234,6 +238,12 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     bloquesProcesados++;
                     lastBlockEndDate[block.empId] = blockEndDate;
                     lastAssignedSlotKey[block.empId] = block.slotKey || lastAssignedSlotKey[block.empId] || '';
+                    continue;
+                }
+                if (exentosSet.has(posProfiles[block.slotKey]?.posName || '')) {
+                    bloquesProcesados++;
+                    lastBlockEndDate[block.empId] = blockEndDate;
+                    lastAssignedSlotKey[block.empId] = block.slotKey;
                     continue;
                 }
                 const origProfCheck = posProfiles[block.slotKey];
@@ -315,6 +325,15 @@ const runEquilibrarCronoHandler = async (data, context) => {
                 const prevProf = getEffectiveProf(prevShift);
                 return !!prevProf && prevProf.endUTCHour === newProf.startUTCHour;
             };
+            const violaDiaSiguiente = (empId, newProf, dateStr) => {
+                const nextMs = new Date(dateStr + 'T12:00:00Z').getTime() + 86400000;
+                const nextDate = new Date(nextMs).toISOString().slice(0, 10);
+                const nextShift = (turnosPorFecha[nextDate] || []).find(t => t.empId === empId);
+                if (!nextShift)
+                    return false;
+                const nextProf = getEffectiveProf(nextShift);
+                return !!nextProf && newProf.endUTCHour === nextProf.startUTCHour;
+            };
             for (const empId of sobreUmbral) {
                 const misShifts = allTurnos
                     .filter(t => t.empId === empId && !t.isFranco && !t.isAbsence && t.posName)
@@ -325,16 +344,22 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     const profActual = getEffectiveProf(shift);
                     if (!profActual || profActual.hours <= 8)
                         continue;
+                    if (exentosSet.has(profActual.posName))
+                        continue;
                     const candidatos = (turnosPorFecha[shift.dateStr] || []).filter(other => {
                         if (other.empId === empId)
                             return false;
                         const profOther = getEffectiveProf(other);
                         if (!profOther || profOther.hours >= profActual.hours)
                             return false;
+                        if (exentosSet.has(profOther.posName))
+                            return false;
                         const nuevasHrs = (currentHours[other.empId] || 0) - profOther.hours + profActual.hours;
                         if (nuevasHrs > HORA_TOPE)
                             return false;
                         if (violaDiaAnterior(other.empId, profActual, shift.dateStr))
+                            return false;
+                        if (violaDiaSiguiente(other.empId, profActual, shift.dateStr))
                             return false;
                         return true;
                     });
@@ -344,6 +369,8 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     const comp = candidatos[0];
                     const profComp = getEffectiveProf(comp);
                     if (violaDiaAnterior(empId, profComp, shift.dateStr))
+                        continue;
+                    if (violaDiaSiguiente(empId, profComp, shift.dateStr))
                         continue;
                     const tsEmp = rebuildTs(shift.dateStr, profComp);
                     const tsComp = rebuildTs(shift.dateStr, profActual);
@@ -395,6 +422,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
         if (turnosActualizados === 0) {
             return { ok: true, empleadosRotados: 0, bloquesProcesados, turnosActualizados: 0,
                 horasAntes, horasDespues: horasAntes, dryRun, isPublished, proposedChanges: [],
+                puestosEncontrados,
                 errores: ['Las horas ya están equilibradas — no se realizaron cambios.'] };
         }
         if (dryRun) {
@@ -409,6 +437,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
                 dryRun: true,
                 isPublished,
                 proposedChanges,
+                puestosEncontrados,
             };
         }
         if (planSnap.exists)
@@ -460,6 +489,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
             errores,
             proposedChanges,
             wasPublished: isPublished,
+            puestosEncontrados,
         };
     }
     catch (e) {
