@@ -10,7 +10,7 @@ import {
   Activity, Loader2, RefreshCw, Building2, Briefcase, UserCheck, ChevronUp, ChevronDown,
 } from 'lucide-react';
 
-type TabId = 'resumen' | 'servicios' | 'clientes' | 'personal';
+type TabId = 'resumen' | 'servicios' | 'clientes' | 'personal' | 'liquidacion';
 type SortDir = 'asc' | 'desc';
 
 interface ServiceRow {
@@ -26,6 +26,11 @@ interface ClientRow {
 interface EmployeeRow {
   employeeId: string; employeeName: string;
   hsEjecutadas: number; presentes: number; ausentes: number; tardanzas: number; retenciones: number;
+}
+interface LiqRow {
+  objectiveId: string; objectiveName: string; clientName: string;
+  hsVendidas: number; hsPlanificadas: number; hsEjecutadas: number;
+  hsAusencia: number; hsExtras: number; hsFT: number; hsLiquidadas: number; delta: number;
 }
 
 function tsToDate(ts: unknown): Date | null {
@@ -44,6 +49,18 @@ function shiftHours(s: Record<string, unknown>): number {
   return 0;
 }
 function fmt1(n: number) { return n.toFixed(1); }
+function plannedHours(t: Record<string,unknown>): number {
+  const st=tsToDate(t.startTime), en=tsToDate(t.endTime);
+  if(st&&en){const h=(en.getTime()-st.getTime())/3600000; if(h>0&&h<=36) return h;} return 0;
+}
+function realHoursOnly(t: Record<string,unknown>): number {
+  const rs=tsToDate(t.realStartTime), re=tsToDate(t.realEndTime);
+  if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; if(h>0&&h<=36) return h;} return 0;
+}
+function extraHours(t: Record<string,unknown>): number {
+  const re=tsToDate(t.realEndTime), en=tsToDate(t.endTime);
+  if(re&&en){const h=(re.getTime()-en.getTime())/3600000; if(h>0&&h<=12) return h;} return 0;
+}
 const DAYS_OPTIONS = [7, 14, 30, 90] as const;
 type DaysOption = typeof DAYS_OPTIONS[number];
 
@@ -98,6 +115,7 @@ export default function KpisPage() {
   const [srvSort, setSrvSort]   = useState<[string, SortDir]>(['hsPerdidas', 'desc']);
   const [cliSort, setCliSort]   = useState<[string, SortDir]>(['hsPerdidas', 'desc']);
   const [empSort, setEmpSort]   = useState<[string, SortDir]>(['hsEjecutadas', 'desc']);
+  const [liqSort, setLiqSort]   = useState<[string, SortDir]>(['delta', 'desc']);
 
   const [turnosRaw,    setTurnosRaw]    = useState<Record<string, unknown>[]>([]);
   const [ausenciasRaw, setAusenciasRaw] = useState<Record<string, unknown>[]>([]);
@@ -259,6 +277,43 @@ export default function KpisPage() {
     return Object.values(m);
   }, [turnos, audit]);
 
+  const liqRows = useMemo<LiqRow[]>(() => {
+    // Mapa SLA: objectiveId → totalMonthlyHours
+    const slaMap = new Map<string,number>();
+    (slas as any[]).forEach((s:any) => {
+      const oid = String(s.objectiveId ?? s.id ?? '').trim();
+      if (oid) slaMap.set(oid, Number(s.totalMonthlyHours ?? 0));
+    });
+    const slaMult = days / 30; // prorate al período
+    const m: Record<string,LiqRow> = {};
+    turnos.forEach(t => {
+      const oid = String(t.objectiveId ?? t.objetivoId ?? '').trim(); if (!oid) return;
+      if (!m[oid]) {
+        const info = objMap.get(oid);
+        m[oid] = {
+          objectiveId: oid,
+          objectiveName: info?.name || String(t.objectiveName ?? '') || oid,
+          clientName:    info?.clientName || String(t.clientName ?? 'Sin cliente'),
+          hsVendidas: (slaMap.get(oid) ?? 0) * slaMult,
+          hsPlanificadas:0, hsEjecutadas:0, hsAusencia:0, hsExtras:0, hsFT:0, hsLiquidadas:0, delta:0,
+        };
+      }
+      const r = m[oid];
+      const ph = plannedHours(t);
+      const rh = realHoursOnly(t);
+      const eh = extraHours(t);
+      if (!t.isAbsent && !t.isFranco && !t.isFrancoTrabajado) r.hsPlanificadas += ph;
+      if (t.isPresent===true||t.isCompleted===true) { r.hsEjecutadas += rh; r.hsExtras += eh; }
+      if (t.isAbsent===true) r.hsAusencia += ph;
+      if (t.isFrancoTrabajado===true) r.hsFT += ph;
+    });
+    Object.values(m).forEach(r => {
+      r.hsLiquidadas = r.hsEjecutadas + r.hsExtras + r.hsFT;
+      r.delta = r.hsVendidas > 0 ? r.hsLiquidadas - r.hsVendidas : 0;
+    });
+    return Object.values(m);
+  }, [turnos, slas, objMap, days]);
+
   function tgl(cur:[string,SortDir],col:string,set:(v:[string,SortDir])=>void){
     set(cur[0]===col?[col,cur[1]==='asc'?'desc':'asc']:[col,'desc']);
   }
@@ -273,6 +328,7 @@ export default function KpisPage() {
   const sS=useMemo(()=>srt(srvRows,srvSort),[srvRows,srvSort]);
   const sC=useMemo(()=>srt(cliRows,cliSort),[cliRows,cliSort]);
   const sE=useMemo(()=>srt(empRows,empSort),[empRows,empSort]);
+  const sL=useMemo(()=>srt(liqRows,liqSort),[liqRows,liqSort]);
 
   const cliChart=useMemo(()=>
     [...cliRows].sort((a,b)=>b.hsEjecutadas-a.hsEjecutadas).slice(0,10).map(c=>({
@@ -281,10 +337,11 @@ export default function KpisPage() {
     })),[cliRows]);
 
   const TABS:{id:TabId;label:string;icon:React.ReactNode}[]=[
-    {id:'resumen',   label:'Resumen',   icon:<Activity size={14}/>},
-    {id:'servicios', label:'Servicios', icon:<Building2 size={14}/>},
-    {id:'clientes',  label:'Clientes',  icon:<Briefcase size={14}/>},
-    {id:'personal',  label:'Personal',  icon:<UserCheck size={14}/>},
+    {id:'resumen',      label:'Resumen',      icon:<Activity size={14}/>},
+    {id:'servicios',    label:'Servicios',    icon:<Building2 size={14}/>},
+    {id:'clientes',     label:'Clientes',     icon:<Briefcase size={14}/>},
+    {id:'personal',     label:'Personal',     icon:<UserCheck size={14}/>},
+    {id:'liquidacion',  label:'Liquidación',  icon:<TrendingUp size={14}/>},
   ];
 
   return (
@@ -602,6 +659,116 @@ export default function KpisPage() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ══ LIQUIDACIÓN / COSTO REAL ══ */}
+          {tab==='liquidacion' && (
+            <div className="space-y-6">
+              {/* Summary cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <KpiCard label="Objetivos analizados"  value={String(liqRows.length)}
+                  icon={<Building2 size={18}/>} color="blue" subtitle="Con turnos en el período"/>
+                <KpiCard label="Hs Vendidas (SLA)" value={fmt1(liqRows.reduce((a,r)=>a+r.hsVendidas,0))}
+                  icon={<Briefcase size={18}/>} color="slate" subtitle="Contratadas × período/30"/>
+                <KpiCard label="Hs Liquidadas" value={fmt1(liqRows.reduce((a,r)=>a+r.hsLiquidadas,0))}
+                  icon={<Clock size={18}/>} color="emerald" subtitle="Ejecutadas + Extras + FT"/>
+                <KpiCard label="Delta total" value={`${liqRows.reduce((a,r)=>a+r.delta,0)>=0?'+':''}${fmt1(liqRows.reduce((a,r)=>a+r.delta,0))}h`}
+                  icon={<TrendingUp size={18}/>}
+                  color={liqRows.reduce((a,r)=>a+r.delta,0)>0?'rose':'emerald'}
+                  subtitle="Liquidadas − Vendidas"/>
+              </div>
+
+              {/* Detail cards row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <KpiCard label="Hs Planificadas"  value={fmt1(liqRows.reduce((a,r)=>a+r.hsPlanificadas,0))}  icon={<Activity size={18}/>}      color="blue"   subtitle="Turnos programados no-franco"/>
+                <KpiCard label="Hs Ejecutadas"    value={fmt1(liqRows.reduce((a,r)=>a+r.hsEjecutadas,0))}    icon={<CheckCircle size={18}/>}   color="emerald" subtitle="Real trabajado (reloj/real)"/>
+                <KpiCard label="Hs Ausencia"      value={fmt1(liqRows.reduce((a,r)=>a+r.hsAusencia,0))}      icon={<AlertTriangle size={18}/>} color="rose"   subtitle="Turnos isAbsent=true"/>
+                <KpiCard label="Hs Extras + FT"   value={fmt1(liqRows.reduce((a,r)=>a+r.hsExtras+r.hsFT,0))} icon={<TrendingUp size={18}/>}    color="amber"  subtitle="Horas extra + Franco trabajado"/>
+              </div>
+
+              {/* Table */}
+              <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Costo Real por Objetivo</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">Hs Vendidas = SLA × ({days}d/30d) · Delta = Liquidadas − Vendidas</p>
+                  </div>
+                  <span className="text-xs text-slate-400">{sL.length} objetivos · {days}d</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="text-left py-2 px-4 text-xs font-semibold uppercase text-slate-400 tracking-wide">Objetivo</th>
+                        <th className="text-left py-2 px-3 text-xs font-semibold uppercase text-slate-400 tracking-wide">Cliente</th>
+                        <SortTh label="Vendidas"   col="hsVendidas"    sort={liqSort} onSort={c=>tgl(liqSort,c,setLiqSort)}/>
+                        <SortTh label="Planif."    col="hsPlanificadas" sort={liqSort} onSort={c=>tgl(liqSort,c,setLiqSort)}/>
+                        <SortTh label="Ejecutadas" col="hsEjecutadas"  sort={liqSort} onSort={c=>tgl(liqSort,c,setLiqSort)}/>
+                        <SortTh label="Ausencia"   col="hsAusencia"    sort={liqSort} onSort={c=>tgl(liqSort,c,setLiqSort)}/>
+                        <SortTh label="Extras"     col="hsExtras"      sort={liqSort} onSort={c=>tgl(liqSort,c,setLiqSort)}/>
+                        <SortTh label="FT"         col="hsFT"          sort={liqSort} onSort={c=>tgl(liqSort,c,setLiqSort)}/>
+                        <SortTh label="Liquidadas" col="hsLiquidadas"  sort={liqSort} onSort={c=>tgl(liqSort,c,setLiqSort)}/>
+                        <SortTh label="Delta"      col="delta"         sort={liqSort} onSort={c=>tgl(liqSort,c,setLiqSort)}/>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sL.length===0&&<tr><td colSpan={10} className="text-center py-12 text-slate-400 text-sm">Sin datos para este período</td></tr>}
+                      {sL.map(row=>{
+                        const deltaPos = row.delta >= 0;
+                        const deltaColor = deltaPos ? 'text-rose-600 font-bold' : 'text-emerald-600 font-bold';
+                        const liqColor  = 'text-violet-600 font-semibold';
+                        return (
+                          <tr key={row.objectiveId} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                            <td className="py-3 px-4 font-medium text-slate-800 max-w-[160px] truncate">{row.objectiveName}</td>
+                            <td className="py-3 px-3 text-slate-500 text-xs max-w-[130px] truncate">{row.clientName}</td>
+                            <td className="py-3 px-3 text-right text-slate-500">{row.hsVendidas>0?fmt1(row.hsVendidas):'—'}</td>
+                            <td className="py-3 px-3 text-right text-slate-400">{fmt1(row.hsPlanificadas)}</td>
+                            <td className="py-3 px-3 text-right font-semibold text-blue-600">{fmt1(row.hsEjecutadas)}</td>
+                            <td className="py-3 px-3 text-right text-rose-400">{fmt1(row.hsAusencia)}</td>
+                            <td className="py-3 px-3 text-right text-amber-500">{fmt1(row.hsExtras)}</td>
+                            <td className="py-3 px-3 text-right text-orange-500">{fmt1(row.hsFT)}</td>
+                            <td className={`py-3 px-3 text-right ${liqColor}`}>{fmt1(row.hsLiquidadas)}</td>
+                            <td className="py-3 px-4 text-right">
+                              {row.hsVendidas>0
+                                ? <span className={deltaColor}>{deltaPos?'+':''}{fmt1(row.delta)}h</span>
+                                : <span className="text-slate-300 text-xs">sin SLA</span>
+                              }
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    {sL.length>0&&(
+                      <tfoot className="bg-slate-50 border-t border-slate-200">
+                        <tr>
+                          <td colSpan={2} className="py-2 px-4 text-xs font-bold text-slate-500 uppercase">Total</td>
+                          <td className="py-2 px-3 text-right text-xs text-slate-500">{fmt1(sL.reduce((a,r)=>a+r.hsVendidas,0))}</td>
+                          <td className="py-2 px-3 text-right text-xs text-slate-400">{fmt1(sL.reduce((a,r)=>a+r.hsPlanificadas,0))}</td>
+                          <td className="py-2 px-3 text-right text-xs font-black text-blue-600">{fmt1(sL.reduce((a,r)=>a+r.hsEjecutadas,0))}</td>
+                          <td className="py-2 px-3 text-right text-xs font-bold text-rose-500">{fmt1(sL.reduce((a,r)=>a+r.hsAusencia,0))}</td>
+                          <td className="py-2 px-3 text-right text-xs font-bold text-amber-500">{fmt1(sL.reduce((a,r)=>a+r.hsExtras,0))}</td>
+                          <td className="py-2 px-3 text-right text-xs font-bold text-orange-500">{fmt1(sL.reduce((a,r)=>a+r.hsFT,0))}</td>
+                          <td className="py-2 px-3 text-right text-xs font-black text-violet-600">{fmt1(sL.reduce((a,r)=>a+r.hsLiquidadas,0))}</td>
+                          <td className="py-2 px-4 text-right text-xs font-black">
+                            {(()=>{const d=sL.reduce((a,r)=>a+r.delta,0);return<span className={d>=0?'text-rose-600':'text-emerald-600'}>{d>=0?'+':''}{fmt1(d)}h</span>;})()}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+
+              {/* Legend */}
+              <div className="bg-slate-50 rounded-xl p-4 text-xs text-slate-500 space-y-1">
+                <p><span className="font-semibold text-slate-700">Hs Vendidas:</span> totalMonthlyHours del SLA × ({days}d / 30d)</p>
+                <p><span className="font-semibold text-slate-700">Hs Ejecutadas:</span> realStartTime → realEndTime en turnos presentes</p>
+                <p><span className="font-semibold text-slate-700">Extras:</span> max(0, realEndTime − endTime) por turno</p>
+                <p><span className="font-semibold text-slate-700">FT (Franco Trabajado):</span> turnos con isFrancoTrabajado = true</p>
+                <p><span className="font-semibold text-slate-700">Hs Liquidadas:</span> Ejecutadas + Extras + FT</p>
+                <p><span className="font-semibold">Delta positivo</span> (rojo) = se entregó más de lo vendido. <span className="font-semibold">Delta negativo</span> (verde) = margen a favor.</p>
               </div>
             </div>
           )}

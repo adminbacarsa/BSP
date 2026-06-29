@@ -214,16 +214,9 @@ const runEquilibrarCronoHandler = async (data, context) => {
         }
         for (const rangeKey of Object.keys(blocksByRange).sort()) {
             const group = blocksByRange[rangeKey];
-            for (const block of group) {
-                if (!block.isPure || !block.slotKey)
-                    continue;
-                const prof = posProfiles[block.slotKey];
-                if (prof)
-                    currentHours[block.empId] = (currentHours[block.empId] || 0) - block.shifts.length * prof.hours;
-            }
             group.sort((a, b) => {
-                const ha = currentHours[a.empId] || 0;
-                const hb = currentHours[b.empId] || 0;
+                const ha = Math.max(horasAntes[a.empId] || 0, currentHours[a.empId] || 0);
+                const hb = Math.max(horasAntes[b.empId] || 0, currentHours[b.empId] || 0);
                 return ha !== hb ? ha - hb : a.empId.localeCompare(b.empId);
             });
             const groupPool = {};
@@ -257,15 +250,14 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     }
                 }
                 if (!assigned) {
-                    const orig = posProfiles[block.slotKey];
-                    if (orig)
-                        currentHours[block.empId] = (currentHours[block.empId] || 0) + block.shifts.length * orig.hours;
                     lastBlockEndDate[block.empId] = blockEndDate;
                     lastAssignedSlotKey[block.empId] = block.slotKey;
                     bloquesProcesados++;
                     continue;
                 }
-                currentHours[block.empId] = (currentHours[block.empId] || 0) + block.shifts.length * assigned.hours;
+                const origProf2 = posProfiles[block.slotKey];
+                const origH = origProf2 ? block.shifts.length * origProf2.hours : 0;
+                currentHours[block.empId] = (currentHours[block.empId] || 0) - origH + block.shifts.length * assigned.hours;
                 const assignedSlotKey = `${assigned.posName}__${assigned.code}`;
                 let changed = false;
                 for (const shift of block.shifts) {

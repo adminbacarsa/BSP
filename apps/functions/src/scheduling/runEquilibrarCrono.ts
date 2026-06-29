@@ -349,18 +349,16 @@ export const runEquilibrarCronoHandler = async (
     for (const rangeKey of Object.keys(blocksByRange).sort()) {
         const group = blocksByRange[rangeKey];
 
-        // Restar la contribución original de los bloques puros de este grupo
-        // para que el sort compare horas "sin contar este grupo"
-        for (const block of group) {
-            if (!block.isPure || !block.slotKey) continue;
-            const prof = posProfiles[block.slotKey];
-            if (prof) currentHours[block.empId] = (currentHours[block.empId] || 0) - block.shifts.length * prof.hours;
-        }
-
-        // Ordenar: menos horas acumuladas → recibe el slot más pesado disponible
+        // Ordenar sin restar la contribución del bloque actual.
+        // Clave = max(horasAntes, currentHours): nunca baja de las horas originales.
+        // Corrige el bug "subtract-before-sort": con resta, un empleado N12+207h
+        // aparecía como 135 (< 184h M → 136) y seguía recibiendo el bloque pesado.
+        // Con max-sin-resta: 207 > 184 → el de más horas queda al final y recibe el
+        // slot más liviano; a medida que el ligero acumula, su currentHours sube y
+        // deja de recibir los pesados (auto-regulación).
         group.sort((a, b) => {
-            const ha = currentHours[a.empId] || 0;
-            const hb = currentHours[b.empId] || 0;
+            const ha = Math.max(horasAntes[a.empId] || 0, currentHours[a.empId] || 0);
+            const hb = Math.max(horasAntes[b.empId] || 0, currentHours[b.empId] || 0);
             return ha !== hb ? ha - hb : a.empId.localeCompare(b.empId);
         });
 
@@ -402,16 +400,17 @@ export const runEquilibrarCronoHandler = async (
             }
 
             if (!assigned) {
-                // Edge case: agregar horas originales y continuar
-                const orig = posProfiles[block.slotKey];
-                if (orig) currentHours[block.empId] = (currentHours[block.empId] || 0) + block.shifts.length * orig.hours;
+                // Edge case: no hay slot → currentHours ya tiene la contribución orig
                 lastBlockEndDate[block.empId] = blockEndDate;
                 lastAssignedSlotKey[block.empId] = block.slotKey;
                 bloquesProcesados++;
                 continue;
             }
 
-            currentHours[block.empId] = (currentHours[block.empId] || 0) + block.shifts.length * assigned.hours;
+            // Diferencial: quitar original, sumar nuevo
+            const origProf2 = posProfiles[block.slotKey];
+            const origH = origProf2 ? block.shifts.length * origProf2.hours : 0;
+            currentHours[block.empId] = (currentHours[block.empId] || 0) - origH + block.shifts.length * assigned.hours;
 
             const assignedSlotKey = `${assigned.posName}__${assigned.code}`;
             let changed = false;
