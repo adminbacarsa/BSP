@@ -38,6 +38,8 @@ export declare const autoCompletarTurnos: functions.CloudFunction<unknown>;
 export declare const detectarAusencias: functions.CloudFunction<unknown>;
 export declare const gestionarVacantes: functions.CloudFunction<unknown>;
 export declare const triggerBackup: functions.HttpsFunction & functions.Runnable<any>;
+export declare const syncBackups: functions.HttpsFunction & functions.Runnable<any>;
+export declare const deleteBackup: functions.HttpsFunction & functions.Runnable<any>;
 export declare const restoreBackup: functions.HttpsFunction & functions.Runnable<any>;
 export declare const processRestoreJob: functions.CloudFunction<functions.Change<functions.firestore.DocumentSnapshot>>;
 export declare const migrateEmpresaData: functions.HttpsFunction & functions.Runnable<any>;

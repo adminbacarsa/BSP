@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runBackup = runBackup;
+exports.syncDriveBackups = syncDriveBackups;
+exports.deleteDriveBackup = deleteDriveBackup;
 exports.resolveDriveBackupFolderId = resolveDriveBackupFolderId;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
@@ -161,6 +163,96 @@ async function runBackup(folderId, opts = {}) {
         status: 'ok',
         ...(empresaId ? { empresaId } : {}),
     };
+}
+async function syncDriveBackups(opts = {}) {
+    const db = admin.firestore();
+    const empresaId = String(opts.empresaId ?? '').trim();
+    const scopeEmpresa = opts.scopeEmpresa === true && !!empresaId;
+    const { google } = await Promise.resolve().then(() => require('googleapis'));
+    const auth = new google.auth.GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/drive'],
+    });
+    const drive = google.drive({ version: 'v3', auth });
+    let query = db.collection('system_backups');
+    if (scopeEmpresa)
+        query = query.where('empresaId', '==', empresaId);
+    const snap = await query.get();
+    let checked = 0;
+    let removed = 0;
+    let kept = 0;
+    const removedIds = [];
+    const existenceCache = new Map();
+    for (const docSnap of snap.docs) {
+        const data = docSnap.data();
+        const driveFileId = String(data.driveFileId ?? '').trim();
+        if (!driveFileId) {
+            kept++;
+            continue;
+        }
+        checked++;
+        let exists = existenceCache.get(driveFileId);
+        if (exists === undefined) {
+            try {
+                const res = await drive.files.get({
+                    fileId: driveFileId,
+                    fields: 'id, trashed',
+                    supportsAllDrives: true,
+                });
+                exists = !res.data.trashed;
+            }
+            catch (e) {
+                const code = e?.code || e?.response?.status;
+                if (code === 404)
+                    exists = false;
+                else {
+                    kept++;
+                    existenceCache.set(driveFileId, true);
+                    continue;
+                }
+            }
+            existenceCache.set(driveFileId, exists);
+        }
+        if (exists) {
+            kept++;
+            continue;
+        }
+        await docSnap.ref.delete();
+        removed++;
+        removedIds.push(docSnap.id);
+    }
+    return { checked, removed, kept, removedIds };
+}
+async function deleteDriveBackup(docId, opts = {}) {
+    const db = admin.firestore();
+    const ref = db.collection('system_backups').doc(docId);
+    const docSnap = await ref.get();
+    if (!docSnap.exists)
+        return { deleted: false, driveDeleted: false };
+    const data = docSnap.data();
+    if (!opts.isSuper && opts.scopeEmpresa) {
+        const docEmp = String(data.empresaId ?? '').trim();
+        if (docEmp !== String(opts.empresaId ?? '').trim()) {
+            throw new Error('El backup pertenece a otra empresa.');
+        }
+    }
+    const driveFileId = String(data.driveFileId ?? '').trim();
+    let driveDeleted = false;
+    if (driveFileId) {
+        try {
+            const { google } = await Promise.resolve().then(() => require('googleapis'));
+            const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/drive'] });
+            const drive = google.drive({ version: 'v3', auth });
+            await drive.files.delete({ fileId: driveFileId, supportsAllDrives: true });
+            driveDeleted = true;
+        }
+        catch (e) {
+            const code = e?.code || e?.response?.status;
+            if (code !== 404)
+                throw e;
+        }
+    }
+    await ref.delete();
+    return { deleted: true, driveDeleted };
 }
 async function resolveDriveBackupFolderId() {
     const fromEnv = String(process.env.DRIVE_BACKUP_FOLDER_ID ?? '').trim();

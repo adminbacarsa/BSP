@@ -9,16 +9,23 @@
  *   npm run deploy              → worktree si lab activo; si no, build en build/ aquí
  *   npm run deploy -- --here    → forzar build en esta carpeta (build/ solamente)
  *   npm run deploy -- --worktree → siempre worktree
- *   npm run deploy --functions  → hosting + functions
+ *   npm run deploy:functions     → hosting + functions (recomendado)
+ *   npm run deploy -- --functions → hosting + functions (alternativa)
+ *   npm run deploy:all           → hosting + functions + firestore rules
  */
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { runDeploy, labIsActive } = require('./deploy-lib');
+const { parseDeployFlags, logDeployPlan } = require('./deploy-flags');
 
 const args = process.argv.slice(2);
+const flags = parseDeployFlags(args);
 const forceHere = args.includes('--here');
 const forceWorktree = args.includes('--worktree');
 const deployArgs = args.filter((a) => a !== '--here' && a !== '--worktree');
+
+logDeployPlan(flags, { label: 'COSP deploy' });
+if (flags.dryRun) process.exit(0);
 
 if (forceWorktree || (!forceHere && labIsActive())) {
   if (!forceWorktree && labIsActive()) {

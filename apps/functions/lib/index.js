@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.setEmployeePortalPassword = void 0;
+exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -2256,6 +2256,48 @@ exports.triggerBackup = functions
             await db.collection('system_backups').add(errDoc);
         }
         throw new functions.https.HttpsError('internal', e?.message || 'Error al ejecutar backup');
+    }
+});
+exports.syncBackups = functions
+    .runWith({ timeoutSeconds: 300, memory: '512MB' })
+    .https.onCall(async (data, context) => {
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    const claimedEmpresa = String(data?.empresaId ?? '').trim();
+    const empresaId = caller.isSuper ? claimedEmpresa : (caller.profileEmpresa || 'bacarsa');
+    const scopeEmpresa = !caller.isSuper;
+    try {
+        const result = await (0, backup_service_1.syncDriveBackups)({ empresaId, scopeEmpresa });
+        return result;
+    }
+    catch (e) {
+        throw new functions.https.HttpsError('internal', e?.message || 'Error al sincronizar backups con Drive');
+    }
+});
+exports.deleteBackup = functions
+    .runWith({ timeoutSeconds: 120, memory: '256MB' })
+    .https.onCall(async (data, context) => {
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    const docId = String(data?.docId ?? '').trim();
+    if (!docId)
+        throw new functions.https.HttpsError('invalid-argument', 'docId requerido');
+    const empresaId = caller.isSuper
+        ? String(data?.empresaId ?? '').trim()
+        : (caller.profileEmpresa || 'bacarsa');
+    try {
+        const result = await (0, backup_service_1.deleteDriveBackup)(docId, { empresaId, scopeEmpresa: !caller.isSuper, isSuper: caller.isSuper });
+        if (!result.deleted)
+            throw new functions.https.HttpsError('not-found', 'El backup ya no existe.');
+        return result;
+    }
+    catch (e) {
+        if (e instanceof functions.https.HttpsError)
+            throw e;
+        if (/pertenece a otra empresa/i.test(e?.message || '')) {
+            throw new functions.https.HttpsError('permission-denied', e.message);
+        }
+        throw new functions.https.HttpsError('internal', e?.message || 'Error al borrar backup');
     }
 });
 exports.restoreBackup = functions

@@ -9,9 +9,11 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { runDeploy } = require('./deploy-lib');
+const { parseDeployFlags, logDeployPlan } = require('./deploy-flags');
 
 const LAB_ROOT = path.join(__dirname, '..');
-const args = process.argv.slice(2).filter((a) => a.startsWith('--'));
+const args = process.argv.slice(2);
+const flags = parseDeployFlags(args);
 const DEPLOY_DIR = process.env.COSP_DEPLOY_DIR || path.join(LAB_ROOT, '..', 'cronoapp-deploy');
 const BRANCH = process.env.COSP_DEPLOY_BRANCH || 'main';
 
@@ -70,6 +72,9 @@ console.log(` Lab:    ${LAB_ROOT}`);
 console.log(` Deploy: ${DEPLOY_DIR}`);
 console.log('═══════════════════════════════════════════════════════');
 
+logDeployPlan(flags, { label: 'COSP deploy (worktree)' });
+if (flags.dryRun) process.exit(0);
+
 ensureWorktree();
 
 console.log('\n▶ npm install en worktree de deploy ...');
@@ -92,7 +97,7 @@ const installWeb2 = spawnSync(npm, ['install', '--ignore-scripts'], {
 });
 if (installWeb2.status !== 0) process.exit(installWeb2.status ?? 1);
 
-const deployFunctions = args.some((a) => a === '--functions' || a === '--all');
+const deployFunctions = flags.withFunctions;
 if (deployFunctions) {
   const functionsDir = path.join(DEPLOY_DIR, 'apps', 'functions');
   console.log('\n▶ npm install apps/functions ...');

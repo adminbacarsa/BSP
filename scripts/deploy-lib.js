@@ -5,6 +5,7 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { parseDeployFlags, logDeployPlan } = require('./deploy-flags');
 
 function isPortListening(port) {
   if (process.platform === 'win32') {
@@ -36,16 +37,22 @@ function run(cmd, cwd, env = {}) {
 
 /**
  * @param {string} projectRoot — raíz del repo donde correr build + firebase
- * @param {string[]} args — flags: --functions, --rules, --all
+ * @param {string[]} args — flags: --functions, --rules, --all (ver deploy-flags.js)
  */
 function runDeploy(projectRoot, args = []) {
+  const flags = parseDeployFlags(args);
+  if (flags.dryRun) {
+    logDeployPlan(flags);
+    return;
+  }
+
   const web2 = path.join(projectRoot, 'apps', 'web2');
   const buildRoot = path.join(projectRoot, 'build');
   const dist = path.join(buildRoot, '.next-prod');
   const hosting = path.join(buildRoot, 'hosting');
 
-  const withFunctions = args.includes('--functions') || args.includes('--all');
-  const withRules = args.includes('--rules') || args.includes('--all');
+  const withFunctions = flags.withFunctions;
+  const withRules = flags.withRules;
 
   fs.mkdirSync(buildRoot, { recursive: true });
 
@@ -68,9 +75,15 @@ function runDeploy(projectRoot, args = []) {
   }
   console.log('✓ build/hosting/ actualizado');
 
-  const targets = ['hosting'];
+  const targets = [];
+  if (flags.withHosting) targets.push('hosting');
   if (withFunctions) targets.push('functions');
   if (withRules) targets.push('firestore:rules');
+
+  if (!targets.length) {
+    console.error('\n✗ Sin objetivos de deploy. Usá npm run deploy:functions o npm run deploy -- --functions');
+    process.exit(1);
+  }
 
   run(`firebase deploy --only "${targets.join(',')}" --force`, projectRoot);
 

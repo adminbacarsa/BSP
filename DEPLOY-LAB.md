@@ -30,13 +30,18 @@ Si hay algo escuchando en `:8080`, `:9099` o `:3000`, `npm run deploy` **detecta
 # Solo hosting
 npm run deploy
 
-# Hosting + Cloud Functions
+# Hosting + Cloud Functions (recomendado — el flag queda en el script npm)
+npm run deploy:functions
+
+# Alternativa con separador `--` (npm no pasa flags sin él)
 npm run deploy -- --functions
 
 # Hosting + reglas Firestore
+npm run deploy:rules
 npm run deploy -- --rules
 
 # Todo
+npm run deploy:all
 npm run deploy -- --all
 ```
 
@@ -47,6 +52,7 @@ Solo si el lab está **apagado** o querés build local explícito (escribe en `b
 ```powershell
 npm run deploy:here
 npm run deploy:here -- --functions
+# o: node scripts/deploy.js --here --functions
 ```
 
 ### Siempre worktree (aunque el lab esté apagado)
@@ -54,6 +60,7 @@ npm run deploy:here -- --functions
 ```powershell
 npm run deploy:worktree
 npm run deploy:worktree -- --functions
+# o: npm run deploy:functions  (worktree automático si el lab está activo)
 ```
 
 ## Primera vez

@@ -17,4 +17,22 @@ export interface BackupResult {
     empresaId?: string;
 }
 export declare function runBackup(folderId: string, opts?: BackupOptions): Promise<BackupResult>;
+export interface SyncDriveBackupsResult {
+    checked: number;
+    removed: number;
+    kept: number;
+    removedIds: string[];
+}
+export declare function syncDriveBackups(opts?: {
+    empresaId?: string;
+    scopeEmpresa?: boolean;
+}): Promise<SyncDriveBackupsResult>;
+export declare function deleteDriveBackup(docId: string, opts?: {
+    empresaId?: string;
+    scopeEmpresa?: boolean;
+    isSuper?: boolean;
+}): Promise<{
+    deleted: boolean;
+    driveDeleted: boolean;
+}>;
 export declare function resolveDriveBackupFolderId(): Promise<string | null>;
