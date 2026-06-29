@@ -192,6 +192,10 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                             {(() => {
                                 const noData = !current.ok && current.errores?.[0]?.includes('No se encontraron turnos');
                                 const alreadyOk = current.ok && current.turnosActualizados === 0;
+                                // Horas excedentes sobre 200h
+                                const excesoAntes   = Object.values(current.horasAntes).reduce((s, h) => s + Math.max(0, h - 200), 0);
+                                const excesoDespues = Object.values(current.horasDespues).reduce((s, h) => s + Math.max(0, h - 200), 0);
+                                const ahorroExceso  = Math.round(excesoAntes - excesoDespues);
                                 return (
                                 <div className={`rounded-xl border-2 px-3 py-2.5 ${result && current.turnosActualizados > 0 ? 'border-emerald-300 bg-emerald-50' : isPreview && current.turnosActualizados > 0 ? 'border-amber-200 bg-amber-50' : noData ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
                                     <div className="flex items-center gap-2 mb-1">
@@ -210,7 +214,15 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                                             <p className="text-[10px] text-amber-600/70 mt-0.5 font-mono">{current.errores?.[0]}</p>
                                         </>
                                     ) : (
-                                        <p className="text-[10px] text-slate-500">{current.bloquesProcesados} bloques procesados</p>
+                                        <div className="flex items-center gap-3 flex-wrap">
+                                            <p className="text-[10px] text-slate-500">{current.bloquesProcesados} bloques procesados</p>
+                                            {excesoAntes > 0 && (
+                                                <p className="text-[10px] font-black text-rose-600">
+                                                    Hs sobre 200h: {Math.round(excesoAntes)}h → {Math.round(excesoDespues)}h
+                                                    {ahorroExceso > 0 && <span className="text-emerald-600 ml-1">(−{ahorroExceso}h excedente)</span>}
+                                                </p>
+                                            )}
+                                        </div>
                                     )}
                                 </div>
                                 );

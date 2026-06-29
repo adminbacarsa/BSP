@@ -316,6 +316,13 @@ export const runEquilibrarCronoHandler = async (
     // Inicializar desde las horas reales del cronograma
     const currentHours: Record<string, number> = { ...horasAntes };
 
+    // Objetivo de equilibrio: promedio de horas del período.
+    // Empleados sobre este umbral no recibirán slots más pesados que el original.
+    const empIds = Object.keys(horasAntes);
+    const targetHours = empIds.length > 0
+        ? Math.round(empIds.reduce((s, id) => s + (horasAntes[id] || 0), 0) / empIds.length)
+        : 192;
+
     // Rastreo por empleado para la restricción de transición N→M
     const lastBlockEndDate: Record<string, string> = {};
     const lastAssignedSlotKey: Record<string, string> = {};
@@ -380,12 +387,20 @@ export const runEquilibrarCronoHandler = async (
                 continue;
             }
 
-            // Elegir el slot más pesado disponible que no viole la restricción N→M
+            // Elegir el slot más pesado disponible sin violar:
+            //  1. restricción N→M sin franco
+            //  2. no asignar slot MÁS PESADO a empleados ya sobre el objetivo
+            //     (evita que ROMERO(207h) absorba N12 de GOYOCHEA(230h) en el mismo grupo)
+            const origProfCheck = posProfiles[block.slotKey];
+            const origHCheck = origProfCheck ? block.shifts.length * origProfCheck.hours : 0;
             let assigned: PosProfile | null = null;
             for (const sk of sortedSlotKeys) {
                 if ((groupPool[sk] || 0) <= 0) continue;
                 const candidate = posProfiles[sk];
                 if (violaTransicion(block.empId, candidate, block.startDate)) continue;
+                const newH = block.shifts.length * candidate.hours;
+                // Empleado sobre objetivo no recibe slot más pesado que el original
+                if (newH > origHCheck && (currentHours[block.empId] || 0) > targetHours) continue;
                 assigned = candidate;
                 groupPool[sk]--;
                 break;

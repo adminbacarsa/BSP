@@ -59,7 +59,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
   const [credGuardada, setCredGuardada]   = useState(false);
   const [modoEdicion, setModoEdicion]     = useState(false);
   const [empresaLocal, setEmpresaLocal]   = useState(empresaNombre || '');
-  const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 30 });
+  const [photoOff, setPhotoOffState]      = useState({ x: 50, y: 20 });
   const photoOffRef                       = useRef({ x: 50, y: 20 });
   const [flipped, setFlipped]             = useState(false);
   const [credModelo, setCredModelo]       = useState<string>('gradiente');
@@ -734,7 +734,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                                     repeating-linear-gradient(45deg, ${tema.accent}05 0px, ${tema.accent}05 1px, transparent 1px, transparent 18px)` }}/>
 
                 {/* ── Zona foto full-bleed ── */}
-                <div style={{ position: 'relative', width: '100%', height: 220, flexShrink: 0, overflow: 'hidden' }}>
+                <div style={{ position: 'relative', width: '100%', height: 280, flexShrink: 0, overflow: 'hidden' }}>
                   {/* Foto */}
                   <div ref={photoContRef} style={{ position: 'absolute', inset: 0, pointerEvents: (fotoMostrada && !viewOnly) ? 'auto' : 'none', touchAction: viewOnly ? 'auto' : 'none' }}>
                     {quitandoFondo && <div style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}><RefreshCw size={16} className="animate-spin" style={{ color: tema.accent }}/><p style={{ color: '#fff', fontSize: 9, fontWeight: 900 }}>{progFondo}%</p></div>}
@@ -749,7 +749,7 @@ export default function CredencialDigital({ empDocId, empData, empresaNombre, em
                     {!viewOnly && fotoMostrada && <div style={{ position: 'absolute', bottom: 48, right: 8, width: 22, height: 22, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}><svg width="10" height="10" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9M3 3l-2 2.5 2 2.5M8 3l2 2.5-2 2.5" stroke="rgba(255,255,255,0.8)" strokeWidth="1.2" strokeLinecap="round"/></svg></div>}
                   </div>
                   {/* Gradiente foto → fondo */}
-                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '55%', background: `linear-gradient(to top, ${bg} 0%, ${bg}cc 30%, transparent 100%)`, pointerEvents: 'none' }}/>
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '38%', background: `linear-gradient(to top, ${bg} 0%, ${bg}aa 25%, transparent 100%)`, pointerEvents: 'none' }}/>
                   {/* Header glassmorphism sobre la foto */}
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '10px 12px 8px', background: 'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, transparent 100%)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', pointerEvents: 'none' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

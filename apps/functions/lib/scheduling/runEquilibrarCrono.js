@@ -188,6 +188,10 @@ const runEquilibrarCronoHandler = async (data, context) => {
         const rotadosSet = new Set();
         let bloquesProcesados = 0;
         const currentHours = { ...horasAntes };
+        const empIds = Object.keys(horasAntes);
+        const targetHours = empIds.length > 0
+            ? Math.round(empIds.reduce((s, id) => s + (horasAntes[id] || 0), 0) / empIds.length)
+            : 192;
         const lastBlockEndDate = {};
         const lastAssignedSlotKey = {};
         const violaTransicion = (empId, candidate, blockFirstDay) => {
@@ -232,12 +236,17 @@ const runEquilibrarCronoHandler = async (data, context) => {
                     lastAssignedSlotKey[block.empId] = block.slotKey || lastAssignedSlotKey[block.empId] || '';
                     continue;
                 }
+                const origProfCheck = posProfiles[block.slotKey];
+                const origHCheck = origProfCheck ? block.shifts.length * origProfCheck.hours : 0;
                 let assigned = null;
                 for (const sk of sortedSlotKeys) {
                     if ((groupPool[sk] || 0) <= 0)
                         continue;
                     const candidate = posProfiles[sk];
                     if (violaTransicion(block.empId, candidate, block.startDate))
+                        continue;
+                    const newH = block.shifts.length * candidate.hours;
+                    if (newH > origHCheck && (currentHours[block.empId] || 0) > targetHours)
                         continue;
                     assigned = candidate;
                     groupPool[sk]--;
