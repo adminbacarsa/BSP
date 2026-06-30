@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useTransition, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useTransition, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -144,6 +144,9 @@ import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificac
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
 import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
 import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageModal';
+import PlanningRecompositionModal from '@/components/planificacion/PlanningRecompositionModal';
+import type { RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
+import { extractPackagesFromPending, emitRecompositionNotifications } from '@/lib/planificacion/planningRecompositionNotify';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import {
@@ -782,6 +785,8 @@ export default function PlanificacionPage() {
     }, [vacancyReplacementOpen]);
     
     const [modifiers, setModifiers] = useState({ extend: false, early: false, plannedNovedad: '' });
+    const [recompositionModalOpen, setRecompositionModalOpen] = useState(false);
+    const [pendingRecompositionPackages, setPendingRecompositionPackages] = useState<RecompositionPackage[]>([]);
 
     const [showLegend, setShowLegend] = useState(false);
     const [selectedRef, setSelectedRef] = useState<string | null>(null);
@@ -3224,7 +3229,7 @@ export default function PlanificacionPage() {
                         // FIX DE SEGURIDAD: Evitar undefined en positionName
                         const safePositionName = change.positionName || 'General';
 
-                        batch.set(doc(collection(db, 'turnos')), stampEmpresaId({
+                        const turnoPayload: Record<string, unknown> = {
                             employeeId: empId,
                             clientId: selectedClient,
                             objectiveId: selectedObjective,
@@ -3238,7 +3243,7 @@ export default function PlanificacionPage() {
                             swapWith: safeSwapWith,
                             swapDate: safeSwapDate,
                             createdAt: serverTimestamp(),
-                            comments: change.comments || 'Carga Masiva',
+                            comments: change.comments || change.coverageNote || 'Carga Masiva',
                             isExtended: change.isExtended || false,
                             isEarlyStart: change.isEarlyStart || false,
                             plannedNovedad: change.plannedNovedad || null,
@@ -3246,7 +3251,33 @@ export default function PlanificacionPage() {
                             coveredBy: change.coveredBy || null,
                             draft: correctionMode ? false : !isPublished,
                             ...deploymentFieldsForFirestore(change),
-                        }, empresaId));
+                        };
+
+                        if (change.coveragePackageId) {
+                            turnoPayload.coveragePackageId = change.coveragePackageId;
+                            turnoPayload.coverageType = change.coverageType || null;
+                            turnoPayload.coverageSegmentRole = change.coverageSegmentRole || null;
+                            turnoPayload.coverageNote = change.coverageNote || null;
+                            turnoPayload.coverageStatus = change.coverageStatus || null;
+                            turnoPayload.coverageMode = change.coverageMode || null;
+                            turnoPayload.liberationReason = change.liberationReason || null;
+                            turnoPayload.redeployNote = change.redeployNote || null;
+                            turnoPayload.coversEmployeeId = change.coversEmployeeId || null;
+                            turnoPayload.coversPositionName = change.coversPositionName || null;
+                            if (change.segmentFromTime) turnoPayload.segmentFromTime = change.segmentFromTime;
+                            if (change.segmentToTime) turnoPayload.segmentToTime = change.segmentToTime;
+                        }
+                        if (change.isEarlyStart && typeof change.adjustedStartTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedStartTime)) {
+                            const [ah, am] = change.adjustedStartTime.split(':').map(Number);
+                            const adj = new Date(tDate);
+                            adj.setHours(ah, am, 0, 0);
+                            turnoPayload.adjustedStartTime = Timestamp.fromDate(adj);
+                        }
+                        if (change.isExtended && typeof change.adjustedEndTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedEndTime)) {
+                            turnoPayload.extensionEndTime = change.adjustedEndTime;
+                        }
+
+                        batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
 
                         if (correctionMode) {
                             const codigoNuevo = change.isFrancoCompensatorio ? 'FF' : change.code;
@@ -3276,6 +3307,38 @@ export default function PlanificacionPage() {
 
                 await addDoc(collection(db, 'planificaciones_historial'), { timestamp: serverTimestamp(), user: realActorName, period: `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`, objectiveId: selectedObjective, changes: logData, count, snapshot: JSON.stringify(snapshotData) });
                 await batch.commit();
+
+                if (isPublished && empresaId) {
+                    const employeesById: Record<string, any> = {};
+                    employees.forEach((e: any) => { employeesById[e.id] = e; });
+                    const objName = getObjectiveName(selectedObjective);
+                    const packages = [
+                        ...pendingRecompositionPackages,
+                        ...extractPackagesFromPending(pendingChanges, employeesById, selectedObjective),
+                    ];
+                    const seenPkg = new Set<string>();
+                    for (const pkg of packages) {
+                        if (seenPkg.has(pkg.id)) continue;
+                        seenPkg.add(pkg.id);
+                        const extName = employeesById[pkg.extension.employeeId]?.name || pkg.extension.employeeId;
+                        const adelName = employeesById[pkg.earlyStart.employeeId]?.name || pkg.earlyStart.employeeId;
+                        const targetName = employeesById[pkg.target.employeeId]?.name || pkg.target.employeeId;
+                        try {
+                            await emitRecompositionNotifications(pkg, {
+                                empresaId,
+                                clientId: selectedClient,
+                                objectiveId: selectedObjective,
+                                objectiveName: objName,
+                                extName,
+                                adelName,
+                                targetName,
+                            });
+                        } catch (notifyErr) {
+                            console.warn('[plan] cobertura notify', notifyErr);
+                        }
+                    }
+                }
+
                 const experienciaPatches = new Map<string, Record<string, unknown>>();
                 for (const [key, change] of Object.entries(pendingChanges)) {
                     if (change.isDeleted) continue;
@@ -3304,6 +3367,7 @@ export default function PlanificacionPage() {
                 }
                 setPendingChanges({});
                 setPendingNovedades({});
+                setPendingRecompositionPackages([]);
                 if (isPublished) {
                     setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
                 }
@@ -3696,6 +3760,20 @@ export default function PlanificacionPage() {
         setSwapConfig(null);
         setShowSwapModal(false);
         toast.info("Cambio aplicado");
+    };
+
+    const applyRecompositionPackage = (updates: Record<string, any>, pkg: RecompositionPackage) => {
+        setPendingChanges(prev => {
+            const next = { ...prev };
+            for (const [k, v] of Object.entries(updates)) {
+                next[k] = { ...v, isTemp: true };
+            }
+            return next;
+        });
+        setPendingRecompositionPackages(prev => [...prev.filter(p => p.id !== pkg.id), pkg]);
+        setSelectedCell(null);
+        setRecompositionModalOpen(false);
+        toast.success('Paquete cobertura/liberación aplicado (pendiente de guardar)');
     };
 
     const handleAssignDeployment = (intent: 'SURPLUS' | 'TRAINING') => {
@@ -4684,9 +4762,9 @@ export default function PlanificacionPage() {
             await new Promise<void>((r) => setTimeout(r, 0));
             const useStrictPipeline = genBrain.strictSixTwo === true;
             const strictPipeline = can6x1
-                ? (() => { try { return runSixPlusOnePipeline(baseGenCtx); } catch { return null; } })()
+                ? (() => { try { return runSixPlusOnePipeline(baseGenCtx); } catch (e) { return null; } })()
                 : canFloater
-                    ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch { return null; } })()
+                    ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch (e) { return null; } })()
                     : null;
             const useFloaterPipeline = !!strictPipeline;
             const gen = strictPipeline?.generation ?? generateScheduleV4({
@@ -5675,6 +5753,8 @@ export default function PlanificacionPage() {
                                         let content = null; let style = "";
                                         let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
                                         let isExtended = s?.isExtended || p?.isExtended; let isEarly = s?.isEarlyStart || p?.isEarlyStart; 
+                                        const covRole = p?.coverageSegmentRole || s?.coverageSegmentRole;
+                                        const covNote = p?.coverageNote || s?.coverageNote;
                                         let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
                                         let absence = absencesMap[key];
                                         if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]) absence = null as any;
@@ -5749,7 +5829,8 @@ export default function PlanificacionPage() {
                                             ? String(absence.inferredCode || inferAbsenceCode(absence) || content || '').toUpperCase()
                                             : String(cellCode || '').toUpperCase();
                                         const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || pending?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}` : (_exclHint || _otherObjHint || _rfzHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{hasRfzOverlay && (<div className="absolute top-0 right-0 text-[7px] font-black bg-red-600 text-white px-0.5 rounded-bl">RFZ</div>)}{rfzOnCell && !s && !p && !absence && rfzOnCell.draft && (<div className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full bg-amber-400 border border-white" title="Sin publicar"/>)}</div></td>;
+                                        const _covHint = covNote ? `\n📋 ${covNote}` : '';
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{covRole === 'EXTENSION' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded">EXT</div>}{covRole === 'EARLY_START' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-cyan-600 text-white px-0.5 rounded">ADEL</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{covRole === 'TARGET' && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-indigo-600 text-white px-0.5 rounded">✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{hasRfzOverlay && (<div className="absolute top-0 right-0 text-[7px] font-black bg-red-600 text-white px-0.5 rounded-bl">RFZ</div>)}{rfzOnCell && !s && !p && !absence && rfzOnCell.draft && (<div className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full bg-amber-400 border border-white" title="Sin publicar"/>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -7899,10 +7980,20 @@ export default function PlanificacionPage() {
                                                 </>
                                             );
                                         })()}
-                                        <div className={`flex gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
-                                            <button onClick={() => setModifiers(p => ({...p, extend: !p.extend}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.extend ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>Extensión (+)</button>
-                                            <button onClick={() => setModifiers(p => ({...p, early: !p.early}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.early ? 'bg-cyan-100 border-cyan-300 text-cyan-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>Adelanto (+)</button>
-                                            <button onClick={() => setShowRRHHModal(true)} className="flex-1 py-2 bg-slate-100 border-slate-200 text-slate-600 rounded-lg text-xs font-bold border hover:bg-slate-200">Ausencia/RRHH</button>
+                                        <div className={`flex flex-col gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setRecompositionModalOpen(true)}
+                                                disabled={!selectedCell?.dateStr}
+                                                className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center justify-center gap-2 disabled:opacity-40"
+                                            >
+                                                <Split size={14} /> Cobertura / Liberación (ext + adel)
+                                            </button>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => setModifiers(p => ({...p, extend: !p.extend}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.extend ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`} title="Marcador rápido al asignar turno">Extensión (+)</button>
+                                                <button onClick={() => setModifiers(p => ({...p, early: !p.early}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.early ? 'bg-cyan-100 border-cyan-300 text-cyan-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`} title="Marcador rápido al asignar turno">Adelanto (+)</button>
+                                                <button onClick={() => setShowRRHHModal(true)} className="flex-1 py-2 bg-slate-100 border-slate-200 text-slate-600 rounded-lg text-xs font-bold border hover:bg-slate-200">Ausencia/RRHH</button>
+                                            </div>
                                         </div>
                                         <button onClick={() => { setSwapConfig({ empId: selectedCell.empId }); setShowSwapModal(true); }} disabled={isServiceLocked} className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-50"><ArrowLeftRight size={16}/> Iniciar Enroque / Cambio de Turno</button>
                                         <div className="mt-2 px-2"><button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="w-full py-2 text-[10px] font-bold text-slate-400 hover:text-rose-500 flex items-center justify-center gap-1 disabled:opacity-50">Aplicar a Selección (Borrar)</button></div>
@@ -8644,6 +8735,23 @@ export default function PlanificacionPage() {
                         />
                     );
                 })()}
+
+                {recompositionModalOpen && selectedCell?.dateStr && typeof document !== 'undefined' && createPortal(
+                    <PlanningRecompositionModal
+                        dateStr={selectedCell.dateStr}
+                        objectiveId={selectedObjective}
+                        objectiveName={getObjectiveName(selectedObjective)}
+                        clientId={selectedClient || undefined}
+                        employees={planningDotacionEmployees}
+                        shiftsMap={shiftsMap}
+                        pendingChanges={pendingChanges}
+                        absencesMap={absencesMap}
+                        preselectedEmpId={selectedCell.empId}
+                        onApply={applyRecompositionPackage}
+                        onClose={() => setRecompositionModalOpen(false)}
+                    />,
+                    document.body,
+                )}
 
                 {/* ── Modal verificación de cobertura post-generación ── */}
                 {showCoverageModal && autoV2Coverage && createPortal(

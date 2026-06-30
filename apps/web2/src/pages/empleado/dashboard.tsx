@@ -1907,6 +1907,9 @@ export default function EmployeeDashboard() {
                       else if (type === 'INGRESO_AUTOREGISTRO' || type === 'INGRESO_AUTOREGISTRO_ALERTA') actionLabel = 'Ingreso';
                       else if (type === 'LLEGADA_TARDE_AVISO') actionLabel = 'Llegada tarde';
                       else if (type === 'RETENTION' || type === 'RETENCION') actionLabel = 'Retención';
+                      else if (type === 'EXTENSION_PLANIFICADA') actionLabel = 'Extensión planificada';
+                      else if (type === 'ADELANTO_PLANIFICADO') actionLabel = 'Adelanto planificado';
+                      else if (type === 'RET_LIBERACION_PLANIFICADA') actionLabel = 'Stand-by RET';
                       return (
                         <div key={n.id} onClick={() => !n.read && markNotificationRead(n.id, n.title || n.body)}
                           className={`border border-slate-800 rounded-xl cursor-pointer p-3 ${n.read ? 'bg-slate-950/60' : 'bg-indigo-950/30 border-indigo-800/40'}`}>

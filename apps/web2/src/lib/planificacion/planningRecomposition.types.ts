@@ -1,0 +1,63 @@
+/** Paquete de cobertura / liberación planificada (ext + adel split). */
+
+export type RecompositionMode = 'absence' | 'liberation';
+
+export type CoverageSegmentRole = 'EXTENSION' | 'EARLY_START' | 'LIBERATED' | 'TARGET';
+
+export type CoveragePackageType = 'ABSENCE_COVERAGE' | 'LIBERATION_RECOMPOSITION';
+
+export interface RecompositionSegment {
+  employeeId: string;
+  role: 'EXTENSION' | 'EARLY_START';
+  positionName: string;
+  fromTime: string;
+  toTime: string;
+  homePositionName?: string;
+  baseCode?: string;
+}
+
+export interface RecompositionTarget {
+  employeeId: string;
+  dateStr: string;
+  positionName: string;
+  code: string;
+  label: string;
+  /** Ausencia, vacante o titular a liberar */
+  kind: 'absence' | 'vacancy' | 'working';
+}
+
+export interface RecompositionPackage {
+  id: string;
+  type: CoveragePackageType;
+  mode: RecompositionMode;
+  objectiveId: string;
+  dateStr: string;
+  target: RecompositionTarget;
+  gapFrom: string;
+  gapTo: string;
+  gapPositionName: string;
+  extension: RecompositionSegment;
+  earlyStart: RecompositionSegment;
+  liberationReason?: string;
+  redeployNote?: string;
+}
+
+export interface RecompositionPendingMeta {
+  coveragePackageId: string;
+  coverageType: CoveragePackageType;
+  coverageSegmentRole: CoverageSegmentRole;
+  isExtended?: boolean;
+  isEarlyStart?: boolean;
+  adjustedStartTime?: string;
+  adjustedEndTime?: string;
+  segmentFromTime?: string;
+  segmentToTime?: string;
+  coversEmployeeId?: string;
+  coversPositionName?: string;
+  coverageNote?: string;
+  liberationReason?: string;
+  redeployNote?: string;
+  coveredBy?: string;
+  coverageStatus?: 'PARTIAL' | 'COVERED';
+  coverageMode?: 'SPLIT';
+}
