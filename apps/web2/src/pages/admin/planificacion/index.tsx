@@ -784,7 +784,7 @@ export default function PlanificacionPage() {
         return () => window.clearTimeout(t);
     }, [vacancyReplacementOpen]);
     
-    const [modifiers, setModifiers] = useState({ extend: false, early: false, plannedNovedad: '' });
+    const [modifiers, setModifiers] = useState({ plannedNovedad: '' });
     const [recompositionModalOpen, setRecompositionModalOpen] = useState(false);
     const [pendingRecompositionPackages, setPendingRecompositionPackages] = useState<RecompositionPackage[]>([]);
 
@@ -3829,10 +3829,10 @@ export default function PlanificacionPage() {
                 return;
             }
         }
-        applyToPending({ ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: modifiers.extend, isEarlyStart: modifiers.early, plannedNovedad: modifiers.plannedNovedad });
+        applyToPending({ ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
     };
 
-    const confirmPendingAssignment = () => { if (!pendingAssignment) return; applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: modifiers.extend, isEarlyStart: modifiers.early, plannedNovedad: modifiers.plannedNovedad }); setPendingAssignment(null); setAuthWarningMessage(''); };
+    const confirmPendingAssignment = () => { if (!pendingAssignment) return; applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad }); setPendingAssignment(null); setAuthWarningMessage(''); };
 
     const getShiftFor = (empId: string, dateStr: string) => {
         const k = `${empId}_${dateStr}`;
@@ -4034,7 +4034,7 @@ export default function PlanificacionPage() {
                 const absenceAlreadyHandled = effectiveShift && ['V','L','PG','A','E','AA'].includes(effectiveShift.code || '');
                 if (!isLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) { findNeighbors(effectiveShift, dateStr); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); if (absence && absence.type) { setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); } else { setShowConflictModal(true); } }
                 else if (!isLocked && absence && !effectiveShift) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); }
-                else { if (!isLocked) { let initialModifiers = { extend: false, early: false, plannedNovedad: '' }; if (effectiveShift) { initialModifiers = { extend: effectiveShift.isExtended || false, early: effectiveShift.isEarlyStart || false, plannedNovedad: effectiveShift.plannedNovedad || '' }; } setModifiers(initialModifiers); setFrancoMode('NONE'); }
+                else { if (!isLocked) { setModifiers({ plannedNovedad: effectiveShift?.plannedNovedad || '' }); setFrancoMode('NONE'); }
                     const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
                     setCellEditMode(correctionMode && !!publishStatusMap[pubKey]);
                     setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); }
@@ -7989,11 +7989,13 @@ export default function PlanificacionPage() {
                                             >
                                                 <Split size={14} /> Cobertura / Liberación (ext + adel)
                                             </button>
-                                            <div className="flex gap-2">
-                                                <button onClick={() => setModifiers(p => ({...p, extend: !p.extend}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.extend ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`} title="Marcador rápido al asignar turno">Extensión (+)</button>
-                                                <button onClick={() => setModifiers(p => ({...p, early: !p.early}))} className={`flex-1 py-2 rounded-lg text-xs font-bold border transition-colors ${modifiers.early ? 'bg-cyan-100 border-cyan-300 text-cyan-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`} title="Marcador rápido al asignar turno">Adelanto (+)</button>
-                                                <button onClick={() => setShowRRHHModal(true)} className="flex-1 py-2 bg-slate-100 border-slate-200 text-slate-600 rounded-lg text-xs font-bold border hover:bg-slate-200">Ausencia/RRHH</button>
-                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowRRHHModal(true)}
+                                                className="w-full py-2.5 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200"
+                                            >
+                                                Ausencia / RRHH
+                                            </button>
                                         </div>
                                         <button onClick={() => { setSwapConfig({ empId: selectedCell.empId }); setShowSwapModal(true); }} disabled={isServiceLocked} className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-50"><ArrowLeftRight size={16}/> Iniciar Enroque / Cambio de Turno</button>
                                         <div className="mt-2 px-2"><button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="w-full py-2 text-[10px] font-bold text-slate-400 hover:text-rose-500 flex items-center justify-center gap-1 disabled:opacity-50">Aplicar a Selección (Borrar)</button></div>
@@ -8010,7 +8012,7 @@ export default function PlanificacionPage() {
                                         setPendingAssignment(null);
                                         setAuthModal({
                                             pendingFn: async () => {
-                                                applyToPending({ ...cap.shiftConfig, positionName: cap.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: modifiers.extend, isEarlyStart: modifiers.early, plannedNovedad: modifiers.plannedNovedad });
+                                                applyToPending({ ...cap.shiftConfig, positionName: cap.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
                                                 setAuthWarningMessage('');
                                             },
                                             employees: [empName],

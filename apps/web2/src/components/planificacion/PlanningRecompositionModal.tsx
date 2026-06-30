@@ -4,8 +4,10 @@ import type { RecompositionMode, RecompositionPackage, RecompositionTarget } fro
 import {
   buildRecompositionPendingUpdates,
   defaultSplitForBand,
+  listEarlyStartCandidates,
+  listExtensionCandidates,
   listRecompositionTargets,
-  listSegmentCandidates,
+  neighborBandsForTarget,
 } from '@/lib/planificacion/planningRecompositionApply';
 
 type Props = {
@@ -61,9 +63,23 @@ export default function PlanningRecompositionModal({
 
   const selectedTarget: RecompositionTarget | undefined = targets.find(t => t.employeeId === targetId);
 
-  const candidates = useMemo(
-    () => listSegmentCandidates(dateStr, objectiveId, employees, shiftsMap, pendingChanges, [targetId]),
-    [dateStr, objectiveId, employees, shiftsMap, pendingChanges, targetId],
+  const bandNeighbors = useMemo(
+    () => (selectedTarget ? neighborBandsForTarget(selectedTarget.code) : null),
+    [selectedTarget?.code],
+  );
+
+  const extCandidates = useMemo(
+    () => selectedTarget
+      ? listExtensionCandidates(selectedTarget.code, dateStr, objectiveId, employees, shiftsMap, pendingChanges, [targetId])
+      : [],
+    [selectedTarget, dateStr, objectiveId, employees, shiftsMap, pendingChanges, targetId],
+  );
+
+  const adelCandidates = useMemo(
+    () => selectedTarget
+      ? listEarlyStartCandidates(selectedTarget.code, dateStr, objectiveId, employees, shiftsMap, pendingChanges, [targetId, extEmpId].filter(Boolean))
+      : [],
+    [selectedTarget, dateStr, objectiveId, employees, shiftsMap, pendingChanges, targetId, extEmpId],
   );
 
   const pickTarget = (t: RecompositionTarget) => {
@@ -74,6 +90,8 @@ export default function PlanningRecompositionModal({
     setExtTo(split.ext.to);
     setAdelFrom(split.adel.from);
     setAdelTo(split.adel.to);
+    setExtEmpId('');
+    setAdelEmpId('');
     if (t.kind === 'absence') setMode('absence');
     else setMode('liberation');
     setStep(2);
@@ -110,8 +128,8 @@ export default function PlanningRecompositionModal({
         positionName: gapPos || selectedTarget.positionName,
         fromTime: extFrom,
         toTime: extTo,
-        homePositionName: candidates.find(c => c.id === extEmpId)?.positionName,
-        baseCode: candidates.find(c => c.id === extEmpId)?.code,
+        homePositionName: extCandidates.find(c => c.id === extEmpId)?.positionName,
+        baseCode: extCandidates.find(c => c.id === extEmpId)?.code,
       },
       earlyStart: {
         employeeId: adelEmpId,
@@ -119,7 +137,7 @@ export default function PlanningRecompositionModal({
         positionName: gapPos || selectedTarget.positionName,
         fromTime: adelFrom,
         toTime: adelTo,
-        baseCode: candidates.find(c => c.id === adelEmpId)?.code,
+        baseCode: adelCandidates.find(c => c.id === adelEmpId)?.code,
       },
       liberationReason: mode === 'liberation' ? 'EVENTO' : undefined,
       redeployNote: mode === 'liberation' ? redeployNote : undefined,
@@ -196,7 +214,11 @@ export default function PlanningRecompositionModal({
                     </button>
                   ))}
                 {targets.filter(t => (mode === 'absence' ? t.kind === 'absence' : t.kind === 'working')).length === 0 && (
-                  <p className="text-[10px] text-slate-400 py-4 text-center">Sin turnos para este modo en el día.</p>
+                  <p className="text-[10px] text-slate-500 py-4 text-center leading-relaxed px-2">
+                    {mode === 'absence'
+                      ? 'No hay ausencias ni códigos V/L/E/A/AA/PG cargados en este día para este objetivo. Usá Ausencia/RRHH en la grilla o elegí Liberar → RET si querés liberar a un guardia con turno M/T/N.'
+                      : 'No hay guardias con turno de trabajo (M/T/N…) este día en el objetivo.'}
+                  </p>
                 )}
               </div>
             </>
@@ -238,16 +260,27 @@ export default function PlanningRecompositionModal({
                   <div className="flex items-center gap-1 text-[10px] font-black text-violet-800 uppercase">
                     <Clock size={12} /> Extensión (+)
                   </div>
+                  {bandNeighbors && (
+                    <p className="text-[9px] font-bold text-violet-700/80 leading-tight">
+                      Turno {bandNeighbors.extensionBand} (banda anterior) · otros puestos
+                    </p>
+                  )}
                   <select
                     value={extEmpId}
-                    onChange={e => setExtEmpId(e.target.value)}
+                    onChange={e => {
+                      setExtEmpId(e.target.value);
+                      if (e.target.value === adelEmpId) setAdelEmpId('');
+                    }}
                     className="w-full text-[11px] font-bold border border-violet-200 rounded-lg px-2 py-1.5 bg-white"
                   >
-                    <option value="">Guardia…</option>
-                    {candidates.map(c => (
+                    <option value="">Guardia en {bandNeighbors?.extensionBand || '…'}…</option>
+                    {extCandidates.map(c => (
                       <option key={c.id} value={c.id}>{c.name} · {c.positionName} · {c.code}</option>
                     ))}
                   </select>
+                  {extCandidates.length === 0 && (
+                    <p className="text-[9px] text-rose-600 font-bold">Sin guardias en turno {bandNeighbors?.extensionBand} este día.</p>
+                  )}
                   <div className="flex gap-1">
                     <input value={extFrom} onChange={e => setExtFrom(e.target.value)} className="w-1/2 text-[10px] font-bold border rounded px-1 py-1" />
                     <input value={extTo} onChange={e => setExtTo(e.target.value)} className="w-1/2 text-[10px] font-bold border rounded px-1 py-1" />
@@ -258,16 +291,24 @@ export default function PlanningRecompositionModal({
                   <div className="flex items-center gap-1 text-[10px] font-black text-cyan-800 uppercase">
                     <Clock size={12} /> Adelanto (+)
                   </div>
+                  {bandNeighbors && (
+                    <p className="text-[9px] font-bold text-cyan-700/80 leading-tight">
+                      Turno {bandNeighbors.earlyStartBand} (banda siguiente) · otros puestos
+                    </p>
+                  )}
                   <select
                     value={adelEmpId}
                     onChange={e => setAdelEmpId(e.target.value)}
                     className="w-full text-[11px] font-bold border border-cyan-200 rounded-lg px-2 py-1.5 bg-white"
                   >
-                    <option value="">Guardia…</option>
-                    {candidates.map(c => (
+                    <option value="">Guardia en {bandNeighbors?.earlyStartBand || '…'}…</option>
+                    {adelCandidates.map(c => (
                       <option key={c.id} value={c.id}>{c.name} · {c.positionName} · {c.code}</option>
                     ))}
                   </select>
+                  {adelCandidates.length === 0 && (
+                    <p className="text-[9px] text-rose-600 font-bold">Sin guardias en turno {bandNeighbors?.earlyStartBand} este día.</p>
+                  )}
                   <div className="flex gap-1">
                     <input value={adelFrom} onChange={e => setAdelFrom(e.target.value)} className="w-1/2 text-[10px] font-bold border rounded px-1 py-1" />
                     <input value={adelTo} onChange={e => setAdelTo(e.target.value)} className="w-1/2 text-[10px] font-bold border rounded px-1 py-1" />

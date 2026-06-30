@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Grupos de ciclo 24d (6M+2F+6T+2F+6N+2F) escalonados — cobertura 4×M/T/N/F.
  * Continuidad desde mayo vía trailing + último código del mes anterior.
  */
@@ -449,7 +449,12 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
                 ctx.prevMonthTrailingRestDays?.[empId],
                 ctx.prevMonthLastWorkBandBeforeRest?.[empId],
             );
-            out[empId] = slot ?? FLOATER_COLD_START_OPENINGS[floaterIds.indexOf(empId) % FLOATER_COLD_START_OPENINGS.length];
+            // Cold-start: preferir la zona natural del empleado sobre el índice rotativo.
+            const preferredBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+            const bandColdStart = (preferredBand && WORK_BANDS.has(preferredBand))
+                ? (ZONE_SLOT[preferredBand] ?? FLOATER_COLD_START_OPENINGS[floaterIds.indexOf(empId) % FLOATER_COLD_START_OPENINGS.length])
+                : FLOATER_COLD_START_OPENINGS[floaterIds.indexOf(empId) % FLOATER_COLD_START_OPENINGS.length];
+            out[empId] = slot ?? bandColdStart;
         }
     }
 
@@ -469,9 +474,9 @@ export function canUseFixedBandFloater(ctx: V2EngineContext, positionGroups?: Re
         if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
         const qty = Math.max(1, Number(pos.qty) || 1);
         const g = groups[pos.positionName] || [];
-        if (g.length < 4) continue; // sin 4 empleados no hay subgrupo; ignorar
+        if (g.length < 4) continue;
         const subgroupCount = Math.min(qty, Math.floor(g.length / 4));
-        counted24 += g.length; // regulares + flotantes
+        counted24 += g.length;
     }
     return counted24 > 0;
 }
@@ -713,7 +718,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         employeeMonthlyHours, employeeCycleHours, cutoffDay,
     );
 
-    // RET que patchRetForAbsences no convirtió: mostrar banda natural del ciclo.
+    // RET que patchRetForAbsences no convirtió: mostrar banda natural del ciclo (con corrección de zona).
     for (let i = 0; i < assignments.length; i++) {
         const a = assignments[i];
         if (a.code !== 'RET') continue;
@@ -721,8 +726,27 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         if (opening === undefined) continue;
         const di = ctx.daysInMonth.findIndex(d => ctx.getDateKey(d) === a.dateStr);
         if (di < 0) continue;
-        const naturalCode = CYCLE_24_MTN[(opening + di) % 24] as string;
-        if (!WORK_BANDS.has(naturalCode)) continue;
+        const rawNaturalCode = CYCLE_24_MTN[(opening + di) % 24] as string;
+        if (!WORK_BANDS.has(rawNaturalCode)) continue;
+        let naturalCode = rawNaturalCode;
+        // DEBUG TEMP
+        const _prevA = assignments.find(x => x.empId === a.empId && x.dateStr === ctx.getDateKey(new Date(new Date(a.dateStr + 'T00:00:00').getTime() - 86400000)));
+        console.error('[DBG]', a.dateStr, a.empId.slice(-8), 'open='+opening, 'di='+di, 'raw='+rawNaturalCode, 'prev='+(_prevA?.code ?? '-'), 'prevH='+((_prevA?.hours ?? 0)));
+        // END DEBUG
+        if (assignmentBreaksBandTransition(assignments, a.empId, a.dateStr, naturalCode)) {
+            let detectedBand: string | null = null;
+            for (let k = di - 1; k >= 0 && k >= di - 14; k--) {
+                const dateK = ctx.getDateKey(ctx.daysInMonth[k]!);
+                const prev = assignments.find(x =>
+                    x.empId === a.empId && x.dateStr === dateK &&
+                    (x.hours ?? 0) > 0 && WORK_BANDS.has(x.code),
+                );
+                if (prev) { detectedBand = prev.code; break; }
+            }
+            if (!detectedBand) continue;
+            naturalCode = detectedBand;
+            if (assignmentBreaksBandTransition(assignments, a.empId, a.dateStr, naturalCode)) continue;
+        }
         const posName = empToPosition[a.empId] ?? '';
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;

@@ -188,6 +188,15 @@ export function listRecompositionTargets(
   return targets;
 }
 
+/** Bandas CCT adyacentes para split ext+adel al cubrir una banda objetivo. */
+export function neighborBandsForTarget(targetBand: string): { extensionBand: string; earlyStartBand: string } {
+  const b = String(targetBand || '').toUpperCase();
+  if (b === 'M' || b === 'D12') return { extensionBand: 'N', earlyStartBand: 'T' };
+  if (b === 'T') return { extensionBand: 'M', earlyStartBand: 'N' };
+  if (b === 'N' || b === 'N12') return { extensionBand: 'T', earlyStartBand: 'M' };
+  return { extensionBand: 'M', earlyStartBand: 'T' };
+}
+
 /** Guardias del objetivo con turno laboral ese día (candidatos ext/adel). */
 export function listSegmentCandidates(
   dateStr: string,
@@ -196,8 +205,10 @@ export function listSegmentCandidates(
   shiftsMap: Record<string, any>,
   pendingChanges: Record<string, any>,
   excludeIds: string[] = [],
+  bandFilter?: string,
 ) {
   const exclude = new Set(excludeIds);
+  const band = bandFilter ? String(bandFilter).toUpperCase() : null;
   const rows: { id: string; name: string; code: string; positionName: string }[] = [];
 
   for (const emp of employees) {
@@ -209,6 +220,7 @@ export function listSegmentCandidates(
     if (!shift || shift.objectiveId !== objectiveId) continue;
     const code = String(shift.code || '').toUpperCase();
     if (!WORK_CODES.has(code)) continue;
+    if (band && code !== band) continue;
     rows.push({
       id: emp.id,
       name: emp.name || emp.id,
@@ -218,6 +230,34 @@ export function listSegmentCandidates(
   }
 
   return rows.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+/** Extensión: guardias de la banda **anterior** (ej. cubrir M → turnos N). */
+export function listExtensionCandidates(
+  targetBand: string,
+  dateStr: string,
+  objectiveId: string,
+  employees: { id: string; name?: string }[],
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+  excludeIds: string[] = [],
+) {
+  const { extensionBand } = neighborBandsForTarget(targetBand);
+  return listSegmentCandidates(dateStr, objectiveId, employees, shiftsMap, pendingChanges, excludeIds, extensionBand);
+}
+
+/** Adelanto: guardias de la banda **siguiente** (ej. cubrir M → turnos T). */
+export function listEarlyStartCandidates(
+  targetBand: string,
+  dateStr: string,
+  objectiveId: string,
+  employees: { id: string; name?: string }[],
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+  excludeIds: string[] = [],
+) {
+  const { earlyStartBand } = neighborBandsForTarget(targetBand);
+  return listSegmentCandidates(dateStr, objectiveId, employees, shiftsMap, pendingChanges, excludeIds, earlyStartBand);
 }
 
 export function defaultSplitForBand(band: string): { ext: { from: string; to: string }; adel: { from: string; to: string }; gap: { from: string; to: string } } {
