@@ -73,6 +73,48 @@ const checkSlotCoverage = (slotStart: Date, slotEnd: Date, shifts: any[]) => {
     return (covered / duration) > 0.90;
 };
 
+/** Ventana efectiva para cobertura split planificada (ext/adel con tramo horario). */
+const getSegmentCoverageWindow = (s: any, baseDate: Date): { start: Date; end: Date } | null => {
+    const from = s.segmentFromTime;
+    const to = s.segmentToTime;
+    if (typeof from === 'string' && typeof to === 'string' && /^\d{1,2}:\d{2}$/.test(from) && /^\d{1,2}:\d{2}$/.test(to)) {
+        const start = createDateFromTime(from, baseDate);
+        let end = createDateFromTime(to, baseDate);
+        if (start && end) {
+            if (end <= start) end = new Date(end.getTime() + 86400000);
+            return { start, end };
+        }
+    }
+    return null;
+};
+
+const shiftMatchesVacancyPosition = (s: any, vacancyPos: string) => {
+    const vPos = normalizePosMatch(vacancyPos);
+    if (normalizePosMatch(s.positionName) === vPos) return true;
+    if (s.coversPositionName && normalizePosMatch(s.coversPositionName) === vPos) return true;
+    return false;
+};
+
+/** Cobertura de slot considerando ext/adel planificados en otro puesto/tramo. */
+const shiftCoversVacancySlot = (s: any, slotStart: Date, slotEnd: Date, vacancyPos: string) => {
+    if (!shiftMatchesVacancyPosition(s, vacancyPos)) return false;
+    if (s.isAbsent || s.isPotentialAbsence || s.isFranco || s.isUnassigned) return false;
+    const seg = getSegmentCoverageWindow(s, slotStart);
+    const proxy = seg ? { shiftDateObj: seg.start, endDateObj: seg.end } : s;
+    return checkSlotCoverage(slotStart, slotEnd, [proxy]);
+};
+
+const assessPlannedPackageStatus = (rows: any[]): 'COVERED' | 'PARTIAL' | 'NONE' => {
+    if (!rows.length) return 'NONE';
+    const hasExt = rows.some(r => r.coverageSegmentRole === 'EXTENSION');
+    const hasAdel = rows.some(r => r.coverageSegmentRole === 'EARLY_START');
+    if (!hasExt || !hasAdel) return 'PARTIAL';
+    const explicit = rows.find(r => r.coverageStatus === 'COVERED' || r.coverageStatus === 'PARTIAL')?.coverageStatus;
+    if (explicit === 'COVERED') return 'COVERED';
+    if (explicit === 'PARTIAL') return 'PARTIAL';
+    return 'COVERED';
+};
+
 const normPosName = (n: unknown) => String(n ?? '').trim().toLowerCase();
 
 // Normalización agresiva para matching entre SLA y turnos:
@@ -392,9 +434,20 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante) return null;
 
             const isEarlyStartScheduled = !!shift.isEarlyStart;
+            const isPlannedSplitSegment = !!shift.coveragePackageId && (shift.coverageSegmentRole === 'EXTENSION' || shift.coverageSegmentRole === 'EARLY_START');
+            const isPlannedLiberationRet = String(shift.code || '').toUpperCase() === 'RET'
+                && (shift.coverageSegmentRole === 'LIBERATED' || !!shift.liberationReason);
+            const plannedOperativelyCovered = !!shift.operacionallyCovered
+                || (shift.coverageStatus === 'COVERED' && (shift.coverageSegmentRole === 'TARGET' || isAbsent))
+                || (!!shift.coveredBy && shift.coverageStatus === 'COVERED' && (isAbsent || shift.coverageSegmentRole === 'TARGET'));
             const isEarlyStart = isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
             const isConvocado = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
-                (isEarlyStart || shift.origin === 'RETEN' || !!shift.isReten || shift.origin === 'OPERATIONS_COVERAGE');
+                (isEarlyStart || isPlannedLiberationRet || shift.origin === 'RETEN' || !!shift.isReten || shift.origin === 'OPERATIONS_COVERAGE');
+            const extSegStart = (shift.coverageSegmentRole === 'EXTENSION' && shift.segmentFromTime)
+                ? createDateFromTime(shift.segmentFromTime, shift.shiftDateObj)
+                : null;
+            const isPlannedExtensionImminent = !!shift.isExtended && shift.coverageSegmentRole === 'EXTENSION'
+                && extSegStart && ((extSegStart.getTime() - currentTime.getTime()) / 60000) <= 15;
 
             let minutesUntilStart = (shift.shiftDateObj.getTime() - currentTime.getTime()) / 60000;
             // CONVOCADO: solo es accionable (PRIORIDAD) cuando está a ≤15 min o ya inició.
@@ -461,7 +514,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // el tab VACANTES y en el PDF. Solo suprimimos el duplicado virtual en el dedup.
             const countsForCoverage = !isAutoNotification && (
                 (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
-                (isReportedToPlanning && !isValidEmployee)
+                (isReportedToPlanning && !isValidEmployee) ||
+                (isPlannedSplitSegment && !isAbsent && !isPotentialAbsence)
             );
 
             const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
@@ -473,10 +527,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
+                isPlannedSplitSegment, isPlannedLiberationRet, isPlannedExtensionImminent, plannedOperativelyCovered,
                 hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
                 minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField, isSinCobertura,
                 isRfzVacante, isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',
                 vacancyOrigin: isRfzVacante ? 'ABSENCE' : shift.vacancyOrigin,
+                operacionallyCovered: plannedOperativelyCovered || !!shift.operacionallyCovered,
             };
         }).filter(Boolean);
 
@@ -566,7 +622,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             if (end <= start) end = new Date(end.getTime() + 86400000);
 
                             // Contar cuántos turnos realmente cubren este slot (≥90% overlap)
-                            const coveredCount = posShifts.filter((s: any) => checkSlotCoverage(start, end, [s])).length;
+                            const coveredCount = posShifts.filter((s: any) => shiftCoversVacancySlot(s, start, end, pos.name)).length;
                             // Capacidad requerida según SLA (quantity del puesto)
                             const requiredCount = pos.quantity || 1;
                             const missing = Math.max(0, requiredCount - coveredCount);
@@ -660,23 +716,31 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
                         // Para cada slot con ausentes: generar tantas vacantes como el déficit
                         absentSlotMap.forEach((refShift: any) => {
+                            if (refShift.plannedOperativelyCovered || refShift.coverageStatus === 'COVERED') return;
                             const coveredOnSlot = posShifts.filter((cover: any) =>
-                                checkSlotCoverage(refShift.shiftDateObj, refShift.endDateObj, [cover])
+                                shiftCoversVacancySlot(cover, refShift.shiftDateObj, refShift.endDateObj, pos.name)
                             ).length;
                             const deficit = Math.max(0, guardQty - coveredOnSlot);
+                            const pkgStatus = refShift.coveragePackageId
+                                ? assessPlannedPackageStatus(allPosShifts.filter((s: any) => s.coveragePackageId === refShift.coveragePackageId))
+                                : 'NONE';
+                            if (pkgStatus === 'COVERED') return;
                             for (let i = 0; i < deficit; i++) {
                                 const startMs = refShift.shiftDateObj instanceof Date ? refShift.shiftDateObj.getTime() : Date.now();
                                 const shiftId = refShift.id || `${startMs}`;
                                 const custOrigin = refShift.hasRRHHNovedad ? 'RRHH_NOVEDAD' : 'ABSENCE';
+                                const isPartial = pkgStatus === 'PARTIAL' || refShift.coverageStatus === 'PARTIAL';
                                 virtualVacancies.push({
                                     id: `V124_CUST_${sla.objectiveId}_${pos.name}_${shiftId}_${i}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
+                                    isPartialPlannedCoverage: isPartial,
                                     vacancyOrigin: custOrigin,
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
-                                    employeeName: `VACANTE: ${(pos.name || 'PUESTO').toUpperCase()}`,
+                                    employeeName: isPartial ? `VACANTE PARCIAL: ${(pos.name || 'PUESTO').toUpperCase()}` : `VACANTE: ${(pos.name || 'PUESTO').toUpperCase()}`,
                                     shiftDateObj: refShift.shiftDateObj, endDateObj: refShift.endDateObj,
-                                    minutesUntilStart: 0, isValidEmployee: false
+                                    minutesUntilStart: 0, isValidEmployee: false,
+                                    relatedCoveragePackageId: refShift.coveragePackageId || null,
                                 });
                             }
                         });
@@ -726,10 +790,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (cap <= 0) return;
             const coveringCount = dedupedRealShifts.filter(cover =>
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
-                !cover.isFranco &&  // franco no cubre — está de descanso
+                !cover.isFranco &&
                 cover.objectiveId === s.objectiveId &&
-                normalizePosMatch(cover.positionName) === normalizePosMatch(s.positionName) &&
-                checkSlotCoverage(s.shiftDateObj, s.endDateObj, [cover])
+                shiftCoversVacancySlot(cover, s.shiftDateObj, s.endDateObj, s.positionName)
             ).length;
             if (coveringCount >= cap) suppressedDevuelto.add(s.id);
         });
@@ -745,8 +808,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // normalizePosMatch para que "Puesto Rondín" === "Rondín" (sin prefijo ni acentos)
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
-                normalizePosMatch(s.positionName) === normalizePosMatch(v.positionName) &&
-                checkSlotCoverage(v.shiftDateObj, v.endDateObj, [s]);
+                shiftMatchesVacancyPosition(s, v.positionName) &&
+                shiftCoversVacancySlot(s, v.shiftDateObj, v.endDateObj, v.positionName);
             // Suprimir si ya hay un DEVUELTO real para este slot (el doc ya representa la vacante)
             // Solo suprimir si el doc tiene startTime cercano al slot virtual (±2h) Y aún no expiró,
             // para evitar que docs expirados o con timestamps erróneos supriman slots correctos
@@ -763,10 +826,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const cap = getPositionCapacity(filteredSLA, v.objectiveId, v.positionName);
             const coveringCount = dedupedRealShifts.filter((cover: any) =>
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
-                !cover.isFranco &&  // franco no cubre — está de descanso
+                !cover.isFranco &&
                 cover.objectiveId === v.objectiveId &&
-                normalizePosMatch(cover.positionName) === normalizePosMatch(v.positionName) &&
-                checkSlotCoverage(v.shiftDateObj, v.endDateObj, [cover])
+                shiftCoversVacancySlot(cover, v.shiftDateObj, v.endDateObj, v.positionName)
             ).length;
             if (coveringCount >= cap) return false;
             return true;
@@ -788,9 +850,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
         switch (viewTab) {
             case 'TODOS':      return hoy.filter((s:any) => !s.isFranco);
-            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isRRHHUrgent) && !s.isFranco);
+            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco);
             case 'NO_LLEGO':   return hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad);
-            case 'PLAN':       return hoy.filter((s:any) => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn);
+            case 'PLAN':       return hoy.filter((s:any) => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet);
             case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention);
             case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention); // isPendingRetention va en PRIORIDAD, no aquí
             case 'VACANTES':   return hoy.filter((s:any) => s.isUnassigned); // incluye devueltas — un puesto sin guardia presente ES una vacante
@@ -803,7 +865,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (s.isCompleted && !s.isRetention) return false;
             if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
             return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isRRHHUrgent) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad).length, plan: hoy.filter(s => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, rrhh_urgente: hoy.filter(s => s.isRRHHUrgent && !s.isFranco).length, rrhh_planificado: hoy.filter(s => s.isRRHHPlanned && !s.isFranco).length, total: hoy.length }; }, [processedData, now]);
+        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad).length, plan: hoy.filter(s => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, rrhh_urgente: hoy.filter(s => s.isRRHHUrgent && !s.isFranco).length, rrhh_planificado: hoy.filter(s => s.isRRHHPlanned && !s.isFranco).length, total: hoy.length }; }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {

@@ -1624,6 +1624,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     if (shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
     else if (refuerzoLabel && shift.isUnassigned) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-fuchsia-600 text-white shrink-0">VACANTE {refuerzoLabel}</span>;
     else if (refuerzoLabel) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${refuerzoLabel === 'TURA' ? 'bg-violet-600' : 'bg-red-600'}`}>{refuerzoLabel}</span>;
+    else if (shift.isUnassigned && shift.isPartialPlannedCoverage) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0">PARCIAL PLAN</span>;
     else if (shift.isUnassigned)     badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ATENCIÓN: relevo pendiente</span>;
     else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
@@ -1633,10 +1634,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isLateNotified)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5">â± LLEGÓ TARDE {shift.minutesRemainingLate != null ? `· ${shift.minutesRemainingLate}min` : ''}</span>;
     else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE</span>;
     else if (shift.isPresent)        badge =<span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
-    else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
+    else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.coverageSegmentRole === 'EARLY_START' ? 'ADEL PLAN' : shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
+    else if (shift.isPlannedExtensionImminent) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>EXT PLAN</span>;
+    else if (shift.isPlannedLiberationRet) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>RET CONVOCABLE</span>;
     else if (shift.isConvocado && shift.isFuture) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>CONVOCADO</span>;
-    else if (shift.isAbsent)         badge = shift.operacionallyCovered
-        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5">AUSENTE <span className="bg-emerald-500 px-1 rounded text-[8px]">âœ" cubierto</span></span>
+    else if (shift.isAbsent)         badge = shift.operacionallyCovered || shift.plannedOperativelyCovered
+        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5">AUSENTE <span className="bg-emerald-500 px-1 rounded text-[8px]">✓ cubierto</span></span>
         : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
