@@ -729,10 +729,6 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         const rawNaturalCode = CYCLE_24_MTN[(opening + di) % 24] as string;
         if (!WORK_BANDS.has(rawNaturalCode)) continue;
         let naturalCode = rawNaturalCode;
-        // DEBUG TEMP
-        const _prevA = assignments.find(x => x.empId === a.empId && x.dateStr === ctx.getDateKey(new Date(new Date(a.dateStr + 'T00:00:00').getTime() - 86400000)));
-        console.error('[DBG]', a.dateStr, a.empId.slice(-8), 'open='+opening, 'di='+di, 'raw='+rawNaturalCode, 'prev='+(_prevA?.code ?? '-'), 'prevH='+((_prevA?.hours ?? 0)));
-        // END DEBUG
         if (assignmentBreaksBandTransition(assignments, a.empId, a.dateStr, naturalCode)) {
             let detectedBand: string | null = null;
             for (let k = di - 1; k >= 0 && k >= di - 14; k--) {
@@ -790,6 +786,37 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                     startTime: '00:00',
                 };
             }
+        }
+    }
+
+    // Continuidad de banda: si ayer tuvo banda X (con horas) y el ciclo indica X hoy y hoy es RET → asignar X.
+    // Cubre secuencias N/T/M interrumpidas por el hard-cleanup cuando el primer día fue asignado por patchRetForAbsences.
+    for (let di = 1; di < ctx.daysInMonth.length; di++) {
+        const dateStr = ctx.getDateKey(ctx.daysInMonth[di]);
+        const prevDateStr = ctx.getDateKey(ctx.daysInMonth[di - 1]!);
+        for (const emp of ctx.employees) {
+            const opening = openingSlotByEmp[emp.id];
+            if (opening === undefined) continue;
+            const ai = assignments.findIndex(x => x.empId === emp.id && x.dateStr === dateStr);
+            if (ai < 0 || assignments[ai].code !== 'RET') continue;
+            const cycleCode = CYCLE_24_MTN[(opening + di) % 24] as string;
+            if (!WORK_BANDS.has(cycleCode)) continue;
+            const prevAi = assignments.findIndex(x => x.empId === emp.id && x.dateStr === prevDateStr);
+            if (prevAi < 0 || assignments[prevAi].code !== cycleCode || (assignments[prevAi].hours ?? 0) <= 0) continue;
+            const posName = empToPosition[emp.id] ?? '';
+            const pos = ctx.positions.find(p => p.positionName === posName);
+            if (!pos) continue;
+            const meta = shiftMeta(pos, cycleCode);
+            assignments[ai] = {
+                empId: emp.id, dateStr, positionName: posName,
+                code: cycleCode, name: meta.name, hours: meta.hours, startTime: meta.startTime,
+                ...(meta.endTime ? { endTime: meta.endTime } : {}),
+            };
+            employeeMonthlyHours[emp.id] = (employeeMonthlyHours[emp.id] || 0) + meta.hours;
+            const day = ctx.daysInMonth[di]!;
+            const inCurrent = day.getDate() <= cutoffDay;
+            if (inCurrent) employeeCycleHours.current[emp.id] = (employeeCycleHours.current[emp.id] || 0) + meta.hours;
+            else employeeCycleHours.next[emp.id] = (employeeCycleHours.next[emp.id] || 0) + meta.hours;
         }
     }
 
