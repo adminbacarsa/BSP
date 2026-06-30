@@ -366,7 +366,9 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
         for (const empId of [...withTrail, ...withoutTrail]) {
             const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
             if (fb && WORK_BANDS.has(fb) && ZONE_SLOT[fb] !== undefined) {
-                anchor = ZONE_SLOT[fb];
+                // Trailing data tiene prioridad: si este empleado tiene slot inferred, usarlo
+                // como anchor para preservar la posición exacta cross-month dentro de la zona.
+                anchor = (out[empId] !== undefined) ? out[empId] : ZONE_SLOT[fb];
                 fixedBandFound = true;
                 break;
             }
