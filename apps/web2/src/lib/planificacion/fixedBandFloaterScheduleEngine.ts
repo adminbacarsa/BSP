@@ -394,9 +394,11 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             const tw = ctx.prevMonthTrailingWorkDays?.[empId] ?? 0;
             const lastCode = (ctx.prevMonthLastShiftByEmp?.[empId] ?? '').toUpperCase();
             if (tw > 0 && WORK_BANDS.has(lastCode)) {
+                // Contar solo días de LA MISMA BANDA que el trailing al inicio del mes con el slot canónico.
+                // Transiciones de banda (ej. trailing M → canonical T) no generan racha.
                 let startDays = 0;
                 for (let di = 0; di < 7; di++) {
-                    if (!WORK_BANDS.has(CYCLE_24_MTN[(canonical + di) % 24] as string)) break;
+                    if ((CYCLE_24_MTN[(canonical + di) % 24] as string) !== lastCode) break;
                     startDays++;
                 }
                 if (tw + startDays > 6) continue;
