@@ -356,22 +356,49 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             }
         }
 
-        // Paso 2b: anchor = withTrail más cercano a su próximo franco (argmin daysUntilFranco).
-        // Al elegir el empleado más avanzado en su bloque, el canónico generado {anchor+k*6}
-        // minimiza los días iniciales del mismo bloque en julio para los demás, reduciendo
-        // los snaps bloqueados por racha cross-month y maximizando la cobertura.
+        // Paso 2b: anchor = withTrail que minimiza snaps bloqueados por racha cross-month.
+        // Para cada candidato, computar cuántos otros withTrail no pueden snapear al canónico
+        // generado desde ese candidato sin superar 6 días consecutivos de la misma banda.
+        // Tiebreak: menor duf (más cerca del próximo franco) → canónico más "tarde" en el bloque.
         let anchor = COLD_START_OPENINGS[0];
         let anchorId: string | null = null;
         {
-            let anchorDuf = Infinity;
-            for (const empId of withTrail) {
-                if (out[empId] === undefined) continue;
+            let bestBlocked = Infinity;
+            let bestDuf = Infinity;
+            for (const candidateId of withTrail) {
+                if (out[candidateId] === undefined) continue;
+                const cSlot = out[candidateId];
+                const cCanon: Partial<Record<string, number>> = {};
+                for (let k = 0; k < 4; k++) {
+                    const s = ((cSlot + k * 6) % 24 + 24) % 24;
+                    const z = bandZone(s);
+                    if (!(z in cCanon)) cCanon[z] = s;
+                }
+                let blocked = 0;
+                for (const otherId of withTrail) {
+                    if (otherId === candidateId || out[otherId] === undefined) continue;
+                    const canon = cCanon[bandZone(out[otherId])];
+                    if (canon === undefined || canon === out[otherId]) continue;
+                    const tw = ctx.prevMonthTrailingWorkDays?.[otherId] ?? 0;
+                    const lastCode = (ctx.prevMonthLastShiftByEmp?.[otherId] ?? '').toUpperCase();
+                    if (tw > 0 && WORK_BANDS.has(lastCode)) {
+                        let startDays = 0;
+                        for (let di = 0; di < 7; di++) {
+                            if ((CYCLE_24_MTN[(canon + di) % 24] as string) !== lastCode) break;
+                            startDays++;
+                        }
+                        if (tw + startDays > 6) blocked++;
+                    }
+                }
                 let duf = 0;
                 for (let di = 0; di < 7; di++) {
-                    if (!WORK_BANDS.has(CYCLE_24_MTN[(out[empId] + di) % 24] as string)) break;
+                    if (!WORK_BANDS.has(CYCLE_24_MTN[(cSlot + di) % 24] as string)) break;
                     duf++;
                 }
-                if (duf < anchorDuf) { anchorDuf = duf; anchor = out[empId]; anchorId = empId; }
+                if (blocked < bestBlocked || (blocked === bestBlocked && duf < bestDuf)) {
+                    bestBlocked = blocked; bestDuf = duf;
+                    anchor = cSlot; anchorId = candidateId;
+                }
             }
         }
         if (anchorId === null) {
