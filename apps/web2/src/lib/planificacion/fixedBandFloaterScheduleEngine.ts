@@ -356,21 +356,22 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             }
         }
 
-        // Paso 2b: anchor = primer withTrail con banda fija (su slot exacto preserva la continuidad
-        // cross-month). Los demás withTrail se ajustan al canónico 6-apart del anchor para evitar
-        // solapamiento de francos, SALVO que el ajuste generaría racha cross-month
-        // (trailing_work + días_iniciales_con_slot_canónico > 6), en cuyo caso se conserva el slot exacto.
+        // Paso 2b: anchor = withTrail más cercano a su próximo franco (argmin daysUntilFranco).
+        // Al elegir el empleado más avanzado en su bloque, el canónico generado {anchor+k*6}
+        // minimiza los días iniciales del mismo bloque en julio para los demás, reduciendo
+        // los snaps bloqueados por racha cross-month y maximizando la cobertura.
         let anchor = COLD_START_OPENINGS[0];
         let anchorId: string | null = null;
-        for (const empId of withTrail) {
-            const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
-            if (fb && WORK_BANDS.has(fb) && out[empId] !== undefined) {
-                anchor = out[empId]; anchorId = empId; break;
-            }
-        }
-        if (anchorId === null) {
+        {
+            let anchorDuf = Infinity;
             for (const empId of withTrail) {
-                if (out[empId] !== undefined) { anchor = out[empId]; anchorId = empId; break; }
+                if (out[empId] === undefined) continue;
+                let duf = 0;
+                for (let di = 0; di < 7; di++) {
+                    if (!WORK_BANDS.has(CYCLE_24_MTN[(out[empId] + di) % 24] as string)) break;
+                    duf++;
+                }
+                if (duf < anchorDuf) { anchorDuf = duf; anchor = out[empId]; anchorId = empId; }
             }
         }
         if (anchorId === null) {
