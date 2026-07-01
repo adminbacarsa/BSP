@@ -791,6 +791,7 @@ export default function PlanificacionPage() {
     const [vacancyPickerTab, setVacancyPickerTab] = useState<'substitute' | 'split'>('substitute');
     const [vacancySplitExtId, setVacancySplitExtId] = useState('');
     const [vacancySplitAdelId, setVacancySplitAdelId] = useState('');
+    const [vacancyApplyToAllSelected, setVacancyApplyToAllSelected] = useState(true);
     const vacancyReplacementPanelRef = React.useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -804,9 +805,16 @@ export default function PlanificacionPage() {
         const initialDates = focus && all.includes(focus) ? [focus] : all;
         setVacancyActiveDates(new Set(initialDates.length ? initialDates : all));
         setVacancyDayCoverages({});
-        const firstDay = initialDates[0] || all[0] || null;
-        setVacancyEditingDay(firstDay);
-        setVacancyReplacementOpen(!!firstDay);
+        const activeCount = (initialDates.length ? initialDates : all).length;
+        setVacancyApplyToAllSelected(activeCount > 1);
+        if (activeCount > 1) {
+            setVacancyEditingDay(null);
+            setVacancyReplacementOpen(true);
+        } else {
+            const onlyDay = initialDates[0] || all[0] || null;
+            setVacancyEditingDay(onlyDay);
+            setVacancyReplacementOpen(!!onlyDay);
+        }
         setSelectedReplacement('');
         setVacancyPickerTab('substitute');
         setVacancySplitExtId('');
@@ -8370,6 +8378,8 @@ export default function PlanificacionPage() {
                     const resolveDayCoverageLabel = (dateStr: string) =>
                         formatVacancyDayCoverageLabel(resolveDayCoverageForUi(dateStr), vacancyEmployeesById);
                     const willAssignAny = [...vacancyActiveDates].some((d) => vacancyDayHasCoverage(resolveDayCoverageForUi(d)));
+                    const vacancyEmptyActiveDays = sortedActiveDates.filter((d) => !vacancyDayHasCoverage(resolveDayCoverageForUi(d))).length;
+                    const vacancyConfiguredDays = sortedActiveDates.length - vacancyEmptyActiveDays;
                     const getTypicalShiftForTitular = (empId: string) => {
                         const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
                         const daysInMo = new Date(yr, mo + 1, 0).getDate();
@@ -8393,7 +8403,16 @@ export default function PlanificacionPage() {
                     );
                     const openDayCoveragePicker = (d: string) => {
                         const existing = vacancyDayCoverages[d] ?? resolveVacancyDayCoverage(d, {}, selectedReplacement);
-                        setVacancyEditingDay(d);
+                        const configuredCount = sortedActiveDates.filter((date) =>
+                            vacancyDayHasCoverage(vacancyDayCoverages[date] ?? { mode: 'none' }),
+                        ).length;
+                        if (sortedActiveDates.length > 1 && configuredCount === 0) {
+                            setVacancyEditingDay(null);
+                            setVacancyApplyToAllSelected(true);
+                        } else {
+                            setVacancyEditingDay(d);
+                            setVacancyApplyToAllSelected(sortedActiveDates.length > 1);
+                        }
                         setVacancyReplacementOpen(true);
                         if (existing.mode === 'split') {
                             setVacancyPickerTab('split');
@@ -8404,6 +8423,49 @@ export default function PlanificacionPage() {
                             setVacancySplitExtId('');
                             setVacancySplitAdelId('');
                         }
+                    };
+                    const resolveTitularForCoverageDay = (dateStr: string, refDate?: string) =>
+                        resolveTitularShiftForDay(dateStr)
+                        || (refDate ? resolveTitularShiftForDay(refDate) : null)
+                        || (sortedActiveDates[0] ? resolveTitularShiftForDay(sortedActiveDates[0]) : null);
+                    const shouldApplyCoverageToAllDays = () =>
+                        isBulkCoverageMode
+                        || (vacancyApplyToAllSelected && sortedActiveDates.length > 1);
+                    const splitApplyButtonLabel = shouldApplyCoverageToAllDays()
+                        ? `Aplicar ext + adel a ${sortedActiveDates.length} días`
+                        : 'Aplicar ext + adel este día';
+                    const replicateCoverageToEmptyDays = () => {
+                        const templateDay = sortedActiveDates.find((d) =>
+                            vacancyDayHasCoverage(vacancyDayCoverages[d] ?? { mode: 'none' }),
+                        );
+                        if (!templateDay) return;
+                        const template = vacancyDayCoverages[templateDay]
+                            ?? resolveVacancyDayCoverage(templateDay, {}, selectedReplacement);
+                        if (!vacancyDayHasCoverage(template)) return;
+                        const patch: Record<string, VacancyDayCoverage> = {};
+                        for (const d of sortedActiveDates) {
+                            if (vacancyDayHasCoverage(vacancyDayCoverages[d] ?? { mode: 'none' })) continue;
+                            if (template.mode === 'substitute') {
+                                patch[d] = { mode: 'substitute', employeeId: template.employeeId };
+                            } else if (template.mode === 'split') {
+                                const tit = resolveTitularForCoverageDay(d, templateDay);
+                                if (!tit) continue;
+                                patch[d] = {
+                                    mode: 'split',
+                                    extEmpId: template.extEmpId,
+                                    adelEmpId: template.adelEmpId,
+                                    gapBand: tit.code,
+                                    gapPosition: tit.positionName,
+                                };
+                            }
+                        }
+                        const filled = Object.keys(patch).length;
+                        if (filled === 0) {
+                            toast.error('No quedan días vacíos para completar o falta inferir el turno del titular.');
+                            return;
+                        }
+                        setVacancyDayCoverages((prev) => ({ ...prev, ...patch }));
+                        toast.success(`Cobertura replicada en ${filled} día(s) restante(s).`);
                     };
                     // Calcular horas mensuales del mes en curso
                     const getEmpMonthHours = (empId: string): number => {
@@ -8488,74 +8550,79 @@ export default function PlanificacionPage() {
                         ? (editingDayCov?.mode === 'substitute' ? editingDayCov.employeeId : selectedReplacement)
                         : selectedReplacement;
                     const selectedReplacementEmp = candidatos.find(e => e.id === editingDaySubstituteId);
-                    const applySplitCoverage = (scope: 'single' | 'all') => {
+                    const applySplitCoverage = () => {
                         if (!vacancySplitExtId || !vacancySplitAdelId) return;
                         if (vacancySplitExtId === vacancySplitAdelId) {
                             toast.error('Extensión y adelanto deben ser guardias distintos.');
                             return;
                         }
-                        const targetDays = scope === 'all' || isBulkCoverageMode
+                        const applyAll = shouldApplyCoverageToAllDays();
+                        const targetDays = applyAll
                             ? sortedActiveDates
                             : (vacancyEditingDay ? [vacancyEditingDay] : sortedActiveDates);
                         if (targetDays.length === 0) return;
+                        const patch: Record<string, VacancyDayCoverage> = {};
                         let applied = 0;
-                        setVacancyDayCoverages((prev) => {
-                            const next = { ...prev };
-                            for (const d of targetDays) {
-                                const tit = resolveTitularShiftForDay(d);
-                                if (!tit) continue;
-                                next[d] = {
-                                    mode: 'split',
-                                    extEmpId: vacancySplitExtId,
-                                    adelEmpId: vacancySplitAdelId,
-                                    gapBand: tit.code,
-                                    gapPosition: tit.positionName,
-                                };
-                                applied++;
-                            }
-                            return next;
-                        });
+                        for (const d of targetDays) {
+                            const tit = resolveTitularForCoverageDay(d, splitReferenceDate || sortedActiveDates[0] || undefined);
+                            if (!tit) continue;
+                            patch[d] = {
+                                mode: 'split',
+                                extEmpId: vacancySplitExtId,
+                                adelEmpId: vacancySplitAdelId,
+                                gapBand: tit.code,
+                                gapPosition: tit.positionName,
+                            };
+                            applied++;
+                        }
                         if (applied === 0) {
                             toast.error('No se pudo inferir el turno del titular en ningún día seleccionado.');
                             return;
                         }
+                        setVacancyDayCoverages((prev) => ({ ...prev, ...patch }));
                         toast.success(`Ext+adel aplicado a ${applied} día(s).`);
                         setVacancyEditingDay(null);
                         setVacancyReplacementOpen(false);
                         setVacancyReplacementSearch('');
                     };
                     const applySubstituteToActiveDays = (employeeId: string) => {
-                        if (vacancyEditingDay) {
+                        const applyAll = shouldApplyCoverageToAllDays();
+                        if (applyAll) {
+                            setSelectedReplacement(employeeId);
+                            setVacancyDayCoverages((prev) => {
+                                const next = { ...prev };
+                                for (const d of sortedActiveDates) {
+                                    next[d] = { mode: 'substitute', employeeId };
+                                }
+                                return next;
+                            });
+                            toast.success(`Suplente asignado a ${sortedActiveDates.length} día(s).`);
+                        } else if (vacancyEditingDay) {
                             setVacancyDayCoverages((prev) => ({ ...prev, [vacancyEditingDay]: { mode: 'substitute', employeeId } }));
-                            setVacancyEditingDay(null);
-                            return;
+                        } else {
+                            setSelectedReplacement(employeeId);
                         }
-                        setSelectedReplacement(employeeId);
-                        setVacancyDayCoverages((prev) => {
-                            const next = { ...prev };
-                            for (const d of vacancyActiveDates) {
-                                next[d] = { mode: 'substitute', employeeId };
-                            }
-                            return next;
-                        });
-                        toast.success(`Suplente asignado a ${vacancyActiveDates.size} día(s).`);
+                        setVacancyEditingDay(null);
                     };
                     const clearCoverageForScope = () => {
-                        if (vacancyEditingDay) {
+                        const applyAll = shouldApplyCoverageToAllDays();
+                        if (applyAll) {
+                            setSelectedReplacement('');
+                            setVacancyDayCoverages((prev) => {
+                                const next = { ...prev };
+                                for (const d of sortedActiveDates) delete next[d];
+                                return next;
+                            });
+                        } else if (vacancyEditingDay) {
                             setVacancyDayCoverages((prev) => {
                                 const next = { ...prev };
                                 delete next[vacancyEditingDay];
                                 return next;
                             });
                             setVacancyEditingDay(null);
-                            return;
+                        } else {
+                            setSelectedReplacement('');
                         }
-                        setSelectedReplacement('');
-                        setVacancyDayCoverages((prev) => {
-                            const next = { ...prev };
-                            for (const d of vacancyActiveDates) delete next[d];
-                            return next;
-                        });
                     };
                     const renderVacancyCandidate = (e: typeof candidatos[0], suffix: string) => (
                         <button
@@ -8596,7 +8663,7 @@ export default function PlanificacionPage() {
                                     <div className="flex items-center justify-between mb-1.5">
                                         <label className="text-[10px] font-black uppercase text-slate-400">Días a procesar</label>
                                         <div className="flex gap-2">
-                                            <button type="button" onClick={() => setVacancyActiveDates(new Set(absenceDateRange))} className="text-[10px] font-bold text-indigo-600 hover:underline">Todos</button>
+                                            <button type="button" onClick={() => { setVacancyActiveDates(new Set(absenceDateRange)); setVacancyEditingDay(null); setVacancyApplyToAllSelected(true); setVacancyReplacementOpen(true); }} className="text-[10px] font-bold text-indigo-600 hover:underline">Todos</button>
                                             <button type="button" onClick={() => setVacancyActiveDates(new Set())} className="text-[10px] font-bold text-slate-400 hover:underline">Ninguno</button>
                                         </div>
                                     </div>
@@ -8622,6 +8689,7 @@ export default function PlanificacionPage() {
                                             type="button"
                                             onClick={() => {
                                                 setVacancyEditingDay(null);
+                                                setVacancyApplyToAllSelected(true);
                                                 setVacancyPickerTab('substitute');
                                                 setVacancyReplacementOpen(true);
                                             }}
@@ -8630,6 +8698,15 @@ export default function PlanificacionPage() {
                                             Misma cobertura para todos
                                         </button>
                                     </div>
+                                    {vacancyEmptyActiveDays > 0 && vacancyConfiguredDays > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={replicateCoverageToEmptyDays}
+                                            className="mb-2 w-full py-2 rounded-xl border border-violet-200 bg-violet-50 text-[10px] font-black text-violet-800 hover:bg-violet-100"
+                                        >
+                                            Completar {vacancyEmptyActiveDays} día(s) restante(s) con la misma cobertura
+                                        </button>
+                                    )}
                                     <p className="text-[10px] font-bold text-indigo-600 mb-2">
                                         <strong>Misma cobertura para todos</strong> aplica suplente o ext+adel a todos los días marcados. Tocá un día sólo si necesitás excepciones.
                                     </p>
@@ -8678,6 +8755,20 @@ export default function PlanificacionPage() {
                                         ? `Configurar ${formatShortDay(vacancyEditingDay)}`
                                         : `Cobertura para todos los días (${vacancyActiveDates.size})`}
                                 </label>
+                                {(vacancyEditingDay || isBulkCoverageMode) && sortedActiveDates.length > 1 && (
+                                    <label className="flex items-center gap-2 cursor-pointer rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2.5">
+                                        <input
+                                            type="checkbox"
+                                            checked={vacancyApplyToAllSelected || isBulkCoverageMode}
+                                            disabled={isBulkCoverageMode}
+                                            onChange={(e) => setVacancyApplyToAllSelected(e.target.checked)}
+                                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                        />
+                                        <span className="text-[10px] font-bold text-indigo-900">
+                                            Aplicar a los {sortedActiveDates.length} días seleccionados
+                                        </span>
+                                    </label>
+                                )}
                                 {(vacancyEditingDay || isBulkCoverageMode) && splitTitularShift && (
                                     <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/90 px-3 py-3">
                                         <div className="text-[10px] font-black uppercase text-amber-900 mb-1.5 flex items-center gap-1">
@@ -8866,24 +8957,12 @@ export default function PlanificacionPage() {
                                                 <div className="flex flex-col gap-2">
                                                     <button
                                                         type="button"
-                                                        onClick={() => applySplitCoverage(isBulkCoverageMode ? 'all' : 'single')}
+                                                        onClick={() => applySplitCoverage()}
                                                         disabled={!vacancySplitExtId || !vacancySplitAdelId}
                                                         className="w-full py-3 rounded-xl bg-violet-600 text-white text-xs font-black disabled:opacity-40 hover:bg-violet-700 shadow-sm shadow-violet-200"
                                                     >
-                                                        {isBulkCoverageMode
-                                                            ? `Aplicar ext + adel a ${vacancyActiveDates.size} días`
-                                                            : 'Aplicar ext + adel este día'}
+                                                        {splitApplyButtonLabel}
                                                     </button>
-                                                    {!isBulkCoverageMode && vacancyActiveDates.size > 1 && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => applySplitCoverage('all')}
-                                                            disabled={!vacancySplitExtId || !vacancySplitAdelId}
-                                                            className="w-full py-2.5 rounded-xl border border-violet-300 text-violet-800 text-xs font-black disabled:opacity-40 hover:bg-violet-50"
-                                                        >
-                                                            Replicar en todos los días ({vacancyActiveDates.size})
-                                                        </button>
-                                                    )}
                                                 </div>
                                             </>
                                         )}
@@ -8925,7 +9004,7 @@ export default function PlanificacionPage() {
                             )}
                             </div>
                             <div className="flex gap-3 shrink-0">
-                                <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); setVacancyReplacementSearch(''); setVacancyReplacementOpen(false); setVacancyActiveDates(new Set()); setVacancyDayCoverages({}); setVacancyEditingDay(null); setVacancyPickerTab('substitute'); setVacancySplitExtId(''); setVacancySplitAdelId(''); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
+                                <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); setVacancyReplacementSearch(''); setVacancyReplacementOpen(false); setVacancyActiveDates(new Set()); setVacancyDayCoverages({}); setVacancyEditingDay(null); setVacancyPickerTab('substitute'); setVacancySplitExtId(''); setVacancySplitAdelId(''); setVacancyApplyToAllSelected(true); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
                                 <button onClick={handleProcessVacancy} disabled={vacancyActiveDates.size === 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg disabled:opacity-40 ${btnColor[color]}`}>
                                     {willAssignAny ? 'Confirmar cobertura' : 'Marcar vacante'}
                                 </button>
