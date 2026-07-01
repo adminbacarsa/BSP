@@ -285,6 +285,11 @@ export interface V2EngineContext {
     prevMonthLastShiftByEmp?: Record<string, string>;
     /** Última banda M/T/N antes del bloque de F al cierre de mayo (si el 31 es F). */
     prevMonthLastWorkBandBeforeRest?: Record<string, string>;
+    /** Slot de apertura del ciclo (0-23 en CYCLE_24_MTN) usado el mes anterior por empId. Fallback cuando
+     *  Firestore no tiene datos del mes anterior (ej. mes generado pero no publicado). */
+    prevMonthOpeningSlotByEmp?: Record<string, number>;
+    /** Cantidad de días del mes anterior. Permite calcular la continuación exacta del ciclo. */
+    prevMonthDaysCount?: number;
     /**
      * Mapa empId → código de turno fijo (M/T/N/D12/N12) asignado por el operador
      * desde el selector "puesto prefijado + turno". Si está presente, el empleado

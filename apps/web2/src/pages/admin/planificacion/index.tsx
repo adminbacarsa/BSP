@@ -734,6 +734,11 @@ export default function PlanificacionPage() {
     // IDs autorizados por supervisor para superar 200h (ref = valor síncrono para el engine)
     const [authorizedOver200Ids, setAuthorizedOver200Ids] = useState<Set<string>>(new Set());
     const authorizedOver200IdsRef = React.useRef<Set<string>>(new Set());
+    // Slots de apertura del último mes generado — permite continuar el ciclo al generar el mes siguiente sin publicar.
+    const lastGenOpeningRef = React.useRef<{
+        year: number; month: number; objectiveId: string;
+        openingSlotByEmp: Record<string, number>; daysCount: number;
+    } | null>(null);
     // UI de autorización 200h en el wizard
     const [over200AuthChecked, setOver200AuthChecked] = useState<Record<string, boolean>>({});
     const [over200AuthPin, setOver200AuthPin] = useState('');
@@ -4732,6 +4737,13 @@ export default function PlanificacionPage() {
                 return;
             }
 
+            // Si el mes anterior fue generado en esta sesión (no publicado), usar sus slots para continuar el ciclo.
+            const prevMonthGenKey = lastGenOpeningRef.current;
+            const isPrevMonthGen = prevMonthGenKey !== null
+                && prevMonthGenKey.objectiveId === selectedObjective
+                && prevMonthGenKey.year === prevMonthEndDate.getFullYear()
+                && prevMonthGenKey.month === prevMonthEndDate.getMonth();
+
             const baseGenCtx = {
                 positions: positionStructure,
                 employees: planningDotacionEmployees
@@ -4766,6 +4778,8 @@ export default function PlanificacionPage() {
                 prevMonthTrailingRestDays,
                 prevMonthLastShiftByEmp,
                 prevMonthLastWorkBandBeforeRest,
+                prevMonthOpeningSlotByEmp: isPrevMonthGen ? prevMonthGenKey!.openingSlotByEmp : undefined,
+                prevMonthDaysCount: isPrevMonthGen ? prevMonthGenKey!.daysCount : undefined,
                 globalRetPool,
                 strictSixTwo: genBrain.strictSixTwo,
                 noFlexSchemeEmployees: true,
@@ -4790,6 +4804,17 @@ export default function PlanificacionPage() {
                 ...baseGenCtx,
                 ...(useStrictPipeline ? { rotateShifts: false, demandDriven: false } : {}),
             });
+
+            // Guardar slots de apertura para que el siguiente mes pueda continuar el ciclo exactamente.
+            if (gen.stats.openingSlotByEmp) {
+                lastGenOpeningRef.current = {
+                    year: currentDate.getFullYear(),
+                    month: currentDate.getMonth(),
+                    objectiveId: selectedObjective,
+                    openingSlotByEmp: gen.stats.openingSlotByEmp,
+                    daysCount: daysInMonth.length,
+                };
+            }
 
             // Análisis de cobertura de ausencias pre-declaradas (V/L/E/A/PG)
             // Siempre se analiza cuando el pipeline floater está disponible (para detectar francos

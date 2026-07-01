@@ -437,7 +437,12 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
                 zone = [...availableZones][0] ?? (['M', 'T', 'N', 'F'] as const)[i % 4];
             }
             availableZones.delete(zone);
-            out[empId] = (canonicalForZone[zone] as number | undefined) ?? ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
+            // Si hay slot del mes anterior y su cantidad de días, continuar el ciclo en lugar de reiniciar.
+            if (ctx.prevMonthOpeningSlotByEmp?.[empId] !== undefined && ctx.prevMonthDaysCount) {
+                out[empId] = ((ctx.prevMonthOpeningSlotByEmp[empId] + ctx.prevMonthDaysCount) % 24 + 24) % 24;
+            } else {
+                out[empId] = (canonicalForZone[zone] as number | undefined) ?? ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
+            }
         });
 
         // Flotantes (índice ≥4): sin trailing usan inicio de bloque de trabajo para que el
@@ -449,12 +454,17 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
                 ctx.prevMonthTrailingRestDays?.[empId],
                 ctx.prevMonthLastWorkBandBeforeRest?.[empId],
             );
-            // Cold-start: preferir la zona natural del empleado sobre el índice rotativo.
-            const preferredBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
-            const bandColdStart = (preferredBand && WORK_BANDS.has(preferredBand))
-                ? (ZONE_SLOT[preferredBand] ?? FLOATER_COLD_START_OPENINGS[floaterIds.indexOf(empId) % FLOATER_COLD_START_OPENINGS.length])
-                : FLOATER_COLD_START_OPENINGS[floaterIds.indexOf(empId) % FLOATER_COLD_START_OPENINGS.length];
-            out[empId] = slot ?? bandColdStart;
+            // Si hay slot del mes anterior y su cantidad de días, continuar el ciclo exactamente.
+            let coldStart: number;
+            if (ctx.prevMonthOpeningSlotByEmp?.[empId] !== undefined && ctx.prevMonthDaysCount) {
+                coldStart = ((ctx.prevMonthOpeningSlotByEmp[empId] + ctx.prevMonthDaysCount) % 24 + 24) % 24;
+            } else {
+                const preferredBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+                coldStart = (preferredBand && WORK_BANDS.has(preferredBand))
+                    ? (ZONE_SLOT[preferredBand] ?? FLOATER_COLD_START_OPENINGS[floaterIds.indexOf(empId) % FLOATER_COLD_START_OPENINGS.length])
+                    : FLOATER_COLD_START_OPENINGS[floaterIds.indexOf(empId) % FLOATER_COLD_START_OPENINGS.length];
+            }
+            out[empId] = slot ?? coldStart;
         }
     }
 
@@ -757,7 +767,6 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         const posName = empToPosition[a.empId] ?? '';
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
-        if (bandQuotaFull(posName, a.dateStr, naturalCode)) continue;
         const meta = shiftMeta(pos, naturalCode);
         assignments[i] = {
             empId: a.empId,
@@ -818,7 +827,6 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             const posName = empToPosition[emp.id] ?? '';
             const pos = ctx.positions.find(p => p.positionName === posName);
             if (!pos) continue;
-            if (bandQuotaFull(posName, dateStr, cycleCode)) continue;
             const meta = shiftMeta(pos, cycleCode);
             assignments[ai] = {
                 empId: emp.id, dateStr, positionName: posName,
@@ -830,6 +838,71 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             const inCurrent = day.getDate() <= cutoffDay;
             if (inCurrent) employeeCycleHours.current[emp.id] = (employeeCycleHours.current[emp.id] || 0) + meta.hours;
             else employeeCycleHours.next[emp.id] = (employeeCycleHours.next[emp.id] || 0) + meta.hours;
+        }
+    }
+
+    // Pase de rebalanceo: puestos qty>1 con bandas sobre-representadas redirigen el excedente
+    // a la banda más deficitaria, solo si el CCT lo permite (sin forzar transiciones prohibidas).
+    for (const pos of ctx.positions) {
+        const posName = pos.positionName;
+        const qty = Math.max(1, Number(pos.qty) || 1);
+        if (qty < 2) continue;
+        const posShifts = Array.isArray(pos.shifts) ? pos.shifts : [];
+        const SKIP_CODES = new Set(['F', 'FF', 'FP', 'FT', 'RET', 'REF', 'ESC', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+        const schemeBands = (() => {
+            const b8 = [...new Set(posShifts
+                .filter((s: any) => (Number(s.hours) || 8) < 12)
+                .map((s: any) => String(s.code || '').toUpperCase())
+                .filter((c: string) => c && !SKIP_CODES.has(c)),
+            )];
+            if (b8.length) return b8;
+            const b12 = [...new Set(posShifts
+                .filter((s: any) => (Number(s.hours) || 8) >= 12)
+                .map((s: any) => String(s.code || '').toUpperCase())
+                .filter((c: string) => !!c && !SKIP_CODES.has(c)),
+            )];
+            return b12.length ? b12 : ['M', 'T', 'N'];
+        })();
+
+        for (let di = 0; di < ctx.daysInMonth.length; di++) {
+            const dateStr = ctx.getDateKey(ctx.daysInMonth[di]);
+            const bandCounts: Record<string, number> = {};
+            for (const b of schemeBands) bandCounts[b] = 0;
+            assignments
+                .filter(a => a.positionName === posName && a.dateStr === dateStr && (a.hours ?? 0) > 0)
+                .forEach(a => { if (bandCounts[a.code] !== undefined) bandCounts[a.code]++; });
+
+            const overBands = schemeBands.filter(b => bandCounts[b] > qty);
+            const underBands = schemeBands.filter(b => bandCounts[b] < qty);
+            if (!overBands.length || !underBands.length) continue;
+
+            for (const overBand of overBands) {
+                for (const underBand of underBands) {
+                    while (bandCounts[overBand] > qty && bandCounts[underBand] < qty) {
+                        const ai = assignments.findIndex(a =>
+                            a.positionName === posName && a.dateStr === dateStr &&
+                            a.code === overBand && (a.hours ?? 0) > 0 &&
+                            !assignmentBreaksBandTransition(assignments, a.empId, dateStr, underBand),
+                        );
+                        if (ai < 0) break;
+                        const empId = assignments[ai].empId;
+                        const oldHours = Number(assignments[ai].hours) || 0;
+                        const meta = shiftMeta(pos, underBand);
+                        employeeMonthlyHours[empId] = Math.max(0, (employeeMonthlyHours[empId] || 0) - oldHours) + meta.hours;
+                        assignments[ai] = {
+                            empId, dateStr, positionName: posName,
+                            code: underBand, name: meta.name, hours: meta.hours, startTime: meta.startTime,
+                            ...(meta.endTime ? { endTime: meta.endTime } : {}),
+                        };
+                        const day = ctx.daysInMonth[di]!;
+                        const inCurrent = day.getDate() <= cutoffDay;
+                        if (inCurrent) employeeCycleHours.current[empId] = Math.max(0, (employeeCycleHours.current[empId] || 0) - oldHours) + meta.hours;
+                        else employeeCycleHours.next[empId] = Math.max(0, (employeeCycleHours.next[empId] || 0) - oldHours) + meta.hours;
+                        bandCounts[overBand]--;
+                        bandCounts[underBand]++;
+                    }
+                }
+            }
         }
     }
 
