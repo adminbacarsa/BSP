@@ -1564,6 +1564,25 @@ export default function PlanificacionPage() {
         return [...missing, ...base];
     }, [uniqueSLAShifts, positionStructure]);
 
+    const objectivePublishLookupKey = useMemo(() => {
+        if (!selectedObjective) return '';
+        return planificacionPublishLookupKey(
+            selectedObjective,
+            currentDate.getFullYear(),
+            currentDate.getMonth() + 1,
+        );
+    }, [selectedObjective, currentDate]);
+
+    const isCronogramaPublicado = !!publishStatusMap[objectivePublishLookupKey];
+
+    /** Slots cerrados y fechas pasadas bloqueadas solo con cronograma publicado (salvo modo corrección). */
+    const enforcePlanningClosureRules = isCronogramaPublicado && !correctionMode;
+
+    const isPlanningDateLocked = useCallback(
+        (dateStr: string) => (enforcePlanningClosureRules ? isDateLocked(dateStr) : false),
+        [enforcePlanningClosureRules],
+    );
+
     // Bloqueo por puesto/día: no mezclar 8h con 12h; solo permitir turnos del mismo grupo; cap 24h/día por PAX.
     const shiftButtonDisabledMap = useMemo(() => {
         const disabled = new Set<string>();
@@ -1639,6 +1658,7 @@ export default function PlanificacionPage() {
         const max8hSlots = shifts8h.length * pax;
         const max12hSlots = shifts12h.length * pax;
 
+        if (enforcePlanningClosureRules) {
         uniqueSLAShifts.forEach((s: any) => {
             const code = String(s.code || '').toUpperCase();
             const hours = Number(s.hours) || 8;
@@ -1660,8 +1680,9 @@ export default function PlanificacionPage() {
                 if (assigned.length >= max8hSlots + max12hSlots) { disabled.add(code); return; }
             }
         });
+        }
         return disabled;
-    }, [selectedCell?.dateStr, selectedObjective, activePosition, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts]);
+    }, [selectedCell?.dateStr, selectedObjective, activePosition, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, enforcePlanningClosureRules]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
@@ -1698,7 +1719,7 @@ export default function PlanificacionPage() {
 
             const dateStr = getDateKey(s.startTime);
             if (seen.has(dateStr)) return;
-            if (isDateLocked(dateStr)) return;
+            if (isPlanningDateLocked(dateStr)) return;
 
             // Si emp1 ya trabaja en dateStr, no es válida (evita doble turno / transferencias)
             const emp1Shift = getShiftInfo(selectedCell.empId, dateStr);
@@ -1714,7 +1735,7 @@ export default function PlanificacionPage() {
         });
 
         setTargetFrancos(dates.sort((a, b) => a.dateStr.localeCompare(b.dateStr)));
-    }, [selectedSwapTarget, shiftsMap, pendingChanges, selectedCell?.empId, selectedCell?.dateStr, selectedObjective]);
+    }, [selectedSwapTarget, shiftsMap, pendingChanges, selectedCell?.empId, selectedCell?.dateStr, selectedObjective, isPlanningDateLocked]);
 
     const activeServiceStatus = useMemo(() => {
         if (!selectedClient || !selectedObjective) return { status: 'IDLE', msg: '', icon: null };
@@ -3057,7 +3078,7 @@ export default function PlanificacionPage() {
     const handleDelete = async () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
         if (!selectedCell) return;
-        if (isDateLocked(selectedCell.dateStr)) { toast.warning("Bloqueado."); return; }
+        if (isPlanningDateLocked(selectedCell.dateStr)) { toast.warning("Bloqueado."); return; }
         if (isShiftConsolidated(selectedCell.currentShift)) { toast.warning("Turno consolidado/fichado: no se puede borrar desde el planificador."); return; }
 
         // Si es una ausencia registrada (colección 'ausencias'), no se borra con pendingChanges.
@@ -3678,7 +3699,7 @@ export default function PlanificacionPage() {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
         if (!selection.start || !selection.end) return; 
         const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)]; 
-        if (isDateLocked(getDateKey(startDay))) {
+        if (isPlanningDateLocked(getDateKey(startDay))) {
             const c = String(shiftConfig?.code || '').toUpperCase();
             if (!['RET','ESC','F','FF','FP','FT'].includes(c)) { toast.warning("Periodo cerrado — solo podés asignar RET, ESC o Franco en masa."); return; }
         }
@@ -3818,7 +3839,7 @@ export default function PlanificacionPage() {
     const handleAssignShift = async (shiftConfig: any, positionName: string) => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
         if (!selectedCell) return; 
-        if (isDateLocked(selectedCell.dateStr)) {
+        if (isPlanningDateLocked(selectedCell.dateStr)) {
             // Días pasados: solo se permiten RET, ESC y francos (F/FF/FP/FT). Turnos bloqueados.
             const c = String(shiftConfig.code || '').toUpperCase();
             if (!['RET','ESC','F','FF','FP','FT'].includes(c)) { toast.error("Periodo cerrado — solo podés asignar RET, ESC o Franco."); return; }
@@ -4011,7 +4032,7 @@ export default function PlanificacionPage() {
                     if (r < 0 || r >= displayedEmployees.length || c < 0 || c >= daysInMonth.length) return;
                     const emp = displayedEmployees[r];
                     const dateStr = getDateKey(daysInMonth[c]);
-                    if (isDateLocked(dateStr)) return;
+                    if (isPlanningDateLocked(dateStr)) return;
                     const key = `${emp.id}_${dateStr}`;
                     if (!shift) { if (newChanges[key] || shiftsMap[key]) newChanges[key] = { isDeleted: true }; }
                     else { newChanges[key] = { ...shift, isTemp: true, employeeId: emp.id, objectiveId: selectedObjective }; pasted++; }
@@ -4029,7 +4050,7 @@ export default function PlanificacionPage() {
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [selection, clipboard, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, columnSelectMode]);
+    }, [selection, clipboard, displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, columnSelectMode, isPlanningDateLocked]);
 
     const handleMouseUp = () => {
         setIsDragging(false);
@@ -4054,7 +4075,7 @@ export default function PlanificacionPage() {
                 const defaultPos = effectiveShift?.positionName || empPreferred || dominantPosition.positionName;
                 setActivePosition(defaultPos);
                 if (isShiftConsolidated(effectiveShift)) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); return; }
-                const isLocked = isDateLocked(dateStr);
+                const isLocked = isPlanningDateLocked(dateStr);
                 const absenceAlreadyHandled = effectiveShift && ['V','L','PG','A','E','AA'].includes(effectiveShift.code || '');
                 if (!isLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) { findNeighbors(effectiveShift, dateStr); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); if (absence && absence.type) { setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); } else { setShowConflictModal(true); } }
                 else if (!isLocked && absence && !effectiveShift) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); }
@@ -4129,7 +4150,7 @@ export default function PlanificacionPage() {
             if (r < 0 || r >= displayedEmployees.length || c < 0 || c >= daysInMonth.length) return;
             const emp = displayedEmployees[r];
             const dateStr = getDateKey(daysInMonth[c]);
-            if (isDateLocked(dateStr)) return;
+            if (isPlanningDateLocked(dateStr)) return;
             const key = `${emp.id}_${dateStr}`;
             if (!shift) {
                 if (newChanges[key] || shiftsMap[key]) newChanges[key] = { isDeleted: true };
@@ -4167,7 +4188,7 @@ export default function PlanificacionPage() {
                 const targetDay = daysInMonth.find(d => d.getDate() === dayNum);
                 if (!targetDay) return;
                 const targetDateStr = getDateKey(targetDay);
-                if (isDateLocked(targetDateStr)) return;
+                if (isPlanningDateLocked(targetDateStr)) return;
                 if (!displayedEmployees.find((e: any) => e.id === shift.employeeId)) return;
                 const key = `${shift.employeeId}_${targetDateStr}`;
                 if (pendingChanges[key] || shiftsMap[key]) { skipped++; return; }
@@ -5792,7 +5813,7 @@ export default function PlanificacionPage() {
                                         const s = shiftsMap[key]; const p = pendingChanges[key];
                                         const rfzOnCell = rfzByEmpDate[key];
                                         const selected = !isSnapshotView && isCellSelected(idx, dayIndex);
-                                        const isLockedDate = !isSnapshotView && isDateLocked(getDateKey(day));
+                                        const isLockedDate = !isSnapshotView && isPlanningDateLocked(getDateKey(day));
                                         const isCellWeekend = [0, 6].includes(day.getDay());
                                         let content = null; let style = "";
                                         let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
@@ -7281,7 +7302,7 @@ export default function PlanificacionPage() {
                                 const code = String(shift?.code || shift?.type || '').toUpperCase();
                                 const isConsolidated = isShiftConsolidated(shift);
                                 const isRRHHCode = ['V', 'L', 'PG', 'A', 'E', 'AA'].includes(code);
-                                const isPastClosed = isDateLocked(selectedCell.dateStr);
+                                const isPastClosed = isPlanningDateLocked(selectedCell.dateStr);
                                 const objectiveId = (shift?.objectiveId || selectedObjective || '').toString();
                                 const serviceName = shift?.objectiveName || (objectiveId ? getObjectiveName(objectiveId) : '-');
                                 const coveredPosition = (shift?.positionName || activePosition || 'General').toString();
@@ -7927,7 +7948,7 @@ export default function PlanificacionPage() {
                                             const isHoursCovered = coverageData.current >= coverageData.target;
                                             const isUnitsCovered = coverageData.isPositionClosed;
                                             const coverageFull = coverageData.isActiveDay && coverageData.requiredUnits > 0 && isUnitsCovered;
-                                            const allowOverAssign = correctionMode;
+                                            const allowOverAssign = !enforcePlanningClosureRules;
                                             const percentage = coverageData.target > 0 ? Math.min(100, (coverageData.current / coverageData.target) * 100) : 100;
                                             const displayTarget = isExcludedDay
                                                 ? 'Excluido SLA'
@@ -7977,13 +7998,13 @@ export default function PlanificacionPage() {
                                                     <div className={`grid grid-cols-3 gap-2 mb-4 ${isServiceLocked || isExcludedDay ? 'opacity-50 pointer-events-none' : ''}`}>
                                                         {uniqueSLAShifts.map((s: any) => {
                                                             const isBlocked = shiftButtonDisabledMap.has(String(s.code).toUpperCase());
-                                                            const disabledByCoverage = coverageFull && !allowOverAssign;
+                                                            const disabledByCoverage = coverageFull && enforcePlanningClosureRules;
                                                             const disabled = isServiceLocked || isBlocked || disabledByCoverage || isExcludedDay;
                                                             const timeRange = (s.startTime && s.endTime) ? `${s.startTime}–${s.endTime}` : null;
                                                             const gap = coverageData.current + (Number(s.hours) || 0) - coverageData.target;
                                                             const blockTitle = isExcludedDay
                                                                 ? 'Puesto excluido por SLA este día'
-                                                                : disabledByCoverage ? 'Puesto cerrado (esquema SLA completo). Solo se puede asignar Franco.' : allowOverAssign && coverageFull ? 'Modo corrección: podés reasignar aunque el puesto figure cerrado' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined;
+                                                                : disabledByCoverage ? 'Puesto cerrado (esquema SLA completo). Solo se puede asignar Franco.' : allowOverAssign && coverageFull ? 'Borrador o modo corrección: podés reasignar aunque el puesto figure cerrado' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined;
                                                             return (
                                                                 <button
                                                                     key={s.code}
@@ -8130,7 +8151,7 @@ export default function PlanificacionPage() {
                                         <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto custom-scrollbar">
                                             {daysInMonth.map((d) => {
                                                 const dateStr = getDateKey(d);
-                                                if (isDateLocked(dateStr)) return null;
+                                                if (isPlanningDateLocked(dateStr)) return null;
                                                 const shift = getShiftFor(selectedSwapTarget, dateStr);
                                                 if (!shift) return null;
                                                 const selectedDay = selectedSwapDate === dateStr;

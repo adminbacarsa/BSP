@@ -356,25 +356,27 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             }
         }
 
-        // Paso 2b: anchor para cold-start de empleados sin trailing.
-        // Los empleados en withTrail ya tienen la posición EXACTA del ciclo inferida de Firestore
-        // (ej. Araya terminó junio con F F N → slot 17, no 16). NO canonicalizar withTrail — eso
-        // los forzaría al inicio del bloque (16) ignorando que ya completaron días del bloque anterior,
-        // generando rachas cross-month (6N en julio + 1N en junio 30 = 7 seguidos).
-        // canonicalForZone se usa SOLO para los cold-start (withoutTrail).
+        // Paso 2b: anchor = primer withTrail con banda fija (su slot exacto preserva la continuidad
+        // cross-month). Los demás withTrail se ajustan al canónico 6-apart del anchor para evitar
+        // solapamiento de francos, SALVO que el ajuste generaría racha cross-month
+        // (trailing_work + días_iniciales_con_slot_canónico > 6), en cuyo caso se conserva el slot exacto.
         let anchor = COLD_START_OPENINGS[0];
-        let fixedBandFound = false;
-        for (const empId of [...withTrail, ...withoutTrail]) {
+        let anchorId: string | null = null;
+        for (const empId of withTrail) {
             const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
-            if (fb && WORK_BANDS.has(fb) && ZONE_SLOT[fb] !== undefined) {
-                anchor = (out[empId] !== undefined) ? out[empId] : ZONE_SLOT[fb];
-                fixedBandFound = true;
-                break;
+            if (fb && WORK_BANDS.has(fb) && out[empId] !== undefined) {
+                anchor = out[empId]; anchorId = empId; break;
             }
         }
-        if (!fixedBandFound) {
+        if (anchorId === null) {
             for (const empId of withTrail) {
-                if (out[empId] !== undefined) { anchor = out[empId]; break; }
+                if (out[empId] !== undefined) { anchor = out[empId]; anchorId = empId; break; }
+            }
+        }
+        if (anchorId === null) {
+            for (const empId of withoutTrail) {
+                const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+                if (fb && WORK_BANDS.has(fb) && ZONE_SLOT[fb] !== undefined) { anchor = ZONE_SLOT[fb]; break; }
             }
         }
         const canonicalForZone: Partial<Record<string, number>> = {};
@@ -383,7 +385,24 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             const z = bandZone(s);
             if (!(z in canonicalForZone)) canonicalForZone[z] = s;
         }
-        // withTrail: NO canonicalizar — mantener slot exacto de Firestore para continuidad cross-month.
+        // Snap withTrail no-anchor al canónico de su zona, salvo que generaría racha cross-month.
+        for (const empId of withTrail) {
+            if (empId === anchorId || out[empId] === undefined) continue;
+            const zone = bandZone(out[empId]);
+            const canonical = canonicalForZone[zone];
+            if (canonical === undefined || canonical === out[empId]) continue;
+            const tw = ctx.prevMonthTrailingWorkDays?.[empId] ?? 0;
+            const lastCode = (ctx.prevMonthLastShiftByEmp?.[empId] ?? '').toUpperCase();
+            if (tw > 0 && WORK_BANDS.has(lastCode)) {
+                let startDays = 0;
+                for (let di = 0; di < 7; di++) {
+                    if (!WORK_BANDS.has(CYCLE_24_MTN[(canonical + di) % 24] as string)) break;
+                    startDays++;
+                }
+                if (tw + startDays > 6) continue;
+            }
+            out[empId] = canonical;
+        }
 
         // Paso 3: cold-start — empleados con banda fija tienen prioridad de zona.
         const availableZones = new Set((['M', 'T', 'N', 'F'] as const).filter(z => !usedZones.has(z)));
@@ -850,6 +869,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                         const ai = assignments.findIndex(a =>
                             a.positionName === posName && a.dateStr === dateStr &&
                             a.code === overBand && (a.hours ?? 0) > 0 &&
+                            !WORK_BANDS.has((ctx.defaultShiftByEmp?.[a.empId] ?? '').toUpperCase()) &&
                             !assignmentBreaksBandTransition(assignments, a.empId, dateStr, underBand),
                         );
                         if (ai < 0) break;
