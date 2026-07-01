@@ -785,9 +785,12 @@ export default function PlanificacionPage() {
         }
         const all = listDateRangeInclusive(vacancyData.startDate, vacancyData.endDate || vacancyData.startDate);
         const focus = vacancyData.focusDate as string | undefined;
-        setVacancyActiveDates(new Set(focus && all.includes(focus) ? [focus] : all));
+        const initialDates = focus && all.includes(focus) ? [focus] : all;
+        setVacancyActiveDates(new Set(initialDates.length ? initialDates : all));
         setVacancyDayCoverages({});
-        setVacancyEditingDay(null);
+        const firstDay = initialDates[0] || all[0] || null;
+        setVacancyEditingDay(firstDay);
+        setVacancyReplacementOpen(!!firstDay);
         setSelectedReplacement('');
         setVacancyPickerTab('substitute');
         setVacancySplitExtId('');
@@ -797,11 +800,6 @@ export default function PlanificacionPage() {
     useEffect(() => {
         if (showVacancyModal) {
             setVacancyReplacementSearch('');
-            setVacancyReplacementOpen(false);
-            setVacancyEditingDay(null);
-            setVacancyPickerTab('substitute');
-            setVacancySplitExtId('');
-            setVacancySplitAdelId('');
         }
     }, [showVacancyModal]);
 
@@ -8520,60 +8518,81 @@ export default function PlanificacionPage() {
                                 </div>
                             )}
                             {vacancyActiveDates.size > 0 && (
-                                <div className="mb-4 shrink-0 max-h-32 overflow-y-auto custom-scrollbar border rounded-xl divide-y">
-                                    {[...vacancyActiveDates].sort().map((d) => (
-                                        <div key={d} className="flex items-center gap-2 px-3 py-2 text-xs">
-                                            <span className="font-mono font-bold text-slate-600 w-14 shrink-0">{formatShortDay(d)}</span>
-                                            <button
-                                                type="button"
-                                                onClick={() => openDayCoveragePicker(d)}
-                                                className="flex-1 text-left truncate font-bold text-slate-700 hover:text-indigo-600"
-                                            >
-                                                {resolveDayCoverageLabel(d)}
-                                            </button>
-                                        </div>
-                                    ))}
+                                <div className="mb-3 shrink-0">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-[10px] font-black uppercase text-slate-400">Cobertura por día</label>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setVacancyEditingDay(null);
+                                                setVacancyPickerTab('substitute');
+                                                setVacancyReplacementOpen(true);
+                                            }}
+                                            className="text-[10px] font-bold text-indigo-600 hover:underline"
+                                        >
+                                            Mismo suplente para todos
+                                        </button>
+                                    </div>
+                                    <p className="text-[10px] font-bold text-indigo-600 mb-2">
+                                        Tocá cada día → elegí <strong>Traer suplente</strong> o <strong>Ext + Adel</strong>
+                                    </p>
+                                    <div className="max-h-36 overflow-y-auto custom-scrollbar border rounded-xl divide-y">
+                                        {[...vacancyActiveDates].sort().map((d) => {
+                                            const cov = resolveDayCoverageForUi(d);
+                                            const isEditing = vacancyEditingDay === d;
+                                            return (
+                                                <button
+                                                    key={d}
+                                                    type="button"
+                                                    onClick={() => openDayCoveragePicker(d)}
+                                                    className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs text-left transition-colors ${isEditing ? 'bg-indigo-50 ring-2 ring-inset ring-indigo-300' : 'hover:bg-slate-50'}`}
+                                                >
+                                                    <span className="font-mono font-black text-slate-700 w-14 shrink-0">{formatShortDay(d)}</span>
+                                                    <span className="flex-1 truncate font-bold text-slate-700">{resolveDayCoverageLabel(d)}</span>
+                                                    {cov.mode === 'split' && (
+                                                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 shrink-0">ext+adel</span>
+                                                    )}
+                                                    {cov.mode === 'substitute' && (
+                                                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-100 text-teal-800 shrink-0">suplente</span>
+                                                    )}
+                                                    <ChevronRight size={14} className={`shrink-0 ${isEditing ? 'text-indigo-600' : 'text-slate-300'}`} />
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             )}
-                            <div className="bg-slate-50 p-4 rounded-xl border mb-5 min-h-0 flex-1 flex flex-col">
+                            {(vacancyReplacementOpen && (vacancyEditingDay || vacancyActiveDates.size > 0)) && (
+                            <div className="bg-slate-50 p-4 rounded-xl border mb-5 min-h-0 flex flex-col">
                                 <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block shrink-0">
                                     {vacancyEditingDay
-                                        ? `Cobertura para ${formatShortDay(vacancyEditingDay)}`
-                                        : (isInj ? 'Suplente por defecto (opcional)' : 'Suplente por defecto para días seleccionados')}
+                                        ? `Configurar ${formatShortDay(vacancyEditingDay)}`
+                                        : 'Suplente por defecto (todos los días sin override)'}
                                 </label>
                                 {vacancyEditingDay && (
                                     <div className="flex gap-1.5 mb-3 shrink-0">
                                         <button
                                             type="button"
                                             onClick={() => setVacancyPickerTab('substitute')}
-                                            className={`flex-1 py-2 rounded-lg text-[10px] font-black border ${vacancyPickerTab === 'substitute' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200'}`}
+                                            className={`flex-1 py-2.5 rounded-lg text-[10px] font-black border ${vacancyPickerTab === 'substitute' ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200'}`}
                                         >
                                             Traer suplente
                                         </button>
                                         <button
                                             type="button"
                                             onClick={() => setVacancyPickerTab('split')}
-                                            className={`flex-1 py-2 rounded-lg text-[10px] font-black border flex items-center justify-center gap-1 ${vacancyPickerTab === 'split' ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-500 border-slate-200'}`}
+                                            className={`flex-1 py-2.5 rounded-lg text-[10px] font-black border flex items-center justify-center gap-1 ${vacancyPickerTab === 'split' ? 'bg-violet-600 text-white border-violet-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200'}`}
                                         >
                                             <Split size={12} /> Ext + Adel
                                         </button>
                                     </div>
                                 )}
-                                {!vacancyReplacementOpen ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => setVacancyReplacementOpen(true)}
-                                        className="w-full p-3 rounded-lg border text-sm font-bold bg-white text-left flex items-center justify-between gap-2 shrink-0"
-                                    >
-                                        <span className={`truncate ${selectedReplacement || vacancyEditingDay ? 'text-slate-800' : 'text-slate-400'}`}>
-                                            {vacancyEditingDay
-                                                ? resolveDayCoverageLabel(vacancyEditingDay)
-                                                : (selectedReplacementEmp ? `${selectedReplacementEmp.expBadge} ${selectedReplacementEmp.name}` : 'Sin cobertura — dejar vacante')}
-                                        </span>
-                                        <ChevronDown size={16} className="text-slate-400 shrink-0" />
-                                    </button>
-                                ) : (
-                                    <div ref={vacancyReplacementPanelRef} className="bg-white border rounded-xl shadow-sm overflow-hidden flex flex-col min-h-0 flex-1">
+                                {!vacancyEditingDay && (
+                                    <p className="text-[10px] text-slate-500 mb-2 shrink-0">
+                                        Aplica a los días seleccionados que no configuraste uno por uno arriba.
+                                    </p>
+                                )}
+                                <div ref={vacancyReplacementPanelRef} className="bg-white border rounded-xl shadow-sm overflow-hidden flex flex-col min-h-0 flex-1">
                                         {(vacancyPickerTab === 'substitute' || !vacancyEditingDay) && (
                                         <>
                                         <div className="p-2 border-b shrink-0 bg-white sticky top-0 z-10">
@@ -8696,18 +8715,41 @@ export default function PlanificacionPage() {
                                                 )}
                                             </div>
                                         )}
-                                        <div className="p-2 border-t shrink-0 bg-slate-50">
+                                        <div className="p-2 border-t shrink-0 bg-slate-50 flex gap-2">
+                                            {vacancyEditingDay && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        const sorted = [...vacancyActiveDates].sort();
+                                                        const idx = sorted.indexOf(vacancyEditingDay);
+                                                        const next = sorted[idx + 1];
+                                                        if (next) openDayCoveragePicker(next);
+                                                        else {
+                                                            setVacancyReplacementOpen(false);
+                                                            setVacancyEditingDay(null);
+                                                            setVacancyReplacementSearch('');
+                                                        }
+                                                    }}
+                                                    className="flex-1 py-2 text-xs font-bold text-indigo-600 hover:text-indigo-800"
+                                                >
+                                                    {(() => {
+                                                        const sorted = [...vacancyActiveDates].sort();
+                                                        const idx = sorted.indexOf(vacancyEditingDay);
+                                                        return idx < sorted.length - 1 ? 'Siguiente día →' : 'Listo';
+                                                    })()}
+                                                </button>
+                                            )}
                                             <button
                                                 type="button"
                                                 onClick={() => { setVacancyReplacementOpen(false); setVacancyReplacementSearch(''); setVacancyEditingDay(null); }}
-                                                className="w-full py-2 text-xs font-bold text-slate-500 hover:text-slate-700"
+                                                className={`py-2 text-xs font-bold text-slate-500 hover:text-slate-700 ${vacancyEditingDay ? 'px-3' : 'flex-1'}`}
                                             >
-                                                Cerrar lista
+                                                Cerrar
                                             </button>
                                         </div>
                                     </div>
-                                )}
                             </div>
+                            )}
                             <div className="flex gap-3 shrink-0">
                                 <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); setVacancyReplacementSearch(''); setVacancyReplacementOpen(false); setVacancyActiveDates(new Set()); setVacancyDayCoverages({}); setVacancyEditingDay(null); setVacancyPickerTab('substitute'); setVacancySplitExtId(''); setVacancySplitAdelId(''); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
                                 <button onClick={handleProcessVacancy} disabled={vacancyActiveDates.size === 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg disabled:opacity-40 ${btnColor[color]}`}>
