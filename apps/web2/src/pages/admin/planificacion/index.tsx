@@ -7760,7 +7760,7 @@ export default function PlanificacionPage() {
                                                 )}
                                                 {previewIsPublished && !canEdit && (
                                                     <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                                                        <LockKeyhole size={12}/> Cronograma publicado — solo superadmin puede corregir
+                                                        <LockKeyhole size={12}/> Cronograma publicado, usar modo corregir para realizar cambios.
                                                     </div>
                                                 )}
                                             </div>
@@ -8804,6 +8804,10 @@ export default function PlanificacionPage() {
                         pendingChanges={pendingChanges}
                         absencesMap={absencesMap}
                         preselectedEmpId={selectedCell.empId}
+                        preselectedEmployeeName={
+                            planningDotacionEmployees.find(e => e.id === selectedCell.empId)?.name
+                            || displayedEmployees.find((e: { id: string; name?: string }) => e.id === selectedCell.empId)?.name
+                        }
                         onApply={applyRecompositionPackage}
                         onClose={() => setRecompositionModalOpen(false)}
                     />,

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { X, ArrowRight, User, Clock, Split, Unlock, AlertTriangle, CheckCircle } from 'lucide-react';
 import type { RecompositionMode, RecompositionPackage, RecompositionTarget } from '@/lib/planificacion/planningRecomposition.types';
 import {
@@ -8,6 +8,7 @@ import {
   listExtensionCandidates,
   listRecompositionTargets,
   neighborBandsForTarget,
+  resolveRecompositionTargetForEmployee,
 } from '@/lib/planificacion/planningRecompositionApply';
 
 type Props = {
@@ -20,6 +21,7 @@ type Props = {
   pendingChanges: Record<string, any>;
   absencesMap: Record<string, any>;
   preselectedEmpId?: string | null;
+  preselectedEmployeeName?: string;
   onApply: (updates: Record<string, any>, pkg: RecompositionPackage) => void;
   onClose: () => void;
 };
@@ -34,6 +36,7 @@ export default function PlanningRecompositionModal({
   pendingChanges,
   absencesMap,
   preselectedEmpId,
+  preselectedEmployeeName,
   onApply,
   onClose,
 }: Props) {
@@ -49,6 +52,7 @@ export default function PlanningRecompositionModal({
   const [adelTo, setAdelTo] = useState('23:00');
   const [redeployNote, setRedeployNote] = useState('');
   const [error, setError] = useState('');
+  const autoPickedRef = useRef(false);
 
   const employeesById = useMemo(() => {
     const m: Record<string, any> = {};
@@ -60,6 +64,27 @@ export default function PlanningRecompositionModal({
     () => listRecompositionTargets(dateStr, objectiveId, employees, shiftsMap, pendingChanges, absencesMap),
     [dateStr, objectiveId, employees, shiftsMap, pendingChanges, absencesMap],
   );
+
+  const preselectedTarget = useMemo(
+    () => (preselectedEmpId
+      ? resolveRecompositionTargetForEmployee(
+        preselectedEmpId,
+        dateStr,
+        objectiveId,
+        employees,
+        shiftsMap,
+        pendingChanges,
+        absencesMap,
+      )
+      : null),
+    [preselectedEmpId, dateStr, objectiveId, employees, shiftsMap, pendingChanges, absencesMap],
+  );
+
+  const visibleTargets = useMemo(() => {
+    const byMode = targets.filter(t => (mode === 'absence' ? t.kind === 'absence' : t.kind === 'working'));
+    if (!preselectedEmpId) return byMode;
+    return byMode.filter(t => t.employeeId === preselectedEmpId);
+  }, [targets, mode, preselectedEmpId]);
 
   const selectedTarget: RecompositionTarget | undefined = targets.find(t => t.employeeId === targetId);
 
@@ -96,6 +121,12 @@ export default function PlanningRecompositionModal({
     else setMode('liberation');
     setStep(2);
   };
+
+  useEffect(() => {
+    if (!preselectedEmpId || autoPickedRef.current || !preselectedTarget) return;
+    autoPickedRef.current = true;
+    pickTarget(preselectedTarget);
+  }, [preselectedEmpId, preselectedTarget]);
 
   const handleConfirm = () => {
     setError('');
@@ -176,6 +207,12 @@ export default function PlanningRecompositionModal({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {step === 1 && (
             <>
+              {preselectedEmpId && preselectedEmployeeName && (
+                <div className="rounded-xl bg-indigo-50 border border-indigo-200 px-3 py-2 text-[10px] font-bold text-indigo-800 flex items-center gap-2">
+                  <User size={14} className="shrink-0" />
+                  <span>Guardia del panel: <strong>{preselectedEmployeeName}</strong></span>
+                </div>
+              )}
               <p className="text-xs font-bold text-slate-600">¿Qué querés hacer?</p>
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -198,11 +235,11 @@ export default function PlanningRecompositionModal({
                 </button>
               </div>
 
-              <p className="text-[10px] font-black text-slate-500 uppercase">Seleccioná turno / guardia</p>
+              <p className="text-[10px] font-black text-slate-500 uppercase">
+                {preselectedEmpId ? 'Confirmá el turno a recomponer' : 'Seleccioná turno / guardia'}
+              </p>
               <div className="space-y-1 max-h-48 overflow-y-auto">
-                {targets
-                  .filter(t => (mode === 'absence' ? t.kind === 'absence' : t.kind === 'working'))
-                  .map(t => (
+                {visibleTargets.map(t => (
                     <button
                       key={t.employeeId}
                       type="button"
@@ -213,11 +250,15 @@ export default function PlanningRecompositionModal({
                       <span className="text-[11px] font-bold text-slate-700 truncate">{t.label}</span>
                     </button>
                   ))}
-                {targets.filter(t => (mode === 'absence' ? t.kind === 'absence' : t.kind === 'working')).length === 0 && (
+                {visibleTargets.length === 0 && (
                   <p className="text-[10px] text-slate-500 py-4 text-center leading-relaxed px-2">
-                    {mode === 'absence'
-                      ? 'No hay ausencias ni códigos V/L/E/A/AA/PG cargados en este día para este objetivo. Usá Ausencia/RRHH en la grilla o elegí Liberar → RET si querés liberar a un guardia con turno M/T/N.'
-                      : 'No hay guardias con turno de trabajo (M/T/N…) este día en el objetivo.'}
+                    {preselectedEmpId && preselectedEmployeeName
+                      ? (mode === 'absence'
+                        ? `${preselectedEmployeeName} no tiene ausencia V/L/E/A/AA/PG este día. Probá Liberar → RET si tiene turno M/T/N.`
+                        : `${preselectedEmployeeName} no tiene turno laboral (M/T/N…) este día. Si está en Franco o RET, asigná banda primero o usá Ausencia/RRHH.`)
+                      : (mode === 'absence'
+                        ? 'No hay ausencias ni códigos V/L/E/A/AA/PG cargados en este día para este objetivo. Usá Ausencia/RRHH en la grilla o elegí Liberar → RET si querés liberar a un guardia con turno M/T/N.'
+                        : 'No hay guardias con turno de trabajo (M/T/N…) este día en el objetivo.')}
                   </p>
                 )}
               </div>
@@ -331,8 +372,15 @@ export default function PlanningRecompositionModal({
 
         <div className="flex gap-2 px-5 py-4 border-t border-slate-100 shrink-0">
           {step > 1 && (
-            <button type="button" onClick={() => setStep(1)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-black text-slate-600 hover:bg-slate-50">
-              Volver
+            <button
+              type="button"
+              onClick={() => {
+                if (preselectedEmpId) onClose();
+                else setStep(1);
+              }}
+              className="flex-1 py-2.5 rounded-xl border border-slate-200 text-xs font-black text-slate-600 hover:bg-slate-50"
+            >
+              {preselectedEmpId ? 'Cancelar' : 'Volver'}
             </button>
           )}
           {step >= 2 && (

@@ -188,6 +188,20 @@ export function listRecompositionTargets(
   return targets;
 }
 
+/** Resuelve el target de recomposición para un guardia concreto (panel lateral / celda). */
+export function resolveRecompositionTargetForEmployee(
+  employeeId: string,
+  dateStr: string,
+  objectiveId: string,
+  employees: { id: string; name?: string }[],
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+  absencesMap: Record<string, any>,
+) {
+  return listRecompositionTargets(dateStr, objectiveId, employees, shiftsMap, pendingChanges, absencesMap)
+    .find(t => t.employeeId === employeeId) ?? null;
+}
+
 /** Bandas CCT adyacentes para split ext+adel al cubrir una banda objetivo. */
 export function neighborBandsForTarget(targetBand: string): { extensionBand: string; earlyStartBand: string } {
   const b = String(targetBand || '').toUpperCase();
