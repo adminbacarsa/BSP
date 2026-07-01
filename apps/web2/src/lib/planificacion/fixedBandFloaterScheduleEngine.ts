@@ -718,6 +718,17 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         employeeMonthlyHours, employeeCycleHours, cutoffDay,
     );
 
+    // Retorna true si el puesto ya tiene `qty` empleados con esa banda ese día (cupo completo).
+    const bandQuotaFull = (posName: string, dateStr: string, code: string): boolean => {
+        const pos = ctx.positions.find(p => p.positionName === posName);
+        if (!pos) return false;
+        const quota = Math.max(1, Number(pos.qty) || 1);
+        const count = assignments.filter(
+            a => a.positionName === posName && a.dateStr === dateStr && a.code === code && (a.hours ?? 0) > 0,
+        ).length;
+        return count >= quota;
+    };
+
     // RET que patchRetForAbsences no convirtió: mostrar banda natural del ciclo (con corrección de zona).
     for (let i = 0; i < assignments.length; i++) {
         const a = assignments[i];
@@ -746,6 +757,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         const posName = empToPosition[a.empId] ?? '';
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
+        if (bandQuotaFull(posName, a.dateStr, naturalCode)) continue;
         const meta = shiftMeta(pos, naturalCode);
         assignments[i] = {
             empId: a.empId,
@@ -806,6 +818,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             const posName = empToPosition[emp.id] ?? '';
             const pos = ctx.positions.find(p => p.positionName === posName);
             if (!pos) continue;
+            if (bandQuotaFull(posName, dateStr, cycleCode)) continue;
             const meta = shiftMeta(pos, cycleCode);
             assignments[ai] = {
                 empId: emp.id, dateStr, positionName: posName,
