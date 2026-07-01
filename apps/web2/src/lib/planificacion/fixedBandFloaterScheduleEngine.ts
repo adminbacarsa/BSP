@@ -356,18 +356,17 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             }
         }
 
-        // Paso 2b: anclar todos los openings a un conjunto canónico exactamente 6 apart.
-        // La deduplicación por zona previene mismo-zona, pero dos empleados en zonas
-        // distintas pueden coincidir en franco si sus openings difieren en ≠6 (ej. 7 apart).
-        // Si hay empleado con banda fija, el anchor arranca en el INICIO de su zona (ZONE_SLOT)
-        // para que su bloque de 6 días sea completo desde el comienzo del mes.
+        // Paso 2b: anchor para cold-start de empleados sin trailing.
+        // Los empleados en withTrail ya tienen la posición EXACTA del ciclo inferida de Firestore
+        // (ej. Araya terminó junio con F F N → slot 17, no 16). NO canonicalizar withTrail — eso
+        // los forzaría al inicio del bloque (16) ignorando que ya completaron días del bloque anterior,
+        // generando rachas cross-month (6N en julio + 1N en junio 30 = 7 seguidos).
+        // canonicalForZone se usa SOLO para los cold-start (withoutTrail).
         let anchor = COLD_START_OPENINGS[0];
         let fixedBandFound = false;
         for (const empId of [...withTrail, ...withoutTrail]) {
             const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
             if (fb && WORK_BANDS.has(fb) && ZONE_SLOT[fb] !== undefined) {
-                // Trailing data tiene prioridad: si este empleado tiene slot inferred, usarlo
-                // como anchor para preservar la posición exacta cross-month dentro de la zona.
                 anchor = (out[empId] !== undefined) ? out[empId] : ZONE_SLOT[fb];
                 fixedBandFound = true;
                 break;
@@ -384,38 +383,7 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             const z = bandZone(s);
             if (!(z in canonicalForZone)) canonicalForZone[z] = s;
         }
-        for (const empId of withTrail) {
-            if (out[empId] !== undefined) {
-                const zone = bandZone(out[empId]);
-                const c = canonicalForZone[zone];
-                if (c !== undefined) out[empId] = c;
-            }
-        }
-
-        // Paso 2c: reubicar empleados con banda fija a su zona correcta.
-        // Si el trailing los dejó en una zona distinta, se los mueve al slot canónico
-        // de su banda; el empleado desplazado de esa zona pasa a cold-start.
-        for (const empId of [...withTrail]) {
-            if (out[empId] === undefined) continue;
-            const fixedBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
-            if (!fixedBand || !WORK_BANDS.has(fixedBand)) continue;
-            const currentZone = bandZone(out[empId]);
-            if ((currentZone as string) === fixedBand) continue;
-            const targetSlot = canonicalForZone[fixedBand];
-            if (targetSlot === undefined) continue;
-            // Si hay otro empleado trailing ocupando la zona destino, desplazarlo a cold-start.
-            const displaced = withTrail.find(
-                id => id !== empId && out[id] !== undefined && (bandZone(out[id]) as string) === fixedBand,
-            );
-            if (displaced) {
-                usedZones.delete(fixedBand);
-                delete out[displaced];
-                withoutTrail.push(displaced);
-            }
-            usedZones.delete(currentZone);
-            usedZones.set(fixedBand as 'M' | 'T' | 'N', true);
-            out[empId] = targetSlot;
-        }
+        // withTrail: NO canonicalizar — mantener slot exacto de Firestore para continuidad cross-month.
 
         // Paso 3: cold-start — empleados con banda fija tienen prioridad de zona.
         const availableZones = new Set((['M', 'T', 'N', 'F'] as const).filter(z => !usedZones.has(z)));
