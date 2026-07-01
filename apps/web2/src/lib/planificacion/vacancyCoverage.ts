@@ -1,6 +1,10 @@
 /** Lógica de cobertura por licencia/vacante en planificador. */
 import { toCalendarDateStr } from './absenceCodes';
-import { buildRecompositionPendingUpdates } from './planningRecompositionApply';
+import {
+  buildRecompositionPendingUpdates,
+  defaultSplitForBand,
+  neighborBandsForTarget,
+} from './planningRecompositionApply';
 import type { RecompositionPackage, RecompositionTarget } from './planningRecomposition.types';
 
 export const VACANCY_ABSENCE_TYPE_CODES: Record<string, string> = {
@@ -15,6 +19,163 @@ export const VACANCY_ABSENCE_TYPE_CODES: Record<string, string> = {
 export const VACANCY_NON_WORK_CODES = new Set([
   'V', 'L', 'PG', 'A', 'E', 'AA', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET',
 ]);
+
+export const VACANCY_BAND_LABELS: Record<string, string> = {
+  M: 'Mañana',
+  T: 'Tarde',
+  N: 'Noche',
+  D12: 'Diurno 12h',
+  N12: 'Nocturno 12h',
+  PU: 'Puesto único',
+  EN: 'Encargado',
+};
+
+export const VACANCY_BAND_SCHEDULE: Record<string, string> = {
+  M: '07:00–15:00',
+  T: '15:00–23:00',
+  N: '23:00–07:00',
+  D12: '07:00–19:00',
+  N12: '19:00–07:00',
+};
+
+export type TitularVacancyWorkShift = {
+  code: string;
+  bandLabel: string;
+  positionName: string;
+  scheduleLabel: string;
+  hours: number;
+  source: 'saved_day' | 'adjacent_day' | 'weekday_pattern' | 'month_typical';
+  sourceLabel: string;
+  rawShift?: Record<string, any>;
+};
+
+function isVacancyWorkCode(code: unknown): boolean {
+  const c = String(code || '').toUpperCase();
+  return !!c && !VACANCY_NON_WORK_CODES.has(c);
+}
+
+function addCalendarDays(ymd: string, delta: number): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const cur = new Date(y, m - 1, d);
+  cur.setDate(cur.getDate() + delta);
+  return `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
+}
+
+function shiftScheduleLabel(shift: Record<string, any>, code: string): string {
+  if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+    return `${shift.startTime}–${shift.endTime}`;
+  }
+  return VACANCY_BAND_SCHEDULE[code] || '—';
+}
+
+function readWorkShift(
+  empId: string,
+  dateStr: string,
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+): Record<string, any> | null {
+  const key = `${empId}_${dateStr}`;
+  for (const src of [pendingChanges[key], shiftsMap[key]]) {
+    if (src && !src.isDeleted && isVacancyWorkCode(src.code)) return src;
+  }
+  return null;
+}
+
+/** Resuelve qué turno laboral cubre la licencia (aunque la celda ya esté en V/L/…). */
+export function resolveTitularVacancyWorkShift(
+  titularId: string,
+  dateStr: string,
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+  getTypicalShift?: (empId: string) => Record<string, any> | null,
+): TitularVacancyWorkShift | null {
+  const toResult = (
+    shift: Record<string, any>,
+    source: TitularVacancyWorkShift['source'],
+    sourceLabel: string,
+  ): TitularVacancyWorkShift => {
+    const code = String(shift.code).toUpperCase();
+    return {
+      code,
+      bandLabel: VACANCY_BAND_LABELS[code] || code,
+      positionName: String(shift.positionName || 'General'),
+      scheduleLabel: shiftScheduleLabel(shift, code),
+      hours: Number(shift.hours) || (code === 'D12' || code === 'N12' ? 12 : 8),
+      source,
+      sourceLabel,
+      rawShift: shift,
+    };
+  };
+
+  const direct = readWorkShift(titularId, dateStr, shiftsMap, pendingChanges);
+  if (direct) {
+    return toResult(direct, 'saved_day', 'Turno planificado ese día (antes de la licencia)');
+  }
+
+  for (const delta of [-1, 1, -7, 7, -2, 2]) {
+    const adj = addCalendarDays(dateStr, delta);
+    const s = readWorkShift(titularId, adj, shiftsMap, pendingChanges);
+    if (s) {
+      const [, m, d] = adj.split('-');
+      return toResult(s, 'adjacent_day', `Referencia del ${d}/${m} en el cronograma`);
+    }
+  }
+
+  const [y, mo, dd] = dateStr.split('-').map(Number);
+  const targetDow = new Date(y, mo - 1, dd).getDay();
+  const freq: Record<string, { count: number; shift: Record<string, any> }> = {};
+  const daysInMo = new Date(y, mo, 0).getDate();
+  for (let d = 1; d <= daysInMo; d++) {
+    const ds = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (ds === dateStr) continue;
+    if (new Date(y, mo - 1, d).getDay() !== targetDow) continue;
+    const s = readWorkShift(titularId, ds, shiftsMap, pendingChanges);
+    if (!s) continue;
+    const code = String(s.code).toUpperCase();
+    if (!freq[code]) freq[code] = { count: 0, shift: s };
+    freq[code].count++;
+  }
+  const weekdayBest = Object.values(freq).sort((a, b) => b.count - a.count)[0];
+  if (weekdayBest) {
+    const dowNames = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    return toResult(
+      weekdayBest.shift,
+      'weekday_pattern',
+      `Patrón habitual los ${dowNames[targetDow]} del mes`,
+    );
+  }
+
+  if (getTypicalShift) {
+    const typical = getTypicalShift(titularId);
+    if (typical?.code && isVacancyWorkCode(typical.code)) {
+      return toResult(typical, 'month_typical', 'Turno más frecuente del mes (días sin licencia)');
+    }
+  }
+
+  return null;
+}
+
+export function formatTitularVacancyShiftSummary(info: TitularVacancyWorkShift): string {
+  return `${info.code} · ${info.bandLabel} · ${info.positionName} · ${info.scheduleLabel}`;
+}
+
+export function describeVacancySplitPlan(work: TitularVacancyWorkShift): {
+  gapLabel: string;
+  extBand: string;
+  extSegment: string;
+  adelBand: string;
+  adelSegment: string;
+} {
+  const split = defaultSplitForBand(work.code);
+  const neighbors = neighborBandsForTarget(work.code);
+  return {
+    gapLabel: `${split.gap.from}–${split.gap.to}`,
+    extBand: neighbors.extensionBand,
+    extSegment: `${split.ext.from}–${split.ext.to}`,
+    adelBand: neighbors.earlyStartBand,
+    adelSegment: `${split.adel.from}–${split.adel.to}`,
+  };
+}
 
 export type VacancyDayCoverage =
   | { mode: 'none' }
@@ -252,15 +413,14 @@ export function applyVacancyCoverageToChanges(
   for (const day of input.days) {
     const { dateStr, coverage } = day;
     const titularKey = `${titularId}_${dateStr}`;
-    const existingShift = input.shiftsMap[titularKey];
-    const pendingTitular = newChanges[titularKey];
-    const workSource = pendingTitular && !pendingTitular.isDeleted
-      ? pendingTitular
-      : existingShift;
-    const workShift =
-      workSource?.code && !VACANCY_NON_WORK_CODES.has(String(workSource.code).toUpperCase())
-        ? workSource
-        : input.getTypicalShift(titularId);
+    const workInfo = resolveTitularVacancyWorkShift(
+      titularId,
+      dateStr,
+      input.shiftsMap,
+      newChanges,
+      input.getTypicalShift,
+    );
+    const workShift = workInfo?.rawShift ?? input.getTypicalShift(titularId);
 
     const coveredByLabel =
       coverage.mode === 'substitute' && coverage.employeeName

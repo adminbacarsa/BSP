@@ -145,6 +145,8 @@ import {
     resolveVacancyDayCoverage,
     formatVacancyDayCoverageLabel,
     vacancyDayHasCoverage,
+    resolveTitularVacancyWorkShift,
+    describeVacancySplitPlan,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
 import {
@@ -8326,24 +8328,13 @@ export default function PlanificacionPage() {
                         }
                         return Object.values(freq).sort((a, b) => b.count - a.count)[0]?.shift || null;
                     };
-                    const getWorkBandForTitularDay = (dateStr: string) => {
-                        const titularId = vacancyData?.employeeId;
-                        if (!titularId || !dateStr) return null;
-                        const key = `${titularId}_${dateStr}`;
-                        const s = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
-                        if (s?.code && !VACANCY_NON_WORK_CODES.has(String(s.code).toUpperCase())) {
-                            return {
-                                code: String(s.code).toUpperCase(),
-                                positionName: s.positionName || activePosition || 'General',
-                            };
-                        }
-                        const typical = getTypicalShiftForTitular(titularId);
-                        if (!typical?.code) return null;
-                        return {
-                            code: String(typical.code).toUpperCase(),
-                            positionName: typical.positionName || activePosition || 'General',
-                        };
-                    };
+                    const resolveTitularShiftForDay = (dateStr: string) => resolveTitularVacancyWorkShift(
+                        vacancyData?.employeeId || '',
+                        dateStr,
+                        shiftsMap,
+                        pendingChanges,
+                        getTypicalShiftForTitular,
+                    );
                     const openDayCoveragePicker = (d: string) => {
                         const existing = vacancyDayCoverages[d] ?? resolveVacancyDayCoverage(d, {}, selectedReplacement);
                         setVacancyEditingDay(d);
@@ -8407,7 +8398,11 @@ export default function PlanificacionPage() {
                     const retenCandidatos = candidatos.filter(e => e.dayRole === 'RETEN' && matchesSearch(e)).sort(sortKm);
                     const escCandidatos = candidatos.filter(e => e.dayRole === 'ESC' && matchesSearch(e)).sort(sortKm);
                     const sinTurnoCandidatos = candidatos.filter(e => e.dayRole === 'FREE' && matchesSearch(e)).sort(sortKm);
-                    const splitWorkBand = vacancyEditingDay ? getWorkBandForTitularDay(vacancyEditingDay) : null;
+                    const splitTitularShift = vacancyEditingDay ? resolveTitularShiftForDay(vacancyEditingDay) : null;
+                    const splitWorkBand = splitTitularShift
+                        ? { code: splitTitularShift.code, positionName: splitTitularShift.positionName }
+                        : null;
+                    const splitPlan = splitTitularShift ? describeVacancySplitPlan(splitTitularShift) : null;
                     const splitNeighbors = splitWorkBand ? neighborBandsForTarget(splitWorkBand.code) : null;
                     const splitExtCandidates = splitWorkBand && vacancyEditingDay
                         ? listExtensionCandidates(
@@ -8548,7 +8543,19 @@ export default function PlanificacionPage() {
                                                     className={`w-full flex items-center gap-2 px-3 py-2.5 text-xs text-left transition-colors ${isEditing ? 'bg-indigo-50 ring-2 ring-inset ring-indigo-300' : 'hover:bg-slate-50'}`}
                                                 >
                                                     <span className="font-mono font-black text-slate-700 w-14 shrink-0">{formatShortDay(d)}</span>
-                                                    <span className="flex-1 truncate font-bold text-slate-700">{resolveDayCoverageLabel(d)}</span>
+                                                    <span className="flex-1 min-w-0">
+                                                        <span className="block truncate font-bold text-slate-700">{resolveDayCoverageLabel(d)}</span>
+                                                        {(() => {
+                                                            const tit = resolveTitularShiftForDay(d);
+                                                            return tit ? (
+                                                                <span className="block truncate text-[9px] font-bold text-amber-700 mt-0.5">
+                                                                    Cubrir: {tit.code} {tit.bandLabel} · {tit.positionName} · {tit.scheduleLabel}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="block text-[9px] font-bold text-rose-500 mt-0.5">Sin turno laboral inferido</span>
+                                                            );
+                                                        })()}
+                                                    </span>
                                                     {cov.mode === 'split' && (
                                                         <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 shrink-0">ext+adel</span>
                                                     )}
@@ -8569,6 +8576,40 @@ export default function PlanificacionPage() {
                                         ? `Configurar ${formatShortDay(vacancyEditingDay)}`
                                         : 'Suplente por defecto (todos los días sin override)'}
                                 </label>
+                                {vacancyEditingDay && splitTitularShift && (
+                                    <div className="rounded-xl border-2 border-amber-200 bg-amber-50/90 px-3 py-2.5 mb-3 shrink-0">
+                                        <div className="text-[10px] font-black uppercase text-amber-900 mb-1 flex items-center gap-1">
+                                            <Clock size={11} /> Turno del titular a cubrir
+                                        </div>
+                                        <div className="text-sm font-black text-slate-800 flex flex-wrap items-center gap-1.5">
+                                            <span className="font-mono bg-white px-2 py-0.5 rounded-lg border border-amber-300 text-amber-900">{splitTitularShift.code}</span>
+                                            <span>{splitTitularShift.bandLabel}</span>
+                                            <span className="text-slate-400">·</span>
+                                            <span>{splitTitularShift.positionName}</span>
+                                        </div>
+                                        <div className="text-[10px] font-bold text-slate-600 mt-1">
+                                            {splitTitularShift.scheduleLabel} · {splitTitularShift.hours}h
+                                        </div>
+                                        <div className="text-[9px] font-bold text-amber-800/90 mt-1">{splitTitularShift.sourceLabel}</div>
+                                        {vacancyPickerTab === 'split' && splitPlan && (
+                                            <div className="mt-2 pt-2 border-t border-amber-200/80 text-[9px] font-bold text-violet-900 space-y-0.5">
+                                                <div>Hueco a recomponer: <strong>{splitPlan.gapLabel}</strong></div>
+                                                <div>Extensión (turno {splitPlan.extBand}): <strong>{splitPlan.extSegment}</strong></div>
+                                                <div>Adelanto (turno {splitPlan.adelBand}): <strong>{splitPlan.adelSegment}</strong></div>
+                                            </div>
+                                        )}
+                                        {vacancyPickerTab === 'substitute' && (
+                                            <div className="mt-2 pt-2 border-t border-amber-200/80 text-[9px] font-bold text-teal-800">
+                                                El suplente heredará turno <strong>{splitTitularShift.code}</strong> en <strong>{splitTitularShift.positionName}</strong>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {vacancyEditingDay && !splitTitularShift && (
+                                    <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 mb-3 text-[10px] font-bold text-rose-700 shrink-0">
+                                        No se pudo inferir el turno laboral del titular. Revisá el cronograma previo a la licencia o usá suplente manual.
+                                    </div>
+                                )}
                                 {vacancyEditingDay && (
                                     <div className="flex gap-1.5 mb-3 shrink-0">
                                         <button
@@ -8655,22 +8696,24 @@ export default function PlanificacionPage() {
                                         )}
                                         {vacancyEditingDay && vacancyPickerTab === 'split' && (
                                             <div className="overflow-y-auto custom-scrollbar p-3 min-h-0 flex-1 max-h-[min(42vh,320px)] space-y-3">
-                                                {!splitWorkBand ? (
+                                                {!splitTitularShift ? (
                                                     <p className="text-xs text-slate-400 text-center py-4">
-                                                        No se pudo inferir la banda a cubrir (M/T/N). Revisá el turno habitual del titular.
+                                                        No se pudo inferir la banda a cubrir. Revisá el turno habitual del titular en el cronograma.
                                                     </p>
                                                 ) : (
                                                     <>
                                                         <div className="rounded-lg bg-violet-50 border border-violet-200 px-3 py-2 text-[10px] font-bold text-violet-900">
-                                                            Cubrir banda <strong>{splitWorkBand.code}</strong> · {splitWorkBand.positionName}
-                                                            {splitNeighbors && (
-                                                                <span className="block text-violet-700/80 mt-0.5">
-                                                                    Extensión: turnos {splitNeighbors.extensionBand} · Adelanto: turnos {splitNeighbors.earlyStartBand}
+                                                            Recomponer <strong>{splitTitularShift.code} {splitTitularShift.bandLabel}</strong> ({splitTitularShift.scheduleLabel}) en <strong>{splitTitularShift.positionName}</strong>
+                                                            {splitPlan && (
+                                                                <span className="block text-violet-700/90 mt-1 leading-relaxed">
+                                                                    Guardia <strong>{splitPlan.extBand}</strong> extiende {splitPlan.extSegment} + guardia <strong>{splitPlan.adelBand}</strong> adelanta {splitPlan.adelSegment}
                                                                 </span>
                                                             )}
                                                         </div>
                                                         <div>
-                                                            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Extensión ({splitNeighbors?.extensionBand})</label>
+                                                            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                                                                Extensión — turno {splitPlan?.extBand} ({splitPlan?.extSegment})
+                                                            </label>
                                                             <div className="space-y-1 max-h-28 overflow-y-auto custom-scrollbar">
                                                                 {splitExtCandidates.length === 0 ? (
                                                                     <p className="text-[10px] text-slate-400 px-1">Sin guardias en banda {splitNeighbors?.extensionBand} ese día.</p>
@@ -8687,7 +8730,9 @@ export default function PlanificacionPage() {
                                                             </div>
                                                         </div>
                                                         <div>
-                                                            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Adelanto ({splitNeighbors?.earlyStartBand})</label>
+                                                            <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                                                                Adelanto — turno {splitPlan?.adelBand} ({splitPlan?.adelSegment})
+                                                            </label>
                                                             <div className="space-y-1 max-h-28 overflow-y-auto custom-scrollbar">
                                                                 {splitAdelCandidates.length === 0 ? (
                                                                     <p className="text-[10px] text-slate-400 px-1">Sin guardias en banda {splitNeighbors?.earlyStartBand} ese día.</p>
