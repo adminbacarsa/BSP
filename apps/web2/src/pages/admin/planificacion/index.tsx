@@ -146,7 +146,7 @@ import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
 import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageModal';
 import PlanningRecompositionModal from '@/components/planificacion/PlanningRecompositionModal';
 import PlanningCronogramasOverviewModal from '@/components/planificacion/PlanningCronogramasOverviewModal';
-import type { RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
+import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
 import { extractPackagesFromPending, emitRecompositionNotifications } from '@/lib/planificacion/planningRecompositionNotify';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
@@ -3807,7 +3807,11 @@ export default function PlanificacionPage() {
         toast.info("Cambio aplicado");
     };
 
-    const applyRecompositionPackage = (updates: Record<string, any>, pkg: RecompositionPackage) => {
+    const applyRecompositionPackage = (
+        updates: Record<string, any>,
+        pkg: RecompositionPackage,
+        novedad?: PendingAbsenceNovedad,
+    ) => {
         setPendingChanges(prev => {
             const next = { ...prev };
             for (const [k, v] of Object.entries(updates)) {
@@ -3815,10 +3819,18 @@ export default function PlanificacionPage() {
             }
             return next;
         });
+        if (novedad) {
+            const key = `${novedad.employeeId}_${novedad.startDate}`;
+            setPendingNovedades(prev => ({ ...prev, [key]: novedad }));
+        }
         setPendingRecompositionPackages(prev => [...prev.filter(p => p.id !== pkg.id), pkg]);
         setSelectedCell(null);
         setRecompositionModalOpen(false);
-        toast.success('Paquete cobertura/liberación aplicado (pendiente de guardar)');
+        toast.success(
+            novedad
+                ? 'Ausencia RRHH y cobertura aplicadas (pendiente de guardar)'
+                : 'Paquete cobertura/liberación aplicado (pendiente de guardar)',
+        );
     };
 
     const handleAssignDeployment = (intent: 'SURPLUS' | 'TRAINING') => {
@@ -8064,13 +8076,6 @@ export default function PlanificacionPage() {
                                                 className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center justify-center gap-2 disabled:opacity-40"
                                             >
                                                 <Split size={14} /> Cobertura / Liberación (ext + adel)
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowRRHHModal(true)}
-                                                className="w-full py-2.5 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200"
-                                            >
-                                                Ausencia / RRHH
                                             </button>
                                         </div>
                                         <button onClick={() => { setSwapConfig({ empId: selectedCell.empId }); setShowSwapModal(true); }} disabled={isServiceLocked} className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-50"><ArrowLeftRight size={16}/> Iniciar Enroque / Cambio de Turno</button>

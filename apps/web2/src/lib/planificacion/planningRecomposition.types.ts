@@ -1,10 +1,26 @@
 /** Paquete de cobertura / liberación planificada (ext + adel split). */
 
-export type RecompositionMode = 'absence' | 'liberation';
+export type RecompositionMode = 'absence' | 'liberation' | 'anticipated_absence';
 
 export type CoverageSegmentRole = 'EXTENSION' | 'EARLY_START' | 'LIBERATED' | 'TARGET';
 
 export type CoveragePackageType = 'ABSENCE_COVERAGE' | 'LIBERATION_RECOMPOSITION';
+
+export interface AnticipatedAbsenceDecl {
+  type: string;
+  code: string;
+  reason: string;
+}
+
+export interface PendingAbsenceNovedad {
+  employeeId: string;
+  employeeName: string;
+  startDate: string;
+  endDate: string;
+  type: string;
+  reason: string;
+  status: 'APPROVED';
+}
 
 export interface RecompositionSegment {
   employeeId: string;
@@ -40,6 +56,7 @@ export interface RecompositionPackage {
   earlyStart: RecompositionSegment;
   liberationReason?: string;
   redeployNote?: string;
+  anticipatedAbsence?: AnticipatedAbsenceDecl;
 }
 
 export interface RecompositionPendingMeta {

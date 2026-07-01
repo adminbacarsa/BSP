@@ -89,6 +89,27 @@ export function buildRecompositionPendingUpdates(
       }),
       comments: `Liberación planificada · ${pkg.redeployNote || 'Convocable otro objetivo'}`,
     });
+  } else if (pkg.mode === 'anticipated_absence' && pkg.anticipatedAbsence) {
+    updates[targetKey] = mergeShift(targetBase, {
+      code: pkg.anticipatedAbsence.code,
+      name: pkg.anticipatedAbsence.type,
+      isNovedad: true,
+      hours: 0,
+      startTime: '00:00',
+      isFranco: false,
+      isExtended: false,
+      isEarlyStart: false,
+      positionName: pkg.target.positionName,
+      objectiveId,
+      ...baseMeta('TARGET', {
+        coveredBy: coveredByLabel,
+        coverageNote: `Ausencia anticipada (${pkg.anticipatedAbsence.type}) · ${coveredByLabel}`,
+        coverageStatus: 'COVERED',
+      }),
+      comments: pkg.anticipatedAbsence.reason
+        ? `Ausencia anticipada: ${pkg.anticipatedAbsence.reason}`
+        : `Ausencia anticipada · ${pkg.anticipatedAbsence.type}`,
+    });
   } else {
     updates[targetKey] = mergeShift(targetBase, {
       ...baseMeta('TARGET', {
