@@ -5,7 +5,7 @@ import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -264,14 +264,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             setPublishStatusMap(map);
         }));
         const startLog = new Date(); startLog.setDate(startLog.getDate() - 2);
-        unsubs.push(onSnapshot(query(collection(db, 'audit_logs'), where('timestamp', '>=', Timestamp.fromDate(startLog)), orderBy('timestamp', 'desc'), limit(200)), (snap) => {
-            setRecentLogs(snap.docs
+        unsubs.push(onSnapshot(buildAuditLogsRecentQuery(empresaId, scopeEmpresa, { since: startLog, limit: 120 }), (snap) => {
+            setRecentLogs(sortAuditLogRows(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .map(d => {
                     const data = d.data();
                     return {
                         id: d.id,
                         ...data,
+                        timestamp: auditLogTimestampMs(data) || Date.now(),
                         formattedActor: data.actorName,
                         time: getSafeDate(data.timestamp),
                         fullDetail: data.details,
@@ -283,7 +284,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         module: data.module || 'OPERACIONES',
                         actorUid: data.actorUid || data.uid || '',
                     };
-                }));
+                }), 200));
         }));
         return () => { unsubs.forEach(u => u()); };
     }, [empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);

@@ -87,6 +87,9 @@ import {
     belongsToEmpresaView,
     shouldScopeQueriesToEmpresa,
     empresaCollectionQuery,
+    buildAuditLogsRecentQuery,
+    auditLogTimestampMs,
+    sortAuditLogRows,
     filterRowsByEmpresa,
     dedupeClientsById,
     stampEmpresaId,
@@ -462,6 +465,17 @@ const ACTION_LABELS: Record<string, string> = {
     'ASIGNACION': 'Asignación', 'ELIMINACION': 'Eliminación', 'EDICION_MASIVA': 'Edición Masiva',
     'ASIGNACION_MASIVA': 'Asignación Múltiple', 'CAMBIO_FRANCO_TURNO': 'Franco x Turno (FT)', 'CAMBIO_TURNO_FRANCO': 'Turno x Franco (FF)',
     'Devolución a Planificación': 'Devolución desde Operaciones',
+    'PUBLICACION_CRONOGRAMA': 'Publicación de cronograma',
+    'DESPUBLICACION_CRONOGRAMA': 'Despublicación de cronograma',
+    'CORRECCION_SUPERADMIN': 'Corrección (SuperAdmin)',
+    'CORRECCION_PLANIFICACION': 'Corrección planificación',
+    'CORRECCION_CODIGO': 'Corrección de código',
+    'ELIMINACION_MASIVA': 'Eliminación masiva',
+    'CAMBIO_DIAGRAMA': 'Cambio de diagrama',
+    'TRANSFERENCIA_OBJETIVO': 'Transferencia de objetivo',
+    'DESVINCULACION_OBJETIVO': 'Desvinculación de objetivo',
+    'OVERRIDE_200H': 'Autorización >200h',
+    'EQUILIBRAR_CRONOGRAMA': 'Equilibrar cronograma',
 };
 
 // Helper para día de la semana (0=Domingo -> 'D')
@@ -2499,38 +2513,38 @@ export default function PlanificacionPage() {
             setRfzTodos(rfzAll);
         }, (e) => { console.error('[plan] turnos error:', e); toast.error(`Error cargando turnos: ${e.code || e.message}`); });
 
-        // Actividad Reciente (audit_logs) - sin índices compuestos: traemos últimos N y filtramos en memoria.
+        // Actividad Reciente (audit_logs) — acotada por empresa activa del panel.
         const unsubLogs = onSnapshot(
-            query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(80)),
+            buildAuditLogsRecentQuery(empresaId, scopeEmpresa, { limit: 60 }),
             (snap) => {
-                const rows = snap.docs
-                    .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                    .map((d) => {
-                        const data: any = d.data();
-                        const ts =
-                            data.timestamp?.toDate ? data.timestamp.toDate()
-                            : (data.timestamp?.seconds ? new Date(data.timestamp.seconds * 1000)
-                            : new Date());
-                        return {
-                            id: d.id,
-                            timestamp: ts.getTime(),
-                            label: ACTION_LABELS[data.action] || data.action || 'CAMBIO',
-                            detail: data.details || '',
-                            actorUid: data.actorUid || '',
-                            actorEmail: data.actorEmail || '',
-                            actorName: data.actorName || data.actor || '',
-                            actor: data.actorName || data.actorEmail || data.actor || data.actorUid || '',
-                            module: data.module || '',
-                            action: data.action || '',
-                        };
-                    })
-                    .filter((x) => {
-                        const mod = (x.module || '').toString().toUpperCase();
-                        if (mod === 'PLANIFICADOR') return true;
-                        if (mod === 'OPERACIONES' && (x.action === 'Devolución a Planificación' || (x.label || '').includes('Devolución'))) return true;
-                        return false;
-                    })
-                    .slice(0, 20);
+                const rows = sortAuditLogRows(
+                    snap.docs
+                        .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                        .map((d) => {
+                            const data: any = d.data();
+                            const tsMs = auditLogTimestampMs(data) || Date.now();
+                            return {
+                                id: d.id,
+                                timestamp: tsMs,
+                                label: ACTION_LABELS[data.action] || data.action || 'CAMBIO',
+                                detail: data.details || '',
+                                objectiveName: data.objectiveName || '',
+                                actorUid: data.actorUid || '',
+                                actorEmail: data.actorEmail || '',
+                                actorName: data.actorName || data.actor || '',
+                                actor: data.actorName || data.actorEmail || data.actor || data.actorUid || '',
+                                module: data.module || '',
+                                action: data.action || '',
+                            };
+                        })
+                        .filter((x) => {
+                            const mod = (x.module || '').toString().toUpperCase();
+                            if (mod === 'PLANIFICADOR') return true;
+                            if (mod === 'OPERACIONES' && (x.action === 'Devolución a Planificación' || (x.label || '').includes('Devolución'))) return true;
+                            return false;
+                        }),
+                    20,
+                );
                 setUnifiedLogs(rows);
                 // Mostrar notificación inline si es un log nuevo (no en el mount inicial)
                 const newest = rows[0];
@@ -2548,9 +2562,13 @@ export default function PlanificacionPage() {
         );
 
         const unsubNotifs = onSnapshot(
-            query(collection(db, 'user_notifications'), orderBy('createdAt', 'desc'), limit(50)),
+            scopeEmpresa && empresaId
+                ? query(empresaCollectionQuery('user_notifications', empresaId, scopeEmpresa), limit(80))
+                : query(collection(db, 'user_notifications'), orderBy('createdAt', 'desc'), limit(50)),
             (snap) => {
-                const rows = snap.docs.map(d => {
+                const rows = snap.docs
+                    .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                    .map(d => {
                     const data: any = d.data();
                     const ts = data.createdAt?.toDate ? data.createdAt.toDate()
                         : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000) : new Date());
@@ -2566,7 +2584,9 @@ export default function PlanificacionPage() {
                         read: !!data.read,
                         readAt: readTs ? readTs.getTime() : null,
                     };
-                });
+                })
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 50);
                 setNotifLogs(rows);
             },
             () => setNotifLogs([])
@@ -3097,7 +3117,7 @@ export default function PlanificacionPage() {
             window.removeEventListener('resize', repositionNotifPanel);
         };
     }, [showNotifications, repositionNotifPanel]);
-    const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), { action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${selectedObjective}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid }); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
+    const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${getObjectiveName(selectedObjective)}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid, objectiveId: selectedObjective, objectiveName: getObjectiveName(selectedObjective) }, empresaId)); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
     const handleDelete = async () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
         if (!selectedCell) return;
@@ -3367,6 +3387,9 @@ export default function PlanificacionPage() {
                                     timestamp: serverTimestamp(),
                                     actorName: realActorName,
                                     actorUid: auth.currentUser?.uid,
+                                    objectiveId: selectedObjective,
+                                    objectiveName: getObjectiveName(selectedObjective),
+                                    clientId: selectedClient || undefined,
                                 }, empresaId));
                             }
                         }
@@ -3553,16 +3576,24 @@ export default function PlanificacionPage() {
                 console.warn('[plan] publish RFZ draft sweep error:', e);
             }
             await batch.commit();
+            const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
+            const clientName = clients.find((c: any) => c.id === selectedClient)?.name || selectedClient || '';
             // 3. Registrar en audit_logs
             await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
                 action: 'PUBLICACION_CRONOGRAMA',
                 module: 'PLANIFICADOR',
                 details: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps)
-                    ? `[OVERRIDE SA] Cronograma publicado sin validación SLA/cobertura — ${draftsSnap.docs.length} turno(s) · ${month}/${year}`
-                    : `Cronograma publicado — ${draftsSnap.docs.length} turno(s) notificado(s) · ${month}/${year}`,
+                    ? `[OVERRIDE SA] Cronograma publicado — ${objectiveName} · ${String(month).padStart(2, '0')}/${year} · ${draftsSnap.docs.length} turno(s)`
+                    : `Cronograma publicado — ${objectiveName} · ${String(month).padStart(2, '0')}/${year} · ${draftsSnap.docs.length} turno(s) notificado(s)`,
                 timestamp: serverTimestamp(),
                 actorName,
                 actorUid: getAuth().currentUser?.uid || null,
+                objectiveId: selectedObjective,
+                objectiveName,
+                clientId: selectedClient || undefined,
+                clientName: clientName || undefined,
+                year,
+                month,
             }, empresaId));
             // 4. Actualizar estado local
             setPublishStatusMap(prev => ({ ...prev, [publishLookupKey]: { publishedAt: new Date(), publishedBy: actorName } }));
@@ -7272,6 +7303,9 @@ export default function PlanificacionPage() {
                         <div className="bg-white w-full max-w-3xl h-[80vh] rounded-xl shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
                             <div className="p-4 border-b bg-slate-50 flex justify-between items-center">
                                 <h3 className="font-black text-lg flex items-center gap-2"><Clock className="text-indigo-600" size={18}/> Actividad Reciente</h3>
+                                {empresaId && (
+                                    <p className="text-[10px] font-bold text-slate-500 mt-0.5">Empresa: {(empresa as any)?.nombre || empresaId}</p>
+                                )}
                                 <button onClick={() => setShowActivityModal(false)} className="p-2 hover:bg-slate-200 rounded-lg"><X size={18}/></button>
                             </div>
                             {/* Tabs */}
@@ -7300,9 +7334,12 @@ export default function PlanificacionPage() {
                                             return (
                                                 <div key={log.id} className="p-3 border rounded-xl hover:bg-slate-50 transition-colors">
                                                     <div className="flex items-center justify-between gap-3">
-                                                        <div className="flex items-center gap-2 min-w-0">
+                                                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
                                                             <span className="text-xs font-mono text-slate-400">{new Date(log.timestamp).toLocaleString()}</span>
                                                             <span className="text-[10px] font-black uppercase bg-slate-100 text-slate-700 px-2 py-0.5 rounded border">{log.label}</span>
+                                                            {log.objectiveName && (
+                                                                <span className="text-[10px] font-bold text-indigo-600 truncate max-w-[140px]">{log.objectiveName}</span>
+                                                            )}
                                                             <span className="text-xs text-slate-700 truncate">{log.detail}</span>
                                                         </div>
                                                         <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">{realName}</span>
@@ -8863,13 +8900,15 @@ export default function PlanificacionPage() {
                                         await authModal.pendingFn!();
                                         // Loguear la autorización solo cuando viene del flujo GUARDAR
                                         if (authModal.isSaveFlow) {
-                                            await addDoc(collection(db, 'audit_logs'), {
+                                            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
                                                 timestamp: serverTimestamp(),
                                                 action: 'OVERRIDE_200H',
                                                 module: 'PLANIFICADOR',
                                                 actorName: result.name,
                                                 details: `${authModal.operatorName || 'Operador'} asignó turno a ${authModal.employees.map(e => `${e.name} (${e.hours}h)`).join(', ')} superando 200hs — autorizó: ${result.name}`,
-                                            });
+                                                objectiveId: selectedObjective || undefined,
+                                                objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
+                                            }, empresaId));
                                         }
                                         setAuthModal({ pendingFn: null, employees: [] });
                                         setAuthPin('');

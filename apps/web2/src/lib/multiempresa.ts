@@ -5,7 +5,7 @@
  */
 import {
   collection, getDocs, writeBatch, doc, setDoc, getDoc, deleteDoc, updateDoc,
-  query, where, limit, Query, CollectionReference, DocumentReference, Timestamp,
+  query, where, limit, orderBy, Query, CollectionReference, DocumentReference, Timestamp,
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { objectiveMatchKeys } from './slaPlanningMatch';
@@ -884,6 +884,58 @@ export function empresaCollectionQuery(
   if (!scopeEmpresa || !id) return col;
   if (id.toLowerCase() === 'bacarsa') return col;
   return query(col, where('empresaId', '==', id));
+}
+
+/** Timestamp de audit_logs → ms (ordenamiento en cliente). */
+export function auditLogTimestampMs(data: { timestamp?: unknown }): number {
+  const ts = data?.timestamp as { toDate?: () => Date; seconds?: number } | undefined;
+  if (ts?.toDate) return ts.toDate().getTime();
+  if (typeof ts?.seconds === 'number') return ts.seconds * 1000;
+  return 0;
+}
+
+/**
+ * Query de audit_logs acotada por tenant.
+ * Empresas con scope: equality en empresaId (+ orderBy timestamp si hay índice).
+ * Bacarsa legacy: últimos N globales; filtrar con belongsToEmpresaView en memoria.
+ */
+export function buildAuditLogsRecentQuery(
+  empresaId: string,
+  scopeEmpresa: boolean,
+  opts?: { limit?: number; since?: Date },
+): Query {
+  const limitN = opts?.limit ?? 80;
+  const id = String(empresaId ?? '').trim();
+  const tenantScoped = scopeEmpresa && !!id && id.toLowerCase() !== 'bacarsa';
+
+  if (tenantScoped) {
+    const base = empresaCollectionQuery('audit_logs', empresaId, true);
+    if (opts?.since) {
+      return query(
+        base as Query,
+        where('timestamp', '>=', Timestamp.fromDate(opts.since)),
+        orderBy('timestamp', 'desc'),
+        limit(limitN),
+      );
+    }
+    return query(base as Query, orderBy('timestamp', 'desc'), limit(limitN));
+  }
+
+  const col = collection(db, 'audit_logs');
+  if (opts?.since) {
+    return query(
+      col,
+      where('timestamp', '>=', Timestamp.fromDate(opts.since)),
+      orderBy('timestamp', 'desc'),
+      limit(limitN),
+    );
+  }
+  return query(col, orderBy('timestamp', 'desc'), limit(limitN));
+}
+
+/** Ordena y limita filas de audit ya filtradas por tenant. */
+export function sortAuditLogRows<T extends { timestamp?: number }>(rows: T[], max = 20): T[] {
+  return [...rows].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0)).slice(0, max);
 }
 
 export const SUPERADMIN_EMPRESA_STORAGE_KEY = 'cosp_superadmin_empresa_id';
