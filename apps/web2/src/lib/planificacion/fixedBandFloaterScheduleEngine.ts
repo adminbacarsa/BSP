@@ -330,28 +330,18 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
         const regularIds = groupIds.slice(0, 4);
         const floaterIds = groupIds.slice(4);
 
-        // Paso 1: determinar slot de apertura.
-        // Prioridad 1: prevMonthOpeningSlot + días del mes anterior → continuación exacta del ciclo planificado.
-        // Garantía CCT cross-month: (slot + 30) mod 24 = slot + 6 → siempre cambia de zona de banda →
-        // imposible tener racha del mismo tipo en el inicio del mes siguiente. Preserva el
-        // escalonamiento entre subgrupos establecido en el mes previo.
-        // Prioridad 2: inferJune1CycleSlot desde Firestore (solo empleados nuevos sin registro anterior).
+        // Paso 1: inferir offsets desde trailing de mayo
         const withTrail: string[] = [];
         const withoutTrail: string[] = [];
         for (const empId of regularIds) {
-            if (ctx.prevMonthOpeningSlotByEmp?.[empId] !== undefined && ctx.prevMonthDaysCount) {
-                out[empId] = ((ctx.prevMonthOpeningSlotByEmp[empId] + ctx.prevMonthDaysCount) % 24 + 24) % 24;
-                withTrail.push(empId);
-            } else {
-                const slot = inferJune1CycleSlot(
-                    ctx.prevMonthLastShiftByEmp?.[empId],
-                    ctx.prevMonthTrailingWorkDays?.[empId],
-                    ctx.prevMonthTrailingRestDays?.[empId],
-                    ctx.prevMonthLastWorkBandBeforeRest?.[empId],
-                );
-                if (slot !== null) { out[empId] = slot; withTrail.push(empId); }
-                else withoutTrail.push(empId);
-            }
+            const slot = inferJune1CycleSlot(
+                ctx.prevMonthLastShiftByEmp?.[empId],
+                ctx.prevMonthTrailingWorkDays?.[empId],
+                ctx.prevMonthTrailingRestDays?.[empId],
+                ctx.prevMonthLastWorkBandBeforeRest?.[empId],
+            );
+            if (slot !== null) { out[empId] = slot; withTrail.push(empId); }
+            else withoutTrail.push(empId);
         }
 
         // Paso 2: deduplicar por ZONA — dos empleados en la misma zona comparten franco.
@@ -366,36 +356,82 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             }
         }
 
-        // Canónico de referencia para empleados sin slot previo (withoutTrail).
-        // Se deriva de los slots ya asignados: con prevMonthOpeningSlot son 6-apart por construcción.
-        const canonicalForZone: Partial<Record<string, number>> = {};
-        for (const empId of withTrail) {
-            if (out[empId] !== undefined) {
-                const z = bandZone(out[empId]);
-                if (!(z in canonicalForZone)) canonicalForZone[z] = out[empId];
-            }
-        }
-        if (Object.keys(canonicalForZone).length > 0) {
-            const refSlot = Object.values(canonicalForZone)[0] as number;
-            for (let k = 0; k < 4; k++) {
-                const s = ((refSlot + k * 6) % 24 + 24) % 24;
-                const z = bandZone(s);
-                if (!(z in canonicalForZone)) canonicalForZone[z] = s;
-            }
-        } else {
-            // Cold-start total: sin ningún empleado con slot previo.
-            for (const empId of withoutTrail) {
-                const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
-                if (fb && WORK_BANDS.has(fb) && ZONE_SLOT[fb] !== undefined) {
-                    const refSlot = ZONE_SLOT[fb];
-                    for (let k = 0; k < 4; k++) {
-                        const s = ((refSlot + k * 6) % 24 + 24) % 24;
-                        const z = bandZone(s);
-                        if (!(z in canonicalForZone)) canonicalForZone[z] = s;
+        // Paso 2b: anchor = withTrail que minimiza snaps bloqueados por racha cross-month.
+        // Para cada candidato, computar cuántos otros withTrail no pueden snapear al canónico
+        // generado desde ese candidato sin superar 6 días consecutivos de la misma banda.
+        // Tiebreak: menor duf (más cerca del próximo franco) → canónico más "tarde" en el bloque.
+        let anchor = COLD_START_OPENINGS[0];
+        let anchorId: string | null = null;
+        {
+            let bestBlocked = Infinity;
+            let bestDuf = Infinity;
+            for (const candidateId of withTrail) {
+                if (out[candidateId] === undefined) continue;
+                const cSlot = out[candidateId];
+                const cCanon: Partial<Record<string, number>> = {};
+                for (let k = 0; k < 4; k++) {
+                    const s = ((cSlot + k * 6) % 24 + 24) % 24;
+                    const z = bandZone(s);
+                    if (!(z in cCanon)) cCanon[z] = s;
+                }
+                let blocked = 0;
+                for (const otherId of withTrail) {
+                    if (otherId === candidateId || out[otherId] === undefined) continue;
+                    const canon = cCanon[bandZone(out[otherId])];
+                    if (canon === undefined || canon === out[otherId]) continue;
+                    const tw = ctx.prevMonthTrailingWorkDays?.[otherId] ?? 0;
+                    const lastCode = (ctx.prevMonthLastShiftByEmp?.[otherId] ?? '').toUpperCase();
+                    if (tw > 0 && WORK_BANDS.has(lastCode)) {
+                        let startDays = 0;
+                        for (let di = 0; di < 7; di++) {
+                            if ((CYCLE_24_MTN[(canon + di) % 24] as string) !== lastCode) break;
+                            startDays++;
+                        }
+                        if (tw + startDays > 6) blocked++;
                     }
-                    break;
+                }
+                let duf = 0;
+                for (let di = 0; di < 7; di++) {
+                    if (!WORK_BANDS.has(CYCLE_24_MTN[(cSlot + di) % 24] as string)) break;
+                    duf++;
+                }
+                if (blocked < bestBlocked || (blocked === bestBlocked && duf < bestDuf)) {
+                    bestBlocked = blocked; bestDuf = duf;
+                    anchor = cSlot; anchorId = candidateId;
                 }
             }
+        }
+        if (anchorId === null) {
+            for (const empId of withoutTrail) {
+                const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+                if (fb && WORK_BANDS.has(fb) && ZONE_SLOT[fb] !== undefined) { anchor = ZONE_SLOT[fb]; break; }
+            }
+        }
+        const canonicalForZone: Partial<Record<string, number>> = {};
+        for (let k = 0; k < 4; k++) {
+            const s = ((anchor + k * 6) % 24 + 24) % 24;
+            const z = bandZone(s);
+            if (!(z in canonicalForZone)) canonicalForZone[z] = s;
+        }
+        // Snap withTrail no-anchor al canónico de su zona, salvo que generaría racha cross-month.
+        for (const empId of withTrail) {
+            if (empId === anchorId || out[empId] === undefined) continue;
+            const zone = bandZone(out[empId]);
+            const canonical = canonicalForZone[zone];
+            if (canonical === undefined || canonical === out[empId]) continue;
+            const tw = ctx.prevMonthTrailingWorkDays?.[empId] ?? 0;
+            const lastCode = (ctx.prevMonthLastShiftByEmp?.[empId] ?? '').toUpperCase();
+            if (tw > 0 && WORK_BANDS.has(lastCode)) {
+                // Contar solo días de LA MISMA BANDA que el trailing al inicio del mes con el slot canónico.
+                // Transiciones de banda (ej. trailing M → canonical T) no generan racha.
+                let startDays = 0;
+                for (let di = 0; di < 7; di++) {
+                    if ((CYCLE_24_MTN[(canonical + di) % 24] as string) !== lastCode) break;
+                    startDays++;
+                }
+                if (tw + startDays > 6) continue;
+            }
+            out[empId] = canonical;
         }
 
         // Paso 3: cold-start — empleados con banda fija tienen prioridad de zona.
@@ -412,12 +448,15 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
         withoutTrail.forEach((empId, i) => {
             const fixedBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
             let zone: string;
-            if (fixedBand && WORK_BANDS.has(fixedBand) && availableZones.has(fixedBand as 'M' | 'T' | 'N' | 'F')) {
+            if (fixedBand && WORK_BANDS.has(fixedBand) && availableZones.has(fixedBand)) {
                 zone = fixedBand;
             } else {
                 zone = [...availableZones][0] ?? (['M', 'T', 'N', 'F'] as const)[i % 4];
             }
-            availableZones.delete(zone as 'M' | 'T' | 'N' | 'F');
+            availableZones.delete(zone);
+            // Siempre usar el slot canónico del subgrupo (alineado con el anchor de step 2b).
+            // prevMonthOpeningSlotByEmp + daysCount causaba desalineación: los slots resultantes
+            // no eran 6-apart respecto al anchor con trailing data → Franco el mismo día → huecos.
             out[empId] = (canonicalForZone[zone] as number | undefined) ?? ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
         });
 
