@@ -71,6 +71,8 @@ export interface RecompositionPendingMeta {
   segmentToTime?: string;
   coversEmployeeId?: string;
   coversPositionName?: string;
+  /** Banda SLA cubierta por el paquete split (ej. MM, M). */
+  coversBandCode?: string;
   coverageNote?: string;
   liberationReason?: string;
   redeployNote?: string;

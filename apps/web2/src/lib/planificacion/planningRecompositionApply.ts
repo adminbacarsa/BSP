@@ -128,6 +128,7 @@ export function buildRecompositionPendingUpdates(
     coverageSegmentRole: role,
     coversEmployeeId: pkg.target.employeeId,
     coversPositionName: pkg.gapPositionName,
+    coversBandCode: String(pkg.target.code || '').toUpperCase() || undefined,
     coverageMode: 'SPLIT',
     ...extra,
   });

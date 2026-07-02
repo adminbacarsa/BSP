@@ -128,6 +128,7 @@ import {
     countPositionClosedUnitsFromShifts,
     PLANNING_NON_BILLABLE_CODES,
     buildCodeCountsByPositionForDay,
+    collectSplitBandCreditsForDay,
 } from '@/lib/planificacion/positionCoverageUnits';
 import {
     analyzeDayCoverageGaps,
@@ -1911,6 +1912,26 @@ export default function PlanificacionPage() {
             codeCounts[code] = (codeCounts[code] || 0) + 1;
         });
 
+        const splitCredits = collectSplitBandCreditsForDay(
+            employeesList,
+            dateStr,
+            (empId, ds) => {
+                const k = `${empId}_${ds}`;
+                const pending = changes[k];
+                if (pending?.isDeleted) return null;
+                return pending ? pending : existing[k] || null;
+            },
+            {
+                selectedObjective,
+                isPendingChange: (empId, ds) => !!changes[`${empId}_${ds}`],
+                resolveOriginalShift: (empId, ds) => existing[`${empId}_${ds}`] || null,
+            },
+        );
+        const posCredits = splitCredits[pos.positionName] || {};
+        for (const [bandCode, n] of Object.entries(posCredits)) {
+            codeCounts[bandCode] = (codeCounts[bandCode] || 0) + n;
+        }
+
         return countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles);
     };
 
@@ -1955,6 +1976,7 @@ export default function PlanificacionPage() {
             selectedObjective,
             dominantPositionName: dominantPosition?.positionName || 'General',
             isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
+            existingShiftsMap: shiftsMap,
         },
     );
 
@@ -3404,6 +3426,7 @@ export default function PlanificacionPage() {
                             turnoPayload.redeployNote = change.redeployNote || null;
                             turnoPayload.coversEmployeeId = change.coversEmployeeId || null;
                             turnoPayload.coversPositionName = change.coversPositionName || null;
+                            turnoPayload.coversBandCode = change.coversBandCode || null;
                             if (change.segmentFromTime) turnoPayload.segmentFromTime = change.segmentFromTime;
                             if (change.segmentToTime) turnoPayload.segmentToTime = change.segmentToTime;
                         }
