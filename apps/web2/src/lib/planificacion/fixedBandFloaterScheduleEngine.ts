@@ -279,8 +279,9 @@ function rebalance24hPositionGroups(
 function buildSubgroupsFor24hs(
     ctx: V2EngineContext,
     positionGroups: Record<string, string[]>,
-): { subgroups: string[][]; strandedIds: string[] } {
+): { subgroups: string[][]; strandedIds: string[]; subgroupMeta: Array<{ puesteName: string; indexWithinPuesto: number }> } {
     const result: string[][] = [];
+    const subgroupMeta: Array<{ puesteName: string; indexWithinPuesto: number }> = [];
     // Empleados de puestos 24hs con dotación insuficiente para armar subgrupo completo.
     // Se redistribuyen como flotantes al final, en vez de quedar idle.
     const stranded: string[] = [];
@@ -307,19 +308,24 @@ function buildSubgroupsFor24hs(
         const floaters = groupIds.slice(subgroupCount * subgroupSize);
         floaters.forEach((id, fi) => { subs[fi % subs.length].push(id); });
         result.push(...subs);
+        subs.forEach((_, i) => subgroupMeta.push({ puesteName: posName, indexWithinPuesto: i }));
     }
     // Redistribuir stranded como flotantes extra en los subgrupos existentes
     if (stranded.length > 0 && result.length > 0) {
         stranded.forEach((id, i) => { result[i % result.length].push(id); });
     }
-    return { subgroups: result, strandedIds: stranded };
+    return { subgroups: result, strandedIds: stranded, subgroupMeta };
 }
 
 // Cold-starts POR SUBGRUPO con deduplicación POR ZONA de banda.
 // El ciclo tiene 3 zonas de trabajo (M=0-5, T=8-13, N=16-21) y 3 de franco (F=6-7/14-15/22-23).
 // Si dos empleados del mismo subgrupo tienen offsets en la misma zona, coinciden en Franco
 // el mismo día → brecha de cobertura. Se mantiene solo uno por zona.
-function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): Record<string, number> {
+function resolveOpeningSlotByEmp(
+    ctx: V2EngineContext,
+    subgroups: string[][],
+    subgroupMeta: Array<{ puesteName: string; indexWithinPuesto: number }> = [],
+): Record<string, number> {
     const out: Record<string, number> = {};
 
     // Zona de banda del slot (día 1 del mes = di=0)
@@ -335,14 +341,41 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
     // Slot preferido para llenar cada zona sin trailing
     const ZONE_SLOT: Record<string, number> = { M: 4, T: 10, N: 16, F: 22 };
 
-    for (const groupIds of subgroups) {
+    // Desplazamiento dentro de zona para sub1+: garantiza que los días de franco
+    // no coincidan entre sub0 y sub1 del mismo puesto (evita 3+ francos simultáneos).
+    const F_CYCLE = [6, 7, 14, 15, 22, 23];
+    const ZONE_BASE: Record<string, number> = { M: 0, T: 8, N: 16 };
+    const withinZoneShift = (zone: string, pos: number, shift: number): number => {
+        if (zone === 'F') {
+            const idx = F_CYCLE.indexOf(pos);
+            return idx >= 0 ? F_CYCLE[(idx + shift) % F_CYCLE.length] : pos;
+        }
+        const base = ZONE_BASE[zone];
+        if (base === undefined) return pos;
+        return base + ((pos - base + shift) % 6 + 6) % 6;
+    };
+
+    // Canónico de sub0 por puesto: sub1+ lo usa como base de su propio canónico escalonado.
+    const sub0CanonicalByPueste: Record<string, Partial<Record<string, number>>> = {};
+
+    for (let gi = 0; gi < subgroups.length; gi++) {
+        const groupIds = subgroups[gi];
+        const meta = subgroupMeta[gi];
+        const stagger = (meta?.indexWithinPuesto ?? 0) * 3;
+        const puesteName = meta?.puesteName ?? '';
         const regularIds = groupIds.slice(0, 4);
         const floaterIds = groupIds.slice(4);
 
-        // Paso 1: inferir offsets desde trailing de mayo
+        // Paso 1: inferir offsets desde trailing de mayo.
+        // Sub1+: forzar cold-start para aplicar el canónico escalonado y evitar
+        // coincidencia de francos con sub0.
         const withTrail: string[] = [];
         const withoutTrail: string[] = [];
         for (const empId of regularIds) {
+            if (stagger > 0) {
+                withoutTrail.push(empId);
+                continue;
+            }
             const slot = inferJune1CycleSlot(
                 ctx.prevMonthLastShiftByEmp?.[empId],
                 ctx.prevMonthTrailingWorkDays?.[empId],
@@ -422,6 +455,18 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
             const z = bandZone(s);
             if (!(z in canonicalForZone)) canonicalForZone[z] = s;
         }
+        if (stagger === 0 && puesteName) {
+            // Guardar canónico de sub0 para que sub1+ pueda escalarlo.
+            sub0CanonicalByPueste[puesteName] = { ...canonicalForZone };
+        } else if (stagger > 0 && sub0CanonicalByPueste[puesteName]) {
+            // Sub1+: reemplazar canonicalForZone con la versión escalonada de sub0.
+            // Desplazar +stagger dentro de cada zona preserva la propiedad 1M+1T+1N+1F/día
+            // y garantiza que los francos de sub0 y sub1 nunca coincidan.
+            for (const z of ['M', 'T', 'N', 'F'] as const) {
+                const basePos = sub0CanonicalByPueste[puesteName][z];
+                if (basePos !== undefined) canonicalForZone[z] = withinZoneShift(z, basePos, stagger);
+            }
+        }
         // Snap withTrail no-anchor al canónico de su zona, salvo que generaría racha cross-month.
         for (const empId of withTrail) {
             if (empId === anchorId || out[empId] === undefined) continue;
@@ -463,8 +508,9 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
                 zone = [...availableZones][0] ?? (['M', 'T', 'N', 'F'] as const)[i % 4];
             }
             availableZones.delete(zone as 'M' | 'T' | 'N' | 'F');
-            // Si hay slot del mes anterior y su cantidad de días, continuar el ciclo en lugar de reiniciar.
-            if (ctx.prevMonthOpeningSlotByEmp?.[empId] !== undefined && ctx.prevMonthDaysCount) {
+            // Sub1+: usar siempre el canónico escalonado para garantizar desfase vs sub0.
+            // Sub0: si hay slot del mes anterior y su cantidad de días, continuar el ciclo.
+            if (stagger === 0 && ctx.prevMonthOpeningSlotByEmp?.[empId] !== undefined && ctx.prevMonthDaysCount) {
                 out[empId] = ((ctx.prevMonthOpeningSlotByEmp[empId] + ctx.prevMonthDaysCount) % 24 + 24) % 24;
             } else {
                 out[empId] = (canonicalForZone[zone] as number | undefined) ?? ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
@@ -603,13 +649,13 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
     // Corregir asignaciones incorrectas: mover excedentes de puestos sobre-dotados a sub-dotados
     const { groups: positionGroups, relocatedIds } = rebalance24hPositionGroups(ctx, rawPositionGroups);
     // Subgrupos independientes por slot concurrente (qty>1 → N subgrupos de 4-5 c/u)
-    const { subgroups, strandedIds } = buildSubgroupsFor24hs(ctx, positionGroups);
+    const { subgroups, strandedIds, subgroupMeta } = buildSubgroupsFor24hs(ctx, positionGroups);
     // empToPosition: usado para L-V y patchRetForAbsences
     const empToPosition: Record<string, string> = {};
     for (const [posName, ids] of Object.entries(positionGroups)) {
         ids.forEach(id => { empToPosition[id] = posName; });
     }
-    const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, subgroups);
+    const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, subgroups, subgroupMeta);
     // empSubgroup: cada guardia apunta a su subgrupo de 4-5 (para isRetFloater correcto)
     const empSubgroup = new Map<string, string[]>();
     subgroups.forEach(sub => sub.forEach(id => empSubgroup.set(id, sub)));
