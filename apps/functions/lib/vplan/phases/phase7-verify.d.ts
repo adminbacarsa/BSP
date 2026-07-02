@@ -6,4 +6,5 @@ export declare function runVplanVerification(opts: {
     prevPlanningState: VplanPlanningState;
     strategy: VplanStrategy;
     draft: VplanScheduleDraft;
+    monthDemandHours?: number;
 }): VplanVerificationReport;

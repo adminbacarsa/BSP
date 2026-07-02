@@ -209,6 +209,7 @@ async function runVplanOrchestrator(request) {
             prevPlanningState: snapshot.prevPlanningState,
             strategy: context.strategy,
             draft: context.draft,
+            monthDemandHours: context.demand?.monthDemandHours,
         });
         steps.push(step('7_verify', context.verification.ok, context.verification.ok
             ? `Cobertura OK · ${context.verification.billableHours}h · gap ${context.verification.hoursGap}h`
@@ -243,6 +244,7 @@ async function runVplanOrchestrator(request) {
                 prevPlanningState: snapshot.prevPlanningState,
                 strategy: context.strategy,
                 draft: context.draft,
+                monthDemandHours: context.demand?.monthDemandHours,
             });
         }
     }
@@ -255,6 +257,7 @@ async function runVplanOrchestrator(request) {
             objectiveId: request.objectiveId,
             year: request.year,
             month: request.month,
+            employeeNames: Object.fromEntries(snapshot.employees.map((e) => [e.id, e.displayName])),
         });
         steps.push(step('10_deliver', true, `Diff ${context.deliverable.diff.length} ops · ${context.deliverable.reportSummary.slice(0, 120)}…`, t10));
     }

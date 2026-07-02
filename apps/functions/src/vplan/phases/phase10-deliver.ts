@@ -17,12 +17,14 @@ export function buildVplanDeliverable(opts: {
   objectiveId: string;
   year: number;
   month: number;
+  employeeNames?: Record<string, string>;
 }): VplanDeliverable {
   const existingMap = new Map<string, VplanExistingAssignment>();
   for (const a of opts.existingAssignments) {
     existingMap.set(`${a.employeeId}_${a.dateStr}`, a);
   }
 
+  const nameOf = (id: string) => opts.employeeNames?.[id] || id;
   const diff: VplanScheduleDiffEntry[] = [];
 
   for (const a of opts.draft.assignments) {
@@ -32,6 +34,7 @@ export function buildVplanDeliverable(opts: {
       diff.push({
         action: 'create',
         employeeId: a.employeeId,
+        employeeName: nameOf(a.employeeId),
         dateStr: a.dateStr,
         code: a.code,
         positionName: a.positionName,
@@ -41,6 +44,7 @@ export function buildVplanDeliverable(opts: {
       diff.push({
         action: 'update',
         employeeId: a.employeeId,
+        employeeName: nameOf(a.employeeId),
         dateStr: a.dateStr,
         code: a.code,
         positionName: a.positionName,
@@ -55,6 +59,7 @@ export function buildVplanDeliverable(opts: {
     diff.push({
       action: 'delete',
       employeeId: prev.employeeId,
+      employeeName: nameOf(prev.employeeId),
       dateStr: prev.dateStr,
       code: prev.code,
       positionName: prev.positionName,

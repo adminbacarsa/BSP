@@ -149,6 +149,7 @@ export interface VplanFixerLogEntry {
 export interface VplanScheduleDiffEntry {
   action: 'create' | 'update' | 'delete';
   employeeId: string;
+  employeeName?: string;
   dateStr: string;
   code: string;
   positionName: string;
@@ -173,12 +174,60 @@ export interface VplanVerificationIssue {
   employeeId?: string;
 }
 
+export interface VplanPositionSlotRow {
+  positionName: string;
+  shiftCode: string;
+  requiredSlots: number;
+  coveredSlots: number;
+  missingSlots: number;
+  coveragePct: number;
+}
+
+export interface VplanCodeMonthSummary {
+  code: string;
+  label: string;
+  category: 'trabajo' | 'franco' | 'ausencia' | 'otro';
+  count: number;
+  hours: number;
+}
+
+export interface VplanSchedulePreviewCell {
+  code: string;
+  positionName?: string;
+}
+
+export interface VplanSchedulePreviewRow {
+  employeeId: string;
+  displayName: string;
+  defaultPosition?: string;
+  cells: Record<string, VplanSchedulePreviewCell>;
+  codeTotals: Record<string, number>;
+}
+
+export interface VplanSchedulePreview {
+  dateStrs: string[];
+  rows: VplanSchedulePreviewRow[];
+  codeSummary: VplanCodeMonthSummary[];
+}
+
+export interface VplanCoverageBundle {
+  totalSlots: number;
+  coveredSlots: number;
+  uncoveredSlots: number;
+  coverageRatio: number;
+  structuralHours: number;
+  positionSlots: VplanPositionSlotRow[];
+  uncoveredByDay: Record<string, Array<{ positionName: string; shiftCode: string; missing: number }>>;
+  schedulePreview: VplanSchedulePreview;
+}
+
 export interface VplanVerificationReport {
   ok: boolean;
   issues: VplanVerificationIssue[];
   billableHours?: number;
   slaVendidas?: number;
   hoursGap?: number;
+  coverage?: VplanCoverageBundle;
 }
 
 export interface VplanStepResult {

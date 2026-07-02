@@ -8,8 +8,12 @@ import type {
   VplanIntent,
   VplanRunMode,
   VplanRunResponse,
-  VplanScheduleDiffEntry,
 } from '@/lib/vplan/vplan.types';
+import {
+  buildEmployeeNameMap,
+  DiffTable,
+  VplanCoveragePanels,
+} from '@/components/vplan/VplanCoveragePanels';
 import {
   Brain,
   Play,
@@ -18,8 +22,6 @@ import {
   CheckCircle2,
   XCircle,
   FlaskConical,
-  ChevronDown,
-  ChevronUp,
   FileJson,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -51,53 +53,6 @@ function statusBadge(status: VplanRunResponse['status']) {
   return { icon: XCircle, className: 'bg-red-50 text-red-800 border-red-200', label: 'Error' };
 }
 
-function DiffTable({ rows }: { rows: VplanScheduleDiffEntry[] }) {
-  const [open, setOpen] = useState(false);
-  const preview = rows.slice(0, 12);
-  if (!rows.length) return <p className="text-sm text-slate-500">Sin operaciones en el diff.</p>;
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50"
-      >
-        <span className="font-bold text-slate-800">Diff ({rows.length} ops)</span>
-        {open ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-      </button>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="bg-slate-50 text-slate-600 uppercase">
-            <tr>
-              <th className="px-3 py-2 text-left">Acción</th>
-              <th className="px-3 py-2 text-left">Fecha</th>
-              <th className="px-3 py-2 text-left">Empleado</th>
-              <th className="px-3 py-2 text-left">Código</th>
-              <th className="px-3 py-2 text-left">Puesto</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(open ? rows : preview).map((r, i) => (
-              <tr key={`${r.employeeId}_${r.dateStr}_${i}`} className="border-t border-slate-100">
-                <td className="px-3 py-1.5 font-mono text-indigo-700">{r.action}</td>
-                <td className="px-3 py-1.5">{r.dateStr}</td>
-                <td className="px-3 py-1.5 font-mono">{r.employeeId.slice(0, 12)}…</td>
-                <td className="px-3 py-1.5 font-bold">{r.code}</td>
-                <td className="px-3 py-1.5">{r.positionName || '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!open && rows.length > preview.length && (
-        <p className="px-4 py-2 text-[11px] text-slate-500 border-t border-slate-100">
-          Mostrando {preview.length} de {rows.length}. Expandir para ver todo.
-        </p>
-      )}
-    </div>
-  );
-}
-
 export default function VplanLabPage() {
   const { isSuperAdmin, canReadModule } = useAuth();
   const { empresaId } = useEmpresa();
@@ -122,6 +77,11 @@ export default function VplanLabPage() {
   const selectedObj = useMemo(
     () => objectives.find((o) => o.objectiveId === objectiveId),
     [objectives, objectiveId],
+  );
+
+  const employeeNameMap = useMemo(
+    () => buildEmployeeNameMap(result?.context.supply),
+    [result?.context.supply],
   );
 
   const handleRun = async () => {
@@ -189,7 +149,7 @@ export default function VplanLabPage() {
 
   return (
     <DashboardLayout>
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-[1400px] mx-auto space-y-6">
         <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white p-6 shadow-lg">
           <div className="flex items-start gap-4">
             <div className="p-3 rounded-2xl bg-white/15">
@@ -211,7 +171,7 @@ export default function VplanLabPage() {
           )}
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-6">
+        <div className="grid lg:grid-cols-2 gap-6 items-start">
           <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 space-y-4">
             <h2 className="font-black text-slate-800 flex items-center gap-2">
               <Play size={18} className="text-indigo-600" />
@@ -383,17 +343,15 @@ export default function VplanLabPage() {
                 )}
 
                 {result.context.verification && (
-                  <div className="text-xs rounded-xl border border-slate-200 p-3">
+                  <div className="text-xs rounded-xl border border-slate-200 p-3 space-y-1">
                     <p className="font-bold text-slate-800">Verificación</p>
                     <p>
-                      {result.context.verification.billableHours}h facturables · gap {result.context.verification.hoursGap}h ·{' '}
-                      {result.context.verification.issues.length} issue(s)
+                      {result.context.verification.billableHours}h facturables · gap {result.context.verification.hoursGap}h
+                      {result.context.verification.coverage && (
+                        <> · cobertura {result.context.verification.coverage.coverageRatio}%</>
+                      )}
                     </p>
                   </div>
-                )}
-
-                {result.context.deliverable && (
-                  <DiffTable rows={result.context.deliverable.diff} />
                 )}
 
                 <button
@@ -413,6 +371,14 @@ export default function VplanLabPage() {
             )}
           </div>
         </div>
+
+        {result?.context.verification?.coverage && (
+          <VplanCoveragePanels verification={result.context.verification} />
+        )}
+
+        {result?.context.deliverable && (
+          <DiffTable rows={result.context.deliverable.diff} nameMap={employeeNameMap} />
+        )}
       </div>
     </DashboardLayout>
   );

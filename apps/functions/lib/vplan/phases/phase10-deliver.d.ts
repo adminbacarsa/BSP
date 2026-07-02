@@ -7,4 +7,5 @@ export declare function buildVplanDeliverable(opts: {
     objectiveId: string;
     year: number;
     month: number;
+    employeeNames?: Record<string, string>;
 }): VplanDeliverable;

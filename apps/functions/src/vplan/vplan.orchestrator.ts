@@ -270,6 +270,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       prevPlanningState: snapshot.prevPlanningState,
       strategy: context.strategy,
       draft: context.draft,
+      monthDemandHours: context.demand?.monthDemandHours,
     });
     steps.push(step(
       '7_verify',
@@ -317,6 +318,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
         prevPlanningState: snapshot.prevPlanningState,
         strategy: context.strategy,
         draft: context.draft,
+        monthDemandHours: context.demand?.monthDemandHours,
       });
     }
   }
@@ -330,6 +332,9 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       objectiveId: request.objectiveId,
       year: request.year,
       month: request.month,
+      employeeNames: Object.fromEntries(
+        snapshot.employees.map((e) => [e.id, e.displayName]),
+      ),
     });
     steps.push(step(
       '10_deliver',
