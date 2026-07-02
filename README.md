@@ -38,7 +38,7 @@ El proyecto es un **Monorepo** que integra Frontend y Backend:
    ```bash
    npm run dev
    ```
-   Abrir **http://localhost:3000** (o el puerto que indique la terminal).
+   Abrir **http://localhost:3001** (puerto definido en `apps/web2/package.json`, `next dev -p 3001`).
 
 2. **Probar y compilar**  
    Cuando esté listo, generar la versión estática:

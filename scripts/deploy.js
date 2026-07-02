@@ -2,7 +2,7 @@
 /**
  * Deploy a producción.
  *
- * Por defecto, si el lab está activo (emuladores :8080/:9099 o dev :3000), deploy en
+ * Por defecto, si el lab está activo (emuladores :8080/:9099 o dev :3001), deploy en
  * worktree separado ../cronoapp-deploy — no build en esta carpeta, emulador intacto.
  *
  * Uso:
@@ -29,7 +29,7 @@ if (flags.dryRun) process.exit(0);
 
 if (forceWorktree || (!forceHere && labIsActive())) {
   if (!forceWorktree && labIsActive()) {
-    console.log('\n🧪 Lab activo (emulador o :3000) → deploy en carpeta separada (cronoapp-deploy).\n');
+    console.log('\n🧪 Lab activo (emulador o :3001) → deploy en carpeta separada (cronoapp-deploy).\n');
     console.log('   Para build en esta carpeta igual: npm run deploy -- --here\n');
   }
   const child = spawnSync(process.execPath, [path.join(__dirname, 'deploy-worktree.js'), ...deployArgs], {

@@ -26,4 +26,4 @@ foreach ($n in $logs) {
 }
 
 Write-Host "`nPuertos:" -ForegroundColor Cyan
-netstat -an | Select-String ':3000|:3010|:4000|:8080|:9099' | Select-Object -First 18
+netstat -an | Select-String ':3001|:3010|:4000|:8080|:9099' | Select-Object -First 18

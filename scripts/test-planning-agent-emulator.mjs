@@ -233,7 +233,8 @@ async function main() {
     console.log('  muestra corrección:', JSON.stringify(data.correcciones[0]));
   }
   console.log('\nOK — pipeline Gemini operativo en emulador.');
-  console.log('UI manual: http://localhost:3000/admin/planificacion → Automatizar');
+  console.log('UI manual: http://localhost:3001/admin/planificacion → Automatizar');
+  console.log('VPLAN lab:  http://localhost:3001/admin/vplan');
 }
 
 main().catch((e) => {

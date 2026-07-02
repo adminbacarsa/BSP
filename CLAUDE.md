@@ -280,7 +280,7 @@ npm run seed
 
 (Mismo comando que `npm run seed:lab`.) Equivale a `node scripts/seed-admin.js` + `node scripts/seed-empleado.js` (`admin@bacarsa.com.ar` / `admin1234`, `guardia@bacarsa.com.ar` / `guardia1234`). `seed-lab.js` espera a que **8080 y 9099** acepten conexión (evita sembrar antes de que Auth esté listo). Solo admin: `node scripts/seed-admin.js`.
 
-**Front en :3000 “viejo”:** el dev server es `next dev` (`npm run dev` desde la raíz). Pará el proceso, borrá `apps/web2/.next`, volvé a `npm run dev` y en el navegador recarga forzada (Ctrl+F5). Si en :3000 corre **otra app** u otro clon de repo, cerrá ese proceso o cambiá el puerto en `apps/web2/package.json` (`next dev -p`).
+**Front en :3001:** el dev server es `next dev -p 3001` (`npm run dev` desde la raíz → `apps/web2`). Pará el proceso, borrá `apps/web2/.next`, volvé a `npm run dev` y recarga forzada (Ctrl+F5). Puerto configurable en `apps/web2/package.json` (`next dev -p`) o `COSP_DEV_PORT`.
 
 ---
 
@@ -300,14 +300,14 @@ Desde Notebook, N8N es accesible como `B:\cronoapp` (unidad de red).
 ```
 DESARROLLO (Notebook)
   1. Editás código en C:\APP\cronoapp
-  2. Probás en http://localhost:3000 (emuladores locales)
+  2. Probás en http://localhost:3001 (emuladores locales)
   3. git push origin main
 
 TESTING (N8N — sincronizar desde Notebook)
   4. git -C /b/cronoapp fetch origin && git -C /b/cronoapp reset --hard origin/main
   5. En N8N: `npm install` y `npm run emulators`
-  6. En N8N: `npm run dev` (Next en 0.0.0.0:3000)
-  7. Testers acceden a http://192.168.0.8:3000
+  6. En N8N: `npm run dev` (Next en 0.0.0.0:3001)
+  7. Testers acceden a http://192.168.0.8:3001
 
 PRODUCCIÓN (Notebook)
   8. Cambiar .env.local → NEXT_PUBLIC_USE_EMULATOR=false
@@ -346,7 +346,7 @@ git -C /b/cronoapp fetch origin && git -C /b/cronoapp reset --hard origin/main
 Firebase Hosting → `https://comtroldata.web.app`
 Firebase project: `comtroldata`
 
-**Deploy no debe tumbar el lab.** Si emuladores (`:8080`/`:9099`) o `npm run dev` (`:3000`) están activos, `npm run deploy` usa automáticamente un **git worktree** en `../cronoapp-deploy`: build y `firebase deploy` corren ahí; esta carpeta (`cronoapp`) no ejecuta `next build`.
+**Deploy no debe tumbar el lab.** Si emuladores (`:8080`/`:9099`) o `npm run dev` (`:3001`) están activos, `npm run deploy` usa automáticamente un **git worktree** en `../cronoapp-deploy`: build y `firebase deploy` corren ahí; esta carpeta (`cronoapp`) no ejecuta `next build`.
 
 Artefactos de producción van a **`build/hosting`** y **`build/.next-prod`** (no `apps/web2/out` ni `.next` del dev server). `.env.local` del lab se copia al worktree solo para credenciales de build (`USE_EMULATOR=false` en el proceso de build).
 

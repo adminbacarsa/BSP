@@ -13,6 +13,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$devPort = if ($env:COSP_DEV_PORT) { [int]$env:COSP_DEV_PORT } else { 3001 }
 
 function Write-Step([string]$msg, [string]$color = 'Cyan') {
   Write-Host $msg -ForegroundColor $color
@@ -174,7 +175,7 @@ if (-not $NoSeed) {
   }
 }
 
-$devPortBusy = Test-TcpPort 3000
+$devPortBusy = Test-TcpPort $devPort
 if (-not $devPortBusy) {
   Write-Step 'Abriendo Next.js (ventana nueva)...' 'Yellow'
   $devCmd = if ($Network) {
@@ -182,15 +183,15 @@ if (-not $devPortBusy) {
   } else {
     'npm run dev'
   }
-  Start-Process cmd.exe -ArgumentList @('/k', "cd /d `"$projectRoot`" && title COSP Next :3000 && $devCmd")
-  Write-Step 'Esperando http://127.0.0.1:3000 ...' 'DarkGray'
+  Start-Process cmd.exe -ArgumentList @('/k', "cd /d `"$projectRoot`" && title COSP Next :$devPort && $devCmd")
+  Write-Step "Esperando http://127.0.0.1:$devPort ..." 'DarkGray'
   try {
-    Wait-TcpPort 3000 90 'Next '
+    Wait-TcpPort $devPort 90 'Next '
   } catch {
-    Write-Step 'Next aún iniciando — abrí http://localhost:3000 en unos segundos.' 'Yellow'
+    Write-Step "Next aún iniciando — abrí http://localhost:$devPort en unos segundos." 'Yellow'
   }
 } else {
-  Write-Step 'Puerto 3000 ocupado — asumo que Next ya corre.' 'Green'
+  Write-Step "Puerto $devPort ocupado — asumo que Next ya corre." 'Green'
 }
 
 if (-not $NoCursor) {
@@ -205,12 +206,12 @@ if (-not $NoCursor) {
 
 if (-not $NoBrowser) {
   Start-Sleep -Seconds 2
-  Start-Process 'http://127.0.0.1:3000'
+  Start-Process "http://127.0.0.1:$devPort"
 }
 
 Write-Host ''
 Write-Step 'Listo.' 'Green'
-Write-Host '  App:        http://localhost:3000' -ForegroundColor White
+Write-Host "  App:        http://localhost:$devPort" -ForegroundColor White
 Write-Host '  Emuladores: http://127.0.0.1:4000' -ForegroundColor White
 Write-Host '  Login lab:  admin@bacarsa.com.ar / admin1234' -ForegroundColor White
 Write-Host ''

@@ -10,7 +10,7 @@ El build de producción (`next build`, compilación de Functions, `firebase depl
 
 | Carpeta | Rol | Puertos típicos |
 |---------|-----|-----------------|
-| `C:\APP\cronoapp` | **Lab** — código, emuladores, dev, backups JSON | `:3000`, `:8080`, `:9099`, `:5001`, `:3010` (bridge) |
+| `C:\APP\cronoapp` | **Lab** — código, emuladores, dev, backups JSON | `:3001`, `:8080`, `:9099`, `:5001`, `:3010` (bridge) |
 | `C:\APP\cronoapp-deploy` | **Deploy** — git worktree; solo build + firebase | ninguno del lab |
 
 Artefactos de producción (no commitear):
@@ -24,7 +24,7 @@ El dev sigue usando `apps/web2/.next` — **no se toca** en deploy.
 
 ### Con el lab corriendo (recomendado)
 
-Si hay algo escuchando en `:8080`, `:9099` o `:3000`, `npm run deploy` **detecta el lab** y deploya desde `cronoapp-deploy` automáticamente:
+Si hay algo escuchando en `:8080`, `:9099` o `:3001`, `npm run deploy` **detecta el lab** y deploya desde `cronoapp-deploy` automáticamente:
 
 ```powershell
 # Solo hosting

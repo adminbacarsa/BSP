@@ -73,7 +73,7 @@ if (planificacion.includes('vplan') || planificacion.includes('VPLAN')) {
 
 console.log('\nDocumentación cerebro: docs/VPLAN.md');
 console.log('Callable lab (emulador): vplanRun');
-console.log('UI lab: /admin/vplan (sidebar si emulador o SuperAdmin)');
+console.log('UI lab: http://localhost:3001/admin/vplan (sidebar si emulador o SuperAdmin)');
 console.log('\nPipeline: intake → demand → supply → feasibility → … → deliver');
 console.log(ok ? '\nOK' : '\nFALTAN ARCHIVOS O AISLAMIENTO ROTO');
 process.exit(ok ? 0 : 1);

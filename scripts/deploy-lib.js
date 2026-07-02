@@ -17,8 +17,10 @@ function isPortListening(port) {
   return (r.stdout || '').includes(`:${port}`);
 }
 
+const DEV_PORT = Number(process.env.COSP_DEV_PORT) || 3001;
+
 function labIsActive() {
-  return isPortListening(8080) || isPortListening(9099) || isPortListening(3000);
+  return isPortListening(8080) || isPortListening(9099) || isPortListening(DEV_PORT) || isPortListening(3000);
 }
 
 function run(cmd, cwd, env = {}) {

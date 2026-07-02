@@ -279,7 +279,7 @@ Plantilla 6+2: **17 guardias** (16 en 24 hs + 1 en P4). Pico simultáneo día la
 ```
 1. Desarrollo en apps/functions/src/vplan/ (+ tests unitarios por fase)
 2. npm run emulators (Auth + Firestore + Functions)
-3. Script o cliente lab: vplanRun({ mode, objectiveId, year, month })
+3. npm run dev → http://localhost:3001/admin/vplan (UI lab) o script test-vplan-emulator.mjs
 4. Comparar salida con planificador manual (misma objetivo/mes) — sin escribir en UI prod
 5. Commits frecuentes en main (o rama feature/vplan) — documentación + código aislado
 6. Deploy Functions: SOLO cuando VPLAN pase checklist de sign-off (sección 10)
