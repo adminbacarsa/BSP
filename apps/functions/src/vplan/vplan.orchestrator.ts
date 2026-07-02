@@ -1,6 +1,6 @@
 /**
- * VPLAN — orquestador (Ola 1: fases 0–3 con Firestore).
- * Pipeline completo documentado en docs/VPLAN.md.
+ * VPLAN — orquestador completo (fases 0–10).
+ * Pipeline documentado en docs/VPLAN.md.
  */
 
 import { loadVplanPlanningSnapshot } from './vplan.firestore';
@@ -8,6 +8,13 @@ import { buildVplanIntake, validateVplanRequest } from './phases/phase0-intake';
 import { buildVplanDemandModel } from './phases/phase1-demand';
 import { buildVplanSupplyModel } from './phases/phase2-supply';
 import { buildVplanFeasibilityReport } from './phases/phase3-feasibility';
+import { buildVplanStrategy } from './phases/phase4-strategy';
+import { runVplanGeneration } from './phases/phase5-generate';
+import { applyVplanAbsenceExceptions } from './phases/phase6-exceptions';
+import { runVplanVerification } from './phases/phase7-verify';
+import { runVplanDeterministicFixer } from './phases/phase8-fix';
+import { runVplanOptimization } from './phases/phase9-optimize';
+import { buildVplanDeliverable } from './phases/phase10-deliver';
 import type {
   VplanBrainContext,
   VplanIntent,
@@ -16,7 +23,21 @@ import type {
   VplanStepResult,
 } from './vplan.types';
 
-const VPLAN_VERSION = 'VPLAN_0.1';
+const VPLAN_VERSION = 'VPLAN_0.2';
+
+const PHASE_ORDER = [
+  '0_intake',
+  '1_demand',
+  '2_supply',
+  '3_feasibility',
+  '4_strategy',
+  '5_generate',
+  '6_exceptions',
+  '7_verify',
+  '8_fix',
+  '9_optimize',
+  '10_deliver',
+] as const;
 
 function step(phase: string, ok: boolean, summary: string, startedAt?: number): VplanStepResult {
   return {
@@ -27,37 +48,37 @@ function step(phase: string, ok: boolean, summary: string, startedAt?: number): 
   };
 }
 
-function shouldRunPhase(intent: VplanIntent, phaseId: string): boolean {
-  if (intent === 'full') return true;
-  const map: Record<VplanIntent, string[]> = {
-    intake: ['0_intake'],
-    demand: ['0_intake', '1_demand'],
-    supply: ['0_intake', '1_demand', '2_supply'],
-    feasibility: ['0_intake', '1_demand', '2_supply', '3_feasibility'],
-    strategy: ['0_intake', '1_demand', '2_supply', '3_feasibility'],
-    generate: ['0_intake', '1_demand', '2_supply', '3_feasibility'],
-    exceptions: ['0_intake', '1_demand', '2_supply', '3_feasibility'],
-    verify: ['0_intake', '1_demand', '2_supply', '3_feasibility'],
-    fix: ['0_intake', '1_demand', '2_supply', '3_feasibility'],
-    optimize: ['0_intake', '1_demand', '2_supply', '3_feasibility'],
-    full: [],
+function phasesForIntent(intent: VplanIntent): Set<string> {
+  const endIndex: Record<VplanIntent, number> = {
+    intake: 0,
+    demand: 1,
+    supply: 2,
+    feasibility: 3,
+    strategy: 4,
+    generate: 5,
+    exceptions: 6,
+    verify: 7,
+    fix: 8,
+    optimize: 9,
+    full: 10,
   };
-  return (map[intent] ?? []).includes(phaseId);
+  const end = endIndex[intent] ?? 10;
+  return new Set(PHASE_ORDER.slice(0, end + 1));
 }
 
-function stubPhases(intent: VplanIntent, steps: VplanStepResult[]): void {
-  if (intent !== 'full') return;
-  const pending = [
-    '4_strategy', '5_generate', '6_exceptions', '7_verify', '8_fix', '9_optimize', '10_deliver',
-  ];
-  for (const phase of pending) {
-    steps.push(step(phase, true, 'Pendiente — Ola 2+ (docs/VPLAN.md)'));
-  }
+function hasTrailing(snapshot: Awaited<ReturnType<typeof loadVplanPlanningSnapshot>>): boolean {
+  const p = snapshot.prevPlanningState;
+  return Boolean(
+    p.trailingWorkDays && Object.keys(p.trailingWorkDays).length > 0,
+  ) || Boolean(
+    p.lastShiftByEmp && Object.keys(p.lastShiftByEmp).length > 0,
+  );
 }
 
 export async function runVplanOrchestrator(request: VplanRunRequest): Promise<VplanRunResponse> {
   const steps: VplanStepResult[] = [];
   const intent = request.intent ?? 'full';
+  const runPhases = phasesForIntent(intent);
   const validationError = validateVplanRequest(request);
 
   if (validationError) {
@@ -91,38 +112,34 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
 
   const context: VplanBrainContext = { run: request, steps: [] };
 
-  if (shouldRunPhase(intent, '0_intake')) {
+  if (runPhases.has('0_intake')) {
     const t0 = Date.now();
-    const intake = buildVplanIntake(request, snapshot);
-    context.intake = intake;
+    context.intake = buildVplanIntake(request, snapshot);
     steps.push(step(
       '0_intake',
       true,
-      `${intake.objectiveName ?? intake.objectiveId} · modo ${intake.mode} · ${intake.positionCount} puestos · ${intake.employeeCount} guardias · SLA ${snapshot.slaId}`,
+      `${context.intake.objectiveName ?? context.intake.objectiveId} · modo ${context.intake.mode} · ${context.intake.positionCount} puestos · ${context.intake.employeeCount} guardias`,
       t0,
     ));
   }
 
-  if (shouldRunPhase(intent, '1_demand')) {
+  if (runPhases.has('1_demand')) {
     const t1 = Date.now();
     context.demand = buildVplanDemandModel({
       positions: snapshot.positions,
       days: snapshot.days,
       slaVendidas: snapshot.slaVendidas,
     });
-    const peak = context.demand.dayDemands.reduce((b, d) => (
-      d.totalPaxUnits > (b?.totalPaxUnits ?? 0) ? d : b
-    ), context.demand.dayDemands[0]);
     steps.push(step(
       '1_demand',
       true,
-      `${Math.round(context.demand.monthDemandHours)}h estructura · ${context.demand.slaVendidas}h vendidas · pico ${peak?.totalPaxUnits ?? 0} pax`,
+      `${Math.round(context.demand.monthDemandHours)}h estructura · ${context.demand.slaVendidas}h vendidas`,
       t1,
     ));
   }
 
   let suggestedHeadcount: number | undefined;
-  if (shouldRunPhase(intent, '3_feasibility') && context.demand) {
+  if (runPhases.has('3_feasibility') && context.demand) {
     const pre = buildVplanFeasibilityReport({
       demand: context.demand,
       supply: buildVplanSupplyModel({
@@ -139,7 +156,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
     suggestedHeadcount = pre.suggestedHeadcount;
   }
 
-  if (shouldRunPhase(intent, '2_supply')) {
+  if (runPhases.has('2_supply')) {
     const t2 = Date.now();
     context.supply = buildVplanSupplyModel({
       employees: snapshot.employees,
@@ -148,19 +165,15 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       suggestedHeadcount,
       previousMonthStateKey: snapshot.previousMonthStateKey,
     });
-    const absDays = context.supply.employees.reduce(
-      (s, e) => s + e.blockedDates.length,
-      0,
-    );
     steps.push(step(
       '2_supply',
       context.supply.employeeCount > 0,
-      `${context.supply.employeeCount} guardias · ${absDays} días bloqueados por ausencias`,
+      `${context.supply.employeeCount} guardias · ${snapshot.existingAssignments.length} turnos existentes en mes`,
       t2,
     ));
   }
 
-  if (shouldRunPhase(intent, '3_feasibility') && context.demand && context.supply) {
+  if (runPhases.has('3_feasibility') && context.demand && context.supply) {
     const t3 = Date.now();
     context.feasibility = buildVplanFeasibilityReport({
       demand: context.demand,
@@ -174,31 +187,177 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       '3_feasibility',
       context.feasibility.ok,
       context.feasibility.ok
-        ? `Viable · ciclo ${context.feasibility.suggestedCycle} · oferta ~${context.feasibility.offerHours}h vs ${context.feasibility.effectiveTargetHours}h`
+        ? `Viable · ciclo ${context.feasibility.suggestedCycle} · ~${context.feasibility.offerHours}h oferta`
         : context.feasibility.reasons[0] ?? 'No viable',
       t3,
     ));
   }
 
-  stubPhases(intent, steps);
+  const needsGeneration = ['4_strategy', '5_generate', '6_exceptions', '7_verify', '8_fix', '9_optimize', '10_deliver']
+    .some((p) => runPhases.has(p));
+
+  if (needsGeneration && context.feasibility && !context.feasibility.ok) {
+    context.steps = steps;
+    return {
+      version: VPLAN_VERSION,
+      status: 'feasibility_failed',
+      message: `VPLAN: viabilidad fallida — ${context.feasibility.reasons.join('; ')}`,
+      context,
+    };
+  }
+
+  if (runPhases.has('4_strategy')) {
+    const t4 = Date.now();
+    context.strategy = buildVplanStrategy({
+      mode: request.mode,
+      preferredCycle: request.preferredCycle ?? context.feasibility?.suggestedCycle,
+      hasExistingAssignments: snapshot.existingAssignments.length > 0,
+      hasTrailing: hasTrailing(snapshot),
+    });
+    steps.push(step(
+      '4_strategy',
+      true,
+      `${context.strategy.engine} · ciclo ${context.strategy.cycle} · ${context.strategy.absenceTiming}`,
+      t4,
+    ));
+  }
+
+  if (runPhases.has('5_generate') && context.strategy) {
+    const t5 = Date.now();
+    try {
+      context.draft = runVplanGeneration({
+        snapshot,
+        planningState: snapshot.planningState,
+        prevPlanningState: snapshot.prevPlanningState,
+        strategy: context.strategy,
+      });
+      steps.push(step(
+        '5_generate',
+        true,
+        `${context.draft.assignments.length} celdas · ${Math.round(context.draft.stats?.totalBillableHours ?? 0)}h · ${context.draft.sourceEngine}`,
+        t5,
+      ));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Error en generación';
+      steps.push(step('5_generate', false, msg, t5));
+      context.steps = steps;
+      return {
+        version: VPLAN_VERSION,
+        status: 'error',
+        message: msg,
+        context,
+      };
+    }
+  }
+
+  if (runPhases.has('6_exceptions') && context.draft && context.strategy) {
+    const t6 = Date.now();
+    const patched = applyVplanAbsenceExceptions({
+      draft: context.draft,
+      absences: snapshot.absences,
+      enabled: context.strategy.modes.patchAbsencesPostGenerate,
+    });
+    context.draft = patched.draft;
+    steps.push(step('6_exceptions', true, `${patched.patchedDays} días marcados con ausencia`, t6));
+  }
+
+  if (runPhases.has('7_verify') && context.draft && context.strategy) {
+    const t7 = Date.now();
+    context.verification = runVplanVerification({
+      snapshot,
+      planningState: snapshot.planningState,
+      prevPlanningState: snapshot.prevPlanningState,
+      strategy: context.strategy,
+      draft: context.draft,
+    });
+    steps.push(step(
+      '7_verify',
+      context.verification.ok,
+      context.verification.ok
+        ? `Cobertura OK · ${context.verification.billableHours}h · gap ${context.verification.hoursGap}h`
+        : `${context.verification.issues.filter((i) => i.severity === 'blocking').length} bloqueante(s)`,
+      t7,
+    ));
+  }
+
+  if (runPhases.has('8_fix') && context.draft) {
+    const t8 = Date.now();
+    const fixed = runVplanDeterministicFixer(context.draft);
+    context.draft = fixed.draft;
+    context.fixerLog = fixed.log;
+    steps.push(step('8_fix', true, `${fixed.log.length} ajuste(s) CCT`, t8));
+  }
+
+  if (runPhases.has('9_optimize') && context.draft && context.verification && context.demand && context.supply) {
+    const t9 = Date.now();
+    const opt = await runVplanOptimization({
+      enabled: request.runOptimization === true,
+      snapshot,
+      demand: context.demand,
+      supply: context.supply,
+      draft: context.draft,
+      verification: context.verification,
+    });
+    context.draft = opt.draft;
+    context.optimization = opt.result;
+    steps.push(step(
+      '9_optimize',
+      true,
+      opt.result.applied
+        ? `${opt.result.correctionCount} corrección(es) Gemini`
+        : (opt.result.skippedReason ?? 'omitido'),
+      t9,
+    ));
+
+    if (opt.result.applied && context.strategy) {
+      context.verification = runVplanVerification({
+        snapshot,
+        planningState: snapshot.planningState,
+        prevPlanningState: snapshot.prevPlanningState,
+        strategy: context.strategy,
+        draft: context.draft,
+      });
+    }
+  }
+
+  if (runPhases.has('10_deliver') && context.draft && context.verification) {
+    const t10 = Date.now();
+    context.deliverable = buildVplanDeliverable({
+      draft: context.draft,
+      verification: context.verification,
+      existingAssignments: snapshot.existingAssignments,
+      objectiveId: request.objectiveId,
+      year: request.year,
+      month: request.month,
+    });
+    steps.push(step(
+      '10_deliver',
+      true,
+      `Diff ${context.deliverable.diff.length} ops · ${context.deliverable.reportSummary.slice(0, 120)}…`,
+      t10,
+    ));
+  }
+
   context.steps = steps;
 
   const feasibilityFailed = context.feasibility && !context.feasibility.ok;
-  const status = feasibilityFailed
-    ? 'feasibility_failed'
-    : context.feasibility
-      ? 'ok'
-      : 'ok';
+  const verificationFailed = context.verification && !context.verification.ok;
+
+  let status: VplanRunResponse['status'] = 'ok';
+  if (feasibilityFailed) status = 'feasibility_failed';
+  else if (verificationFailed && runPhases.has('7_verify')) status = 'verification_failed';
 
   let message: string;
-  if (feasibilityFailed && context.feasibility) {
+  if (status === 'feasibility_failed' && context.feasibility) {
     message = `VPLAN: viabilidad fallida — ${context.feasibility.reasons.join('; ')}`;
+  } else if (status === 'verification_failed' && context.verification) {
+    message = `VPLAN: pipeline completo con gaps — ${context.verification.issues.filter((i) => i.severity === 'blocking').length} bloqueante(s). Diff disponible en deliverable.`;
+  } else if (context.deliverable) {
+    message = `VPLAN pipeline completo: ${context.deliverable.assignmentCount} asignaciones, ${context.deliverable.billableHours}h facturables. Sin escritura Firestore (fase prueba).`;
   } else if (context.feasibility?.ok) {
-    message = `VPLAN Ola 1: demanda, oferta y viabilidad OK. Generación pendiente (Ola 2).`;
-  } else if (intent === 'intake' || intent === 'demand' || intent === 'supply') {
-    message = `VPLAN: fase ${intent} completada`;
+    message = `VPLAN: fases hasta ${intent} completadas`;
   } else {
-    message = 'VPLAN: orquestador activo — fases 4–10 en Ola 2+';
+    message = `VPLAN: corrida ${intent}`;
   }
 
   return {

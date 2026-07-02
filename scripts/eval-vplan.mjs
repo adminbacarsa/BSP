@@ -11,6 +11,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const required = [
   'docs/VPLAN.md',
+  'apps/functions/src/vplan/vplan.engine-bridge.ts',
+  'apps/functions/src/vplan/phases/phase4-strategy.ts',
+  'apps/functions/src/vplan/phases/phase5-generate.ts',
+  'apps/functions/src/vplan/phases/phase6-exceptions.ts',
+  'apps/functions/src/vplan/phases/phase7-verify.ts',
+  'apps/functions/src/vplan/phases/phase8-fix.ts',
+  'apps/functions/src/vplan/phases/phase9-optimize.ts',
+  'apps/functions/src/vplan/phases/phase10-deliver.ts',
   'apps/functions/src/vplan/vplan.types.ts',
   'apps/functions/src/vplan/vplan.orchestrator.ts',
   'apps/functions/src/vplan/vplan.handler.ts',
@@ -24,7 +32,7 @@ const required = [
 ];
 
 let ok = true;
-console.log('COSP — eval VPLAN (Ola 1)\n');
+console.log('COSP — eval VPLAN (pipeline completo)\n');
 for (const rel of required) {
   const p = path.join(root, rel);
   const exists = fs.existsSync(p);

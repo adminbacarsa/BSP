@@ -109,6 +109,57 @@ export interface VplanAssignment {
 export interface VplanScheduleDraft {
   assignments: VplanAssignment[];
   sourceEngine?: string;
+  stats?: {
+    totalBillableHours: number;
+    targetHours: number;
+    slaHoursClosed: boolean;
+    employeeCount: number;
+  };
+}
+
+export interface VplanStrategy {
+  cycle: string;
+  absenceTiming: 'pre_block' | 'post_replan' | 'hybrid';
+  continuity: 'continue_streaks' | 'reset';
+  engine: string;
+  modes: {
+    useTrailing: boolean;
+    preserveExisting: boolean;
+    patchAbsencesPostGenerate: boolean;
+  };
+  notes: string[];
+}
+
+export interface VplanOptimizationResult {
+  applied: boolean;
+  skippedReason?: string;
+  correctionCount?: number;
+  summary?: string;
+}
+
+export interface VplanFixerLogEntry {
+  code: string;
+  message: string;
+  employeeId?: string;
+  dateStr?: string;
+}
+
+export interface VplanScheduleDiffEntry {
+  action: 'create' | 'update' | 'delete';
+  employeeId: string;
+  dateStr: string;
+  code: string;
+  positionName: string;
+  hours?: number;
+  previousCode?: string;
+}
+
+export interface VplanDeliverable {
+  diff: VplanScheduleDiffEntry[];
+  reportSummary: string;
+  assignmentCount: number;
+  billableHours: number;
+  uncoveredSlots?: number;
 }
 
 export interface VplanVerificationIssue {
@@ -157,14 +208,18 @@ export interface VplanBrainContext {
   demand?: VplanDemandModel;
   supply?: VplanSupplyModel;
   feasibility?: VplanFeasibilityReport;
+  strategy?: VplanStrategy;
   draft?: VplanScheduleDraft;
   verification?: VplanVerificationReport;
+  fixerLog?: VplanFixerLogEntry[];
+  optimization?: VplanOptimizationResult;
+  deliverable?: VplanDeliverable;
   steps: VplanStepResult[];
 }
 
 export interface VplanRunResponse {
-  version: 'VPLAN_0.1';
-  status: 'stub' | 'ok' | 'feasibility_failed' | 'error';
+  version: 'VPLAN_0.2';
+  status: 'ok' | 'feasibility_failed' | 'verification_failed' | 'error';
   context: VplanBrainContext;
   message: string;
 }

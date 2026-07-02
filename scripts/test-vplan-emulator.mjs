@@ -89,9 +89,10 @@ async function main() {
     year: y,
     month: m,
     mode: 'GREENFIELD',
-    intent: 'feasibility',
+    intent: 'full',
     preferredCycle: '6+2',
     budgetMode: 'cct',
+    runOptimization: false,
   };
 
   console.log('Invocando vplanRun…', payload);
@@ -111,12 +112,18 @@ async function main() {
     if (f.warnings?.length) console.log('  warnings:', f.warnings.join(' | '));
   }
 
-  const ok = data.status === 'ok' || data.status === 'feasibility_failed' || data.status === 'stub';
+  if (data.context?.deliverable) {
+    const d = data.context.deliverable;
+    console.log('\nEntrega:', d.reportSummary);
+    console.log('  diff ops:', d.diff.length);
+  }
+
+  const ok = ['ok', 'verification_failed', 'feasibility_failed'].includes(data.status);
   if (!data.context?.demand) {
     console.error('\n✗ Sin modelo de demanda');
     process.exit(1);
   }
-  console.log(ok ? '\nOK — callable VPLAN respondió con fases 0–3' : '\n✗ Respuesta inesperada');
+  console.log(ok ? '\nOK — pipeline VPLAN respondió (fases 0–10)' : '\n✗ Respuesta inesperada');
   process.exit(ok ? 0 : 1);
 }
 

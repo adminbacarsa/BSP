@@ -4,6 +4,21 @@ export interface VplanEmployeeRecord {
     displayName: string;
     priorCctHours: number;
 }
+export interface VplanPlanningState {
+    defaultPositionByEmp: Record<string, string>;
+    defaultShiftByEmp: Record<string, string>;
+    trailingWorkDays?: Record<string, number>;
+    trailingRestDays?: Record<string, number>;
+    lastShiftByEmp?: Record<string, string>;
+    lastWorkBandBeforeRest?: Record<string, string>;
+}
+export interface VplanExistingAssignment {
+    employeeId: string;
+    dateStr: string;
+    code: string;
+    positionName: string;
+    hours?: number;
+}
 export interface VplanPlanningSnapshot {
     empresaId: string;
     objectiveId: string;
@@ -18,6 +33,9 @@ export interface VplanPlanningSnapshot {
         dayLetter: string;
     }>;
     previousMonthStateKey?: string;
+    planningState: VplanPlanningState;
+    prevPlanningState: VplanPlanningState;
+    existingAssignments: VplanExistingAssignment[];
 }
 export declare function loadVplanPlanningSnapshot(request: {
     empresaId: string;

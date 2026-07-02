@@ -14,6 +14,23 @@ export interface VplanEmployeeRecord {
   priorCctHours: number;
 }
 
+export interface VplanPlanningState {
+  defaultPositionByEmp: Record<string, string>;
+  defaultShiftByEmp: Record<string, string>;
+  trailingWorkDays?: Record<string, number>;
+  trailingRestDays?: Record<string, number>;
+  lastShiftByEmp?: Record<string, string>;
+  lastWorkBandBeforeRest?: Record<string, string>;
+}
+
+export interface VplanExistingAssignment {
+  employeeId: string;
+  dateStr: string;
+  code: string;
+  positionName: string;
+  hours?: number;
+}
+
 export interface VplanPlanningSnapshot {
   empresaId: string;
   objectiveId: string;
@@ -25,6 +42,9 @@ export interface VplanPlanningSnapshot {
   absences: Record<string, Set<string>>;
   days: Array<{ dateStr: string; dayLetter: string }>;
   previousMonthStateKey?: string;
+  planningState: VplanPlanningState;
+  prevPlanningState: VplanPlanningState;
+  existingAssignments: VplanExistingAssignment[];
 }
 
 function isSlaActive(data: admin.firestore.DocumentData): boolean {
@@ -152,6 +172,73 @@ async function loadAbsences(
   return result;
 }
 
+function emptyPlanningState(): VplanPlanningState {
+  return {
+    defaultPositionByEmp: {},
+    defaultShiftByEmp: {},
+  };
+}
+
+async function loadPlanningState(
+  objectiveId: string,
+  year: number,
+  month: number,
+): Promise<VplanPlanningState> {
+  const key = `${objectiveId}_${year}_${month}`;
+  const snap = await db().collection('planificacion_estados').doc(key).get();
+  if (!snap.exists) return emptyPlanningState();
+  const d = snap.data() || {};
+  return {
+    defaultPositionByEmp: (d.defaultPositionByEmp as Record<string, string>) || {},
+    defaultShiftByEmp: (d.defaultShiftByEmp as Record<string, string>) || {},
+    trailingWorkDays: d.trailingWorkDays as Record<string, number> | undefined,
+    trailingRestDays: d.trailingRestDays as Record<string, number> | undefined,
+    lastShiftByEmp: d.lastShiftByEmp as Record<string, string> | undefined,
+    lastWorkBandBeforeRest: d.lastWorkBandBeforeRest as Record<string, string> | undefined,
+  };
+}
+
+function dateStrFromTimestamp(ts: admin.firestore.Timestamp | Date | string | undefined): string | null {
+  if (!ts) return null;
+  if (typeof ts === 'string') return ts.slice(0, 10);
+  const d = ts instanceof admin.firestore.Timestamp ? ts.toDate() : ts;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+async function loadExistingAssignments(
+  objectiveId: string,
+  year: number,
+  month: number,
+): Promise<VplanExistingAssignment[]> {
+  const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+  const snap = await db()
+    .collection('turnos')
+    .where('objectiveId', '==', objectiveId)
+    .get();
+
+  const result: VplanExistingAssignment[] = [];
+  snap.docs.forEach((doc) => {
+    const d = doc.data();
+    if (d.draft === true) return;
+    const dateStr = dateStrFromTimestamp(d.startTime as admin.firestore.Timestamp)
+      ?? String(d.dateStr || d.date || '').slice(0, 10);
+    if (!dateStr.startsWith(monthPrefix)) return;
+    const employeeId = String(d.employeeId || d.empId || '');
+    if (!employeeId) return;
+    result.push({
+      employeeId,
+      dateStr,
+      code: String(d.code || d.shiftCode || 'M').toUpperCase(),
+      positionName: String(d.positionName || d.puesto || ''),
+      hours: Number(d.hours) || undefined,
+    });
+  });
+  return result;
+}
+
 export async function loadVplanPlanningSnapshot(request: {
   empresaId: string;
   objectiveId: string;
@@ -167,6 +254,24 @@ export async function loadVplanPlanningSnapshot(request: {
   const prev = previousMonth(request.year, request.month);
   const prevKey = `${request.objectiveId}_${prev.year}_${prev.month}`;
 
+  const [planningState, prevPlanningState, existingAssignments] = await Promise.all([
+    loadPlanningState(request.objectiveId, request.year, request.month),
+    loadPlanningState(request.objectiveId, prev.year, prev.month),
+    loadExistingAssignments(request.objectiveId, request.year, request.month),
+  ]);
+
+  let mergedPlanning = planningState;
+  if (
+    Object.keys(planningState.defaultPositionByEmp).length === 0
+    && Object.keys(prevPlanningState.defaultPositionByEmp).length > 0
+  ) {
+    mergedPlanning = {
+      ...planningState,
+      defaultPositionByEmp: prevPlanningState.defaultPositionByEmp,
+      defaultShiftByEmp: prevPlanningState.defaultShiftByEmp,
+    };
+  }
+
   return {
     empresaId: request.empresaId,
     objectiveId: request.objectiveId,
@@ -178,5 +283,8 @@ export async function loadVplanPlanningSnapshot(request: {
     absences,
     days,
     previousMonthStateKey: prevKey,
+    planningState: mergedPlanning,
+    prevPlanningState,
+    existingAssignments,
   };
 }

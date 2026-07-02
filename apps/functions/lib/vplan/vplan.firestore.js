@@ -116,6 +116,66 @@ async function loadAbsences(empresaId, year, month) {
     });
     return result;
 }
+function emptyPlanningState() {
+    return {
+        defaultPositionByEmp: {},
+        defaultShiftByEmp: {},
+    };
+}
+async function loadPlanningState(objectiveId, year, month) {
+    const key = `${objectiveId}_${year}_${month}`;
+    const snap = await db().collection('planificacion_estados').doc(key).get();
+    if (!snap.exists)
+        return emptyPlanningState();
+    const d = snap.data() || {};
+    return {
+        defaultPositionByEmp: d.defaultPositionByEmp || {},
+        defaultShiftByEmp: d.defaultShiftByEmp || {},
+        trailingWorkDays: d.trailingWorkDays,
+        trailingRestDays: d.trailingRestDays,
+        lastShiftByEmp: d.lastShiftByEmp,
+        lastWorkBandBeforeRest: d.lastWorkBandBeforeRest,
+    };
+}
+function dateStrFromTimestamp(ts) {
+    if (!ts)
+        return null;
+    if (typeof ts === 'string')
+        return ts.slice(0, 10);
+    const d = ts instanceof admin.firestore.Timestamp ? ts.toDate() : ts;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+async function loadExistingAssignments(objectiveId, year, month) {
+    const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+    const snap = await db()
+        .collection('turnos')
+        .where('objectiveId', '==', objectiveId)
+        .get();
+    const result = [];
+    snap.docs.forEach((doc) => {
+        const d = doc.data();
+        if (d.draft === true)
+            return;
+        const dateStr = dateStrFromTimestamp(d.startTime)
+            ?? String(d.dateStr || d.date || '').slice(0, 10);
+        if (!dateStr.startsWith(monthPrefix))
+            return;
+        const employeeId = String(d.employeeId || d.empId || '');
+        if (!employeeId)
+            return;
+        result.push({
+            employeeId,
+            dateStr,
+            code: String(d.code || d.shiftCode || 'M').toUpperCase(),
+            positionName: String(d.positionName || d.puesto || ''),
+            hours: Number(d.hours) || undefined,
+        });
+    });
+    return result;
+}
 async function loadVplanPlanningSnapshot(request) {
     const sla = await loadSlaForObjective(request.objectiveId, request.empresaId);
     const objectiveName = sla.objectiveName ?? await resolveObjectiveName(request.objectiveId, request.empresaId);
@@ -124,6 +184,20 @@ async function loadVplanPlanningSnapshot(request) {
     const days = (0, vplan_calendar_1.buildMonthDays)(request.year, request.month);
     const prev = (0, vplan_calendar_1.previousMonth)(request.year, request.month);
     const prevKey = `${request.objectiveId}_${prev.year}_${prev.month}`;
+    const [planningState, prevPlanningState, existingAssignments] = await Promise.all([
+        loadPlanningState(request.objectiveId, request.year, request.month),
+        loadPlanningState(request.objectiveId, prev.year, prev.month),
+        loadExistingAssignments(request.objectiveId, request.year, request.month),
+    ]);
+    let mergedPlanning = planningState;
+    if (Object.keys(planningState.defaultPositionByEmp).length === 0
+        && Object.keys(prevPlanningState.defaultPositionByEmp).length > 0) {
+        mergedPlanning = {
+            ...planningState,
+            defaultPositionByEmp: prevPlanningState.defaultPositionByEmp,
+            defaultShiftByEmp: prevPlanningState.defaultShiftByEmp,
+        };
+    }
     return {
         empresaId: request.empresaId,
         objectiveId: request.objectiveId,
@@ -135,6 +209,9 @@ async function loadVplanPlanningSnapshot(request) {
         absences,
         days,
         previousMonthStateKey: prevKey,
+        planningState: mergedPlanning,
+        prevPlanningState,
+        existingAssignments,
     };
 }
 //# sourceMappingURL=vplan.firestore.js.map

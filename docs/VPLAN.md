@@ -1,6 +1,6 @@
 # VPLAN — Cerebro de planificación automática COSP
 
-> **Versión:** 0.1 (etapa de prueba)  
+> **Versión:** 0.2 (pipeline completo en emulador)  
 > **Estado:** Experimental — **solo emulador local**. Sin deploy a producción hasta validación completa.  
 > **Aislamiento:** Proceso **100 % paralelo** al planificador actual (V2/V4, `autoPlanningBrain`, wizard Automatizar). **No reemplaza ni modifica** flujos existentes hasta decisión explícita de producto.
 
@@ -309,12 +309,8 @@ Plantilla 6+2: **17 guardias** (16 en 24 hs + 1 en P4). Pico simultáneo día la
 | Ola | Entregable |
 |-----|------------|
 | **Ola 0** | Documentación VPLAN, tipos, callable stub, cliente lab emulador |
-| **Ola 1** (actual) | Fases 0–3: intake, demanda SLA, oferta/dotación, viabilidad (Firestore emulador) |
-| **Ola 2** | Fase 5 `GREENFIELD` + motor 6+2 fijo |
-| **Ola 3** | Fase 7 verificadores unificados |
-| **Ola 4** | `CONTINUE` + snapshot mes anterior |
-| **Ola 5** | Fases 6, 8 (`RESTORE`, coberturas) |
-| **Ola 6** | `MIGRATE_CYCLE`, Fase 9 IA, UI lab opcional |
+| **Ola 1** | Fases 0–3: intake, demanda SLA, oferta/dotación, viabilidad (Firestore emulador) |
+| **Ola 2–6** (actual) | Fases 4–10: estrategia, generación 6+2, excepciones, verificación, fixer CCT, Gemini opcional, diff entrega |
 | **Ola 7** | Integración producto (fuera de alcance hasta sign-off) |
 
 ---
