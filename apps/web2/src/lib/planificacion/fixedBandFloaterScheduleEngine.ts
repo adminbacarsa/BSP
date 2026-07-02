@@ -250,8 +250,17 @@ function rebalance24hPositionGroups(
             }
         }
         if (!defName || !surName) break;
-        // Mueve un empleado del sobre-dotado al sub-dotado
-        const movedId = groups[surName].pop()!;
+        // Mueve un empleado del sobre-dotado al sub-dotado.
+        // Prioridad: mover a quien NO tiene rotación activa (sin datos del mes anterior).
+        // Nunca mover a quien tiene puesto asignado Y turno en ese puesto (prevMonthLastShiftByEmp
+        // o prevMonthOpeningSlotByEmp definidos = tiene ciclo activo, no mover si hay alternativa).
+        const srcGroup = groups[surName];
+        const noActiveRotationIdx = srcGroup.findIndex(id =>
+            !ctx.prevMonthLastShiftByEmp?.[id] &&
+            ctx.prevMonthOpeningSlotByEmp?.[id] === undefined,
+        );
+        const pickIdx = noActiveRotationIdx >= 0 ? noActiveRotationIdx : srcGroup.length - 1;
+        const movedId = srcGroup.splice(pickIdx, 1)[0];
         (groups[defName] = groups[defName] || []).push(movedId);
         relocatedIds.push(movedId);
     }
@@ -448,12 +457,12 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
         withoutTrail.forEach((empId, i) => {
             const fixedBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
             let zone: string;
-            if (fixedBand && WORK_BANDS.has(fixedBand) && availableZones.has(fixedBand)) {
+            if (fixedBand && WORK_BANDS.has(fixedBand) && availableZones.has(fixedBand as 'M' | 'T' | 'N' | 'F')) {
                 zone = fixedBand;
             } else {
                 zone = [...availableZones][0] ?? (['M', 'T', 'N', 'F'] as const)[i % 4];
             }
-            availableZones.delete(zone);
+            availableZones.delete(zone as 'M' | 'T' | 'N' | 'F');
             // Si hay slot del mes anterior y su cantidad de días, continuar el ciclo en lugar de reiniciar.
             if (ctx.prevMonthOpeningSlotByEmp?.[empId] !== undefined && ctx.prevMonthDaysCount) {
                 out[empId] = ((ctx.prevMonthOpeningSlotByEmp[empId] + ctx.prevMonthDaysCount) % 24 + 24) % 24;
