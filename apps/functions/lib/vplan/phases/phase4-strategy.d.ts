@@ -4,4 +4,5 @@ export declare function buildVplanStrategy(opts: {
     preferredCycle?: string;
     hasExistingAssignments: boolean;
     hasTrailing: boolean;
+    hasPrevMonthShifts?: boolean;
 }): VplanStrategy;

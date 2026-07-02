@@ -6,6 +6,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys");
 const vplan_calendar_1 = require("./vplan.calendar");
 const vplan_positions_1 = require("./vplan.positions");
+const vplan_trailing_1 = require("./vplan.trailing");
 const db = () => admin.firestore();
 function timestampToDate(val) {
     if (!val)
@@ -276,7 +277,8 @@ async function loadPlanningState(empresaId, objectiveId, year, month) {
             continue;
         const d = snap.data() || {};
         const defaultPositionByEmp = d.defaultPositionByEmp || {};
-        if (Object.keys(defaultPositionByEmp).length === 0)
+        const hasTrailing = Boolean(d.trailingWorkDays || d.trailingRestDays || d.lastShiftByEmp || d.lastWorkBandBeforeRest);
+        if (Object.keys(defaultPositionByEmp).length === 0 && !hasTrailing)
             continue;
         return {
             defaultPositionByEmp,
@@ -336,13 +338,17 @@ async function loadVplanPlanningSnapshot(request) {
     const days = (0, vplan_calendar_1.buildMonthDays)(request.year, request.month);
     const prev = (0, vplan_calendar_1.previousMonth)(request.year, request.month);
     const prevKey = `${request.objectiveId}_${prev.year}_${prev.month}`;
-    const [objectiveAliases, slaIdToObjectiveId, planningState, prevPlanningState, absences] = await Promise.all([
+    const prevDays = (0, vplan_calendar_1.buildMonthDays)(prev.year, prev.month);
+    const [objectiveAliases, slaIdToObjectiveId, planningState, prevPlanningStateRaw, absences, existingAssignments, previousMonthAssignments] = await Promise.all([
         buildObjectiveAliasIds(request.empresaId, request.objectiveId, sla.slaObjectiveId, objectiveName),
         buildSlaIdToObjectiveId(request.empresaId),
         loadPlanningState(request.empresaId, request.objectiveId, request.year, request.month),
         loadPlanningState(request.empresaId, request.objectiveId, prev.year, prev.month),
         loadAbsences(request.empresaId, request.year, request.month),
+        loadExistingAssignments(request.objectiveId, request.year, request.month),
+        loadExistingAssignments(request.objectiveId, prev.year, prev.month),
     ]);
+    const prevPlanningState = (0, vplan_trailing_1.enrichPlanningStateWithTrailingFromTurnos)(prevPlanningStateRaw, previousMonthAssignments, prevDays.map((d) => d.dateStr));
     const planningEmployeeIds = new Set([
         ...Object.keys(planningState.defaultPositionByEmp || {}),
         ...Object.keys(prevPlanningState.defaultPositionByEmp || {}),
@@ -353,7 +359,6 @@ async function loadVplanPlanningSnapshot(request) {
         slaIdToObjectiveId,
         planningEmployeeIds,
     });
-    const existingAssignments = await loadExistingAssignments(request.objectiveId, request.year, request.month);
     let mergedPlanning = planningState;
     if (Object.keys(planningState.defaultPositionByEmp).length === 0
         && Object.keys(prevPlanningState.defaultPositionByEmp).length > 0) {
@@ -376,6 +381,7 @@ async function loadVplanPlanningSnapshot(request) {
         previousMonthStateKey: prevKey,
         planningState: mergedPlanning,
         prevPlanningState,
+        previousMonthAssignments,
         existingAssignments,
     };
 }

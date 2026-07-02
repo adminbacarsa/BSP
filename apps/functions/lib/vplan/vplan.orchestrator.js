@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runVplanOrchestrator = runVplanOrchestrator;
 const vplan_firestore_1 = require("./vplan.firestore");
+const vplan_trailing_1 = require("./vplan.trailing");
 const phase0_intake_1 = require("./phases/phase0-intake");
 const phase1_demand_1 = require("./phases/phase1-demand");
 const phase2_supply_1 = require("./phases/phase2-supply");
@@ -53,8 +54,7 @@ function phasesForIntent(intent) {
     return new Set(PHASE_ORDER.slice(0, end + 1));
 }
 function hasTrailing(snapshot) {
-    const p = snapshot.prevPlanningState;
-    return Boolean(p.trailingWorkDays && Object.keys(p.trailingWorkDays).length > 0) || Boolean(p.lastShiftByEmp && Object.keys(p.lastShiftByEmp).length > 0);
+    return (0, vplan_trailing_1.planningStateHasTrailing)(snapshot.prevPlanningState);
 }
 async function runVplanOrchestrator(request) {
     const steps = [];
@@ -165,8 +165,9 @@ async function runVplanOrchestrator(request) {
             preferredCycle: request.preferredCycle ?? context.feasibility?.suggestedCycle,
             hasExistingAssignments: snapshot.existingAssignments.length > 0,
             hasTrailing: hasTrailing(snapshot),
+            hasPrevMonthShifts: snapshot.previousMonthAssignments.length > 0,
         });
-        steps.push(step('4_strategy', true, `${context.strategy.engine} · ciclo ${context.strategy.cycle} · ${context.strategy.absenceTiming}`, t4));
+        steps.push(step('4_strategy', true, `${context.strategy.engine} · ciclo ${context.strategy.cycle}${context.strategy.modes.useTrailing ? ' · racha mes ant.' : ''}`, t4));
     }
     if (runPhases.has('5_generate') && context.strategy) {
         const t5 = Date.now();

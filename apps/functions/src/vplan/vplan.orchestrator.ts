@@ -4,6 +4,7 @@
  */
 
 import { loadVplanPlanningSnapshot } from './vplan.firestore';
+import { planningStateHasTrailing } from './vplan.trailing';
 import { buildVplanIntake, validateVplanRequest } from './phases/phase0-intake';
 import { buildVplanDemandModel } from './phases/phase1-demand';
 import { buildVplanSupplyModel } from './phases/phase2-supply';
@@ -67,12 +68,7 @@ function phasesForIntent(intent: VplanIntent): Set<string> {
 }
 
 function hasTrailing(snapshot: Awaited<ReturnType<typeof loadVplanPlanningSnapshot>>): boolean {
-  const p = snapshot.prevPlanningState;
-  return Boolean(
-    p.trailingWorkDays && Object.keys(p.trailingWorkDays).length > 0,
-  ) || Boolean(
-    p.lastShiftByEmp && Object.keys(p.lastShiftByEmp).length > 0,
-  );
+  return planningStateHasTrailing(snapshot.prevPlanningState);
 }
 
 export async function runVplanOrchestrator(request: VplanRunRequest): Promise<VplanRunResponse> {
@@ -214,11 +210,12 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       preferredCycle: request.preferredCycle ?? context.feasibility?.suggestedCycle,
       hasExistingAssignments: snapshot.existingAssignments.length > 0,
       hasTrailing: hasTrailing(snapshot),
+      hasPrevMonthShifts: snapshot.previousMonthAssignments.length > 0,
     });
     steps.push(step(
       '4_strategy',
       true,
-      `${context.strategy.engine} · ciclo ${context.strategy.cycle} · ${context.strategy.absenceTiming}`,
+      `${context.strategy.engine} · ciclo ${context.strategy.cycle}${context.strategy.modes.useTrailing ? ' · racha mes ant.' : ''}`,
       t4,
     ));
   }

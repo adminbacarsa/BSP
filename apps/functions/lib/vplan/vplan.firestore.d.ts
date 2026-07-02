@@ -35,6 +35,7 @@ export interface VplanPlanningSnapshot {
     previousMonthStateKey?: string;
     planningState: VplanPlanningState;
     prevPlanningState: VplanPlanningState;
+    previousMonthAssignments: VplanExistingAssignment[];
     existingAssignments: VplanExistingAssignment[];
 }
 export declare function loadVplanPlanningSnapshot(request: {

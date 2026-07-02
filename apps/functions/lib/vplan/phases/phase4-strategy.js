@@ -77,11 +77,21 @@ function buildVplanStrategy(opts) {
                 notes: [`Migración de ciclo hacia ${cycle}`],
             };
         case 'GREENFIELD':
-        default:
+        default: {
+            const continueFromPrev = Boolean(opts.hasPrevMonthShifts || opts.hasTrailing);
             return {
                 ...base,
-                notes: ['Cronograma desde cero'],
+                continuity: continueFromPrev ? 'continue_streaks' : 'reset',
+                modes: {
+                    useTrailing: continueFromPrev,
+                    preserveExisting: false,
+                    patchAbsencesPostGenerate: true,
+                },
+                notes: continueFromPrev
+                    ? ['Cronograma nuevo continuando racha del mes anterior (turnos o planificacion_estados)']
+                    : ['Cronograma desde cero'],
             };
+        }
     }
 }
 //# sourceMappingURL=phase4-strategy.js.map
