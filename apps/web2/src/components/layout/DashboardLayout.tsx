@@ -11,7 +11,7 @@ import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, Brain
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -23,6 +23,7 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/dashboard'))       return 'Dashboard';
   if (pathname.startsWith('/admin/operaciones'))     return 'Operaciones';
   if (pathname.startsWith('/admin/planificacion'))   return 'Planificador';
+  if (pathname.startsWith('/admin/vplan'))           return 'VPLAN Lab';
   if (pathname.startsWith('/admin/crm'))             return 'CRM';
   if (pathname.startsWith('/admin/servicios'))       return 'Servicios';
   if (pathname.startsWith('/admin/reportes'))        return 'Reportes';
@@ -299,6 +300,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
   const { canReadModule, user, isSuperAdmin } = useAuth();
+  const isVplanLabVisible = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true' || isSuperAdmin;
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
   const [pendientesCount, setPendientesCount] = useState(0);
@@ -497,6 +499,20 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
                 >
                   {rfzPlanifCount > 99 ? '99+' : rfzPlanifCount}
                 </button>
+              )}
+            </Link>
+          )}
+
+          {canReadModule('PLANNING') && isVplanLabVisible && (
+            <Link href="/admin/vplan" prefetch={false} title="VPLAN Lab (emulador)"
+              className={getLinkHoverClass('/admin/vplan')}
+              style={getLinkStyle('/admin/vplan')}>
+              <Brain size={18} className="shrink-0" />
+              {sidebarOpen && (
+                <span className="animate-in fade-in whitespace-nowrap flex items-center gap-1">
+                  VPLAN Lab
+                  <span className="text-[8px] font-black uppercase bg-amber-200 text-amber-900 px-1 rounded">β</span>
+                </span>
               )}
             </Link>
           )}

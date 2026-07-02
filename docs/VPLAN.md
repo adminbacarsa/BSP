@@ -240,8 +240,9 @@ Cada etapa: **lee contexto → escribe su slice → no muta otras fases**.
 | `vplan/engines/*` | Sub-motores Fase 5 | Generadores plug-in |
 | `vplan/verifiers/*` | Fase 7 | Verificadores independientes |
 | Cliente lab | `apps/web2/src/lib/vplan/vplan.client.ts` | Invocación emulador + tipos |
+| **UI lab** | `/admin/vplan` (`pages/admin/vplan/index.tsx`) | Panel visual; visible en sidebar si emulador o SuperAdmin |
 
-**Fase prueba:** un solo callable `vplanRun` con `intent` por etapa (`feasibility` | `full` | `verify-only` …) para probar incrementalmente.
+**Fase prueba:** un solo callable `vplanRun` con `intent` por etapa (`feasibility` | `full` | `verify-only` …) para probar incrementalmente. La UI lab no escribe turnos; solo muestra diff y diagnóstico.
 
 Configuración runtime prevista (cuando se despliegue): `timeoutSeconds: 300`, `memory: 1GiB`, secreto `GEMINI_API_KEY` solo para Fase 9.
 

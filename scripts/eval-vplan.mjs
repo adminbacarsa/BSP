@@ -29,6 +29,7 @@ const required = [
   'apps/functions/src/vplan/index.ts',
   'apps/web2/src/lib/vplan/vplan.types.ts',
   'apps/web2/src/lib/vplan/vplan.client.ts',
+  'apps/web2/src/pages/admin/vplan/index.tsx',
 ];
 
 let ok = true;
@@ -72,7 +73,7 @@ if (planificacion.includes('vplan') || planificacion.includes('VPLAN')) {
 
 console.log('\nDocumentación cerebro: docs/VPLAN.md');
 console.log('Callable lab (emulador): vplanRun');
-console.log('Cliente: import { runVplan } from "@/lib/vplan/vplan.client"');
+console.log('UI lab: /admin/vplan (sidebar si emulador o SuperAdmin)');
 console.log('\nPipeline: intake → demand → supply → feasibility → … → deliver');
 console.log(ok ? '\nOK' : '\nFALTAN ARCHIVOS O AISLAMIENTO ROTO');
 process.exit(ok ? 0 : 1);
