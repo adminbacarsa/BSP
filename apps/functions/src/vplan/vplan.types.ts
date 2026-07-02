@@ -89,9 +89,13 @@ export interface VplanSupplyModel {
 export interface VplanFeasibilityReport {
   ok: boolean;
   reasons: string[];
+  warnings?: string[];
   suggestedCycle?: string;
   suggestedHeadcount?: number;
   peakConcurrent?: number;
+  peopleAvailable?: number;
+  offerHours?: number;
+  effectiveTargetHours?: number;
 }
 
 export interface VplanAssignment {
@@ -131,9 +135,25 @@ export interface VplanStepResult {
   durationMs?: number;
 }
 
+export interface VplanIntakeMeta {
+  empresaId: string;
+  objectiveId: string;
+  objectiveName?: string;
+  slaId: string;
+  year: number;
+  month: number;
+  mode: VplanRunMode;
+  positionCount: number;
+  employeeCount: number;
+  monthDays: number;
+  budgetMode: 'cct' | 'calendar';
+  preferredCycle: string;
+}
+
 /** Contexto que viaja entre fases — ver docs/VPLAN.md §5. */
 export interface VplanBrainContext {
   run: VplanRunRequest;
+  intake?: VplanIntakeMeta;
   demand?: VplanDemandModel;
   supply?: VplanSupplyModel;
   feasibility?: VplanFeasibilityReport;

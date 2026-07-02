@@ -14,13 +14,17 @@ const required = [
   'apps/functions/src/vplan/vplan.types.ts',
   'apps/functions/src/vplan/vplan.orchestrator.ts',
   'apps/functions/src/vplan/vplan.handler.ts',
+  'apps/functions/src/vplan/vplan.firestore.ts',
+  'apps/functions/src/vplan/phases/phase1-demand.ts',
+  'apps/functions/src/vplan/phases/phase2-supply.ts',
+  'apps/functions/src/vplan/phases/phase3-feasibility.ts',
   'apps/functions/src/vplan/index.ts',
   'apps/web2/src/lib/vplan/vplan.types.ts',
   'apps/web2/src/lib/vplan/vplan.client.ts',
 ];
 
 let ok = true;
-console.log('COSP — eval VPLAN (Ola 0)\n');
+console.log('COSP — eval VPLAN (Ola 1)\n');
 for (const rel of required) {
   const p = path.join(root, rel);
   const exists = fs.existsSync(p);

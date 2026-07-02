@@ -308,8 +308,8 @@ Plantilla 6+2: **17 guardias** (16 en 24 hs + 1 en P4). Pico simultáneo día la
 
 | Ola | Entregable |
 |-----|------------|
-| **Ola 0** (actual) | Documentación VPLAN, tipos, callable stub, cliente lab emulador |
-| **Ola 1** | Fases 0–3 (intake, demanda, oferta, viabilidad) |
+| **Ola 0** | Documentación VPLAN, tipos, callable stub, cliente lab emulador |
+| **Ola 1** (actual) | Fases 0–3: intake, demanda SLA, oferta/dotación, viabilidad (Firestore emulador) |
 | **Ola 2** | Fase 5 `GREENFIELD` + motor 6+2 fijo |
 | **Ola 3** | Fase 7 verificadores unificados |
 | **Ola 4** | `CONTINUE` + snapshot mes anterior |
