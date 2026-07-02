@@ -368,13 +368,18 @@ function resolveOpeningSlotByEmp(
 
         // Paso 1: inferir offsets desde trailing de mayo.
         // Sub1+: forzar cold-start para aplicar el canónico escalonado y evitar
-        // coincidencia de francos con sub0.
+        // coincidencia de francos con sub0. Excepción: trailRest=1 (franco truncado)
+        // debe continuar el ciclo para completar el 2.° día de franco (CCT).
         const withTrail: string[] = [];
         const withoutTrail: string[] = [];
         for (const empId of regularIds) {
             if (stagger > 0) {
-                withoutTrail.push(empId);
-                continue;
+                const trRest = ctx.prevMonthTrailingRestDays?.[empId] ?? 0;
+                if (trRest !== 1) {
+                    withoutTrail.push(empId);
+                    continue;
+                }
+                // trRest===1 → pasar por inferJune1CycleSlot para obtener slot F (2.° día franco)
             }
             const slot = inferJune1CycleSlot(
                 ctx.prevMonthLastShiftByEmp?.[empId],
@@ -506,6 +511,17 @@ function resolveOpeningSlotByEmp(
                 zone = fixedBand;
             } else {
                 zone = [...availableZones][0] ?? (['M', 'T', 'N', 'F'] as const)[i % 4];
+            }
+            // Si la zona elegiría un arranque en banda diferente a la que terminó el mes anterior
+            // (ej. trailing M → zona N = transición ilegal CCT), preferir zona F para arrancar
+            // en Franco y respetar el ciclo M→F→T→F→N.
+            if (!fixedBand && WORK_BANDS.has(zone)) {
+                const trailBand = (ctx.prevMonthLastShiftByEmp?.[empId] ?? '').toUpperCase();
+                const trailWork = ctx.prevMonthTrailingWorkDays?.[empId] ?? 0;
+                if (trailWork > 0 && WORK_BANDS.has(trailBand) && trailBand !== zone && availableZones.has('F')) {
+                    availableZones.delete(zone as 'M' | 'T' | 'N' | 'F');
+                    zone = 'F';
+                }
             }
             availableZones.delete(zone as 'M' | 'T' | 'N' | 'F');
             // Sub1+: usar siempre el canónico escalonado para garantizar desfase vs sub0.

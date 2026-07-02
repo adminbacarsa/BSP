@@ -776,7 +776,7 @@ export default function PlanificacionPage() {
     const [autoV2RunGemini, setAutoV2RunGemini] = useState(false);
     const [autoCoverAbsences, setAutoCoverAbsences] = useState(false);
     const [autoV2TrailDiag, setAutoV2TrailDiag] = useState<Array<{
-        id: string; nombre: string; puesto: string;
+        id: string; nombre: string; puesto: string; puestoQty: number;
         lastBand: string; trailWork: number; trailRest: number;
         julioSlot?: number; julioBand?: string; diasFranco?: number;
     }> | null>(null);
@@ -5112,10 +5112,13 @@ export default function PlanificacionPage() {
                 const _dtf = (s: number) => { for(let d=0;d<24;d++){if(_db(s+d)==='F')return d;} return 0; };
                 setAutoV2TrailDiag(displayedEmployees.map((emp: any) => {
                     const slot = gen.stats.openingSlotByEmp?.[emp.id];
+                    const posName = defaultPositionByEmp[emp.id] ?? '—';
+                    const posData = (positionStructure as any[]).find((p: any) => p.positionName === posName);
                     return {
                         id: emp.id,
                         nombre: (emp.nombre || emp.name || '').slice(0, 24),
-                        puesto: defaultPositionByEmp[emp.id] ?? '—',
+                        puesto: posName,
+                        puestoQty: Math.max(1, Number(posData?.qty) || 1),
                         lastBand: prevMonthLastShiftByEmp[emp.id] ?? '—',
                         trailWork: prevMonthTrailingWorkDays[emp.id] ?? 0,
                         trailRest: prevMonthTrailingRestDays[emp.id] ?? 0,
@@ -10974,7 +10977,9 @@ export default function PlanificacionPage() {
                                                                     ? `${row.julioBand} · ${row.diasFranco}d→F`
                                                                     : '—';
                                                                 const k = aperturaKey(row);
-                                                                const isCollision = k !== null && (keyCounts[k] ?? 0) > 1;
+                                                                // Colisión real solo si hay MÁS empleados con igual apertura que qty del puesto.
+                                                                // qty=2 → 2 F·0d en el mismo puesto es normal (1 por subgrupo).
+                                                                const isCollision = k !== null && (keyCounts[k] ?? 0) > (row.puestoQty ?? 1);
                                                                 const isTruncatedFranco = row.trailRest === 1 && row.julioBand !== 'F';
                                                                 const rowClass = isCollision
                                                                     ? 'text-rose-700 bg-rose-50'
@@ -10992,7 +10997,7 @@ export default function PlanificacionPage() {
                                                             })}
                                                         </tbody>
                                                     </table>
-                                                    <p className="text-[8px] text-slate-400 mt-1">Rojo = colisión de apertura en mismo puesto (mismo franco → hueco). Ámbar = franco truncado.</p>
+                                                    <p className="text-[8px] text-slate-400 mt-1">Rojo = colisión (más empleados con igual apertura que qty del puesto). Ámbar = franco truncado (1×F → inicio trabajo).</p>
                                                 </div>
                                             )}
                                         </div>
