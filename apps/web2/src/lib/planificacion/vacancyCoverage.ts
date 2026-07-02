@@ -2,8 +2,12 @@
 import { toCalendarDateStr } from './absenceCodes';
 import {
   buildRecompositionPendingUpdates,
+  collectSplitFrancoConflicts,
   defaultSplitForBand,
+  isPlannedFrancoShift,
   neighborBandsForTarget,
+  resolveEmployeeShift,
+  type FrancoCoverageConflict,
 } from './planningRecompositionApply';
 import type { RecompositionPackage, RecompositionTarget } from './planningRecomposition.types';
 
@@ -348,7 +352,43 @@ export type ProcessVacancyInput = {
     ext: { from: string; to: string };
     adel: { from: string; to: string };
   };
+  authorizeFrancoTrabajado?: boolean;
 };
+
+export function collectVacancyFrancoConflicts(
+  input: Pick<ProcessVacancyInput, 'days' | 'shiftsMap' | 'employeesById'>,
+  pendingChanges: Record<string, any>,
+): FrancoCoverageConflict[] {
+  const rows: FrancoCoverageConflict[] = [];
+  for (const day of input.days) {
+    const { dateStr, coverage } = day;
+    if (coverage.mode === 'split') {
+      rows.push(
+        ...collectSplitFrancoConflicts(
+          dateStr,
+          coverage.extEmpId,
+          coverage.adelEmpId,
+          input.employeesById,
+          input.shiftsMap,
+          pendingChanges,
+        ),
+      );
+    } else if (coverage.mode === 'substitute' && coverage.employeeId) {
+      const shift = resolveEmployeeShift(coverage.employeeId, dateStr, input.shiftsMap, pendingChanges);
+      if (isPlannedFrancoShift(shift)) {
+        const emp = input.employeesById[coverage.employeeId];
+        rows.push({
+          employeeId: coverage.employeeId,
+          employeeName: emp?.name || coverage.employeeName || coverage.employeeId,
+          dateStr,
+          role: 'SUBSTITUTE',
+          francoCode: String(shift?.code || 'F').toUpperCase(),
+        });
+      }
+    }
+  }
+  return rows;
+}
 
 function buildVacancySplitPackage(
   input: ProcessVacancyInput,
@@ -450,6 +490,11 @@ export function applyVacancyCoverageToChanges(
 
     if (coverage.mode === 'substitute' && coverage.employeeId && workShift) {
       const suplenteKey = `${coverage.employeeId}_${dateStr}`;
+      const suplBase = resolveEmployeeShift(coverage.employeeId, dateStr, input.shiftsMap, newChanges);
+      const suplOnFranco = isPlannedFrancoShift(suplBase);
+      if (suplOnFranco && !input.authorizeFrancoTrabajado) {
+        throw new Error(`FRANCO_COVERAGE:suplente en franco ${dateStr}`);
+      }
       newChanges[suplenteKey] = {
         code: workShift.code,
         name: workShift.code,
@@ -458,6 +503,8 @@ export function applyVacancyCoverageToChanges(
         hours: workShift.hours || 8,
         startTime: workShift.startTime || '00:00',
         positionName: workShift.positionName || input.activePosition || 'General',
+        isFrancoTrabajado: suplOnFranco || undefined,
+        isFranco: suplOnFranco ? false : undefined,
         comments: coverageCommentForTitular(titularName, input.vacancyData.type),
       };
       covered++;
@@ -480,6 +527,7 @@ export function applyVacancyCoverageToChanges(
           employeesById: input.employeesById,
           objectiveId: input.selectedObjective,
           clientId: input.clientId,
+          authorizeFrancoTrabajado: input.authorizeFrancoTrabajado,
         });
         Object.assign(newChanges, updates);
         splitCovered++;

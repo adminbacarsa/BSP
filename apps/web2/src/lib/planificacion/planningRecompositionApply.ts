@@ -1,6 +1,15 @@
 import type { RecompositionPackage, RecompositionPendingMeta } from './planningRecomposition.types';
 
 const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'D12', 'REF', 'ESC', 'FT']);
+const PLANNED_FRANCO_CODES = new Set(['F', 'FF', 'FP']);
+
+export type FrancoCoverageConflict = {
+  employeeId: string;
+  employeeName: string;
+  dateStr: string;
+  role: 'EXTENSION' | 'EARLY_START' | 'SUBSTITUTE';
+  francoCode: string;
+};
 
 function shiftKey(empId: string, dateStr: string) {
   return `${empId}_${dateStr}`;
@@ -19,6 +28,69 @@ function mergeShift(base: any, patch: Record<string, unknown>) {
   return { ...(base || {}), ...patch, isTemp: true };
 }
 
+/** Franco planificado (F/FF/FP) — no FT ni turno laboral. */
+export function isPlannedFrancoShift(shift: Record<string, any> | null | undefined): boolean {
+  if (!shift || shift.isDeleted) return false;
+  if (shift.isFrancoTrabajado) return false;
+  const code = String(shift.code || '').toUpperCase();
+  if (PLANNED_FRANCO_CODES.has(code)) return true;
+  return !!shift.isFranco && !WORK_CODES.has(code);
+}
+
+export function resolveEmployeeShift(
+  empId: string,
+  dateStr: string,
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+): Record<string, any> | null {
+  const k = shiftKey(empId, dateStr);
+  const pending = pendingChanges[k];
+  if (pending) return pending.isDeleted ? null : pending;
+  return shiftsMap[k] || null;
+}
+
+export function collectSplitFrancoConflicts(
+  dateStr: string,
+  extEmpId: string,
+  adelEmpId: string,
+  employeesById: Record<string, { name?: string } | undefined>,
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+): FrancoCoverageConflict[] {
+  const rows: FrancoCoverageConflict[] = [];
+  const extShift = resolveEmployeeShift(extEmpId, dateStr, shiftsMap, pendingChanges);
+  if (isPlannedFrancoShift(extShift)) {
+    rows.push({
+      employeeId: extEmpId,
+      employeeName: empDisplayName(employeesById[extEmpId], extEmpId),
+      dateStr,
+      role: 'EXTENSION',
+      francoCode: String(extShift?.code || 'F').toUpperCase(),
+    });
+  }
+  const adelShift = resolveEmployeeShift(adelEmpId, dateStr, shiftsMap, pendingChanges);
+  if (isPlannedFrancoShift(adelShift)) {
+    rows.push({
+      employeeId: adelEmpId,
+      employeeName: empDisplayName(employeesById[adelEmpId], adelEmpId),
+      dateStr,
+      role: 'EARLY_START',
+      francoCode: String(adelShift?.code || 'F').toUpperCase(),
+    });
+  }
+  return rows;
+}
+
+export function formatFrancoConflictSummary(conflicts: FrancoCoverageConflict[]): string {
+  return conflicts
+    .map((c) => {
+      const role = c.role === 'EXTENSION' ? 'ext' : c.role === 'EARLY_START' ? 'adel' : 'suplente';
+      const [, m, d] = c.dateStr.split('-');
+      return `${c.employeeName.split(',')[0]} (${role}) · ${d}/${m} · ${c.francoCode}`;
+    })
+    .join('; ');
+}
+
 /** Construye actualizaciones de pendingChanges para un paquete ext+adel. */
 export function buildRecompositionPendingUpdates(
   pkg: RecompositionPackage,
@@ -28,6 +100,7 @@ export function buildRecompositionPendingUpdates(
     employeesById: Record<string, any>;
     objectiveId: string;
     clientId?: string;
+    authorizeFrancoTrabajado?: boolean;
   },
 ): Record<string, any> {
   const updates: Record<string, any> = {};
@@ -126,14 +199,21 @@ export function buildRecompositionPendingUpdates(
   if (!extBase || extBase.isDeleted) {
     throw new Error('El guardia de extensión no tiene turno ese día');
   }
+  const extOnFranco = isPlannedFrancoShift(extBase);
+  if (extOnFranco && !ctx.authorizeFrancoTrabajado) {
+    throw new Error(`FRANCO_COVERAGE:${extName} tiene franco planificado (${extBase.code}) el ${pkg.dateStr} — requiere PIN de supervisor (FT / costo extra).`);
+  }
   updates[extKey] = mergeShift(extBase, {
+    isFrancoTrabajado: extOnFranco ? true : (extBase.isFrancoTrabajado || false),
+    isFranco: extOnFranco ? false : extBase.isFranco,
+    code: extOnFranco ? (pkg.extension.baseCode || extBase.code) : extBase.code,
     isExtended: true,
     isEarlyStart: false,
     ...baseMeta('EXTENSION', {
       adjustedEndTime: pkg.extension.toTime,
       segmentFromTime: pkg.extension.fromTime,
       segmentToTime: pkg.extension.toTime,
-      coverageNote: `Ext +${pkg.gapPositionName} ${pkg.extension.fromTime}-${pkg.extension.toTime} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
+      coverageNote: `${extOnFranco ? 'FT ' : ''}Ext +${pkg.gapPositionName} ${pkg.extension.fromTime}-${pkg.extension.toTime} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
     }),
   });
 
@@ -143,14 +223,21 @@ export function buildRecompositionPendingUpdates(
   if (!adelBase || adelBase.isDeleted) {
     throw new Error('El guardia de adelanto no tiene turno ese día');
   }
+  const adelOnFranco = isPlannedFrancoShift(adelBase);
+  if (adelOnFranco && !ctx.authorizeFrancoTrabajado) {
+    throw new Error(`FRANCO_COVERAGE:${adelName} tiene franco planificado (${adelBase.code}) el ${pkg.dateStr} — requiere PIN de supervisor (FT / costo extra).`);
+  }
   updates[adelKey] = mergeShift(adelBase, {
+    isFrancoTrabajado: adelOnFranco ? true : (adelBase.isFrancoTrabajado || false),
+    isFranco: adelOnFranco ? false : adelBase.isFranco,
+    code: adelOnFranco ? (pkg.earlyStart.baseCode || adelBase.code) : adelBase.code,
     isEarlyStart: true,
     isExtended: false,
     adjustedStartTime: pkg.earlyStart.fromTime,
     ...baseMeta('EARLY_START', {
       segmentFromTime: pkg.earlyStart.fromTime,
       segmentToTime: pkg.earlyStart.toTime,
-      coverageNote: `Adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime} · ${pkg.gapPositionName} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
+      coverageNote: `${adelOnFranco ? 'FT ' : ''}Adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime} · ${pkg.gapPositionName} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
     }),
   });
 
@@ -254,6 +341,7 @@ export function listSegmentCandidates(
     const shift = pending && !pending.isDeleted ? pending : saved;
     if (!shift || shift.objectiveId !== objectiveId) continue;
     const code = String(shift.code || '').toUpperCase();
+    if (isPlannedFrancoShift(shift)) continue;
     if (!WORK_CODES.has(code)) continue;
     if (band && code !== band) continue;
     rows.push({

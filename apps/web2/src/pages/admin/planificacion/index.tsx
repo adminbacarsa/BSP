@@ -144,6 +144,7 @@ import { isEmployeeOnLeave, shouldShowLeaveConflictSiren } from '@/lib/planifica
 import {
     listDateRangeInclusive,
     applyVacancyCoverageToChanges,
+    collectVacancyFrancoConflicts,
     VACANCY_NON_WORK_CODES,
     resolveVacancyDayCoverage,
     formatVacancyDayCoverageLabel,
@@ -157,6 +158,9 @@ import {
     listEarlyStartCandidates,
     defaultSplitForBand,
     neighborBandsForTarget,
+    collectSplitFrancoConflicts,
+    formatFrancoConflictSummary,
+    type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
 import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificacion/planningPipeline';
@@ -475,6 +479,7 @@ const ACTION_LABELS: Record<string, string> = {
     'TRANSFERENCIA_OBJETIVO': 'Transferencia de objetivo',
     'DESVINCULACION_OBJETIVO': 'Desvinculación de objetivo',
     'OVERRIDE_200H': 'Autorización >200h',
+    'AUTORIZACION_FRANCO_COBERTURA': 'Autorización franco trabajado (cobertura)',
     'EQUILIBRAR_CRONOGRAMA': 'Equilibrar cronograma',
 };
 
@@ -631,7 +636,15 @@ export default function PlanificacionPage() {
     const [addSearchTerm, setAddSearchTerm] = useState('');
     const [selectedCell, setSelectedCell] = useState<any>(null);
 
-    const [authModal, setAuthModal] = useState<{ pendingFn: (() => Promise<void>) | null; employees: { name: string; hours: number }[]; operatorName?: string; isSaveFlow?: boolean; description?: string }>({ pendingFn: null, employees: [] });
+    const [authModal, setAuthModal] = useState<{
+        pendingFn: (() => Promise<void>) | null;
+        employees: { name: string; hours: number; detail?: string }[];
+        operatorName?: string;
+        isSaveFlow?: boolean;
+        description?: React.ReactNode;
+        auditAction?: string;
+        auditDetails?: string;
+    }>({ pendingFn: null, employees: [] });
     const [authPin, setAuthPin] = useState('');
     const [authError, setAuthError] = useState('');
     const [authLoading, setAuthLoading] = useState(false);
@@ -792,6 +805,7 @@ export default function PlanificacionPage() {
     const [vacancySplitExtId, setVacancySplitExtId] = useState('');
     const [vacancySplitAdelId, setVacancySplitAdelId] = useState('');
     const [vacancyApplyToAllSelected, setVacancyApplyToAllSelected] = useState(true);
+    const [vacancyFrancoAuthApproved, setVacancyFrancoAuthApproved] = useState(false);
     const vacancyReplacementPanelRef = React.useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -819,6 +833,7 @@ export default function PlanificacionPage() {
         setVacancyPickerTab('substitute');
         setVacancySplitExtId('');
         setVacancySplitAdelId('');
+        setVacancyFrancoAuthApproved(false);
     }, [vacancyData]);
 
     useEffect(() => {
@@ -3157,6 +3172,35 @@ export default function PlanificacionPage() {
         return { ok: true, name: `${u.firstName} ${u.lastName}` };
     };
 
+    const requestSupervisorFrancoAuth = (
+        conflicts: FrancoCoverageConflict[],
+        onAuthorized: () => void | Promise<void>,
+        contextLabel = 'cobertura',
+    ) => {
+        if (conflicts.length === 0) {
+            void onAuthorized();
+            return;
+        }
+        const unique = [...new Map(conflicts.map((c) => [`${c.employeeId}_${c.dateStr}_${c.role}`, c])).values()];
+        const details = formatFrancoConflictSummary(unique);
+        setAuthModal({
+            pendingFn: async () => { await onAuthorized(); },
+            employees: unique.map((c) => ({
+                name: c.employeeName,
+                hours: 0,
+                detail: `${c.role === 'SUBSTITUTE' ? 'Suplente' : c.role === 'EXTENSION' ? 'Extensión' : 'Adelanto'} · ${c.francoCode}`,
+            })),
+            description: (
+                <>
+                    La {contextLabel} involucra guardias en <strong>franco planificado (FT)</strong> — costo extra CCT.
+                    Preferí RET, ESC o guardias libres. Si confirmás, queda registrado en auditoría.
+                </>
+            ),
+            auditAction: 'AUTORIZACION_FRANCO_COBERTURA',
+            auditDetails: details,
+        });
+    };
+
     const handleSaveAll = async () => {
         if (isProcessing) return;
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
@@ -3709,6 +3753,21 @@ export default function PlanificacionPage() {
         setShowRRHHModal(false);
         setSelectedCell(null);
     };
+    const finalizeVacancyModal = () => {
+        setShowVacancyModal(false);
+        setVacancyData(null);
+        setVacancyReplacementSearch('');
+        setVacancyReplacementOpen(false);
+        setVacancyActiveDates(new Set());
+        setVacancyDayCoverages({});
+        setVacancyFrancoAuthApproved(false);
+        setVacancyEditingDay(null);
+        setVacancyPickerTab('substitute');
+        setVacancySplitExtId('');
+        setVacancySplitAdelId('');
+        setVacancyApplyToAllSelected(true);
+    };
+
     const handleProcessVacancy = () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
         if (!vacancyData?.startDate) return;
@@ -3778,32 +3837,55 @@ export default function PlanificacionPage() {
             }
             return { dateStr, coverage: { mode: 'none' as const } };
         });
-        const { changes, count, covered, splitCovered, cleared } = applyVacancyCoverageToChanges(pendingChanges, {
-            vacancyData,
-            days,
-            selectedObjective,
-            activePosition,
-            shiftsMap,
-            getTypicalShift,
-            employeesById,
-            clientId: selectedClient || undefined,
-            defaultSplitForBand,
-        });
-        const vd = vacancyData;
-        const absCode = days.length ? (changes[`${vd.employeeId}_${days[0].dateStr}`]?.code || '—') : '—';
-        setPendingChanges(changes);
-        setShowVacancyModal(false);
-        setVacancyData(null);
-        setVacancyActiveDates(new Set());
-        setVacancyDayCoverages({});
-        const clearedMsg = cleared > 0 ? ` Se removieron ${cleared} turno(s) de cobertura anterior.` : '';
-        const totalCovered = covered + splitCovered;
-        if (totalCovered > 0) {
-            const splitMsg = splitCovered > 0 ? ` (${covered} suplente, ${splitCovered} ext+adel)` : '';
-            toast.success(`${absCode} en ${count} día(s) — ${totalCovered} con cobertura${splitMsg}.${clearedMsg} Guardá los cambios.`);
-        } else {
-            toast.success(`${absCode} en ${count} día(s) — sin cobertura asignada.${clearedMsg} Guardá los cambios.`);
+
+        const runApplyVacancy = (authorizeFranco: boolean) => {
+            try {
+                const { changes, count, covered, splitCovered, cleared } = applyVacancyCoverageToChanges(pendingChanges, {
+                    vacancyData,
+                    days,
+                    selectedObjective,
+                    activePosition,
+                    shiftsMap,
+                    getTypicalShift,
+                    employeesById,
+                    clientId: selectedClient || undefined,
+                    defaultSplitForBand,
+                    authorizeFrancoTrabajado: authorizeFranco,
+                });
+                const vd = vacancyData;
+                const absCode = days.length ? (changes[`${vd.employeeId}_${days[0].dateStr}`]?.code || '—') : '—';
+                setPendingChanges(changes);
+                finalizeVacancyModal();
+                const clearedMsg = cleared > 0 ? ` Se removieron ${cleared} turno(s) de cobertura anterior.` : '';
+                const totalCovered = covered + splitCovered;
+                if (totalCovered > 0) {
+                    const splitMsg = splitCovered > 0 ? ` (${covered} suplente, ${splitCovered} ext+adel)` : '';
+                    toast.success(`${absCode} en ${count} día(s) — ${totalCovered} con cobertura${splitMsg}.${clearedMsg} Guardá los cambios.`);
+                } else {
+                    toast.success(`${absCode} en ${count} día(s) — sin cobertura asignada.${clearedMsg} Guardá los cambios.`);
+                }
+            } catch (e: any) {
+                const msg = String(e?.message || '');
+                if (msg.includes('FRANCO_COVERAGE')) {
+                    toast.error('Hay guardias en franco sin autorizar — revisá la cobertura o pedí PIN de supervisor.');
+                } else {
+                    toast.error('Error al aplicar cobertura de licencia');
+                }
+            }
+        };
+
+        const francoConflicts = collectVacancyFrancoConflicts(
+            { days, shiftsMap, employeesById },
+            pendingChanges,
+        );
+        if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
+            requestSupervisorFrancoAuth(francoConflicts, () => {
+                setVacancyFrancoAuthApproved(true);
+                runApplyVacancy(true);
+            }, 'cobertura de licencia');
+            return;
         }
+        runApplyVacancy(francoConflicts.length > 0 || vacancyFrancoAuthApproved);
     };
     
     // 🛑 FIX: Inyección de Puesto en Bulk
@@ -8545,6 +8627,27 @@ export default function PlanificacionPage() {
                             [vacancyData?.employeeId, vacancySplitExtId].filter(Boolean),
                         ).filter(c => !q || c.name.toLowerCase().includes(q))
                         : [];
+                    const splitFrancoPreview = (vacancySplitExtId && vacancySplitAdelId)
+                        ? (() => {
+                            const previewDays = shouldApplyCoverageToAllDays()
+                                ? sortedActiveDates
+                                : (vacancyEditingDay ? [vacancyEditingDay] : sortedActiveDates);
+                            const rows: FrancoCoverageConflict[] = [];
+                            for (const d of previewDays) {
+                                rows.push(
+                                    ...collectSplitFrancoConflicts(
+                                        d,
+                                        vacancySplitExtId,
+                                        vacancySplitAdelId,
+                                        vacancyEmployeesById,
+                                        shiftsMap,
+                                        pendingChanges,
+                                    ),
+                                );
+                            }
+                            return rows;
+                        })()
+                        : [];
                     const editingDayCov = vacancyEditingDay ? vacancyDayCoverages[vacancyEditingDay] : undefined;
                     const editingDaySubstituteId = vacancyEditingDay
                         ? (editingDayCov?.mode === 'substitute' ? editingDayCov.employeeId : selectedReplacement)
@@ -8561,48 +8664,100 @@ export default function PlanificacionPage() {
                             ? sortedActiveDates
                             : (vacancyEditingDay ? [vacancyEditingDay] : sortedActiveDates);
                         if (targetDays.length === 0) return;
-                        const patch: Record<string, VacancyDayCoverage> = {};
-                        let applied = 0;
+
+                        const commitSplitPatch = () => {
+                            const patch: Record<string, VacancyDayCoverage> = {};
+                            let applied = 0;
+                            for (const d of targetDays) {
+                                const tit = resolveTitularForCoverageDay(d, splitReferenceDate || sortedActiveDates[0] || undefined);
+                                if (!tit) continue;
+                                patch[d] = {
+                                    mode: 'split',
+                                    extEmpId: vacancySplitExtId,
+                                    adelEmpId: vacancySplitAdelId,
+                                    gapBand: tit.code,
+                                    gapPosition: tit.positionName,
+                                };
+                                applied++;
+                            }
+                            if (applied === 0) {
+                                toast.error('No se pudo inferir el turno del titular en ningún día seleccionado.');
+                                return;
+                            }
+                            setVacancyDayCoverages((prev) => ({ ...prev, ...patch }));
+                            toast.success(`Ext+adel aplicado a ${applied} día(s).`);
+                            setVacancyEditingDay(null);
+                            setVacancyReplacementOpen(false);
+                            setVacancyReplacementSearch('');
+                        };
+
+                        const francoConflicts: FrancoCoverageConflict[] = [];
                         for (const d of targetDays) {
-                            const tit = resolveTitularForCoverageDay(d, splitReferenceDate || sortedActiveDates[0] || undefined);
-                            if (!tit) continue;
-                            patch[d] = {
-                                mode: 'split',
-                                extEmpId: vacancySplitExtId,
-                                adelEmpId: vacancySplitAdelId,
-                                gapBand: tit.code,
-                                gapPosition: tit.positionName,
-                            };
-                            applied++;
+                            francoConflicts.push(
+                                ...collectSplitFrancoConflicts(
+                                    d,
+                                    vacancySplitExtId,
+                                    vacancySplitAdelId,
+                                    vacancyEmployeesById,
+                                    shiftsMap,
+                                    pendingChanges,
+                                ),
+                            );
                         }
-                        if (applied === 0) {
-                            toast.error('No se pudo inferir el turno del titular en ningún día seleccionado.');
+                        if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
+                            requestSupervisorFrancoAuth(francoConflicts, () => {
+                                setVacancyFrancoAuthApproved(true);
+                                commitSplitPatch();
+                            }, 'extensión + adelanto');
                             return;
                         }
-                        setVacancyDayCoverages((prev) => ({ ...prev, ...patch }));
-                        toast.success(`Ext+adel aplicado a ${applied} día(s).`);
-                        setVacancyEditingDay(null);
-                        setVacancyReplacementOpen(false);
-                        setVacancyReplacementSearch('');
+                        if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
+                        commitSplitPatch();
                     };
                     const applySubstituteToActiveDays = (employeeId: string) => {
                         const applyAll = shouldApplyCoverageToAllDays();
-                        if (applyAll) {
-                            setSelectedReplacement(employeeId);
-                            setVacancyDayCoverages((prev) => {
-                                const next = { ...prev };
-                                for (const d of sortedActiveDates) {
-                                    next[d] = { mode: 'substitute', employeeId };
-                                }
-                                return next;
-                            });
-                            toast.success(`Suplente asignado a ${sortedActiveDates.length} día(s).`);
-                        } else if (vacancyEditingDay) {
-                            setVacancyDayCoverages((prev) => ({ ...prev, [vacancyEditingDay]: { mode: 'substitute', employeeId } }));
-                        } else {
-                            setSelectedReplacement(employeeId);
+                        const targetDays = applyAll
+                            ? sortedActiveDates
+                            : (vacancyEditingDay ? [vacancyEditingDay] : []);
+
+                        const commitSubstitute = () => {
+                            if (applyAll) {
+                                setSelectedReplacement(employeeId);
+                                setVacancyDayCoverages((prev) => {
+                                    const next = { ...prev };
+                                    for (const d of sortedActiveDates) {
+                                        next[d] = { mode: 'substitute', employeeId };
+                                    }
+                                    return next;
+                                });
+                                toast.success(`Suplente asignado a ${sortedActiveDates.length} día(s).`);
+                            } else if (vacancyEditingDay) {
+                                setVacancyDayCoverages((prev) => ({ ...prev, [vacancyEditingDay]: { mode: 'substitute', employeeId } }));
+                            } else {
+                                setSelectedReplacement(employeeId);
+                            }
+                            setVacancyEditingDay(null);
+                        };
+
+                        if (targetDays.length > 0) {
+                            const francoConflicts = collectVacancyFrancoConflicts({
+                                days: targetDays.map((dateStr) => ({
+                                    dateStr,
+                                    coverage: { mode: 'substitute' as const, employeeId, employeeName: vacancyEmployeesById[employeeId]?.name || '' },
+                                })),
+                                shiftsMap,
+                                employeesById: vacancyEmployeesById,
+                            }, pendingChanges);
+                            if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
+                                requestSupervisorFrancoAuth(francoConflicts, () => {
+                                    setVacancyFrancoAuthApproved(true);
+                                    commitSubstitute();
+                                }, 'suplencia sobre franco');
+                                return;
+                            }
+                            if (francoConflicts.length > 0) setVacancyFrancoAuthApproved(true);
                         }
-                        setVacancyEditingDay(null);
+                        commitSubstitute();
                     };
                     const clearCoverageForScope = () => {
                         const applyAll = shouldApplyCoverageToAllDays();
@@ -8846,6 +9001,9 @@ export default function PlanificacionPage() {
                                 )}
                                 {vacancyPickerTab === 'substitute' && (
                                     <div ref={vacancyReplacementPanelRef} className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                                        <p className="text-[10px] font-bold text-teal-800 bg-teal-50 border-b border-teal-100 px-3 py-2">
+                                            Preferí <strong>RET</strong>, <strong>ESC</strong> o guardias <strong>sin turno</strong> — evitás franco trabajado (FT) y costo extra.
+                                        </p>
                                         <div className="p-2 border-b bg-white">
                                             <div className="relative">
                                                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -8954,6 +9112,17 @@ export default function PlanificacionPage() {
                                                         ))}
                                                     </div>
                                                 </div>
+                                                {splitFrancoPreview.length > 0 && (
+                                                    <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5 text-[10px] font-bold text-amber-900">
+                                                        <div className="flex items-center gap-1.5 mb-1 text-amber-800">
+                                                            <AlertTriangle size={12} /> Franco planificado — costo FT
+                                                        </div>
+                                                        <p className="leading-relaxed">
+                                                            {formatFrancoConflictSummary(splitFrancoPreview)}.
+                                                            Requiere <strong>PIN de supervisor</strong> o elegí guardias en servicio / RET / ESC (pestaña suplente).
+                                                        </p>
+                                                    </div>
+                                                )}
                                                 <div className="flex flex-col gap-2">
                                                     <button
                                                         type="button"
@@ -9004,7 +9173,7 @@ export default function PlanificacionPage() {
                             )}
                             </div>
                             <div className="flex gap-3 shrink-0">
-                                <button onClick={() => { setShowVacancyModal(false); setVacancyData(null); setVacancyReplacementSearch(''); setVacancyReplacementOpen(false); setVacancyActiveDates(new Set()); setVacancyDayCoverages({}); setVacancyEditingDay(null); setVacancyPickerTab('substitute'); setVacancySplitExtId(''); setVacancySplitAdelId(''); setVacancyApplyToAllSelected(true); }} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
+                                <button onClick={finalizeVacancyModal} className="flex-1 py-3 text-slate-400 font-bold hover:bg-slate-50 rounded-xl border">Cancelar</button>
                                 <button onClick={handleProcessVacancy} disabled={vacancyActiveDates.size === 0} className={`flex-1 py-3 text-white rounded-xl font-bold shadow-lg disabled:opacity-40 ${btnColor[color]}`}>
                                     {willAssignAny ? 'Confirmar cobertura' : 'Marcar vacante'}
                                 </button>
@@ -9029,8 +9198,13 @@ export default function PlanificacionPage() {
                                 <p className="text-sm text-slate-500 mt-1">{authModal.description || <>El siguiente empleado superará las <strong>200 hs</strong> mensuales:</>}</p>
                                 <div className="mt-3 flex flex-col gap-1 items-center">
                                     {authModal.employees.map(e => (
-                                        <span key={e.name} className="text-xs bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-bold">
-                                            {e.name} — <span className="text-amber-900">{e.hours}h</span>
+                                        <span key={`${e.name}-${e.detail || e.hours}`} className="text-xs bg-amber-100 text-amber-700 px-3 py-1 rounded-full font-bold">
+                                            {e.name}
+                                            {e.detail
+                                                ? <> — <span className="text-amber-900">{e.detail}</span></>
+                                                : e.hours
+                                                    ? <> — <span className="text-amber-900">{e.hours}h</span></>
+                                                    : null}
                                         </span>
                                     ))}
                                 </div>
@@ -9069,7 +9243,6 @@ export default function PlanificacionPage() {
                                         }
                                         // PIN válido → ejecutar el guardado
                                         await authModal.pendingFn!();
-                                        // Loguear la autorización solo cuando viene del flujo GUARDAR
                                         if (authModal.isSaveFlow) {
                                             await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
                                                 timestamp: serverTimestamp(),
@@ -9077,6 +9250,17 @@ export default function PlanificacionPage() {
                                                 module: 'PLANIFICADOR',
                                                 actorName: result.name,
                                                 details: `${authModal.operatorName || 'Operador'} asignó turno a ${authModal.employees.map(e => `${e.name} (${e.hours}h)`).join(', ')} superando 200hs — autorizó: ${result.name}`,
+                                                objectiveId: selectedObjective || undefined,
+                                                objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
+                                            }, empresaId));
+                                        } else if (authModal.auditAction) {
+                                            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                                                timestamp: serverTimestamp(),
+                                                action: authModal.auditAction,
+                                                module: 'PLANIFICADOR',
+                                                actorName: result.name,
+                                                actorUid: getAuth().currentUser?.uid || null,
+                                                details: authModal.auditDetails || authModal.employees.map(e => e.name).join(', '),
                                                 objectiveId: selectedObjective || undefined,
                                                 objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
                                             }, empresaId));
@@ -9394,6 +9578,9 @@ export default function PlanificacionPage() {
                             || displayedEmployees.find((e: { id: string; name?: string }) => e.id === selectedCell.empId)?.name
                         }
                         onApply={applyRecompositionPackage}
+                        onRequestSupervisorAuth={(conflicts, onAuthorized) => {
+                            requestSupervisorFrancoAuth(conflicts, onAuthorized, 'cobertura / liberación');
+                        }}
                         onClose={() => setRecompositionModalOpen(false)}
                     />,
                     document.body,

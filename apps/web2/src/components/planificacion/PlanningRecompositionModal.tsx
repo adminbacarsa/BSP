@@ -10,12 +10,14 @@ import type {
 } from '@/lib/planificacion/planningRecomposition.types';
 import {
   buildRecompositionPendingUpdates,
+  collectSplitFrancoConflicts,
   defaultSplitForBand,
   listEarlyStartCandidates,
   listExtensionCandidates,
   listRecompositionTargets,
   neighborBandsForTarget,
   resolveRecompositionTargetForEmployee,
+  type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
 
 const RRHH_TYPE_OPTIONS = [
@@ -43,6 +45,10 @@ type Props = {
     pkg: RecompositionPackage,
     novedad?: PendingAbsenceNovedad,
   ) => void;
+  onRequestSupervisorAuth?: (
+    conflicts: FrancoCoverageConflict[],
+    onAuthorized: () => void,
+  ) => void;
   onClose: () => void;
 };
 
@@ -69,6 +75,7 @@ export default function PlanningRecompositionModal({
   preselectedEmpId,
   preselectedEmployeeName,
   onApply,
+  onRequestSupervisorAuth,
   onClose,
 }: Props) {
   const [step, setStep] = useState(1);
@@ -151,6 +158,11 @@ export default function PlanningRecompositionModal({
     [selectedTarget, dateStr, objectiveId, employees, shiftsMap, pendingChanges, targetId, extEmpId],
   );
 
+  const splitFrancoPreview = useMemo(() => {
+    if (!extEmpId || !adelEmpId) return [];
+    return collectSplitFrancoConflicts(dateStr, extEmpId, adelEmpId, employeesById, shiftsMap, pendingChanges);
+  }, [dateStr, extEmpId, adelEmpId, employeesById, shiftsMap, pendingChanges]);
+
   const goToCoverageStep = (t: RecompositionTarget, nextMode: RecompositionMode) => {
     setTargetId(t.employeeId);
     setMode(nextMode);
@@ -180,20 +192,8 @@ export default function PlanningRecompositionModal({
     goToCoverageStep(preselectedTarget, mode);
   };
 
-  const handleConfirm = () => {
-    setError('');
-    if (!selectedTarget || !extEmpId || !adelEmpId) {
-      setError('Completá guardia extensión, adelanto y objetivo.');
-      return;
-    }
-    if (extEmpId === adelEmpId) {
-      setError('Extensión y adelanto deben ser guardias distintos.');
-      return;
-    }
-    if (extTo !== adelFrom) {
-      setError('Los tramos deben ser contiguos (fin ext = inicio adel).');
-      return;
-    }
+  const applyPackage = (authorizeFrancoTrabajado: boolean) => {
+    if (!selectedTarget || !extEmpId || !adelEmpId) return;
 
     let anticipatedAbsence: AnticipatedAbsenceDecl | undefined;
     let novedad: PendingAbsenceNovedad | undefined;
@@ -245,19 +245,65 @@ export default function PlanningRecompositionModal({
       anticipatedAbsence,
     };
 
-    try {
-      const updates = buildRecompositionPendingUpdates(pkg, {
-        shiftsMap,
-        pendingChanges,
-        employeesById,
-        objectiveId,
-        clientId,
-      });
-      onApply(updates, pkg, novedad);
-      onClose();
-    } catch (e: any) {
-      setError(e?.message || 'Error al armar el paquete');
+    const updates = buildRecompositionPendingUpdates(pkg, {
+      shiftsMap,
+      pendingChanges,
+      employeesById,
+      objectiveId,
+      clientId,
+      authorizeFrancoTrabajado,
+    });
+    onApply(updates, pkg, novedad);
+    onClose();
+  };
+
+  const handleConfirm = () => {
+    setError('');
+    if (!selectedTarget || !extEmpId || !adelEmpId) {
+      setError('Completá guardia extensión, adelanto y objetivo.');
+      return;
     }
+    if (extEmpId === adelEmpId) {
+      setError('Extensión y adelanto deben ser guardias distintos.');
+      return;
+    }
+    if (extTo !== adelFrom) {
+      setError('Los tramos deben ser contiguos (fin ext = inicio adel).');
+      return;
+    }
+
+    const francoConflicts = collectSplitFrancoConflicts(
+      dateStr,
+      extEmpId,
+      adelEmpId,
+      employeesById,
+      shiftsMap,
+      pendingChanges,
+    );
+
+    const tryApply = (authorizeFranco: boolean) => {
+      try {
+        applyPackage(authorizeFranco);
+      } catch (e: any) {
+        const msg = String(e?.message || '');
+        if (msg.startsWith('FRANCO_COVERAGE:')) {
+          setError('Guardia en franco planificado — requiere PIN de supervisor o elegí RET/ESC/libre.');
+        } else {
+          setError(msg || 'Error al armar el paquete');
+        }
+      }
+    };
+
+    if (francoConflicts.length > 0) {
+      if (onRequestSupervisorAuth) {
+        onRequestSupervisorAuth(francoConflicts, () => tryApply(true));
+        return;
+      }
+      setError('Los guardias seleccionados tienen franco planificado (FT). Preferí RET/ESC o guardias en servicio.');
+      return;
+    }
+
+    tryApply(false);
   };
 
   const fmtDate = dateStr.split('-').reverse().join('/');
@@ -500,6 +546,14 @@ export default function PlanningRecompositionModal({
                 {mode === 'liberation' && ' · titular pasa a RET'}
                 {mode === 'anticipated_absence' && ` · titular pasa a ${RRHH_ABSENCE_LABEL_TO_CODE[rrhhType] || 'AA'} (RRHH)`}
               </div>
+
+              {splitFrancoPreview.length > 0 && (
+                <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-900">
+                  <AlertTriangle size={12} className="inline mr-1 text-amber-700" />
+                  Guardia en <strong>franco planificado</strong> — costo FT. Al confirmar se pedirá PIN de supervisor.
+                  Preferí guardias en servicio o RET/ESC de otro puesto.
+                </div>
+              )}
 
               {error && (
                 <p className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">{error}</p>
