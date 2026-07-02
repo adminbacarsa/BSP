@@ -48,6 +48,7 @@
     "seed": "node scripts/seed-lab.js",
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
+    "eval:vplan": "node scripts/eval-vplan.mjs",
     "test:planning-agent-emulator": "node scripts/test-planning-agent-emulator.mjs",
     "test:automate-planning-ui": "node scripts/test-automate-planning-ui.mjs",
     "autoplan:real": "node scripts/run-autoplan-real.mjs",

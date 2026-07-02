@@ -773,6 +773,9 @@ export const optimizePlanningGemini =
         .runWith({ ...optimizePlanningGeminiRuntime, secrets: ['GEMINI_API_KEY'] })
         .https.onCall(optimizePlanningGeminiHandler);
 
+// --- VPLAN (experimental, paralelo — ver docs/VPLAN.md; handler bloquea fuera de emulador) ---
+export { vplanRun } from './vplan';
+
 // --- MOTOR DE PLANIFICACIÓN AUTOMÁTICA ---
 
 export const runAutoSchedule = functions
