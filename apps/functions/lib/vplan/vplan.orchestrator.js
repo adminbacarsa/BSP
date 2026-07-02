@@ -77,6 +77,7 @@ async function runVplanOrchestrator(request) {
             year: request.year,
             month: request.month,
             employeeIds: request.employeeIds,
+            supplyScope: request.supplyScope,
         });
     }
     catch (e) {
@@ -130,7 +131,7 @@ async function runVplanOrchestrator(request) {
             suggestedHeadcount,
             previousMonthStateKey: snapshot.previousMonthStateKey,
         });
-        steps.push(step('2_supply', context.supply.employeeCount > 0, `${context.supply.employeeCount} guardias · ${snapshot.existingAssignments.length} turnos existentes en mes`, t2));
+        steps.push(step('2_supply', context.supply.employeeCount > 0, `${context.supply.employeeCount} guardias (${request.supplyScope ?? 'objective'}) · ${snapshot.existingAssignments.length} turnos en mes`, t2));
     }
     if (runPhases.has('3_feasibility') && context.demand && context.supply) {
         const t3 = Date.now();

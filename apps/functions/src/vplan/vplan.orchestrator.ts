@@ -98,6 +98,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       year: request.year,
       month: request.month,
       employeeIds: request.employeeIds,
+      supplyScope: request.supplyScope,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Error cargando datos Firestore';
@@ -168,7 +169,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
     steps.push(step(
       '2_supply',
       context.supply.employeeCount > 0,
-      `${context.supply.employeeCount} guardias · ${snapshot.existingAssignments.length} turnos existentes en mes`,
+      `${context.supply.employeeCount} guardias (${request.supplyScope ?? 'objective'}) · ${snapshot.existingAssignments.length} turnos en mes`,
       t2,
     ));
   }

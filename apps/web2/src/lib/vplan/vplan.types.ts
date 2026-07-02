@@ -36,6 +36,7 @@ export interface VplanRunRequest {
   preferredCycle?: '6+2' | '4+2' | '5+1' | '6+1';
   runOptimization?: boolean;
   employeeIds?: string[];
+  supplyScope?: 'objective' | 'empresa';
 }
 
 export interface VplanPositionDemand {

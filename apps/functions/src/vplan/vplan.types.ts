@@ -40,8 +40,10 @@ export interface VplanRunRequest {
   preferredCycle?: '6+2' | '4+2' | '5+1' | '6+1';
   /** Incluir Fase 9 (Gemini) — solo emulador con GEMINI_API_KEY. */
   runOptimization?: boolean;
-  /** IDs empleados a considerar; vacío = dotación del objetivo. */
+  /** IDs empleados a considerar; vacío = según supplyScope. */
   employeeIds?: string[];
+  /** objective = nativos del objetivo + planificación; empresa = toda plantilla activa. */
+  supplyScope?: 'objective' | 'empresa';
 }
 
 export interface VplanPositionDemand {

@@ -43,4 +43,5 @@ export declare function loadVplanPlanningSnapshot(request: {
     year: number;
     month: number;
     employeeIds?: string[];
+    supplyScope?: 'objective' | 'empresa';
 }): Promise<VplanPlanningSnapshot>;

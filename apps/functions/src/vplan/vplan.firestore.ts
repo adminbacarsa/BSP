@@ -4,6 +4,7 @@
 
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { planificacionEstadoLookupDocIds } from '../assistant/planificacionEstadoKeys';
 import { buildMonthDays, previousMonth } from './vplan.calendar';
 import { normalizeSlaPositions, type VplanPositionDef } from './vplan.positions';
 
@@ -72,13 +73,107 @@ function isSlaActive(data: admin.firestore.DocumentData): boolean {
 
 function isEmployeeActive(data: admin.firestore.DocumentData): boolean {
   if (data.activo === false) return false;
-  const status = String(data.status || '').toUpperCase();
-  if (status === 'INACTIVE') return false;
-  return data.activo === true || status === 'ACTIVE' || status === '';
+  const status = String(data.status || '').toLowerCase().trim();
+  if (status === 'inactivo' || status === 'inactive') return false;
+  if (data.activo === true) return true;
+  if (!status || status === 'activo' || status === 'active') return true;
+  return true;
+}
+
+function normalizeObjectiveKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+async function buildObjectiveAliasIds(
+  empresaId: string,
+  canonicalObjectiveId: string,
+  slaObjectiveId?: string,
+  objectiveNameHint?: string,
+): Promise<Set<string>> {
+  const aliases = new Set<string>();
+  const add = (value?: string) => {
+    const trimmed = String(value || '').trim();
+    if (trimmed) aliases.add(trimmed);
+  };
+
+  add(canonicalObjectiveId);
+  add(slaObjectiveId);
+  if (objectiveNameHint) add(objectiveNameHint);
+
+  const snap = await db().collection('clients').where('empresaId', '==', empresaId).limit(40).get();
+  for (const doc of snap.docs) {
+    const objetivos = Array.isArray(doc.data().objetivos) ? doc.data().objetivos : [];
+    for (const raw of objetivos) {
+      const obj = raw as { id?: string; name?: string };
+      const keys = [String(obj?.id || '').trim(), String(obj?.name || '').trim()].filter(Boolean);
+      const matchesCanonical = keys.some(
+        (key) => aliases.has(key) || normalizeObjectiveKey(key) === normalizeObjectiveKey(canonicalObjectiveId),
+      );
+      if (matchesCanonical) keys.forEach(add);
+    }
+  }
+
+  const nameHints = new Set<string>();
+  for (const alias of aliases) nameHints.add(normalizeObjectiveKey(alias));
+
+  const slaSnap = await db().collection('servicios_sla').where('empresaId', '==', empresaId).get();
+  const idsByNormName = new Map<string, Set<string>>();
+  for (const doc of slaSnap.docs) {
+    const data = doc.data();
+    if (!isSlaActive(data)) continue;
+    const oid = String(data.objectiveId || '').trim();
+    const oname = normalizeObjectiveKey(String(data.objectiveName || data.name || ''));
+    if (!oname) continue;
+    if (!idsByNormName.has(oname)) idsByNormName.set(oname, new Set());
+    if (oid) idsByNormName.get(oname)!.add(oid);
+  }
+
+  for (const hint of nameHints) {
+    const related = idsByNormName.get(hint);
+    if (!related) continue;
+    related.forEach(add);
+  }
+
+  for (const doc of slaSnap.docs) {
+    const data = doc.data();
+    if (!isSlaActive(data)) continue;
+    const oid = String(data.objectiveId || '').trim();
+    const oname = normalizeObjectiveKey(String(data.objectiveName || data.name || ''));
+    if ((oid && aliases.has(oid)) || (oname && nameHints.has(oname))) {
+      if (oid) add(oid);
+      add(data.objectiveName);
+    }
+  }
+
+  return aliases;
+}
+
+function refMatchesObjective(
+  ref: string,
+  objectiveAliases: Set<string>,
+  slaIdToObjectiveId: Record<string, string>,
+): boolean {
+  const trimmed = String(ref || '').trim();
+  if (!trimmed) return false;
+  if (objectiveAliases.has(trimmed)) return true;
+
+  const mapped = slaIdToObjectiveId[trimmed];
+  if (mapped && objectiveAliases.has(mapped)) return true;
+
+  const norm = normalizeObjectiveKey(trimmed);
+  for (const alias of objectiveAliases) {
+    if (normalizeObjectiveKey(alias) === norm) return true;
+  }
+  return false;
 }
 
 async function loadSlaForObjective(objectiveId: string, empresaId: string): Promise<{
   slaId: string;
+  slaObjectiveId: string;
   slaVendidas: number;
   positions: VplanPositionDef[];
   objectiveName?: string;
@@ -102,6 +197,7 @@ async function loadSlaForObjective(objectiveId: string, empresaId: string): Prom
   const sla = doc.data();
   return {
     slaId: doc.id,
+    slaObjectiveId: String(sla.objectiveId || objectiveId),
     slaVendidas: Math.max(0, Number(sla.totalMonthlyHours) || 0),
     positions: normalizeSlaPositions(sla.positions || []),
     objectiveName: sla.objectiveName ? String(sla.objectiveName) : undefined,
@@ -118,31 +214,80 @@ async function resolveObjectiveName(objectiveId: string, empresaId: string): Pro
   return undefined;
 }
 
+async function buildSlaIdToObjectiveId(empresaId: string): Promise<Record<string, string>> {
+  const snap = await db()
+    .collection('servicios_sla')
+    .where('empresaId', '==', empresaId)
+    .get();
+  const map: Record<string, string> = {};
+  snap.docs.forEach((doc) => {
+    const d = doc.data();
+    if (!isSlaActive(d)) return;
+    const objId = String(d.objectiveId || '');
+    if (objId) map[doc.id] = objId;
+  });
+  return map;
+}
+
+function employeeMatchesObjective(
+  employeeId: string,
+  data: admin.firestore.DocumentData,
+  objectiveAliases: Set<string>,
+  slaIdToObjectiveId: Record<string, string>,
+  planningEmployeeIds: Set<string>,
+): boolean {
+  if (planningEmployeeIds.has(employeeId)) return true;
+
+  const dotacion = data.planificacionDotacion as Record<string, { positionName?: string }> | undefined;
+  if (dotacion && typeof dotacion === 'object') {
+    for (const [objKey, cfg] of Object.entries(dotacion)) {
+      if (cfg?.positionName && refMatchesObjective(objKey, objectiveAliases, slaIdToObjectiveId)) {
+        return true;
+      }
+    }
+  }
+
+  const pref = String(data.preferredObjectiveId || '').trim();
+  if (!pref) return false;
+  return refMatchesObjective(pref, objectiveAliases, slaIdToObjectiveId);
+}
+
 async function loadEmployees(
   empresaId: string,
-  objectiveId: string,
-  employeeIds?: string[],
+  objectiveAliases: Set<string>,
+  opts: {
+    employeeIds?: string[];
+    supplyScope?: 'objective' | 'empresa';
+    slaIdToObjectiveId?: Record<string, string>;
+    planningEmployeeIds?: Set<string>;
+  },
 ): Promise<VplanEmployeeRecord[]> {
   const snap = await db()
     .collection('empleados')
     .where('empresaId', '==', empresaId)
     .get();
 
-  const allowSet = employeeIds?.length ? new Set(employeeIds) : null;
+  const allowSet = opts.employeeIds?.length ? new Set(opts.employeeIds) : null;
+  const scope = opts.supplyScope ?? 'objective';
+  const slaMap = opts.slaIdToObjectiveId ?? {};
+  const planningIds = opts.planningEmployeeIds ?? new Set<string>();
 
   return snap.docs
     .filter((doc) => {
       if (allowSet && !allowSet.has(doc.id)) return false;
       const data = doc.data();
       if (!isEmployeeActive(data)) return false;
-      const pref = data.preferredObjectiveId;
-      return !pref || pref === objectiveId;
+      if (scope === 'empresa') return true;
+      return employeeMatchesObjective(doc.id, data, objectiveAliases, slaMap, planningIds);
     })
     .map((doc) => {
       const data = doc.data();
+      const first = String(data.firstName || data.nombre || '').trim();
+      const last = String(data.lastName || data.apellido || '').trim();
+      const composed = [last, first].filter(Boolean).join(', ');
       return {
         id: doc.id,
-        displayName: String(data.nombre || data.fullName || data.name || doc.id),
+        displayName: composed || String(data.fullName || data.name || doc.id),
         priorCctHours: Math.max(0, Number(data.priorCctHours ?? data.horasCiclo ?? data.horasMes) || 0),
       };
     });
@@ -195,22 +340,28 @@ function emptyPlanningState(): VplanPlanningState {
 }
 
 async function loadPlanningState(
+  empresaId: string,
   objectiveId: string,
   year: number,
   month: number,
 ): Promise<VplanPlanningState> {
-  const key = `${objectiveId}_${year}_${month}`;
-  const snap = await db().collection('planificacion_estados').doc(key).get();
-  if (!snap.exists) return emptyPlanningState();
-  const d = snap.data() || {};
-  return {
-    defaultPositionByEmp: (d.defaultPositionByEmp as Record<string, string>) || {},
-    defaultShiftByEmp: (d.defaultShiftByEmp as Record<string, string>) || {},
-    trailingWorkDays: d.trailingWorkDays as Record<string, number> | undefined,
-    trailingRestDays: d.trailingRestDays as Record<string, number> | undefined,
-    lastShiftByEmp: d.lastShiftByEmp as Record<string, string> | undefined,
-    lastWorkBandBeforeRest: d.lastWorkBandBeforeRest as Record<string, string> | undefined,
-  };
+  const docIds = planificacionEstadoLookupDocIds(empresaId, objectiveId, year, month);
+  for (const key of docIds) {
+    const snap = await db().collection('planificacion_estados').doc(key).get();
+    if (!snap.exists) continue;
+    const d = snap.data() || {};
+    const defaultPositionByEmp = (d.defaultPositionByEmp as Record<string, string>) || {};
+    if (Object.keys(defaultPositionByEmp).length === 0) continue;
+    return {
+      defaultPositionByEmp,
+      defaultShiftByEmp: (d.defaultShiftByEmp as Record<string, string>) || {},
+      trailingWorkDays: d.trailingWorkDays as Record<string, number> | undefined,
+      trailingRestDays: d.trailingRestDays as Record<string, number> | undefined,
+      lastShiftByEmp: d.lastShiftByEmp as Record<string, string> | undefined,
+      lastWorkBandBeforeRest: d.lastWorkBandBeforeRest as Record<string, string> | undefined,
+    };
+  }
+  return emptyPlanningState();
 }
 
 function dateStrFromTimestamp(ts: unknown): string | null {
@@ -261,20 +412,39 @@ export async function loadVplanPlanningSnapshot(request: {
   year: number;
   month: number;
   employeeIds?: string[];
+  supplyScope?: 'objective' | 'empresa';
 }): Promise<VplanPlanningSnapshot> {
   const sla = await loadSlaForObjective(request.objectiveId, request.empresaId);
   const objectiveName = sla.objectiveName ?? await resolveObjectiveName(request.objectiveId, request.empresaId);
-  const employees = await loadEmployees(request.empresaId, request.objectiveId, request.employeeIds);
-  const absences = await loadAbsences(request.empresaId, request.year, request.month);
   const days = buildMonthDays(request.year, request.month);
   const prev = previousMonth(request.year, request.month);
   const prevKey = `${request.objectiveId}_${prev.year}_${prev.month}`;
 
-  const [planningState, prevPlanningState, existingAssignments] = await Promise.all([
-    loadPlanningState(request.objectiveId, request.year, request.month),
-    loadPlanningState(request.objectiveId, prev.year, prev.month),
-    loadExistingAssignments(request.objectiveId, request.year, request.month),
+  const [objectiveAliases, slaIdToObjectiveId, planningState, prevPlanningState, absences] = await Promise.all([
+    buildObjectiveAliasIds(request.empresaId, request.objectiveId, sla.slaObjectiveId, objectiveName),
+    buildSlaIdToObjectiveId(request.empresaId),
+    loadPlanningState(request.empresaId, request.objectiveId, request.year, request.month),
+    loadPlanningState(request.empresaId, request.objectiveId, prev.year, prev.month),
+    loadAbsences(request.empresaId, request.year, request.month),
   ]);
+
+  const planningEmployeeIds = new Set([
+    ...Object.keys(planningState.defaultPositionByEmp || {}),
+    ...Object.keys(prevPlanningState.defaultPositionByEmp || {}),
+  ]);
+
+  const employees = await loadEmployees(request.empresaId, objectiveAliases, {
+    employeeIds: request.employeeIds,
+    supplyScope: request.supplyScope,
+    slaIdToObjectiveId,
+    planningEmployeeIds,
+  });
+
+  const existingAssignments = await loadExistingAssignments(
+    request.objectiveId,
+    request.year,
+    request.month,
+  );
 
   let mergedPlanning = planningState;
   if (

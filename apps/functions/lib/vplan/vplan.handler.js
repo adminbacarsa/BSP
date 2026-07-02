@@ -21,6 +21,7 @@ async function vplanRunHandler(data, context) {
         preferredCycle: data?.preferredCycle,
         runOptimization: data?.runOptimization === true,
         employeeIds: Array.isArray(data?.employeeIds) ? data.employeeIds : undefined,
+        supplyScope: data?.supplyScope === 'empresa' ? 'empresa' : 'objective',
     };
     if (!Number.isFinite(request.year) || !Number.isFinite(request.month)) {
         throw new functions.https.HttpsError('invalid-argument', 'year y month inválidos');

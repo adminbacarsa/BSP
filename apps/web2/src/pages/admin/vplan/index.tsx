@@ -111,6 +111,7 @@ export default function VplanLabPage() {
   const [intent, setIntent] = useState<VplanIntent>('full');
   const [preferredCycle, setPreferredCycle] = useState<'6+2' | '4+2'>('6+2');
   const [runOptimization, setRunOptimization] = useState(false);
+  const [supplyScope, setSupplyScope] = useState<'objective' | 'empresa'>('objective');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<VplanRunResponse | null>(null);
   const [showJson, setShowJson] = useState(false);
@@ -141,6 +142,7 @@ export default function VplanLabPage() {
         preferredCycle,
         budgetMode: 'cct',
         runOptimization,
+        supplyScope,
       });
       setResult(res);
       if (res.status === 'ok') toast.success('VPLAN completado');
@@ -282,6 +284,18 @@ export default function VplanLabPage() {
               </select>
             </label>
 
+            <label className="block text-xs font-bold text-slate-600 uppercase">
+              Dotación (oferta)
+              <select
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                value={supplyScope}
+                onChange={(e) => setSupplyScope(e.target.value as 'objective' | 'empresa')}
+              >
+                <option value="objective">Solo objetivo (preferido + flotantes + planif.)</option>
+                <option value="empresa">Toda la plantilla activa de la empresa</option>
+              </select>
+            </label>
+
             <div className="grid grid-cols-2 gap-3 items-end">
               <label className="block text-xs font-bold text-slate-600 uppercase">
                 Ciclo
@@ -359,6 +373,12 @@ export default function VplanLabPage() {
                     <p className="font-bold text-slate-800">Viabilidad</p>
                     <p>Ciclo sugerido: {result.context.feasibility.suggestedCycle} · plantilla ~{result.context.feasibility.suggestedHeadcount}</p>
                     <p>Oferta ~{result.context.feasibility.offerHours}h vs objetivo {result.context.feasibility.effectiveTargetHours}h</p>
+                    {result.status === 'feasibility_failed' && (
+                      <p className="text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
+                        El SLA pide ~{result.context.feasibility.suggestedHeadcount} guardias y la oferta cargada no alcanza.
+                        Probá <strong>Dotación → Toda la plantilla</strong> para simular con toda la empresa, o asigná más legajos al objetivo en RRHH/Planificador.
+                      </p>
+                    )}
                   </div>
                 )}
 
