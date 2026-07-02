@@ -129,6 +129,7 @@ import {
     PLANNING_NON_BILLABLE_CODES,
     buildCodeCountsByPositionForDay,
     collectSplitBandCreditsForDay,
+    lookupSplitCreditsForPosition,
 } from '@/lib/planificacion/positionCoverageUnits';
 import {
     analyzeDayCoverageGaps,
@@ -624,6 +625,13 @@ export default function PlanificacionPage() {
     const [needsRepublishMap, setNeedsRepublishMap] = useState<Record<string, boolean>>({});
     const [isPublishing, setIsPublishing] = useState(false);
     const [isUnpublishing, setIsUnpublishing] = useState(false);
+    const [publishConfirmModal, setPublishConfirmModal] = useState<{
+        isRepublish: boolean;
+        warnings: string[];
+        superAdminOverride: boolean;
+        objectiveName: string;
+        periodLabel: string;
+    } | null>(null);
     const [correctionMode, setCorrectionMode] = useState(false);
     const [cellEditMode, setCellEditMode] = useState(false);
     // 🛑 SYNC-CORE: Estado activo inicial null para forzar limpieza
@@ -1925,9 +1933,11 @@ export default function PlanificacionPage() {
                 selectedObjective,
                 isPendingChange: (empId, ds) => !!changes[`${empId}_${ds}`],
                 resolveOriginalShift: (empId, ds) => existing[`${empId}_${ds}`] || null,
+                shiftsMap: existing,
+                pendingChanges: changes,
             },
         );
-        const posCredits = splitCredits[pos.positionName] || {};
+        const posCredits = lookupSplitCreditsForPosition(splitCredits, pos.positionName);
         for (const [bandCode, n] of Object.entries(posCredits)) {
             codeCounts[bandCode] = (codeCounts[bandCode] || 0) + n;
         }
@@ -1977,6 +1987,7 @@ export default function PlanificacionPage() {
             dominantPositionName: dominantPosition?.positionName || 'General',
             isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
             existingShiftsMap: shiftsMap,
+            pendingChangesMap: pendingChanges,
         },
     );
 
@@ -2542,6 +2553,14 @@ export default function PlanificacionPage() {
                         isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
                         swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
                         positionName: data.positionName,
+                        coveredBy: data.coveredBy,
+                        coveragePackageId: data.coveragePackageId,
+                        coverageSegmentRole: data.coverageSegmentRole,
+                        coversPositionName: data.coversPositionName,
+                        coversEmployeeId: data.coversEmployeeId,
+                        coversBandCode: data.coversBandCode,
+                        coverageStatus: data.coverageStatus,
+                        coverageNote: data.coverageNote,
                         deploymentRole: data.deploymentRole,
                         deploymentBand: data.deploymentBand,
                         surplusIntent: data.surplusIntent,
@@ -3556,7 +3575,7 @@ export default function PlanificacionPage() {
         await doSave();
     };
 
-    const handlePublish = async () => {
+    const openPublishConfirm = () => {
         if (!selectedObjective || !canPublishPlanning) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
@@ -3581,27 +3600,43 @@ export default function PlanificacionPage() {
         }
 
         const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        const publishDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
         const isAlreadyPublished = !!publishStatusMap[publishLookupKey];
-        let verb = isAlreadyPublished
-            ? 'El cronograma ya fue publicado. ¿Volver a notificar todos los cambios desde la última publicación?'
-            : '¿Publicar cronograma? Se notificará a todos los empleados del objetivo.';
-        if (isSuperAdmin && (slaHoursMismatch || hasCoverageGaps)) {
-            const warnings: string[] = [];
-            if (slaHoursMismatch) {
-                const delta = slaRounded - plannedRounded;
-                warnings.push(
-                    delta > 0
-                        ? `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (faltan ${delta}h).`
-                        : `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (excede ${-delta}h).`,
-                );
-            }
-            if (hasCoverageGaps) {
-                warnings.push(`Cobertura: ${coverageGapDays} día(s) con huecos respecto al esquema SLA.`);
-            }
-            verb = `[SUPERADMIN — sin validación SLA/cobertura]\n\n${warnings.join('\n')}\n\n¿Publicar igual?`;
+        const warnings: string[] = [];
+        if (isSuperAdmin && slaHoursMismatch) {
+            const delta = slaRounded - plannedRounded;
+            warnings.push(
+                delta > 0
+                    ? `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (faltan ${delta}h).`
+                    : `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (excede ${-delta}h).`,
+            );
         }
-        if (!confirm(verb)) return;
+        if (isSuperAdmin && hasCoverageGaps) {
+            warnings.push(`Cobertura: ${coverageGapDays} día(s) con huecos respecto al esquema SLA.`);
+        }
+
+        const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
+        setPublishConfirmModal({
+            isRepublish: isAlreadyPublished,
+            warnings,
+            superAdminOverride: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps),
+            objectiveName,
+            periodLabel: `${String(month).padStart(2, '0')}/${year}`,
+        });
+    };
+
+    const executePublish = async () => {
+        if (!selectedObjective || !canPublishPlanning) return;
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
+        const publishDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
+        const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
+        const slaHoursMismatch = slaVendidas > 0 && Math.round(totalPlanned) !== Math.round(slaVendidas);
+        const coverageGapDays = objectiveCoverageGapReport
+            ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
+            : 0;
+        const hasCoverageGaps = coverageGapDays > 0;
+        setPublishConfirmModal(null);
         setIsPublishing(true);
         try {
             const auth = getAuth();
@@ -6690,7 +6725,7 @@ export default function PlanificacionPage() {
                                         )}
                                         {canPublishPlanning && (!published || needsRepublish) && (
                                             <button
-                                                onClick={handlePublish}
+                                                onClick={openPublishConfirm}
                                                 disabled={isPublishing}
                                                 title={isSuperAdmin && (slaVendidas > 0 && Math.round(Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0)) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
                                                     ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
@@ -8323,6 +8358,83 @@ export default function PlanificacionPage() {
                                             operatorName: activeActorName || operatorName
                                         });
                                     }} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Autorizar con PIN</button></div></div></div></div>, document.body)}
+                {publishConfirmModal && typeof document !== 'undefined' && createPortal(
+                    <div
+                        className="fixed inset-0 z-[9200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+                        onClick={() => !isPublishing && setPublishConfirmModal(null)}
+                    >
+                        <div
+                            className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <div className="p-5 border-b bg-indigo-50/80">
+                                <div className="flex items-start gap-3">
+                                    <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-xl shrink-0">
+                                        <CalendarCheck size={22}/>
+                                    </div>
+                                    <div>
+                                        <h3 className="font-black text-base text-slate-900 uppercase tracking-wide">
+                                            {publishConfirmModal.isRepublish ? 'Re-publicar cronograma' : 'Publicar cronograma'}
+                                        </h3>
+                                        <p className="text-[11px] font-bold text-indigo-700 mt-0.5">
+                                            {publishConfirmModal.objectiveName} · {publishConfirmModal.periodLabel}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="p-5 space-y-3">
+                                <p className="text-sm text-slate-700 leading-relaxed">
+                                    {publishConfirmModal.isRepublish
+                                        ? '¿Está seguro de re-publicar este cronograma? Se volverán a enviar notificaciones a los colaboradores con los turnos en borrador del mes.'
+                                        : '¿Está seguro de publicar este cronograma? Los colaboradores del objetivo recibirán notificaciones con sus turnos asignados.'}
+                                </p>
+                                <ul className="text-[11px] text-slate-500 space-y-1.5 list-disc pl-4">
+                                    <li>El cronograma quedará visible en el portal del guardia.</li>
+                                    <li>Los turnos en borrador pasan a estado publicado.</li>
+                                    <li>Esta acción no se puede deshacer con un clic (solo SuperAdmin puede despublicar).</li>
+                                </ul>
+                                {publishConfirmModal.superAdminOverride && publishConfirmModal.warnings.length > 0 && (
+                                    <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5 space-y-1">
+                                        <p className="text-[10px] font-black uppercase text-amber-800 flex items-center gap-1">
+                                            <ShieldAlert size={12}/> SuperAdmin — publicación con advertencias
+                                        </p>
+                                        {publishConfirmModal.warnings.map((w, i) => (
+                                            <p key={i} className="text-[11px] font-medium text-amber-900">{w}</p>
+                                        ))}
+                                    </div>
+                                )}
+                                {Object.keys(pendingChanges).length > 0 && (
+                                    <div className="rounded-xl border-2 border-rose-300 bg-rose-50 px-3 py-2.5">
+                                        <p className="text-[11px] font-bold text-rose-800 flex items-center gap-1.5">
+                                            <AlertTriangle size={13}/>
+                                            Tenés {Object.keys(pendingChanges).length} cambio(s) sin guardar. Guardá antes de publicar para que entren en las notificaciones.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="p-4 border-t bg-slate-50 flex gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setPublishConfirmModal(null)}
+                                    disabled={isPublishing}
+                                    className="flex-1 py-3 rounded-xl text-xs font-black text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={executePublish}
+                                    disabled={isPublishing || Object.keys(pendingChanges).length > 0}
+                                    className="flex-1 py-3 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {isPublishing ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>}
+                                    {publishConfirmModal.isRepublish ? 'Re-publicar' : 'Publicar'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>,
+                    document.body,
+                )}
                 {deployBandPicker && createPortal(
                     <div className="fixed inset-0 z-[9100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setDeployBandPicker(null)}>
                         <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-2xl w-full max-w-xs border dark:border-slate-700" onClick={e => e.stopPropagation()}>

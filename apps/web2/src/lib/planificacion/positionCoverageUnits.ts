@@ -4,6 +4,7 @@
  */
 
 import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
+import { resolveTitularVacancyWorkShift } from './vacancyCoverage';
 
 export const PLANNING_NON_BILLABLE_CODES = new Set([
     'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC',
@@ -22,15 +23,38 @@ export type PlanningShiftSlice = {
     coversEmployeeId?: string;
     coversBandCode?: string;
     coverageStatus?: string;
+    coveredBy?: string;
     isExtended?: boolean;
     isEarlyStart?: boolean;
 };
 
+type ShiftRow = PlanningShiftSlice & { employeeId: string };
+
+export function normalizePlanningPositionName(name: unknown): string {
+    return String(name ?? '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/^puesto\s+/, '');
+}
+
+export function lookupSplitCreditsForPosition(
+    credits: Record<string, Record<string, number>>,
+    positionName: string,
+): Record<string, number> {
+    const target = normalizePlanningPositionName(positionName);
+    for (const [posName, bands] of Object.entries(credits)) {
+        if (normalizePlanningPositionName(posName) === target) return bands;
+    }
+    return {};
+}
+
 /** Paquete ext+adel completo → 1 banda SLA cerrada en el puesto cubierto. */
 export function assessSplitPackageStatus(rows: PlanningShiftSlice[]): 'COVERED' | 'PARTIAL' | 'NONE' {
     if (!rows.length) return 'NONE';
-    const hasExt = rows.some(r => r.coverageSegmentRole === 'EXTENSION' || (!!r.isExtended && !!r.coversPositionName));
-    const hasAdel = rows.some(r => r.coverageSegmentRole === 'EARLY_START' || (!!r.isEarlyStart && !!r.coversPositionName));
+    const hasExt = rows.some(r => r.coverageSegmentRole === 'EXTENSION' || !!r.isExtended);
+    const hasAdel = rows.some(r => r.coverageSegmentRole === 'EARLY_START' || !!r.isEarlyStart);
     if (!hasExt || !hasAdel) return 'PARTIAL';
     const explicit = rows.find(r => r.coverageStatus === 'COVERED' || r.coverageStatus === 'PARTIAL')?.coverageStatus;
     if (explicit === 'COVERED') return 'COVERED';
@@ -44,16 +68,37 @@ function normBandCode(code: unknown): string {
 
 function resolveSplitBandCode(
     rows: PlanningShiftSlice[],
-    resolveOriginalShift?: (employeeId: string) => PlanningShiftSlice | null | undefined,
+    ctx?: {
+        titularId?: string;
+        dateStr?: string;
+        shiftsMap?: Record<string, PlanningShiftSlice | null | undefined>;
+        pendingChanges?: Record<string, PlanningShiftSlice | null | undefined>;
+        resolveOriginalShift?: (employeeId: string) => PlanningShiftSlice | null | undefined;
+    },
 ): string | null {
     const withBand = rows.find(r => r.coversBandCode);
     if (withBand?.coversBandCode) return normBandCode(withBand.coversBandCode);
 
     const targetRow = rows.find(r => r.coverageSegmentRole === 'TARGET');
-    const coversEmp = targetRow?.coversEmployeeId
+    const coversEmp = ctx?.titularId
+        || targetRow?.coversEmployeeId
         || rows.find(r => r.coversEmployeeId)?.coversEmployeeId;
-    if (coversEmp && resolveOriginalShift) {
-        const original = resolveOriginalShift(coversEmp);
+
+    if (coversEmp && ctx?.dateStr && ctx?.shiftsMap) {
+        const inferred = resolveTitularVacancyWorkShift(
+            coversEmp,
+            ctx.dateStr,
+            ctx.shiftsMap,
+            ctx.pendingChanges || {},
+        );
+        const inferredCode = normBandCode(inferred?.code);
+        if (inferredCode && !ABSENCE_CODES.has(inferredCode) && !PLANNING_NON_BILLABLE_CODES.has(inferredCode)) {
+            return inferredCode;
+        }
+    }
+
+    if (coversEmp && ctx?.resolveOriginalShift) {
+        const original = ctx.resolveOriginalShift(coversEmp);
         const origCode = normBandCode(original?.code);
         if (origCode && !ABSENCE_CODES.has(origCode) && !PLANNING_NON_BILLABLE_CODES.has(origCode)) {
             return origCode;
@@ -68,6 +113,116 @@ function resolveSplitBandCode(
     return null;
 }
 
+function resolveSplitPositionName(rows: PlanningShiftSlice[], titularId?: string, ctx?: {
+    dateStr?: string;
+    shiftsMap?: Record<string, PlanningShiftSlice | null | undefined>;
+    pendingChanges?: Record<string, PlanningShiftSlice | null | undefined>;
+}): string | null {
+    const extRow = rows.find(r => r.coverageSegmentRole === 'EXTENSION')
+        || rows.find(r => r.isExtended);
+    const fromMeta = extRow?.coversPositionName
+        || rows.find(r => r.coversPositionName)?.coversPositionName
+        || rows.find(r => r.coverageSegmentRole === 'TARGET')?.positionName;
+    if (fromMeta) return String(fromMeta);
+
+    if (titularId && ctx?.dateStr && ctx?.shiftsMap) {
+        const inferred = resolveTitularVacancyWorkShift(
+            titularId,
+            ctx.dateStr,
+            ctx.shiftsMap,
+            ctx.pendingChanges || {},
+        );
+        if (inferred?.positionName) return inferred.positionName;
+    }
+
+    return extRow?.positionName
+        || rows.find(r => r.isEarlyStart)?.positionName
+        || null;
+}
+
+function creditSplitPackage(
+    rows: ShiftRow[],
+    credits: Record<string, Record<string, number>>,
+    ctx: {
+        titularId?: string;
+        dateStr: string;
+        shiftsMap?: Record<string, PlanningShiftSlice | null | undefined>;
+        pendingChanges?: Record<string, PlanningShiftSlice | null | undefined>;
+        resolveOriginalShift?: (employeeId: string) => PlanningShiftSlice | null | undefined;
+    },
+): string[] {
+    if (assessSplitPackageStatus(rows) !== 'COVERED') return [];
+
+    const posName = resolveSplitPositionName(rows, ctx.titularId, ctx);
+    if (!posName) return [];
+
+    const bandCode = resolveSplitBandCode(rows, ctx);
+    if (!bandCode) return [];
+
+    if (!credits[posName]) credits[posName] = {};
+    credits[posName][bandCode] = (credits[posName][bandCode] || 0) + 1;
+    return rows
+        .filter(r => r.isExtended || r.isEarlyStart || r.coverageSegmentRole === 'EXTENSION' || r.coverageSegmentRole === 'EARLY_START')
+        .map(r => r.employeeId);
+}
+
+function collectLegacyExtAdelPairs(
+    employeesList: Array<{ id: string }>,
+    dateStr: string,
+    resolveShift: (empId: string, dateStr: string) => PlanningShiftSlice | null | undefined,
+    options: {
+        selectedObjective: string;
+        isPendingChange?: (empId: string, dateStr: string) => boolean;
+    },
+    packagedEmpIds: Set<string>,
+): Array<{ rows: ShiftRow[]; titularId?: string }> {
+    const ext: ShiftRow[] = [];
+    const adel: ShiftRow[] = [];
+    const absentWithCover: ShiftRow[] = [];
+
+    for (const emp of employeesList) {
+        if (packagedEmpIds.has(emp.id)) continue;
+        const shift = resolveShift(emp.id, dateStr);
+        if (!shift || shift.isDeleted) continue;
+        if (!(shift.objectiveId === options.selectedObjective || options.isPendingChange?.(emp.id, dateStr))) continue;
+
+        const row: ShiftRow = { ...shift, employeeId: emp.id };
+        const code = normBandCode(shift.code);
+        if (shift.isExtended && !shift.isEarlyStart) ext.push(row);
+        else if (shift.isEarlyStart && !shift.isExtended) adel.push(row);
+        else if (ABSENCE_CODES.has(code) && String(shift.coveredBy || '').trim()) absentWithCover.push(row);
+    }
+
+    const pairs: Array<{ rows: ShiftRow[]; titularId?: string }> = [];
+    const usedExt = new Set<number>();
+    const usedAdel = new Set<number>();
+
+    for (let ei = 0; ei < ext.length; ei++) {
+        const tid = ext[ei].coversEmployeeId;
+        if (!tid) continue;
+        const ai = adel.findIndex((a, j) => !usedAdel.has(j) && a.coversEmployeeId === tid);
+        if (ai < 0) continue;
+        pairs.push({ rows: [ext[ei], adel[ai]], titularId: tid });
+        usedExt.add(ei);
+        usedAdel.add(ai);
+    }
+
+    let absentIdx = 0;
+    for (let ei = 0; ei < ext.length; ei++) {
+        if (usedExt.has(ei)) continue;
+        const ai = adel.findIndex((_, j) => !usedAdel.has(j));
+        if (ai < 0) break;
+        const titularId = ext[ei].coversEmployeeId
+            || adel[ai].coversEmployeeId
+            || absentWithCover[absentIdx++]?.employeeId;
+        pairs.push({ rows: [ext[ei], adel[ai]], titularId });
+        usedExt.add(ei);
+        usedAdel.add(ai);
+    }
+
+    return pairs;
+}
+
 /**
  * Créditos de banda por puesto cuando ext+adel cierran un hueco (½+½ = 1 puesto).
  * La ext/adel suman en su turno base (M, N…) pero no en el puesto/banda ausente (ej. MM).
@@ -80,46 +235,61 @@ export function collectSplitBandCreditsForDay(
         selectedObjective: string;
         isPendingChange?: (empId: string, dateStr: string) => boolean;
         resolveOriginalShift?: (empId: string, dateStr: string) => PlanningShiftSlice | null | undefined;
+        shiftsMap?: Record<string, PlanningShiftSlice | null | undefined>;
+        pendingChanges?: Record<string, PlanningShiftSlice | null | undefined>;
     },
 ): Record<string, Record<string, number>> {
-    const packages = new Map<string, PlanningShiftSlice[]>();
+    const packages = new Map<string, ShiftRow[]>();
+    const creditedEmpIds = new Set<string>();
+
+    const bandCtx = {
+        dateStr,
+        shiftsMap: options.shiftsMap,
+        pendingChanges: options.pendingChanges,
+        resolveOriginalShift: options.resolveOriginalShift
+            ? (empId: string) => options.resolveOriginalShift!(empId, dateStr)
+            : undefined,
+    };
 
     for (const emp of employeesList) {
         const shift = resolveShift(emp.id, dateStr);
         if (!shift || shift.isDeleted) continue;
-        const pkgId = shift.coveragePackageId;
-        const isSplitSegment = !!pkgId
-            || ((shift.isExtended || shift.isEarlyStart) && !!shift.coversPositionName);
+        const isSplitSegment = !!shift.coveragePackageId
+            || shift.isExtended
+            || shift.isEarlyStart
+            || !!shift.coversPositionName;
         if (!isSplitSegment) continue;
         if (!(shift.objectiveId === options.selectedObjective || options.isPendingChange?.(emp.id, dateStr))) continue;
 
-        const key = pkgId || `legacy_${shift.coversEmployeeId || 'x'}_${shift.coversPositionName}_${dateStr}`;
+        const pkgId = shift.coveragePackageId;
+        const key = pkgId
+            || `legacy_${shift.coversEmployeeId || 'pair'}_${shift.coversPositionName || shift.positionName || 'general'}_${dateStr}`;
         const list = packages.get(key) || [];
-        list.push(shift);
+        list.push({ ...shift, employeeId: emp.id });
         packages.set(key, list);
     }
 
     const credits: Record<string, Record<string, number>> = {};
 
     for (const rows of packages.values()) {
-        if (assessSplitPackageStatus(rows) !== 'COVERED') continue;
+        const titularId = rows.find(r => r.coverageSegmentRole === 'TARGET')?.coversEmployeeId
+            || rows.find(r => r.coversEmployeeId)?.coversEmployeeId;
+        for (const empId of creditSplitPackage(rows, credits, { ...bandCtx, titularId })) {
+            creditedEmpIds.add(empId);
+        }
+    }
 
-        const extRow = rows.find(r => r.coverageSegmentRole === 'EXTENSION')
-            || rows.find(r => r.isExtended && r.coversPositionName);
-        const posName = extRow?.coversPositionName
-            || rows.find(r => r.coverageSegmentRole === 'TARGET')?.positionName;
-        if (!posName) continue;
-
-        const bandCode = resolveSplitBandCode(
-            rows,
-            options.resolveOriginalShift
-                ? (empId) => options.resolveOriginalShift!(empId, dateStr)
-                : undefined,
-        );
-        if (!bandCode) continue;
-
-        if (!credits[posName]) credits[posName] = {};
-        credits[posName][bandCode] = (credits[posName][bandCode] || 0) + 1;
+    const legacyPairs = collectLegacyExtAdelPairs(
+        employeesList,
+        dateStr,
+        resolveShift,
+        options,
+        creditedEmpIds,
+    );
+    for (const pair of legacyPairs) {
+        for (const empId of creditSplitPackage(pair.rows, credits, { ...bandCtx, titularId: pair.titularId })) {
+            creditedEmpIds.add(empId);
+        }
     }
 
     return credits;
@@ -310,6 +480,7 @@ export function buildCodeCountsByPositionForDay(
         isPendingChange: (empId: string, dateStr: string) => boolean;
         /** Turnos guardados (sin pending) para resolver banda original del titular en V/L. */
         existingShiftsMap?: Record<string, PlanningShiftSlice | null | undefined>;
+        pendingChangesMap?: Record<string, PlanningShiftSlice | null | undefined>;
     },
 ): Record<string, Record<string, number>> {
     const byPos: Record<string, Record<string, number>> = {};
@@ -340,6 +511,8 @@ export function buildCodeCountsByPositionForDay(
             resolveOriginalShift: options.existingShiftsMap
                 ? (empId, ds) => options.existingShiftsMap![`${empId}_${ds}`] ?? null
                 : undefined,
+            shiftsMap: options.existingShiftsMap,
+            pendingChanges: options.pendingChangesMap,
         },
     );
 
