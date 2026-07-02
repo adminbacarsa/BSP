@@ -775,6 +775,12 @@ export default function PlanificacionPage() {
     const [autoV2Fixing, setAutoV2Fixing] = useState(false);
     const [autoV2RunGemini, setAutoV2RunGemini] = useState(false);
     const [autoCoverAbsences, setAutoCoverAbsences] = useState(false);
+    const [autoV2TrailDiag, setAutoV2TrailDiag] = useState<Array<{
+        id: string; nombre: string; puesto: string;
+        lastBand: string; trailWork: number; trailRest: number;
+        julioSlot?: number; julioBand?: string; diasFranco?: number;
+    }> | null>(null);
+    const [autoV2ShowTrailDiag, setAutoV2ShowTrailDiag] = useState(false);
     const [autoCoverageGaps, setAutoCoverageGaps] = useState<import('@/lib/planificacion/coverageEngine').CoverageGap[]>([]);
     const [planCoverageModalGaps, setPlanCoverageModalGaps] = useState<(import('@/lib/planificacion/coverageEngine').CoverageGap & { absentName?: string })[]>([]);
     const [coverageSelectedDays, setCoverageSelectedDays] = useState<Set<string>>(new Set());
@@ -5099,6 +5105,25 @@ export default function PlanificacionPage() {
                     openingSlotByEmp: gen.stats.openingSlotByEmp,
                     daysCount: daysInMonth.length,
                 };
+            }
+            // Diagnóstico de racha: trailing mes anterior + apertura mes generado por colaborador.
+            {
+                const _db = (s: number) => { const n=((s%24)+24)%24; if(n<=5)return'M'; if(n<=7)return'F'; if(n<=13)return'T'; if(n<=15)return'F'; if(n<=21)return'N'; return'F'; };
+                const _dtf = (s: number) => { for(let d=0;d<24;d++){if(_db(s+d)==='F')return d;} return 0; };
+                setAutoV2TrailDiag(displayedEmployees.map((emp: any) => {
+                    const slot = gen.stats.openingSlotByEmp?.[emp.id];
+                    return {
+                        id: emp.id,
+                        nombre: (emp.nombre || emp.name || '').slice(0, 24),
+                        puesto: defaultPositionByEmp[emp.id] ?? '—',
+                        lastBand: prevMonthLastShiftByEmp[emp.id] ?? '—',
+                        trailWork: prevMonthTrailingWorkDays[emp.id] ?? 0,
+                        trailRest: prevMonthTrailingRestDays[emp.id] ?? 0,
+                        julioSlot: slot,
+                        julioBand: slot !== undefined ? _db(slot) : undefined,
+                        diasFranco: slot !== undefined ? _dtf(slot) : undefined,
+                    };
+                }));
             }
 
             // Análisis de cobertura de ausencias pre-declaradas (V/L/E/A/PG)
@@ -10909,6 +10934,70 @@ export default function PlanificacionPage() {
                                         )}
                                     </div>
                                 )}
+
+                                {autoV2TrailDiag && (autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (() => {
+                                    const diagBandOf = (s: number) => { const n=((s%24)+24)%24; if(n<=5)return'M'; if(n<=7)return'F'; if(n<=13)return'T'; if(n<=15)return'F'; if(n<=21)return'N'; return'F'; };
+                                    // Detectar colisiones: misma apertura (banda+diasFranco) entre empleados del mismo puesto
+                                    const aperturaKey = (r: typeof autoV2TrailDiag[0]) =>
+                                        r.julioBand && r.diasFranco !== undefined ? `${r.puesto}|${r.julioBand}|${r.diasFranco}` : null;
+                                    const keyCounts: Record<string, number> = {};
+                                    autoV2TrailDiag.forEach(r => { const k = aperturaKey(r); if(k) keyCounts[k] = (keyCounts[k]??0)+1; });
+                                    return (
+                                        <div className="rounded-xl border-2 border-slate-200 bg-white px-3 py-2 space-y-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => setAutoV2ShowTrailDiag(v => !v)}
+                                                className="w-full flex items-center justify-between text-[10px] font-black uppercase tracking-wide text-slate-600 hover:text-slate-900"
+                                            >
+                                                <span>Racha mes anterior → apertura</span>
+                                                <span className="text-slate-400">{autoV2ShowTrailDiag ? '▲' : '▼'}</span>
+                                            </button>
+                                            {autoV2ShowTrailDiag && (
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full">
+                                                        <thead>
+                                                            <tr className="text-[9px] font-black uppercase text-slate-400 border-b border-slate-100">
+                                                                <th className="text-left pb-1 pr-2 font-black">Colaborador</th>
+                                                                <th className="text-center pb-1 pr-1 font-black">Puesto</th>
+                                                                <th className="text-center pb-1 pr-1 font-black">Fin mes ant.</th>
+                                                                <th className="text-center pb-1 font-black">Apertura</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {autoV2TrailDiag.map(row => {
+                                                                const finMes = row.trailWork > 0
+                                                                    ? `${row.trailWork}×${row.lastBand}`
+                                                                    : row.trailRest > 0
+                                                                        ? `${row.trailRest}×F`
+                                                                        : '—';
+                                                                const apertura = row.julioBand !== undefined && row.diasFranco !== undefined
+                                                                    ? `${row.julioBand} · ${row.diasFranco}d→F`
+                                                                    : '—';
+                                                                const k = aperturaKey(row);
+                                                                const isCollision = k !== null && (keyCounts[k] ?? 0) > 1;
+                                                                const isTruncatedFranco = row.trailRest === 1 && row.julioBand !== 'F';
+                                                                const rowClass = isCollision
+                                                                    ? 'text-rose-700 bg-rose-50'
+                                                                    : isTruncatedFranco
+                                                                        ? 'text-amber-700'
+                                                                        : 'text-slate-700';
+                                                                return (
+                                                                    <tr key={row.id} className={`text-[9px] font-bold border-b border-slate-50 ${rowClass}`}>
+                                                                        <td className="py-0.5 pr-2 text-left">{row.nombre}</td>
+                                                                        <td className="py-0.5 pr-1 text-center text-slate-500">{row.puesto}</td>
+                                                                        <td className="py-0.5 pr-1 text-center font-black">{finMes}</td>
+                                                                        <td className="py-0.5 text-center font-black">{apertura}</td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                    <p className="text-[8px] text-slate-400 mt-1">Rojo = colisión de apertura en mismo puesto (mismo franco → hueco). Ámbar = franco truncado.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
 
                                 {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && (autoV2GenStats.totalRetCount ?? 0) > 0 && (
                                     <div className={`rounded-lg border px-3 py-2 text-[11px] font-bold ${
