@@ -56,6 +56,16 @@ export function buildEngineContext(opts: {
   }));
 
   const useTrailing = opts.strategy.modes.useTrailing;
+  const trailingEmpIds = new Set(
+    Object.keys(opts.prevPlanningState.lastShiftByEmp || {}),
+  );
+
+  const defaultShiftByEmp: Record<string, string> = {};
+  for (const [empId, band] of Object.entries(opts.planningState.defaultShiftByEmp || {})) {
+    if (!useTrailing || !trailingEmpIds.has(empId)) {
+      defaultShiftByEmp[empId] = band;
+    }
+  }
 
   return {
     positions: toEnginePositions(opts.snapshot.positions),
@@ -65,7 +75,7 @@ export function buildEngineContext(opts: {
     autoCycles: [opts.strategy.cycle],
     absences: opts.snapshot.absences,
     defaultPositionByEmp: { ...opts.planningState.defaultPositionByEmp },
-    defaultShiftByEmp: { ...opts.planningState.defaultShiftByEmp },
+    defaultShiftByEmp,
     prevMonthTrailingWorkDays: useTrailing ? opts.prevPlanningState.trailingWorkDays : undefined,
     prevMonthTrailingRestDays: useTrailing ? opts.prevPlanningState.trailingRestDays : undefined,
     prevMonthLastShiftByEmp: useTrailing ? opts.prevPlanningState.lastShiftByEmp : undefined,

@@ -4,7 +4,7 @@
  */
 
 import { loadVplanPlanningSnapshot } from './vplan.firestore';
-import { planningStateHasTrailing } from './vplan.trailing';
+import { countTrailingEmployees, planningStateHasTrailing } from './vplan.trailing';
 import { buildVplanIntake, validateVplanRequest } from './phases/phase0-intake';
 import { buildVplanDemandModel } from './phases/phase1-demand';
 import { buildVplanSupplyModel } from './phases/phase2-supply';
@@ -215,7 +215,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
     steps.push(step(
       '4_strategy',
       true,
-      `${context.strategy.engine} · ciclo ${context.strategy.cycle}${context.strategy.modes.useTrailing ? ' · racha mes ant.' : ''}`,
+      `${context.strategy.engine} · ciclo ${context.strategy.cycle}${context.strategy.modes.useTrailing ? ` · racha ${countTrailingEmployees(snapshot.prevPlanningState)} guardias` : ''}`,
       t4,
     ));
   }

@@ -167,7 +167,7 @@ async function runVplanOrchestrator(request) {
             hasTrailing: hasTrailing(snapshot),
             hasPrevMonthShifts: snapshot.previousMonthAssignments.length > 0,
         });
-        steps.push(step('4_strategy', true, `${context.strategy.engine} · ciclo ${context.strategy.cycle}${context.strategy.modes.useTrailing ? ' · racha mes ant.' : ''}`, t4));
+        steps.push(step('4_strategy', true, `${context.strategy.engine} · ciclo ${context.strategy.cycle}${context.strategy.modes.useTrailing ? ` · racha ${(0, vplan_trailing_1.countTrailingEmployees)(snapshot.prevPlanningState)} guardias` : ''}`, t4));
     }
     if (runPhases.has('5_generate') && context.strategy) {
         const t5 = Date.now();

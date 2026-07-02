@@ -2,10 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deriveTrailingFromAssignments = deriveTrailingFromAssignments;
 exports.planningStateHasTrailing = planningStateHasTrailing;
+exports.countTrailingEmployees = countTrailingEmployees;
 exports.enrichPlanningStateWithTrailingFromTurnos = enrichPlanningStateWithTrailingFromTurnos;
 const WORK_BANDS = new Set(['M', 'T', 'N']);
-const FRANCO_CODES = new Set(['F', 'FF', 'FP']);
+const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
+const RET_CODES = new Set(['RET', 'R']);
 function normBand(code) {
     const c = code.toUpperCase();
     if (c === 'D12')
@@ -23,6 +25,13 @@ function isFranco(code) {
 function isAbsence(code) {
     return ABSENCE_CODES.has(code.toUpperCase());
 }
+function isRet(code) {
+    return RET_CODES.has(code.toUpperCase());
+}
+function codeOnDay(dayMap, dateStr) {
+    const c = dayMap.get(dateStr);
+    return c ? String(c).toUpperCase() : undefined;
+}
 function deriveTrailingFromAssignments(assignments, monthDateStrs) {
     const byEmp = new Map();
     for (const a of assignments) {
@@ -37,20 +46,22 @@ function deriveTrailingFromAssignments(assignments, monthDateStrs) {
     const daysDesc = [...monthDateStrs].sort().reverse();
     for (const [empId, dayMap] of byEmp) {
         let lastCode;
+        let lastDate;
         for (const d of daysDesc) {
-            const c = dayMap.get(d);
+            const c = codeOnDay(dayMap, d);
             if (c) {
                 lastCode = c;
+                lastDate = d;
                 lastShiftByEmp[empId] = c;
                 break;
             }
         }
-        if (!lastCode)
+        if (!lastCode || !lastDate)
             continue;
         if (isFranco(lastCode)) {
             let rest = 0;
             for (const d of daysDesc) {
-                const c = dayMap.get(d);
+                const c = codeOnDay(dayMap, d);
                 if (!c)
                     continue;
                 if (isFranco(c))
@@ -61,7 +72,7 @@ function deriveTrailingFromAssignments(assignments, monthDateStrs) {
             if (rest > 0)
                 trailingRestDays[empId] = rest;
             for (const d of daysDesc) {
-                const c = dayMap.get(d);
+                const c = codeOnDay(dayMap, d);
                 if (!c)
                     continue;
                 if (isFranco(c))
@@ -76,11 +87,49 @@ function deriveTrailingFromAssignments(assignments, monthDateStrs) {
         }
         if (isAbsence(lastCode))
             continue;
+        if (isRet(lastCode)) {
+            lastShiftByEmp[empId] = 'RET';
+            let band;
+            for (const d of daysDesc) {
+                const c = codeOnDay(dayMap, d);
+                if (!c)
+                    continue;
+                if (isRet(c))
+                    continue;
+                if (isFranco(c) || isAbsence(c))
+                    break;
+                if (isWorkBand(c)) {
+                    band = normBand(c);
+                    break;
+                }
+                break;
+            }
+            if (band) {
+                lastWorkBandBeforeRest[empId] = band;
+                let work = 0;
+                for (const d of daysDesc) {
+                    const c = codeOnDay(dayMap, d);
+                    if (!c)
+                        continue;
+                    if (isRet(c))
+                        continue;
+                    if (isFranco(c) || isAbsence(c))
+                        break;
+                    if (normBand(c) === band)
+                        work += 1;
+                    else if (isWorkBand(c))
+                        break;
+                }
+                if (work > 0)
+                    trailingWorkDays[empId] = work;
+            }
+            continue;
+        }
         if (isWorkBand(lastCode)) {
             const band = normBand(lastCode);
             let work = 0;
             for (const d of daysDesc) {
-                const c = dayMap.get(d);
+                const c = codeOnDay(dayMap, d);
                 if (!c)
                     continue;
                 if (isAbsence(c))
@@ -107,20 +156,34 @@ function planningStateHasTrailing(state) {
     return Boolean((state.lastShiftByEmp && Object.keys(state.lastShiftByEmp).length > 0)
         || (state.trailingWorkDays && Object.keys(state.trailingWorkDays).length > 0));
 }
+function countTrailingEmployees(state) {
+    const ids = new Set();
+    Object.keys(state.lastShiftByEmp || {}).forEach((id) => ids.add(id));
+    Object.keys(state.trailingWorkDays || {}).forEach((id) => ids.add(id));
+    return ids.size;
+}
 function enrichPlanningStateWithTrailingFromTurnos(state, prevAssignments, prevMonthDateStrs) {
-    if (planningStateHasTrailing(state) || prevAssignments.length === 0) {
+    if (prevAssignments.length === 0)
         return state;
-    }
     const derived = deriveTrailingFromAssignments(prevAssignments, prevMonthDateStrs);
+    const hasDerived = planningStateHasTrailing({
+        ...emptyTrailingState(),
+        ...derived,
+    });
+    if (!hasDerived)
+        return state;
     return {
         ...state,
-        trailingWorkDays: { ...derived.trailingWorkDays, ...state.trailingWorkDays },
-        trailingRestDays: { ...derived.trailingRestDays, ...state.trailingRestDays },
-        lastShiftByEmp: { ...derived.lastShiftByEmp, ...state.lastShiftByEmp },
+        trailingWorkDays: { ...state.trailingWorkDays, ...derived.trailingWorkDays },
+        trailingRestDays: { ...state.trailingRestDays, ...derived.trailingRestDays },
+        lastShiftByEmp: { ...state.lastShiftByEmp, ...derived.lastShiftByEmp },
         lastWorkBandBeforeRest: {
-            ...derived.lastWorkBandBeforeRest,
             ...state.lastWorkBandBeforeRest,
+            ...derived.lastWorkBandBeforeRest,
         },
     };
+}
+function emptyTrailingState() {
+    return { defaultPositionByEmp: {}, defaultShiftByEmp: {} };
 }
 //# sourceMappingURL=vplan.trailing.js.map

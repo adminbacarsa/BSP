@@ -380,35 +380,53 @@ function dateStrFromTimestamp(ts: unknown): string | null {
   return `${y}-${m}-${day}`;
 }
 
-async function loadExistingAssignments(
+async function loadMonthAssignments(
   objectiveId: string,
   year: number,
   month: number,
+  opts?: { includeDrafts?: boolean },
 ): Promise<VplanExistingAssignment[]> {
   const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+  const includeDrafts = opts?.includeDrafts === true;
   const snap = await db()
     .collection('turnos')
     .where('objectiveId', '==', objectiveId)
     .get();
 
-  const result: VplanExistingAssignment[] = [];
+  const byKey = new Map<string, VplanExistingAssignment & { _draft?: boolean }>();
   snap.docs.forEach((doc) => {
     const d = doc.data();
-    if (d.draft === true) return;
+    const isDraft = d.draft === true;
+    if (!includeDrafts && isDraft) return;
     const dateStr = dateStrFromTimestamp(d.startTime)
       ?? String(d.dateStr || d.date || '').slice(0, 10);
     if (!dateStr.startsWith(monthPrefix)) return;
     const employeeId = String(d.employeeId || d.empId || '');
     if (!employeeId) return;
-    result.push({
+    const row: VplanExistingAssignment & { _draft?: boolean } = {
       employeeId,
       dateStr,
       code: String(d.code || d.shiftCode || 'M').toUpperCase(),
       positionName: String(d.positionName || d.puesto || ''),
       hours: Number(d.hours) || undefined,
-    });
+      _draft: isDraft,
+    };
+    const key = `${employeeId}_${dateStr}`;
+    const prev = byKey.get(key);
+    if (!prev || (prev._draft && !isDraft)) {
+      byKey.set(key, row);
+    }
   });
-  return result;
+
+  return [...byKey.values()].map(({ _draft, ...row }) => row);
+}
+
+async function loadExistingAssignments(
+  objectiveId: string,
+  year: number,
+  month: number,
+): Promise<VplanExistingAssignment[]> {
+  return loadMonthAssignments(objectiveId, year, month, { includeDrafts: false });
 }
 
 export async function loadVplanPlanningSnapshot(request: {
@@ -434,7 +452,7 @@ export async function loadVplanPlanningSnapshot(request: {
     loadPlanningState(request.empresaId, request.objectiveId, prev.year, prev.month),
     loadAbsences(request.empresaId, request.year, request.month),
     loadExistingAssignments(request.objectiveId, request.year, request.month),
-    loadExistingAssignments(request.objectiveId, prev.year, prev.month),
+    loadMonthAssignments(request.objectiveId, prev.year, prev.month, { includeDrafts: true }),
   ]);
 
   const prevPlanningState = enrichPlanningStateWithTrailingFromTurnos(

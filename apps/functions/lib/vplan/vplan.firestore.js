@@ -304,16 +304,18 @@ function dateStrFromTimestamp(ts) {
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
 }
-async function loadExistingAssignments(objectiveId, year, month) {
+async function loadMonthAssignments(objectiveId, year, month, opts) {
     const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+    const includeDrafts = opts?.includeDrafts === true;
     const snap = await db()
         .collection('turnos')
         .where('objectiveId', '==', objectiveId)
         .get();
-    const result = [];
+    const byKey = new Map();
     snap.docs.forEach((doc) => {
         const d = doc.data();
-        if (d.draft === true)
+        const isDraft = d.draft === true;
+        if (!includeDrafts && isDraft)
             return;
         const dateStr = dateStrFromTimestamp(d.startTime)
             ?? String(d.dateStr || d.date || '').slice(0, 10);
@@ -322,15 +324,24 @@ async function loadExistingAssignments(objectiveId, year, month) {
         const employeeId = String(d.employeeId || d.empId || '');
         if (!employeeId)
             return;
-        result.push({
+        const row = {
             employeeId,
             dateStr,
             code: String(d.code || d.shiftCode || 'M').toUpperCase(),
             positionName: String(d.positionName || d.puesto || ''),
             hours: Number(d.hours) || undefined,
-        });
+            _draft: isDraft,
+        };
+        const key = `${employeeId}_${dateStr}`;
+        const prev = byKey.get(key);
+        if (!prev || (prev._draft && !isDraft)) {
+            byKey.set(key, row);
+        }
     });
-    return result;
+    return [...byKey.values()].map(({ _draft, ...row }) => row);
+}
+async function loadExistingAssignments(objectiveId, year, month) {
+    return loadMonthAssignments(objectiveId, year, month, { includeDrafts: false });
 }
 async function loadVplanPlanningSnapshot(request) {
     const sla = await loadSlaForObjective(request.objectiveId, request.empresaId);
@@ -346,7 +357,7 @@ async function loadVplanPlanningSnapshot(request) {
         loadPlanningState(request.empresaId, request.objectiveId, prev.year, prev.month),
         loadAbsences(request.empresaId, request.year, request.month),
         loadExistingAssignments(request.objectiveId, request.year, request.month),
-        loadExistingAssignments(request.objectiveId, prev.year, prev.month),
+        loadMonthAssignments(request.objectiveId, prev.year, prev.month, { includeDrafts: true }),
     ]);
     const prevPlanningState = (0, vplan_trailing_1.enrichPlanningStateWithTrailingFromTurnos)(prevPlanningStateRaw, previousMonthAssignments, prevDays.map((d) => d.dateStr));
     const planningEmployeeIds = new Set([
