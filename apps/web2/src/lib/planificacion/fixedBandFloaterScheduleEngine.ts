@@ -310,7 +310,11 @@ function buildSubgroupsFor24hs(
 // El ciclo tiene 3 zonas de trabajo (M=0-5, T=8-13, N=16-21) y 3 de franco (F=6-7/14-15/22-23).
 // Si dos empleados del mismo subgrupo tienen offsets en la misma zona, coinciden en Franco
 // el mismo día → brecha de cobertura. Se mantiene solo uno por zona.
-function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): Record<string, number> {
+function resolveOpeningSlotByEmp(
+    ctx: V2EngineContext,
+    subgroups: string[][],
+    positionGroups?: Record<string, string[]>,
+): Record<string, number> {
     const out: Record<string, number> = {};
 
     // Zona de banda del slot (día 1 del mes = di=0)
@@ -444,6 +448,47 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
         }
     }
 
+    // Paso 4: escalonar subgrupos hermanos del mismo puesto.
+    // Cuando qty>1 hay N subgrupos por puesto. Si todos comparten los mismos slots de apertura
+    // (caso típico: primer mes o continuación de generación mal alineada), sus patrones de Franco
+    // coinciden → 0 cobertura de la banda en Franco simultáneo de todos los subgrupos.
+    // Solución: offset de +3 al 2do subgrupo (y +6 al 3ro, etc.) dentro del mismo puesto.
+    // +3 = mitad de bloque de 6 días → Francos escalonados, cobertura garantizada sin gaps.
+    if (positionGroups) {
+        const empPuesto: Record<string, string> = {};
+        for (const [posName, ids] of Object.entries(positionGroups)) {
+            for (const id of ids) empPuesto[id] = posName;
+        }
+        const sgByPuesto: Record<string, number[]> = {};
+        for (let si = 0; si < subgroups.length; si++) {
+            const refId = subgroups[si].find(id => out[id] !== undefined);
+            if (!refId) continue;
+            const puesto = empPuesto[refId];
+            if (!puesto) continue;
+            (sgByPuesto[puesto] ??= []).push(si);
+        }
+        for (const sgIndices of Object.values(sgByPuesto)) {
+            if (sgIndices.length < 2) continue;
+            const usedSlots = new Set(
+                subgroups[sgIndices[0]].slice(0, 4)
+                    .filter(id => out[id] !== undefined)
+                    .map(id => out[id]),
+            );
+            for (let k = 1; k < sgIndices.length; k++) {
+                const si = sgIndices[k];
+                const regularIds = subgroups[si].slice(0, 4).filter(id => out[id] !== undefined);
+                // Detectar colisión de slot con cualquier subgrupo anterior del mismo puesto
+                if (regularIds.some(id => usedSlots.has(out[id]))) {
+                    const offset = k * 3; // +3 por subgrupo extra → Francos escalonados
+                    for (const empId of regularIds) {
+                        out[empId] = ((out[empId] + offset) % 24 + 24) % 24;
+                    }
+                }
+                regularIds.forEach(id => usedSlots.add(out[id]));
+            }
+        }
+    }
+
     return out;
 }
 
@@ -559,7 +604,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
     for (const [posName, ids] of Object.entries(positionGroups)) {
         ids.forEach(id => { empToPosition[id] = posName; });
     }
-    const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, subgroups);
+    const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, subgroups, positionGroups);
     // empSubgroup: cada guardia apunta a su subgrupo de 4-5 (para isRetFloater correcto)
     const empSubgroup = new Map<string, string[]>();
     subgroups.forEach(sub => sub.forEach(id => empSubgroup.set(id, sub)));
