@@ -2,9 +2,27 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadVplanPlanningSnapshot = loadVplanPlanningSnapshot;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const vplan_calendar_1 = require("./vplan.calendar");
 const vplan_positions_1 = require("./vplan.positions");
 const db = () => admin.firestore();
+function timestampToDate(val) {
+    if (!val)
+        return null;
+    if (val instanceof firestore_1.Timestamp)
+        return val.toDate();
+    if (val instanceof Date)
+        return val;
+    if (typeof val === 'object' && val !== null && 'toDate' in val && typeof val.toDate === 'function') {
+        return val.toDate();
+    }
+    if (typeof val === 'object' && val !== null && 'seconds' in val) {
+        const s = Number(val.seconds);
+        if (Number.isFinite(s))
+            return new Date(s * 1000);
+    }
+    return null;
+}
 function isSlaActive(data) {
     const status = String(data.status || '').toLowerCase();
     if (status === 'inactive')
@@ -142,7 +160,9 @@ function dateStrFromTimestamp(ts) {
         return null;
     if (typeof ts === 'string')
         return ts.slice(0, 10);
-    const d = ts instanceof admin.firestore.Timestamp ? ts.toDate() : ts;
+    const d = timestampToDate(ts);
+    if (!d || Number.isNaN(d.getTime()))
+        return null;
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');

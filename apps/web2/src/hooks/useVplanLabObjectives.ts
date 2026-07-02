@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { empresaScopedQuery, filterRowsByEmpresa } from '@/lib/multiempresa';
+import { onSnapshot } from 'firebase/firestore';
+import { useEmpresa } from '@/context/EmpresaContext';
+import {
+  empresaScopedQuery,
+  filterRowsByEmpresa,
+  shouldScopeQueriesToEmpresa,
+} from '@/lib/multiempresa';
 
 export interface VplanLabObjective {
   clientId: string;
@@ -11,8 +15,14 @@ export interface VplanLabObjective {
 }
 
 export function useVplanLabObjectives(empresaId: string | undefined) {
+  const { empresa } = useEmpresa();
   const [objectives, setObjectives] = useState<VplanLabObjective[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const scopeEmpresa = shouldScopeQueriesToEmpresa(
+    empresaId ?? '',
+    empresa?.migracionCompleta === true,
+  );
 
   useEffect(() => {
     if (!empresaId) {
@@ -21,13 +31,15 @@ export function useVplanLabObjectives(empresaId: string | undefined) {
       return;
     }
 
-    const q = empresaScopedQuery(collection(db, 'clients'), empresaId);
+    const q = empresaScopedQuery('clients', empresaId, scopeEmpresa);
     const unsub = onSnapshot(
       q,
       (snap) => {
         const rows = filterRowsByEmpresa(
           snap.docs.map((d) => ({ id: d.id, ...d.data() })),
           empresaId,
+          scopeEmpresa,
+          empresa?.migracionCompleta === true,
         );
         const flat: VplanLabObjective[] = [];
         for (const client of rows) {
@@ -56,7 +68,7 @@ export function useVplanLabObjectives(empresaId: string | undefined) {
     );
 
     return () => unsub();
-  }, [empresaId]);
+  }, [empresaId, scopeEmpresa, empresa?.migracionCompleta]);
 
   const byClient = useMemo(() => {
     const map = new Map<string, { clientName: string; items: VplanLabObjective[] }>();

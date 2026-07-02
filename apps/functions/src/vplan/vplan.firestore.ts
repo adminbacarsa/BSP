@@ -3,10 +3,25 @@
  */
 
 import * as admin from 'firebase-admin';
+import { Timestamp } from 'firebase-admin/firestore';
 import { buildMonthDays, previousMonth } from './vplan.calendar';
 import { normalizeSlaPositions, type VplanPositionDef } from './vplan.positions';
 
 const db = () => admin.firestore();
+
+function timestampToDate(val: unknown): Date | null {
+  if (!val) return null;
+  if (val instanceof Timestamp) return val.toDate();
+  if (val instanceof Date) return val;
+  if (typeof val === 'object' && val !== null && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
+    return (val as { toDate: () => Date }).toDate();
+  }
+  if (typeof val === 'object' && val !== null && 'seconds' in val) {
+    const s = Number((val as { seconds: number }).seconds);
+    if (Number.isFinite(s)) return new Date(s * 1000);
+  }
+  return null;
+}
 
 export interface VplanEmployeeRecord {
   id: string;
@@ -198,10 +213,11 @@ async function loadPlanningState(
   };
 }
 
-function dateStrFromTimestamp(ts: admin.firestore.Timestamp | Date | string | undefined): string | null {
+function dateStrFromTimestamp(ts: unknown): string | null {
   if (!ts) return null;
   if (typeof ts === 'string') return ts.slice(0, 10);
-  const d = ts instanceof admin.firestore.Timestamp ? ts.toDate() : ts;
+  const d = timestampToDate(ts);
+  if (!d || Number.isNaN(d.getTime())) return null;
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -223,7 +239,7 @@ async function loadExistingAssignments(
   snap.docs.forEach((doc) => {
     const d = doc.data();
     if (d.draft === true) return;
-    const dateStr = dateStrFromTimestamp(d.startTime as admin.firestore.Timestamp)
+    const dateStr = dateStrFromTimestamp(d.startTime)
       ?? String(d.dateStr || d.date || '').slice(0, 10);
     if (!dateStr.startsWith(monthPrefix)) return;
     const employeeId = String(d.employeeId || d.empId || '');
