@@ -454,10 +454,12 @@ function resolveOpeningSlotByEmp(ctx: V2EngineContext, subgroups: string[][]): R
                 zone = [...availableZones][0] ?? (['M', 'T', 'N', 'F'] as const)[i % 4];
             }
             availableZones.delete(zone);
-            // Siempre usar el slot canónico del subgrupo (alineado con el anchor de step 2b).
-            // prevMonthOpeningSlotByEmp + daysCount causaba desalineación: los slots resultantes
-            // no eran 6-apart respecto al anchor con trailing data → Franco el mismo día → huecos.
-            out[empId] = (canonicalForZone[zone] as number | undefined) ?? ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
+            // Si hay slot del mes anterior y su cantidad de días, continuar el ciclo en lugar de reiniciar.
+            if (ctx.prevMonthOpeningSlotByEmp?.[empId] !== undefined && ctx.prevMonthDaysCount) {
+                out[empId] = ((ctx.prevMonthOpeningSlotByEmp[empId] + ctx.prevMonthDaysCount) % 24 + 24) % 24;
+            } else {
+                out[empId] = (canonicalForZone[zone] as number | undefined) ?? ZONE_SLOT[zone] ?? COLD_START_OPENINGS[i % 4];
+            }
         });
 
         // Flotantes (índice ≥4): sin trailing usan inicio de bloque de trabajo para que el
