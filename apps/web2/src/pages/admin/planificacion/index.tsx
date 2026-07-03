@@ -10656,4 +10656,1002 @@ export default function PlanificacionPage() {
                                                 }}
                                                 className="w-full text-left text-[10px] font-bold rounded px-2 py-1.5 bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors"
                                             >
-                                                💡 <strong>{autoPlanningBrainReport.recommendedAlternative}</strong
+                                                💡 <strong>{autoPlanningBrainReport.recommendedAlternative}</strong> también es viable — clic para aplicar
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Resultado: 3 tarjetas */}
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && autoCycles.length > 0 && (
+                                    <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 mb-1">
+                                        <p className="text-[10px] font-black text-indigo-700 uppercase tracking-wide">
+                                            {autoWizardStep === 'sla_open' ? 'Esquema calculado' : 'Esquema aplicado'}
+                                        </p>
+                                        <p className="text-sm font-black text-indigo-900">{autoCycles.join(' · ')} <span className="text-[10px] font-bold text-indigo-600">(auto)</span></p>
+                                    </div>
+                                )}
+
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && slaVendidas > 0 && (
+                                    <div className={`rounded-lg border px-3 py-2 text-[11px] font-bold ${
+                                        autoV2GenStats.slaHoursClosed
+                                            ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                            : 'border-rose-300 bg-rose-50 text-rose-800'
+                                    }`}>
+                                        {autoV2GenStats.slaHoursClosed
+                                            ? `✓ SLA cerrado: ${Math.round(autoV2GenStats.totalBillableHours)}h planificadas = ${slaVendidas}h vendidas`
+                                            : (() => {
+                                                const hrs = Math.round(
+                                                    autoV2GenStats.slaDeficitRemaining
+                                                    ?? Math.max(0, slaVendidas - autoV2GenStats.totalBillableHours),
+                                                );
+                                                const slots = autoV2Coverage?.coverage.uncoveredSlots
+                                                    ?? autoV2GenStats.uncoveredSlots ?? 0;
+                                                const parts: string[] = [];
+                                                if (hrs > 0) parts.push(`${hrs}h`);
+                                                if (slots > 0) parts.push(`${slots} slot${slots !== 1 ? 's' : ''} sin cubrir`);
+                                                const detail = parts.length > 0 ? parts.join(' · ') : 'revisar cobertura';
+                                                return `✗ SLA abierto: ${detail} (${slaVendidas}h vendidas, ${Math.round(autoV2GenStats.totalBillableHours)}h planificadas)`;
+                                            })()}
+                                    </div>
+                                )}
+
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && (
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div className={`bg-white rounded-xl p-3 border-2 text-center ${
+                                            autoV2GenStats.gridBillableHours != null
+                                            && Math.abs(autoV2GenStats.totalBillableHours - autoV2GenStats.gridBillableHours) > 16
+                                                ? 'border-amber-400' : 'border-slate-200'
+                                        }`}>
+                                            <div className="text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">Hs facturables</div>
+                                            <div className="text-2xl font-black text-indigo-700">{Math.round(autoV2GenStats.totalBillableHours)}<span className="text-sm">h</span></div>
+                                            {autoV2GenStats.gridBillableHours != null
+                                                && Math.abs(autoV2GenStats.totalBillableHours - autoV2GenStats.gridBillableHours) > 16 && (
+                                                <div className="text-[9px] font-bold text-amber-700 mt-0.5">
+                                                    Grilla: {Math.round(autoV2GenStats.gridBillableHours)}h
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="bg-white rounded-xl p-3 border-2 border-slate-200 text-center">
+                                            <div className="text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">Cubiertos</div>
+                                            <div className={`text-2xl font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                                {autoV2Coverage ? `${autoV2Coverage.coverage.coveredSlots}/${autoV2Coverage.coverage.totalSlots}` : '—'}
+                                            </div>
+                                        </div>
+                                        <div className={`bg-white rounded-xl p-3 border-2 text-center ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'border-emerald-300' : 'border-rose-300'}`}>
+                                            <div className="text-[9px] font-black uppercase tracking-wide text-slate-500 mb-1">Sin cubrir</div>
+                                            <div className={`text-2xl font-black ${(autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                                {autoV2Coverage?.coverage.uncoveredSlots ?? 0}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Aviso: empleados movidos automáticamente por asignación incorrecta de puestos */}
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (() => {
+                                    const relocated = autoV2GenStats?.relocatedEmployeeIds || [];
+                                    const stranded  = autoV2GenStats?.strandedEmployeeIds  || [];
+                                    if (relocated.length === 0 && stranded.length === 0) return null;
+                                    const getName = (id: string) => {
+                                        const emp = displayedEmployees.find((e: any) => e.id === id);
+                                        return emp ? (emp.name || emp.nombre || id) : id;
+                                    };
+                                    return (
+                                        <div className="rounded-xl border-2 border-orange-400 bg-orange-50 px-3 py-2.5 space-y-2">
+                                            <div className="flex items-start gap-2">
+                                                <span className="text-orange-600 mt-0.5 text-base font-black">!</span>
+                                                <div className="flex-1">
+                                                    <p className="text-[11px] font-black text-orange-900 uppercase tracking-wide mb-0.5">
+                                                        Puestos con dotación incorrecta — corregidos automáticamente
+                                                    </p>
+                                                    <p className="text-[10px] text-orange-800 leading-relaxed">
+                                                        El engine detectó puestos con más o menos empleados de los necesarios para el ciclo 6+2 (qty × 4 por puesto)
+                                                        y rebalanceó la asignación para generar cobertura correcta.
+                                                        <strong className="block mt-0.5">Corregí la asignación de puestos en los legajos para que coincida con el SLA.</strong>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {relocated.length > 0 && (
+                                                <div>
+                                                    <p className="text-[9px] font-black text-orange-700 uppercase mb-1">
+                                                        {relocated.length} movido{relocated.length !== 1 ? 's' : ''} de su puesto (legajo incorrecto):
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {relocated.map((id, i) => (
+                                                            <span key={i} className="bg-orange-200 text-orange-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase">
+                                                                {getName(id)}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {stranded.length > 0 && (
+                                                <div>
+                                                    <p className="text-[9px] font-black text-orange-700 uppercase mb-1">
+                                                        {stranded.length} sin puesto válido (faltan empleados en el servicio):
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {stranded.map((id, i) => (
+                                                            <span key={i} className="bg-amber-200 text-amber-900 text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase">
+                                                                {getName(id)}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Panel de cobertura de ausencias — visible si hay gaps (siempre se analiza con pipeline floater) */}
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoCoverageGaps.length > 0 && (() => {
+                                    const bandMeta: Record<string, { name: string; hours: number; startTime: string; endTime: string }> = {
+                                        M: { name: 'Mañana',   hours: 8, startTime: '07:00', endTime: '15:00' },
+                                        T: { name: 'Tarde',    hours: 8, startTime: '15:00', endTime: '23:00' },
+                                        N: { name: 'Noche',    hours: 8, startTime: '23:00', endTime: '07:00' },
+                                        D12:{ name: 'Diurno',  hours:12, startTime: '07:00', endTime: '19:00' },
+                                        N12:{ name: 'Nocturno',hours:12, startTime: '19:00', endTime: '07:00' },
+                                    };
+
+                                    const assignGap = (candidateEmpId: string, candidateName: string, dateStr: string, band: string, absentEmpId: string) => {
+                                        const meta = bandMeta[band] ?? bandMeta.M;
+                                        const posName = positionStructure[0]?.positionName ?? 'General';
+                                        // Actualizar grilla: cambiar el turno del candidato en ese día
+                                        setPendingChanges(prev => ({
+                                            ...prev,
+                                            [`${candidateEmpId}_${dateStr}`]: {
+                                                isTemp: true,
+                                                employeeId: candidateEmpId,
+                                                objectiveId: selectedObjective,
+                                                positionName: posName,
+                                                code: band,
+                                                name: meta.name,
+                                                hours: meta.hours,
+                                                startTime: meta.startTime,
+                                                endTime: meta.endTime,
+                                                isFranco: false,
+                                            },
+                                        }));
+                                        // Marcar gap como cubierto manualmente
+                                        setAutoCoverageGaps(prev => prev.map(g =>
+                                            g.absentEmpId === absentEmpId && g.dateStr === dateStr
+                                                ? { ...g, coverageType: 'manual' as const, coveredBy: candidateEmpId, coveredByName: candidateName }
+                                                : g
+                                        ));
+                                        toast.success(`Día ${dateStr.slice(8,10)}: ${candidateName.split(',')[0]} asignado a banda ${band}`, { duration: 3000 });
+                                    };
+
+                                    const coveredGaps = autoCoverageGaps.filter(g => g.coveredBy !== null);
+                                    const ftGaps = autoCoverageGaps.filter(g => g.coverageType === 'ft_required');
+
+                                    const ftByEmp: Record<string, { nombre: string; days: typeof ftGaps }> = {};
+                                    for (const g of ftGaps) {
+                                        if (!ftByEmp[g.absentEmpId]) ftByEmp[g.absentEmpId] = { nombre: g.absentName || g.absentEmpId, days: [] };
+                                        ftByEmp[g.absentEmpId].days.push(g);
+                                    }
+
+                                    const coverLabel = (type: string) =>
+                                        type === 'ret' ? 'RET' : type === 'esc' ? 'ESC' : type === 'sin_turno' ? 'ST' : type === 'manual' ? 'MANUAL' : type === 'ft_required' ? 'FT' : type.toUpperCase();
+
+                                    return (
+                                        <div className="rounded-xl border-2 border-amber-200 bg-amber-50/80 px-3 py-2.5 space-y-2.5">
+                                            <div className="flex items-center justify-between">
+                                                <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Cobertura ausencias</p>
+                                                <div className="flex gap-1 flex-wrap">
+                                                    {coveredGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-100 text-teal-800">{coveredGaps.length} cubiertos ✓</span>}
+                                                    {ftGaps.length > 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">{ftGaps.length} sin cubrir</span>}
+                                                    {!autoCoverAbsences && ftGaps.length > 0 && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">activá cobertura auto</span>}
+                                                </div>
+                                            </div>
+
+                                            {/* Sin cobertura ST/RET/ESC → filas clicables multi-selección */}
+                                            {ftGaps.length > 0 && (() => {
+                                                const allFtKeys = ftGaps.map(g => `${g.absentEmpId}_${g.dateStr}`);
+                                                const someSelected = allFtKeys.some(k => coverageSelectedDays.has(k));
+                                                const allSelected = allFtKeys.every(k => coverageSelectedDays.has(k));
+                                                const selectedGaps = ftGaps.filter(g => coverageSelectedDays.has(`${g.absentEmpId}_${g.dateStr}`));
+                                                const toggle = (key: string) => setCoverageSelectedDays(prev => {
+                                                    const next = new Set(prev);
+                                                    next.has(key) ? next.delete(key) : next.add(key);
+                                                    return next;
+                                                });
+                                                return (
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex items-center justify-between">
+                                                            <p className="text-[9px] font-black text-rose-800">Seleccioná días a cubrir:</p>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setCoverageSelectedDays(allSelected
+                                                                    ? new Set()
+                                                                    : new Set(allFtKeys)
+                                                                )}
+                                                                className="text-[9px] font-black text-indigo-600 hover:text-indigo-800"
+                                                            >
+                                                                {allSelected ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                                                            </button>
+                                                        </div>
+                                                        {Object.values(ftByEmp).map(({ nombre, days }) => (
+                                                            <div key={days[0].absentEmpId} className="rounded-lg border border-rose-200 bg-white overflow-hidden">
+                                                                <div className="px-2.5 py-1.5 bg-rose-50 border-b border-rose-100">
+                                                                    <p className="text-[9px] font-black text-rose-800">{nombre}</p>
+                                                                </div>
+                                                                {days.map(gap => {
+                                                                    const key = `${gap.absentEmpId}_${gap.dateStr}`;
+                                                                    const isChecked = coverageSelectedDays.has(key);
+                                                                    return (
+                                                                        <button
+                                                                            key={gap.dateStr}
+                                                                            type="button"
+                                                                            onClick={() => toggle(key)}
+                                                                            className={`w-full flex items-center justify-between px-3 py-2 border-b border-slate-100 last:border-b-0 transition-colors text-left ${
+                                                                                isChecked
+                                                                                    ? 'bg-indigo-600 text-white'
+                                                                                    : 'bg-white hover:bg-slate-50 text-slate-700'
+                                                                            }`}
+                                                                        >
+                                                                            <span className="text-[10px] font-bold">
+                                                                                Día {gap.dateStr.slice(8, 10)} · {gap.band}
+                                                                            </span>
+                                                                            <span className={`text-[9px] font-black ${isChecked ? 'text-white/80' : 'text-slate-400'}`}>
+                                                                                {isChecked ? '✓' : '○'}
+                                                                            </span>
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        ))}
+                                                        <button
+                                                            type="button"
+                                                            disabled={!someSelected}
+                                                            onClick={() => someSelected && setPlanCoverageModalGaps(selectedGaps)}
+                                                            className={`w-full py-2.5 rounded-lg text-[10px] font-black transition-colors ${
+                                                                someSelected
+                                                                    ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                                                    : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                            }`}
+                                                        >
+                                                            {someSelected
+                                                                ? `Asignar cobertura — ${selectedGaps.length} día(s) seleccionado(s)`
+                                                                : 'Seleccioná al menos un día'}
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                            {/* Cubiertos: ST / RET / ESC / FT / manual */}
+                                            {coveredGaps.length > 0 && (
+                                                <div className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1.5 space-y-0.5">
+                                                    <p className="text-[9px] font-black text-teal-800 mb-1">✓ Cubiertos</p>
+                                                    {coveredGaps.map(g => (
+                                                        <div key={`${g.absentEmpId}_${g.dateStr}`} className="flex justify-between text-[9px] font-bold text-teal-700">
+                                                            <span>{g.absentName?.split(',')[0]} · día {g.dateStr.slice(8,10)} · {g.band}</span>
+                                                            <span>{g.coveredByName?.split(',')[0]} ({coverLabel(g.coverageType)})</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+
+                                {autoV2FormReport && (autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (
+                                    <div className={`rounded-xl border-2 px-3 py-2.5 space-y-2 ${
+                                        autoV2FormReport.ok
+                                            ? 'border-emerald-200 bg-emerald-50/90'
+                                            : autoV2FormReport.warnings
+                                                ? 'border-amber-200 bg-amber-50/90'
+                                                : 'border-rose-200 bg-rose-50/90'
+                                    }`}>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <p className="text-[10px] font-black uppercase tracking-wide text-slate-700">
+                                                Calidad forma 6+2
+                                            </p>
+                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
+                                                autoV2FormReport.ok ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                                            }`}>
+                                                {autoV2FormReport.metrics.formCompliantPct}% limpias
+                                            </span>
+                                        </div>
+                                        <p className="text-[10px] font-bold text-slate-800 leading-snug">{autoV2FormReport.summary}</p>
+                                        <div className="grid grid-cols-4 gap-1 text-[9px] font-bold text-slate-600">
+                                            <span>Prom {autoV2FormReport.metrics.avgBillableHours}h</span>
+                                            <span>{autoV2FormReport.metrics.minBillableHours}–{autoV2FormReport.metrics.maxBillableHours}h</span>
+                                            <span>Δ {autoV2FormReport.metrics.hoursSpread}h</span>
+                                            <span>&gt;200h: {autoV2FormReport.metrics.over200Count}</span>
+                                        </div>
+                                        {(autoV2FormReport.metrics.workBlockIssues > 0
+                                            || autoV2FormReport.metrics.francoBlockIssues > 0
+                                            || autoV2FormReport.metrics.rotationStuckCount > 0
+                                            || autoV2FormReport.metrics.weeklyOver48Count > 0) && (
+                                            <div className="flex flex-wrap gap-1">
+                                                {autoV2FormReport.metrics.workBlockIssues > 0 && (
+                                                    <span className="text-[9px] font-bold bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        bloques ≠6d: {autoV2FormReport.metrics.workBlockIssues}
+                                                    </span>
+                                                )}
+                                                {autoV2FormReport.metrics.francoBlockIssues > 0 && (
+                                                    <span className="text-[9px] font-bold bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        FF ≠2: {autoV2FormReport.metrics.francoBlockIssues}
+                                                    </span>
+                                                )}
+                                                {autoV2FormReport.metrics.rotationStuckCount > 0 && (
+                                                    <span className="text-[9px] font-bold bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        banda fija: {autoV2FormReport.metrics.rotationStuckCount}
+                                                    </span>
+                                                )}
+                                                {autoV2FormReport.metrics.weeklyOver48Count > 0 && (
+                                                    <span className="text-[9px] font-bold bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                                        sem &gt;48h: {autoV2FormReport.metrics.weeklyOver48Count}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {autoV2FormReport.issues.length > 0 && (
+                                            <ul className="max-h-28 overflow-y-auto text-[9px] font-bold text-slate-700 space-y-0.5 border-t border-slate-200/80 pt-1.5">
+                                                {autoV2FormReport.issues.slice(0, 12).map((issue, i) => (
+                                                    <li key={`${issue.empId}-${issue.kind}-${i}`} className={issue.severity === 'error' ? 'text-rose-800' : 'text-amber-800'}>
+                                                        {issue.empName || issue.empId.slice(-6)}: {issue.message}
+                                                    </li>
+                                                ))}
+                                                {autoV2FormReport.issues.length > 12 && (
+                                                    <li className="text-slate-500">… y {autoV2FormReport.issues.length - 12} más</li>
+                                                )}
+                                            </ul>
+                                        )}
+                                        {(autoV2FormReport.metrics.hoursSpread > 24
+                                            || autoV2FormReport.metrics.over192Count > 0
+                                            || autoV2FormReport.metrics.under168Count > 0)
+                                            && (autoV2Coverage?.coverage.uncoveredSlots ?? 0) === 0
+                                            && autoWizardStep === 'done'
+                                            && !autoPlanningBrainRef.current?.strictSixTwo
+                                            && !autoSelectedCyclesRef.current?.includes('6+2') && (
+                                            <button
+                                                type="button"
+                                                onClick={() => void rebalanceAutoForm()}
+                                                disabled={autoV2Rebalancing || autoV2Generating}
+                                                className="w-full mt-1 flex items-center justify-center gap-1.5 rounded-lg border-2 border-indigo-300 bg-indigo-50 px-2 py-1.5 text-[10px] font-black uppercase tracking-wide text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                                            >
+                                                {autoV2Rebalancing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowLeftRight className="w-3 h-3" />}
+                                                Rebalancear forma (swaps)
+                                            </button>
+                                        )}
+                                        {autoV2RebalanceLog.length > 0 && (
+                                            <ul className="max-h-20 overflow-y-auto text-[9px] font-bold text-indigo-800 space-y-0.5 border-t border-indigo-200/80 pt-1.5">
+                                                {autoV2RebalanceLog.slice(-6).map((entry, i) => (
+                                                    <li key={`${entry.dateStr}-${entry.fromEmpId}-${i}`}>
+                                                        {entry.dateStr}: {entry.detail}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                )}
+
+                                {autoV2TrailDiag && (autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (() => {
+                                    const diagBandOf = (s: number) => { const n=((s%24)+24)%24; if(n<=5)return'M'; if(n<=7)return'F'; if(n<=13)return'T'; if(n<=15)return'F'; if(n<=21)return'N'; return'F'; };
+                                    // Detectar colisiones: misma apertura (banda+diasFranco) entre empleados del mismo puesto
+                                    const aperturaKey = (r: typeof autoV2TrailDiag[0]) =>
+                                        r.julioBand && r.diasFranco !== undefined ? `${r.puesto}|${r.julioBand}|${r.diasFranco}` : null;
+                                    const keyCounts: Record<string, number> = {};
+                                    autoV2TrailDiag.forEach(r => { const k = aperturaKey(r); if(k) keyCounts[k] = (keyCounts[k]??0)+1; });
+                                    return (
+                                        <div className="rounded-xl border-2 border-slate-200 bg-white px-3 py-2 space-y-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => setAutoV2ShowTrailDiag(v => !v)}
+                                                className="w-full flex items-center justify-between text-[10px] font-black uppercase tracking-wide text-slate-600 hover:text-slate-900"
+                                            >
+                                                <span>Racha mes anterior → apertura</span>
+                                                <span className="text-slate-400">{autoV2ShowTrailDiag ? '▲' : '▼'}</span>
+                                            </button>
+                                            {autoV2ShowTrailDiag && (
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full">
+                                                        <thead>
+                                                            <tr className="text-[9px] font-black uppercase text-slate-400 border-b border-slate-100">
+                                                                <th className="text-left pb-1 pr-2 font-black">Colaborador</th>
+                                                                <th className="text-center pb-1 pr-1 font-black">Puesto</th>
+                                                                <th className="text-center pb-1 pr-1 font-black">Fin mes ant.</th>
+                                                                <th className="text-center pb-1 font-black">Apertura</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {autoV2TrailDiag.map(row => {
+                                                                const finMes = row.trailWork > 0
+                                                                    ? `${row.trailWork}×${row.lastBand}`
+                                                                    : row.trailRest > 0
+                                                                        ? `${row.trailRest}×F`
+                                                                        : '—';
+                                                                const apertura = row.julioBand !== undefined && row.diasFranco !== undefined
+                                                                    ? `${row.julioBand} · ${row.diasFranco}d→F`
+                                                                    : '—';
+                                                                const k = aperturaKey(row);
+                                                                // Colisión real solo si hay MÁS empleados con igual apertura que qty del puesto.
+                                                                // qty=2 → 2 F·0d en el mismo puesto es normal (1 por subgrupo).
+                                                                const isCollision = k !== null && (keyCounts[k] ?? 0) > (row.puestoQty ?? 1);
+                                                                const isTruncatedFranco = row.trailRest === 1 && row.julioBand !== 'F';
+                                                                const rowClass = isCollision
+                                                                    ? 'text-rose-700 bg-rose-50'
+                                                                    : isTruncatedFranco
+                                                                        ? 'text-amber-700'
+                                                                        : 'text-slate-700';
+                                                                return (
+                                                                    <tr key={row.id} className={`text-[9px] font-bold border-b border-slate-50 ${rowClass}`}>
+                                                                        <td className="py-0.5 pr-2 text-left">{row.nombre}</td>
+                                                                        <td className="py-0.5 pr-1 text-center text-slate-500">{row.puesto}</td>
+                                                                        <td className="py-0.5 pr-1 text-center font-black">{finMes}</td>
+                                                                        <td className="py-0.5 text-center font-black">{apertura}</td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                    <p className="text-[8px] text-slate-400 mt-1">Rojo = colisión (más empleados con igual apertura que qty del puesto). Ámbar = franco truncado (1×F → inicio trabajo).</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+
+                                {(autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && autoV2GenStats && (autoV2GenStats.totalRetCount ?? 0) > 0 && (
+                                    <div className={`rounded-lg border px-3 py-2 text-[11px] font-bold ${
+                                        autoV2GenStats.ajustarCrono ? 'border-violet-300 bg-violet-50 text-violet-900' : 'border-amber-200 bg-amber-50 text-amber-900'
+                                    }`}>
+                                        <p className="font-black">
+                                            Pool RET: {autoV2GenStats.totalRetCount} días-persona
+                                            {autoV2GenStats.totalRetHoursPotential
+                                                ? ` (~${Math.round(autoV2GenStats.totalRetHoursPotential)}h stand-by potencial)`
+                                                : ''}
+                                        </p>
+                                        {(autoV2GenStats.overCoverageRetDays ?? 0) > 0 && (
+                                            <p className="text-[10px] mt-1 opacity-90">
+                                                ⚠ {autoV2GenStats.overCoverageRetDays} día(s) con 2+ RET simultáneos
+                                                (máx. {autoV2GenStats.maxRetConcurrent ?? 0}) — revisar sobrecobertura en dotación.
+                                            </p>
+                                        )}
+                                        {autoV2GenStats.ajustarCrono && (
+                                            <p className="text-[10px] mt-1 opacity-80">
+                                                Modo ajustar crono: esquemas intensivos para liberar guardias a otros objetivos / eventos.
+                                            </p>
+                                        )}
+                                        {(autoV2GenStats.apretarCronoDays?.length ?? 0) > 0 && (
+                                            <p className="text-[10px] mt-1 opacity-90">
+                                                Modo 12 (D12+N12):{' '}
+                                                {autoV2GenStats.apretarCronoDays!.map(d => d.slice(8, 10)).join(', ')}
+                                                {' '}— ausencias auto y/o Contingencia manual.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {autoWizardStep === 'done' && !autoV2Generating && autoV2GenStats && (
+                                    <>
+                                        {/* Conflictos / descansos — grilla aplicada */}
+                                        {autoV2Coverage && (autoV2Coverage.licenseConflicts.length > 0 || autoV2Coverage.restViolations.length > 0) && (
+                                            <div className="flex flex-wrap gap-2">
+                                                {autoV2Coverage.licenseConflicts.length > 0 && (
+                                                    <span className="text-[11px] font-black text-rose-700 bg-rose-100 px-2 py-1 rounded-lg">
+                                                        ⛔ {autoV2Coverage.licenseConflicts.length} conflicto{autoV2Coverage.licenseConflicts.length > 1 ? 's' : ''} de licencia
+                                                    </span>
+                                                )}
+                                                {autoV2Coverage.restViolations.length > 0 && (
+                                                    <span className="text-[11px] font-black text-amber-700 bg-amber-100 px-2 py-1 rounded-lg">
+                                                        ⚠ {autoV2Coverage.restViolations.length} descanso{autoV2Coverage.restViolations.length > 1 ? 's' : ''} roto{autoV2Coverage.restViolations.length > 1 ? 's' : ''}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {!autoOverwrite && (autoV2GenStats?.cellsSkippedOverwrite ?? 0) > 0 && (
+                                            <p className="text-[11px] font-black text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-2 py-1.5">
+                                                Sobreescribir OFF: {autoV2GenStats?.cellsSkippedOverwrite} celdas no se actualizaron. Lo que ves en la grilla puede no coincidir con el cálculo del modal.
+                                            </p>
+                                        )}
+                                        <p className="text-[11px] text-slate-500 font-bold">
+                                            {autoV2Coverage?.ok !== false
+                                                ? 'Cronograma listo. Revisá la grilla y guardá cuando estés listo.'
+                                                : 'Cronograma con avisos. Revisá la grilla antes de guardar.'}
+                                        </p>
+                                        {autoV2GeminiSummary && (
+                                            <p className="text-[10px] text-indigo-700 font-bold bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1.5">
+                                                IA: {autoV2GeminiSummary}
+                                            </p>
+                                        )}
+                                        {autoV2LastRun && autoV2Coverage && (
+                                            <button type="button"
+                                                disabled={autoV2GeminiLoading || autoV2Generating}
+                                                onClick={async () => {
+                                                    if (!autoV2LastRun || !autoV2Coverage) return;
+                                                    const out = await runAutoV2PlanningAgentGemini(
+                                                        autoV2LastRun.assignments,
+                                                        autoV2Coverage,
+                                                        autoV2LastRun.ctx,
+                                                        autoV2LastRun.stats,
+                                                        { ...pendingChanges },
+                                                        true,
+                                                    );
+                                                    setPendingChanges({ ...out.changes });
+                                                    setAutoV2Coverage(out.coverage);
+                                                    setAutoV2LastRun({ ...autoV2LastRun, assignments: out.assignments });
+                                                    setAutoV2Suggestions(
+                                                        buildScheduleOptimizationSuggestions(
+                                                            autoV2LastRun.ctx,
+                                                            out.assignments,
+                                                            autoV2LastRun.stats,
+                                                        ),
+                                                    );
+                                                }}
+                                                className="w-full py-2 rounded-lg text-[11px] font-black text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                                                {autoV2GeminiLoading ? 'IA trabajando…' : '↻ Re-ejecutar ajuste fino IA'}
+                                            </button>
+                                        )}
+
+                                        {/* Autorización 200h */}
+                                        {capOverflowEmps.length > 0 && (
+                                            <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-3">
+                                                <p className="text-[11px] font-black text-orange-800 mb-1">
+                                                    ⚠ {capOverflowEmps.length} empleado{capOverflowEmps.length > 1 ? 's' : ''} alcanzaron el tope de 200h
+                                                </p>
+                                                <p className="text-[10px] text-orange-700 font-bold mb-2">
+                                                    Autorizá quiénes pueden superarlo con PIN de supervisor. El motor re-generará.
+                                                </p>
+                                                <div className="space-y-1 mb-3">
+                                                    {capOverflowEmps.map(e => (
+                                                        <label key={e.empId} className="flex items-center gap-2 cursor-pointer">
+                                                            <input type="checkbox"
+                                                                checked={over200AuthChecked[e.empId] ?? false}
+                                                                onChange={ev => setOver200AuthChecked(prev => ({ ...prev, [e.empId]: ev.target.checked }))}
+                                                                className="w-3.5 h-3.5 accent-orange-600"/>
+                                                            <span className="text-[11px] font-bold text-slate-800">{e.nombre}</span>
+                                                            {authorizedOver200Ids.has(e.empId) && (
+                                                                <span className="text-[9px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full">ya autorizado</span>
+                                                            )}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <SupervisorPinInput
+                                                        value={over200AuthPin}
+                                                        onChange={e => { setOver200AuthPin(e.target.value.replace(/\D/g, '').slice(0, 20)); setOver200AuthError(''); }}
+                                                        placeholder="PIN supervisor (mín. 4 dígitos)"
+                                                        maxLength={20}
+                                                        className="flex-1 min-w-0 rounded-lg border border-orange-300 px-2 py-1.5 text-[11px] font-bold bg-white outline-none focus:ring-2 focus:ring-orange-400"/>
+                                                    <button type="button"
+                                                        disabled={autoV2Generating || !over200AuthPin}
+                                                        onClick={() => {
+                                                            if (over200AuthPin.length < 4) { setOver200AuthError('PIN mínimo 4 caracteres'); return; }
+                                                            const toAuthorize = capOverflowEmps.filter(e => over200AuthChecked[e.empId]).map(e => e.empId);
+                                                            if (toAuthorize.length === 0) { setOver200AuthError('Seleccioná al menos un empleado'); return; }
+                                                            const next = new Set(authorizedOver200IdsRef.current);
+                                                            toAuthorize.forEach(id => next.add(id));
+                                                            authorizedOver200IdsRef.current = next;
+                                                            setAuthorizedOver200Ids(next);
+                                                            setCapOverflowEmps([]);
+                                                            setOver200AuthPin(''); setOver200AuthError('');
+                                                            applyAutoScheduleV2();
+                                                        }}
+                                                        className="shrink-0 px-3 py-1.5 rounded-lg text-[11px] font-black text-white bg-orange-600 hover:bg-orange-700 transition-colors disabled:opacity-50">
+                                                        Autorizar y re-generar
+                                                    </button>
+                                                </div>
+                                                {over200AuthError && <p className="text-[10px] font-bold text-rose-700 mt-1">{over200AuthError}</p>}
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+
+                                {/* Ajustar configuración — colapsible, visible en verified (no viable) y done */}
+                                {(autoWizardStep === 'verified' || autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Generating && (
+                                    <div className="border border-slate-200 rounded-xl overflow-hidden">
+                                        <button type="button"
+                                            onClick={() => setAutoWizardPersonalize(p => !p)}
+                                            className="w-full flex items-center justify-between px-3 py-2 text-[11px] font-black text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">
+                                            <span>Ajustar configuración</span>
+                                            {autoWizardPersonalize ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+                                        </button>
+                                        {autoWizardPersonalize && (
+                                            <div className="px-3 pb-3 pt-2 bg-white space-y-3">
+                                                {autoCycles.length > 0 && (
+                                                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+                                                        <p className="text-[9px] font-black text-slate-500 uppercase">Esquema (automático)</p>
+                                                        <p className="text-[11px] font-black text-slate-800">{autoCycles.join(' · ')}</p>
+                                                    </div>
+                                                )}
+                                                <div className="grid grid-cols-2 gap-1.5">
+                                                    <button type="button" onClick={() => setAutoV2BudgetMode('cct')}
+                                                        className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='cct' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500'}`}>
+                                                        CCT por tramos<div className={`text-[9px] font-bold ${autoV2BudgetMode==='cct' ? 'opacity-80' : 'opacity-50'}`}>cola + nuevo desde día {autoV2Report?.metrics.cctCutoffDay ?? 25}</div>
+                                                    </button>
+                                                    <button type="button" onClick={() => setAutoV2BudgetMode('calendar')}
+                                                        className={`py-1.5 rounded-lg text-[10px] font-black border-2 transition-colors text-left px-2 ${autoV2BudgetMode==='calendar' ? 'border-amber-500 bg-amber-100 text-amber-700' : 'border-slate-200 text-slate-500'}`}>
+                                                        Calendario simple<div className={`text-[9px] font-bold ${autoV2BudgetMode==='calendar' ? 'opacity-80' : 'opacity-50'}`}>200h netas sin cola</div>
+                                                    </button>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-black text-slate-700 flex-1">Sobreescribir celdas ya asignadas</span>
+                                                    <button type="button" onClick={() => setAutoOverwrite(p => !p)}
+                                                        className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoOverwrite ? 'bg-amber-500' : 'bg-slate-300'}`}>
+                                                        <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoOverwrite ? 'translate-x-4' : ''}`}/>
+                                                    </button>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-black text-slate-700 flex-1">Ajuste fino IA tras generar (Gemini)</span>
+                                                    <button type="button" onClick={() => setAutoV2RunGemini(p => !p)}
+                                                        className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoV2RunGemini ? 'bg-indigo-500' : 'bg-slate-300'}`}>
+                                                        <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoV2RunGemini ? 'translate-x-4' : ''}`}/>
+                                                    </button>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-black text-slate-700 flex-1">Cobertura de ausencias (V/L/E/A/PG)</span>
+                                                    <button type="button" onClick={() => setAutoCoverAbsences(p => !p)}
+                                                        className={`relative w-8 h-4 rounded-full transition-colors shrink-0 ${autoCoverAbsences ? 'bg-teal-500' : 'bg-slate-300'}`}>
+                                                        <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform shadow-sm ${autoCoverAbsences ? 'translate-x-4' : ''}`}/>
+                                                    </button>
+                                                </div>
+                                                {/* Ausencias — mini wizard */}
+                                                {autoV2CoveragePreflight && autoV2CoveragePreflight.employees.some(e => e.blockedCount > 0) && (
+                                                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 space-y-1.5">
+                                                        <p className="text-[9px] font-black uppercase tracking-wide text-amber-700 mb-1">Ausencias en el mes</p>
+                                                        {autoV2CoveragePreflight.employees.filter(e => e.blockedCount > 0).map(emp => {
+                                                            const absMap = autoAbsencesMap[emp.empId];
+                                                            const codes = absMap
+                                                                ? [...new Set([...absMap.values()].filter(c => ['V','L','E','A','PG','AA'].includes(c)))]
+                                                                : [];
+                                                            return (
+                                                                <div key={emp.empId} className="flex items-center justify-between gap-1.5">
+                                                                    <div className="min-w-0">
+                                                                        <span className="text-[10px] font-black text-amber-800 truncate block">{emp.nombre}</span>
+                                                                        <span className="text-[9px] font-bold text-amber-600">{emp.blockedCount}d{codes.length > 0 ? ` · ${codes.join('/')}` : ''}</span>
+                                                                    </div>
+                                                                    <span className="shrink-0 text-[9px] font-black px-2 py-1 rounded-lg border border-violet-200 bg-violet-50 text-violet-600">
+                                                                        D12 auto
+                                                                    </span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                                <button type="button"
+                                                    onClick={() => { setAutoWizardPersonalize(false); runFullGeneration(); }}
+                                                    disabled={autoV2Loading || autoV2Generating}
+                                                    className="w-full py-2 rounded-lg text-[11px] font-black text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5">
+                                                    <RefreshCw size={11}/> Re-generar (re-evalúa esquema)
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                            </div>
+
+                            {/* Footer */}
+                            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3 flex flex-col gap-2 rounded-b-2xl">
+                                {slaDebug && (
+                                    <div className="bg-slate-900 text-slate-100 text-[10px] rounded-lg p-2 max-h-60 overflow-y-auto">
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <span className="font-black text-emerald-300">doc id: {slaDebug.id}</span>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(slaDebug, null, 2)); toast.success('JSON copiado'); }} className="text-[10px] font-bold text-slate-300 hover:text-white">copiar</button>
+                                                <button onClick={() => setSlaDebug(null)} className="text-[10px] font-bold text-slate-300 hover:text-white">cerrar</button>
+                                            </div>
+                                        </div>
+                                        <pre className="whitespace-pre-wrap break-all leading-tight">{JSON.stringify(slaDebug.data, null, 2)}</pre>
+                                    </div>
+                                )}
+                                <div className="flex items-center justify-between gap-3">
+                                    <button type="button" onClick={fetchSlaDebug} disabled={slaDebugLoading || !selectedObjective}
+                                        className="text-[11px] font-black text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors">
+                                        {slaDebugLoading ? 'Cargando…' : '🔧 SLA JSON'}
+                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        {autoWizardStep === 'configure' && !autoV2Loading && !autoV2Generating && (
+                                            <button type="button"
+                                                onClick={() => runFullGeneration()}
+                                                className="px-5 py-2 rounded-xl text-sm font-black text-white bg-amber-500 hover:bg-amber-600 transition-colors flex items-center gap-1.5">
+                                                <Wand2 size={14}/> Generar
+                                            </button>
+                                        )}
+                                        {autoWizardStep === 'sla_open' && !autoV2Loading && !autoV2Generating && (
+                                            <>
+                                                <button type="button"
+                                                    onClick={() => setShowAutoV2Modal(false)}
+                                                    className="px-5 py-2 rounded-xl text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
+                                                    Ver grilla
+                                                </button>
+                                                <button type="button"
+                                                    onClick={() => runFullGeneration()}
+                                                    className="px-5 py-2 rounded-xl text-sm font-black text-white bg-rose-600 hover:bg-rose-700 transition-colors flex items-center gap-1.5">
+                                                    <RefreshCw size={14}/> Re-generar
+                                                </button>
+                                            </>
+                                        )}
+                                        <button type="button"
+                                            onClick={() => {
+                                                if (autoV2GeminiLoading) {
+                                                    setAutoV2GeminiLoading(false);
+                                                    setAutoV2Progress(null);
+                                                }
+                                                setShowAutoV2Modal(false);
+                                            }}
+                                            disabled={autoV2Loading || autoV2Generating}
+                                            className="px-5 py-2 rounded-xl text-sm font-black text-slate-600 bg-slate-200 hover:bg-slate-300 transition-colors disabled:opacity-50">
+                                            Cerrar
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                , document.body)}
+
+            {showDiagnostic && diagnosticPanelPos && typeof document !== 'undefined' && createPortal(
+                <>
+                    <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowDiagnostic(false)} />
+                    <div
+                        className="fixed z-[9999] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[280px] max-w-[min(420px,calc(100vw-2rem))] p-3 animate-in zoom-in-95 max-h-[min(70vh,520px)] overflow-y-auto custom-scrollbar"
+                        style={{ left: diagnosticPanelPos.x, top: diagnosticPanelPos.y }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Estructura del Servicio</p>
+                        <div className="space-y-1.5">
+                            {positionStructure.map((pos, i) => (
+                                <div key={i} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-[10px] font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5 flex-wrap">
+                                            <span>{pos.positionName}</span>
+                                            {renderPositionGeneroBadge(pos.preferenciaGenero)}
+                                        </p>
+                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                            {(pos.shifts || []).map((sh: any, j: number) => (
+                                                <span key={j} className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-700 font-bold">
+                                                    {sh.code || sh.name}{sh.hours ? ` · ${sh.hours}h` : ''}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <span className="text-[10px] font-black text-white bg-indigo-600 px-1.5 py-0.5 rounded shrink-0">{pos.qty} pax</span>
+                                </div>
+                            ))}
+                        </div>
+                        {slaVendidas > 0 && (
+                            <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600 flex justify-between items-center">
+                                <span className="text-[9px] font-black text-slate-400 uppercase">Hs. Vendidas / mes</span>
+                                <span className="text-base font-black text-teal-600">{slaVendidas}h</span>
+                            </div>
+                        )}
+                    </div>
+                </>,
+                document.body,
+            )}
+
+            {showCoverageDiagnostic && coveragePanelPos && objectiveCoverageGapReport && typeof document !== 'undefined' && createPortal(
+                <>
+                    <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowCoverageDiagnostic(false)} />
+                    <div
+                        className="fixed z-[9999] bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-600 shadow-2xl min-w-[320px] max-w-[min(420px,calc(100vw-2rem))] p-3 animate-in zoom-in-95 max-h-[min(70vh,520px)] overflow-y-auto custom-scrollbar"
+                        style={{ left: coveragePanelPos.x, top: coveragePanelPos.y }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Qué falta para cerrar el SLA</p>
+                        <div className="grid grid-cols-3 gap-2 mb-3">
+                            <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-100">
+                                <div className="text-lg font-black text-emerald-700">{objectiveCoverageGapReport.daysFull}</div>
+                                <div className="text-[8px] font-bold text-emerald-600 uppercase">Días 100%</div>
+                            </div>
+                            <div className="bg-amber-50 rounded-lg p-2 text-center border border-amber-100">
+                                <div className="text-lg font-black text-amber-700">{objectiveCoverageGapReport.daysPartial}</div>
+                                <div className="text-[8px] font-bold text-amber-600 uppercase">Parcial</div>
+                            </div>
+                            <div className="bg-rose-50 rounded-lg p-2 text-center border border-rose-100">
+                                <div className="text-lg font-black text-rose-700">{objectiveCoverageGapReport.daysEmpty}</div>
+                                <div className="text-[8px] font-bold text-rose-600 uppercase">Sin cerrar</div>
+                            </div>
+                        </div>
+                        {Object.keys(objectiveCoverageGapReport.aggregateMissingPrimary).length > 0 && (
+                            <div className="mb-3">
+                                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Bandas faltantes en el mes (esquema M+T+N)</p>
+                                <div className="flex flex-wrap gap-1">
+                                    {Object.entries(objectiveCoverageGapReport.aggregateMissingPrimary)
+                                        .sort((a, b) => b[1] - a[1])
+                                        .map(([code, n]) => (
+                                            <span key={code} className="text-[9px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-200">
+                                                {n}x{code}
+                                            </span>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
+                        {objectiveCoverageGapReport.worstDays.length > 0 && (
+                            <div>
+                                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Peores días (click en pie para detalle)</p>
+                                <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                                    {objectiveCoverageGapReport.worstDays.slice(0, 8).map(wd => {
+                                        const dayGaps = objectiveCoverageGapReport.byDay[wd.dateStr]?.positions || [];
+                                        return (
+                                            <div key={wd.dateStr} className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                                                <div className="flex justify-between text-[10px] font-black text-slate-700 dark:text-slate-200 mb-0.5">
+                                                    <span>Día {wd.dateStr.slice(8)}</span>
+                                                    <span className="text-rose-600">{wd.closed}/{wd.required}</span>
+                                                </div>
+                                                {dayGaps.slice(0, 3).map((g, i) => (
+                                                    <p key={i} className="text-[9px] text-slate-500 leading-snug">{g.positionName}: {g.summary}</p>
+                                                ))}
+                                                {dayGaps.length > 3 && (
+                                                    <p className="text-[8px] text-slate-400">+{dayGaps.length - 3} puestos más</p>
+                                      
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </>,
+                document.body,
+            )}
+            {/* ── Modal asignar guardia a RFZ vacante ── */}
+            {rfzAsignando && (
+                <div className="fixed inset-0 bg-black/60 z-[75] flex items-center justify-center p-4"
+                    onClick={() => setRfzAsignando(null)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-4"
+                        onClick={e => e.stopPropagation()}>
+                        <div className="flex items-start gap-3">
+                            <span className="shrink-0 text-[10px] font-black text-white bg-red-500 px-2 py-1 rounded-lg">RFZ</span>
+                            <div>
+                                <h2 className="font-black text-slate-800 text-base leading-tight">Asignar guardia al refuerzo</h2>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    {rfzAsignando.positionName || 'Sin puesto'} · {formatTime(rfzAsignando.startTime)}–{formatTime(rfzAsignando.endTime)} · {rfzAsignando.fecha}
+                                </p>
+                                {rfzAsignando.solicitadoPorNombre && (
+                                    <p className="text-[10px] text-red-500 font-bold mt-0.5">
+                                        Solicitado por: {rfzAsignando.solicitadoPorNombre}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-bold -mt-1">
+                            Solo guardias disponibles ese día (sin turno, RET o franco). Se prioriza titular y quien conoce el objetivo.
+                        </p>
+                        <div className="flex flex-col max-h-72 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
+                            {(() => {
+                                const fecha = rfzAsignando.fecha;
+                                const objId = rfzAsignando.objectiveId;
+                                const cliId = rfzAsignando.clientId;
+                                const categorizar = (emp: any) => {
+                                    const key = `${emp.id}_${fecha}`;
+                                    const pend = pendingChanges[key];
+                                    const shift = pend ? (pend.isDeleted ? null : pend) : shiftsMap[key];
+                                    const code = String(shift?.code || '').toUpperCase();
+                                    if (!shift || !code) return { rank: 0, label: 'Sin turno', cls: 'bg-emerald-100 text-emerald-700', franco: false };
+                                    if (code === 'RET') return { rank: 1, label: 'RET (stand-by)', cls: 'bg-sky-100 text-sky-700', franco: false };
+                                    if (['F', 'FF', 'FP'].includes(code)) return { rank: 2, label: 'De franco → FT', cls: 'bg-amber-100 text-amber-700', franco: true };
+                                    return null;
+                                };
+                                // Experiencia (igual que Operaciones): 3 titular, 2 conoce objetivo, 1 mismo cliente.
+                                const expLevel = (emp: any): number => {
+                                    if (objId && emp.preferredObjectiveId === objId) return 3;
+                                    const expMap: Record<string, any> = emp.experienciaObjetivos || {};
+                                    const entry = objId ? expMap[objId] : null;
+                                    if (entry) {
+                                        const total = (entry.turnosRegulares ?? 0) + (entry.turnosRefuerzo ?? 0) + (entry.turnosConvocado ?? 0) + (entry.turnosEscuela ?? 0);
+                                        if (total > 0) return 2;
+                                    }
+                                    if (cliId && emp.clientId === cliId) return 1;
+                                    return 0;
+                                };
+                                const expBadge = (lv: number) =>
+                                    lv === 3 ? { label: '★ Titular', cls: 'bg-emerald-100 text-emerald-700' }
+                                  : lv === 2 ? { label: '◆ Conoce el objetivo', cls: 'bg-blue-50 text-blue-600' }
+                                  : lv === 1 ? { label: 'Mismo cliente', cls: 'bg-slate-100 text-slate-500' }
+                                  : null;
+                                const candidatos = (displayedEmployees as any[])
+                                    .map(emp => ({ emp, cat: categorizar(emp), exp: expLevel(emp) }))
+                                    .filter((x): x is { emp: any; cat: NonNullable<ReturnType<typeof categorizar>>; exp: number } => x.cat !== null)
+                                    .sort((a, b) => (a.cat.rank - b.cat.rank) || (b.exp - a.exp) || String(a.emp.name).localeCompare(String(b.emp.name)));
+                                if (candidatos.length === 0) {
+                                    return <p className="text-xs text-slate-400 text-center py-4">No hay guardias disponibles (sin turno, RET o franco) ese día</p>;
+                                }
+                                return candidatos.map(({ emp, cat, exp }) => {
+                                    const eb = expBadge(exp);
+                                    return (
+                                        <button key={emp.id}
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await updateDoc(doc(db, 'turnos', rfzAsignando.id), {
+                                                        employeeId: emp.id,
+                                                        employeeName: emp.name,
+                                                        ...(cat.franco ? { isFrancoTrabajado: true, coveredFromFranco: true } : {}),
+                                                    });
+                                                    activateRfzCorrectionFlow();
+                                                    setRfzAsignando(null);
+                                                    const lookupKey = planificacionPublishLookupKey(
+                                                        selectedObjective,
+                                                        currentDate.getFullYear(),
+                                                        currentDate.getMonth() + 1,
+                                                    );
+                                                    const yaPublicado = !!publishStatusMap[lookupKey];
+                                                    toast.success(
+                                                        yaPublicado
+                                                            ? (cat.franco
+                                                                ? `${emp.name} asignado/a al RFZ (Franco Trabajado). Modo corrección activo — re-publicá para notificarle.`
+                                                                : `${emp.name} asignado/a al RFZ. Modo corrección activo — re-publicá para notificarle.`)
+                                                            : (cat.franco
+                                                                ? `${emp.name} asignado/a al RFZ (Franco Trabajado). Publicá el cronograma para notificarle.`
+                                                                : `${emp.name} asignado/a al RFZ. Publicá el cronograma para notificarle.`),
+                                                    );
+                                                } catch {
+                                                    toast.error('Error al asignar guardia');
+                                                }
+                                            }}
+                                            className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50 text-left transition-colors">
+                                            <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-xs font-black text-slate-600 shrink-0">
+                                                {(emp.name || '?')[0]}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="block text-sm text-slate-700 font-semibold truncate">{emp.name}</span>
+                                                {eb && (
+                                                    <span className={`inline-block mt-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-full ${eb.cls}`}>{eb.label}</span>
+                                                )}
+                                            </div>
+                                            <span className={`shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full ${cat.cls}`}>{cat.label}</span>
+                                        </button>
+                                    );
+                                });
+                            })()}
+                        </div>
+                        <button type="button" onClick={() => setRfzAsignando(null)}
+                            className="self-end text-xs text-slate-400 hover:text-slate-600">
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+            )}
+            </div>
+
+            {/* ── MODAL AJUSTAR CRONO ── */}
+            <AjustarCronoOperativoModal
+                open={showAjustarCronoModal}
+                onClose={() => setShowAjustarCronoModal(false)}
+                empresaId={empresaId || ''}
+                fechaInicial={currentDate}
+                fechaHastaInicial={currentDate}
+                objetivoInicial={selectedObjectiveData ? { id: selectedObjectiveData.id, nombre: selectedObjectiveData.nombre || selectedObjectiveData.name || '' } : undefined}
+                clients={clients}
+                gridSnapshot={{ shiftsMap, pendingChanges }}
+            />
+
+            {/* ── MODAL EQUILIBRAR CRONO ── */}
+            <EquilibrarCronoModal
+                open={showEquilibrarModal}
+                onClose={() => setShowEquilibrarModal(false)}
+                empresaId={empresaId || ''}
+                objectiveId={selectedObjective || ''}
+                objectiveNombre={selectedObjectiveData?.nombre || selectedObjectiveData?.name || selectedObjective || ''}
+                year={currentDate.getFullYear()}
+                month={currentDate.getMonth() + 1}
+                employees={planningDotacionEmployees}
+                onApplyPending={(changes) => {
+                    const newPending: Record<string, any> = { ...pendingChanges };
+                    for (const c of changes) {
+                        newPending[`${c.empId}_${c.dateStr}`] = {
+                            code:         c.code,
+                            name:         c.name,
+                            hours:        c.hours,
+                            positionName: c.positionName,
+                            startTime:    c.startTimeStr,
+                            endTime:      c.endTimeStr,
+                            isFranco:     false,
+                            isTemp:       true,
+                            swapWith:     null,
+                            swapDate:     null,
+                            comments:     'Equilibrar horas',
+                        };
+                    }
+                    setPendingChanges(newPending);
+                }}
+            />
+        </DashboardLayout>
+    );
+}
