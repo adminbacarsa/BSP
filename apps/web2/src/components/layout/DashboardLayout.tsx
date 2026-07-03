@@ -300,7 +300,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
   const { canReadModule, user, isSuperAdmin } = useAuth();
-  const isVplanLabVisible = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true' || isSuperAdmin;
+  const isVplanLabVisible = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
