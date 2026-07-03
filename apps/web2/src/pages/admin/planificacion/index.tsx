@@ -1755,7 +1755,6 @@ export default function PlanificacionPage() {
         const max8hSlots = shifts8h.length * pax;
         const max12hSlots = shifts12h.length * pax;
 
-        if (enforcePlanningClosureRules) {
         uniqueSLAShifts.forEach((s: any) => {
             const code = String(s.code || '').toUpperCase();
             const hours = Number(s.hours) || 8;
@@ -1777,9 +1776,8 @@ export default function PlanificacionPage() {
                 if (assigned.length >= max8hSlots + max12hSlots) { disabled.add(code); return; }
             }
         });
-        }
         return disabled;
-    }, [selectedCell?.dateStr, selectedObjective, activePosition, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, enforcePlanningClosureRules]);
+    }, [selectedCell?.dateStr, selectedObjective, activePosition, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
@@ -2095,6 +2093,15 @@ export default function PlanificacionPage() {
         if (selectedCell) {
             const empPreferred = empDefaultPos[`${selectedCell.empId}___${selectedObjective}`];
             const smartDefault = selectedCell.currentShift?.positionName || empPreferred || dominantPosition.positionName || 'General';
+            // Si no hay turno asignado y hay exactamente un puesto con faltante, pre-seleccionarlo
+            if (!selectedCell.currentShift) {
+                const dayReport = buildDayCoverageReport(selectedCell.dateStr);
+                const openPositions = dayReport ? dayReport.positions.filter((p: any) => p.missingUnits > 0) : [];
+                if (openPositions.length === 1) {
+                    setActivePosition(openPositions[0].positionName);
+                    return;
+                }
+            }
             setActivePosition(smartDefault);
         } else {
             setActivePosition(null);
@@ -8335,7 +8342,6 @@ export default function PlanificacionPage() {
                                             const isHoursCovered = coverageData.current >= coverageData.target;
                                             const isUnitsCovered = coverageData.isPositionClosed;
                                             const coverageFull = coverageData.isActiveDay && coverageData.requiredUnits > 0 && isUnitsCovered;
-                                            const allowOverAssign = !enforcePlanningClosureRules;
                                             const percentage = coverageData.target > 0 ? Math.min(100, (coverageData.current / coverageData.target) * 100) : 100;
                                             const displayTarget = isExcludedDay
                                                 ? 'Excluido SLA'
@@ -8385,13 +8391,14 @@ export default function PlanificacionPage() {
                                                     <div className={`grid grid-cols-3 gap-2 mb-4 ${isServiceLocked || isExcludedDay ? 'opacity-50 pointer-events-none' : ''}`}>
                                                         {uniqueSLAShifts.map((s: any) => {
                                                             const isBlocked = shiftButtonDisabledMap.has(String(s.code).toUpperCase());
-                                                            const disabledByCoverage = coverageFull && enforcePlanningClosureRules;
+                                                            const disabledByCoverage = coverageFull;
                                                             const disabled = isServiceLocked || isBlocked || disabledByCoverage || isExcludedDay;
                                                             const timeRange = (s.startTime && s.endTime) ? `${s.startTime}–${s.endTime}` : null;
                                                             const gap = coverageData.current + (Number(s.hours) || 0) - coverageData.target;
                                                             const blockTitle = isExcludedDay
                                                                 ? 'Puesto excluido por SLA este día'
-                                                                : disabledByCoverage ? 'Puesto cerrado (esquema SLA completo). Solo se puede asignar Franco.' : allowOverAssign && coverageFull ? 'Borrador o modo corrección: podés reasignar aunque el puesto figure cerrado' : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined;
+                                                                : disabledByCoverage ? 'Puesto cerrado — esquema SLA completo (M+T+N o D12+N12).'
+                                                                : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined;
                                                             return (
                                                                 <button
                                                                     key={s.code}
