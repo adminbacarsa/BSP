@@ -409,7 +409,8 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
   const _sbW = sidebarOpen ? 'w-64' : 'w-16';
   const _sbT = !sidebarOpen ? '-translate-x-full lg:translate-x-0' : 'translate-x-0';
-  const _sbCls = 'fixed top-0 left-0 z-[999] h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden ' + _sbW + ' ' + _sbT;
+  const _sbZ = sidebarOpen ? 'z-[1001]' : 'z-[999]';
+  const _sbCls = 'fixed top-0 left-0 ' + _sbZ + ' h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden ' + _sbW + ' ' + _sbT;
 
   return (
     <>
@@ -655,7 +656,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
         </div>
       ) : (
         <div className={'flex-1 transition-all duration-300 ease-in-out ' + (isPinned ? 'lg:ml-64' : 'lg:ml-16') + ' min-w-0'}>
-          <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
+          <DashboardHeader isSidebarOpen={sidebarOpen} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
           {/* Supervisión usa su propia bottom nav en mobile */}
           <main className={'overflow-x-hidden ' + (isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8')}>
             {children}
