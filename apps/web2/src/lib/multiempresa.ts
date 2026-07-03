@@ -7,7 +7,7 @@ import {
   collection, getDocs, writeBatch, doc, setDoc, getDoc, deleteDoc, updateDoc,
   query, where, limit, orderBy, Query, CollectionReference, DocumentReference, Timestamp,
 } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth, db, getDb } from './firebase';
 import { objectiveMatchKeys } from './slaPlanningMatch';
 
 /** Colecciones que participan en el aislamiento por empresa */
@@ -60,7 +60,7 @@ export async function migrarEmpresa(
     onProgreso({ mensaje: 'Leyendo colecciones legacy de Bacarsa...', procesados: 0, total: 0, completa: false });
 
     const snapshots = await Promise.allSettled(
-      COLECCIONES.map(col => getDocs(collection(db, col)))
+      COLECCIONES.map(col => getDocs(collection(getDb(), col)))
     );
 
     // 2. Filtrar solo docs sin empresaId
@@ -865,7 +865,14 @@ export function empresaScopedQuery(
   empresaId: string,
   scopeEmpresa: boolean,
 ): Query | CollectionReference {
-  const col = collection(db, colName);
+  if (typeof window === 'undefined') {
+    throw new Error('empresaScopedQuery: solo disponible en el cliente');
+  }
+  const path = String(colName ?? '').trim();
+  if (!path) {
+    throw new Error('empresaScopedQuery: colName inválido');
+  }
+  const col = collection(getDb(), path);
   if (!scopeEmpresa || !String(empresaId ?? '').trim()) return col;
   return query(col, where('empresaId', '==', String(empresaId).trim()));
 }
@@ -879,7 +886,7 @@ export function empresaCollectionQuery(
   empresaId: string,
   scopeEmpresa: boolean,
 ): Query | CollectionReference {
-  const col = collection(db, colName);
+  const col = collection(getDb(), String(colName ?? '').trim());
   const id = String(empresaId ?? '').trim();
   if (!scopeEmpresa || !id) return col;
   if (id.toLowerCase() === 'bacarsa') return col;
@@ -1003,4 +1010,54 @@ export async function fetchPlanificacionEstadoDoc(
     return { id: legacy.id, data: legacy.data() as Record<string, unknown> };
   }
   return null;
+}
+
+/** Fusiona tenant + legacy: puestos/bandas de ambos docs; trailing del primero que lo tenga. */
+export async function fetchMergedPlanificacionEstadoData(
+  empresaId: string,
+  objectiveId: string,
+  year: number,
+  month: number,
+): Promise<Record<string, unknown>> {
+  const ids = [
+    buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month),
+    buildPlanificacionEstadoDocId('', objectiveId, year, month),
+  ].filter((id, index, arr) => arr.indexOf(id) === index);
+
+  let merged: Record<string, unknown> = {};
+  let trailingFrom: Record<string, unknown> | null = null;
+
+  for (const id of ids) {
+    const snap = await getDoc(doc(db, 'planificacion_estados', id));
+    if (!snap.exists()) continue;
+    const d = snap.data() as Record<string, unknown>;
+    merged = {
+      ...merged,
+      defaultPositionByEmp: {
+        ...((merged.defaultPositionByEmp as Record<string, string>) || {}),
+        ...((d.defaultPositionByEmp as Record<string, string>) || {}),
+      },
+      defaultShiftByEmp: {
+        ...((merged.defaultShiftByEmp as Record<string, string>) || {}),
+        ...((d.defaultShiftByEmp as Record<string, string>) || {}),
+      },
+      publishedAt: merged.publishedAt ?? d.publishedAt,
+      publishedBy: merged.publishedBy ?? d.publishedBy,
+    };
+    if (!trailingFrom && (d.lastShiftByEmp || d.trailingWorkDays)) {
+      trailingFrom = d;
+    }
+  }
+
+  if (trailingFrom) {
+    merged = {
+      ...merged,
+      trailingWorkDays: trailingFrom.trailingWorkDays,
+      trailingRestDays: trailingFrom.trailingRestDays,
+      lastShiftByEmp: trailingFrom.lastShiftByEmp,
+      lastWorkBandBeforeRest: trailingFrom.lastWorkBandBeforeRest,
+    };
+  }
+
+  return merged;
 }

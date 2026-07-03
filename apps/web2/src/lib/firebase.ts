@@ -1,6 +1,12 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { initializeFirestore, getFirestore, memoryLocalCache, connectFirestoreEmulator } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  getFirestore,
+  memoryLocalCache,
+  connectFirestoreEmulator,
+  type Firestore,
+} from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
@@ -45,6 +51,46 @@ function isAuthOnEmulator(): boolean {
   return Boolean((auth as unknown as { _emulatorConfig?: { host?: string } })._emulatorConfig?.host);
 }
 
+let _db: Firestore | undefined;
+let _emulatorsConnected = false;
+
+function createFirestoreInstance(): Firestore {
+  if (typeof window === 'undefined') {
+    return getFirestore(app);
+  }
+  if (USE_EMULATOR) {
+    try {
+      return initializeFirestore(app, {
+        experimentalForceLongPolling: true,
+      });
+    } catch {
+      return getFirestore(app);
+    }
+  }
+  try {
+    return initializeFirestore(app, {
+      localCache: memoryLocalCache(),
+    });
+  } catch {
+    return getFirestore(app);
+  }
+}
+
+/**
+ * Firestore singleton — resolver en runtime (evita db inválido en hidratación Next.js).
+ */
+export function getDb(): Firestore {
+  if (!_db) {
+    _db = createFirestoreInstance();
+    if (typeof window !== 'undefined' && USE_EMULATOR) {
+      console.info(
+        `[Firebase] Modo emulador activo → ${getEmulatorHost()} (auth 9099, firestore 8080, functions 5001, storage 9199) 🧪`,
+      );
+    }
+  }
+  return _db;
+}
+
 /** Conecta Auth/Firestore/Functions al lab local (idempotente). Llamar antes del primer signIn. */
 export function ensureFirebaseEmulatorsConnected(): void {
   if (typeof window === 'undefined' || !USE_EMULATOR) return;
@@ -53,7 +99,7 @@ export function ensureFirebaseEmulatorsConnected(): void {
     connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
   }
   try {
-    connectFirestoreEmulator(db, host, 8080);
+    connectFirestoreEmulator(getDb(), host, 8080);
   } catch {
     /* ya conectado */
   }
@@ -67,34 +113,13 @@ export function ensureFirebaseEmulatorsConnected(): void {
   } catch {
     /* ya conectado */
   }
+  _emulatorsConnected = true;
 }
 
-// Cache en memoria (estable en todos los navegadores). La persistencia IndexedDB
-// quedó descartada: si IndexedDB se bloquea (multipestaña/storage restringido),
-// los getDoc nunca resuelven y el login se cuelga ("pensando" infinito).
-let db;
-if (typeof window === 'undefined') {
-  db = getFirestore(app);
-} else if (USE_EMULATOR) {
-  try {
-    db = initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-    });
-  } catch {
-    db = getFirestore(app);
-  }
+export const db: Firestore = getDb();
+
+if (typeof window !== 'undefined' && USE_EMULATOR) {
   ensureFirebaseEmulatorsConnected();
-  console.info(
-    `[Firebase] Modo emulador activo → ${getEmulatorHost()} (auth 9099, firestore 8080, functions 5001, storage 9199) 🧪`,
-  );
-} else {
-  try {
-    db = initializeFirestore(app, {
-      localCache: memoryLocalCache(),
-    });
-  } catch {
-    db = getFirestore(app);
-  }
 }
 
-export { app, auth, db, functions, storage };
+export { app, auth, functions, storage };
