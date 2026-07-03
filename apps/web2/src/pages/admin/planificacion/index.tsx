@@ -1768,11 +1768,11 @@ export default function PlanificacionPage() {
                 if (assigned8h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
                 if (assigned12h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
             } else {
-                // Multi-pax: permitir mezcla de 8h y 12h (ej: 2×M + 1×D12 + 1×N12 es válido)
-                // Solo bloquear si el código ya fue asignado PAX veces (saturado)
+                // Multi-pax: mismo esquema para todos (M+T+N o D12+N12, no mezclar)
+                if (assigned8h.length > 0 && !is8h) { disabled.add(code); return; }
+                if (assigned12h.length > 0 && is8h) { disabled.add(code); return; }
                 const codeCount = assigned.filter(a => a.code === code).length;
                 if (codeCount >= pax) { disabled.add(code); return; }
-                // Bloquear si el total de turnos ya alcanza el máximo posible para este SLA
                 if (assigned.length >= max8hSlots + max12hSlots) { disabled.add(code); return; }
             }
         });
@@ -2073,9 +2073,15 @@ export default function PlanificacionPage() {
                         {openPositions.map(pg => (
                             <div key={pg.positionName} className="text-[10px] font-bold text-rose-800 leading-snug">
                                 <span className="font-black">{pg.positionName}</span>
-                                <span className="text-rose-600"> — faltan {pg.missingUnits} pax</span>
-                                {pg.schemeLabel && <span className="text-rose-500 font-medium"> ({pg.schemeLabel})</span>}
-                                {pg.summary && <p className="text-[9px] text-rose-600/90 font-medium mt-0.5">{pg.summary}</p>}
+                                {pg.summary && !pg.summary.includes(';') ? (
+                                    <span className="text-rose-600"> — {pg.summary}</span>
+                                ) : (
+                                    <>
+                                        <span className="text-rose-600"> — faltan {pg.missingUnits} pax</span>
+                                        {pg.schemeLabel && <span className="text-rose-500 font-medium"> ({pg.schemeLabel})</span>}
+                                        {pg.summary && <p className="text-[9px] text-rose-600/90 font-medium mt-0.5">{pg.summary}</p>}
+                                    </>
+                                )}
                             </div>
                         ))}
                     </div>

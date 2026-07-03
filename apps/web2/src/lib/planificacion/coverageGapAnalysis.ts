@@ -141,13 +141,28 @@ export function analyzePositionDayGap(
         primaryScheme = mtnBands.join('+');
         alternateScheme = altBands.join('+');
 
-        const mtnClosed = Math.min(qty, Math.min(...mtnBands.map(c => codeCounts[c] || 0)));
-        const remainingAfterMtn = qty - mtnClosed;
+        const has8h = mtnBands.some(c => (codeCounts[c] || 0) > 0);
+        const has12h = altBands.some(c => (codeCounts[c] || 0) > 0);
 
-        missingBandsPrimary = missingBandsForScheme(qty, codeCounts, mtnBands);
-
-        if (remainingAfterMtn > 0) {
-            missingBandsAlternate = missingBandsForScheme(remainingAfterMtn, codeCounts, altBands);
+        if (has8h && !has12h) {
+            // Esquema 8h comprometido — solo mostrar bandas faltantes de ese esquema
+            missingBandsPrimary = missingBandsForScheme(qty, codeCounts, mtnBands);
+            missingBandsAlternate = [];
+            alternateScheme = undefined;
+        } else if (has12h && !has8h) {
+            // Esquema 12h comprometido
+            primaryScheme = altBands.join('+');
+            missingBandsPrimary = missingBandsForScheme(qty, codeCounts, altBands);
+            missingBandsAlternate = [];
+            alternateScheme = undefined;
+        } else {
+            // Sin comprometer — mostrar ambas opciones
+            const mtnClosed = Math.min(qty, Math.min(...mtnBands.map(c => codeCounts[c] || 0)));
+            const remainingAfterMtn = qty - mtnClosed;
+            missingBandsPrimary = missingBandsForScheme(qty, codeCounts, mtnBands);
+            if (remainingAfterMtn > 0) {
+                missingBandsAlternate = missingBandsForScheme(remainingAfterMtn, codeCounts, altBands);
+            }
         }
     } else {
         const bandCodes = getCustomBandCodes(pos, dayLetter, cycles);
@@ -157,11 +172,14 @@ export function analyzePositionDayGap(
 
     const parts: string[] = [];
     const primaryText = formatBandGaps(missingBandsPrimary);
-    if (primaryText) parts.push(`falta ${primaryText} (${primaryScheme})`);
     const altText = formatBandGaps(missingBandsAlternate);
-    if (altText && alternateScheme) {
-        parts.push(`o ${altText} (${alternateScheme}) para ${missingUnits} puesto${missingUnits > 1 ? 's' : ''}`);
-    } else if (missingUnits > 0 && !primaryText) {
+    if (primaryText && altText && alternateScheme) {
+        // Sin esquema comprometido — mostrar ambas opciones
+        parts.push(`${primaryText} (${primaryScheme}); o ${altText} (${alternateScheme}) para ${missingUnits} puesto${missingUnits > 1 ? 's' : ''}`);
+    } else if (primaryText) {
+        // Esquema comprometido — solo lo que falta
+        parts.push(`falta ${primaryText}`);
+    } else if (missingUnits > 0) {
         parts.push(`${missingUnits} puesto${missingUnits > 1 ? 's' : ''} sin cerrar (${schemeLabel})`);
     }
 
