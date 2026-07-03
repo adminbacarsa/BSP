@@ -301,6 +301,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
   const { canReadModule, user, isSuperAdmin } = useAuth();
   const isVplanLabVisible = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true' || isSuperAdmin;
+  const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
   const [pendientesCount, setPendientesCount] = useState(0);
@@ -393,16 +394,22 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
   const isActive = (path: string) => router.pathname.startsWith(path);
 
-  const linkBase = `flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-medium ${!sidebarOpen ? 'justify-center' : ''}`;
+  const _linkJustify = !sidebarOpen ? 'justify-center' : '';
+  const linkBase = 'flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-medium ' + _linkJustify;
 
-  const getLinkStyle = (path: string, special = false): React.CSSProperties => {
+  const getLinkStyle = (path: string, special = false) => {
     if (isActive(path)) return { backgroundColor: 'var(--sb-active-bg)', color: 'var(--sb-active-text)' };
     if (special) return { backgroundColor: 'var(--sb-special-bg)', color: 'var(--sb-special-text)', border: '1px solid var(--sb-special-border)' };
     return { color: 'var(--sb-text)' };
   };
 
-  const getLinkHoverClass = (path: string) =>
-    isActive(path) ? linkBase : `${linkBase} hover:opacity-90`;
+  function getLinkHoverClass(path: string) {
+    return isActive(path) ? linkBase : (linkBase + ' hover:opacity-90');
+  }
+
+  const _sbW = sidebarOpen ? 'w-64' : 'w-16';
+  const _sbT = !sidebarOpen ? '-translate-x-full lg:translate-x-0' : 'translate-x-0';
+  const _sbCls = 'fixed top-0 left-0 z-[999] h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden ' + _sbW + ' ' + _sbT;
 
   return (
     <>
@@ -421,16 +428,17 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
         aria-label="Navegación principal"
         onMouseEnter={() => !compactSidebar && window.innerWidth >= 1024 && setIsHovered(true)}
         onMouseLeave={() => { setIsHovered(false); if (!isPinned) setIsPinned(false); }}
-        className={`fixed top-0 left-0 z-[999] h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden
-          ${sidebarOpen ? 'w-64' : 'w-16'}
-          ${!sidebarOpen ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'}`}
+        className={_sbCls}
         style={{ backgroundColor: 'var(--sb-bg)', borderColor: 'var(--sb-border)', color: 'var(--sb-text)' }}
       >
         <div style={{ height: 'env(titlebar-area-height, 0px)', flexShrink: 0 }} />
+        {isEmulatorMode && (
+          <div className="w-full bg-amber-400 py-0.5 shrink-0" />
+        )}
 
         {/* Logo / Header del sidebar */}
         <div
-          className={`flex items-center shrink-0 border-b overflow-hidden ${sidebarOpen ? 'p-4 justify-between' : 'p-3 justify-center'}`}
+          className={'flex items-center shrink-0 border-b overflow-hidden h-14 ' + (sidebarOpen ? 'px-4 justify-between' : 'px-3 justify-center')}
           style={{ borderColor: 'var(--sb-border)' }}
         >
           {sidebarOpen ? (
@@ -619,7 +627,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
         <div className="p-2 border-t shrink-0" style={{ borderColor: 'var(--sb-border)' }}>
           <button
             onClick={handleLogout}
-            className={`w-full flex items-center ${sidebarOpen ? 'gap-3 px-3' : 'justify-center'} py-2.5 rounded-xl transition-all font-medium text-sm hover:opacity-80`}
+            className={'w-full flex items-center ' + (sidebarOpen ? 'gap-3 px-3' : 'justify-center') + ' py-2.5 rounded-xl transition-all font-medium text-sm hover:opacity-80'}
             style={{ color: 'var(--sb-logout)' }}
             title="Cerrar Sesión"
           >
@@ -635,21 +643,21 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           <div className="absolute top-0 left-0 right-0 h-2 z-50 cursor-n-resize"
             onMouseEnter={() => setTopbarVisible(true)} />
           <div
-            className={`absolute top-0 left-0 right-0 z-[100] transition-transform duration-200 ease-out shadow-2xl ${topbarVisible ? 'translate-y-0' : '-translate-y-full'}`}
+            className={'absolute top-0 left-0 right-0 z-[100] transition-transform duration-200 ease-out shadow-2xl ' + (topbarVisible ? 'translate-y-0' : '-translate-y-full')}
             onMouseLeave={() => setTopbarVisible(false)}
           >
             <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
           </div>
-          <div className={`absolute top-0 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ${topbarVisible ? 'opacity-0' : 'opacity-60'}`}>
+          <div className={'absolute top-0 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ' + (topbarVisible ? 'opacity-0' : 'opacity-60')}>
             <div className="w-12 h-1 rounded-b-full bg-slate-500/60" />
           </div>
           <main className="h-full overflow-y-auto min-h-0">{children}</main>
         </div>
       ) : (
-        <div className={`flex-1 transition-all duration-300 ease-in-out ${isPinned ? 'lg:ml-64' : 'lg:ml-16'} min-w-0`}>
+        <div className={'flex-1 transition-all duration-300 ease-in-out ' + (isPinned ? 'lg:ml-64' : 'lg:ml-16') + ' min-w-0'}>
           <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
           {/* Supervisión usa su propia bottom nav en mobile */}
-          <main className={`overflow-x-hidden ${isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8'}`}>
+          <main className={'overflow-x-hidden ' + (isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8')}>
             {children}
           </main>
         </div>
@@ -657,27 +665,17 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
       {/* ── BOTTOM NAVIGATION (mobile) ────────────────────────────────── */}
       {!isSupervisionApp && <BottomNav />}
+
+      <Toaster position="top-right" richColors closeButton />
     </>
   );
 }
 
-// ─── LAYOUT SHELL ─────────────────────────────────────────────────────────────
+// ─── PUBLIC WRAPPER ───────────────────────────────────────────────────────────
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<AppTheme>('light');
-
-  useEffect(() => {
-    setTheme(getStoredTheme());
-    const handler = (e: Event) => setTheme((e as CustomEvent<AppTheme>).detail);
-    window.addEventListener('cosp:theme', handler);
-    return () => window.removeEventListener('cosp:theme', handler);
-  }, []);
-
   return (
-    <div className="min-h-screen transition-colors duration-200 flex overflow-x-hidden" style={{ backgroundColor: 'var(--app-bg)' }}>
-      <Toaster position="top-center" richColors closeButton expand />
-      <PageHeaderProvider>
-        <LayoutInner>{children}</LayoutInner>
-      </PageHeaderProvider>
-    </div>
+    <PageHeaderProvider>
+      <LayoutInner>{children}</LayoutInner>
+    </PageHeaderProvider>
   );
 }
