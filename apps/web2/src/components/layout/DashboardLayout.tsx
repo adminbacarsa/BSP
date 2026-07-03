@@ -160,7 +160,7 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
 
   return (
     <div
-      className="shadow-sm border-b sticky z-50"
+      className="shadow-sm border-b sticky z-[1000]"
       style={{ backgroundColor: 'var(--topbar-bg)', borderColor: 'var(--topbar-border)', color: 'var(--topbar-text)', top: 0 }}
     >
       {isEmulator && (
@@ -171,7 +171,7 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
       <div style={{ height: 'env(titlebar-area-height, 0px)', WebkitAppRegion: 'drag' } as React.CSSProperties} />
 
       {/* Topbar row */}
-      <div className="h-14 px-3 flex items-center gap-2 overflow-visible">
+      <div className={`h-14 flex items-center gap-2 overflow-visible pr-3 transition-[padding] duration-300 ease-in-out ${isSidebarOpen ? 'pl-3 lg:pl-[268px]' : 'pl-3 lg:pl-[76px]'}`}>
         {/* Hamburger — solo en desktop (mobile usa bottom nav) */}
         <button
           onClick={onToggleSidebar}
@@ -409,7 +409,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
       {/* ── BACKDROP MOBILE ───────────────────────────────────────────── */}
       {isPinned && (
         <div
-          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-[990] bg-black/60 backdrop-blur-sm lg:hidden"
           onClick={closeSidebar}
           aria-hidden="true"
         />
@@ -421,7 +421,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
         aria-label="Navegación principal"
         onMouseEnter={() => !compactSidebar && window.innerWidth >= 1024 && setIsHovered(true)}
         onMouseLeave={() => { setIsHovered(false); if (!isPinned) setIsPinned(false); }}
-        className={`fixed top-0 left-0 z-40 h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden
+        className={`fixed top-0 left-0 z-[999] h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden
           ${sidebarOpen ? 'w-64' : 'w-16'}
           ${!sidebarOpen ? '-translate-x-full lg:translate-x-0' : 'translate-x-0'}`}
         style={{ backgroundColor: 'var(--sb-bg)', borderColor: 'var(--sb-border)', color: 'var(--sb-text)' }}
@@ -646,7 +646,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           <main className="h-full overflow-y-auto min-h-0">{children}</main>
         </div>
       ) : (
-        <div className="flex-1 transition-all duration-300 ease-in-out lg:ml-16 min-w-0">
+        <div className={`flex-1 transition-all duration-300 ease-in-out ${isPinned ? 'lg:ml-64' : 'lg:ml-16'} min-w-0`}>
           <DashboardHeader isSidebarOpen={isPinned} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
           {/* Supervisión usa su propia bottom nav en mobile */}
           <main className={`overflow-x-hidden ${isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8'}`}>

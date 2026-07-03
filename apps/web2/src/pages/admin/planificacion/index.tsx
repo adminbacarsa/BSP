@@ -14,7 +14,8 @@ import {
     Printer, Download, Grid, RefreshCw, Edit3, Shield, ArrowRightCircle, Info, ArrowDownWideNarrow, ArrowDownAZ,
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
-    PowerOff, LockKeyhole, Ghost, Maximize2, Copy, ClipboardPaste, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList
+    PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
+    ChevronsUp, ChevronsDown, MoreHorizontal
 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -96,6 +97,7 @@ import {
     buildPlanificacionEstadoDocId,
     planificacionPublishLookupKey,
     fetchPlanificacionEstadoDoc,
+    fetchMergedPlanificacionEstadoData,
 } from '@/lib/multiempresa';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import {
@@ -561,6 +563,10 @@ export default function PlanificacionPage() {
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [sortDropOpen, setSortDropOpen] = useState(false);
     const [bandDropOpen, setBandDropOpen] = useState(false);
+    const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
+    const [toolbarMoreOpen, setToolbarMoreOpen] = useState(false);
+    const [cronoFullscreen, setCronoFullscreen] = useState(false);
+    const [statsBarCollapsed, setStatsBarCollapsed] = useState(false);
 
     const [employees, setEmployees] = useState<any[]>([]);
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
@@ -917,6 +923,22 @@ export default function PlanificacionPage() {
             window.removeEventListener('resize', repositionCoveragePanel);
         };
     }, [showCoverageDiagnostic, repositionCoveragePanel]);
+
+    useEffect(() => {
+        setToolbarCollapsed(localStorage.getItem('planif_toolbar_collapsed') === '1');
+        setStatsBarCollapsed(localStorage.getItem('planif_stats_collapsed') === '1');
+    }, []);
+
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                if (cronoFullscreen) setCronoFullscreen(false);
+                if (toolbarMoreOpen) setToolbarMoreOpen(false);
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [cronoFullscreen, toolbarMoreOpen]);
 
     // ============================================================================
     // 2. UTILIDADES Y HELPERS (NIVEL 1 - Definidos ANTES de usarse)
@@ -2765,7 +2787,7 @@ export default function PlanificacionPage() {
         if (!selectedObjective) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
-        const stateKey = `${selectedObjective}_${year}_${month}`;
+        const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
         const applyOverlay = (monthlyPos: Record<string,string>, monthlyShift: Record<string,string>) => {
             if (Object.keys(monthlyPos).length === 0) return false;
             const merged = { ...basePos };
@@ -2776,18 +2798,18 @@ export default function PlanificacionPage() {
             setEmpDefaultShift(mergedS);
             return true;
         };
-        getDoc(doc(db, 'planificacion_estados', stateKey)).then(snap => {
-            const d = snap.data();
-            if (applyOverlay(d?.defaultPositionByEmp || {}, d?.defaultShiftByEmp || {})) return;
+        fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, year, month).then((d) => {
+            if (applyOverlay(
+                (d.defaultPositionByEmp as Record<string, string>) || {},
+                (d.defaultShiftByEmp as Record<string, string>) || {},
+            )) return;
             // Sin datos propios → intentar heredar del mes anterior
             const prevMonth = month === 1 ? 12 : month - 1;
             const prevYear = month === 1 ? year - 1 : year;
-            getDoc(doc(db, 'planificacion_estados', `${selectedObjective}_${prevYear}_${prevMonth}`)).then(prevSnap => {
-                const prev = prevSnap.data();
-                const prevPos: Record<string,string> = prev?.defaultPositionByEmp || {};
-                const prevSh: Record<string,string> = prev?.defaultShiftByEmp || {};
+            fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, prevYear, prevMonth).then((prev) => {
+                const prevPos: Record<string,string> = (prev.defaultPositionByEmp as Record<string, string>) || {};
+                const prevSh: Record<string,string> = (prev.defaultShiftByEmp as Record<string, string>) || {};
                 if (applyOverlay(prevPos, prevSh)) {
-                    // Guardar herencia en el mes actual para no volver a leer el mes anterior
                     setDoc(doc(db, 'planificacion_estados', stateKey), {
                         defaultPositionByEmp: prevPos,
                         defaultShiftByEmp: prevSh,
@@ -2795,7 +2817,7 @@ export default function PlanificacionPage() {
                 }
             }).catch(() => {});
         }).catch(() => {});
-    }, [employees, selectedObjective, currentDate]);
+    }, [employees, selectedObjective, currentDate, empresaId]);
 
     useEffect(() => {
         if (dotacionMigratedRef.current || typeof window === 'undefined' || !employees.length) return;
@@ -3129,7 +3151,7 @@ export default function PlanificacionPage() {
         try {
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth() + 1;
-            const stateKey = `${selectedObjective}_${year}_${month}`;
+            const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
             const stateRef = doc(db, 'planificacion_estados', stateKey);
             const posField = `defaultPositionByEmp.${empId}`;
             const shiftField = `defaultShiftByEmp.${empId}`;
@@ -6543,9 +6565,9 @@ export default function PlanificacionPage() {
                     className="px-2 pt-2"
                 />
             </div>
-            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${comparingSnapshot && selectedObjective ? 'h-[calc(100dvh-3.75rem)] overflow-hidden p-0.5 space-y-0.5' : selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
+            <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${cronoFullscreen ? 'fixed inset-0 z-[100] bg-white dark:bg-slate-900 overflow-hidden p-1 space-y-1' : comparingSnapshot && selectedObjective ? 'h-[calc(100dvh-3.75rem)] overflow-hidden p-0.5 space-y-0.5' : selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                         <div className="flex-1 flex flex-wrap items-center gap-1.5 min-w-0">
                             <span className="text-[10px] font-black text-slate-700 truncate max-w-[220px]" title={`${selectedClientLabel} · ${selectedObjectiveLabel}`}>
@@ -6590,6 +6612,7 @@ export default function PlanificacionPage() {
                         </div>
                     ) : (
                         <>
+                            <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
                             <div className="flex items-center gap-1.5 no-print">
                                 {!selectedClient ? (
                                     /* Sin cliente: botón cuadrado que despliega lista custom al clic */
@@ -6789,9 +6812,11 @@ export default function PlanificacionPage() {
                                 );
                             })()}
                             {Object.keys(pendingChanges).length > 0 && !isServiceLocked && <div className="flex items-center gap-2 animate-in slide-in-from-top-2 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-lg no-print"><span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest hidden md:inline">Planificando como: {operatorName}</span><div className="h-4 w-px bg-amber-200 mx-1"></div><span className="text-xs font-black text-amber-700 px-1">{Object.keys(pendingChanges).length} cambios</span><button onClick={() => setPendingChanges({})} className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button><button onClick={handleSaveAll} disabled={isProcessing} className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 shadow">{isProcessing ? <Loader2 size={14} className="animate-spin"/> : <Save size={14}/>}{isProcessing ? 'GUARDANDO…' : 'GUARDAR'}</button></div>}
-                            
-                            <div className="flex items-center gap-3 no-print">
-                                {isSuperAdmin && (
+                            </div>
+
+                            <div className="flex-shrink-0 flex items-center gap-2 no-print">
+                                {/* CRONOGRAMAS — solo expandido */}
+                                {!toolbarCollapsed && isSuperAdmin && (
                                     <button
                                         type="button"
                                         onClick={() => setShowCronogramasOverview(true)}
@@ -6803,35 +6828,39 @@ export default function PlanificacionPage() {
                                     </button>
                                 )}
 
-                                {/* BOTÓN REFERENCIAS */}
-                                <button 
-                                    onClick={() => setShowLegend(!showLegend)} 
-                                    className={`p-2 rounded-xl transition-colors border ${showLegend ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-slate-100 border-transparent hover:bg-white text-slate-500'}`} 
-                                    title="Ver Referencias de Colores"
-                                >
-                                    <Info size={18}/>
-                                </button>
-                                {/* RENDERIZADO CONDICIONAL DE LA LEYENDA (MODAL) */}
+                                {/* REFERENCIAS — solo expandido */}
+                                {!toolbarCollapsed && (
+                                    <button
+                                        onClick={() => setShowLegend(!showLegend)}
+                                        className={`p-2 rounded-xl transition-colors border ${showLegend ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-slate-100 border-transparent hover:bg-white text-slate-500'}`}
+                                        title="Ver Referencias de Colores"
+                                    >
+                                        <Info size={18}/>
+                                    </button>
+                                )}
                                 {showLegend && renderLegend()}
 
-                                <div className="relative">
-                                    <button
-                                        ref={notifBtnRef}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (showNotifications) {
-                                                setShowNotifications(false);
-                                            } else {
-                                                repositionNotifPanel();
-                                                setShowNotifications(true);
-                                                setHasUnread(false);
-                                            }
-                                        }}
-                                        className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl relative"
-                                    >
-                                        <Bell size={18}/>{(hasUnread || bellNotifications.length > 0) && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
-                                    </button>
-                                </div>
+                                {/* BELL — solo expandido */}
+                                {!toolbarCollapsed && (
+                                    <div className="relative">
+                                        <button
+                                            ref={notifBtnRef}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (showNotifications) {
+                                                    setShowNotifications(false);
+                                                } else {
+                                                    repositionNotifPanel();
+                                                    setShowNotifications(true);
+                                                    setHasUnread(false);
+                                                }
+                                            }}
+                                            className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl relative"
+                                        >
+                                            <Bell size={18}/>{(hasUnread || bellNotifications.length > 0) && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>}
+                                        </button>
+                                    </div>
+                                )}
                                 {showNotifications && typeof document !== 'undefined' && createPortal(
                                     <>
                                         <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowNotifications(false)} />
@@ -6878,7 +6907,10 @@ export default function PlanificacionPage() {
                                     document.body,
                                 )}
 
+                                {/* < MES > — siempre visible */}
                                 <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className="px-3 font-black text-xs w-24 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
+
+                                {/* AUTO — siempre visible */}
                                 <div className="flex items-center gap-0.5" title="Automatización del cronograma (motor COSP)">
                                     <button
                                         onClick={applyPrevMonthTemplate}
@@ -6913,156 +6945,182 @@ export default function PlanificacionPage() {
                                     </button>
                                         ); })()}
                                 </div>
-                                <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
-                                <button
-                                    onClick={() => {
-                                        if (!selectedClient) return;
-                                        openCronoPopout({
-                                            clientId: selectedClient,
-                                            objectiveId: floatingInitialObjective,
-                                            month: currentDate,
-                                            mainObjectiveId: selectedObjective,
-                                        });
-                                    }}
-                                    disabled={!selectedClient}
-                                    className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors disabled:opacity-40"
-                                    title="Abrir crono en ventana externa (monitor extra)"
-                                >
-                                    <Maximize2 size={18}/>
-                                </button>
-                                {(() => {
-                                    const _pubKey2 = selectedObjective ? planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
-                                    const _blocked2 = !!(_pubKey2 && publishStatusMap[_pubKey2]) && !correctionMode;
-                                    return (
-                                <>
-                                <button
-                                    onClick={() => setShowAjustarCronoModal(true)}
-                                    disabled={!selectedObjective || _blocked2}
-                                    title={_blocked2 ? 'Crono publicado — entrá en CORREGIR para usar Ajustar' : 'Ajustar Crono: comprimir a 12h o liberar retenes para un rango de días'}
-                                    className="p-2 bg-slate-100 rounded-lg hover:bg-rose-50 hover:text-rose-600 transition-colors disabled:opacity-40 flex items-center gap-1.5 px-2.5"
-                                >
-                                    <ArrowLeftRight size={16} className="text-rose-600 shrink-0"/>
-                                    <span className="text-[10px] font-black text-rose-700 uppercase tracking-tight hidden sm:inline">Ajustar</span>
-                                </button>
-                                <button
-                                    onClick={() => setShowEquilibrarModal(true)}
-                                    disabled={!selectedObjective || _blocked2}
-                                    title={_blocked2 ? 'Crono publicado — entrá en CORREGIR para equilibrar' : 'Equilibrar horas: rotar posiciones por bloque para igualar horas entre todos los empleados'}
-                                    className="p-2 bg-slate-100 rounded-lg hover:bg-emerald-50 hover:text-emerald-600 transition-colors disabled:opacity-40 flex items-center gap-1.5 px-2.5"
-                                >
-                                    <BarChart2 size={16} className="text-emerald-600 shrink-0"/>
-                                    <span className="text-[10px] font-black text-emerald-700 uppercase tracking-tight hidden sm:inline">Equilibrar</span>
-                                </button>
-                                </>
-                                    );
-                                })()}
-                                {selectedObjective && Object.keys(empDefaultPos).some(k => k.endsWith(`___${selectedObjective}`)) && (
-                                    <button
-                                        onClick={clearAllPositions}
-                                        className="p-2 bg-slate-100 rounded-lg hover:bg-orange-50 hover:text-orange-600 transition-colors flex items-center gap-1.5 px-2.5"
-                                        title="Quitar todos los puestos asignados en este mes"
-                                    >
-                                        <X size={14} className="text-orange-500 shrink-0"/>
-                                        <span className="text-[10px] font-black text-orange-600 uppercase tracking-tight hidden sm:inline">Puestos</span>
-                                    </button>
-                                )}
-                                <div className="flex items-center gap-0.5">
-                                    <div className="relative">
-                                        {(() => {
-                                            const SORT_OPTIONS: { key: typeof sortBy; label: string; Icon: typeof ArrowDownWideNarrow }[] = [
-                                                { key: 'activity', label: 'Actividad', Icon: ArrowDownWideNarrow },
-                                                { key: 'name', label: 'Nombre', Icon: ArrowDownAZ },
-                                                { key: 'client', label: 'Cliente', Icon: Briefcase },
-                                                { key: 'band', label: 'Banda', Icon: Clock },
-                                                { key: 'position', label: 'Puesto', Icon: LayoutGrid },
-                                            ];
-                                            const activeSort = SORT_OPTIONS.find(o => o.key === sortBy) || SORT_OPTIONS[0];
-                                            const ActiveIcon = activeSort.Icon;
-                                            return (
+
+                                {/* === ACCIONES SECUNDARIAS — se ocultan al colapsar === */}
+                                {!toolbarCollapsed && (
+                                    <>
+                                        <button onClick={loadHistory} className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors" title="Ver Historial" disabled={!selectedObjective}><History size={18}/></button>
+
+                                        {/* ⋯ MENÚ: Ventana externa + Ajustar + Equilibrar + Puestos */}
+                                        <div className="relative" onClick={e => e.stopPropagation()}>
+                                            <button
+                                                onClick={() => setToolbarMoreOpen(v => !v)}
+                                                className={`p-2 rounded-xl transition-colors border ${toolbarMoreOpen ? 'bg-slate-200 border-slate-300 text-slate-700' : 'bg-slate-100 border-transparent hover:bg-slate-200 text-slate-500'}`}
+                                                title="Más acciones"
+                                            >
+                                                <MoreHorizontal size={18}/>
+                                            </button>
+                                            {toolbarMoreOpen && (
                                                 <>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setBandDropOpen(false);
-                                                            setSortDropOpen(p => !p);
-                                                        }}
-                                                        className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200 flex items-center gap-1"
-                                                        title={`Orden: ${activeSort.label}`}
-                                                    >
-                                                        <ActiveIcon size={18}/>
-                                                        <ChevronDown size={12} className={sortDropOpen ? 'rotate-180 transition-transform' : 'transition-transform'}/>
-                                                    </button>
-                                                    {sortDropOpen && (
-                                                        <div className="absolute top-full right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50 py-1 min-w-[168px]">
-                                                            <p className="px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-700 mb-1">
-                                                                Ordenar por
-                                                            </p>
-                                                            {SORT_OPTIONS.map(({ key, label, Icon }) => {
-                                                                const active = sortBy === key;
-                                                                return (
+                                                    <div className="fixed inset-0 z-40" onClick={() => setToolbarMoreOpen(false)}/>
+                                                    <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 min-w-[210px]">
+                                                        <button
+                                                            onClick={() => {
+                                                                if (selectedClient) openCronoPopout({ clientId: selectedClient, objectiveId: floatingInitialObjective, month: currentDate, mainObjectiveId: selectedObjective });
+                                                                setToolbarMoreOpen(false);
+                                                            }}
+                                                            disabled={!selectedClient}
+                                                            className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-2.5"
+                                                        >
+                                                            <Maximize2 size={14} className="text-indigo-500"/> Ventana externa
+                                                        </button>
+                                                        <div className="h-px bg-slate-100 mx-2 my-1"/>
+                                                        {(() => {
+                                                            const _pubKey2 = selectedObjective ? planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
+                                                            const _blocked2 = !!(_pubKey2 && publishStatusMap[_pubKey2]) && !correctionMode;
+                                                            return (
+                                                                <>
                                                                     <button
-                                                                        key={key}
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            startFilterTransition(() => setSortBy(key));
-                                                                            setSortDropOpen(false);
-                                                                        }}
-                                                                        className={`w-full px-3 py-2 text-left text-[11px] font-bold flex items-center gap-2 transition-colors ${active ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
+                                                                        onClick={() => { setShowAjustarCronoModal(true); setToolbarMoreOpen(false); }}
+                                                                        disabled={!selectedObjective || _blocked2}
+                                                                        title={_blocked2 ? 'Crono publicado — entrá en CORREGIR para usar Ajustar' : 'Ajustar Crono: comprimir a 12h o liberar retenes para un rango de días'}
+                                                                        className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-2.5"
                                                                     >
-                                                                        <Icon size={14} className="shrink-0"/>
-                                                                        {label}
-                                                                        {active && <Check size={12} className="ml-auto text-indigo-600"/>}
+                                                                        <ArrowLeftRight size={14} className="text-rose-500"/> Ajustar crono
                                                                     </button>
+                                                                    <button
+                                                                        onClick={() => { setShowEquilibrarModal(true); setToolbarMoreOpen(false); }}
+                                                                        disabled={!selectedObjective || _blocked2}
+                                                                        title={_blocked2 ? 'Crono publicado — entrá en CORREGIR para equilibrar' : 'Equilibrar horas: rotar posiciones por bloque para igualar horas entre todos los empleados'}
+                                                                        className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center gap-2.5"
+                                                                    >
+                                                                        <BarChart2 size={14} className="text-emerald-500"/> Equilibrar horas
+                                                                    </button>
+                                                                </>
+                                                            );
+                                                        })()}
+                                                        {selectedObjective && Object.keys(empDefaultPos).some(k => k.endsWith(`___${selectedObjective}`)) && (
+                                                            <>
+                                                                <div className="h-px bg-slate-100 mx-2 my-1"/>
+                                                                <button
+                                                                    onClick={() => { clearAllPositions(); setToolbarMoreOpen(false); }}
+                                                                    className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 flex items-center gap-2.5"
+                                                                    title="Quitar todos los puestos asignados en este mes"
+                                                                >
+                                                                    <X size={14} className="text-orange-500"/> Quitar puestos
+                                                                </button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {/* SORT */}
+                                        <div className="flex items-center gap-0.5">
+                                            <div className="relative">
+                                                {(() => {
+                                                    const SORT_OPTIONS: { key: typeof sortBy; label: string; Icon: typeof ArrowDownWideNarrow }[] = [
+                                                        { key: 'activity', label: 'Actividad', Icon: ArrowDownWideNarrow },
+                                                        { key: 'name', label: 'Nombre', Icon: ArrowDownAZ },
+                                                        { key: 'client', label: 'Cliente', Icon: Briefcase },
+                                                        { key: 'band', label: 'Banda', Icon: Clock },
+                                                        { key: 'position', label: 'Puesto', Icon: LayoutGrid },
+                                                    ];
+                                                    const activeSort = SORT_OPTIONS.find(o => o.key === sortBy) || SORT_OPTIONS[0];
+                                                    const ActiveIcon = activeSort.Icon;
+                                                    return (
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setBandDropOpen(false);
+                                                                    setSortDropOpen(p => !p);
+                                                                }}
+                                                                className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200 flex items-center gap-1"
+                                                                title={`Orden: ${activeSort.label}`}
+                                                            >
+                                                                <ActiveIcon size={18}/>
+                                                                <ChevronDown size={12} className={sortDropOpen ? 'rotate-180 transition-transform' : 'transition-transform'}/>
+                                                            </button>
+                                                            {sortDropOpen && (
+                                                                <div className="absolute top-full right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg z-50 py-1 min-w-[168px]">
+                                                                    <p className="px-3 py-1.5 text-[9px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-700 mb-1">
+                                                                        Ordenar por
+                                                                    </p>
+                                                                    {SORT_OPTIONS.map(({ key, label, Icon }) => {
+                                                                        const active = sortBy === key;
+                                                                        return (
+                                                                            <button
+                                                                                key={key}
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    startFilterTransition(() => setSortBy(key));
+                                                                                    setSortDropOpen(false);
+                                                                                }}
+                                                                                className={`w-full px-3 py-2 text-left text-[11px] font-bold flex items-center gap-2 transition-colors ${active ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
+                                                                            >
+                                                                                <Icon size={14} className="shrink-0"/>
+                                                                                {label}
+                                                                                {active && <Check size={12} className="ml-auto text-indigo-600"/>}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    );
+                                                })()}
+                                            </div>
+                                            <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
+                                        </div>
+
+                                        {/* BAND FILTER */}
+                                        <div className="relative" title="Filtrar por banda horaria">
+                                            {(() => {
+                                                const BAND_COLORS: Record<string, string> = {
+                                                    M: 'text-blue-700 border-blue-400 bg-blue-50',
+                                                    T: 'text-orange-600 border-orange-400 bg-orange-50',
+                                                    N: 'text-indigo-700 border-indigo-500 bg-indigo-50',
+                                                    D12: 'text-cyan-700 border-cyan-400 bg-cyan-50',
+                                                    N12: 'text-purple-700 border-purple-500 bg-purple-50',
+                                                    RET: 'text-amber-700 border-amber-500 bg-amber-50',
+                                                };
+                                                const activeCls = bandFilter ? BAND_COLORS[bandFilter] : 'text-slate-600 border-slate-300 bg-slate-100';
+                                                return (<>
+                                                    <button
+                                                        onClick={() => { setSortDropOpen(false); setBandDropOpen(p => !p); }}
+                                                        className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-colors flex items-center gap-1 ${activeCls}`}
+                                                    >
+                                                        {bandFilter ?? 'ALL'}
+                                                        <ChevronDown size={10}/>
+                                                    </button>
+                                                    {bandDropOpen && (
+                                                        <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[72px]">
+                                                            {[null,'M','T','N','D12','N12','RET'].map(b => {
+                                                                const label = b ?? 'ALL';
+                                                                const active = bandFilter === b;
+                                                                const textCls = b ? BAND_COLORS[b].split(' ')[0] : 'text-slate-600';
+                                                                return (
+                                                                    <button key={label}
+                                                                        onClick={() => { startFilterTransition(() => setBandFilter(b)); setBandDropOpen(false); }}
+                                                                        className={`w-full px-3 py-1.5 text-left text-[10px] font-black uppercase hover:bg-slate-50 transition-colors ${active ? textCls : 'text-slate-400'}`}
+                                                                    >{label}</button>
                                                                 );
                                                             })}
                                                         </div>
                                                     )}
-                                                </>
-                                            );
-                                        })()}
-                                    </div>
-                                    <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
-                                </div>
-                                <div className="relative" title="Filtrar por banda horaria">
-                                    {(() => {
-                                        const BAND_COLORS: Record<string, string> = {
-                                            M: 'text-blue-700 border-blue-400 bg-blue-50',
-                                            T: 'text-orange-600 border-orange-400 bg-orange-50',
-                                            N: 'text-indigo-700 border-indigo-500 bg-indigo-50',
-                                            D12: 'text-cyan-700 border-cyan-400 bg-cyan-50',
-                                            N12: 'text-purple-700 border-purple-500 bg-purple-50',
-                                            RET: 'text-amber-700 border-amber-500 bg-amber-50',
-                                        };
-                                        const activeCls = bandFilter ? BAND_COLORS[bandFilter] : 'text-slate-600 border-slate-300 bg-slate-100';
-                                        return (<>
-                                            <button
-                                                onClick={() => { setSortDropOpen(false); setBandDropOpen(p => !p); }}
-                                                className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-colors flex items-center gap-1 ${activeCls}`}
-                                            >
-                                                {bandFilter ?? 'ALL'}
-                                                <ChevronDown size={10}/>
-                                            </button>
-                                            {bandDropOpen && (
-                                                <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[72px]">
-                                                    {[null,'M','T','N','D12','N12','RET'].map(b => {
-                                                        const label = b ?? 'ALL';
-                                                        const active = bandFilter === b;
-                                                        const textCls = b ? BAND_COLORS[b].split(' ')[0] : 'text-slate-600';
-                                                        return (
-                                                            <button key={label}
-                                                                onClick={() => { startFilterTransition(() => setBandFilter(b)); setBandDropOpen(false); }}
-                                                                className={`w-full px-3 py-1.5 text-left text-[10px] font-black uppercase hover:bg-slate-50 transition-colors ${active ? textCls : 'text-slate-400'}`}
-                                                            >{label}</button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
-                                        </>);
-                                    })()}
-                                </div>
-                                {customOrderMap[selectedObjective || '__all__'] && !forceShowAll && (
-                                    <button onClick={clearCustomOrder} className="p-2 bg-indigo-100 text-indigo-600 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors text-[9px] font-black uppercase flex items-center gap-1" title="Hay orden personalizado — click para restablecer orden automático"><Grip size={12}/><X size={10}/></button>
+                                                </>);
+                                            })()}
+                                        </div>
+
+                                        {customOrderMap[selectedObjective || '__all__'] && !forceShowAll && (
+                                            <button onClick={clearCustomOrder} className="p-2 bg-indigo-100 text-indigo-600 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors text-[9px] font-black uppercase flex items-center gap-1" title="Hay orden personalizado — click para restablecer orden automático"><Grip size={12}/><X size={10}/></button>
+                                        )}
+                                    </>
                                 )}
+
+                                {/* DOTACIÓN — siempre visible */}
                                 {forceShowAll ? (
                                     <div className="flex items-center gap-0.5 px-1.5 py-1 rounded-xl border bg-amber-100 text-amber-700 border-amber-200">
                                         <button
@@ -7124,7 +7182,31 @@ export default function PlanificacionPage() {
                                         Sin personal a ≤{nearbyKmRadius} km
                                     </span>
                                 )}
+
+                                {/* ASIGNAR — siempre visible */}
                                 <button onClick={() => setShowAddModal(true)} disabled={!selectedObjective || isServiceLocked} className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-slate-800 disabled:opacity-50"><UserPlus size={14}/> Asignar</button>
+
+                                {/* PANTALLA COMPLETA — siempre visible */}
+                                <button
+                                    onClick={() => setCronoFullscreen(v => !v)}
+                                    title={cronoFullscreen ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'}
+                                    className="p-2 bg-slate-100 rounded-lg hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                                >
+                                    {cronoFullscreen ? <Minimize2 size={18}/> : <Maximize size={18}/>}
+                                </button>
+
+                                {/* COLAPSAR BARRA — siempre visible */}
+                                <button
+                                    onClick={() => setToolbarCollapsed(v => {
+                                        const next = !v;
+                                        if (typeof window !== 'undefined') localStorage.setItem('planif_toolbar_collapsed', next ? '1' : '0');
+                                        return next;
+                                    })}
+                                    title={toolbarCollapsed ? 'Expandir barra de herramientas' : 'Colapsar barra de herramientas'}
+                                    className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
+                                >
+                                    {toolbarCollapsed ? <ChevronsDown size={14}/> : <ChevronsUp size={14}/>}
+                                </button>
                             </div>
                         </>
                     )}
@@ -7277,7 +7359,13 @@ export default function PlanificacionPage() {
                 )}
 
                 {/* RESUMEN DE HORAS PLANIFICADAS */}
-                {selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0 && (() => {
+                {selectedObjective && !comparingSnapshot && Object.keys(empMonthlyHours).length > 0 && (
+                    statsBarCollapsed ? (
+                        <div className="rounded-xl border shadow-sm shrink-0 no-print flex items-center justify-between px-3 py-1.5" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5"><BarChart2 size={11}/> Estadísticas ocultas</span>
+                            <button onClick={() => { setStatsBarCollapsed(false); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '0'); }} className="flex items-center gap-1 px-2 py-1 text-[9px] font-black text-indigo-600 hover:text-indigo-700 border border-indigo-200 hover:border-indigo-300 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors" title="Mostrar estadísticas"><ChevronUp size={10}/> Mostrar</button>
+                        </div>
+                    ) : (() => {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
                     const nativeAssignedHours = displayedEmployees
@@ -7374,11 +7462,12 @@ export default function PlanificacionPage() {
                                 <p className="text-sm font-black text-teal-600 leading-tight">{slaVendidas}</p>
                             </div>
                         )}
+                        <button onClick={() => { setStatsBarCollapsed(true); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '1'); }} className="shrink-0 ml-2 flex items-center gap-1 px-2 py-1 text-[9px] font-black text-slate-400 hover:text-slate-600 border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors" title="Ocultar estadísticas"><ChevronDown size={10}/></button>
                     </div>
                     );
-                })()}
+                    })() )}
 
-                {!comparingSnapshot && (
+                {!comparingSnapshot && !statsBarCollapsed && (
                 <div className="hidden lg:block rounded-xl border shadow-sm shrink-0 no-print overflow-hidden" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                     {/* Barra de título — siempre visible, clic abre el modal */}
                     <button
