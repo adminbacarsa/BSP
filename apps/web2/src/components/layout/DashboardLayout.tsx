@@ -433,7 +433,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
       >
         <div style={{ height: 'env(titlebar-area-height, 0px)', flexShrink: 0 }} />
         {isEmulatorMode && (
-          <div className="w-full bg-amber-400 py-0.5 shrink-0" />
+          <div className="w-full bg-amber-400 text-[10px] font-bold text-center py-0.5 tracking-wide shrink-0" aria-hidden="true" style={{color:'transparent'}}>&#8203;</div>
         )}
 
         {/* Logo / Header del sidebar */}
