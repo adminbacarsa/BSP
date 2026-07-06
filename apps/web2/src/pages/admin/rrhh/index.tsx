@@ -279,6 +279,7 @@ export default function EmployeesPage() {
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [importStatusMsg, setImportStatusMsg] = useState('');
+  const [importAsInactive, setImportAsInactive] = useState(false);
   
   const [activeFormTab, setActiveFormTab] = useState<'PERSONAL' | 'LABORAL' | 'TALLES' | 'EXPERIENCIA' | 'RESTRICCIONES'>('PERSONAL');
   const initialForm: any = { firstName: '', lastName: '', dni: '', fileNumber: '', phone: '', email: '', category: '', status: 'activo', laborAgreement: '', preferredClientId: '', preferredObjectiveId: '', genero: '', sizes: { shirt:'', pants:'', shoes:'' }, cuil: '', address: '', lat: null, lng: null, contractType: 'FullTime', periodType: 'Mensual', cycleStartDay: 26, maxHours: 200, restriccionesObjetivo: [], restriccionesCliente: [], conflictosEmpleados: [], experienciaObjetivos: {} };
@@ -1492,19 +1493,20 @@ export default function EmployeesPage() {
       const toGeocode: { docId: string; address: string }[] = [];
 
       for (const emp of deduped) {
+        const finalEmp = importAsInactive ? { ...emp, status: 'inactivo' } : emp;
         const existing = current.find(e =>
-          (emp.dni && e.dni === emp.dni) ||
-          (emp.fileNumber && e.fileNumber === emp.fileNumber)
+          (finalEmp.dni && e.dni === finalEmp.dni) ||
+          (finalEmp.fileNumber && e.fileNumber === finalEmp.fileNumber)
         );
-        const needsGeo = !!(emp.address && !emp.lat && !emp.lng);
+        const needsGeo = !!(finalEmp.address && !finalEmp.lat && !finalEmp.lng);
         if (existing) {
-          await updateDoc(doc(db, 'empleados', existing.id), emp);
+          await updateDoc(doc(db, 'empleados', existing.id), finalEmp);
           updated++;
-          if (needsGeo) toGeocode.push({ docId: existing.id, address: emp.address });
+          if (needsGeo) toGeocode.push({ docId: existing.id, address: finalEmp.address });
         } else {
-          const ref = await addDoc(collection(db, 'empleados'), { ...emp, empresaId: targetEmpresaId });
+          const ref = await addDoc(collection(db, 'empleados'), { ...finalEmp, empresaId: targetEmpresaId });
           created++;
-          if (needsGeo) toGeocode.push({ docId: ref.id, address: emp.address });
+          if (needsGeo) toGeocode.push({ docId: ref.id, address: finalEmp.address });
         }
       }
 
@@ -1538,7 +1540,7 @@ export default function EmployeesPage() {
         : '';
       alert(`Importación completa:\n• ${created} empleados nuevos\n• ${updated} actualizados\n• ${skipped} duplicados ignorados${geoLine}`);
       setShowImportModal(false);
-      setImportPreview([]); setCsvContent(''); setFileName('');
+      setImportPreview([]); setCsvContent(''); setFileName(''); setImportAsInactive(false);
       await loadData();
     } catch(e) {
       console.error(e);
@@ -2859,6 +2861,24 @@ export default function EmployeesPage() {
                                     </select>
                                 </div>
                             )}
+                            <div className="mt-3">
+                                <label className="flex items-center gap-2.5 cursor-pointer select-none w-fit">
+                                    <div
+                                        onClick={() => setImportAsInactive(v => !v)}
+                                        className={`relative w-10 h-5 rounded-full transition-colors ${importAsInactive ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                                    >
+                                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${importAsInactive ? 'translate-x-5' : ''}`}/>
+                                    </div>
+                                    <span className={`text-xs font-black uppercase ${importAsInactive ? 'text-amber-600' : 'text-slate-400'}`}>
+                                        Importar como inactivos
+                                    </span>
+                                    {importAsInactive && (
+                                        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                                            Los empleados se crearán con estado Inactivo
+                                        </span>
+                                    )}
+                                </label>
+                            </div>
                         </div>
                         <div className="flex gap-2">
                             <button onClick={handleDownloadTemplate} className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-black uppercase hover:bg-indigo-100 transition-colors flex items-center gap-2"><Download size={14}/> Descargar Plantilla</button>
@@ -2893,6 +2913,7 @@ export default function EmployeesPage() {
                                             <th className="p-3">Convenio</th>
                                             <th className="p-3">Cat.</th>
                                             <th className="p-3">Género</th>
+                                            <th className="p-3">Estado</th>
                                             {/* COLUMNAS ADICIONALES SOLICITADAS */}
                                             <th className="p-3">Objetivo</th>
                                             <th className="p-3">Contacto</th>
@@ -2910,6 +2931,11 @@ export default function EmployeesPage() {
                                                 <td className="p-3">{row.laborAgreement}</td>
                                                 <td className="p-3">{row.category}</td>
                                                 <td className="p-3 font-mono">{row.genero === 'M' ? 'M' : row.genero === 'F' ? 'F' : '-'}</td>
+                                                <td className="p-3">
+                                                    <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${(importAsInactive || row.status === 'inactivo') ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                                        {importAsInactive ? 'inactivo' : (row.status || 'activo')}
+                                                    </span>
+                                                </td>
                                                 {/* DATA EXTRA */}
                                                 <td className="p-3">
                                                     {/* Mostrar check si encontró ID, o el nombre crudo si no */}
