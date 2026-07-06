@@ -281,6 +281,7 @@ export default function EmployeesPage() {
   const [isImporting, setIsImporting] = useState(false);
   const [importStatusMsg, setImportStatusMsg] = useState('');
   const [importAsInactive, setImportAsInactive] = useState(false);
+  const [importWithGeo, setImportWithGeo] = useState(false);
   
   const [activeFormTab, setActiveFormTab] = useState<'PERSONAL' | 'LABORAL' | 'TALLES' | 'EXPERIENCIA' | 'RESTRICCIONES'>('PERSONAL');
   const initialForm: any = { firstName: '', lastName: '', dni: '', fileNumber: '', phone: '', email: '', category: '', status: 'activo', laborAgreement: '', preferredClientId: '', preferredObjectiveId: '', genero: '', sizes: { shirt:'', pants:'', shoes:'' }, cuil: '', address: '', lat: null, lng: null, contractType: 'FullTime', periodType: 'Mensual', cycleStartDay: 26, maxHours: 200, restriccionesObjetivo: [], restriccionesCliente: [], conflictosEmpleados: [], experienciaObjetivos: {} };
@@ -1460,7 +1461,7 @@ export default function EmployeesPage() {
           (finalEmp.dni && e.dni === finalEmp.dni) ||
           (finalEmp.fileNumber && e.fileNumber === finalEmp.fileNumber)
         );
-        const needsGeo = !!(finalEmp.address && !finalEmp.lat && !finalEmp.lng);
+        const needsGeo = !!(importWithGeo && finalEmp.address && !finalEmp.lat && !finalEmp.lng);
         if (existing) {
           await updateDoc(doc(db, 'empleados', existing.id), finalEmp);
           updated++;
@@ -2841,10 +2842,28 @@ export default function EmployeesPage() {
                                     )}
                                 </label>
                             </div>
+                            <div className="mt-2">
+                                <label className="flex items-center gap-2.5 cursor-pointer select-none w-fit">
+                                    <div
+                                        onClick={() => setImportWithGeo(v => !v)}
+                                        className={`relative w-10 h-5 rounded-full transition-colors ${importWithGeo ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                                    >
+                                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${importWithGeo ? 'translate-x-5' : ''}`}/>
+                                    </div>
+                                    <span className={`text-xs font-black uppercase ${importWithGeo ? 'text-indigo-600' : 'text-slate-400'}`}>
+                                        Geolocalizar al importar
+                                    </span>
+                                    {importWithGeo && (
+                                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                                            Puede tardar varios minutos
+                                        </span>
+                                    )}
+                                </label>
+                            </div>
                         </div>
                         <div className="flex gap-2">
                             <button onClick={handleDownloadTemplate} className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-black uppercase hover:bg-indigo-100 transition-colors flex items-center gap-2"><Download size={14}/> Descargar Plantilla</button>
-                            <button onClick={() => {setShowImportModal(false); setImportPreview([]); setCsvContent('');}} className="p-2 hover:bg-slate-100 rounded-full"><X/></button>
+                            <button onClick={() => {setShowImportModal(false); setImportPreview([]); setCsvContent(''); setImportAsInactive(false); setImportWithGeo(false);}} className="p-2 hover:bg-slate-100 rounded-full"><X/></button>
                         </div>
                     </div>
 
