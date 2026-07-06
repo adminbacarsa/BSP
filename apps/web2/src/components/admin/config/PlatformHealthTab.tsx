@@ -7,7 +7,7 @@ import {
   Activity, CheckCircle, XCircle, AlertCircle, Loader2,
   Database, Zap, Mail, HardDrive, Bell, Bot, Clock, Server,
   BarChart3, RefreshCw, Shield, Download, Copy, Check,
-  KeyRound, Eye, EyeOff, Pencil, Trash2, Plus, Save, X,
+  KeyRound, Eye, EyeOff, Pencil, Trash2, Plus, Save, X, MapPin,
 } from 'lucide-react';
 
 const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
@@ -93,6 +93,7 @@ const INITIAL_CHECKS: CheckResult[] = [
   { status: 'idle', label: 'Gemini AI',                    detail: 'Sin ejecutar', group: 'APIs externas', icon: Bot },
   { status: 'idle', label: 'Gmail SMTP',                   detail: 'Sin ejecutar', group: 'APIs externas', icon: Mail },
   { status: 'idle', label: 'Google Drive (Backups)',        detail: 'Sin ejecutar', group: 'APIs externas', icon: HardDrive },
+  { status: 'idle', label: 'Nominatim — geocodificación',  detail: 'Sin ejecutar', group: 'APIs externas', icon: MapPin },
   // Datos
   { status: 'idle', label: 'Conteo de datos críticos',     detail: 'Sin ejecutar', group: 'Datos',         icon: BarChart3 },
   { status: 'idle', label: 'Scheduled jobs',               detail: 'Sin ejecutar', group: 'Datos',         icon: Clock },
@@ -399,6 +400,26 @@ export default function PlatformHealthTab() {
         'Conteo de datos críticos', 'Scheduled jobs', 'Entorno de ejecución'].forEach(label => {
         updateCheck(label, { status: 'warn', detail: 'No se pudo verificar (Functions caída)' });
       });
+      setOverallOk(false);
+    }
+
+    // ── 4. Nominatim — geocodificación (client-side) ────────
+    const tn = Date.now();
+    try {
+      const resp = await fetch(
+        'https://nominatim.openstreetmap.org/search?q=Buenos+Aires,+Argentina&format=json&limit=1&countrycodes=ar',
+        { headers: { 'Accept-Language': 'es' }, signal: AbortSignal.timeout(8000) },
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      const latNom = Date.now() - tn;
+      if (Array.isArray(json) && json.length > 0) {
+        updateCheck('Nominatim — geocodificación', { status: 'ok', latencyMs: latNom, detail: 'Respuesta OK · OpenStreetMap' });
+      } else {
+        updateCheck('Nominatim — geocodificación', { status: 'warn', latencyMs: latNom, detail: 'Sin resultados (servicio responde pero sin datos)' });
+      }
+    } catch (e: any) {
+      updateCheck('Nominatim — geocodificación', { status: 'error', latencyMs: Date.now() - tn, detail: e.message });
       setOverallOk(false);
     }
 
