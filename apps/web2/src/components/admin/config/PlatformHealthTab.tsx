@@ -403,20 +403,19 @@ export default function PlatformHealthTab() {
       setOverallOk(false);
     }
 
-    // ── 4. Nominatim — geocodificación (client-side) ────────
+    // ── 4. Nominatim — geocodificación (vía proxy server-side) ──
     const tn = Date.now();
     try {
-      const resp = await fetch(
-        'https://nominatim.openstreetmap.org/search?q=Buenos+Aires,+Argentina&format=json&limit=1&countrycodes=ar',
-        { headers: { 'Accept-Language': 'es' }, signal: AbortSignal.timeout(8000) },
+      const geoFn = httpsCallable<{ address: string }, { lat: string; lon: string; display_name: string } | null>(
+        functions, 'geocodeAddressProxy',
       );
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const json = await resp.json();
+      const geoRes = await geoFn({ address: 'Buenos Aires, Argentina' });
       const latNom = Date.now() - tn;
-      if (Array.isArray(json) && json.length > 0) {
-        updateCheck('Nominatim — geocodificación', { status: 'ok', latencyMs: latNom, detail: 'Respuesta OK · OpenStreetMap' });
+      if (geoRes.data) {
+        const short = geoRes.data.display_name.split(',').slice(0, 2).join(',');
+        updateCheck('Nominatim — geocodificación', { status: 'ok', latencyMs: latNom, detail: `Proxy OK · ${short}` });
       } else {
-        updateCheck('Nominatim — geocodificación', { status: 'warn', latencyMs: latNom, detail: 'Sin resultados (servicio responde pero sin datos)' });
+        updateCheck('Nominatim — geocodificación', { status: 'warn', latencyMs: latNom, detail: 'Proxy OK · sin resultados' });
       }
     } catch (e: any) {
       updateCheck('Nominatim — geocodificación', { status: 'error', latencyMs: Date.now() - tn, detail: e.message });

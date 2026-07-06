@@ -3353,3 +3353,40 @@ export const setEmployeePortalPassword = functions.https.onCall(async (data, con
 
   return { success: true, email, alreadyExisted, uid };
 });
+
+export const geocodeAddressProxy = functions.https.onCall(async (data, _context) => {
+  const { address } = data as { address: string };
+  if (!address?.trim()) throw new functions.https.HttpsError('invalid-argument', 'address requerido.');
+
+  const headers: Record<string, string> = {
+    'Accept-Language': 'es',
+    'User-Agent': 'COSP-v1/comtroldata.web.app',
+  };
+
+  const nom = async (params: string) => {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&${params}`,
+      { headers },
+    );
+    if (!r.ok) throw new Error(`Nominatim HTTP ${r.status}`);
+    const d = await r.json() as Array<{ lat: string; lon: string; display_name: string }>;
+    return d?.length > 0 ? d[0] : null;
+  };
+
+  const parts = address.split(',').map((p: string) => p.trim()).filter(Boolean);
+  const tc = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  const street = parts[0] || '';
+  const city = parts[1] ? tc(parts[1]) : 'Córdoba';
+  const state = parts[2] ? tc(parts[2]) : city;
+  const stateClean = state.toLowerCase() === city.toLowerCase() ? city : state;
+
+  let res = await nom(`street=${encodeURIComponent(street)}&city=${encodeURIComponent(city)}&state=${encodeURIComponent(stateClean)}&country=Argentina`);
+  if (!res) res = await nom(`q=${encodeURIComponent(`${street}, ${city}, Argentina`)}`);
+  if (!res) res = await nom(`q=${encodeURIComponent(address.replace(/,/g, ', '))}`);
+  if (!res) {
+    const noNum = street.replace(/\s+\d+.*$/, '').trim();
+    if (noNum && noNum !== street) res = await nom(`q=${encodeURIComponent(`${noNum}, ${city}, Argentina`)}`);
+  }
+
+  return res ?? null;
+});
