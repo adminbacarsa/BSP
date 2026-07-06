@@ -418,8 +418,13 @@ export default function PlatformHealthTab() {
         updateCheck('Nominatim — geocodificación', { status: 'warn', latencyMs: latNom, detail: 'Proxy OK · sin resultados' });
       }
     } catch (e: any) {
-      updateCheck('Nominatim — geocodificación', { status: 'error', latencyMs: Date.now() - tn, detail: e.message });
-      setOverallOk(false);
+      const isRateLimit = e.code === 'functions/resource-exhausted';
+      updateCheck('Nominatim — geocodificación', {
+        status: isRateLimit ? 'warn' : 'error',
+        latencyMs: Date.now() - tn,
+        detail: isRateLimit ? 'Rate limit (429) · servicio disponible, esperá unos segundos' : e.message,
+      });
+      if (!isRateLimit) setOverallOk(false);
     }
 
     const ts = new Date().toLocaleString('es-AR');

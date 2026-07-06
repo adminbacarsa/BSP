@@ -3368,7 +3368,8 @@ export const geocodeAddressProxy = functions.https.onCall(async (data, _context)
       `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&${params}`,
       { headers, signal: AbortSignal.timeout(8000) },
     );
-    if (!r.ok) throw new Error(`Nominatim HTTP ${r.status}`);
+    if (r.status === 429) throw new functions.https.HttpsError('resource-exhausted', 'Nominatim: rate limit (429) — esperá unos segundos y reintentá');
+    if (!r.ok) throw new functions.https.HttpsError('unavailable', `Nominatim HTTP ${r.status}`);
     const d = await r.json() as Array<{ lat: string; lon: string; display_name: string }>;
     return d?.length > 0 ? d[0] : null;
   };
@@ -3391,6 +3392,7 @@ export const geocodeAddressProxy = functions.https.onCall(async (data, _context)
 
     return res ?? null;
   } catch (e: any) {
+    if (e instanceof functions.https.HttpsError) throw e;
     throw new functions.https.HttpsError('unavailable', e.message || 'Nominatim no disponible');
   }
 });
