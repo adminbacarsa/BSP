@@ -3363,12 +3363,18 @@ export const geocodeAddressProxy = functions.https.onCall(async (data, _context)
     'User-Agent': 'COSP-v1/comtroldata.web.app',
   };
 
-  const nom = async (params: string) => {
+  const nom = async (params: string, retry = true): Promise<{ lat: string; lon: string; display_name: string } | null> => {
     const r = await fetch(
       `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&${params}`,
-      { headers, signal: AbortSignal.timeout(8000) },
+      { headers, signal: AbortSignal.timeout(10000) },
     );
-    if (r.status === 429) throw new functions.https.HttpsError('resource-exhausted', 'Nominatim: rate limit (429) — esperá unos segundos y reintentá');
+    if (r.status === 429) {
+      if (retry) {
+        await new Promise(res => setTimeout(res, 2500));
+        return nom(params, false);
+      }
+      throw new functions.https.HttpsError('resource-exhausted', 'Nominatim: rate limit (429)');
+    }
     if (!r.ok) throw new functions.https.HttpsError('unavailable', `Nominatim HTTP ${r.status}`);
     const d = await r.json() as Array<{ lat: string; lon: string; display_name: string }>;
     return d?.length > 0 ? d[0] : null;
