@@ -1659,6 +1659,22 @@ export default function ServiciosSLAPage() {
                              setForm({ ...form, positions: nextPositions });
                          }
                      };
+                     const excludeMonth = (monthDays: Array<{ date: Date; ds: string }>) => {
+                         const validDs = monthDays.filter(d => d.ds).map(d => d.ds);
+                         if (isAll) {
+                             const next = new Set(slaGlobal);
+                             validDs.forEach(ds => next.add(ds));
+                             setForm({ ...form, excludedDates: Array.from(next).sort() });
+                         } else if (scopePosIdx >= 0) {
+                             const nextPositions = form.positions.map((p, i) => {
+                                 if (i !== scopePosIdx) return p;
+                                 const cur = new Set(p.excludedDates || []);
+                                 validDs.forEach(ds => cur.add(ds));
+                                 return { ...p, excludedDates: Array.from(cur).sort() };
+                             });
+                             setForm({ ...form, positions: nextPositions });
+                         }
+                     };
 
                      // Total excluidos en todos los scopes
                      const totalExcluded = slaGlobal.size + form.positions.reduce(
@@ -1737,7 +1753,10 @@ export default function ServiciosSLAPage() {
                                                  const padded = Array(firstDow === 0 ? 6 : firstDow - 1).fill(null).concat(days);
                                                  return (
                                                      <div key={`${year}-${month}`}>
-                                                         <p className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-2">{label}</p>
+                                                         <div className="flex items-center justify-between mb-2">
+                                                             <p className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400">{label}</p>
+                                                             <button type="button" onClick={() => excludeMonth(days)} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase">Excluir todo</button>
+                                                         </div>
                                                          <div className="grid grid-cols-7 gap-0.5">
                                                              {['L','M','X','J','V','S','D'].map(h => <span key={h} className="text-center text-[8px] font-black text-slate-400 py-0.5">{h}</span>)}
                                                              {padded.map((cell, i) => {
