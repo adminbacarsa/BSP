@@ -9,6 +9,7 @@ import { absenceService, Absence } from '@/services/absenceService';
 import { holidayService, Holiday } from '@/services/holidayService';
 import { agreementService } from '@/services/agreementService';
 import { db } from '@/lib/firebase';
+import { geocodeAddress } from '@/lib/employees/geocodeAddress';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, onSnapshot, limit } from 'firebase/firestore';
@@ -907,45 +908,6 @@ export default function EmployeesPage() {
   };
 
   // --- GEOLOCALIZACION ---
-  const GEO_HEADERS = { 'Accept-Language': 'es' };
-
-  // Parsea el formato importado "Calle 123,Ciudad,PROVINCIA,Pais" en partes útiles
-  const parseAddress = (raw: string) => {
-      const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
-      // title-case cada parte
-      const tc = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
-      const street = parts[0] || '';
-      const city   = parts[1] ? tc(parts[1]) : 'Córdoba';
-      const state  = parts[2] ? tc(parts[2]) : city;
-      // Evitar duplicar ciudad y provincia
-      const stateClean = state.toLowerCase() === city.toLowerCase() ? city : state;
-      return { street, city, state: stateClean };
-  };
-
-  // Intenta geocodificar una dirección con múltiples estrategias
-  const geocodeAddress = async (raw: string): Promise<{ lat: string; lon: string; display_name: string } | null> => {
-      const { street, city, state } = parseAddress(raw);
-      const nom = async (params: string) => {
-          const r = await fetch(
-              `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&${params}`,
-              { headers: GEO_HEADERS }
-          );
-          const d = await r.json();
-          return d?.length > 0 ? d[0] : null;
-      };
-      // 1. Estructurado completo (mejor para el formato importado)
-      let res = await nom(`street=${encodeURIComponent(street)}&city=${encodeURIComponent(city)}&state=${encodeURIComponent(state)}&country=Argentina`);
-      // 2. Libre: calle + ciudad + Argentina
-      if (!res) res = await nom(`q=${encodeURIComponent(`${street}, ${city}, Argentina`)}`);
-      // 3. Libre: dirección completa normalizada
-      if (!res) res = await nom(`q=${encodeURIComponent(raw.replace(/,/g, ', '))}`);
-      // 4. Solo calle sin número + ciudad
-      if (!res) {
-          const noNum = street.replace(/\s+\d+.*$/, '').trim();
-          if (noNum && noNum !== street) res = await nom(`q=${encodeURIComponent(`${noNum}, ${city}, Argentina`)}`);
-      }
-      return res;
-  };
 
   const handleGeocode = async () => {
       if (!form.address) return addToast('Ingrese una dirección primero', 'warning');
