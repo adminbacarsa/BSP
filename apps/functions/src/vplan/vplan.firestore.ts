@@ -8,6 +8,13 @@ import { planificacionEstadoLookupDocIds } from '../assistant/planificacionEstad
 import { buildMonthDays, previousMonth } from './vplan.calendar';
 import { normalizeSlaPositions, type VplanPositionDef } from './vplan.positions';
 import { enrichPlanningStateWithTrailingFromTurnos } from './vplan.trailing';
+import {
+  inferDefaultPositionFromTurnos,
+  mergeDefaultPositionMaps,
+  mergeDefaultShiftMaps,
+} from './vplan.assigned-positions';
+import { capDefaultPositionByEmp } from './vplan.sla-enforce';
+import { formatDateStrCordoba } from './vplan.dates';
 
 const db = () => admin.firestore();
 
@@ -348,85 +355,103 @@ async function loadPlanningState(
   month: number,
 ): Promise<VplanPlanningState> {
   const docIds = planificacionEstadoLookupDocIds(empresaId, objectiveId, year, month);
+  let merged = emptyPlanningState();
+  let foundAny = false;
+  let trailingFrom: Record<string, unknown> | null = null;
+
   for (const key of docIds) {
     const snap = await db().collection('planificacion_estados').doc(key).get();
     if (!snap.exists) continue;
+    foundAny = true;
     const d = snap.data() || {};
-    const defaultPositionByEmp = (d.defaultPositionByEmp as Record<string, string>) || {};
-    const hasTrailing = Boolean(
-      d.trailingWorkDays || d.trailingRestDays || d.lastShiftByEmp || d.lastWorkBandBeforeRest,
-    );
-    if (Object.keys(defaultPositionByEmp).length === 0 && !hasTrailing) continue;
-    return {
-      defaultPositionByEmp,
-      defaultShiftByEmp: (d.defaultShiftByEmp as Record<string, string>) || {},
-      trailingWorkDays: d.trailingWorkDays as Record<string, number> | undefined,
-      trailingRestDays: d.trailingRestDays as Record<string, number> | undefined,
-      lastShiftByEmp: d.lastShiftByEmp as Record<string, string> | undefined,
-      lastWorkBandBeforeRest: d.lastWorkBandBeforeRest as Record<string, string> | undefined,
+    merged = {
+      ...merged,
+      defaultPositionByEmp: {
+        ...merged.defaultPositionByEmp,
+        ...((d.defaultPositionByEmp as Record<string, string>) || {}),
+      },
+      defaultShiftByEmp: {
+        ...merged.defaultShiftByEmp,
+        ...((d.defaultShiftByEmp as Record<string, string>) || {}),
+      },
+    };
+    if (!trailingFrom && (d.lastShiftByEmp || d.trailingWorkDays)) {
+      trailingFrom = d;
+    }
+  }
+
+  if (!foundAny) return emptyPlanningState();
+
+  if (trailingFrom) {
+    merged = {
+      ...merged,
+      trailingWorkDays: trailingFrom.trailingWorkDays as Record<string, number> | undefined,
+      trailingRestDays: trailingFrom.trailingRestDays as Record<string, number> | undefined,
+      lastShiftByEmp: trailingFrom.lastShiftByEmp as Record<string, string> | undefined,
+      lastWorkBandBeforeRest: trailingFrom.lastWorkBandBeforeRest as Record<string, string> | undefined,
     };
   }
-  return emptyPlanningState();
+
+  return merged;
 }
 
 function dateStrFromTimestamp(ts: unknown): string | null {
-  if (!ts) return null;
-  if (typeof ts === 'string') return ts.slice(0, 10);
-  const d = timestampToDate(ts);
-  if (!d || Number.isNaN(d.getTime())) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return formatDateStrCordoba(ts);
 }
 
 async function loadMonthAssignments(
-  objectiveId: string,
+  objectiveAliases: Set<string>,
   year: number,
   month: number,
   opts?: { includeDrafts?: boolean },
 ): Promise<VplanExistingAssignment[]> {
   const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
   const includeDrafts = opts?.includeDrafts === true;
-  const snap = await db()
-    .collection('turnos')
-    .where('objectiveId', '==', objectiveId)
-    .get();
+  const aliasList = [...objectiveAliases].filter(Boolean);
+  if (aliasList.length === 0) return [];
 
   const byKey = new Map<string, VplanExistingAssignment & { _draft?: boolean }>();
-  snap.docs.forEach((doc) => {
-    const d = doc.data();
-    const isDraft = d.draft === true;
-    if (!includeDrafts && isDraft) return;
-    const dateStr = dateStrFromTimestamp(d.startTime)
-      ?? String(d.dateStr || d.date || '').slice(0, 10);
-    if (!dateStr.startsWith(monthPrefix)) return;
-    const employeeId = String(d.employeeId || d.empId || '');
-    if (!employeeId) return;
-    const row: VplanExistingAssignment & { _draft?: boolean } = {
-      employeeId,
-      dateStr,
-      code: String(d.code || d.shiftCode || 'M').toUpperCase(),
-      positionName: String(d.positionName || d.puesto || ''),
-      hours: Number(d.hours) || undefined,
-      _draft: isDraft,
-    };
-    const key = `${employeeId}_${dateStr}`;
-    const prev = byKey.get(key);
-    if (!prev || (prev._draft && !isDraft)) {
-      byKey.set(key, row);
-    }
-  });
+
+  for (let i = 0; i < aliasList.length; i += 10) {
+    const batch = aliasList.slice(i, i + 10);
+    const snap = batch.length === 1
+      ? await db().collection('turnos').where('objectiveId', '==', batch[0]).get()
+      : await db().collection('turnos').where('objectiveId', 'in', batch).get();
+
+    snap.docs.forEach((doc) => {
+      const d = doc.data();
+      const isDraft = d.draft === true;
+      if (!includeDrafts && isDraft) return;
+      const dateStr = formatDateStrCordoba(d.startTime)
+        ?? String(d.dateStr || d.date || '').slice(0, 10);
+      if (!dateStr.startsWith(monthPrefix)) return;
+      const employeeId = String(d.employeeId || d.empId || '');
+      if (!employeeId) return;
+      const row: VplanExistingAssignment & { _draft?: boolean } = {
+        employeeId,
+        dateStr,
+        code: String(d.code || d.shiftCode || 'M').toUpperCase(),
+        positionName: String(d.positionName || d.puesto || ''),
+        hours: Number(d.hours) || undefined,
+        _draft: isDraft,
+      };
+      const key = `${employeeId}_${dateStr}`;
+      const prev = byKey.get(key);
+      if (!prev || (prev._draft && !isDraft)) {
+        byKey.set(key, row);
+      }
+    });
+  }
 
   return [...byKey.values()].map(({ _draft, ...row }) => row);
 }
 
 async function loadExistingAssignments(
-  objectiveId: string,
+  objectiveAliases: Set<string>,
   year: number,
   month: number,
 ): Promise<VplanExistingAssignment[]> {
-  return loadMonthAssignments(objectiveId, year, month, { includeDrafts: false });
+  return loadMonthAssignments(objectiveAliases, year, month, { includeDrafts: false });
 }
 
 export async function loadVplanPlanningSnapshot(request: {
@@ -445,14 +470,17 @@ export async function loadVplanPlanningSnapshot(request: {
 
   const prevDays = buildMonthDays(prev.year, prev.month);
 
-  const [objectiveAliases, slaIdToObjectiveId, planningState, prevPlanningStateRaw, absences, existingAssignments, previousMonthAssignments] = await Promise.all([
+  const [objectiveAliases, slaIdToObjectiveId, planningState, prevPlanningStateRaw, absences] = await Promise.all([
     buildObjectiveAliasIds(request.empresaId, request.objectiveId, sla.slaObjectiveId, objectiveName),
     buildSlaIdToObjectiveId(request.empresaId),
     loadPlanningState(request.empresaId, request.objectiveId, request.year, request.month),
     loadPlanningState(request.empresaId, request.objectiveId, prev.year, prev.month),
     loadAbsences(request.empresaId, request.year, request.month),
-    loadExistingAssignments(request.objectiveId, request.year, request.month),
-    loadMonthAssignments(request.objectiveId, prev.year, prev.month, { includeDrafts: true }),
+  ]);
+
+  const [existingAssignments, previousMonthAssignments] = await Promise.all([
+    loadExistingAssignments(objectiveAliases, request.year, request.month),
+    loadMonthAssignments(objectiveAliases, prev.year, prev.month, { includeDrafts: true }),
   ]);
 
   const prevPlanningState = enrichPlanningStateWithTrailingFromTurnos(
@@ -473,17 +501,22 @@ export async function loadVplanPlanningSnapshot(request: {
     planningEmployeeIds,
   });
 
-  let mergedPlanning = planningState;
-  if (
-    Object.keys(planningState.defaultPositionByEmp).length === 0
-    && Object.keys(prevPlanningState.defaultPositionByEmp).length > 0
-  ) {
-    mergedPlanning = {
-      ...planningState,
-      defaultPositionByEmp: prevPlanningState.defaultPositionByEmp,
-      defaultShiftByEmp: prevPlanningState.defaultShiftByEmp,
-    };
-  }
+  let mergedPlanning: VplanPlanningState = {
+    ...planningState,
+    defaultPositionByEmp: capDefaultPositionByEmp(
+      sla.positions,
+      mergeDefaultPositionMaps(
+        inferDefaultPositionFromTurnos(previousMonthAssignments),
+        prevPlanningState.defaultPositionByEmp,
+        planningState.defaultPositionByEmp,
+      ),
+      '6+2',
+    ),
+    defaultShiftByEmp: mergeDefaultShiftMaps(
+      prevPlanningState.defaultShiftByEmp,
+      planningState.defaultShiftByEmp,
+    ),
+  };
 
   return {
     empresaId: request.empresaId,

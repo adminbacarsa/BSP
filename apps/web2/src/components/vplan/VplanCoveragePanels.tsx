@@ -101,6 +101,7 @@ export function VplanCoveragePanels({
   const cov = verification.coverage;
   const [showGrid, setShowGrid] = useState(true);
   const [showGaps, setShowGaps] = useState(false);
+  const [showExcess, setShowExcess] = useState(false);
 
   const francoSummary = useMemo(() => {
     if (!cov?.schedulePreview.codeSummary) return null;
@@ -114,10 +115,11 @@ export function VplanCoveragePanels({
   if (!cov) return null;
 
   const gapDays = Object.keys(cov.uncoveredByDay).sort();
+  const excessDays = Object.keys(cov.overCoveredByDay ?? {}).sort();
 
   return (
     <div className="space-y-4">
-      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
           <p className="text-[10px] font-black uppercase text-slate-500">Cobertura puestos</p>
           <p className="text-lg font-black text-slate-900">{cov.coverageRatio}%</p>
@@ -139,6 +141,13 @@ export function VplanCoveragePanels({
             {francoSummary ? `${francoSummary.workDays} / ${francoSummary.francoDays}` : '—'}
           </p>
           <p className="text-xs text-slate-600">días trabajo · días franco</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <p className="text-[10px] font-black uppercase text-slate-500">Sobre-cobertura</p>
+          <p className={`text-lg font-black ${(cov.overCoveredSlots ?? 0) > 0 ? 'text-amber-700' : 'text-slate-900'}`}>
+            {cov.overCoveredSlots ?? 0}
+          </p>
+          <p className="text-xs text-slate-600">slots de más vs SLA qty</p>
         </div>
       </div>
 
@@ -175,6 +184,7 @@ export function VplanCoveragePanels({
                 <th className="px-3 py-2 text-right">Requeridos</th>
                 <th className="px-3 py-2 text-right">Cubiertos</th>
                 <th className="px-3 py-2 text-right">Faltan</th>
+                <th className="px-3 py-2 text-right">Sobra</th>
                 <th className="px-3 py-2 text-right">%</th>
               </tr>
             </thead>
@@ -187,6 +197,9 @@ export function VplanCoveragePanels({
                   <td className="px-3 py-1.5 text-right text-emerald-700">{row.coveredSlots}</td>
                   <td className={`px-3 py-1.5 text-right ${row.missingSlots > 0 ? 'text-red-600 font-bold' : ''}`}>
                     {row.missingSlots}
+                  </td>
+                  <td className={`px-3 py-1.5 text-right ${(row.excessSlots ?? 0) > 0 ? 'text-amber-700 font-bold' : ''}`}>
+                    {row.excessSlots ?? 0}
                   </td>
                   <td className="px-3 py-1.5 text-right">{row.coveragePct}%</td>
                 </tr>
@@ -202,18 +215,65 @@ export function VplanCoveragePanels({
             <p className="font-bold text-slate-800 text-sm">Resumen de códigos del mes</p>
           </div>
           <div className="flex flex-wrap gap-2 p-3">
-            {cov.schedulePreview.codeSummary.map((c) => (
+            {cov.schedulePreview.codeSummary.map((c) => {
+              const hasExcess = (c.excessCount ?? 0) > 0;
+              return (
               <span
                 key={c.code}
-                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-bold ${categoryBadge(c.category)}`}
+                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-bold ${
+                  hasExcess ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300' : categoryBadge(c.category)
+                }`}
+                title={
+                  c.slaExpected !== undefined
+                    ? `SLA: ${c.slaExpected} · asignado: ${c.count}${hasExcess ? ` (+${c.excessCount})` : ''}`
+                    : undefined
+                }
               >
                 <span>{c.code}</span>
                 <span className="font-normal opacity-80">{c.label}</span>
-                <span>×{c.count}</span>
+                <span>
+                  ×{c.count}
+                  {c.slaExpected !== undefined && c.category === 'trabajo' && (
+                    <span className="font-normal opacity-70"> / {c.slaExpected}</span>
+                  )}
+                </span>
                 {c.hours > 0 && <span className="opacity-70">({c.hours}h)</span>}
+                {hasExcess && <span className="text-amber-800">+{c.excessCount}</span>}
               </span>
-            ))}
+            );})}
           </div>
+        </div>
+      )}
+
+      {excessDays.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/50 shadow-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowExcess((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left"
+          >
+            <span className="font-bold text-amber-900 text-sm">
+              Sobre-cobertura ({cov.overCoveredSlots ?? 0} slot(s) de más · {excessDays.length} día(s))
+            </span>
+            {showExcess ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+          {showExcess && (
+            <div className="px-4 pb-3 space-y-2 max-h-48 overflow-y-auto">
+              {excessDays.map((dateStr) => (
+                <div key={dateStr} className="text-xs">
+                  <p className="font-bold text-amber-900">{dateStr}</p>
+                  <ul className="list-disc list-inside text-amber-800">
+                    {(cov.overCoveredByDay?.[dateStr] ?? []).map((g, i) => (
+                      <li key={i}>
+                        {g.positionName}: +{g.excess}×{g.shiftCode}
+                        {g.employeeIds.length > 0 && ` (${g.employeeIds.join(', ')})`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

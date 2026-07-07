@@ -3,12 +3,15 @@
  */
 
 import type { VplanDemandModel, VplanFeasibilityReport, VplanSupplyModel } from '../vplan.types';
+import type { PlanningRulesConfig } from '../../planning/planning-rules.types';
+import { resolvePlanningRules } from '../../planning/planning-rules.service';
+import { shiftHoursForCycle } from '../../planning/planning-rules.defaults';
 import type { VplanPositionDef } from '../vplan.positions';
 import { is24hsPosition, isPositionActiveOnDay } from '../vplan.positions';
+import { headcountPerQtyUnit } from '../vplan.rotation';
 import { estimateOfferHours } from './phase2-supply';
 
-const TARGET_AVG_HOURS = 192;
-const HARD_MAX_CCT_HOURS = 200;
+const TARGET_AVG_HOURS_DEFAULT = 192;
 
 type CycleKey = '6+2' | '4+2' | '5+1' | '6+1';
 
@@ -19,13 +22,17 @@ const CYCLE_MAP: Record<CycleKey, [number, number]> = {
   '6+1': [6, 1],
 };
 
-function resolveCycle(preferred?: string): { key: CycleKey; factor: number; avgShiftHours: number } {
+function resolveCycle(preferred: string | undefined, rules: PlanningRulesConfig): {
+  key: CycleKey;
+  factor: number;
+  avgShiftHours: number;
+} {
   const key = (preferred && CYCLE_MAP[preferred as CycleKey]
     ? preferred
-    : '6+2') as CycleKey;
+    : rules.defaultCycle) as CycleKey;
   const [work, rest] = CYCLE_MAP[key];
   const factor = (work + rest) / work;
-  const avgShiftHours = key === '4+2' ? 12 : 8;
+  const avgShiftHours = shiftHoursForCycle(key, rules);
   return { key, factor, avgShiftHours };
 }
 
@@ -52,12 +59,12 @@ function computeSuggestedHeadcount(
   cycleKey: CycleKey,
 ): number {
   let total = 0;
-  const perQty24 = cycleKey === '4+2' ? 3 : 4;
+  const perQty = headcountPerQtyUnit(cycleKey);
   for (const pos of positions) {
     const activeDays = days.filter((d) => isPositionActiveOnDay(pos, d.dayLetter)).length;
     const isLimited = activeDays > 0 && activeDays < days.length;
     if (is24hsPosition(pos)) {
-      total += Math.ceil(pos.qty * (isLimited ? 1 : perQty24));
+      total += Math.ceil(pos.qty * (isLimited ? 1 : perQty));
     } else {
       total += Math.ceil(pos.qty);
     }
@@ -72,19 +79,26 @@ export function buildVplanFeasibilityReport(opts: {
   days: Array<{ dayLetter: string }>;
   preferredCycle?: string;
   budgetMode?: 'cct' | 'calendar';
+  planningRules?: PlanningRulesConfig;
 }): VplanFeasibilityReport {
-  const { key: cycleKey, factor: cycleFactor, avgShiftHours } = resolveCycle(opts.preferredCycle);
+  const rules = resolvePlanningRules(opts.planningRules ?? null);
+  const targetAvg = rules.targetAvgHoursPerEmployee;
+  const cctMax = rules.cctMaxBillableHours;
+  const { key: cycleKey, factor: cycleFactor, avgShiftHours } = resolveCycle(
+    opts.preferredCycle,
+    rules,
+  );
   const workRatio = CYCLE_MAP[cycleKey][0] / (CYCLE_MAP[cycleKey][0] + CYCLE_MAP[cycleKey][1]);
 
   const peakConcurrent = computePeakConcurrent(opts.positions, opts.days);
   const suggestedHeadcount = computeSuggestedHeadcount(opts.positions, opts.days, cycleKey);
   const peopleAvailable = opts.supply.employees.filter((e) => e.availableDays > 0).length;
-  const offerHours = estimateOfferHours(opts.supply, avgShiftHours, workRatio);
+  const offerHours = estimateOfferHours(opts.supply, avgShiftHours, workRatio, cctMax);
 
   const contractedHours = Math.max(0, opts.demand.slaVendidas);
   const structuralHours = opts.demand.monthDemandHours;
   const effectiveTarget = contractedHours > 0 ? contractedHours : structuralHours;
-  const peopleNeededForTarget = Math.ceil(effectiveTarget / TARGET_AVG_HOURS);
+  const peopleNeededForTarget = Math.ceil(effectiveTarget / targetAvg);
 
   const reasons: string[] = [];
   const warnings: string[] = [...opts.demand.warnings];
@@ -95,7 +109,7 @@ export function buildVplanFeasibilityReport(opts: {
 
   if (peopleAvailable < peopleNeededForTarget) {
     reasons.push(
-      `Dotación insuficiente por horas: hacen falta ~${peopleNeededForTarget} personas con ${TARGET_AVG_HOURS}h c/u para ${Math.round(effectiveTarget)}h y hay ${peopleAvailable} con días disponibles`,
+      `Dotación insuficiente por horas: hacen falta ~${peopleNeededForTarget} personas con ${targetAvg}h c/u para ${Math.round(effectiveTarget)}h y hay ${peopleAvailable} con días disponibles`,
     );
   }
 
@@ -111,8 +125,26 @@ export function buildVplanFeasibilityReport(opts: {
     );
   }
 
+  const employeeCount = opts.supply.employeeCount;
+  const avgHoursRequiredPerGuard = employeeCount > 0 && effectiveTarget > 0
+    ? Math.round((effectiveTarget / employeeCount) * 10) / 10
+    : 0;
+  const avgHoursOfferPerGuard = employeeCount > 0 && offerHours > 0
+    ? Math.round((offerHours / employeeCount) * 10) / 10
+    : 0;
+  const capacityAdequate = employeeCount > 0
+    && effectiveTarget > 0
+    && offerHours >= effectiveTarget - rules.slaHoursTolerance
+    && avgHoursRequiredPerGuard <= targetAvg;
+
+  if (capacityAdequate) {
+    warnings.push(
+      `Capacidad OK: ${employeeCount} guardias · ${avgHoursRequiredPerGuard}h/guardia requerido vs ~${avgHoursOfferPerGuard}h oferta (6+2) — el SLA se cierra redistribuyendo, no sumando personal`,
+    );
+  }
+
   const overCct = opts.supply.employees.filter(
-    (e) => (e.cctHoursRemaining ?? HARD_MAX_CCT_HOURS) < avgShiftHours * 3,
+    (e) => (e.cctHoursRemaining ?? cctMax) < avgShiftHours * 3,
   );
   if (overCct.length > 0) {
     warnings.push(
@@ -155,5 +187,8 @@ export function buildVplanFeasibilityReport(opts: {
     peopleAvailable,
     offerHours: Math.round(offerHours),
     effectiveTargetHours: Math.round(effectiveTarget),
+    avgHoursRequiredPerGuard,
+    avgHoursOfferPerGuard,
+    capacityAdequate,
   };
 }

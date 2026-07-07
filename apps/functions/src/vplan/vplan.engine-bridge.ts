@@ -10,11 +10,17 @@ import type {
   EnginePositionDef,
 } from '../scheduling/autoScheduleEngine';
 import type { VplanPlanningSnapshot, VplanPlanningState } from './vplan.firestore';
+import { capDefaultPositionByEmp } from './vplan.sla-enforce';
 import type { VplanPositionDef } from './vplan.positions';
+import { positionsForCycle, resolveActiveDays } from './vplan.positions';
 import type { VplanStrategy } from './vplan.types';
 
-export function toEnginePositions(positions: VplanPositionDef[]): EnginePositionDef[] {
-  return positions.map((p) => ({
+export function toEnginePositions(
+  positions: VplanPositionDef[],
+  cycle?: string,
+): EnginePositionDef[] {
+  const filtered = cycle ? positionsForCycle(positions, cycle) : positions;
+  return filtered.map((p) => ({
     positionName: p.positionName,
     qty: p.qty,
     shifts: p.shifts.map((s) => ({
@@ -22,8 +28,9 @@ export function toEnginePositions(positions: VplanPositionDef[]): EnginePosition
       hours: s.hours,
       startTime: s.startTime,
       endTime: s.endTime,
+      days: s.days,
     })),
-    activeDays: p.activeDays,
+    activeDays: resolveActiveDays(p),
     coverageType: p.coverageType,
   }));
 }
@@ -55,31 +62,42 @@ export function buildEngineContext(opts: {
     nombre: e.displayName,
   }));
 
-  const useTrailing = opts.strategy.modes.useTrailing;
-  const trailingEmpIds = new Set(
-    Object.keys(opts.prevPlanningState.lastShiftByEmp || {}),
+  const defaultPositionByEmp = capDefaultPositionByEmp(
+    opts.snapshot.positions,
+    {
+      ...opts.prevPlanningState.defaultPositionByEmp,
+      ...opts.planningState.defaultPositionByEmp,
+    },
+    opts.strategy.cycle,
   );
 
-  const defaultShiftByEmp: Record<string, string> = {};
-  for (const [empId, band] of Object.entries(opts.planningState.defaultShiftByEmp || {})) {
-    if (!useTrailing || !trailingEmpIds.has(empId)) {
-      defaultShiftByEmp[empId] = band;
-    }
-  }
+  /** Banda fija (M/T/N) siempre manda sobre trailing — el resto del subgrupo rota. */
+  const defaultShiftByEmp: Record<string, string> = {
+    ...opts.prevPlanningState.defaultShiftByEmp,
+    ...opts.planningState.defaultShiftByEmp,
+  };
 
   return {
-    positions: toEnginePositions(opts.snapshot.positions),
+    positions: toEnginePositions(opts.snapshot.positions, opts.strategy.cycle),
     employees,
     daysInMonth,
     slaVendidas: opts.snapshot.slaVendidas,
     autoCycles: [opts.strategy.cycle],
     absences: opts.snapshot.absences,
-    defaultPositionByEmp: { ...opts.planningState.defaultPositionByEmp },
+    defaultPositionByEmp,
     defaultShiftByEmp,
-    prevMonthTrailingWorkDays: useTrailing ? opts.prevPlanningState.trailingWorkDays : undefined,
-    prevMonthTrailingRestDays: useTrailing ? opts.prevPlanningState.trailingRestDays : undefined,
-    prevMonthLastShiftByEmp: useTrailing ? opts.prevPlanningState.lastShiftByEmp : undefined,
-    prevMonthLastWorkBandBeforeRest: useTrailing ? opts.prevPlanningState.lastWorkBandBeforeRest : undefined,
+    prevMonthTrailingWorkDays: opts.strategy.modes.useTrailing
+      ? opts.prevPlanningState.trailingWorkDays
+      : undefined,
+    prevMonthTrailingRestDays: opts.strategy.modes.useTrailing
+      ? opts.prevPlanningState.trailingRestDays
+      : undefined,
+    prevMonthLastShiftByEmp: opts.strategy.modes.useTrailing
+      ? opts.prevPlanningState.lastShiftByEmp
+      : undefined,
+    prevMonthLastWorkBandBeforeRest: opts.strategy.modes.useTrailing
+      ? opts.prevPlanningState.lastWorkBandBeforeRest
+      : undefined,
     cctCutoffDay: opts.cctCutoffDay ?? 25,
     codeHoursHint: buildCodeHoursHint(opts.snapshot.positions),
   };

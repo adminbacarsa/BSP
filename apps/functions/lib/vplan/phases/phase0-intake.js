@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildVplanIntake = buildVplanIntake;
 exports.validateVplanRequest = validateVplanRequest;
+const vplan_prev_month_preview_1 = require("../vplan.prev-month-preview");
 function buildVplanIntake(request, snapshot) {
     return {
         empresaId: request.empresaId,
@@ -16,6 +17,7 @@ function buildVplanIntake(request, snapshot) {
         monthDays: snapshot.days.length,
         budgetMode: request.budgetMode ?? 'cct',
         preferredCycle: request.preferredCycle ?? '6+2',
+        prevMonthPreview: (0, vplan_prev_month_preview_1.buildPrevMonthTrailingPreview)(request.year, request.month, snapshot),
     };
 }
 function validateVplanRequest(request) {

@@ -3,9 +3,9 @@
  */
 
 import type { VplanSupplyModel } from '../vplan.types';
+import type { PlanningRulesConfig } from '../../planning/planning-rules.types';
+import { resolvePlanningRules } from '../../planning/planning-rules.service';
 import type { VplanEmployeeRecord } from '../vplan.firestore';
-
-const HARD_MAX_CCT_HOURS = 200;
 
 export function buildVplanSupplyModel(opts: {
   employees: VplanEmployeeRecord[];
@@ -13,7 +13,10 @@ export function buildVplanSupplyModel(opts: {
   absences: Record<string, Set<string>>;
   suggestedHeadcount?: number;
   previousMonthStateKey?: string;
+  planningRules?: PlanningRulesConfig;
 }): VplanSupplyModel {
+  const rules = resolvePlanningRules(opts.planningRules ?? null);
+  const cctMax = rules.cctMaxBillableHours;
   const monthDayCount = opts.days.length;
 
   const employees = opts.employees.map((emp) => {
@@ -21,7 +24,7 @@ export function buildVplanSupplyModel(opts: {
     const blockedDates = [...blocked].sort();
     const availableDays = monthDayCount - blockedDates.length;
     const prior = Math.max(0, emp.priorCctHours);
-    const cctHoursRemaining = Math.max(0, HARD_MAX_CCT_HOURS - prior);
+    const cctHoursRemaining = Math.max(0, cctMax - prior);
 
     return {
       employeeId: emp.id,
@@ -45,11 +48,12 @@ export function estimateOfferHours(
   supply: VplanSupplyModel,
   avgShiftHours = 8,
   workRatio = 6 / 7,
+  cctMaxFallback = 200,
 ): number {
   return supply.employees.reduce((sum, emp) => {
     const workable = Math.max(0, emp.availableDays) * workRatio;
     const capByDays = Math.ceil(workable) * avgShiftHours;
-    const capByCct = emp.cctHoursRemaining ?? HARD_MAX_CCT_HOURS;
+    const capByCct = emp.cctHoursRemaining ?? cctMaxFallback;
     return sum + Math.min(capByDays, capByCct);
   }, 0);
 }

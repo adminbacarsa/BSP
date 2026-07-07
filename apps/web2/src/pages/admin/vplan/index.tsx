@@ -15,6 +15,16 @@ import {
   VplanCoveragePanels,
 } from '@/components/vplan/VplanCoveragePanels';
 import {
+  VPLAN_STAGE_BY_INTENT,
+  VPLAN_STAGES,
+  VPLAN_VALIDATION_PLAYBOOK,
+} from '@/lib/vplan/vplan-stages';
+import {
+  downloadVplanEvalReport,
+  downloadVplanFullJson,
+  downloadVplanScheduleCsv,
+} from '@/lib/vplan/vplan-export';
+import {
   Brain,
   Play,
   Loader2,
@@ -23,6 +33,9 @@ import {
   XCircle,
   FlaskConical,
   FileJson,
+  ListChecks,
+  ChevronRight,
+  Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -36,14 +49,6 @@ const MODES: { value: VplanRunMode; label: string }[] = [
   { value: 'REPLAN_ABSENCES', label: 'REPLAN_ABSENCES' },
   { value: 'REBALANCE_HOURS', label: 'REBALANCE_HOURS' },
   { value: 'MIGRATE_CYCLE', label: 'MIGRATE_CYCLE' },
-];
-
-const INTENTS: { value: VplanIntent; label: string }[] = [
-  { value: 'full', label: 'Pipeline completo (0–10)' },
-  { value: 'feasibility', label: 'Hasta viabilidad (0–3)' },
-  { value: 'generate', label: 'Hasta generación (0–5)' },
-  { value: 'verify', label: 'Hasta verificación (0–7)' },
-  { value: 'intake', label: 'Solo intake' },
 ];
 
 function statusBadge(status: VplanRunResponse['status']) {
@@ -79,10 +84,18 @@ export default function VplanLabPage() {
     [objectives, objectiveId],
   );
 
+  const selectedStage = VPLAN_STAGE_BY_INTENT[intent];
+
   const employeeNameMap = useMemo(
     () => buildEmployeeNameMap(result?.context.supply),
     [result?.context.supply],
   );
+
+  const applyPlaybookStep = (stepIntent: VplanIntent, stepMode: VplanRunMode) => {
+    setIntent(stepIntent);
+    setMode(stepMode);
+    toast.info(`Etapa ${VPLAN_STAGE_BY_INTENT[stepIntent]?.shortLabel ?? stepIntent} · modo ${stepMode}`);
+  };
 
   const handleRun = async () => {
     if (!empresaId || !objectiveId) {
@@ -232,17 +245,49 @@ export default function VplanLabPage() {
             </label>
 
             <label className="block text-xs font-bold text-slate-600 uppercase">
-              Intent (etapas)
+              Intent (etapa hasta)
               <select
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium"
                 value={intent}
-                onChange={(e) => setIntent(e.target.value as VplanIntent)}
+                onChange={(e) => {
+                  const next = e.target.value as VplanIntent;
+                  setIntent(next);
+                  const stage = VPLAN_STAGE_BY_INTENT[next];
+                  if (stage && next !== 'full') {
+                    setMode(stage.recommendedMode);
+                  }
+                }}
               >
-                {INTENTS.map((i) => (
-                  <option key={i.value} value={i.value}>{i.label}</option>
+                {VPLAN_STAGES.map((s) => (
+                  <option key={s.intent} value={s.intent}>
+                    {s.shortLabel} — {s.title}
+                  </option>
                 ))}
               </select>
             </label>
+
+            {selectedStage && (
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-2">
+                <p className="text-[10px] font-black uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
+                  <ListChecks size={12} />
+                  Verificar antes de avanzar
+                </p>
+                {selectedStage.prerequisite && (
+                  <p className="text-[11px] text-indigo-800/80">
+                    Requiere etapa anterior:{' '}
+                    <strong>{VPLAN_STAGE_BY_INTENT[selectedStage.prerequisite]?.shortLabel}</strong>
+                  </p>
+                )}
+                <ul className="text-[11px] text-slate-700 space-y-1 list-disc pl-4">
+                  {selectedStage.checks.slice(0, 4).map((c) => (
+                    <li key={c}>{c}</li>
+                  ))}
+                </ul>
+                <p className="text-[10px] text-slate-500 font-mono truncate" title={selectedStage.output}>
+                  → {selectedStage.output}
+                </p>
+              </div>
+            )}
 
             <label className="block text-xs font-bold text-slate-600 uppercase">
               Dotación (oferta)
@@ -328,6 +373,52 @@ export default function VplanLabPage() {
                   ))}
                 </div>
 
+                {result.context.intake?.prevMonthPreview && (
+                  <div className="text-xs rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 space-y-2">
+                    <p className="font-bold text-indigo-900">
+                      Mes anterior ({result.context.intake.prevMonthPreview.prevMonth}/{result.context.intake.prevMonthPreview.prevYear})
+                    </p>
+                    <p className="text-indigo-800">
+                      {result.context.intake.prevMonthPreview.assignmentCount} turnos leídos ·{' '}
+                      {result.context.intake.prevMonthPreview.employeesWithTrailing} guardia(s) con racha · zona AR/Córdoba
+                    </p>
+                    <div className="overflow-x-auto rounded-lg border border-indigo-100 bg-white">
+                      <table className="w-full text-[10px] border-collapse min-w-[640px]">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-600">
+                            <th className="text-left p-1.5 sticky left-0 bg-slate-50">Guardia</th>
+                            <th className="p-1">Último</th>
+                            <th className="p-1">Racha</th>
+                            {result.context.intake.prevMonthPreview.tailDateStrs.map((d) => (
+                              <th key={d} className="p-1 font-mono">{d.slice(8)}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {result.context.intake.prevMonthPreview.rows.map((row) => (
+                            <tr key={row.employeeId} className="border-t border-slate-100">
+                              <td className="p-1.5 font-medium text-slate-800 sticky left-0 bg-white max-w-[140px] truncate" title={row.displayName}>
+                                {row.displayName.split(',')[0]}
+                              </td>
+                              <td className="p-1 text-center font-mono">
+                                {row.lastDate ? `${row.lastDate.slice(8)}=${row.lastCode ?? '—'}` : '—'}
+                              </td>
+                              <td className="p-1 text-center text-slate-600">
+                                {row.trailingWork != null ? `W×${row.trailingWork}` : row.trailingRest != null ? `F×${row.trailingRest}` : '—'}
+                              </td>
+                              {row.tailDays.map((cell) => (
+                                <td key={cell.dateStr} className={`p-1 text-center font-bold ${cell.code ? 'text-indigo-900' : 'text-slate-300'}`}>
+                                  {cell.code || '·'}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {result.context.feasibility && (
                   <div className="text-xs rounded-xl border border-slate-200 p-3 space-y-1">
                     <p className="font-bold text-slate-800">Viabilidad</p>
@@ -354,14 +445,53 @@ export default function VplanLabPage() {
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => setShowJson((v) => !v)}
-                  className="flex items-center gap-2 text-xs font-bold text-indigo-600 hover:underline"
-                >
-                  <FileJson size={14} />
-                  {showJson ? 'Ocultar JSON' : 'Ver JSON completo'}
-                </button>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      downloadVplanEvalReport(result, employeeNameMap);
+                      toast.success('Informe de evaluación descargado');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold shadow-sm hover:bg-indigo-700 active:scale-95"
+                  >
+                    <Download size={14} />
+                    Informe evaluación (.json)
+                  </button>
+                  {result.context.verification?.coverage?.schedulePreview?.rows.length ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        downloadVplanScheduleCsv(result, employeeNameMap);
+                        toast.success('Cronograma CSV descargado');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 active:scale-95"
+                    >
+                      <Download size={14} />
+                      Cronograma (.csv)
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      downloadVplanFullJson(result);
+                      toast.success('JSON completo descargado');
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 active:scale-95"
+                  >
+                    <FileJson size={14} />
+                    JSON completo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowJson((v) => !v)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-600 hover:bg-indigo-50"
+                  >
+                    {showJson ? 'Ocultar vista' : 'Vista previa'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Para revisión con el asistente: descargá <strong>Informe evaluación</strong> y pegá el archivo en el chat.
+                </p>
                 {showJson && (
                   <pre className="text-[10px] bg-slate-900 text-slate-100 p-3 rounded-xl overflow-auto max-h-64">
                     {JSON.stringify(result, null, 2)}
@@ -379,6 +509,70 @@ export default function VplanLabPage() {
         {result?.context.deliverable && (
           <DiffTable rows={result.context.deliverable.diff} nameMap={employeeNameMap} />
         )}
+
+        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 space-y-4">
+          <h2 className="font-black text-slate-800 flex items-center gap-2">
+            <ListChecks size={18} className="text-indigo-600" />
+            Playbook de validación (etapa por etapa)
+          </h2>
+          <p className="text-sm text-slate-600 max-w-3xl">
+            Ejecutá cada paso en orden. Si una etapa falla, <strong>no avances</strong> — corregí esa fase antes de seguir.
+            El pipeline completo (full) solo tiene sentido cuando las etapas 3–7 pasan individualmente.
+          </p>
+
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {VPLAN_VALIDATION_PLAYBOOK.map((pb) => {
+              const stage = VPLAN_STAGE_BY_INTENT[pb.intent];
+              const lastStep = result?.context.steps.find((s) => s.phase === stage?.phase);
+              const done = lastStep?.ok === true;
+              return (
+                <button
+                  key={pb.step}
+                  type="button"
+                  onClick={() => applyPlaybookStep(pb.intent, pb.mode)}
+                  className="text-left rounded-xl border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40 p-3 transition-all active:scale-[0.99]"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                      Paso {pb.step}
+                    </span>
+                    {done && (
+                      <span className="text-[10px] font-bold text-emerald-700 flex items-center gap-0.5">
+                        <CheckCircle2 size={11} /> OK
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-bold text-slate-800">{stage?.shortLabel}</p>
+                  <p className="text-[11px] text-slate-500">{pb.mode} · {pb.note}</p>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 mt-2">
+                    Cargar parámetros <ChevronRight size={12} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 text-left text-slate-500 uppercase tracking-wider">
+                  <th className="px-3 py-2 font-black">Fase</th>
+                  <th className="px-3 py-2 font-black">Qué produce</th>
+                  <th className="px-3 py-2 font-black">Criterio de paso</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {VPLAN_STAGES.filter((s) => s.intent !== 'full').map((s) => (
+                  <tr key={s.intent} className="hover:bg-slate-50/80">
+                    <td className="px-3 py-2 font-bold text-slate-800 whitespace-nowrap">{s.shortLabel}</td>
+                    <td className="px-3 py-2 text-slate-600">{s.output}</td>
+                    <td className="px-3 py-2 text-slate-700">{s.checks[0]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </DashboardLayout>
   );

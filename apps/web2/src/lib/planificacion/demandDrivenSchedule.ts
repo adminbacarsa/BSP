@@ -5,7 +5,7 @@
 import { buildObjectiveCoverageDemand, isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool, type ObjectiveDayDemand } from './objectiveCoverageDemand';
 import {
     effectiveShiftsForPositionDay,
-    HARD_MAX_HOURS,
+    hardMaxForCtx,
     positionIsActiveOn,
     type V2Assignment,
     type V2EngineContext,
@@ -180,7 +180,7 @@ function tryFillSlotFromFrancoRescue(
         : sortCandidates(candidates, params, code, inCurrent, { preferRemainingBudget: true });
 
     for (const empId of sorted) {
-        if (!options?.allowSlaClose && !authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > HARD_MAX_HOURS) {
+        if (!options?.allowSlaClose && !authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > hardMaxForCtx(ctx)) {
             continue;
         }
         const restOk = options?.allowSlaClose
@@ -310,8 +310,8 @@ function sortCandidates(
         const ha = cctUsed(runtime, a, inCurrent, limitedEmpIds.has(a));
         const hb = cctUsed(runtime, b, inCurrent, limitedEmpIds.has(b));
         if (options?.preferRemainingBudget) {
-            const remA = HARD_MAX_HOURS - ha;
-            const remB = HARD_MAX_HOURS - hb;
+            const remA = hardMaxForCtx(ctx) - ha;
+            const remB = hardMaxForCtx(ctx) - hb;
             if (remA !== remB) return remB - remA;
             if (ha >= 192 && hb < 192) return 1;
             if (hb >= 192 && ha < 192) return -1;
@@ -435,7 +435,7 @@ function tryFillOneSlot(
     }
 
     for (const empId of candidates) {
-        if (!options?.allowSlaClose && !authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > HARD_MAX_HOURS) {
+        if (!options?.allowSlaClose && !authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > hardMaxForCtx(ctx)) {
             continue;
         }
         const restOk = options?.allowSlaClose
@@ -485,7 +485,7 @@ function tryPromoteRetToSlot(
     const candidates = sortCandidates(retIds, params, code, inCurrent, { preferRemainingBudget: true });
 
     for (const empId of candidates) {
-        if (!authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > HARD_MAX_HOURS) {
+        if (!authorized?.has(empId) && cctUsed(runtime, empId, inCurrent, limitedEmpIds.has(empId)) + sHrs > hardMaxForCtx(ctx)) {
             continue;
         }
         const restOk = ctx.rotateShifts !== false
@@ -685,7 +685,7 @@ function canUpgradeCellTo12h(
     const oldHrs = Number(a.hours) || 0;
     const delta = sHrs - oldHrs;
     const authorized = ctx.authorizedOver200Ids;
-    if (!authorized?.has(a.empId) && cctUsed(runtime, a.empId, inCurrent, limitedEmpIds.has(a.empId)) + delta > HARD_MAX_HOURS) {
+    if (!authorized?.has(a.empId) && cctUsed(runtime, a.empId, inCurrent, limitedEmpIds.has(a.empId)) + delta > hardMaxForCtx(ctx)) {
         return false;
     }
     return canAssignBand(params, a.empId, a.dateStr, target, sStart, sHrs)

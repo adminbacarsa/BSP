@@ -258,6 +258,7 @@ function inferCycleSlot(
 ): number | null {
     if (!lastCode) return null;
     const code = lastCode.toUpperCase();
+    const candidates: number[] = [];
 
     if (code === 'RET' || code === 'R') {
         const effectiveBand = lastWorkBand?.toUpperCase();
@@ -271,9 +272,9 @@ function inferCycleSlot(
                 if (CYCLE_24_MTN[(may31 - b + 24) % 24] !== effectiveBand) break;
                 ok++;
             }
-            if (ok >= need) return june1;
+            if (ok >= need) candidates.push(june1);
         }
-        return null;
+        return candidates[0] ?? null;
     }
 
     for (let june1 = 0; june1 < 24; june1++) {
@@ -286,7 +287,7 @@ function inferCycleSlot(
                 if (CYCLE_24_MTN[(may31 - b + 24) % 24] !== code) break;
                 ok++;
             }
-            if (ok >= need) return june1;
+            if (ok >= need) candidates.push(june1);
         } else if (FRANCO_CODES.has(code)) {
             const need = Math.max(1, trailingRest ?? 1);
             let ok = 0;
@@ -300,10 +301,25 @@ function inferCycleSlot(
             } else {
                 if (!WORK_BANDS.has(CYCLE_24_MTN[june1])) continue;
             }
-            return june1;
+            candidates.push(june1);
         }
     }
-    return null;
+
+    if (candidates.length === 0) return null;
+
+    if (WORK_BANDS.has(code)) {
+        const streak = trailingWork ?? 1;
+        const continueSameBand = streak < 6;
+        if (continueSameBand) {
+            const same = candidates.find((d) => CYCLE_24_MTN[d] === code);
+            if (same !== undefined) return same;
+        } else {
+            const franco = candidates.find((d) => CYCLE_24_MTN[d] === 'F');
+            if (franco !== undefined) return franco;
+        }
+    }
+
+    return candidates[0];
 }
 
 function resolveOpeningSlots(ctx: EngineContext, subgroups: string[][]): Record<string, number> {
@@ -492,19 +508,25 @@ export function generateSchedule(ctx: EngineContext): EngineResult {
     const empSubgroup = new Map<string, string[]>();
     subgroups.forEach(sub => sub.forEach(id => empSubgroup.set(id, sub)));
 
-    // displacement: cuando hay empleado con banda fija en el subgrupo,
-    // el resto "cede" esa banda para mantener 1M+1T+1N+1F diario.
-    const subgroupDisplacement = new Map<string, { fixedBand: string; fixedOpening: number }>();
+    // Rotadores ceden bandas fijas de otros del subgrupo (1M+1T+1N+1F por día).
+    type FixedBandRef = { fixedEmpId: string; fixedBand: string; fixedOpening: number };
+    const rotatorFixedBands = new Map<string, FixedBandRef[]>();
     for (const subGroup of subgroups) {
-        const fixedEmpId = subGroup.find(id => {
-            const fb = ctx.defaultShiftByEmp?.[id]?.toUpperCase();
-            return fb && WORK_BANDS.has(fb) && openingSlotByEmp[id] !== undefined;
-        });
-        if (!fixedEmpId) continue;
-        const fixedBand = ctx.defaultShiftByEmp![fixedEmpId].toUpperCase();
-        const fixedOpening = openingSlotByEmp[fixedEmpId];
+        const fixedList: FixedBandRef[] = [];
         for (const empId of subGroup) {
-            if (empId !== fixedEmpId) subgroupDisplacement.set(empId, { fixedBand, fixedOpening });
+            const fb = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+            if (fb && WORK_BANDS.has(fb) && openingSlotByEmp[empId] !== undefined) {
+                fixedList.push({
+                    fixedEmpId: empId,
+                    fixedBand: fb,
+                    fixedOpening: openingSlotByEmp[empId],
+                });
+            }
+        }
+        if (fixedList.length === 0) continue;
+        for (const empId of subGroup) {
+            if (fixedList.some((f) => f.fixedEmpId === empId)) continue;
+            rotatorFixedBands.set(empId, fixedList);
         }
     }
 
@@ -555,15 +577,18 @@ export function generateSchedule(ctx: EngineContext): EngineResult {
             let rawCodeFinal: string;
 
             if (ownFixedBand && WORK_BANDS.has(ownFixedBand) && WORK_BANDS.has(rawCode)) {
-                rawCodeFinal = ownFixedBand; // siempre su banda en días laborales
+                rawCodeFinal = ownFixedBand;
             } else {
-                const disp = subgroupDisplacement.get(emp.id);
-                if (disp && rawCode === disp.fixedBand && WORK_BANDS.has(rawCode)) {
-                    const naturalOfFixed = CYCLE_24_MTN[(disp.fixedOpening + di) % 24] as string;
+                const fixedList = rotatorFixedBands.get(emp.id) ?? [];
+                let displaced = false;
+                for (const f of fixedList) {
+                    if (rawCode !== f.fixedBand || !WORK_BANDS.has(rawCode)) continue;
+                    const naturalOfFixed = CYCLE_24_MTN[(f.fixedOpening + di) % 24] as string;
                     rawCodeFinal = WORK_BANDS.has(naturalOfFixed) ? naturalOfFixed : rawCode;
-                } else {
-                    rawCodeFinal = rawCode;
+                    displaced = true;
+                    break;
                 }
+                if (!displaced) rawCodeFinal = rawCode;
             }
 
             const isExcludedDay = !isRetFloater && WORK_BANDS.has(rawCodeFinal) && !!pos.excludedDates?.includes(dateStr);
@@ -642,7 +667,7 @@ export interface CoverageReport {
     uncoveredByDay: Record<string, Array<{ positionName: string; shiftCode: string; missing: number }>>;
 }
 
-const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET']);
+const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET', 'NR']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
 
 export function verifyCoverage(ctx: EngineContext, assignments: EngineAssignment[]): CoverageReport {

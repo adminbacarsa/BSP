@@ -187,6 +187,8 @@ import { verifyScheduleForm } from '@/lib/planificacion/scheduleFormValidator';
 import { rebalanceScheduleForm, type FormRebalanceLogEntry } from '@/lib/planificacion/scheduleFormRebalancer';
 import AjustarCronoOperativoModal from '@/components/admin/planificacion/AjustarCronoOperativoModal';
 import EquilibrarCronoModal from '@/components/admin/planificacion/EquilibrarCronoModal';
+import { usePlanningRules } from '@/hooks/usePlanningRules';
+import { enabledPlanningCycles, planningHourLimits } from '@/lib/planning/planning-rules.runtime';
 import {
     buildPlanningSnapshotFromGrid,
     diffPlanningSnapshots,
@@ -539,6 +541,11 @@ const rfzDocToShiftView = (rfz: any) => ({
 
 export default function PlanificacionPage() {
     const { empresaId, empresa } = useEmpresa();
+    const { rules: planningRules } = usePlanningRules(empresaId);
+    const planningLimits = useMemo(
+        () => planningHourLimits(planningRules),
+        [planningRules],
+    );
     const { isSuperAdmin, rolePermissions } = useAuth();
     const canPublishPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('publish');
     const canCorrectPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('correct');
@@ -2148,10 +2155,10 @@ export default function PlanificacionPage() {
         const rule =
             agreements.find((a: any) => a.name === emp.laborAgreement) ||
             agreements.find((a: any) => a.name === 'General') || {
-                maxHoursWeekly: DEFAULT_LIMITS.weekly,
-                maxHoursMonthly: DEFAULT_LIMITS.monthly,
+                maxHoursWeekly: planningLimits.weekly,
+                maxHoursMonthly: planningLimits.monthly,
             };
-        const limitMonthly = parseInt(String((rule as any).maxHoursMonthly), 10) || DEFAULT_LIMITS.monthly;
+        const limitMonthly = parseInt(String((rule as any).maxHoursMonthly), 10) || planningLimits.monthly;
         const pendingShift = pendingChanges[key];
         const existingShift = shiftsMap[key];
         const finalShift = pendingShift ? (pendingShift.isDeleted ? null : pendingShift) : existingShift;
@@ -3291,13 +3298,13 @@ export default function PlanificacionPage() {
         if (!confirm(`¿Confirmar y guardar ${count} cambios?`)) return;
 
         // Verificar si algún empleado superaría las 200h
-        const over200: { name: string; hours: number }[] = [];
+        const overCap: { name: string; hours: number }[] = [];
         Object.keys(pendingChanges).forEach(key => {
             const empId = key.split('_')[0];
             const hours = empMonthlyHours[empId] || 0;
-            if (hours > 200) {
+            if (hours > planningLimits.monthly) {
                 const empName = displayedEmployees.find((e: any) => e.id === empId)?.name || empId;
-                if (!over200.some(e => e.name === empName)) over200.push({ name: empName, hours: Math.round(hours) });
+                if (!overCap.some(e => e.name === empName)) overCap.push({ name: empName, hours: Math.round(hours) });
             }
         });
 
@@ -3606,8 +3613,8 @@ export default function PlanificacionPage() {
             }
         };
 
-        if (over200.length > 0) {
-            setAuthModal({ pendingFn: doSave, employees: over200, operatorName: activeActorName || operatorName, isSaveFlow: true });
+        if (overCap.length > 0) {
+            setAuthModal({ pendingFn: doSave, employees: overCap, operatorName: activeActorName || operatorName, isSaveFlow: true });
             setAuthPin('');
             setAuthError('');
             return;
@@ -5110,6 +5117,8 @@ export default function PlanificacionPage() {
                 strictSixTwo: genBrain.strictSixTwo,
                 noFlexSchemeEmployees: true,
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
+                cctMaxBillableHours: planningRules.cctMaxBillableHours,
+                targetAvgHoursPerEmployee: planningRules.targetAvgHoursPerEmployee,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
             const canFloater = !can6x1 && canUseFixedBandFloater(baseGenCtx);
@@ -5271,6 +5280,8 @@ export default function PlanificacionPage() {
                 prevMonthTrailingWorkDays,
                 prevMonthTrailingRestDays,
                 prevMonthLastShiftByEmp,
+                cctMaxBillableHours: planningRules.cctMaxBillableHours,
+                targetAvgHoursPerEmployee: planningRules.targetAvgHoursPerEmployee,
             } as any;
             let finalAssignments = gen.assignments;
             let coverage = strictPipeline?.verification
@@ -6041,7 +6052,7 @@ export default function PlanificacionPage() {
                             {/* FILA ACTUAL (Editable) - Solo se muestra si NO es vista de snapshot */}
                             {!isSnapshotView && (
                                 <tr
-                                    className={`group ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
+                                    className={`group ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
                                     onDragOver={forceShowAll ? undefined : (e) => handleRowDragOver(e, idx)}
                                     onDrop={forceShowAll ? undefined : (e) => handleRowDrop(e, idx)}
                                     onDragEnd={forceShowAll ? undefined : () => setDragOverVisual(null)}
@@ -6052,7 +6063,7 @@ export default function PlanificacionPage() {
                                         onClick={() => !isSnapshotView && handleRowHeaderClick(idx)}
                                         title={forceShowAll ? 'Modo cercanos: ordenado por distancia' : 'Clic para seleccionar fila completa'}
                                         style={{ width: nameColWidth, minWidth: nameColWidth }}
-                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${forceShowAll ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= 200 ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
+                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${forceShowAll ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
                                         {(() => {
                                             if (compareCompact) {
@@ -6069,7 +6080,7 @@ export default function PlanificacionPage() {
                                             const cctHours = empCctCurrentHours[emp.id] || 0;
                                             const retDays = empRetDays[emp.id] || 0;
                                             const displayHours = hoursMode === 'cct' ? cctHours : monthHours;
-                                            const hoursColor = displayHours >= 200 ? 'text-red-600 font-black'
+                                            const hoursColor = displayHours >= planningLimits.monthly ? 'text-red-600 font-black'
                                                 : displayHours >= 185 ? 'text-orange-500 font-bold'
                                                 : displayHours >= 160 ? 'text-amber-500'
                                                 : displayHours > 0   ? 'text-slate-500 dark:text-slate-300'
@@ -9584,7 +9595,7 @@ export default function PlanificacionPage() {
                                             </div>
                                         </div>
                                         <p className="text-xs text-slate-500 font-medium mb-4">
-                                            Tope CCT 422/05: <b>200h por ciclo</b>. La tabla refleja la <b>última automatización</b> de este objetivo: si corregiste datos o filtros, volvé a <b>generar</b> para actualizarla.
+                                            Tope CCT 422/05: <b>{planningLimits.monthly}h por ciclo</b>. La tabla refleja la <b>última automatización</b> de este objetivo: si corregiste datos o filtros, volvé a <b>generar</b> para actualizarla.
                                             La cola del ciclo (26..mes anterior) solo suma turnos <b>de este objetivo</b> y <b>no operativos</b> (reten / cobertura ops. / SLA virtual), para no mezclar con otros cronogramas. Los borradores sí se cuentan (siguen siendo crono planificado).
                                         </p>
                                     </>
@@ -9625,10 +9636,10 @@ export default function PlanificacionPage() {
                                                 const retHours = (autoV2GenStats.employeeRetHoursPotential || {})[emp.id] || 0;
                                                 const pos = posByEmp[emp.id] || (idleSet.has(emp.id) ? '—' : 'Sin puesto');
                                                 const isIdle = idleSet.has(emp.id);
-                                                const isCapped = curr >= 200 || next >= 200;
+                                                const isCapped = curr >= planningLimits.monthly || next >= planningLimits.monthly;
                                                 const isHigh = curr >= 192 || next >= 192;
                                                 const status = isIdle ? 'Capacidad ociosa' :
-                                                    isCapped ? 'CAP 200h alcanzado' :
+                                                    isCapped ? `CAP ${planningLimits.monthly}h alcanzado` :
                                                     isHigh ? 'Cerca del cap (≥192h)' :
                                                     bufCurr + bufNext >= 40 ? 'Disponible para más' :
                                                     'Carga normal';
@@ -9641,8 +9652,8 @@ export default function PlanificacionPage() {
                                             });
                                             // Ordenar: capped primero, después por buffer descendente
                                             rows.sort((a, b) => {
-                                                const aCap = a.curr >= 200 || a.next >= 200 ? 0 : 1;
-                                                const bCap = b.curr >= 200 || b.next >= 200 ? 0 : 1;
+                                                const aCap = a.curr >= planningLimits.monthly || a.next >= planningLimits.monthly ? 0 : 1;
+                                                const bCap = b.curr >= planningLimits.monthly || b.next >= planningLimits.monthly ? 0 : 1;
                                                 if (aCap !== bCap) return aCap - bCap;
                                                 return (b.bufCurr + b.bufNext) - (a.bufCurr + a.bufNext);
                                             });
@@ -11645,6 +11656,7 @@ export default function PlanificacionPage() {
                 year={currentDate.getFullYear()}
                 month={currentDate.getMonth() + 1}
                 employees={planningDotacionEmployees}
+                cctMaxBillableHours={planningLimits.monthly}
                 onApplyPending={(changes) => {
                     const newPending: Record<string, any> = { ...pendingChanges };
                     for (const c of changes) {

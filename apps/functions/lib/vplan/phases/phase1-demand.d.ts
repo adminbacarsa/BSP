@@ -7,4 +7,5 @@ export declare function buildVplanDemandModel(opts: {
         dayLetter: string;
     }>;
     slaVendidas: number;
+    cycle?: string;
 }): VplanDemandModel;

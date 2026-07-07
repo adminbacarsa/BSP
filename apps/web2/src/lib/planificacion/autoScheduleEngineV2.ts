@@ -173,6 +173,16 @@ const V2_AGREEMENT_REST_BASE: AgreementRestConfig = {
 export const TARGET_AVG_HOURS = SUVICO_POLICY.REST.TARGET_MONTHLY;
 /** Tope duro de horas facturables por ciclo CCT; fuente: `SUVICO_POLICY.REST.MAX_MONTHLY_HARD`. */
 export const HARD_MAX_HOURS = SUVICO_POLICY.REST.MAX_MONTHLY_HARD;
+
+export function hardMaxForCtx(ctx?: Pick<V2EngineContext, 'cctMaxBillableHours'>): number {
+    const n = ctx?.cctMaxBillableHours;
+    return typeof n === 'number' && n > 0 ? n : HARD_MAX_HOURS;
+}
+
+export function targetAvgForCtx(ctx?: Pick<V2EngineContext, 'targetAvgHoursPerEmployee'>): number {
+    const n = ctx?.targetAvgHoursPerEmployee;
+    return typeof n === 'number' && n > 0 ? n : TARGET_AVG_HOURS;
+}
 /**
  * La racha 48h → descanso 35h del CCT se controla día a día con `checkRestBetweenShifts` y
  * `verifyScheduleCoverage` (no hay "tope semanal blando" que la reemplace). Tras generar,
@@ -310,6 +320,10 @@ export interface V2EngineContext {
      * código de turno del slot (M/T/N/etc.) en el objetivo pedido.
      */
     globalRetPool?: Array<{ id: string; nombre?: string; name?: string }>;
+    /** Tope CCT facturable por ciclo (desde `planning_rules/{empresaId}`). */
+    cctMaxBillableHours?: number;
+    /** Target promedio informativo por empleado/mes (desde reglas de planificación). */
+    targetAvgHoursPerEmployee?: number;
     /**
      * IDs de empleados autorizados por supervisor para superar el tope CCT de 200h.
      * El motor omite el chequeo `used + hrs > HARD_MAX_HOURS` para estos empleados.
@@ -707,6 +721,8 @@ function dayPeakConcurrentForPosition(pos: V2PositionDef, dayLetter: string, aut
 }
 
 export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
+    const hardMax = hardMaxForCtx(ctx);
+    const targetAvg = targetAvgForCtx(ctx);
     const { cL, cF, key: cycleKey } = pickRepresentativeCycle(ctx.autoCycles);
     const cycleFactor = (cL + cF) / cL; // p.ej. 6+1 → 7/6 ≈ 1.166
 
@@ -779,9 +795,9 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
     /** Si hay horas vendidas, ese es el verdadero objetivo de planificación. Si no, la estructura. */
     const effectiveTargetHours = contractedHours > 0 ? contractedHours : structuralDemandHours;
     /** Por horas: cuántos "192h" hacen falta (sin mezclar factor de ciclo en el cupo total). */
-    const peopleNeededForTarget = Math.ceil(effectiveTargetHours / TARGET_AVG_HOURS);
+    const peopleNeededForTarget = Math.ceil(effectiveTargetHours / targetAvg);
     /** Heurística: con francos del ciclo a veces conviene +1 cabeza; no bloquea si ya cierran las horas. */
-    const peopleSuggestedWithCycle = Math.ceil((effectiveTargetHours / TARGET_AVG_HOURS) * cycleFactor);
+    const peopleSuggestedWithCycle = Math.ceil((effectiveTargetHours / targetAvg) * cycleFactor);
 
     const mode: V2BudgetMode = ctx.budgetMode === 'calendar' ? 'calendar' : 'cct';
     const cutoffDay = ctx.cctCutoffDay && ctx.cctCutoffDay >= 1 && ctx.cctCutoffDay <= 31 ? ctx.cctCutoffDay : 25;
@@ -801,7 +817,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
         const absenceDays = absenceDaysCurrent + absenceDaysNext;
 
         if (mode === 'calendar') {
-            const availableHours = Math.max(0, HARD_MAX_HOURS - absenceDays * 8);
+            const availableHours = Math.max(0, hardMax - absenceDays * 8);
             return {
                 id: emp.id,
                 nombre: emp.nombre,
@@ -819,7 +835,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
         // Regla dura: en cada ciclo CCT (26→25) el empleado no puede pasar de 200h (HARD_MAX_HOURS).
         // Tramo 1 → cutoff: cola CCT + horas del tramo ≤ 200 → tope = 200 − cola.
         // Tramo cutoff+1 → fin: ciclo CCT nuevo arranca en cero → tope = 200 (lo que falte se planificará el mes próximo).
-        const remainingHardCurrent = Math.max(0, HARD_MAX_HOURS - priorHours);
+        const remainingHardCurrent = Math.max(0, hardMax - priorHours);
         const workableDaysCurrent = Math.max(0, daysCurrent.length - absenceDaysCurrent);
         // Capacidad por tramo: días del tramo × proporción de trabajo del ciclo (cL/(cL+cF))
         // × jornada. Los días laborables efectivos suelen ser fraccionarios (ej. 6+2 en
@@ -833,7 +849,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
         const workableDaysNext = Math.max(0, daysNext.length - absenceDaysNext);
         const rawWorkSlotsNext = workableDaysNext * workRatio;
         const capacityNext = Math.ceil(rawWorkSlotsNext) * avgShiftHours;
-        const availableNextCycle = Math.max(0, Math.min(HARD_MAX_HOURS, capacityNext));
+        const availableNextCycle = Math.max(0, Math.min(hardMax, capacityNext));
 
         return {
             id: emp.id,
@@ -880,7 +896,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
 
     if (peopleAvailable < peopleNeededForTarget) {
         reasons.push(
-            `Dotación insuficiente por horas: hacen falta al menos ${peopleNeededForTarget} personas con ~${TARGET_AVG_HOURS}h c/u para ${Math.round(effectiveTargetHours)}h y hay ${peopleAvailable}.`
+            `Dotación insuficiente por horas: hacen falta al menos ${peopleNeededForTarget} personas con ~${targetAvg}h c/u para ${Math.round(effectiveTargetHours)}h y hay ${peopleAvailable}.`
         );
     } else if (peopleAvailable < peopleSuggestedWithCycle) {
         warnings.push(
@@ -986,7 +1002,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
                 const avgWorkDays = (cLc / (cLc + cFc)) * ctx.daysInMonth.length;
                 // Tope facturable por tipo de turno: 8h→200h (25d), 12h→192h (16d).
                 // floor(MAX/shiftHrs)*shiftHrs evita fracciones: 200/12=16.67→16×12=192.
-                const billableCap = Math.floor(HARD_MAX_HOURS / avgHrs) * avgHrs;
+                const billableCap = Math.floor(hardMax / avgHrs) * avgHrs;
                 const hrsPerPerson = Math.min(avgWorkDays * avgHrs, billableCap);
                 const buffer = spp * hrsPerPerson - structuralDemandHours;
                 return {
@@ -1160,6 +1176,8 @@ function isoWeekKey(d: Date): string {
 /** Genera asignaciones respetando ciclo CCT (4+2, 6+1...), 200h/ciclo, ausencias y horas vendidas.
  *  V4 (alias generateScheduleV4): + D12/N12 por ausencia T; EN/RO titular + backup Puesto 24hs. */
 export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
+    const hardMax = hardMaxForCtx(ctx);
+    const targetAvg = targetAvgForCtx(ctx);
     // Wrapper de shiftHours que usa ctx.codeHoursHint como fallback para códigos custom (RO, RON, etc.).
     const _hint = ctx.codeHoursHint || {};
     const shiftHoursH = (s: V2ShiftDef): number => {
@@ -1217,7 +1235,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             (preferMatch ? 100 : 0) +                              // objetivo preferido manda
             (distanceKm === null ? 0 : Math.max(0, 40 - distanceKm * 0.8)) + // más cerca, mejor
             (1 - absenceRate) * 30;                                // menor ausentismo, mejor
-        empMeta[e.id] = { preferMatch, distanceKm, absenceRate, targetHours: TARGET_AVG_HOURS, priorityScore };
+        empMeta[e.id] = { preferMatch, distanceKm, absenceRate, targetHours: targetAvg, priorityScore };
     });
 
     // ── PASO 1: Matching empleado → puesto ──────────────────────────────
@@ -1274,7 +1292,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 const cyclicN = Math.max(1, positionNeed[pos.positionName] || 1);
                 const posPerf = feasibility.perPosition.find(p => p.positionName === pos.positionName);
                 const capN = posPerf && posPerf.monthHours > 0
-                    ? Math.ceil(posPerf.monthHours / HARD_MAX_HOURS)
+                    ? Math.ceil(posPerf.monthHours / hardMax)
                     : cyclicN;
                 const need = Math.max(cyclicN, capN);
                 const have = positionGroups[pos.positionName].length;
@@ -1302,7 +1320,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const cyclicNeed = Math.max(1, positionNeed[posName] || 1);
         const posPerf = feasibility.perPosition.find(p => p.positionName === posName);
         const capNeed = posPerf && posPerf.monthHours > 0
-            ? Math.ceil(posPerf.monthHours / HARD_MAX_HOURS)
+            ? Math.ceil(posPerf.monthHours / hardMax)
             : cyclicNeed;
         const need = Math.max(cyclicNeed, capNeed);
         const group = positionGroups[posName];
@@ -2075,7 +2093,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const sHrs = shiftHoursH(sh);
         const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
         const sEnd = sh.endTime || undefined;
-        if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > HARD_MAX_HOURS) return false;
+        if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > hardMax) return false;
         if (assignmentBreaksBandTransition(assignments, empId, dateStr, sCode)) return false;
         if (nextAssignmentBreaksBandTransition(assignments, empId, dateStr, sCode)) return false;
         if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) return false;
@@ -2283,7 +2301,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 // Sort: owner → cupo CCT libre (repartir carga T1) → rotación justa por banda.
                 const di = dayIndexMap.get(dateStr) ?? 0;
                 const cctRemain = (empId: string) =>
-                    HARD_MAX_HOURS - cctTrancheUsed(empId, inCurrentCycle);
+                    hardMax - cctTrancheUsed(empId, inCurrentCycle);
                 candidates.sort((a, b) => {
                     const ao = defaultPos[a] === pos.positionName ? 1 : 0;
                     const bo = defaultPos[b] === pos.positionName ? 1 : 0;
@@ -2309,7 +2327,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     const used = limitedEmpIds.has(empId)
                         ? st.cycleCurrentUsed + st.cycleNextUsed
                         : (inCurrentCycle ? st.cycleCurrentUsed : st.cycleNextUsed);
-                    if (used + assignHrs > HARD_MAX_HOURS) {
+                    if (used + assignHrs > hardMax) {
                         const seenKey = `${empId}||${dateStr}||${assignCode}`;
                         if (!capBlockedEmpSeen.has(seenKey) && passesAgreementRest(empId, dateStr, assignCode, assignStart, assignHrs)) {
                             capBlockedEmpSeen.add(seenKey);
@@ -2409,7 +2427,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 const used2 = limitedEmpIds.has(emp.id)
                     ? runtime[emp.id].cycleCurrentUsed + runtime[emp.id].cycleNextUsed
                     : (inCurr2 ? runtime[emp.id].cycleCurrentUsed : runtime[emp.id].cycleNextUsed);
-                if (used2 + sHrs2 > HARD_MAX_HOURS) {
+                if (used2 + sHrs2 > hardMax) {
                     const seenKey2 = `${emp.id}||${dateStr2}||${sCode2}`;
                     if (!capBlockedEmpSeen.has(seenKey2) && passesAgreementRest(emp.id, dateStr2, sCode2, sStart2, sHrs2)) {
                         capBlockedEmpSeen.add(seenKey2);
@@ -2455,7 +2473,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 const sHrs = shiftHoursH(sh);
                 const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[code] || '07:00';
                 const sEnd = sh.endTime || undefined;
-                if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > HARD_MAX_HOURS) continue;
+                if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > hardMax) continue;
                 if (!passesAgreementRest(empId, dateStr, code, sStart, sHrs)) continue;
                 writeAssignment(empId, dateStr, pos.positionName, code, sh.name || code, sHrs, sStart, inCurrent, sEnd);
                 return true;
@@ -3003,7 +3021,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     for (const emp of ctx.employees) {
         const st = runtime[emp.id];
         if (customCoverEmps.has(emp.id)) continue;
-        if (st.cycleCurrentUsed > HARD_MAX_HOURS || st.cycleNextUsed > HARD_MAX_HOURS) {
+        if (st.cycleCurrentUsed > hardMax || st.cycleNextUsed > hardMax) {
             stats.employeesOver200.push(emp.id);
         }
     }

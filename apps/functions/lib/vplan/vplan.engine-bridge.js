@@ -4,8 +4,11 @@ exports.toEnginePositions = toEnginePositions;
 exports.buildCodeHoursHint = buildCodeHoursHint;
 exports.buildEngineContext = buildEngineContext;
 exports.engineToVplanAssignments = engineToVplanAssignments;
-function toEnginePositions(positions) {
-    return positions.map((p) => ({
+const vplan_sla_enforce_1 = require("./vplan.sla-enforce");
+const vplan_positions_1 = require("./vplan.positions");
+function toEnginePositions(positions, cycle) {
+    const filtered = cycle ? (0, vplan_positions_1.positionsForCycle)(positions, cycle) : positions;
+    return filtered.map((p) => ({
         positionName: p.positionName,
         qty: p.qty,
         shifts: p.shifts.map((s) => ({
@@ -13,8 +16,9 @@ function toEnginePositions(positions) {
             hours: s.hours,
             startTime: s.startTime,
             endTime: s.endTime,
+            days: s.days,
         })),
-        activeDays: p.activeDays,
+        activeDays: (0, vplan_positions_1.resolveActiveDays)(p),
         coverageType: p.coverageType,
     }));
 }
@@ -37,27 +41,35 @@ function buildEngineContext(opts) {
         id: e.id,
         nombre: e.displayName,
     }));
-    const useTrailing = opts.strategy.modes.useTrailing;
-    const trailingEmpIds = new Set(Object.keys(opts.prevPlanningState.lastShiftByEmp || {}));
-    const defaultShiftByEmp = {};
-    for (const [empId, band] of Object.entries(opts.planningState.defaultShiftByEmp || {})) {
-        if (!useTrailing || !trailingEmpIds.has(empId)) {
-            defaultShiftByEmp[empId] = band;
-        }
-    }
+    const defaultPositionByEmp = (0, vplan_sla_enforce_1.capDefaultPositionByEmp)(opts.snapshot.positions, {
+        ...opts.prevPlanningState.defaultPositionByEmp,
+        ...opts.planningState.defaultPositionByEmp,
+    }, opts.strategy.cycle);
+    const defaultShiftByEmp = {
+        ...opts.prevPlanningState.defaultShiftByEmp,
+        ...opts.planningState.defaultShiftByEmp,
+    };
     return {
-        positions: toEnginePositions(opts.snapshot.positions),
+        positions: toEnginePositions(opts.snapshot.positions, opts.strategy.cycle),
         employees,
         daysInMonth,
         slaVendidas: opts.snapshot.slaVendidas,
         autoCycles: [opts.strategy.cycle],
         absences: opts.snapshot.absences,
-        defaultPositionByEmp: { ...opts.planningState.defaultPositionByEmp },
+        defaultPositionByEmp,
         defaultShiftByEmp,
-        prevMonthTrailingWorkDays: useTrailing ? opts.prevPlanningState.trailingWorkDays : undefined,
-        prevMonthTrailingRestDays: useTrailing ? opts.prevPlanningState.trailingRestDays : undefined,
-        prevMonthLastShiftByEmp: useTrailing ? opts.prevPlanningState.lastShiftByEmp : undefined,
-        prevMonthLastWorkBandBeforeRest: useTrailing ? opts.prevPlanningState.lastWorkBandBeforeRest : undefined,
+        prevMonthTrailingWorkDays: opts.strategy.modes.useTrailing
+            ? opts.prevPlanningState.trailingWorkDays
+            : undefined,
+        prevMonthTrailingRestDays: opts.strategy.modes.useTrailing
+            ? opts.prevPlanningState.trailingRestDays
+            : undefined,
+        prevMonthLastShiftByEmp: opts.strategy.modes.useTrailing
+            ? opts.prevPlanningState.lastShiftByEmp
+            : undefined,
+        prevMonthLastWorkBandBeforeRest: opts.strategy.modes.useTrailing
+            ? opts.prevPlanningState.lastWorkBandBeforeRest
+            : undefined,
         cctCutoffDay: opts.cctCutoffDay ?? 25,
         codeHoursHint: buildCodeHoursHint(opts.snapshot.positions),
     };

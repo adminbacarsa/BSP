@@ -5,17 +5,7 @@
 
 import type { VplanDemandModel, VplanDayDemand, VplanPositionDemand } from '../vplan.types';
 import type { VplanPositionDef } from '../vplan.positions';
-import { is24hsPosition, isPositionActiveOnDay, shiftBandHours } from '../vplan.positions';
-
-function bandSetsForPosition(pos: VplanPositionDef): { bands8: string[]; bands12: string[] } {
-  const bands8 = [...new Set(
-    pos.shifts.filter((s) => shiftBandHours(s) < 12).map((s) => s.code).filter(Boolean),
-  )];
-  const bands12 = [...new Set(
-    pos.shifts.filter((s) => shiftBandHours(s) >= 12).map((s) => s.code).filter(Boolean),
-  )];
-  return { bands8, bands12 };
-}
+import { is24hsPosition, isPositionActiveOnDay, shiftBandHours, shiftsForCycle } from '../vplan.positions';
 
 function schemeLabelFromBands(bands: Record<string, number>): string {
   const keys = Object.keys(bands).sort();
@@ -27,14 +17,28 @@ function schemeLabelFromBands(bands: Record<string, number>): string {
 function buildBandSlotsForPositionDay(
   pos: VplanPositionDef,
   dayLetter: string,
+  cycle?: string,
 ): { bandSlots: Record<string, number>; hours: number; schemeLabel: string } {
   const qty = Math.max(1, pos.qty);
   if (is24hsPosition(pos)) {
-    const { bands8, bands12 } = bandSetsForPosition(pos);
-    const mtn = bands8.length > 0 ? bands8 : ['M', 'T', 'N'];
+    const activeShifts = shiftsForCycle(pos, cycle).filter((s) => {
+      const c = String(s.code || '').toUpperCase();
+      if (c === 'F') return false;
+      if (!Array.isArray(s.days) || s.days.length === 0) return true;
+      return s.days.includes(dayLetter);
+    });
     const bandSlots: Record<string, number> = {};
-    for (const b of mtn) bandSlots[b] = qty;
-    return { bandSlots, hours: qty * 24, schemeLabel: schemeLabelFromBands(bandSlots) };
+    let hours = 0;
+    for (const s of activeShifts) {
+      const code = String(s.code || '').toUpperCase();
+      bandSlots[code] = qty;
+      hours += qty * shiftBandHours(s);
+    }
+    if (Object.keys(bandSlots).length === 0) {
+      for (const b of ['M', 'T', 'N']) bandSlots[b] = qty;
+      hours = qty * 24;
+    }
+    return { bandSlots, hours, schemeLabel: schemeLabelFromBands(bandSlots) };
   }
 
   const bands = pos.shifts.map((s) => s.code).filter(Boolean);
@@ -56,6 +60,7 @@ export function buildVplanDemandModel(opts: {
   positions: VplanPositionDef[];
   days: Array<{ dateStr: string; dayLetter: string }>;
   slaVendidas: number;
+  cycle?: string;
 }): VplanDemandModel {
   const dayDemands: VplanDayDemand[] = opts.days.map(({ dateStr, dayLetter }) => {
     const positions: VplanPositionDemand[] = [];
@@ -64,7 +69,7 @@ export function buildVplanDemandModel(opts: {
 
     for (const pos of opts.positions) {
       if (!isPositionActiveOnDay(pos, dayLetter)) continue;
-      const built = buildBandSlotsForPositionDay(pos, dayLetter);
+      const built = buildBandSlotsForPositionDay(pos, dayLetter, opts.cycle);
       positions.push({
         positionName: pos.positionName,
         qty: pos.qty,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { onSnapshot } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { ensureFirebaseEmulatorsConnected } from '@/lib/firebase';
 import {
   empresaScopedQuery,
   filterRowsByEmpresa,
@@ -15,29 +16,40 @@ export interface VplanLabObjective {
 }
 
 export function useVplanLabObjectives(empresaId: string | undefined) {
-  const { empresa } = useEmpresa();
+  const { empresa, loadingEmpresa } = useEmpresa();
   const [objectives, setObjectives] = useState<VplanLabObjective[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const tenantId = String(empresaId ?? '').trim();
   const scopeEmpresa = shouldScopeQueriesToEmpresa(
-    empresaId ?? '',
+    tenantId,
     empresa?.migracionCompleta === true,
   );
 
   useEffect(() => {
-    if (!empresaId) {
-      setObjectives([]);
-      setLoading(false);
+    if (typeof window === 'undefined') return;
+
+    if (loadingEmpresa || !tenantId) {
+      if (!loadingEmpresa && !tenantId) {
+        setObjectives([]);
+        setLoading(false);
+      }
       return;
     }
 
-    const q = empresaScopedQuery('clients', empresaId, scopeEmpresa);
+    ensureFirebaseEmulatorsConnected();
+
+    let cancelled = false;
+    setLoading(true);
+
+    const q = empresaScopedQuery('clients', tenantId, scopeEmpresa);
     const unsub = onSnapshot(
       q,
       (snap) => {
+        if (cancelled) return;
         const rows = filterRowsByEmpresa(
           snap.docs.map((d) => ({ id: d.id, ...d.data() })),
-          empresaId,
+          tenantId,
           scopeEmpresa,
           empresa?.migracionCompleta === true,
         );
@@ -62,13 +74,17 @@ export function useVplanLabObjectives(empresaId: string | undefined) {
         setLoading(false);
       },
       () => {
+        if (cancelled) return;
         setObjectives([]);
         setLoading(false);
       },
     );
 
-    return () => unsub();
-  }, [empresaId, scopeEmpresa, empresa?.migracionCompleta]);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [tenantId, scopeEmpresa, loadingEmpresa, empresa?.migracionCompleta]);
 
   const byClient = useMemo(() => {
     const map = new Map<string, { clientName: string; items: VplanLabObjective[] }>();
@@ -79,5 +95,5 @@ export function useVplanLabObjectives(empresaId: string | undefined) {
     return map;
   }, [objectives]);
 
-  return { objectives, byClient, loading };
+  return { objectives, byClient, loading: loading || loadingEmpresa };
 }

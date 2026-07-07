@@ -4,6 +4,7 @@
 
 import type { VplanIntakeMeta, VplanRunRequest } from '../vplan.types';
 import type { VplanPlanningSnapshot } from '../vplan.firestore';
+import { buildPrevMonthTrailingPreview } from '../vplan.prev-month-preview';
 
 export function buildVplanIntake(
   request: VplanRunRequest,
@@ -22,6 +23,7 @@ export function buildVplanIntake(
     monthDays: snapshot.days.length,
     budgetMode: request.budgetMode ?? 'cct',
     preferredCycle: request.preferredCycle ?? '6+2',
+    prevMonthPreview: buildPrevMonthTrailingPreview(request.year, request.month, snapshot),
   };
 }
 

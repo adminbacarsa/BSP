@@ -286,6 +286,13 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    match /planning_rules/{empresaId} {
+      allow read: if isAdmin() && (isSuperAdmin() || empresaId == userEmpresaId());
+      allow write: if isSuperAdmin() || (
+        isAdmin() && empresaId == userEmpresaId()
+      );
+    }
+
     match /empresas/{empresaId} {
       allow read: if isAdmin() || isEmployeeClaim();
       allow write: if isSuperAdmin();

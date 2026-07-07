@@ -1,0 +1,10 @@
+import type { PlanningCycleKey, PlanningCycleRule, PlanningRulesConfig } from './planning-rules.types';
+export declare const PLANNING_CYCLE_KEYS: PlanningCycleKey[];
+export declare const DEFAULT_CYCLE_RULES: Record<PlanningCycleKey, PlanningCycleRule>;
+export declare const DEFAULT_PLANNING_RULES: PlanningRulesConfig;
+export declare function normalizePlanningCycleKey(cycle?: string): PlanningCycleKey;
+export declare function enabledCyclesFromRules(rules: PlanningRulesConfig): PlanningCycleKey[];
+export declare function workDaysForCycle(cycle: string | undefined, rules: PlanningRulesConfig): number;
+export declare function restDaysForCycle(cycle: string | undefined, rules: PlanningRulesConfig): number;
+export declare function shiftHoursForCycle(cycle: string | undefined, rules: PlanningRulesConfig): 8 | 12;
+export declare function isCycleEnabled(cycle: string | undefined, rules: PlanningRulesConfig): boolean;

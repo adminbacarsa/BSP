@@ -1,0 +1,24 @@
+export type VplanCycleKey = '6+2' | '4+2' | '5+1' | '6+1';
+export declare const CYCLE_24_MTN: readonly string[];
+export declare const CYCLE_12_DN: readonly string[];
+export declare const COLD_START_24: readonly [4, 10, 16, 22];
+export declare const COLD_START_12: readonly [2, 6, 10];
+export declare function normalizeCycleKey(cycle?: string): VplanCycleKey;
+export declare function is4x2Cycle(cycle?: string): boolean;
+export declare function getCycleTemplate(cycle?: string): readonly string[];
+export declare function cycleLength(cycle?: string): number;
+export declare function coldStartOpenings(cycle?: string): readonly number[];
+export declare function subgroupSize(cycle?: string): number;
+export declare function normalizeCodeForCycle(code: string, cycle?: string): string;
+export declare function isCycleWorkCode(code: string, cycle?: string): boolean;
+export declare function isFrancoCycleCode(code: string): boolean;
+export declare function bandZoneForSlot(slot: number, cycle?: string): string;
+export declare function maxWorkStreak(cycle?: string): number;
+export declare function billableHoursForCode(code: string, cycle?: string): number;
+export declare function inferCycleSlotFromTrailing(lastCode: string | undefined, trailingWork: number | undefined, trailingRest: number | undefined, lastWorkBand?: string, cycle?: string): number | null;
+export declare function inferTrailingOpeningSlots(prevPlanningState: {
+    lastShiftByEmp?: Record<string, string>;
+    trailingWorkDays?: Record<string, number>;
+    trailingRestDays?: Record<string, number>;
+    lastWorkBandBeforeRest?: Record<string, string>;
+}, cycle?: string): Record<string, number>;

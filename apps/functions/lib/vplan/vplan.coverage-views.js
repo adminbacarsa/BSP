@@ -1,11 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildPositionSlotRows = buildPositionSlotRows;
+exports.buildSlaExpectedByCode = buildSlaExpectedByCode;
+exports.buildOverCoveredByDay = buildOverCoveredByDay;
 exports.buildCodeMonthSummary = buildCodeMonthSummary;
 exports.buildSchedulePreview = buildSchedulePreview;
 exports.buildVplanCoverageBundle = buildVplanCoverageBundle;
 exports.engineAssignmentsFromDraft = engineAssignmentsFromDraft;
-const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET']);
+const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET', 'NR']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
 const FRANCO_CODES = new Set(['F', 'FF', 'FP']);
 function normCode(c) {
@@ -77,33 +79,115 @@ function buildPositionSlotRows(ctx, assignments) {
                 const shiftCode = String(sh.code || '').toUpperCase();
                 const slotKey = `${pos.positionName}__${normCode(shiftCode)}`;
                 if (!agg[slotKey])
-                    agg[slotKey] = { required: 0, covered: 0 };
+                    agg[slotKey] = { required: 0, covered: 0, assigned: 0 };
                 agg[slotKey].required += qty;
                 const dayKey = `${dateStr}__${pos.positionName}__${normCode(shiftCode)}`;
                 const assigned = realCount[dayKey] || 0;
                 agg[slotKey].covered += Math.min(assigned, qty);
+                agg[slotKey].assigned += assigned;
             }
         });
     });
     return Object.entries(agg)
-        .map(([key, { required, covered }]) => {
+        .map(([key, { required, covered, assigned }]) => {
         const sep = key.lastIndexOf('__');
         const positionName = key.slice(0, sep);
         const shiftCode = key.slice(sep + 2);
         const coveredSlots = Math.min(required, covered);
         const missingSlots = Math.max(0, required - coveredSlots);
+        const excessSlots = Math.max(0, assigned - required);
         return {
             positionName,
             shiftCode,
             requiredSlots: required,
             coveredSlots,
             missingSlots,
+            excessSlots,
+            assignedSlots: assigned,
             coveragePct: required > 0 ? Math.round((coveredSlots / required) * 1000) / 10 : 100,
         };
     })
         .sort((a, b) => a.positionName.localeCompare(b.positionName) || a.shiftCode.localeCompare(b.shiftCode));
 }
-function buildCodeMonthSummary(assignments) {
+function buildSlaExpectedByCode(ctx) {
+    const out = {};
+    ctx.daysInMonth.forEach((d) => {
+        const dateStr = getDateKey(d);
+        const dayLetter = getDayLetter(dateStr);
+        ctx.positions.forEach((pos) => {
+            if (pos.excludedDates?.includes(dateStr))
+                return;
+            const qty = Number(pos.qty) || 0;
+            if (!qty)
+                return;
+            if (!positionIsActiveOn(pos, dayLetter))
+                return;
+            const shifts = (pos.shifts || []).filter((s) => {
+                const c = String(s.code || '').toUpperCase();
+                return c && !NON_BILLABLE.has(c) && !ABSENCE_CODES.has(c)
+                    && (!Array.isArray(s.days) || s.days.length === 0 || s.days.includes(dayLetter));
+            });
+            for (const sh of shifts) {
+                const code = String(sh.code || '').toUpperCase();
+                out[code] = (out[code] || 0) + qty;
+            }
+        });
+    });
+    return out;
+}
+function buildOverCoveredByDay(ctx, assignments) {
+    const realCount = {};
+    const realEmps = {};
+    for (const a of assignments) {
+        const c = String(a.code || '').toUpperCase();
+        if (!c || NON_BILLABLE.has(c) || ABSENCE_CODES.has(c) || !a.positionName)
+            continue;
+        const k = `${a.dateStr}__${a.positionName}__${normCode(c)}`;
+        realCount[k] = (realCount[k] || 0) + 1;
+        if (!realEmps[k])
+            realEmps[k] = [];
+        realEmps[k].push(a.employeeId);
+    }
+    const overCoveredByDay = {};
+    let overCoveredSlots = 0;
+    ctx.daysInMonth.forEach((d) => {
+        const dateStr = getDateKey(d);
+        const dayLetter = getDayLetter(dateStr);
+        ctx.positions.forEach((pos) => {
+            if (pos.excludedDates?.includes(dateStr))
+                return;
+            const qty = Number(pos.qty) || 0;
+            if (!qty)
+                return;
+            if (!positionIsActiveOn(pos, dayLetter))
+                return;
+            const shifts = (pos.shifts || []).filter((s) => {
+                const c = String(s.code || '').toUpperCase();
+                return c && !NON_BILLABLE.has(c) && !ABSENCE_CODES.has(c)
+                    && (!Array.isArray(s.days) || s.days.length === 0 || s.days.includes(dayLetter));
+            });
+            for (const sh of shifts) {
+                const shiftCode = String(sh.code || '').toUpperCase();
+                const dayKey = `${dateStr}__${pos.positionName}__${normCode(shiftCode)}`;
+                const assigned = realCount[dayKey] || 0;
+                const excess = Math.max(0, assigned - qty);
+                if (excess <= 0)
+                    continue;
+                overCoveredSlots += excess;
+                if (!overCoveredByDay[dateStr])
+                    overCoveredByDay[dateStr] = [];
+                overCoveredByDay[dateStr].push({
+                    positionName: pos.positionName,
+                    shiftCode,
+                    excess,
+                    employeeIds: realEmps[dayKey] || [],
+                });
+            }
+        });
+    });
+    return { overCoveredByDay, overCoveredSlots };
+}
+function buildCodeMonthSummary(assignments, slaExpectedByCode) {
     const counts = {};
     for (const a of assignments) {
         const code = String(a.code || '').toUpperCase();
@@ -115,13 +199,19 @@ function buildCodeMonthSummary(assignments) {
         counts[code].hours += Number(a.hours) || 0;
     }
     return Object.entries(counts)
-        .map(([code, v]) => ({
-        code,
-        label: codeLabel(code),
-        category: codeCategory(code),
-        count: v.count,
-        hours: Math.round(v.hours),
-    }))
+        .map(([code, v]) => {
+        const slaExpected = slaExpectedByCode?.[code];
+        const excessCount = slaExpected !== undefined ? Math.max(0, v.count - slaExpected) : undefined;
+        return {
+            code,
+            label: codeLabel(code),
+            category: codeCategory(code),
+            count: v.count,
+            hours: Math.round(v.hours),
+            slaExpected,
+            excessCount,
+        };
+    })
         .sort((a, b) => {
         const order = { trabajo: 0, franco: 1, ausencia: 2, otro: 3 };
         const ca = order[a.category] - order[b.category];
@@ -161,23 +251,28 @@ function buildSchedulePreview(opts) {
     return {
         dateStrs: opts.dateStrs,
         rows,
-        codeSummary: buildCodeMonthSummary(opts.assignments),
+        codeSummary: buildCodeMonthSummary(opts.assignments, opts.slaExpectedByCode),
     };
 }
 function buildVplanCoverageBundle(opts) {
+    const slaExpectedByCode = buildSlaExpectedByCode(opts.ctx);
+    const { overCoveredByDay, overCoveredSlots } = buildOverCoveredByDay(opts.ctx, opts.draftAssignments);
     return {
         totalSlots: opts.coverage.totalSlots,
         coveredSlots: opts.coverage.coveredSlots,
         uncoveredSlots: opts.coverage.uncoveredSlots,
+        overCoveredSlots,
         coverageRatio: Math.round(opts.coverage.coverageRatio * 1000) / 10,
         structuralHours: Math.round(opts.monthDemandHours),
         positionSlots: buildPositionSlotRows(opts.ctx, opts.draftAssignments),
         uncoveredByDay: opts.coverage.uncoveredByDay,
+        overCoveredByDay,
         schedulePreview: buildSchedulePreview({
             assignments: opts.draftAssignments,
             employees: opts.employees,
             dateStrs: opts.dateStrs,
             defaultPositionByEmp: opts.defaultPositionByEmp,
+            slaExpectedByCode,
         }),
     };
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { Settings, Users, Shield, Database, Building2, HardDrive, Bot, Activity } from 'lucide-react';
+import { Settings, Users, Shield, Database, Building2, HardDrive, Bot, Activity, Scale } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import UsersTab from '@/components/admin/config/UsersTab';
 import RolesTab from '@/components/admin/config/RolesTab';
@@ -10,11 +10,12 @@ import EmpresasTab from '@/components/admin/config/EmpresasTab';
 import BackupTab from '@/components/admin/config/BackupTab';
 import AssistantLogTab from '@/components/admin/config/AssistantLogTab';
 import PlatformHealthTab from '@/components/admin/config/PlatformHealthTab';
+import PlanningRulesTab from '@/components/admin/config/PlanningRulesTab';
 import { useAuth } from '@/context/AuthContext';
 import { PageShell, PageHeader, TabBar } from '@/components/ui';
 
 export default function ConfigPage() {
-    const [activeTab, setActiveTab] = useState<'GENERAL' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT' | 'HEALTH'>('GENERAL');
+    const [activeTab, setActiveTab] = useState<'GENERAL' | 'PLANNING' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT' | 'HEALTH'>('GENERAL');
     const router = useRouter();
     const { loading, canReadModule } = useAuth();
 
@@ -54,6 +55,7 @@ export default function ConfigPage() {
                     <TabBar
                         tabs={[
                             { id: 'GENERAL',   label: 'Sistema',          icon: Database },
+                            { id: 'PLANNING',  label: 'Planificación',    icon: Scale },
                             { id: 'USERS',     label: 'Usuarios Admin',   icon: Users },
                             { id: 'ROLES',     label: 'Roles y Permisos', icon: Shield },
                             { id: 'EMPRESAS',  label: 'Empresas',         icon: Building2 },
@@ -66,6 +68,7 @@ export default function ConfigPage() {
                     />
                     <div>
                         {activeTab === 'GENERAL'   && <GeneralTab />}
+                        {activeTab === 'PLANNING' && <PlanningRulesTab />}
                         {activeTab === 'USERS'     && <UsersTab />}
                         {activeTab === 'ROLES'     && <RolesTab />}
                         {activeTab === 'EMPRESAS'  && <EmpresasTab />}

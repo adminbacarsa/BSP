@@ -173,6 +173,8 @@ export interface VplanPositionSlotRow {
   requiredSlots: number;
   coveredSlots: number;
   missingSlots: number;
+  excessSlots?: number;
+  assignedSlots?: number;
   coveragePct: number;
 }
 
@@ -182,6 +184,15 @@ export interface VplanCodeMonthSummary {
   category: 'trabajo' | 'franco' | 'ausencia' | 'otro';
   count: number;
   hours: number;
+  slaExpected?: number;
+  excessCount?: number;
+}
+
+export interface VplanOverCoverageDayGap {
+  positionName: string;
+  shiftCode: string;
+  excess: number;
+  employeeIds: string[];
 }
 
 export interface VplanSchedulePreviewCell {
@@ -207,11 +218,41 @@ export interface VplanCoverageBundle {
   totalSlots: number;
   coveredSlots: number;
   uncoveredSlots: number;
+  overCoveredSlots?: number;
   coverageRatio: number;
   structuralHours: number;
   positionSlots: VplanPositionSlotRow[];
   uncoveredByDay: Record<string, Array<{ positionName: string; shiftCode: string; missing: number }>>;
+  overCoveredByDay?: Record<string, VplanOverCoverageDayGap[]>;
   schedulePreview: VplanSchedulePreview;
+}
+
+export interface VplanCoverageGapCandidate {
+  employeeId: string;
+  displayName?: string;
+  currentCode: string;
+  canAssign: boolean;
+  blockReason?: string;
+}
+
+export interface VplanCoverageGapDetail {
+  dateStr: string;
+  dayLetter: string;
+  positionName: string;
+  shiftCode: string;
+  required: number;
+  assigned: number;
+  missing: number;
+  candidates: VplanCoverageGapCandidate[];
+}
+
+export interface VplanCoverageAuditReport {
+  ok: boolean;
+  totalGaps: number;
+  totalMissingSlots: number;
+  totalExcessSlots: number;
+  gaps: VplanCoverageGapDetail[];
+  iterationsUsed?: number;
 }
 
 export interface VplanVerificationReport {
@@ -221,6 +262,7 @@ export interface VplanVerificationReport {
   slaVendidas?: number;
   hoursGap?: number;
   coverage?: VplanCoverageBundle;
+  coverageAudit?: VplanCoverageAuditReport;
 }
 
 export interface VplanStepResult {
@@ -228,6 +270,26 @@ export interface VplanStepResult {
   ok: boolean;
   summary: string;
   durationMs?: number;
+}
+
+export interface VplanPrevMonthPreviewRow {
+  employeeId: string;
+  displayName: string;
+  lastDate?: string;
+  lastCode?: string;
+  trailingWork?: number;
+  trailingRest?: number;
+  tailDays: Array<{ dateStr: string; code: string }>;
+}
+
+export interface VplanPrevMonthPreview {
+  prevYear: number;
+  prevMonth: number;
+  prevMonthKey: string;
+  assignmentCount: number;
+  employeesWithTrailing: number;
+  tailDateStrs: string[];
+  rows: VplanPrevMonthPreviewRow[];
 }
 
 export interface VplanIntakeMeta {
@@ -243,6 +305,7 @@ export interface VplanIntakeMeta {
   monthDays: number;
   budgetMode: 'cct' | 'calendar';
   preferredCycle: string;
+  prevMonthPreview?: VplanPrevMonthPreview;
 }
 
 export interface VplanBrainContext {

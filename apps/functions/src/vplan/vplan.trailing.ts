@@ -5,6 +5,7 @@
 
 import type { VplanExistingAssignment } from './vplan.firestore';
 import type { VplanPlanningState } from './vplan.firestore';
+import { getCycleTemplate, is4x2Cycle, normalizeCodeForCycle } from './vplan.cycle-templates';
 
 const WORK_BANDS = new Set(['M', 'T', 'N']);
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
@@ -60,33 +61,25 @@ export function deriveTrailingFromAssignments(
   const lastShiftByEmp: Record<string, string> = {};
   const lastWorkBandBeforeRest: Record<string, string> = {};
 
-  const daysDesc = [...monthDateStrs].sort().reverse();
-
   for (const [empId, dayMap] of byEmp) {
-    let lastCode: string | undefined;
-    let lastDate: string | undefined;
-    for (const d of daysDesc) {
-      const c = codeOnDay(dayMap, d);
-      if (c) {
-        lastCode = c;
-        lastDate = d;
-        lastShiftByEmp[empId] = c;
-        break;
-      }
-    }
-    if (!lastCode || !lastDate) continue;
+    const empDatesDesc = [...dayMap.keys()].sort().reverse();
+    if (empDatesDesc.length === 0) continue;
+
+    const lastDate = empDatesDesc[0]!;
+    const lastCode = codeOnDay(dayMap, lastDate);
+    if (!lastCode) continue;
+    lastShiftByEmp[empId] = lastCode;
 
     if (isFranco(lastCode)) {
       let rest = 0;
-      for (const d of daysDesc) {
+      for (const d of empDatesDesc) {
         const c = codeOnDay(dayMap, d);
-        if (!c) continue;
-        if (isFranco(c)) rest += 1;
-        else break;
+        if (!c || !isFranco(c)) break;
+        rest += 1;
       }
       if (rest > 0) trailingRestDays[empId] = rest;
 
-      for (const d of daysDesc) {
+      for (const d of empDatesDesc) {
         const c = codeOnDay(dayMap, d);
         if (!c) continue;
         if (isFranco(c)) continue;
@@ -104,7 +97,7 @@ export function deriveTrailingFromAssignments(
     if (isRet(lastCode)) {
       lastShiftByEmp[empId] = 'RET';
       let band: string | undefined;
-      for (const d of daysDesc) {
+      for (const d of empDatesDesc) {
         const c = codeOnDay(dayMap, d);
         if (!c) continue;
         if (isRet(c)) continue;
@@ -118,7 +111,7 @@ export function deriveTrailingFromAssignments(
       if (band) {
         lastWorkBandBeforeRest[empId] = band;
         let work = 0;
-        for (const d of daysDesc) {
+        for (const d of empDatesDesc) {
           const c = codeOnDay(dayMap, d);
           if (!c) continue;
           if (isRet(c)) continue;
@@ -134,9 +127,9 @@ export function deriveTrailingFromAssignments(
     if (isWorkBand(lastCode)) {
       const band = normBand(lastCode);
       let work = 0;
-      for (const d of daysDesc) {
+      for (const d of empDatesDesc) {
         const c = codeOnDay(dayMap, d);
-        if (!c) continue;
+        if (!c) break;
         if (isAbsence(c)) break;
         if (isFranco(c)) break;
         if (normBand(c) === band) work += 1;
@@ -168,6 +161,76 @@ export function countTrailingEmployees(
   Object.keys(state.lastShiftByEmp || {}).forEach((id) => ids.add(id));
   Object.keys(state.trailingWorkDays || {}).forEach((id) => ids.add(id));
   return ids.size;
+}
+
+function dayOffsetFromAnchor(dateStr: string, anchorDateStr: string): number {
+  const a = new Date(`${anchorDateStr}T12:00:00`).getTime();
+  const b = new Date(`${dateStr}T12:00:00`).getTime();
+  return Math.round((b - a) / 86_400_000);
+}
+
+/**
+ * Infiere opening slot (0..23) alineando el mes anterior al ciclo CYCLE_24_MTN.
+ * Más robusto que inferCycleSlot cuando hay rachas largas o datos reales de grilla.
+ */
+export function inferOpeningSlotsFromMonthHistory(
+  assignments: VplanExistingAssignment[],
+  monthDateStrs: string[],
+  targetMonthFirstDateStr: string,
+  cycle = '6+2',
+): Record<string, number> {
+  const template = getCycleTemplate(cycle);
+  const len = template.length;
+  const byEmp = new Map<string, Array<{ dateStr: string; code: string }>>();
+  for (const a of assignments) {
+    if (!monthDateStrs.includes(a.dateStr)) continue;
+    let code = String(a.code || '').toUpperCase();
+    if (is4x2Cycle(cycle)) code = normalizeCodeForCycle(code, cycle);
+    if (isAbsence(code)) continue;
+    if (!byEmp.has(a.employeeId)) byEmp.set(a.employeeId, []);
+    byEmp.get(a.employeeId)!.push({ dateStr: a.dateStr, code });
+  }
+
+  const out: Record<string, number> = {};
+
+  for (const [empId, rows] of byEmp) {
+    if (rows.length === 0) continue;
+    rows.sort((x, y) => x.dateStr.localeCompare(y.dateStr));
+
+    const cycleRows = rows.filter((r) => isWorkBand(r.code) || isFranco(r.code));
+    if (cycleRows.length < 3) continue;
+
+    let bestSlot: number | null = null;
+    let bestScore = -Infinity;
+
+    for (let opening = 0; opening < len; opening++) {
+      let score = 0;
+      for (const row of cycleRows) {
+        const offset = dayOffsetFromAnchor(row.dateStr, targetMonthFirstDateStr);
+        const expected = template[(opening + offset + len * 200) % len];
+        if (expected === row.code) {
+          score += 3;
+        } else if (isFranco(row.code) && expected === 'F') {
+          score += 2;
+        } else if (isWorkBand(row.code) && isWorkBand(expected)) {
+          score -= 2;
+        } else if (isFranco(row.code) || expected === 'F') {
+          score -= 1;
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestSlot = opening;
+      }
+    }
+
+    const minScore = Math.max(6, Math.floor(cycleRows.length * 1.5));
+    if (bestSlot !== null && bestScore >= minScore) {
+      out[empId] = bestSlot;
+    }
+  }
+
+  return out;
 }
 
 /** Turnos del mes anterior (incl. borrador) tienen prioridad sobre planificacion_estados. */

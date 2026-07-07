@@ -26,6 +26,8 @@ interface Props {
     month: number;
     /** Lista de empleados del objetivo para mostrar nombres */
     employees: { id: string; name?: string; nombre?: string }[];
+    /** Tope CCT facturable por ciclo (desde reglas de planificación). */
+    cctMaxBillableHours?: number;
     /** Cuando el usuario confirma, recibe los cambios para inyectarlos en pendingChanges */
     onApplyPending?: (changes: EquilibrarProposedChange[]) => void;
 }
@@ -47,7 +49,7 @@ interface EquilibrarOutput {
 
 const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-export default function EquilibrarCronoModal({ open, onClose, empresaId, objectiveId, objectiveNombre, year, month, employees, onApplyPending }: Props) {
+export default function EquilibrarCronoModal({ open, onClose, empresaId, objectiveId, objectiveNombre, year, month, employees, cctMaxBillableHours = 200, onApplyPending }: Props) {
     const [running, setRunning]         = useState(false);
     const [preview, setPreview]         = useState<EquilibrarOutput | null>(null);
     const [result, setResult]           = useState<EquilibrarOutput | null>(null);
@@ -213,8 +215,8 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                                 const noData = !current.ok && current.errores?.[0]?.includes('No se encontraron turnos');
                                 const alreadyOk = current.ok && current.turnosActualizados === 0;
                                 // Horas excedentes sobre 200h
-                                const excesoAntes   = Object.values(current.horasAntes).reduce((s, h) => s + Math.max(0, h - 200), 0);
-                                const excesoDespues = Object.values(current.horasDespues).reduce((s, h) => s + Math.max(0, h - 200), 0);
+                                const excesoAntes   = Object.values(current.horasAntes).reduce((s, h) => s + Math.max(0, h - cctMaxBillableHours), 0);
+                                const excesoDespues = Object.values(current.horasDespues).reduce((s, h) => s + Math.max(0, h - cctMaxBillableHours), 0);
                                 const ahorroExceso  = Math.round(excesoAntes - excesoDespues);
                                 return (
                                 <div className={`rounded-xl border-2 px-3 py-2.5 ${result && current.turnosActualizados > 0 ? 'border-emerald-300 bg-emerald-50' : isPreview && current.turnosActualizados > 0 ? 'border-amber-200 bg-amber-50' : noData ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
@@ -238,7 +240,7 @@ export default function EquilibrarCronoModal({ open, onClose, empresaId, objecti
                                             <p className="text-[10px] text-slate-500">{current.bloquesProcesados} bloques procesados</p>
                                             {excesoAntes > 0 && (
                                                 <p className="text-[10px] font-black text-rose-600">
-                                                    Hs sobre 200h: {Math.round(excesoAntes)}h → {Math.round(excesoDespues)}h
+                                                    Hs sobre {cctMaxBillableHours}h: {Math.round(excesoAntes)}h → {Math.round(excesoDespues)}h
                                                     {ahorroExceso > 0 && <span className="text-emerald-600 ml-1">(−{ahorroExceso}h excedente)</span>}
                                                 </p>
                                             )}

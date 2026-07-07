@@ -2,7 +2,7 @@ import type { EngineAssignment, EngineContext, EnginePositionDef } from '../sche
 import type { VplanPlanningSnapshot, VplanPlanningState } from './vplan.firestore';
 import type { VplanPositionDef } from './vplan.positions';
 import type { VplanStrategy } from './vplan.types';
-export declare function toEnginePositions(positions: VplanPositionDef[]): EnginePositionDef[];
+export declare function toEnginePositions(positions: VplanPositionDef[], cycle?: string): EnginePositionDef[];
 export declare function buildCodeHoursHint(positions: VplanPositionDef[]): Record<string, number>;
 export declare function buildEngineContext(opts: {
     snapshot: VplanPlanningSnapshot;

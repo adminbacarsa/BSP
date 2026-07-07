@@ -1,3 +1,5 @@
+import type { PlanningRulesConfig } from '../planning/planning-rules.types';
+export type { PlanningRulesConfig };
 export type VplanRunMode = 'GREENFIELD' | 'CONTINUE' | 'COMPLETE' | 'RESTORE' | 'REPLAN_ABSENCES' | 'REBALANCE_HOURS' | 'MIGRATE_CYCLE';
 export type VplanIntent = 'intake' | 'demand' | 'supply' | 'feasibility' | 'strategy' | 'generate' | 'exceptions' | 'verify' | 'fix' | 'optimize' | 'full';
 export interface VplanRunRequest {
@@ -60,6 +62,9 @@ export interface VplanFeasibilityReport {
     peopleAvailable?: number;
     offerHours?: number;
     effectiveTargetHours?: number;
+    avgHoursRequiredPerGuard?: number;
+    avgHoursOfferPerGuard?: number;
+    capacityAdequate?: boolean;
 }
 export interface VplanAssignment {
     employeeId: string;
@@ -76,6 +81,23 @@ export interface VplanScheduleDraft {
         targetHours: number;
         slaHoursClosed: boolean;
         employeeCount: number;
+        continuityFixes?: number;
+        openingSlotCount?: number;
+        openingSlotByEmp?: Record<string, number>;
+        openingProtectedCells?: string[];
+        historySlotCount?: number;
+        trailingSlotCount?: number;
+        needsReinforcementCount?: number;
+        motorBillableHours?: number;
+        hourRebalanceAdded?: number;
+        coverageLadder?: {
+            subgrupo6x2: number;
+            refuerzo4x2: number;
+            sinTurno: number;
+            ret: number;
+            ft: number;
+            needsReinforcement: number;
+        };
     };
 }
 export interface VplanStrategy {
@@ -133,6 +155,8 @@ export interface VplanPositionSlotRow {
     requiredSlots: number;
     coveredSlots: number;
     missingSlots: number;
+    excessSlots: number;
+    assignedSlots: number;
     coveragePct: number;
 }
 export interface VplanCodeMonthSummary {
@@ -141,6 +165,30 @@ export interface VplanCodeMonthSummary {
     category: 'trabajo' | 'franco' | 'ausencia' | 'otro';
     count: number;
     hours: number;
+    slaExpected?: number;
+    excessCount?: number;
+}
+export interface VplanOverCoverageDayGap {
+    positionName: string;
+    shiftCode: string;
+    excess: number;
+    employeeIds: string[];
+}
+export interface VplanCoverageBundle {
+    totalSlots: number;
+    coveredSlots: number;
+    uncoveredSlots: number;
+    overCoveredSlots: number;
+    coverageRatio: number;
+    structuralHours: number;
+    positionSlots: VplanPositionSlotRow[];
+    uncoveredByDay: Record<string, Array<{
+        positionName: string;
+        shiftCode: string;
+        missing: number;
+    }>>;
+    overCoveredByDay: Record<string, VplanOverCoverageDayGap[]>;
+    schedulePreview: VplanSchedulePreview;
 }
 export interface VplanSchedulePreviewCell {
     code: string;
@@ -158,19 +206,30 @@ export interface VplanSchedulePreview {
     rows: VplanSchedulePreviewRow[];
     codeSummary: VplanCodeMonthSummary[];
 }
-export interface VplanCoverageBundle {
-    totalSlots: number;
-    coveredSlots: number;
-    uncoveredSlots: number;
-    coverageRatio: number;
-    structuralHours: number;
-    positionSlots: VplanPositionSlotRow[];
-    uncoveredByDay: Record<string, Array<{
-        positionName: string;
-        shiftCode: string;
-        missing: number;
-    }>>;
-    schedulePreview: VplanSchedulePreview;
+export interface VplanCoverageGapCandidate {
+    employeeId: string;
+    displayName?: string;
+    currentCode: string;
+    canAssign: boolean;
+    blockReason?: string;
+}
+export interface VplanCoverageGapDetail {
+    dateStr: string;
+    dayLetter: string;
+    positionName: string;
+    shiftCode: string;
+    required: number;
+    assigned: number;
+    missing: number;
+    candidates: VplanCoverageGapCandidate[];
+}
+export interface VplanCoverageAuditReport {
+    ok: boolean;
+    totalGaps: number;
+    totalMissingSlots: number;
+    totalExcessSlots: number;
+    gaps: VplanCoverageGapDetail[];
+    iterationsUsed?: number;
 }
 export interface VplanVerificationReport {
     ok: boolean;
@@ -179,12 +238,34 @@ export interface VplanVerificationReport {
     slaVendidas?: number;
     hoursGap?: number;
     coverage?: VplanCoverageBundle;
+    coverageAudit?: VplanCoverageAuditReport;
 }
 export interface VplanStepResult {
     phase: string;
     ok: boolean;
     summary: string;
     durationMs?: number;
+}
+export interface VplanPrevMonthPreviewRow {
+    employeeId: string;
+    displayName: string;
+    lastDate?: string;
+    lastCode?: string;
+    trailingWork?: number;
+    trailingRest?: number;
+    tailDays: Array<{
+        dateStr: string;
+        code: string;
+    }>;
+}
+export interface VplanPrevMonthPreview {
+    prevYear: number;
+    prevMonth: number;
+    prevMonthKey: string;
+    assignmentCount: number;
+    employeesWithTrailing: number;
+    tailDateStrs: string[];
+    rows: VplanPrevMonthPreviewRow[];
 }
 export interface VplanIntakeMeta {
     empresaId: string;
@@ -199,6 +280,62 @@ export interface VplanIntakeMeta {
     monthDays: number;
     budgetMode: 'cct' | 'calendar';
     preferredCycle: string;
+    prevMonthPreview?: VplanPrevMonthPreview;
+}
+export type VplanMandateKey = 'CICLO_6X2' | 'COBERTURA_OBJETIVO' | 'HORAS_VENDIDAS';
+export interface VplanMandateStatus {
+    key: VplanMandateKey;
+    label: string;
+    ok: boolean;
+    summary: string;
+}
+export interface VplanPlanningLayerStatus {
+    key: 'CICLO_OBJETIVO' | 'CONTINGENCIA_4X2' | 'OFFSET_RACHA';
+    label: string;
+    value: string;
+    notes: string;
+}
+export interface VplanHourHeadroom {
+    slaVendidas: number;
+    billableHours: number;
+    offerHours: number;
+    gapToSla: number;
+    headroomHours: number;
+    canUseContingency4x2: boolean;
+    summary: string;
+    employeeCount?: number;
+    avgHoursRequiredPerGuard?: number;
+    avgHoursOfferPerGuard?: number;
+    assignmentGapNotHeadcount?: boolean;
+}
+export interface VplanCoverageLadderRecommendation {
+    dateStr: string;
+    positionName: string;
+    shiftCode: string;
+    ladderStep: string;
+    stepNumber: number;
+    message: string;
+    employeeId?: string;
+}
+export interface VplanBrainReport {
+    mandates: VplanMandateStatus[];
+    mandatesOk: number;
+    mandatesTotal: number;
+    allMandatesOk: boolean;
+    action: 'skip' | 'preserve' | 'mandate_repair' | 'solver_full';
+    summary: string;
+    preserveGeneration: boolean;
+    repairTargets: VplanMandateKey[];
+    planningLayers: VplanPlanningLayerStatus[];
+    hourHeadroom: VplanHourHeadroom;
+    coverageLadder: VplanCoverageLadderRecommendation[];
+    inMonthStreakViolations: number;
+    crossMonthViolations: number;
+}
+export interface VplanFixerDecision {
+    policy: 'skip' | 'light' | 'preserve' | 'mandate_repair' | 'solver_full';
+    reason: string;
+    preserveGeneration: boolean;
 }
 export interface VplanBrainContext {
     run: VplanRunRequest;
@@ -209,10 +346,13 @@ export interface VplanBrainContext {
     strategy?: VplanStrategy;
     draft?: VplanScheduleDraft;
     verification?: VplanVerificationReport;
+    brainReport?: VplanBrainReport;
+    fixerDecision?: VplanFixerDecision;
     fixerLog?: VplanFixerLogEntry[];
     optimization?: VplanOptimizationResult;
     deliverable?: VplanDeliverable;
     steps: VplanStepResult[];
+    planningRules?: PlanningRulesConfig;
 }
 export interface VplanRunResponse {
     version: 'VPLAN_0.2';

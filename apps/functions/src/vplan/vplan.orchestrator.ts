@@ -4,6 +4,12 @@
  */
 
 import { loadVplanPlanningSnapshot } from './vplan.firestore';
+import { loadPlanningRulesForEmpresa } from '../planning/planning-rules.service';
+import { enabledCyclesFromRules } from '../planning/planning-rules.defaults';
+import { positionsForCycle } from './vplan.positions';
+import { capDefaultPositionByEmp } from './vplan.sla-enforce';
+import { computeOpeningProtectedCells } from './vplan.cycle-continuity';
+import { previousMonth, buildMonthDays } from './vplan.calendar';
 import { countTrailingEmployees, planningStateHasTrailing } from './vplan.trailing';
 import { buildVplanIntake, validateVplanRequest } from './phases/phase0-intake';
 import { buildVplanDemandModel } from './phases/phase1-demand';
@@ -14,6 +20,7 @@ import { runVplanGeneration } from './phases/phase5-generate';
 import { applyVplanAbsenceExceptions } from './phases/phase6-exceptions';
 import { runVplanVerification } from './phases/phase7-verify';
 import { runVplanDeterministicFixer } from './phases/phase8-fix';
+import { evaluateVplanBrainMandates } from './vplan.brain';
 import { runVplanOptimization } from './phases/phase9-optimize';
 import { buildVplanDeliverable } from './phases/phase10-deliver';
 import type {
@@ -109,13 +116,28 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
 
   const context: VplanBrainContext = { run: request, steps: [] };
 
+  const planningRules = await loadPlanningRulesForEmpresa(request.empresaId);
+  context.planningRules = planningRules;
+
+  const effectiveCycle = (() => {
+    const preferred = request.preferredCycle ?? planningRules.defaultCycle;
+    if (enabledCyclesFromRules(planningRules).includes(preferred as typeof planningRules.defaultCycle)) {
+      return preferred;
+    }
+    return planningRules.defaultCycle;
+  })();
+
   if (runPhases.has('0_intake')) {
     const t0 = Date.now();
     context.intake = buildVplanIntake(request, snapshot);
+    const prevPreview = context.intake.prevMonthPreview;
+    const prevSummary = prevPreview
+      ? ` · ${prevPreview.assignmentCount} turnos ${prevPreview.prevMonth}/${prevPreview.prevYear} · ${prevPreview.employeesWithTrailing} racha(s)`
+      : '';
     steps.push(step(
       '0_intake',
       true,
-      `${context.intake.objectiveName ?? context.intake.objectiveId} · modo ${context.intake.mode} · ${context.intake.positionCount} puestos · ${context.intake.employeeCount} guardias`,
+      `${context.intake.objectiveName ?? context.intake.objectiveId} · modo ${context.intake.mode} · ${context.intake.positionCount} puestos · ${context.intake.employeeCount} guardias${prevSummary}`,
       t0,
     ));
   }
@@ -126,6 +148,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       positions: snapshot.positions,
       days: snapshot.days,
       slaVendidas: snapshot.slaVendidas,
+      cycle: effectiveCycle,
     });
     steps.push(step(
       '1_demand',
@@ -144,11 +167,13 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
         days: snapshot.days,
         absences: snapshot.absences,
         previousMonthStateKey: snapshot.previousMonthStateKey,
+        planningRules,
       }),
       positions: snapshot.positions,
       days: snapshot.days,
-      preferredCycle: request.preferredCycle,
+      preferredCycle: effectiveCycle,
       budgetMode: request.budgetMode,
+      planningRules,
     });
     suggestedHeadcount = pre.suggestedHeadcount;
   }
@@ -161,6 +186,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       absences: snapshot.absences,
       suggestedHeadcount,
       previousMonthStateKey: snapshot.previousMonthStateKey,
+      planningRules,
     });
     steps.push(step(
       '2_supply',
@@ -177,8 +203,9 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       supply: context.supply,
       positions: snapshot.positions,
       days: snapshot.days,
-      preferredCycle: request.preferredCycle,
+      preferredCycle: effectiveCycle,
       budgetMode: request.budgetMode,
+      planningRules,
     });
     steps.push(step(
       '3_feasibility',
@@ -207,7 +234,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
     const t4 = Date.now();
     context.strategy = buildVplanStrategy({
       mode: request.mode,
-      preferredCycle: request.preferredCycle ?? context.feasibility?.suggestedCycle,
+      preferredCycle: effectiveCycle ?? context.feasibility?.suggestedCycle,
       hasExistingAssignments: snapshot.existingAssignments.length > 0,
       hasTrailing: hasTrailing(snapshot),
       hasPrevMonthShifts: snapshot.previousMonthAssignments.length > 0,
@@ -228,11 +255,18 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
         planningState: snapshot.planningState,
         prevPlanningState: snapshot.prevPlanningState,
         strategy: context.strategy,
+        planningRules,
+        demand: context.demand,
       });
+      const motorH = context.draft.stats?.motorBillableHours;
+      const postH = Math.round(context.draft.stats?.totalBillableHours ?? 0);
+      const hoursLabel = motorH != null && motorH !== postH
+        ? `${postH}h (motor ${motorH}h)`
+        : `${postH}h`;
       steps.push(step(
         '5_generate',
         true,
-        `${context.draft.assignments.length} celdas · ${Math.round(context.draft.stats?.totalBillableHours ?? 0)}h · ${context.draft.sourceEngine}`,
+        `${context.draft.assignments.length} celdas · ${hoursLabel} · ${context.draft.sourceEngine}${context.draft.stats?.trailingSlotCount ? ` · ${context.draft.stats.trailingSlotCount} racha(s)` : ''}${context.draft.stats?.needsReinforcementCount ? ` · ${context.draft.stats.needsReinforcementCount} NR` : ''}${context.draft.stats?.continuityFixes ? ` · ${context.draft.stats.continuityFixes} ajuste(s)` : ''}`,
         t5,
       ));
     } catch (e: unknown) {
@@ -259,6 +293,18 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
     steps.push(step('6_exceptions', true, `${patched.patchedDays} días marcados con ausencia`, t6));
   }
 
+  const employeeNames = Object.fromEntries(
+    snapshot.employees.map((e) => [e.id, e.displayName]),
+  );
+  const cappedDefaultPosition = capDefaultPositionByEmp(
+    snapshot.positions,
+    {
+      ...snapshot.prevPlanningState.defaultPositionByEmp,
+      ...snapshot.planningState.defaultPositionByEmp,
+    },
+    context.strategy?.cycle,
+  );
+
   if (runPhases.has('7_verify') && context.draft && context.strategy) {
     const t7 = Date.now();
     context.verification = runVplanVerification({
@@ -268,6 +314,9 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       strategy: context.strategy,
       draft: context.draft,
       monthDemandHours: context.demand?.monthDemandHours,
+      demand: context.demand,
+      employeeNames,
+      planningRules,
     });
     steps.push(step(
       '7_verify',
@@ -281,10 +330,137 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
 
   if (runPhases.has('8_fix') && context.draft) {
     const t8 = Date.now();
-    const fixed = runVplanDeterministicFixer(context.draft);
+    const monthFirstDate = snapshot.days[0]?.dateStr ?? '';
+    const runYear = monthFirstDate ? Number(monthFirstDate.slice(0, 4)) : 0;
+    const runMonth = monthFirstDate ? Number(monthFirstDate.slice(5, 7)) : 0;
+    const prevCal = runYear && runMonth ? previousMonth(runYear, runMonth) : null;
+    const prevCalLast = prevCal
+      ? buildMonthDays(prevCal.year, prevCal.month).at(-1)?.dateStr
+      : undefined;
+    const prevMonthDateStrs = snapshot.previousMonthAssignments.length > 0
+      ? snapshot.previousMonthAssignments.map((a) => a.dateStr).filter((d, i, arr) => arr.indexOf(d) === i).sort()
+      : [] as string[];
+    const prevMonthLastDate: string = prevCalLast
+      ?? (prevMonthDateStrs.length > 0 ? prevMonthDateStrs[prevMonthDateStrs.length - 1]! : '');
+
+    const mergedDefaultShiftByEmp = {
+      ...snapshot.prevPlanningState.defaultShiftByEmp,
+      ...snapshot.planningState.defaultShiftByEmp,
+    };
+
+    let protectedCells: Set<string> | undefined;
+    if (context.strategy?.modes.useTrailing && prevMonthLastDate && monthFirstDate) {
+      if (context.draft.stats?.openingProtectedCells?.length) {
+        protectedCells = new Set(context.draft.stats.openingProtectedCells);
+      } else {
+        protectedCells = computeOpeningProtectedCells({
+          previousMonthAssignments: snapshot.previousMonthAssignments,
+          prevMonthLastDate,
+          monthFirstDate,
+          prevPlanningState: snapshot.prevPlanningState,
+          positions: snapshot.positions,
+          defaultPositionByEmp: cappedDefaultPosition,
+          defaultShiftByEmp: mergedDefaultShiftByEmp,
+          cycle: context.strategy.cycle,
+          useTrailing: true,
+          draftAssignments: context.draft.assignments,
+        });
+      }
+    }
+
+    const brainReport = context.strategy && context.demand
+      ? evaluateVplanBrainMandates({
+        mode: request.mode,
+        strategy: context.strategy,
+        draft: context.draft,
+        demand: context.demand,
+        snapshot,
+        planningState: snapshot.planningState,
+        prevPlanningState: snapshot.prevPlanningState,
+        defaultPositionByEmp: cappedDefaultPosition,
+        defaultShiftByEmp: mergedDefaultShiftByEmp,
+        prevMonthLastDate,
+        monthFirstDate,
+        dateStrList: snapshot.days.map((d) => d.dateStr),
+        supply: context.supply,
+        feasibility: context.feasibility,
+        planningRules,
+      })
+      : undefined;
+    context.brainReport = brainReport;
+    if (brainReport) {
+      context.fixerDecision = {
+        policy: brainReport.action,
+        reason: brainReport.summary,
+        preserveGeneration: brainReport.preserveGeneration,
+      };
+    }
+
+    const fixed = runVplanDeterministicFixer(
+      context.draft,
+      snapshot.days.map((d) => d.dateStr),
+      {
+        brainReport,
+        action: brainReport?.action,
+        previousMonthAssignments: snapshot.previousMonthAssignments,
+        monthFirstDate,
+        positions: positionsForCycle(snapshot.positions, context.strategy?.cycle),
+        dateMeta: snapshot.days,
+        defaultPositionByEmp: cappedDefaultPosition,
+        defaultShiftByEmp: mergedDefaultShiftByEmp,
+        demand: context.demand,
+        cycle: context.strategy?.cycle,
+        strategy: context.strategy,
+        snapshot,
+        prevPlanningState: snapshot.prevPlanningState,
+        prevMonthLastDate,
+        employeeNames,
+        planningRules,
+        protectedCells,
+      },
+    );
     context.draft = fixed.draft;
     context.fixerLog = fixed.log;
-    steps.push(step('8_fix', true, `${fixed.log.length} ajuste(s) CCT`, t8));
+    const auditSummary = fixed.coverageAudit
+      ? ` · audit ${fixed.coverageAudit.totalMissingSlots} gap(s) · ${fixed.coverageAudit.iterationsUsed ?? 0} iter`
+      : '';
+    const mandateSummary = brainReport
+      ? `${brainReport.mandatesOk}/${brainReport.mandatesTotal} mandatos · ${brainReport.action}`
+      : fixed.action;
+    steps.push(step(
+      '8_fix',
+      true,
+      `${mandateSummary}: ${brainReport?.summary ?? fixed.action} · ${fixed.log.length} ajuste(s)${auditSummary}`,
+      t8,
+    ));
+
+    if (context.strategy && runPhases.has('7_verify')) {
+      context.verification = runVplanVerification({
+        snapshot,
+        planningState: snapshot.planningState,
+        prevPlanningState: snapshot.prevPlanningState,
+        strategy: context.strategy,
+        draft: context.draft,
+        monthDemandHours: context.demand?.monthDemandHours,
+        demand: context.demand,
+        employeeNames,
+        planningRules,
+      });
+      if (fixed.coverageAudit && context.verification) {
+        context.verification.coverageAudit = fixed.coverageAudit;
+      }
+      const blockingAfterFix = context.verification.issues.filter((i) => i.severity === 'blocking').length;
+      const verifyIdx = steps.findIndex((s) => s.phase === '7_verify');
+      if (verifyIdx >= 0) {
+        steps[verifyIdx] = step(
+          '7_verify',
+          context.verification.ok,
+          context.verification.ok
+            ? `Cobertura OK · ${context.verification.billableHours}h · gap ${context.verification.hoursGap}h`
+            : `${blockingAfterFix} bloqueante(s) post-solver`,
+        );
+      }
+    }
   }
 
   if (runPhases.has('9_optimize') && context.draft && context.verification && context.demand && context.supply) {
@@ -316,6 +492,9 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
         strategy: context.strategy,
         draft: context.draft,
         monthDemandHours: context.demand?.monthDemandHours,
+        demand: context.demand,
+        employeeNames,
+        planningRules,
       });
     }
   }
