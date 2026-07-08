@@ -14,11 +14,13 @@ import { trailingWorkFromPrevMonth, wouldExceedCctWorkStreak } from './vplan.cct
 import type { VplanExistingAssignment, VplanPlanningState } from './vplan.firestore';
 import { isCustomFixedShiftPosition, isVirtualEmployeeId, type VplanPositionDef } from './vplan.positions';
 import {
+  billableHoursForCode,
   getCycleTemplate,
   is4x2Cycle,
   maxWorkStreak,
   normalizeCodeForCycle,
 } from './vplan.cycle-templates';
+import { resolveAssignmentBillableHours } from './vplan.assignment-hours';
 import { maxRestStreak } from './vplan.rotation';
 import type { VplanAssignment, VplanFixerLogEntry, VplanScheduleDraft } from './vplan.types';
 import type { CoverageGuardContext } from './vplan.coverage-guard';
@@ -29,7 +31,6 @@ export { CYCLE_24_MTN, CYCLE_12_DN } from './vplan.cycle-templates';
 const WORK_BANDS = new Set(['M', 'T', 'N']);
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'E', 'A', 'PG', 'AA', 'RET', 'R', 'ESC', 'REF']);
-const BILLABLE_HOURS = 8;
 /** Mínimo CCT entre turnos (12 h). Configurable vía `minRestHoursBetweenBands` en reglas. */
 const DEFAULT_MIN_REST_HOURS = 12;
 
@@ -198,7 +199,7 @@ export function realignVplanDraftToCycle(opts: {
       if (current.code.toUpperCase() === expected) return;
 
       const prevCode = current.code;
-      const hours = expected === 'F' ? 0 : (is4x2Cycle(cycle) ? 12 : (current.hours ?? BILLABLE_HOURS));
+      const hours = expected === 'F' ? 0 : billableHoursForCode(expected, cycle);
       assignments[idx] = {
         ...current,
         code: expected,
@@ -280,6 +281,7 @@ function applyBandFix(
     draftMeta: Pick<VplanScheduleDraft, 'sourceEngine'>;
     coverageGuard?: CoverageGuardContext & { protect: boolean };
     protectedCells?: Set<string>;
+    cycle?: string;
   },
 ): void {
   const key = assignmentKey(empId, dateStr);
@@ -320,7 +322,7 @@ function applyBandFix(
   assignments[idx] = {
     ...assignments[idx],
     code: replacement,
-    hours: replacement === 'F' ? 0 : (assignments[idx].hours ?? BILLABLE_HOURS),
+    hours: replacement === 'F' ? 0 : billableHoursForCode(replacement, opts?.cycle ?? '6+2'),
     positionName: replacement === 'F' ? '' : assignments[idx].positionName,
   };
   byDate.set(dateStr, assignments[idx]!);
@@ -448,6 +450,7 @@ export function guardIllegalBandTransitions(opts: {
               draftMeta: opts.draft,
               coverageGuard: opts.coverageGuard,
               protectedCells: opts.protectedCells,
+              cycle,
             },
           );
           const fixedBand = workBand(replacement);
@@ -720,7 +723,12 @@ export function patchMonthOpeningContinuity(opts: {
       assignments[idx] = {
         ...current,
         code: t.expectedCode,
-        hours: is4x2Cycle(cycle) ? 12 : (current.hours ?? BILLABLE_HOURS),
+        hours: t.expectedCode === 'F'
+          ? 0
+          : resolveAssignmentBillableHours(
+            { ...current, code: t.expectedCode, positionName: t.fixedPos || current.positionName || '' },
+            { cycle, positions: opts.positions },
+          ),
         positionName: t.fixedPos || current.positionName || '',
       };
       log.push({

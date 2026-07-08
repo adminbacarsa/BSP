@@ -15,19 +15,8 @@ const vplan_sla_enforce_1 = require("../vplan.sla-enforce");
 const vplan_positions_1 = require("../vplan.positions");
 const vplan_assigned_positions_1 = require("../vplan.assigned-positions");
 const vplan_engine_bridge_1 = require("../vplan.engine-bridge");
+const vplan_assignment_hours_1 = require("../vplan.assignment-hours");
 const vplan_cycle_templates_1 = require("../vplan.cycle-templates");
-const BILLABLE_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'EN', 'RO', 'RON']);
-const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET', 'R', 'NR', 'V', 'L', 'A', 'E', 'PG', 'AA']);
-function countBillableHours(assignments) {
-    let total = 0;
-    for (const a of assignments) {
-        const c = String(a.code || '').toUpperCase();
-        if (NON_BILLABLE.has(c))
-            continue;
-        total += a.hours ?? (BILLABLE_CODES.has(c) ? 8 : 0);
-    }
-    return Math.round(total);
-}
 function runVplanGeneration(opts) {
     const cycle = opts.strategy.cycle;
     const is4x2 = (0, vplan_cycle_templates_1.is4x2Cycle)(cycle);
@@ -595,7 +584,36 @@ function runVplanGeneration(opts) {
         });
         assignments = customFinal2.draft.assignments;
         fixLog.push(...customFinal2.log);
+        const hourNormalizePre = (0, vplan_assignment_hours_1.normalizeAssignmentBillableHours)(assignments, {
+            cycle,
+            positions: opts.snapshot.positions,
+        });
+        assignments = hourNormalizePre.assignments;
+        fixLog.push(...hourNormalizePre.log);
+        const postHourClose = (0, vplan_hour_rebalance_1.rebalanceHoursTowardSla)({
+            draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+            dateStrs: opts.snapshot.days,
+            positions: cyclePositions,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            cycle,
+            dateStrList: dateStrs,
+            slaVendidas: opts.snapshot.slaVendidas,
+            employeeIds: opts.snapshot.employees.map((e) => e.id),
+            previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+            rules,
+            protectedCells: weekendProtected,
+            tolerance: 0,
+        });
+        assignments = postHourClose.draft.assignments;
+        fixLog.push(...postHourClose.log);
+        rebalanced.hoursAdded += postHourClose.hoursAdded;
     }
+    const hourNormalizeFinal = (0, vplan_assignment_hours_1.normalizeAssignmentBillableHours)(assignments, {
+        cycle,
+        positions: opts.snapshot.positions,
+    });
+    assignments = hourNormalizeFinal.assignments;
+    fixLog.push(...hourNormalizeFinal.log);
     const openingProtectedCells = protectedCells
         ? [...protectedCells]
         : (opts.strategy.modes.useTrailing && prevMonthLastDate && monthFirstDate
@@ -626,7 +644,10 @@ function runVplanGeneration(opts) {
                     }),
                 ])]
             : undefined);
-    const billableAfterPipeline = countBillableHours(assignments);
+    const billableAfterPipeline = (0, vplan_assignment_hours_1.countDraftBillableHours)(assignments, {
+        cycle,
+        positions: opts.snapshot.positions,
+    });
     return {
         assignments,
         sourceEngine: `vplan:${opts.strategy.engine}:${cycle}${is4x2 ? ':D12N12' : ''}:motor+ladder`,

@@ -108,11 +108,13 @@ function runVplanVerification(opts) {
     }
     const hoursGap = Math.round(coverage.slaVendidas - coverage.billableHours);
     const hoursTolerance = rules.slaHoursTolerance;
-    if (coverage.slaVendidas > 0 && hoursGap > hoursTolerance) {
+    if (coverage.slaVendidas > 0 && hoursGap > 0) {
         issues.push({
-            severity: 'warning',
+            severity: hoursGap > hoursTolerance ? 'blocking' : 'warning',
             code: 'HOURS_UNDER_SLA',
-            message: `Faltan ~${hoursGap}h facturables vs SLA vendidas`,
+            message: hoursGap <= hoursTolerance
+                ? `Faltan ${hoursGap}h facturables vs SLA (${hoursGap}h = turno sin cubrir contable)`
+                : `Faltan ~${hoursGap}h facturables vs SLA vendidas`,
         });
     }
     else if (coverage.slaVendidas > 0 && hoursGap < -hoursTolerance) {

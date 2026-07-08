@@ -18,22 +18,10 @@ import { capDefaultPositionByEmp, stripExcessSlaAssignments } from '../vplan.sla
 import { positionsForCycle } from '../vplan.positions';
 import { enforceAssigned24hsPositions } from '../vplan.assigned-positions';
 import { buildEngineContext, engineToVplanAssignments } from '../vplan.engine-bridge';
-import { is4x2Cycle } from '../vplan.cycle-templates';
+import { countDraftBillableHours, normalizeAssignmentBillableHours } from '../vplan.assignment-hours';
 import type { VplanPlanningSnapshot, VplanPlanningState } from '../vplan.firestore';
-import type { VplanFixerLogEntry, VplanScheduleDraft, VplanStrategy, VplanAssignment, VplanDemandModel } from '../vplan.types';
-
-const BILLABLE_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'EN', 'RO', 'RON']);
-const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET', 'R', 'NR', 'V', 'L', 'A', 'E', 'PG', 'AA']);
-
-function countBillableHours(assignments: VplanAssignment[]): number {
-  let total = 0;
-  for (const a of assignments) {
-    const c = String(a.code || '').toUpperCase();
-    if (NON_BILLABLE.has(c)) continue;
-    total += a.hours ?? (BILLABLE_CODES.has(c) ? 8 : 0);
-  }
-  return Math.round(total);
-}
+import { is4x2Cycle } from '../vplan.cycle-templates';
+import type { VplanFixerLogEntry, VplanScheduleDraft, VplanStrategy, VplanDemandModel, VplanAssignment } from '../vplan.types';
 
 export function runVplanGeneration(opts: {
   snapshot: VplanPlanningSnapshot;
@@ -662,7 +650,39 @@ export function runVplanGeneration(opts: {
     });
     assignments = customFinal2.draft.assignments;
     fixLog.push(...customFinal2.log);
+
+    const hourNormalizePre = normalizeAssignmentBillableHours(assignments, {
+      cycle,
+      positions: opts.snapshot.positions,
+    });
+    assignments = hourNormalizePre.assignments;
+    fixLog.push(...hourNormalizePre.log);
+
+    const postHourClose = rebalanceHoursTowardSla({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs: opts.snapshot.days,
+      positions: cyclePositions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      cycle,
+      dateStrList: dateStrs,
+      slaVendidas: opts.snapshot.slaVendidas,
+      employeeIds: opts.snapshot.employees.map((e) => e.id),
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      rules,
+      protectedCells: weekendProtected,
+      tolerance: 0,
+    });
+    assignments = postHourClose.draft.assignments;
+    fixLog.push(...postHourClose.log);
+    rebalanced.hoursAdded += postHourClose.hoursAdded;
   }
+
+  const hourNormalizeFinal = normalizeAssignmentBillableHours(assignments, {
+    cycle,
+    positions: opts.snapshot.positions,
+  });
+  assignments = hourNormalizeFinal.assignments;
+  fixLog.push(...hourNormalizeFinal.log);
 
   const openingProtectedCells = protectedCells
     ? [...protectedCells]
@@ -695,7 +715,10 @@ export function runVplanGeneration(opts: {
       ])]
       : undefined);
 
-  const billableAfterPipeline = countBillableHours(assignments);
+  const billableAfterPipeline = countDraftBillableHours(assignments, {
+    cycle,
+    positions: opts.snapshot.positions,
+  });
 
   return {
     assignments,

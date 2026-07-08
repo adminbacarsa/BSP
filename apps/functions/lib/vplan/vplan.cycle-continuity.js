@@ -22,6 +22,7 @@ exports.enforceIllegalBandRest = enforceIllegalBandRest;
 const vplan_cct_enforce_1 = require("./vplan.cct-enforce");
 const vplan_positions_1 = require("./vplan.positions");
 const vplan_cycle_templates_1 = require("./vplan.cycle-templates");
+const vplan_assignment_hours_1 = require("./vplan.assignment-hours");
 const vplan_rotation_1 = require("./vplan.rotation");
 const vplan_coverage_guard_1 = require("./vplan.coverage-guard");
 var vplan_cycle_templates_2 = require("./vplan.cycle-templates");
@@ -30,7 +31,6 @@ Object.defineProperty(exports, "CYCLE_12_DN", { enumerable: true, get: function 
 const WORK_BANDS = new Set(['M', 'T', 'N']);
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'E', 'A', 'PG', 'AA', 'RET', 'R', 'ESC', 'REF']);
-const BILLABLE_HOURS = 8;
 const DEFAULT_MIN_REST_HOURS = 12;
 const BAND_SCHEDULE = {
     M: { startMin: 7 * 60, endMin: 15 * 60 },
@@ -132,7 +132,7 @@ function realignVplanDraftToCycle(opts) {
             if (current.code.toUpperCase() === expected)
                 return;
             const prevCode = current.code;
-            const hours = expected === 'F' ? 0 : ((0, vplan_cycle_templates_1.is4x2Cycle)(cycle) ? 12 : (current.hours ?? BILLABLE_HOURS));
+            const hours = expected === 'F' ? 0 : (0, vplan_cycle_templates_1.billableHoursForCode)(expected, cycle);
             assignments[idx] = {
                 ...current,
                 code: expected,
@@ -218,7 +218,7 @@ function applyBandFix(assignments, indexByKey, byDate, empId, dateStr, replaceme
     assignments[idx] = {
         ...assignments[idx],
         code: replacement,
-        hours: replacement === 'F' ? 0 : (assignments[idx].hours ?? BILLABLE_HOURS),
+        hours: replacement === 'F' ? 0 : (0, vplan_cycle_templates_1.billableHoursForCode)(replacement, opts?.cycle ?? '6+2'),
         positionName: replacement === 'F' ? '' : assignments[idx].positionName,
     };
     byDate.set(dateStr, assignments[idx]);
@@ -304,6 +304,7 @@ function guardIllegalBandTransitions(opts) {
                         draftMeta: opts.draft,
                         coverageGuard: opts.coverageGuard,
                         protectedCells: opts.protectedCells,
+                        cycle,
                     });
                     const fixedBand = workBand(replacement);
                     if (fixedBand) {
@@ -502,7 +503,9 @@ function patchMonthOpeningContinuity(opts) {
             assignments[idx] = {
                 ...current,
                 code: t.expectedCode,
-                hours: (0, vplan_cycle_templates_1.is4x2Cycle)(cycle) ? 12 : (current.hours ?? BILLABLE_HOURS),
+                hours: t.expectedCode === 'F'
+                    ? 0
+                    : (0, vplan_assignment_hours_1.resolveAssignmentBillableHours)({ ...current, code: t.expectedCode, positionName: t.fixedPos || current.positionName || '' }, { cycle, positions: opts.positions }),
                 positionName: t.fixedPos || current.positionName || '',
             };
             log.push({
