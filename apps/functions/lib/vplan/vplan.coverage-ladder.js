@@ -102,6 +102,35 @@ function candidateCanTakeBand(opts) {
     });
     return evalResult.canAssign;
 }
+function expectedBandForEmployeeDay(empId, dateStr, ctx) {
+    const opening = ctx.openingSlotByEmp?.[empId];
+    if (opening === undefined || opening === null)
+        return null;
+    const dayIndex = ctx.dateStrList.indexOf(dateStr);
+    if (dayIndex < 0)
+        return null;
+    const skipFixed = Boolean(ctx.useTrailing && ctx.trailingEmpIds?.has(empId));
+    const fixedBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+    return (0, vplan_cycle_continuity_1.expectedCycleCodeForEmployeeDay)(opening, dayIndex, ctx.cycle, fixedBand, skipFixed);
+}
+function cycleBandMatchesEmployeeDay(empId, dateStr, shiftCode, ctx) {
+    const expected = expectedBandForEmployeeDay(empId, dateStr, ctx);
+    if (!expected)
+        return false;
+    if (expected === 'F')
+        return false;
+    return (0, vplan_sla_enforce_1.normBandCode)(expected) === (0, vplan_sla_enforce_1.normBandCode)(shiftCode);
+}
+function cyclePreferenceRank(empId, dateStr, shiftCode, ctx) {
+    return cycleBandMatchesEmployeeDay(empId, dateStr, shiftCode, ctx) ? 0 : 1;
+}
+function sortFrancoCandidatesByCycle(items, dateStr, shiftCode, ctx) {
+    return [...items].sort((x, y) => {
+        const xr = cyclePreferenceRank(x.a.employeeId, dateStr, shiftCode, ctx);
+        const yr = cyclePreferenceRank(y.a.employeeId, dateStr, shiftCode, ctx);
+        return xr - yr;
+    });
+}
 function tryDirectBandReassign(opts) {
     const needBand = (0, vplan_sla_enforce_1.normBandCode)(opts.shiftCode);
     const limits = bandLimitsForPosition(opts.pos, opts.dayLetter, opts.fillCtx.cycle);
@@ -120,6 +149,19 @@ function tryDirectBandReassign(opts) {
         if (pos !== opts.posName)
             return false;
         return (0, vplan_sla_enforce_1.normBandCode)(code) !== needBand;
+    })
+        .sort((x, y) => {
+        const pref = {
+            openingSlotByEmp: opts.fillCtx.openingSlotByEmp,
+            dateStrList: opts.fillCtx.dateStrList,
+            cycle: opts.fillCtx.cycle,
+            defaultShiftByEmp: opts.fillCtx.defaultShiftByEmp,
+            useTrailing: opts.fillCtx.useTrailing,
+            trailingEmpIds: opts.fillCtx.trailingEmpIds,
+        };
+        const xr = cyclePreferenceRank(x.a.employeeId, opts.dateStr, opts.shiftCode, pref);
+        const yr = cyclePreferenceRank(y.a.employeeId, opts.dateStr, opts.shiftCode, pref);
+        return xr - yr;
     });
     for (const { a, i } of occupants) {
         const fromBand = (0, vplan_sla_enforce_1.normBandCode)(String(a.code || ''));
@@ -137,6 +179,18 @@ function tryDirectBandReassign(opts) {
             dateStr: opts.dateStr,
             shiftCode: opts.shiftCode,
         })) {
+            continue;
+        }
+        const cyclePref = {
+            openingSlotByEmp: opts.fillCtx.openingSlotByEmp,
+            dateStrList: opts.fillCtx.dateStrList,
+            cycle: opts.fillCtx.cycle,
+            defaultShiftByEmp: opts.fillCtx.defaultShiftByEmp,
+            useTrailing: opts.fillCtx.useTrailing,
+            trailingEmpIds: opts.fillCtx.trailingEmpIds,
+        };
+        if (opts.fillCtx.openingSlotByEmp
+            && !cycleBandMatchesEmployeeDay(a.employeeId, opts.dateStr, opts.shiftCode, cyclePref)) {
             continue;
         }
         const nextCounts = new Map(counts);
@@ -290,7 +344,21 @@ function tryBandSwapWithFrancoHelper(opts) {
     return { ok: false };
 }
 function candidateCanFill(opts) {
-    return candidateCanTakeBand(opts);
+    if (!candidateCanTakeBand(opts))
+        return false;
+    if (opts.francoTrabajado || !opts.openingSlotByEmp)
+        return true;
+    const expected = expectedBandForEmployeeDay(opts.empId, opts.dateStr, {
+        openingSlotByEmp: opts.openingSlotByEmp,
+        dateStrList: opts.dateStrList,
+        cycle: opts.cycle,
+        defaultShiftByEmp: opts.defaultShiftByEmp,
+        useTrailing: opts.useTrailing,
+        trailingEmpIds: opts.trailingEmpIds,
+    });
+    if (!expected || expected === 'F')
+        return true;
+    return (0, vplan_sla_enforce_1.normBandCode)(expected) === (0, vplan_sla_enforce_1.normBandCode)(opts.shiftCode);
 }
 function assignCell(assignments, idx, shiftCode, posName, pos) {
     const shift = (pos.shifts || []).find((s) => String(s.code || '').toUpperCase() === shiftCode);
@@ -469,6 +537,12 @@ function fillCoverageGapsWithLadder(opts) {
         previousMonthAssignments: opts.previousMonthAssignments,
         rules,
         protectedCells: opts.protectedCells,
+        openingSlotByEmp: opts.openingSlotByEmp,
+        defaultShiftByEmp: opts.defaultShiftByEmp,
+        useTrailing: opts.useTrailing,
+        trailingEmpIds: opts.trailingEmployeeIds
+            ? new Set(opts.trailingEmployeeIds)
+            : undefined,
     };
     for (const { dateStr, dayLetter } of opts.dateStrs) {
         for (const pos of opts.positions) {
@@ -589,9 +663,18 @@ function fillCoverageGapsWithLadder(opts) {
                             return false;
                         return opts.defaultPositionByEmp[a.employeeId] === posName;
                     });
-                    const pick6x2Legal = francoOnPosition.find(({ a }) => candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }));
+                    const cyclePref = {
+                        openingSlotByEmp: opts.openingSlotByEmp,
+                        dateStrList,
+                        cycle,
+                        defaultShiftByEmp: opts.defaultShiftByEmp,
+                        useTrailing: opts.useTrailing,
+                        trailingEmpIds: fillCtx.trailingEmpIds,
+                    };
+                    const francoSorted = sortFrancoCandidatesByCycle(francoOnPosition, dateStr, shiftCode, cyclePref);
+                    const pick6x2Legal = francoSorted.find(({ a }) => candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }));
                     const pick6x2Ft = !pick6x2Legal && opts.allowFrancoTrabajado
-                        ? francoOnPosition.find(({ a }) => candidateCanFill({
+                        ? francoSorted.find(({ a }) => candidateCanFill({
                             ...fillCtx,
                             empId: a.employeeId,
                             dateStr,
@@ -619,7 +702,7 @@ function fillCoverageGapsWithLadder(opts) {
                     if (!filled && hourHeadroom.canUseContingency4x2) {
                         const contCode = contingencyShiftCode(shiftCode);
                         if (contCode && positionHasShift(pos, contCode)) {
-                            const pick4x2 = francoOnPosition.find(({ a }) => candidateCanFill({
+                            const pick4x2 = sortFrancoCandidatesByCycle(francoOnPosition, dateStr, contCode, cyclePref).find(({ a }) => candidateCanFill({
                                 ...fillCtx,
                                 empId: a.employeeId,
                                 dateStr,
@@ -662,7 +745,7 @@ function fillCoverageGapsWithLadder(opts) {
                                 return false;
                             return true;
                         });
-                        const pickPool = francoPool.find(({ a }) => candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }));
+                        const pickPool = sortFrancoCandidatesByCycle(francoPool, dateStr, shiftCode, cyclePref).find(({ a }) => candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }));
                         if (pickPool) {
                             assignCell(assignments, pickPool.i, shiftCode, posName, pos);
                             log.push({

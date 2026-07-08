@@ -17,6 +17,7 @@ export declare function transitionIsLegal(prev: 'M' | 'T' | 'N', next: 'M' | 'T'
     prevDate: string;
     nextDate: string;
 }): boolean;
+export declare function expectedCycleCodeForEmployeeDay(opening: number, dayIndex: number, cycle: string, fixedBand?: string, skipFixedOverride?: boolean): string;
 export declare function realignVplanDraftToCycle(opts: {
     draft: VplanScheduleDraft;
     dateStrs: string[];
@@ -25,6 +26,7 @@ export declare function realignVplanDraftToCycle(opts: {
     defaultShiftByEmp?: Record<string, string>;
     useTrailing?: boolean;
     cycle?: string;
+    protectedCells?: Set<string>;
 }): {
     draft: VplanScheduleDraft;
     log: VplanFixerLogEntry[];

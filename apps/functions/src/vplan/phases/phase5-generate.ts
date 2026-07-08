@@ -82,6 +82,13 @@ export function runVplanGeneration(opts: {
   });
 
   const openingSlotByEmp = resolved.slots;
+  const trailingEmployeeIds = Object.keys(opts.prevPlanningState.lastShiftByEmp || {});
+  const ladderCycleOpts = {
+    openingSlotByEmp,
+    defaultShiftByEmp: mergedDefaultShiftByEmp,
+    useTrailing: opts.strategy.modes.useTrailing,
+    trailingEmployeeIds,
+  };
 
   const sourceEngineBase = `vplan:${opts.strategy.engine}:${cycle}`;
   const coverageGuard = opts.demand && rules.protectCoverageOnEnforce
@@ -571,6 +578,7 @@ export function runVplanGeneration(opts: {
       protectedCells: weekendProtected,
       excludeCustomCrossPool: true,
       allowFrancoTrabajado: true,
+      ...ladderCycleOpts,
     });
     assignments = postCustomLadder.draft.assignments;
     fixLog.push(...postCustomLadder.log);
@@ -618,6 +626,7 @@ export function runVplanGeneration(opts: {
         protectedCells: weekendProtected,
         excludeCustomCrossPool: true,
         allowFrancoTrabajado: true,
+        ...ladderCycleOpts,
       });
       assignments = refill.draft.assignments;
       fixLog.push(...refill.log);
@@ -650,6 +659,100 @@ export function runVplanGeneration(opts: {
     });
     assignments = customFinal2.draft.assignments;
     fixLog.push(...customFinal2.log);
+
+    const cycleProtectedCells = new Set<string>([
+      ...(weekendProtected ?? []),
+      ...(protectedCells ?? []),
+      ...(opts.strategy.modes.useTrailing && prevMonthLastDate && monthFirstDate
+        ? [
+          ...computeOpeningProtectedCells({
+            previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+            prevMonthLastDate,
+            monthFirstDate,
+            prevPlanningState: opts.prevPlanningState,
+            positions: opts.snapshot.positions,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            defaultShiftByEmp: mergedDefaultShiftByEmp,
+            cycle,
+            useTrailing: true,
+            draftAssignments: assignments,
+          }),
+          ...computeOpeningRestProtectedCells({
+            previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+            prevMonthLastDate,
+            monthFirstDate,
+            prevPlanningState: opts.prevPlanningState,
+            positions: opts.snapshot.positions,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            defaultShiftByEmp: mergedDefaultShiftByEmp,
+            cycle,
+            useTrailing: true,
+            draftAssignments: assignments,
+          }),
+        ]
+        : []),
+    ]);
+
+    const postCustomBandRest = enforceIllegalBandRest({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs,
+      minRestHours: rules.minRestHoursBetweenBands ?? 12,
+      protectedCells: cycleProtectedCells,
+    });
+    assignments = postCustomBandRest.draft.assignments;
+    fixLog.push(...postCustomBandRest.log);
+
+    if (postCustomBandRest.log.length > 0) {
+      const bandRestRefill = fillCoverageGapsWithLadder({
+        draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+        dateStrs: opts.snapshot.days,
+        positions: cyclePositions,
+        defaultPositionByEmp: mergedDefaultPositionByEmp,
+        cycle,
+        dateStrList: dateStrs,
+        previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+        slaVendidas: opts.snapshot.slaVendidas,
+        offerHours,
+        employeeIds: opts.snapshot.employees.map((e) => e.id),
+        rules,
+        protectedCells: cycleProtectedCells,
+        excludeCustomCrossPool: true,
+        allowFrancoTrabajado: false,
+        ...ladderCycleOpts,
+      });
+      assignments = bandRestRefill.draft.assignments;
+      fixLog.push(...bandRestRefill.log);
+      gapFilled.ladderStats.subgrupo6x2 += bandRestRefill.ladderStats.subgrupo6x2;
+      gapFilled.ladderStats.bandSwap += bandRestRefill.ladderStats.bandSwap;
+      gapFilled.ladderStats.sinTurno += bandRestRefill.ladderStats.sinTurno;
+
+      const bandRestAudit = fillAssignableGapsFromAudit({
+        draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+        demand: opts.demand,
+        positions: cyclePositions,
+        defaultPositionByEmp: mergedDefaultPositionByEmp,
+        dateStrList: dateStrs,
+        cycle,
+        previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+        rules,
+        protectedCells: cycleProtectedCells,
+        allowFrancoTrabajado: false,
+      });
+      assignments = bandRestAudit.draft.assignments;
+      fixLog.push(...bandRestAudit.log);
+      gapFilled.ladderStats.auditGap = (gapFilled.ladderStats.auditGap ?? 0) + bandRestAudit.ladderStats.auditGap;
+
+      const customFinal3 = enforceCustomPositionSchedules({
+        draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+        dateStrs: opts.snapshot.days,
+        positions: opts.snapshot.positions,
+        defaultPositionByEmp: mergedDefaultPositionByEmp,
+        absences: opts.snapshot.absences,
+        openingSlotByEmp,
+      });
+      assignments = customFinal3.draft.assignments;
+      fixLog.push(...customFinal3.log);
+    }
 
     const hourNormalizePre = normalizeAssignmentBillableHours(assignments, {
       cycle,

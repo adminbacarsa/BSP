@@ -11,7 +11,7 @@ import {
   ladderMessage,
   type HourHeadroom,
 } from './vplan.brain-model';
-import { protectedCellKey } from './vplan.cycle-continuity';
+import { expectedCycleCodeForEmployeeDay, protectedCellKey } from './vplan.cycle-continuity';
 import { isCustomEmployeeCrossAssignable } from './vplan.custom-schedule';
 import type { VplanExistingAssignment } from './vplan.firestore';
 import {
@@ -150,6 +150,69 @@ function candidateCanTakeBand(opts: {
   return evalResult.canAssign;
 }
 
+type CyclePrefCtx = {
+  openingSlotByEmp?: Record<string, number>;
+  dateStrList: string[];
+  cycle: string;
+  defaultShiftByEmp?: Record<string, string>;
+  useTrailing?: boolean;
+  trailingEmpIds?: Set<string>;
+};
+
+function expectedBandForEmployeeDay(
+  empId: string,
+  dateStr: string,
+  ctx: CyclePrefCtx,
+): string | null {
+  const opening = ctx.openingSlotByEmp?.[empId];
+  if (opening === undefined || opening === null) return null;
+  const dayIndex = ctx.dateStrList.indexOf(dateStr);
+  if (dayIndex < 0) return null;
+  const skipFixed = Boolean(ctx.useTrailing && ctx.trailingEmpIds?.has(empId));
+  const fixedBand = ctx.defaultShiftByEmp?.[empId]?.toUpperCase();
+  return expectedCycleCodeForEmployeeDay(
+    opening,
+    dayIndex,
+    ctx.cycle,
+    fixedBand,
+    skipFixed,
+  );
+}
+
+function cycleBandMatchesEmployeeDay(
+  empId: string,
+  dateStr: string,
+  shiftCode: string,
+  ctx: CyclePrefCtx,
+): boolean {
+  const expected = expectedBandForEmployeeDay(empId, dateStr, ctx);
+  if (!expected) return false;
+  if (expected === 'F') return false;
+  return normBandCode(expected) === normBandCode(shiftCode);
+}
+
+function cyclePreferenceRank(
+  empId: string,
+  dateStr: string,
+  shiftCode: string,
+  ctx: CyclePrefCtx,
+): number {
+  return cycleBandMatchesEmployeeDay(empId, dateStr, shiftCode, ctx) ? 0 : 1;
+}
+
+function sortFrancoCandidatesByCycle<T extends { a: VplanAssignment }>(
+  items: T[],
+  dateStr: string,
+  shiftCode: string,
+  ctx: CyclePrefCtx,
+): T[] {
+  return [...items].sort((x, y) => {
+    const xr = cyclePreferenceRank(x.a.employeeId, dateStr, shiftCode, ctx);
+    const yr = cyclePreferenceRank(y.a.employeeId, dateStr, shiftCode, ctx);
+    return xr - yr;
+  });
+}
+
 function tryDirectBandReassign(opts: {
   assignments: VplanAssignment[];
   dateStr: string;
@@ -165,6 +228,10 @@ function tryDirectBandReassign(opts: {
     previousMonthAssignments?: VplanExistingAssignment[];
     rules: PlanningRulesConfig;
     protectedCells?: Set<string>;
+    openingSlotByEmp?: Record<string, number>;
+    defaultShiftByEmp?: Record<string, string>;
+    useTrailing?: boolean;
+    trailingEmpIds?: Set<string>;
   };
 }): { ok: boolean; idx?: number; fromBand?: string } {
   const needBand = normBandCode(opts.shiftCode);
@@ -186,6 +253,19 @@ function tryDirectBandReassign(opts: {
       const pos = String(a.positionName || opts.defaultPositionByEmp[a.employeeId] || '').trim();
       if (pos !== opts.posName) return false;
       return normBandCode(code) !== needBand;
+    })
+    .sort((x, y) => {
+      const pref = {
+        openingSlotByEmp: opts.fillCtx.openingSlotByEmp,
+        dateStrList: opts.fillCtx.dateStrList,
+        cycle: opts.fillCtx.cycle,
+        defaultShiftByEmp: opts.fillCtx.defaultShiftByEmp,
+        useTrailing: opts.fillCtx.useTrailing,
+        trailingEmpIds: opts.fillCtx.trailingEmpIds,
+      };
+      const xr = cyclePreferenceRank(x.a.employeeId, opts.dateStr, opts.shiftCode, pref);
+      const yr = cyclePreferenceRank(y.a.employeeId, opts.dateStr, opts.shiftCode, pref);
+      return xr - yr;
     });
 
   for (const { a, i } of occupants) {
@@ -206,6 +286,19 @@ function tryDirectBandReassign(opts: {
       dateStr: opts.dateStr,
       shiftCode: opts.shiftCode,
     })) {
+      continue;
+    }
+
+    const cyclePref: CyclePrefCtx = {
+      openingSlotByEmp: opts.fillCtx.openingSlotByEmp,
+      dateStrList: opts.fillCtx.dateStrList,
+      cycle: opts.fillCtx.cycle,
+      defaultShiftByEmp: opts.fillCtx.defaultShiftByEmp,
+      useTrailing: opts.fillCtx.useTrailing,
+      trailingEmpIds: opts.fillCtx.trailingEmpIds,
+    };
+    if (opts.fillCtx.openingSlotByEmp
+      && !cycleBandMatchesEmployeeDay(a.employeeId, opts.dateStr, opts.shiftCode, cyclePref)) {
       continue;
     }
 
@@ -428,8 +521,23 @@ function candidateCanFill(opts: {
   rules: PlanningRulesConfig;
   protectedCells?: Set<string>;
   francoTrabajado?: boolean;
+  openingSlotByEmp?: Record<string, number>;
+  defaultShiftByEmp?: Record<string, string>;
+  useTrailing?: boolean;
+  trailingEmpIds?: Set<string>;
 }): boolean {
-  return candidateCanTakeBand(opts);
+  if (!candidateCanTakeBand(opts)) return false;
+  if (opts.francoTrabajado || !opts.openingSlotByEmp) return true;
+  const expected = expectedBandForEmployeeDay(opts.empId, opts.dateStr, {
+    openingSlotByEmp: opts.openingSlotByEmp,
+    dateStrList: opts.dateStrList,
+    cycle: opts.cycle,
+    defaultShiftByEmp: opts.defaultShiftByEmp,
+    useTrailing: opts.useTrailing,
+    trailingEmpIds: opts.trailingEmpIds,
+  });
+  if (!expected || expected === 'F') return true;
+  return normBandCode(expected) === normBandCode(opts.shiftCode);
 }
 
 function assignCell(
@@ -492,6 +600,11 @@ export interface FillCoverageLadderOpts {
   excludeCustomCrossPool?: boolean;
   /** Permite FT (trabajo en franco) al cerrar huecos — típico post-custom fin de semana. */
   allowFrancoTrabajado?: boolean;
+  /** Slot de apertura por guardia — prioriza candidatos alineados al ciclo 6+2. */
+  openingSlotByEmp?: Record<string, number>;
+  defaultShiftByEmp?: Record<string, string>;
+  useTrailing?: boolean;
+  trailingEmployeeIds?: string[];
 }
 
 export interface FillCoverageLadderResult {
@@ -711,6 +824,12 @@ export function fillCoverageGapsWithLadder(
     previousMonthAssignments: opts.previousMonthAssignments,
     rules,
     protectedCells: opts.protectedCells,
+    openingSlotByEmp: opts.openingSlotByEmp,
+    defaultShiftByEmp: opts.defaultShiftByEmp,
+    useTrailing: opts.useTrailing,
+    trailingEmpIds: opts.trailingEmployeeIds
+      ? new Set(opts.trailingEmployeeIds)
+      : undefined,
   };
 
   for (const { dateStr, dayLetter } of opts.dateStrs) {
@@ -834,11 +953,21 @@ export function fillCoverageGapsWithLadder(
               return opts.defaultPositionByEmp[a.employeeId] === posName;
             });
 
-          const pick6x2Legal = francoOnPosition.find(({ a }) =>
+          const cyclePref: CyclePrefCtx = {
+            openingSlotByEmp: opts.openingSlotByEmp,
+            dateStrList,
+            cycle,
+            defaultShiftByEmp: opts.defaultShiftByEmp,
+            useTrailing: opts.useTrailing,
+            trailingEmpIds: fillCtx.trailingEmpIds,
+          };
+          const francoSorted = sortFrancoCandidatesByCycle(francoOnPosition, dateStr, shiftCode, cyclePref);
+
+          const pick6x2Legal = francoSorted.find(({ a }) =>
             candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }),
           );
           const pick6x2Ft = !pick6x2Legal && opts.allowFrancoTrabajado
-            ? francoOnPosition.find(({ a }) =>
+            ? francoSorted.find(({ a }) =>
               candidateCanFill({
                 ...fillCtx,
                 empId: a.employeeId,
@@ -872,7 +1001,7 @@ export function fillCoverageGapsWithLadder(
           if (!filled && hourHeadroom.canUseContingency4x2) {
             const contCode = contingencyShiftCode(shiftCode);
             if (contCode && positionHasShift(pos, contCode)) {
-              const pick4x2 = francoOnPosition.find(({ a }) =>
+              const pick4x2 = sortFrancoCandidatesByCycle(francoOnPosition, dateStr, contCode, cyclePref).find(({ a }) =>
                 candidateCanFill({
                   ...fillCtx,
                   empId: a.employeeId,
@@ -912,7 +1041,7 @@ export function fillCoverageGapsWithLadder(
                 })) return false;
                 return true;
               });
-            const pickPool = francoPool.find(({ a }) =>
+            const pickPool = sortFrancoCandidatesByCycle(francoPool, dateStr, shiftCode, cyclePref).find(({ a }) =>
               candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }),
             );
             if (pickPool) {

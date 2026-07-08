@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
@@ -2808,5 +2808,52 @@ exports.setEmployeePortalPassword = functions.https.onCall(async (data, context)
         details: 'Contraseña de portal establecida para ' + empName + ' (' + email + '). Usuario ' + (alreadyExisted ? 'existente actualizado' : 'nuevo creado') + '.',
     });
     return { success: true, email, alreadyExisted, uid };
+});
+exports.geocodeAddressProxy = functions.https.onCall(async (data, _context) => {
+    const { address } = data;
+    if (!address?.trim())
+        throw new functions.https.HttpsError('invalid-argument', 'address requerido.');
+    const headers = {
+        'Accept-Language': 'es',
+        'User-Agent': 'COSP-v1/comtroldata.web.app',
+    };
+    const nom = async (params, retry = true) => {
+        const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&${params}`, { headers, signal: AbortSignal.timeout(10000) });
+        if (r.status === 429) {
+            if (retry) {
+                await new Promise(res => setTimeout(res, 2500));
+                return nom(params, false);
+            }
+            throw new functions.https.HttpsError('resource-exhausted', 'Nominatim: rate limit (429)');
+        }
+        if (!r.ok)
+            throw new functions.https.HttpsError('unavailable', `Nominatim HTTP ${r.status}`);
+        const d = await r.json();
+        return d?.length > 0 ? d[0] : null;
+    };
+    try {
+        const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
+        const tc = (s) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+        const street = parts[0] || '';
+        const city = parts[1] ? tc(parts[1]) : 'Córdoba';
+        const state = parts[2] ? tc(parts[2]) : city;
+        const stateClean = state.toLowerCase() === city.toLowerCase() ? city : state;
+        let res = await nom(`street=${encodeURIComponent(street)}&city=${encodeURIComponent(city)}&state=${encodeURIComponent(stateClean)}&country=Argentina`);
+        if (!res)
+            res = await nom(`q=${encodeURIComponent(`${street}, ${city}, Argentina`)}`);
+        if (!res)
+            res = await nom(`q=${encodeURIComponent(address.replace(/,/g, ', '))}`);
+        if (!res) {
+            const noNum = street.replace(/\s+\d+.*$/, '').trim();
+            if (noNum && noNum !== street)
+                res = await nom(`q=${encodeURIComponent(`${noNum}, ${city}, Argentina`)}`);
+        }
+        return res ?? null;
+    }
+    catch (e) {
+        if (e instanceof functions.https.HttpsError)
+            throw e;
+        throw new functions.https.HttpsError('unavailable', e.message || 'Nominatim no disponible');
+    }
 });
 //# sourceMappingURL=index.js.map

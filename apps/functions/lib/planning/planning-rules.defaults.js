@@ -18,7 +18,7 @@ exports.DEFAULT_PLANNING_RULES = {
     status: 'ACTIVE',
     cctMaxBillableHours: 200,
     targetAvgHoursPerEmployee: 192,
-    minRestHoursBetweenBands: 8,
+    minRestHoursBetweenBands: 12,
     maxConsecutiveWorkHours: 56,
     defaultCycle: '6+2',
     cycles: { ...exports.DEFAULT_CYCLE_RULES },

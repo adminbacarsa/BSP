@@ -22,6 +22,10 @@ export interface FillCoverageLadderOpts {
     protectedCells?: Set<string>;
     excludeCustomCrossPool?: boolean;
     allowFrancoTrabajado?: boolean;
+    openingSlotByEmp?: Record<string, number>;
+    defaultShiftByEmp?: Record<string, string>;
+    useTrailing?: boolean;
+    trailingEmployeeIds?: string[];
 }
 export interface FillCoverageLadderResult {
     draft: VplanScheduleDraft;

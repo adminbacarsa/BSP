@@ -131,7 +131,7 @@ function assignmentKey(empId: string, dateStr: string): string {
   return `${empId}_${dateStr}`;
 }
 
-function expectedCycleCode(
+export function expectedCycleCodeForEmployeeDay(
   opening: number,
   dayIndex: number,
   cycle: string,
@@ -169,6 +169,7 @@ export function realignVplanDraftToCycle(opts: {
   defaultShiftByEmp?: Record<string, string>;
   useTrailing?: boolean;
   cycle?: string;
+  protectedCells?: Set<string>;
 }): { draft: VplanScheduleDraft; log: VplanFixerLogEntry[] } {
   const cycle = opts.cycle ?? '6+2';
   const template = getCycleTemplate(cycle);
@@ -189,13 +190,14 @@ export function realignVplanDraftToCycle(opts: {
 
     opts.dateStrs.forEach((dateStr, di) => {
       const key = assignmentKey(empId, dateStr);
+      if (opts.protectedCells?.has(key)) return;
       const idx = indexByKey.get(key);
       if (idx === undefined) return;
 
       const current = assignments[idx];
       if (shouldSkipRealign(current.code)) return;
 
-      const expected = expectedCycleCode(opening, di, cycle, fixedBand, skipFixed);
+      const expected = expectedCycleCodeForEmployeeDay(opening, di, cycle, fixedBand, skipFixed);
       if (current.code.toUpperCase() === expected) return;
 
       const prevCode = current.code;

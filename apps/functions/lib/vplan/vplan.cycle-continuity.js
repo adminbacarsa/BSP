@@ -9,6 +9,7 @@ exports.workBand = workBand;
 exports.isFrancoCode = isFrancoCode;
 exports.isIllegalBandTransition = isIllegalBandTransition;
 exports.transitionIsLegal = transitionIsLegal;
+exports.expectedCycleCodeForEmployeeDay = expectedCycleCodeForEmployeeDay;
 exports.realignVplanDraftToCycle = realignVplanDraftToCycle;
 exports.countFrancosBetweenAssignments = countFrancosBetweenAssignments;
 exports.guardIllegalBandTransitions = guardIllegalBandTransitions;
@@ -88,7 +89,7 @@ function transitionIsLegal(prev, next, francosBetween, minRestHours = DEFAULT_MI
 function assignmentKey(empId, dateStr) {
     return `${empId}_${dateStr}`;
 }
-function expectedCycleCode(opening, dayIndex, cycle, fixedBand, skipFixedOverride = false) {
+function expectedCycleCodeForEmployeeDay(opening, dayIndex, cycle, fixedBand, skipFixedOverride = false) {
     const template = (0, vplan_cycle_templates_1.getCycleTemplate)(cycle);
     const raw = template[(opening + dayIndex) % template.length];
     if ((0, vplan_cycle_templates_1.is4x2Cycle)(cycle))
@@ -122,13 +123,15 @@ function realignVplanDraftToCycle(opts) {
         const fixedBand = opts.defaultShiftByEmp?.[empId]?.toUpperCase();
         opts.dateStrs.forEach((dateStr, di) => {
             const key = assignmentKey(empId, dateStr);
+            if (opts.protectedCells?.has(key))
+                return;
             const idx = indexByKey.get(key);
             if (idx === undefined)
                 return;
             const current = assignments[idx];
             if (shouldSkipRealign(current.code))
                 return;
-            const expected = expectedCycleCode(opening, di, cycle, fixedBand, skipFixed);
+            const expected = expectedCycleCodeForEmployeeDay(opening, di, cycle, fixedBand, skipFixed);
             if (current.code.toUpperCase() === expected)
                 return;
             const prevCode = current.code;
