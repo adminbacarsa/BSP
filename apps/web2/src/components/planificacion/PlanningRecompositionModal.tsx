@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { X, User, Clock, Split, Unlock, AlertTriangle, CheckCircle, FileText, Bell } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { X, User, Clock, Split, Unlock, AlertTriangle, CheckCircle, FileText, Bell, MapPin } from 'lucide-react';
 import { RRHH_ABSENCE_LABEL_TO_CODE } from '@/lib/planificacion/absenceCodes';
 import type {
   AnticipatedAbsenceDecl,
@@ -19,6 +19,24 @@ import {
   resolveRecompositionTargetForEmployee,
   type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
+
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function fmtDist(m: number): string {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${Math.round(m)}m`;
+}
+
+const WORKING_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'RET', 'REF', 'ESC', 'FT']);
+
+type NearbyGuard = { id: string; name?: string; code: string; role: 'ext' | 'adel' | 'other'; positionName?: string; isDraft?: boolean };
+type NearbyGroup = { objId: string; objName: string; clientName?: string; dist: number; guards: NearbyGuard[] };
+type NearbyResult = { groups: NearbyGroup[]; noGpsCount: number };
 
 const RRHH_TYPE_OPTIONS = [
   'Enfermedad',
@@ -50,6 +68,10 @@ type Props = {
     onAuthorized: () => void,
   ) => void;
   onClose: () => void;
+  currentObjectiveLat?: number | null;
+  currentObjectiveLng?: number | null;
+  allObjectives?: Array<{ id: string; name: string; lat?: number | null; lng?: number | null; clientName?: string }>;
+  allEmployees?: Array<{ id: string; name?: string }>;
 };
 
 function initSplitForTarget(t: RecompositionTarget) {
@@ -77,10 +99,15 @@ export default function PlanningRecompositionModal({
   onApply,
   onRequestSupervisorAuth,
   onClose,
+  currentObjectiveLat,
+  currentObjectiveLng,
+  allObjectives,
+  allEmployees,
 }: Props) {
   const [step, setStep] = useState(1);
   const [mode, setMode] = useState<RecompositionMode>('anticipated_absence');
   const [targetId, setTargetId] = useState<string>(preselectedEmpId || '');
+  const [selectedNearbyObjId, setSelectedNearbyObjId] = useState<string | null>(null);
   const [extEmpId, setExtEmpId] = useState('');
   const [adelEmpId, setAdelEmpId] = useState('');
   const [gapPos, setGapPos] = useState('');
@@ -92,12 +119,14 @@ export default function PlanningRecompositionModal({
   const [rrhhType, setRrhhType] = useState<string>('Enfermedad');
   const [rrhhReason, setRrhhReason] = useState('');
   const [error, setError] = useState('');
+  const [nearbyRadius, setNearbyRadius] = useState(1000);
 
   const employeesById = useMemo(() => {
     const m: Record<string, any> = {};
+    allEmployees?.forEach(e => { if (e.id) m[e.id] = e; });
     employees.forEach(e => { m[e.id] = e; });
     return m;
-  }, [employees]);
+  }, [employees, allEmployees]);
 
   const targets = useMemo(
     () => listRecompositionTargets(dateStr, objectiveId, employees, shiftsMap, pendingChanges, absencesMap),
@@ -162,6 +191,76 @@ export default function PlanningRecompositionModal({
     if (!extEmpId || !adelEmpId) return [];
     return collectSplitFrancoConflicts(dateStr, extEmpId, adelEmpId, employeesById, shiftsMap, pendingChanges);
   }, [dateStr, extEmpId, adelEmpId, employeesById, shiftsMap, pendingChanges]);
+
+  const WORKING_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'RET', 'REF', 'ESC', 'FT']);
+
+  const nearbyResult = useMemo((): NearbyResult => {
+    const empty: NearbyResult = { groups: [], noGpsCount: 0 };
+    if (!currentObjectiveLat || !currentObjectiveLng || !allObjectives?.length || !allEmployees?.length || !selectedTarget) return empty;
+    const extBand = bandNeighbors?.extensionBand;
+    const adelBand = bandNeighbors?.earlyStartBand;
+    let noGpsCount = 0;
+    const nearbyObjsMap: Record<string, { id: string; name: string; clientName?: string; dist: number }> = {};
+    for (const obj of allObjectives) {
+      if (obj.id === objectiveId) continue;
+      if (!obj.lat || !obj.lng) { noGpsCount++; continue; }
+      const dist = haversineMeters(currentObjectiveLat, currentObjectiveLng, Number(obj.lat), Number(obj.lng));
+      if (dist <= nearbyRadius) nearbyObjsMap[obj.id] = { id: obj.id, name: obj.name, clientName: obj.clientName, dist };
+    }
+    const allGroups: Record<string, NearbyGroup> = {};
+    for (const objMeta of Object.values(nearbyObjsMap)) {
+      allGroups[objMeta.id] = { objId: objMeta.id, objName: objMeta.name, clientName: objMeta.clientName, dist: objMeta.dist, guards: [] };
+    }
+    const empNamesById: Record<string, string | undefined> = {};
+    allEmployees.forEach(e => { if (e.id) empNamesById[e.id] = e.name; });
+    const suffix = `_${dateStr}`;
+    const allShiftsForDate = { ...pendingChanges, ...shiftsMap };
+    for (const [key, shift] of Object.entries(allShiftsForDate)) {
+      if (!key.endsWith(suffix)) continue;
+      if (!shift) continue;
+      const empId = key.slice(0, key.length - suffix.length);
+      if (!empId || empId === targetId) continue;
+      const code = String(shift.code || '').toUpperCase();
+      if (!WORKING_CODES.has(code)) continue;
+      const objId = shift.objectiveId;
+      if (!objId || !(objId in allGroups)) continue;
+      const role: 'ext' | 'adel' | 'other' = code === extBand ? 'ext' : code === adelBand ? 'adel' : 'other';
+      allGroups[objId].guards.push({ id: empId, name: empNamesById[empId], code, role, positionName: shift.positionName, isDraft: !!shift.draft });
+    }
+    const groups = Object.values(allGroups).filter(g => g.guards.length > 0).sort((a, b) => a.dist - b.dist);
+    return { groups, noGpsCount };
+  }, [currentObjectiveLat, currentObjectiveLng, allObjectives, allEmployees, objectiveId, selectedTarget, bandNeighbors, nearbyRadius, dateStr, targetId, pendingChanges, shiftsMap]);
+
+  const selectedNearbyGroup = useMemo(
+    () => nearbyResult.groups.find(g => g.objId === selectedNearbyObjId) ?? null,
+    [nearbyResult.groups, selectedNearbyObjId]
+  );
+
+  const nearbyExtCandidates = useMemo(() => {
+    if (!selectedNearbyGroup || !bandNeighbors) return [];
+    return selectedNearbyGroup.guards
+      .filter(g => g.role === 'ext')
+      .map(g => ({ id: g.id, name: g.name || g.id, code: g.code, positionName: g.positionName }));
+  }, [selectedNearbyGroup, bandNeighbors]);
+
+  const nearbyAdelCandidates = useMemo(() => {
+    if (!selectedNearbyGroup || !bandNeighbors) return [];
+    return selectedNearbyGroup.guards
+      .filter(g => g.role === 'adel')
+      .map(g => ({ id: g.id, name: g.name || g.id, code: g.code, positionName: g.positionName }));
+  }, [selectedNearbyGroup, bandNeighbors]);
+
+  const activeExtCandidates = useMemo(() => {
+    const ids = new Set(extCandidates.map(c => c.id));
+    return [...extCandidates, ...nearbyExtCandidates.filter(c => !ids.has(c.id))];
+  }, [extCandidates, nearbyExtCandidates]);
+
+  const activeAdelCandidates = useMemo(() => {
+    const ids = new Set(adelCandidates.map(c => c.id));
+    return [...adelCandidates, ...nearbyAdelCandidates.filter(c => !ids.has(c.id))];
+  }, [adelCandidates, nearbyAdelCandidates]);
+
+  useEffect(() => { setSelectedNearbyObjId(null); }, [targetId, step]);
 
   const goToCoverageStep = (t: RecompositionTarget, nextMode: RecompositionMode) => {
     setTargetId(t.employeeId);
@@ -229,8 +328,8 @@ export default function PlanningRecompositionModal({
         positionName: gapPos || selectedTarget.positionName,
         fromTime: extFrom,
         toTime: extTo,
-        homePositionName: extCandidates.find(c => c.id === extEmpId)?.positionName,
-        baseCode: extCandidates.find(c => c.id === extEmpId)?.code,
+        homePositionName: activeExtCandidates.find(c => c.id === extEmpId)?.positionName,
+        baseCode: activeExtCandidates.find(c => c.id === extEmpId)?.code,
       },
       earlyStart: {
         employeeId: adelEmpId,
@@ -238,7 +337,7 @@ export default function PlanningRecompositionModal({
         positionName: gapPos || selectedTarget.positionName,
         fromTime: adelFrom,
         toTime: adelTo,
-        baseCode: adelCandidates.find(c => c.id === adelEmpId)?.code,
+        baseCode: activeAdelCandidates.find(c => c.id === adelEmpId)?.code,
       },
       liberationReason: mode === 'liberation' ? 'EVENTO' : undefined,
       redeployNote: mode === 'liberation' ? redeployNote : undefined,
@@ -479,6 +578,20 @@ export default function PlanningRecompositionModal({
                 />
               </label>
 
+              {selectedNearbyGroup && (
+                <div className="flex items-center gap-1.5 rounded-lg bg-indigo-50 border border-indigo-200 px-2 py-1.5">
+                  <MapPin size={10} className="text-indigo-500 shrink-0" />
+                  <span className="text-[9px] font-bold text-indigo-700 truncate">Candidatos de: {selectedNearbyGroup.objName} · {fmtDist(selectedNearbyGroup.dist)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedNearbyObjId(null)}
+                    className="ml-auto shrink-0 text-indigo-400 hover:text-indigo-700"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-xl border-2 border-violet-200 bg-violet-50/50 p-3 space-y-2">
                   <div className="flex items-center gap-1 text-[10px] font-black text-violet-800 uppercase">
@@ -498,11 +611,11 @@ export default function PlanningRecompositionModal({
                     className="w-full text-[11px] font-bold border border-violet-200 rounded-lg px-2 py-1.5 bg-white"
                   >
                     <option value="">Guardia en {bandNeighbors?.extensionBand || '…'}…</option>
-                    {extCandidates.map(c => (
+                    {activeExtCandidates.map(c => (
                       <option key={c.id} value={c.id}>{c.name} · {c.positionName} · {c.code}</option>
                     ))}
                   </select>
-                  {extCandidates.length === 0 && (
+                  {activeExtCandidates.length === 0 && (
                     <p className="text-[9px] text-rose-600 font-bold">Sin guardias en turno {bandNeighbors?.extensionBand} este día.</p>
                   )}
                   <div className="flex gap-1">
@@ -526,11 +639,11 @@ export default function PlanningRecompositionModal({
                     className="w-full text-[11px] font-bold border border-cyan-200 rounded-lg px-2 py-1.5 bg-white"
                   >
                     <option value="">Guardia en {bandNeighbors?.earlyStartBand || '…'}…</option>
-                    {adelCandidates.map(c => (
+                    {activeAdelCandidates.map(c => (
                       <option key={c.id} value={c.id}>{c.name} · {c.positionName} · {c.code}</option>
                     ))}
                   </select>
-                  {adelCandidates.length === 0 && (
+                  {activeAdelCandidates.length === 0 && (
                     <p className="text-[9px] text-rose-600 font-bold">Sin guardias en turno {bandNeighbors?.earlyStartBand} este día.</p>
                   )}
                   <div className="flex gap-1">
@@ -552,6 +665,79 @@ export default function PlanningRecompositionModal({
                   <AlertTriangle size={12} className="inline mr-1 text-amber-700" />
                   Guardia en <strong>franco planificado</strong> — costo FT. Al confirmar se pedirá PIN de supervisor.
                   Preferí guardias en servicio o RET/ESC de otro puesto.
+                </div>
+              )}
+
+              {currentObjectiveLat && currentObjectiveLng && !!allObjectives?.length && !!allEmployees?.length && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-500 uppercase flex items-center gap-1.5">
+                      <MapPin size={11} /> Objetivos cercanos
+                    </span>
+                    <select
+                      value={nearbyRadius}
+                      onChange={e => setNearbyRadius(Number(e.target.value))}
+                      className="text-[9px] font-bold border border-slate-200 rounded px-1.5 py-0.5 bg-white"
+                    >
+                      <option value={100}>100 m</option>
+                      <option value={500}>500 m</option>
+                      <option value={1000}>1 km</option>
+                      <option value={2000}>2 km</option>
+                      <option value={5000}>5 km</option>
+                    </select>
+                  </div>
+                  {nearbyResult.groups.length === 0 ? (
+                    <div className="text-[9px] font-bold text-slate-400 text-center py-1.5">
+                      <p>Sin objetivos con GPS en radio de {fmtDist(nearbyRadius)}</p>
+                      {nearbyResult.noGpsCount > 0 && <p className="text-slate-300 mt-0.5">{nearbyResult.noGpsCount} obj. sin GPS</p>}
+                    </div>
+                  ) : (
+                    <div className="space-y-1 max-h-48 overflow-y-auto pr-0.5">
+                      {nearbyResult.noGpsCount > 0 && (
+                        <p className="text-[9px] font-bold text-slate-300 text-right">{nearbyResult.noGpsCount} obj. sin GPS</p>
+                      )}
+                      {nearbyResult.groups.map(group => {
+                        const isOpen = selectedNearbyObjId === group.objId;
+                        const extCount = group.guards.filter(g => g.role === 'ext').length;
+                        const adelCount = group.guards.filter(g => g.role === 'adel').length;
+                        return (
+                          <div key={group.objId} className={`rounded-xl border transition-colors ${isOpen ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-slate-50/40'}`}>
+                            <button
+                              type="button"
+                              className="w-full flex items-center gap-2 px-3 py-2 text-left"
+                              onClick={() => setSelectedNearbyObjId(isOpen ? null : group.objId)}
+                            >
+                              <span className={`text-[10px] font-black truncate flex-1 ${isOpen ? 'text-indigo-800' : 'text-slate-700'}`}>{group.objName}</span>
+                              {!isOpen && (
+                                <span className="text-[8px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
+                                  {extCount > 0 && <span className="bg-violet-100 text-violet-700 px-1 rounded">{extCount} ext</span>}
+                                  {adelCount > 0 && <span className="bg-cyan-100 text-cyan-700 px-1 rounded">{adelCount} adel</span>}
+                                  {extCount === 0 && adelCount === 0 && <span className="text-slate-400">{group.guards.length} guard.</span>}
+                                </span>
+                              )}
+                              <span className="text-[9px] font-bold text-slate-400 shrink-0">{fmtDist(group.dist)}</span>
+                            </button>
+                            {isOpen && (
+                              <div className="px-3 pb-2 space-y-1.5 border-t border-indigo-200">
+                                {group.clientName && (
+                                  <div className="text-[9px] font-bold text-indigo-400 pt-1.5">{group.clientName}</div>
+                                )}
+                                {group.guards.map(g => (
+                                  <div key={g.id} className="flex items-center gap-1.5">
+                                    <span className={`px-1.5 py-0.5 rounded text-white text-[8px] font-black shrink-0 ${g.role === 'ext' ? 'bg-violet-500' : g.role === 'adel' ? 'bg-cyan-500' : 'bg-slate-400'}`}>{g.code}</span>
+                                    <span className="text-[10px] font-bold text-slate-600 truncate">{g.name || g.id}</span>
+                                    {g.positionName && <span className="text-[9px] text-slate-400 truncate">· {g.positionName}</span>}
+                                    {g.isDraft && <span className="text-[8px] font-bold text-amber-500 shrink-0">borrador</span>}
+                                    {g.role !== 'other' && !g.isDraft && <span className="ml-auto text-[8px] font-bold text-indigo-400 shrink-0">{g.role === 'ext' ? '← ext' : 'adel →'}</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -9858,6 +9858,18 @@ export default function PlanificacionPage() {
                             requestSupervisorFrancoAuth(conflicts, onAuthorized, 'cobertura / liberación');
                         }}
                         onClose={() => setRecompositionModalOpen(false)}
+                        currentObjectiveLat={Number(selectedObjectiveData?.lat ?? selectedObjectiveData?.latitude ?? 0) || null}
+                        currentObjectiveLng={Number(selectedObjectiveData?.lng ?? selectedObjectiveData?.longitude ?? 0) || null}
+                        allObjectives={clients.flatMap((c: any) =>
+                            (c.objetivos || []).map((o: any) => ({
+                                id: o.id || o.name,
+                                name: o.name || o.id || '',
+                                lat: Number(o.lat ?? o.latitude ?? 0) || null,
+                                lng: Number(o.lng ?? o.longitude ?? 0) || null,
+                                clientName: c.name || c.razonSocial || c.businessName || '',
+                            }))
+                        ).filter((o: any) => o.id)}
+                        allEmployees={employees}
                     />,
                     document.body,
                 )}
