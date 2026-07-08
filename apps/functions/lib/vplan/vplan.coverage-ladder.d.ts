@@ -20,6 +20,8 @@ export interface FillCoverageLadderOpts {
     employeeIds?: string[];
     rules?: PlanningRulesConfig;
     protectedCells?: Set<string>;
+    excludeCustomCrossPool?: boolean;
+    allowFrancoTrabajado?: boolean;
 }
 export interface FillCoverageLadderResult {
     draft: VplanScheduleDraft;
@@ -45,6 +47,7 @@ export interface FillAssignableGapsFromAuditOpts {
     previousMonthAssignments?: VplanExistingAssignment[];
     rules?: PlanningRulesConfig;
     protectedCells?: Set<string>;
+    allowFrancoTrabajado?: boolean;
 }
 export declare function fillAssignableGapsFromAudit(opts: FillAssignableGapsFromAuditOpts): FillCoverageLadderResult;
 export declare function fillCoverageGapsWithLadder(opts: FillCoverageLadderOpts): FillCoverageLadderResult;

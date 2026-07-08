@@ -12,8 +12,8 @@ import { detectCctStreakViolations } from '../vplan.cct-enforce';
 import { buildDetailedCoverageAudit } from '../vplan.coverage-audit';
 import { detectFixedBandViolations } from '../vplan.fixed-band';
 import { detectAssignedPositionViolations } from '../vplan.assigned-positions';
-import { detectConsecutiveBillableHoursViolations } from '../vplan.custom-schedule';
-import { workDaysForCycle } from '../../planning/planning-rules.defaults';
+import { detectConsecutiveBillableHoursViolations, detectCustomScheduleViolations, detectOverlongRestStreaks } from '../vplan.custom-schedule';
+import { restDaysForCycle, workDaysForCycle } from '../../planning/planning-rules.defaults';
 import type { PlanningRulesConfig } from '../../planning/planning-rules.types';
 import { resolvePlanningRules } from '../../planning/planning-rules.service';
 import { buildEngineContext } from '../vplan.engine-bridge';
@@ -232,6 +232,54 @@ export function runVplanVerification(opts: {
       message: `Racha CCT ×${v.workDays} sin descanso (${v.fromDate} → ${v.toDate}, máx ${maxStreak} en ${opts.strategy.cycle})`,
       employeeId: v.employeeId,
       dateStr: v.toDate,
+    });
+  }
+
+  const maxRest = restDaysForCycle(opts.strategy.cycle, rules);
+  const restStreakViolations = detectOverlongRestStreaks(
+    opts.draft,
+    dateStrs,
+    opts.strategy.cycle,
+    opts.snapshot.previousMonthAssignments,
+    rules,
+  );
+  for (const v of restStreakViolations.slice(0, 20)) {
+    issues.push({
+      severity: 'warning',
+      code: 'REST_STREAK_TOO_LONG',
+      message: `Racha ${v.restDays}F consecutivos (${v.fromDate} → ${v.toDate}, máx ${v.maxRest} en ${opts.strategy.cycle})`,
+      employeeId: v.employeeId,
+      dateStr: v.toDate,
+    });
+  }
+  if (restStreakViolations.length > 20) {
+    issues.push({
+      severity: 'info',
+      code: 'REST_STREAK_TOO_LONG',
+      message: `+${restStreakViolations.length - 20} rachas de descanso excesivo adicionales`,
+    });
+  }
+
+  const customViolations = detectCustomScheduleViolations({
+    draft: opts.draft,
+    dateStrs: opts.snapshot.days,
+    positions: opts.snapshot.positions,
+    defaultPositionByEmp: mergedDefaultPositionByEmp,
+  });
+  for (const v of customViolations.slice(0, 20)) {
+    issues.push({
+      severity: 'blocking',
+      code: 'CUSTOM_SCHEDULE_VIOLATION',
+      message: `${v.positionName}: esperado ${v.expectedCode} pero ${v.actualCode} (${v.dateStr})`,
+      employeeId: v.employeeId,
+      dateStr: v.dateStr,
+    });
+  }
+  if (customViolations.length > 20) {
+    issues.push({
+      severity: 'info',
+      code: 'CUSTOM_SCHEDULE_VIOLATION',
+      message: `+${customViolations.length - 20} desvíos de turno custom adicionales`,
     });
   }
 

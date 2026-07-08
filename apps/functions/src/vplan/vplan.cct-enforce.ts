@@ -48,7 +48,7 @@ export function trailingWorkFromPrevMonth(
   return run;
 }
 
-function trailingRestFromPrevMonth(
+export function trailingRestFromPrevMonth(
   prev: VplanExistingAssignment[] | undefined,
   empId: string,
 ): number {
@@ -75,6 +75,8 @@ export function wouldExceedCctWorkStreak(opts: {
   cycle: string;
   previousMonthAssignments?: VplanExistingAssignment[];
   rules?: PlanningRulesConfig;
+  /** FT / cobertura urgente: permite trabajo en bloque de descanso CCT (no supera racha máx). */
+  allowFrancoTrabajado?: boolean;
 }): { ok: boolean; reason?: string } {
   const rules = resolvePlanningRules(opts.rules ?? null);
   const cycle = opts.cycle;
@@ -105,7 +107,9 @@ export function wouldExceedCctWorkStreak(opts: {
 
     if (restPending > 0) {
       if (d === opts.dateStr && isCycleWorkCode(code, cycle)) {
-        return { ok: false, reason: `Bloque descanso CCT (${maxRest}F tras ${maxWork} trab)` };
+        if (!opts.allowFrancoTrabajado) {
+          return { ok: false, reason: `Bloque descanso CCT (${maxRest}F tras ${maxWork} trab)` };
+        }
       }
       if (isFranco(c) || !c) restPending -= 1;
       else if (isCycleWorkCode(c, cycle)) restPending = maxRest;

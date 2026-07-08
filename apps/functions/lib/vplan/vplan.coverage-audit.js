@@ -74,6 +74,7 @@ function evaluateCoverageCandidate(opts) {
         cycle: opts.cycle,
         previousMonthAssignments: opts.previousMonthAssignments,
         rules: opts.rules,
+        allowFrancoTrabajado: opts.francoTrabajado === true,
     });
     if (!cct.ok)
         return { canAssign: false, blockReason: cct.reason };

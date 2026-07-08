@@ -10,6 +10,7 @@ exports.isFrancoCode = isFrancoCode;
 exports.isIllegalBandTransition = isIllegalBandTransition;
 exports.transitionIsLegal = transitionIsLegal;
 exports.realignVplanDraftToCycle = realignVplanDraftToCycle;
+exports.countFrancosBetweenAssignments = countFrancosBetweenAssignments;
 exports.guardIllegalBandTransitions = guardIllegalBandTransitions;
 exports.protectedCellKey = protectedCellKey;
 exports.computeOpeningProtectedCells = computeOpeningProtectedCells;
@@ -160,6 +161,14 @@ function countFrancosBetween(byDate, fromDate, toDate) {
             count += 1;
     }
     return count;
+}
+function countFrancosBetweenAssignments(assignments, empId, fromDate, toDate) {
+    const byDate = new Map();
+    for (const a of assignments) {
+        if (a.employeeId === empId)
+            byDate.set(a.dateStr, a);
+    }
+    return countFrancosBetween(byDate, fromDate, toDate);
 }
 function pickLegalBandReplacement(prev, illegalNext, prevDate, nextDate, francos, minRest) {
     const candidates = [illegalNext, prev, 'F', 'M', 'T', 'N'];

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.trailingWorkFromPrevMonth = trailingWorkFromPrevMonth;
+exports.trailingRestFromPrevMonth = trailingRestFromPrevMonth;
 exports.wouldExceedCctWorkStreak = wouldExceedCctWorkStreak;
 exports.enforceCctWorkRestPattern = enforceCctWorkRestPattern;
 exports.detectCctStreakViolations = detectCctStreakViolations;
@@ -78,7 +79,9 @@ function wouldExceedCctWorkStreak(opts) {
         const c = String(cell?.code || '').toUpperCase();
         if (restPending > 0) {
             if (d === opts.dateStr && (0, vplan_cycle_templates_1.isCycleWorkCode)(code, cycle)) {
-                return { ok: false, reason: `Bloque descanso CCT (${maxRest}F tras ${maxWork} trab)` };
+                if (!opts.allowFrancoTrabajado) {
+                    return { ok: false, reason: `Bloque descanso CCT (${maxRest}F tras ${maxWork} trab)` };
+                }
             }
             if (isFranco(c) || !c)
                 restPending -= 1;

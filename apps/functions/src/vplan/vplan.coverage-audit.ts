@@ -90,6 +90,8 @@ export function evaluateCoverageCandidate(opts: {
   cycle: string;
   previousMonthAssignments?: VplanExistingAssignment[];
   rules?: PlanningRulesConfig;
+  /** FT: omite bloque descanso CCT obligatorio (mantiene tope racha trabajo). */
+  francoTrabajado?: boolean;
 }): { canAssign: boolean; blockReason?: string } {
   const current = opts.assignments.find(
     (a) => a.employeeId === opts.empId && a.dateStr === opts.dateStr,
@@ -105,6 +107,7 @@ export function evaluateCoverageCandidate(opts: {
     cycle: opts.cycle,
     previousMonthAssignments: opts.previousMonthAssignments,
     rules: opts.rules,
+    allowFrancoTrabajado: opts.francoTrabajado === true,
   });
   if (!cct.ok) return { canAssign: false, blockReason: cct.reason };
 

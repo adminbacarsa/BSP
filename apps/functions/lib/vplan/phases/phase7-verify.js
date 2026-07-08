@@ -191,6 +191,46 @@ function runVplanVerification(opts) {
             dateStr: v.toDate,
         });
     }
+    const maxRest = (0, planning_rules_defaults_1.restDaysForCycle)(opts.strategy.cycle, rules);
+    const restStreakViolations = (0, vplan_custom_schedule_1.detectOverlongRestStreaks)(opts.draft, dateStrs, opts.strategy.cycle, opts.snapshot.previousMonthAssignments, rules);
+    for (const v of restStreakViolations.slice(0, 20)) {
+        issues.push({
+            severity: 'warning',
+            code: 'REST_STREAK_TOO_LONG',
+            message: `Racha ${v.restDays}F consecutivos (${v.fromDate} → ${v.toDate}, máx ${v.maxRest} en ${opts.strategy.cycle})`,
+            employeeId: v.employeeId,
+            dateStr: v.toDate,
+        });
+    }
+    if (restStreakViolations.length > 20) {
+        issues.push({
+            severity: 'info',
+            code: 'REST_STREAK_TOO_LONG',
+            message: `+${restStreakViolations.length - 20} rachas de descanso excesivo adicionales`,
+        });
+    }
+    const customViolations = (0, vplan_custom_schedule_1.detectCustomScheduleViolations)({
+        draft: opts.draft,
+        dateStrs: opts.snapshot.days,
+        positions: opts.snapshot.positions,
+        defaultPositionByEmp: mergedDefaultPositionByEmp,
+    });
+    for (const v of customViolations.slice(0, 20)) {
+        issues.push({
+            severity: 'blocking',
+            code: 'CUSTOM_SCHEDULE_VIOLATION',
+            message: `${v.positionName}: esperado ${v.expectedCode} pero ${v.actualCode} (${v.dateStr})`,
+            employeeId: v.employeeId,
+            dateStr: v.dateStr,
+        });
+    }
+    if (customViolations.length > 20) {
+        issues.push({
+            severity: 'info',
+            code: 'CUSTOM_SCHEDULE_VIOLATION',
+            message: `+${customViolations.length - 20} desvíos de turno custom adicionales`,
+        });
+    }
     const consecutiveHoursViolations = (0, vplan_custom_schedule_1.detectConsecutiveBillableHoursViolations)(opts.draft, dateStrs, rules.maxConsecutiveWorkHours);
     for (const v of consecutiveHoursViolations.slice(0, 15)) {
         issues.push({

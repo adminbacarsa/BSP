@@ -3,6 +3,7 @@ import type { VplanExistingAssignment } from './vplan.firestore';
 import type { CoverageGuardContext } from './vplan.coverage-guard';
 import type { VplanAssignment, VplanFixerLogEntry, VplanScheduleDraft } from './vplan.types';
 export declare function trailingWorkFromPrevMonth(prev: VplanExistingAssignment[] | undefined, empId: string, cycle: string): number;
+export declare function trailingRestFromPrevMonth(prev: VplanExistingAssignment[] | undefined, empId: string): number;
 export declare function wouldExceedCctWorkStreak(opts: {
     assignments: VplanAssignment[];
     dateStrs: string[];
@@ -12,6 +13,7 @@ export declare function wouldExceedCctWorkStreak(opts: {
     cycle: string;
     previousMonthAssignments?: VplanExistingAssignment[];
     rules?: PlanningRulesConfig;
+    allowFrancoTrabajado?: boolean;
 }): {
     ok: boolean;
     reason?: string;

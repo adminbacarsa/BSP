@@ -11,6 +11,7 @@ export declare function evaluateCoverageCandidate(opts: {
     cycle: string;
     previousMonthAssignments?: VplanExistingAssignment[];
     rules?: PlanningRulesConfig;
+    francoTrabajado?: boolean;
 }): {
     canAssign: boolean;
     blockReason?: string;

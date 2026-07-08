@@ -233,6 +233,20 @@ function countFrancosBetween(
   return count;
 }
 
+/** Francos estrictamente entre dos fechas (excluye extremos). */
+export function countFrancosBetweenAssignments(
+  assignments: VplanAssignment[],
+  empId: string,
+  fromDate: string,
+  toDate: string,
+): number {
+  const byDate = new Map<string, VplanAssignment>();
+  for (const a of assignments) {
+    if (a.employeeId === empId) byDate.set(a.dateStr, a);
+  }
+  return countFrancosBetween(byDate, fromDate, toDate);
+}
+
 /** Reemplazo legal cuando el descanso entre turnos es insuficiente. */
 function pickLegalBandReplacement(
   prev: 'M' | 'T' | 'N',

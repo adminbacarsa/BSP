@@ -13,7 +13,7 @@ import { resolveOpeningSlotsForVplan } from '../vplan.cycle-generate';
 import { previousMonth, buildMonthDays } from '../vplan.calendar';
 import { fillAssignableGapsFromAudit, fillCoverageGapsWithLadder } from '../vplan.coverage-ladder';
 import { rebalanceHoursTowardSla } from '../vplan.hour-rebalance';
-import { enforceCustomPositionSchedules } from '../vplan.custom-schedule';
+import { enforceCustomPositionSchedules, computeCustomScheduleProtectedCells, enforceMaxRestStreak } from '../vplan.custom-schedule';
 import { capDefaultPositionByEmp, stripExcessSlaAssignments } from '../vplan.sla-enforce';
 import { positionsForCycle } from '../vplan.positions';
 import { enforceAssigned24hsPositions } from '../vplan.assigned-positions';
@@ -530,6 +530,111 @@ export function runVplanGeneration(opts: {
       gapFilled.ladderStats.sinTurno += postBandLadder.ladderStats.sinTurno;
       gapFilled.ladderStats.bandSwap += postBandLadder.ladderStats.bandSwap;
     }
+  }
+
+  const customFinal = enforceCustomPositionSchedules({
+    draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+    dateStrs: opts.snapshot.days,
+    positions: opts.snapshot.positions,
+    defaultPositionByEmp: mergedDefaultPositionByEmp,
+    absences: opts.snapshot.absences,
+    openingSlotByEmp,
+  });
+  assignments = customFinal.draft.assignments;
+  fixLog.push(...customFinal.log);
+
+  if (opts.demand) {
+    const customWeekendProtected = computeCustomScheduleProtectedCells({
+      dateStrs: opts.snapshot.days,
+      positions: opts.snapshot.positions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      draftAssignments: assignments,
+    });
+    const weekendProtected = customWeekendProtected.size > 0
+      ? new Set([...(protectedCells ?? []), ...customWeekendProtected])
+      : protectedCells;
+
+    const postCustomRest = enforceMaxRestStreak({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs,
+      cycle,
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      rules,
+      protectedCells: weekendProtected,
+      positions: opts.snapshot.positions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      defaultShiftByEmp: mergedDefaultShiftByEmp,
+    });
+    assignments = postCustomRest.draft.assignments;
+    fixLog.push(...postCustomRest.log);
+
+    const postCustomLadder = fillCoverageGapsWithLadder({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs: opts.snapshot.days,
+      positions: cyclePositions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      cycle,
+      dateStrList: dateStrs,
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      slaVendidas: opts.snapshot.slaVendidas,
+      offerHours,
+      employeeIds: opts.snapshot.employees.map((e) => e.id),
+      rules,
+      protectedCells: weekendProtected,
+      excludeCustomCrossPool: true,
+      allowFrancoTrabajado: true,
+    });
+    assignments = postCustomLadder.draft.assignments;
+    fixLog.push(...postCustomLadder.log);
+    gapFilled.ladderStats.subgrupo6x2 += postCustomLadder.ladderStats.subgrupo6x2;
+    gapFilled.ladderStats.sinTurno += postCustomLadder.ladderStats.sinTurno;
+    gapFilled.ladderStats.ft += postCustomLadder.ladderStats.ft;
+    gapFilled.ladderStats.needsReinforcement += postCustomLadder.ladderStats.needsReinforcement;
+
+    const postCustomAudit = fillAssignableGapsFromAudit({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      demand: opts.demand,
+      positions: cyclePositions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      dateStrList: dateStrs,
+      cycle,
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      rules,
+      protectedCells: weekendProtected,
+      allowFrancoTrabajado: true,
+    });
+    assignments = postCustomAudit.draft.assignments;
+    fixLog.push(...postCustomAudit.log);
+    gapFilled.ladderStats.auditGap = (gapFilled.ladderStats.auditGap ?? 0) + postCustomAudit.ladderStats.auditGap;
+
+    const postCustomCct = runCctEnforce(assignments);
+    assignments = postCustomCct.draft.assignments;
+    fixLog.push(...postCustomCct.log);
+
+    const postCustomRest2 = enforceMaxRestStreak({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs,
+      cycle,
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      rules,
+      protectedCells: weekendProtected,
+      positions: opts.snapshot.positions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      defaultShiftByEmp: mergedDefaultShiftByEmp,
+    });
+    assignments = postCustomRest2.draft.assignments;
+    fixLog.push(...postCustomRest2.log);
+
+    const customFinal2 = enforceCustomPositionSchedules({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs: opts.snapshot.days,
+      positions: opts.snapshot.positions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      absences: opts.snapshot.absences,
+      openingSlotByEmp,
+    });
+    assignments = customFinal2.draft.assignments;
+    fixLog.push(...customFinal2.log);
   }
 
   const openingProtectedCells = protectedCells

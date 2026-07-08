@@ -12,6 +12,7 @@ import {
   type HourHeadroom,
 } from './vplan.brain-model';
 import { protectedCellKey } from './vplan.cycle-continuity';
+import { isCustomEmployeeCrossAssignable } from './vplan.custom-schedule';
 import type { VplanExistingAssignment } from './vplan.firestore';
 import {
   isPositionActiveOnDay,
@@ -131,6 +132,7 @@ function candidateCanTakeBand(opts: {
   previousMonthAssignments?: VplanExistingAssignment[];
   rules: PlanningRulesConfig;
   protectedCells?: Set<string>;
+  francoTrabajado?: boolean;
 }): boolean {
   if (isVirtualEmployeeId(opts.empId)) return false;
   if (opts.protectedCells?.has(protectedCellKey(opts.empId, opts.dateStr))) return false;
@@ -143,6 +145,7 @@ function candidateCanTakeBand(opts: {
     cycle: opts.cycle,
     previousMonthAssignments: opts.previousMonthAssignments,
     rules: opts.rules,
+    francoTrabajado: opts.francoTrabajado === true,
   });
   return evalResult.canAssign;
 }
@@ -324,6 +327,7 @@ function candidateCanFill(opts: {
   previousMonthAssignments?: VplanExistingAssignment[];
   rules: PlanningRulesConfig;
   protectedCells?: Set<string>;
+  francoTrabajado?: boolean;
 }): boolean {
   return candidateCanTakeBand(opts);
 }
@@ -384,6 +388,10 @@ export interface FillCoverageLadderOpts {
   employeeIds?: string[];
   rules?: PlanningRulesConfig;
   protectedCells?: Set<string>;
+  /** Tras aplicar RO/EN L–V: no usar rondín/encargada para cubrir 24hs. */
+  excludeCustomCrossPool?: boolean;
+  /** Permite FT (trabajo en franco) al cerrar huecos — típico post-custom fin de semana. */
+  allowFrancoTrabajado?: boolean;
 }
 
 export interface FillCoverageLadderResult {
@@ -411,6 +419,7 @@ export interface FillAssignableGapsFromAuditOpts {
   previousMonthAssignments?: VplanExistingAssignment[];
   rules?: PlanningRulesConfig;
   protectedCells?: Set<string>;
+  allowFrancoTrabajado?: boolean;
 }
 
 /** Misma regla que buildDetailedCoverageAudit.canAssign, sobre grilla actual (no snapshot obsoleto). */
@@ -426,6 +435,7 @@ function liveAuditGapCandidateCanFill(opts: {
   previousMonthAssignments?: VplanExistingAssignment[];
   rules: PlanningRulesConfig;
   protectedCells?: Set<string>;
+  francoTrabajado?: boolean;
 }): boolean {
   if (opts.protectedCells?.has(protectedCellKey(opts.empId, opts.dateStr))) return false;
   if (isVirtualEmployeeId(opts.empId)) return false;
@@ -448,6 +458,7 @@ function liveAuditGapCandidateCanFill(opts: {
     cycle: opts.cycle,
     previousMonthAssignments: opts.previousMonthAssignments,
     rules: opts.rules,
+    francoTrabajado: opts.francoTrabajado === true,
   });
   return evalResult.canAssign;
 }
@@ -507,7 +518,17 @@ export function fillAssignableGapsFromAudit(
           dateStr: gap.dateStr,
           shiftCode: gap.shiftCode,
           positionName: gap.positionName,
-        }));
+        }))
+          ?? (opts.allowFrancoTrabajado
+            ? gap.candidates.find((candidate) => liveAuditGapCandidateCanFill({
+              ...liveCtx,
+              empId: candidate.employeeId,
+              dateStr: gap.dateStr,
+              shiftCode: gap.shiftCode,
+              positionName: gap.positionName,
+              francoTrabajado: true,
+            }))
+            : undefined);
         if (!pick) break;
 
         const idx = assignments.findIndex(
@@ -730,6 +751,11 @@ export function fillCoverageGapsWithLadder(
                 const c = String(a.code || '').toUpperCase();
                 if (!FRANCO_POOL.has(c)) return false;
                 if (opts.defaultPositionByEmp[a.employeeId] === posName) return false;
+                if (opts.excludeCustomCrossPool && !isCustomEmployeeCrossAssignable({
+                  empId: a.employeeId,
+                  positions: opts.positions,
+                  defaultPositionByEmp: opts.defaultPositionByEmp,
+                })) return false;
                 return true;
               });
             const pickPool = francoPool.find(({ a }) =>
@@ -807,7 +833,14 @@ export function fillCoverageGapsWithLadder(
                 return FRANCO_POOL.has(c);
               });
             const pickFt = francoObjective.find(({ a }) =>
-              candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }),
+              candidateCanFill({
+                ...fillCtx,
+                empId: a.employeeId,
+                dateStr,
+                shiftCode,
+                cycle,
+                francoTrabajado: true,
+              }),
             );
             if (pickFt) {
               assignCell(assignments, pickFt.i, shiftCode, posName, pos);

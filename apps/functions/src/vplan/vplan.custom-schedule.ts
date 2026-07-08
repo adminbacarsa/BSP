@@ -2,15 +2,21 @@
  * Planificación de puestos custom (EN/RO L–V) y francos en días sin servicio.
  */
 
+import { restDaysForCycle } from '../planning/planning-rules.defaults';
+import type { PlanningRulesConfig } from '../planning/planning-rules.types';
+import { resolvePlanningRules } from '../planning/planning-rules.service';
+import { evaluateCoverageCandidate } from './vplan.coverage-audit';
+import { trailingRestFromPrevMonth } from './vplan.cct-enforce';
+import { protectedCellKey } from './vplan.cycle-continuity';
+import type { VplanExistingAssignment } from './vplan.firestore';
+import { billableHoursForCode, isCycleWorkCode } from './vplan.cycle-templates';
 import {
-  is24hsPosition,
   isCustomFixedShiftPosition,
   isPositionActiveOnDay,
   primaryShiftCode,
   shiftBandHours,
   type VplanPositionDef,
 } from './vplan.positions';
-import { billableHoursForCode } from './vplan.cycle-templates';
 import { resolvePositionAssignees } from './vplan.sla-enforce';
 import type { VplanAssignment, VplanFixerLogEntry, VplanScheduleDraft } from './vplan.types';
 
@@ -251,4 +257,261 @@ export function detectConsecutiveBillableHoursViolations(
   }
 
   return violations;
+}
+
+const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT']);
+
+function isFrancoCode(code: string): boolean {
+  return FRANCO_SET.has(code.toUpperCase());
+}
+
+/** Guardia en puesto custom (RO/EN): no puede cubrir huecos 24hs vía pool. */
+export function isCustomEmployeeCrossAssignable(opts: {
+  empId: string;
+  positions: VplanPositionDef[];
+  defaultPositionByEmp: Record<string, string>;
+}): boolean {
+  const posName = String(opts.defaultPositionByEmp[opts.empId] || '').trim();
+  if (!posName) return true;
+  const pos = opts.positions.find((p) => p.positionName === posName);
+  if (!pos) return true;
+  return !isCustomFixedShiftPosition(pos);
+}
+
+/** Celdas protegidas: la escalera/audit no puede pisar RO L–V ni F S/D. */
+export function computeCustomScheduleProtectedCells(opts: {
+  dateStrs: Array<{ dateStr: string; dayLetter: string }>;
+  positions: VplanPositionDef[];
+  defaultPositionByEmp: Record<string, string>;
+  draftAssignments?: VplanAssignment[];
+}): Set<string> {
+  const protectedCells = new Set<string>();
+  const posByName = new Map(opts.positions.map((p) => [p.positionName, p]));
+  const empToPos = resolvePositionAssignees({
+    defaultPositionByEmp: opts.defaultPositionByEmp,
+    positions: opts.positions,
+    draftAssignments: opts.draftAssignments,
+    onlyCustom: true,
+  });
+
+  for (const [empId, posName] of empToPos) {
+    const pos = posByName.get(posName);
+    if (!pos || !isCustomFixedShiftPosition(pos)) continue;
+    for (const { dateStr, dayLetter } of opts.dateStrs) {
+      if (!isPositionActiveOnDay(pos, dayLetter)) {
+        protectedCells.add(protectedCellKey(empId, dateStr));
+      }
+    }
+  }
+
+  return protectedCells;
+}
+
+export function detectCustomScheduleViolations(opts: {
+  draft: VplanScheduleDraft;
+  dateStrs: Array<{ dateStr: string; dayLetter: string }>;
+  positions: VplanPositionDef[];
+  defaultPositionByEmp: Record<string, string>;
+}): Array<{ employeeId: string; dateStr: string; expectedCode: string; actualCode: string; positionName: string }> {
+  const violations: Array<{
+    employeeId: string;
+    dateStr: string;
+    expectedCode: string;
+    actualCode: string;
+    positionName: string;
+  }> = [];
+
+  const posByName = new Map(opts.positions.map((p) => [p.positionName, p]));
+  const empToPos = resolvePositionAssignees({
+    defaultPositionByEmp: opts.defaultPositionByEmp,
+    positions: opts.positions,
+    draftAssignments: opts.draft.assignments,
+    onlyCustom: true,
+  });
+
+  const byEmp = new Map<string, Map<string, VplanAssignment>>();
+  for (const a of opts.draft.assignments) {
+    if (!byEmp.has(a.employeeId)) byEmp.set(a.employeeId, new Map());
+    byEmp.get(a.employeeId)!.set(a.dateStr, a);
+  }
+
+  for (const [empId, posName] of empToPos) {
+    const pos = posByName.get(posName);
+    if (!pos || !isCustomFixedShiftPosition(pos)) continue;
+    const shiftCode = primaryShiftCode(pos);
+
+    for (const { dateStr, dayLetter } of opts.dateStrs) {
+      const active = isPositionActiveOnDay(pos, dayLetter);
+      const expectedCode = active ? shiftCode : 'F';
+      const cell = byEmp.get(empId)?.get(dateStr);
+      const actualCode = String(cell?.code || 'F').toUpperCase();
+      if (actualCode === expectedCode) continue;
+      if (!active && isFrancoCode(actualCode) && actualCode !== 'F') continue;
+      violations.push({
+        employeeId: empId,
+        dateStr,
+        expectedCode,
+        actualCode,
+        positionName: posName,
+      });
+    }
+  }
+
+  return violations;
+}
+
+export function detectOverlongRestStreaks(
+  draft: VplanScheduleDraft,
+  dateStrs: string[],
+  cycle: string,
+  previousMonthAssignments?: VplanExistingAssignment[],
+  rules?: PlanningRulesConfig,
+): Array<{ employeeId: string; fromDate: string; toDate: string; restDays: number; maxRest: number }> {
+  const resolved = resolvePlanningRules(rules ?? null);
+  const maxRest = restDaysForCycle(cycle, resolved);
+  const violations: Array<{
+    employeeId: string;
+    fromDate: string;
+    toDate: string;
+    restDays: number;
+    maxRest: number;
+  }> = [];
+
+  const byEmp = new Map<string, Map<string, VplanAssignment>>();
+  for (const a of draft.assignments) {
+    if (!byEmp.has(a.employeeId)) byEmp.set(a.employeeId, new Map());
+    byEmp.get(a.employeeId)!.set(a.dateStr, a);
+  }
+
+  const empIds = new Set(draft.assignments.map((a) => a.employeeId));
+
+  for (const empId of empIds) {
+    let restRun = trailingRestFromPrevMonth(previousMonthAssignments, empId);
+    let streakStart = '';
+
+    for (const dateStr of dateStrs) {
+      const code = String(byEmp.get(empId)?.get(dateStr)?.code || 'F').toUpperCase();
+      if (isFrancoCode(code) || !code) {
+        if (restRun === 0) streakStart = dateStr;
+        restRun += 1;
+        if (restRun > maxRest) {
+          violations.push({
+            employeeId: empId,
+            fromDate: streakStart,
+            toDate: dateStr,
+            restDays: restRun,
+            maxRest,
+          });
+        }
+      } else {
+        restRun = 0;
+        streakStart = '';
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * Recorta rachas F > restDays (6+2 → máx 2F). Convierte F excedente en trabajo legal.
+ * No toca celdas protegidas ni francos de puestos custom (RO/EN).
+ */
+export function enforceMaxRestStreak(opts: {
+  draft: VplanScheduleDraft;
+  dateStrs: string[];
+  cycle: string;
+  previousMonthAssignments?: VplanExistingAssignment[];
+  rules?: PlanningRulesConfig;
+  protectedCells?: Set<string>;
+  positions: VplanPositionDef[];
+  defaultPositionByEmp: Record<string, string>;
+  defaultShiftByEmp?: Record<string, string>;
+}): { draft: VplanScheduleDraft; log: VplanFixerLogEntry[] } {
+  const log: VplanFixerLogEntry[] = [];
+  const rules = resolvePlanningRules(opts.rules ?? null);
+  const maxRest = restDaysForCycle(opts.cycle, rules);
+  const posByName = new Map(opts.positions.map((p) => [p.positionName, p]));
+
+  const customEmpIds = new Set(resolvePositionAssignees({
+    defaultPositionByEmp: opts.defaultPositionByEmp,
+    positions: opts.positions,
+    draftAssignments: opts.draft.assignments,
+    onlyCustom: true,
+  }).keys());
+
+  const assignments = opts.draft.assignments.map((a) => ({ ...a }));
+  const indexByKey = new Map<string, number>();
+  assignments.forEach((a, i) => indexByKey.set(assignmentKey(a.employeeId, a.dateStr), i));
+
+  const shiftCandidatesFor = (empId: string): string[] => {
+    const preferred = String(opts.defaultShiftByEmp?.[empId] || '').toUpperCase();
+    const pool = preferred ? [preferred, 'M', 'T', 'N'] : ['M', 'T', 'N'];
+    return [...new Set(pool.filter((c) => isCycleWorkCode(c, opts.cycle)))];
+  };
+
+  const empIds = new Set(assignments.map((a) => a.employeeId));
+
+  for (const empId of empIds) {
+    if (customEmpIds.has(empId)) continue;
+
+    let restRun = trailingRestFromPrevMonth(opts.previousMonthAssignments, empId);
+
+    for (const dateStr of opts.dateStrs) {
+      const key = assignmentKey(empId, dateStr);
+      const idx = indexByKey.get(key);
+      if (idx === undefined) continue;
+
+      const cell = assignments[idx]!;
+      const code = String(cell.code || 'F').toUpperCase();
+
+      if (!isFrancoCode(code)) {
+        restRun = 0;
+        continue;
+      }
+
+      restRun += 1;
+      if (restRun <= maxRest) continue;
+      if (opts.protectedCells?.has(protectedCellKey(empId, dateStr))) continue;
+
+      const defaultPos = String(opts.defaultPositionByEmp[empId] || '').trim();
+      const pos = defaultPos ? posByName.get(defaultPos) : undefined;
+      if (pos && isCustomFixedShiftPosition(pos)) continue;
+
+      let picked: string | null = null;
+      for (const shiftCode of shiftCandidatesFor(empId)) {
+        const evalResult = evaluateCoverageCandidate({
+          empId,
+          dateStr,
+          shiftCode,
+          assignments,
+          dateStrs: opts.dateStrs,
+          cycle: opts.cycle,
+          previousMonthAssignments: opts.previousMonthAssignments,
+          rules,
+        });
+        if (evalResult.canAssign) {
+          picked = shiftCode;
+          break;
+        }
+      }
+      if (!picked) continue;
+
+      assignments[idx] = {
+        ...cell,
+        code: picked,
+        positionName: defaultPos,
+        hours: billableHoursForCode(picked),
+      };
+      log.push({
+        code: 'CCT_TRIM_REST',
+        message: `F → ${picked} (racha F>${maxRest}, ${opts.cycle})`,
+        employeeId: empId,
+        dateStr,
+      });
+      restRun = 0;
+    }
+  }
+
+  return { draft: { ...opts.draft, assignments }, log };
 }

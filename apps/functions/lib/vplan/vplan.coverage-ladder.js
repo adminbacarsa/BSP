@@ -7,6 +7,7 @@ const planning_rules_service_1 = require("../planning/planning-rules.service");
 const vplan_coverage_audit_1 = require("./vplan.coverage-audit");
 const vplan_brain_model_1 = require("./vplan.brain-model");
 const vplan_cycle_continuity_1 = require("./vplan.cycle-continuity");
+const vplan_custom_schedule_1 = require("./vplan.custom-schedule");
 const vplan_positions_1 = require("./vplan.positions");
 const vplan_sla_enforce_1 = require("./vplan.sla-enforce");
 exports.NEEDS_REINFORCEMENT_EMP_ID = 'SIN_COBERTURA';
@@ -97,6 +98,7 @@ function candidateCanTakeBand(opts) {
         cycle: opts.cycle,
         previousMonthAssignments: opts.previousMonthAssignments,
         rules: opts.rules,
+        francoTrabajado: opts.francoTrabajado === true,
     });
     return evalResult.canAssign;
 }
@@ -266,6 +268,7 @@ function liveAuditGapCandidateCanFill(opts) {
         cycle: opts.cycle,
         previousMonthAssignments: opts.previousMonthAssignments,
         rules: opts.rules,
+        francoTrabajado: opts.francoTrabajado === true,
     });
     return evalResult.canAssign;
 }
@@ -315,7 +318,17 @@ function fillAssignableGapsFromAudit(opts) {
                     dateStr: gap.dateStr,
                     shiftCode: gap.shiftCode,
                     positionName: gap.positionName,
-                }));
+                }))
+                    ?? (opts.allowFrancoTrabajado
+                        ? gap.candidates.find((candidate) => liveAuditGapCandidateCanFill({
+                            ...liveCtx,
+                            empId: candidate.employeeId,
+                            dateStr: gap.dateStr,
+                            shiftCode: gap.shiftCode,
+                            positionName: gap.positionName,
+                            francoTrabajado: true,
+                        }))
+                        : undefined);
                 if (!pick)
                     break;
                 const idx = assignments.findIndex((a) => a.employeeId === pick.employeeId && a.dateStr === gap.dateStr);
@@ -521,6 +534,12 @@ function fillCoverageGapsWithLadder(opts) {
                                 return false;
                             if (opts.defaultPositionByEmp[a.employeeId] === posName)
                                 return false;
+                            if (opts.excludeCustomCrossPool && !(0, vplan_custom_schedule_1.isCustomEmployeeCrossAssignable)({
+                                empId: a.employeeId,
+                                positions: opts.positions,
+                                defaultPositionByEmp: opts.defaultPositionByEmp,
+                            }))
+                                return false;
                             return true;
                         });
                         const pickPool = francoPool.find(({ a }) => candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }));
@@ -593,7 +612,14 @@ function fillCoverageGapsWithLadder(opts) {
                             const c = String(a.code || '').toUpperCase();
                             return FRANCO_POOL.has(c);
                         });
-                        const pickFt = francoObjective.find(({ a }) => candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }));
+                        const pickFt = francoObjective.find(({ a }) => candidateCanFill({
+                            ...fillCtx,
+                            empId: a.employeeId,
+                            dateStr,
+                            shiftCode,
+                            cycle,
+                            francoTrabajado: true,
+                        }));
                         if (pickFt) {
                             assignCell(assignments, pickFt.i, shiftCode, posName, pos);
                             log.push({
