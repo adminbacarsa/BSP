@@ -11,7 +11,10 @@ import type { PlanningRulesConfig } from '../planning/planning-rules.types';
 import { resolvePlanningRules } from '../planning/planning-rules.service';
 import type { VplanExistingAssignment } from './vplan.firestore';
 import { isCycleWorkCode } from './vplan.cycle-templates';
-import type { CoverageGuardContext } from './vplan.coverage-guard';
+import {
+  wouldReduceCoverageByForcingFranco,
+  type CoverageGuardContext,
+} from './vplan.coverage-guard';
 import type { VplanAssignment, VplanFixerLogEntry, VplanScheduleDraft } from './vplan.types';
 
 const FRANCO = new Set(['F', 'FF', 'FP', 'FT']);
@@ -183,13 +186,30 @@ export function enforceCctWorkRestPattern(opts: {
 
       if (restPending > 0) {
         if (isCycleWorkCode(code, cycle)) {
-          assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
-          log.push({
-            code: 'CCT_REST_BLOCK',
-            message: `${code} → F (descanso obligatorio ${maxRest}F tras ${maxWork} trab, ${cycle})`,
-            employeeId: empId,
-            dateStr,
-          });
+          const protectCoverage = opts.coverageGuard?.protect === true
+            && wouldReduceCoverageByForcingFranco({
+              assignments,
+              draftMeta: opts.draft,
+              guard: opts.coverageGuard,
+              empId,
+              dateStr,
+            });
+          if (!protectCoverage && !opts.protectedCells?.has(assignmentKey(empId, dateStr))) {
+            assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
+            log.push({
+              code: 'CCT_REST_BLOCK',
+              message: `${code} → F (descanso obligatorio ${maxRest}F tras ${maxWork} trab, ${cycle})`,
+              employeeId: empId,
+              dateStr,
+            });
+          } else {
+            log.push({
+              code: 'CCT_REST_DEFER',
+              message: `Preserva ${code} (${dateStr}) — cobertura/FT`,
+              employeeId: empId,
+              dateStr,
+            });
+          }
         }
         restPending -= 1;
         workRun = 0;
@@ -199,15 +219,34 @@ export function enforceCctWorkRestPattern(opts: {
       if (isCycleWorkCode(code, cycle)) {
         workRun += 1;
         if (workRun > maxWork) {
-          assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
-          log.push({
-            code: 'CCT_MAX_WORK',
-            message: `${code} → F (racha >${maxWork} días, ${cycle})`,
-            employeeId: empId,
-            dateStr,
-          });
-          workRun = 0;
-          restPending = maxRest;
+          const protectCoverage = opts.coverageGuard?.protect === true
+            && wouldReduceCoverageByForcingFranco({
+              assignments,
+              draftMeta: opts.draft,
+              guard: opts.coverageGuard,
+              empId,
+              dateStr,
+            });
+          if (!protectCoverage && !opts.protectedCells?.has(assignmentKey(empId, dateStr))) {
+            assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
+            log.push({
+              code: 'CCT_MAX_WORK',
+              message: `${code} → F (racha >${maxWork} días, ${cycle})`,
+              employeeId: empId,
+              dateStr,
+            });
+            workRun = 0;
+            restPending = maxRest;
+          } else {
+            log.push({
+              code: 'CCT_MAX_DEFER',
+              message: `Preserva ${code} (${dateStr}) — cobertura > racha CCT`,
+              employeeId: empId,
+              dateStr,
+            });
+            // No arranca restPending: celda ya es trabajo que cubre SLA.
+            workRun = maxWork;
+          }
         } else if (workRun === maxWork) {
           restPending = maxRest;
         }

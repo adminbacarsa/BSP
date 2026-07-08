@@ -192,9 +192,13 @@ function tryDirectBandReassign(opts: {
     const fromBand = normBandCode(String(a.code || ''));
     const fromCount = counts.get(fromBand) || 0;
     const fromLimit = limits.get(fromBand) || 0;
-    if (fromCount <= fromLimit && (counts.get(needBand) || 0) >= (limits.get(needBand) || 0)) {
-      continue;
-    }
+    const needCount = counts.get(needBand) || 0;
+    const needLimit = limits.get(needBand) || 0;
+    if (needCount >= needLimit) continue;
+
+    // No vaciar una banda ya en cupo (causa oscilación M↔N el mismo día).
+    // Para mover desde cupo pleno → tryBandSwapWithFrancoHelper.
+    if (fromCount <= fromLimit) continue;
 
     if (!candidateCanTakeBand({
       ...opts.fillCtx,
@@ -207,7 +211,7 @@ function tryDirectBandReassign(opts: {
 
     const nextCounts = new Map(counts);
     nextCounts.set(fromBand, fromCount - 1);
-    nextCounts.set(needBand, (nextCounts.get(needBand) || 0) + 1);
+    nextCounts.set(needBand, needCount + 1);
     let bandsOk = true;
     for (const [band, limit] of limits) {
       if ((nextCounts.get(band) || 0) < limit) {
@@ -311,6 +315,102 @@ function tryPairBandSwap(opts: {
       if (trySwap(b, a, bandB, bandA)) {
         return { ok: true, idxA: b.i, idxB: a.i, fromA: bandB, fromB: bandA };
       }
+    }
+  }
+
+  return { ok: false };
+}
+
+/**
+ * Cuando hace falta una banda y el ocupante de otra no puede cambiar (ej. N→M),
+ * busca un franco que pueda tomar la banda liberada y hace M←T / F←T.
+ */
+function tryBandSwapWithFrancoHelper(opts: {
+  assignments: VplanAssignment[];
+  dateStr: string;
+  posName: string;
+  pos: VplanPositionDef;
+  dayLetter: string;
+  shiftCode: string;
+  defaultPositionByEmp: Record<string, string>;
+  fillCtx: {
+    assignments: VplanAssignment[];
+    dateStrList: string[];
+    cycle: string;
+    previousMonthAssignments?: VplanExistingAssignment[];
+    rules: PlanningRulesConfig;
+    protectedCells?: Set<string>;
+    francoTrabajado?: boolean;
+  };
+  allowFrancoTrabajado?: boolean;
+}): { ok: boolean; occupantIdx?: number; francoIdx?: number; fromBand?: string } {
+  const needBand = normBandCode(opts.shiftCode);
+  const counts = countBandsOnPosition(
+    opts.assignments,
+    opts.dateStr,
+    opts.posName,
+    opts.defaultPositionByEmp,
+  );
+  const needCount = counts.get(needBand) || 0;
+  const needLimit = bandLimitsForPosition(opts.pos, opts.dayLetter, opts.fillCtx.cycle).get(needBand) || 0;
+  if (needCount >= needLimit) return { ok: false };
+
+  const occupants = opts.assignments
+    .map((a, i) => ({ a, i }))
+    .filter(({ a }) => {
+      if (a.dateStr !== opts.dateStr) return false;
+      if (isVirtualEmployeeId(a.employeeId)) return false;
+      const code = String(a.code || '').toUpperCase();
+      if (!WORK_CODES.has(code)) return false;
+      const pos = String(a.positionName || opts.defaultPositionByEmp[a.employeeId] || '').trim();
+      return pos === opts.posName && normBandCode(code) !== needBand;
+    });
+
+  const francos = opts.assignments
+    .map((a, i) => ({ a, i }))
+    .filter(({ a }) => {
+      if (a.dateStr !== opts.dateStr) return false;
+      if (isVirtualEmployeeId(a.employeeId)) return false;
+      if (!FRANCO_POOL.has(String(a.code || '').toUpperCase())) return false;
+      return opts.defaultPositionByEmp[a.employeeId] === opts.posName;
+    });
+
+  for (const occ of occupants) {
+    const fromBand = normBandCode(String(occ.a.code || ''));
+    // Preferir origen T→M (legal) antes que N→M; ordenar por prioridad
+    void fromBand;
+  }
+
+  const ranked = [...occupants].sort((a, b) => {
+    const ba = normBandCode(String(a.a.code || ''));
+    const bb = normBandCode(String(b.a.code || ''));
+    const preferOrder = needBand === 'M' ? ['T', 'N', 'M'] : needBand === 'T' ? ['M', 'N', 'T'] : ['T', 'M', 'N'];
+    return preferOrder.indexOf(ba) - preferOrder.indexOf(bb);
+  });
+
+  for (const occ of ranked) {
+    const fromBand = normBandCode(String(occ.a.code || ''));
+    if (!candidateCanTakeBand({
+      ...opts.fillCtx,
+      empId: occ.a.employeeId,
+      dateStr: opts.dateStr,
+      shiftCode: opts.shiftCode,
+      francoTrabajado: opts.allowFrancoTrabajado === true,
+    })) {
+      continue;
+    }
+
+    for (const fr of francos) {
+      const canTakeFrom = candidateCanFill({
+        ...opts.fillCtx,
+        empId: fr.a.employeeId,
+        dateStr: opts.dateStr,
+        shiftCode: fromBand,
+        cycle: opts.fillCtx.cycle,
+        francoTrabajado: opts.allowFrancoTrabajado === true,
+      });
+      if (!canTakeFrom) continue;
+      return { ok: true, occupantIdx: occ.i, francoIdx: fr.i, fromBand };
     }
   }
 
@@ -656,6 +756,7 @@ export function fillCoverageGapsWithLadder(
               const oldKey = slotKey(dateStr, posName, fromBand);
               daySlotCount.set(oldKey, Math.max(0, (daySlotCount.get(oldKey) || 0) - 1));
             }
+            daySlotCount.set(key, (daySlotCount.get(key) || 0) + 1);
             log.push({
               code: 'LADDER_BAND_SWAP',
               message: `${fromBand} → ${shiftCode} en ${posName} (${dateStr})`,
@@ -664,6 +765,8 @@ export function fillCoverageGapsWithLadder(
             });
             ladderStats.bandSwap += 1;
             filled = true;
+            used += 1;
+            continue;
           }
 
           if (!filled) {
@@ -679,6 +782,7 @@ export function fillCoverageGapsWithLadder(
               daySlotCount.set(oldKeyB, Math.max(0, (daySlotCount.get(oldKeyB) || 0) - 1));
               const oldKeyA = slotKey(dateStr, posName, pairSwap.fromA);
               daySlotCount.set(oldKeyA, (daySlotCount.get(oldKeyA) || 0) + 1);
+              daySlotCount.set(key, (daySlotCount.get(key) || 0) + 1);
               log.push({
                 code: 'LADDER_BAND_SWAP_PAIR',
                 message: `${pairSwap.fromA}/${pairSwap.fromB} → ${shiftCode}/${pairSwap.fromA} en ${posName} (${dateStr})`,
@@ -687,6 +791,36 @@ export function fillCoverageGapsWithLadder(
               });
               ladderStats.bandSwap += 1;
               filled = true;
+              used += 1;
+              continue;
+            }
+          }
+
+          if (!filled) {
+            const helperSwap = tryBandSwapWithFrancoHelper({
+              ...swapCtx,
+              allowFrancoTrabajado: opts.allowFrancoTrabajado === true,
+            });
+            if (helperSwap.ok
+              && helperSwap.occupantIdx !== undefined
+              && helperSwap.francoIdx !== undefined
+              && helperSwap.fromBand) {
+              assignCell(assignments, helperSwap.occupantIdx, shiftCode, posName, pos);
+              assignCell(assignments, helperSwap.francoIdx, helperSwap.fromBand, posName, pos);
+              const oldKey = slotKey(dateStr, posName, helperSwap.fromBand);
+              daySlotCount.set(oldKey, Math.max(0, (daySlotCount.get(oldKey) || 0) - 1) + 1);
+              daySlotCount.set(key, (daySlotCount.get(key) || 0) + 1);
+              log.push({
+                code: 'LADDER_BAND_SWAP_FRANCO',
+                message: `${helperSwap.fromBand}→${shiftCode} + F→${helperSwap.fromBand} en ${posName} (${dateStr})`,
+                employeeId: assignments[helperSwap.occupantIdx]!.employeeId,
+                dateStr,
+              });
+              ladderStats.bandSwap += 1;
+              if (opts.allowFrancoTrabajado) ladderStats.ft += 1;
+              filled = true;
+              used += 1;
+              continue;
             }
           }
 
@@ -700,18 +834,38 @@ export function fillCoverageGapsWithLadder(
               return opts.defaultPositionByEmp[a.employeeId] === posName;
             });
 
-          const pick6x2 = francoOnPosition.find(({ a }) =>
+          const pick6x2Legal = francoOnPosition.find(({ a }) =>
             candidateCanFill({ ...fillCtx, empId: a.employeeId, dateStr, shiftCode, cycle }),
           );
+          const pick6x2Ft = !pick6x2Legal && opts.allowFrancoTrabajado
+            ? francoOnPosition.find(({ a }) =>
+              candidateCanFill({
+                ...fillCtx,
+                empId: a.employeeId,
+                dateStr,
+                shiftCode,
+                cycle,
+                francoTrabajado: true,
+              }),
+            )
+            : undefined;
+          const pick6x2 = pick6x2Legal ?? pick6x2Ft;
           if (pick6x2) {
             assignCell(assignments, pick6x2.i, shiftCode, posName, pos);
+            const usedFt = !pick6x2Legal && !!pick6x2Ft;
             log.push({
-              code: 'LADDER_6X2',
-              message: ladderMessage('SUBGRUPO_6X2_LEGAL', dateStr, posName, shiftCode),
+              code: usedFt ? 'LADDER_FT' : 'LADDER_6X2',
+              message: ladderMessage(
+                usedFt ? 'FT_FRANCO_TRABAJADO' : 'SUBGRUPO_6X2_LEGAL',
+                dateStr,
+                posName,
+                shiftCode,
+              ),
               employeeId: assignments[pick6x2.i]!.employeeId,
               dateStr,
             });
-            ladderStats.subgrupo6x2 += 1;
+            if (usedFt) ladderStats.ft += 1;
+            else ladderStats.subgrupo6x2 += 1;
             filled = true;
           }
 

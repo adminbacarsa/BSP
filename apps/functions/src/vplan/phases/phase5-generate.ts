@@ -606,10 +606,37 @@ export function runVplanGeneration(opts: {
     assignments = postCustomAudit.draft.assignments;
     fixLog.push(...postCustomAudit.log);
     gapFilled.ladderStats.auditGap = (gapFilled.ladderStats.auditGap ?? 0) + postCustomAudit.ladderStats.auditGap;
+    gapFilled.ladderStats.bandSwap = (gapFilled.ladderStats.bandSwap ?? 0)
+      + (postCustomLadder.ladderStats.bandSwap ?? 0);
 
-    const postCustomCct = runCctEnforce(assignments);
+    // Preservar FT/cobertura recién cerrada (no tumbar a F el CCT estricto)
+    const postCustomCct = runCctEnforce(assignments, true);
     assignments = postCustomCct.draft.assignments;
     fixLog.push(...postCustomCct.log);
+
+    if (postCustomCct.log.some((e) => e.code === 'CCT_REST_BLOCK' || e.code === 'CCT_MAX_WORK')) {
+      const refill = fillCoverageGapsWithLadder({
+        draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+        dateStrs: opts.snapshot.days,
+        positions: cyclePositions,
+        defaultPositionByEmp: mergedDefaultPositionByEmp,
+        cycle,
+        dateStrList: dateStrs,
+        previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+        slaVendidas: opts.snapshot.slaVendidas,
+        offerHours,
+        employeeIds: opts.snapshot.employees.map((e) => e.id),
+        rules,
+        protectedCells: weekendProtected,
+        excludeCustomCrossPool: true,
+        allowFrancoTrabajado: true,
+      });
+      assignments = refill.draft.assignments;
+      fixLog.push(...refill.log);
+      gapFilled.ladderStats.ft += refill.ladderStats.ft;
+      gapFilled.ladderStats.bandSwap += refill.ladderStats.bandSwap;
+      gapFilled.ladderStats.subgrupo6x2 += refill.ladderStats.subgrupo6x2;
+    }
 
     const postCustomRest2 = enforceMaxRestStreak({
       draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },

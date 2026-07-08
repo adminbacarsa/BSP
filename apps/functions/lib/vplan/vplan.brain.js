@@ -34,10 +34,15 @@ function mandateCiclo6x2(opts) {
             cycle: opts.strategy.cycle,
         });
     }
-    const ok = cctStreaks.length === 0 && crossMonth.length === 0;
+    const softFt = cctStreaks.filter((v) => v.workDays === maxWork + 1);
+    const hardStreaks = cctStreaks.filter((v) => v.workDays > maxWork + 1);
+    const ok = hardStreaks.length === 0 && crossMonth.length === 0;
     const parts = [];
-    if (cctStreaks.length > 0) {
-        parts.push(`${cctStreaks.length} racha(s) >${maxWork}d CCT`);
+    if (hardStreaks.length > 0) {
+        parts.push(`${hardStreaks.length} racha(s) >${maxWork + 1}d CCT`);
+    }
+    if (softFt.length > 0) {
+        parts.push(`${softFt.length} FT (×${maxWork + 1})`);
     }
     if (crossMonth.length > 0) {
         parts.push(`${crossMonth.length} ruptura(s) cross-month`);
@@ -48,11 +53,13 @@ function mandateCiclo6x2(opts) {
             label: 'Ciclo 6+2 + racha',
             ok,
             summary: ok
-                ? `6+2 OK (máx ${maxWork} trab consecutivos)`
+                ? (softFt.length > 0
+                    ? `6+2 OK · ${softFt.length} franco(s) trabajado(s)`
+                    : `6+2 OK (máx ${maxWork} trab consecutivos)`)
                 : parts.join(' · '),
         },
         crossMonthViolations: crossMonth.length,
-        inMonthStreakViolations: cctStreaks.length,
+        inMonthStreakViolations: hardStreaks.length,
     };
 }
 function mandateHorasVendidas(billable, slaVendidas, tolerance, motorClosed) {

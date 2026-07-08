@@ -226,10 +226,14 @@ export function runVplanVerification(opts: {
     rules,
   });
   for (const v of cctStreakViolations) {
+    // ×(máx+1) = un franco trabajado típico → warning; ×(máx+2)+ → bloqueante
+    const isSoftFt = v.workDays === maxStreak + 1;
     issues.push({
-      severity: 'blocking',
+      severity: isSoftFt ? 'warning' : 'blocking',
       code: 'WORK_STREAK_TOO_LONG',
-      message: `Racha CCT ×${v.workDays} sin descanso (${v.fromDate} → ${v.toDate}, máx ${maxStreak} en ${opts.strategy.cycle})`,
+      message: isSoftFt
+        ? `Franco trabajado ×${v.workDays} (${v.fromDate} → ${v.toDate}, máx ${maxStreak} + FT en ${opts.strategy.cycle})`
+        : `Racha CCT ×${v.workDays} sin descanso (${v.fromDate} → ${v.toDate}, máx ${maxStreak} en ${opts.strategy.cycle})`,
       employeeId: v.employeeId,
       dateStr: v.toDate,
     });

@@ -8,6 +8,7 @@ exports.detectCctStreakViolations = detectCctStreakViolations;
 const planning_rules_defaults_1 = require("../planning/planning-rules.defaults");
 const planning_rules_service_1 = require("../planning/planning-rules.service");
 const vplan_cycle_templates_1 = require("./vplan.cycle-templates");
+const vplan_coverage_guard_1 = require("./vplan.coverage-guard");
 const FRANCO = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE = new Set(['V', 'L', 'E', 'A', 'PG', 'AA']);
 function isFranco(code) {
@@ -139,13 +140,31 @@ function enforceCctWorkRestPattern(opts) {
                 continue;
             if (restPending > 0) {
                 if ((0, vplan_cycle_templates_1.isCycleWorkCode)(code, cycle)) {
-                    assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
-                    log.push({
-                        code: 'CCT_REST_BLOCK',
-                        message: `${code} → F (descanso obligatorio ${maxRest}F tras ${maxWork} trab, ${cycle})`,
-                        employeeId: empId,
-                        dateStr,
-                    });
+                    const protectCoverage = opts.coverageGuard?.protect === true
+                        && (0, vplan_coverage_guard_1.wouldReduceCoverageByForcingFranco)({
+                            assignments,
+                            draftMeta: opts.draft,
+                            guard: opts.coverageGuard,
+                            empId,
+                            dateStr,
+                        });
+                    if (!protectCoverage && !opts.protectedCells?.has(assignmentKey(empId, dateStr))) {
+                        assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
+                        log.push({
+                            code: 'CCT_REST_BLOCK',
+                            message: `${code} → F (descanso obligatorio ${maxRest}F tras ${maxWork} trab, ${cycle})`,
+                            employeeId: empId,
+                            dateStr,
+                        });
+                    }
+                    else {
+                        log.push({
+                            code: 'CCT_REST_DEFER',
+                            message: `Preserva ${code} (${dateStr}) — cobertura/FT`,
+                            employeeId: empId,
+                            dateStr,
+                        });
+                    }
                 }
                 restPending -= 1;
                 workRun = 0;
@@ -154,15 +173,34 @@ function enforceCctWorkRestPattern(opts) {
             if ((0, vplan_cycle_templates_1.isCycleWorkCode)(code, cycle)) {
                 workRun += 1;
                 if (workRun > maxWork) {
-                    assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
-                    log.push({
-                        code: 'CCT_MAX_WORK',
-                        message: `${code} → F (racha >${maxWork} días, ${cycle})`,
-                        employeeId: empId,
-                        dateStr,
-                    });
-                    workRun = 0;
-                    restPending = maxRest;
+                    const protectCoverage = opts.coverageGuard?.protect === true
+                        && (0, vplan_coverage_guard_1.wouldReduceCoverageByForcingFranco)({
+                            assignments,
+                            draftMeta: opts.draft,
+                            guard: opts.coverageGuard,
+                            empId,
+                            dateStr,
+                        });
+                    if (!protectCoverage && !opts.protectedCells?.has(assignmentKey(empId, dateStr))) {
+                        assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
+                        log.push({
+                            code: 'CCT_MAX_WORK',
+                            message: `${code} → F (racha >${maxWork} días, ${cycle})`,
+                            employeeId: empId,
+                            dateStr,
+                        });
+                        workRun = 0;
+                        restPending = maxRest;
+                    }
+                    else {
+                        log.push({
+                            code: 'CCT_MAX_DEFER',
+                            message: `Preserva ${code} (${dateStr}) — cobertura > racha CCT`,
+                            employeeId: empId,
+                            dateStr,
+                        });
+                        workRun = maxWork;
+                    }
                 }
                 else if (workRun === maxWork) {
                     restPending = maxRest;
