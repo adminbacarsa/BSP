@@ -107,7 +107,9 @@ export default function PlanningRecompositionModal({
   const [step, setStep] = useState(1);
   const [mode, setMode] = useState<RecompositionMode>('anticipated_absence');
   const [targetId, setTargetId] = useState<string>(preselectedEmpId || '');
-  const [selectedNearbyObjId, setSelectedNearbyObjId] = useState<string | null>(null);
+  const [expandedNearbyObjId, setExpandedNearbyObjId] = useState<string | null>(null);
+  const [nearbyExtObjId, setNearbyExtObjId] = useState<string | null>(null);
+  const [nearbyAdelObjId, setNearbyAdelObjId] = useState<string | null>(null);
   const [extEmpId, setExtEmpId] = useState('');
   const [adelEmpId, setAdelEmpId] = useState('');
   const [gapPos, setGapPos] = useState('');
@@ -231,24 +233,29 @@ export default function PlanningRecompositionModal({
     return { groups, noGpsCount };
   }, [currentObjectiveLat, currentObjectiveLng, allObjectives, allEmployees, objectiveId, selectedTarget, bandNeighbors, nearbyRadius, dateStr, targetId, pendingChanges, shiftsMap]);
 
-  const selectedNearbyGroup = useMemo(
-    () => nearbyResult.groups.find(g => g.objId === selectedNearbyObjId) ?? null,
-    [nearbyResult.groups, selectedNearbyObjId]
+  const nearbyExtGroup = useMemo(
+    () => nearbyResult.groups.find(g => g.objId === nearbyExtObjId) ?? null,
+    [nearbyResult.groups, nearbyExtObjId]
+  );
+
+  const nearbyAdelGroup = useMemo(
+    () => nearbyResult.groups.find(g => g.objId === nearbyAdelObjId) ?? null,
+    [nearbyResult.groups, nearbyAdelObjId]
   );
 
   const nearbyExtCandidates = useMemo(() => {
-    if (!selectedNearbyGroup || !bandNeighbors) return [];
-    return selectedNearbyGroup.guards
+    if (!nearbyExtGroup || !bandNeighbors) return [];
+    return nearbyExtGroup.guards
       .filter(g => g.role === 'ext')
       .map(g => ({ id: g.id, name: g.name || g.id, code: g.code, positionName: g.positionName }));
-  }, [selectedNearbyGroup, bandNeighbors]);
+  }, [nearbyExtGroup, bandNeighbors]);
 
   const nearbyAdelCandidates = useMemo(() => {
-    if (!selectedNearbyGroup || !bandNeighbors) return [];
-    return selectedNearbyGroup.guards
+    if (!nearbyAdelGroup || !bandNeighbors) return [];
+    return nearbyAdelGroup.guards
       .filter(g => g.role === 'adel')
       .map(g => ({ id: g.id, name: g.name || g.id, code: g.code, positionName: g.positionName }));
-  }, [selectedNearbyGroup, bandNeighbors]);
+  }, [nearbyAdelGroup, bandNeighbors]);
 
   const activeExtCandidates = useMemo(() => {
     const ids = new Set(extCandidates.map(c => c.id));
@@ -260,7 +267,11 @@ export default function PlanningRecompositionModal({
     return [...adelCandidates, ...nearbyAdelCandidates.filter(c => !ids.has(c.id))];
   }, [adelCandidates, nearbyAdelCandidates]);
 
-  useEffect(() => { setSelectedNearbyObjId(null); }, [targetId, step]);
+  useEffect(() => {
+    setExpandedNearbyObjId(null);
+    setNearbyExtObjId(null);
+    setNearbyAdelObjId(null);
+  }, [targetId, step]);
 
   const goToCoverageStep = (t: RecompositionTarget, nextMode: RecompositionMode) => {
     setTargetId(t.employeeId);
@@ -578,20 +589,6 @@ export default function PlanningRecompositionModal({
                 />
               </label>
 
-              {selectedNearbyGroup && (
-                <div className="flex items-center gap-1.5 rounded-lg bg-indigo-50 border border-indigo-200 px-2 py-1.5">
-                  <MapPin size={10} className="text-indigo-500 shrink-0" />
-                  <span className="text-[9px] font-bold text-indigo-700 truncate">Candidatos de: {selectedNearbyGroup.objName} · {fmtDist(selectedNearbyGroup.dist)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedNearbyObjId(null)}
-                    className="ml-auto shrink-0 text-indigo-400 hover:text-indigo-700"
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
-              )}
-
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-xl border-2 border-violet-200 bg-violet-50/50 p-3 space-y-2">
                   <div className="flex items-center gap-1 text-[10px] font-black text-violet-800 uppercase">
@@ -615,6 +612,13 @@ export default function PlanningRecompositionModal({
                       <option key={c.id} value={c.id}>{c.name} · {c.positionName} · {c.code}</option>
                     ))}
                   </select>
+                  {nearbyExtGroup && (
+                    <div className="flex items-center gap-1 text-[8px] font-bold text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">
+                      <MapPin size={9} className="shrink-0" />
+                      <span className="truncate">{nearbyExtGroup.objName}</span>
+                      <button type="button" onClick={() => setNearbyExtObjId(null)} className="ml-auto shrink-0 text-violet-400 hover:text-violet-700"><X size={9} /></button>
+                    </div>
+                  )}
                   {activeExtCandidates.length === 0 && (
                     <p className="text-[9px] text-rose-600 font-bold">Sin guardias en turno {bandNeighbors?.extensionBand} este día.</p>
                   )}
@@ -643,6 +647,13 @@ export default function PlanningRecompositionModal({
                       <option key={c.id} value={c.id}>{c.name} · {c.positionName} · {c.code}</option>
                     ))}
                   </select>
+                  {nearbyAdelGroup && (
+                    <div className="flex items-center gap-1 text-[8px] font-bold text-cyan-700 bg-cyan-50 border border-cyan-200 rounded px-1.5 py-0.5">
+                      <MapPin size={9} className="shrink-0" />
+                      <span className="truncate">{nearbyAdelGroup.objName}</span>
+                      <button type="button" onClick={() => setNearbyAdelObjId(null)} className="ml-auto shrink-0 text-cyan-400 hover:text-cyan-700"><X size={9} /></button>
+                    </div>
+                  )}
                   {activeAdelCandidates.length === 0 && (
                     <p className="text-[9px] text-rose-600 font-bold">Sin guardias en turno {bandNeighbors?.earlyStartBand} este día.</p>
                   )}
@@ -697,30 +708,32 @@ export default function PlanningRecompositionModal({
                         <p className="text-[9px] font-bold text-slate-300 text-right">{nearbyResult.noGpsCount} obj. sin GPS</p>
                       )}
                       {nearbyResult.groups.map(group => {
-                        const isOpen = selectedNearbyObjId === group.objId;
+                        const isOpen = expandedNearbyObjId === group.objId;
+                        const isExtSrc = nearbyExtObjId === group.objId;
+                        const isAdelSrc = nearbyAdelObjId === group.objId;
                         const extCount = group.guards.filter(g => g.role === 'ext').length;
                         const adelCount = group.guards.filter(g => g.role === 'adel').length;
                         return (
-                          <div key={group.objId} className={`rounded-xl border transition-colors ${isOpen ? 'border-indigo-400 bg-indigo-50' : 'border-slate-200 bg-slate-50/40'}`}>
+                          <div key={group.objId} className={`rounded-xl border transition-colors ${isOpen ? 'border-slate-300 bg-white' : 'border-slate-200 bg-slate-50/40'}`}>
                             <button
                               type="button"
                               className="w-full flex items-center gap-2 px-3 py-2 text-left"
-                              onClick={() => setSelectedNearbyObjId(isOpen ? null : group.objId)}
+                              onClick={() => setExpandedNearbyObjId(isOpen ? null : group.objId)}
                             >
-                              <span className={`text-[10px] font-black truncate flex-1 ${isOpen ? 'text-indigo-800' : 'text-slate-700'}`}>{group.objName}</span>
-                              {!isOpen && (
-                                <span className="text-[8px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
-                                  {extCount > 0 && <span className="bg-violet-100 text-violet-700 px-1 rounded">{extCount} ext</span>}
-                                  {adelCount > 0 && <span className="bg-cyan-100 text-cyan-700 px-1 rounded">{adelCount} adel</span>}
-                                  {extCount === 0 && adelCount === 0 && <span className="text-slate-400">{group.guards.length} guard.</span>}
-                                </span>
-                              )}
+                              <span className="text-[10px] font-black truncate flex-1 text-slate-700">{group.objName}</span>
+                              <span className="text-[8px] font-bold shrink-0 flex items-center gap-1">
+                                {isExtSrc && <span className="bg-violet-500 text-white px-1 rounded">ext</span>}
+                                {isAdelSrc && <span className="bg-cyan-500 text-white px-1 rounded">adel</span>}
+                                {!isExtSrc && !isAdelSrc && extCount === 0 && adelCount === 0 && <span className="text-slate-400">{group.guards.length} guard.</span>}
+                                {!isExtSrc && extCount > 0 && <span className="bg-violet-100 text-violet-700 px-1 rounded">{extCount} ext</span>}
+                                {!isAdelSrc && adelCount > 0 && <span className="bg-cyan-100 text-cyan-700 px-1 rounded">{adelCount} adel</span>}
+                              </span>
                               <span className="text-[9px] font-bold text-slate-400 shrink-0">{fmtDist(group.dist)}</span>
                             </button>
                             {isOpen && (
-                              <div className="px-3 pb-2 space-y-1.5 border-t border-indigo-200">
+                              <div className="px-3 pb-2 space-y-2 border-t border-slate-100">
                                 {group.clientName && (
-                                  <div className="text-[9px] font-bold text-indigo-400 pt-1.5">{group.clientName}</div>
+                                  <div className="text-[9px] font-bold text-slate-400 pt-1.5">{group.clientName}</div>
                                 )}
                                 {group.guards.map(g => (
                                   <div key={g.id} className="flex items-center gap-1.5">
@@ -728,9 +741,28 @@ export default function PlanningRecompositionModal({
                                     <span className="text-[10px] font-bold text-slate-600 truncate">{g.name || g.id}</span>
                                     {g.positionName && <span className="text-[9px] text-slate-400 truncate">· {g.positionName}</span>}
                                     {g.isDraft && <span className="text-[8px] font-bold text-amber-500 shrink-0">borrador</span>}
-                                    {g.role !== 'other' && !g.isDraft && <span className="ml-auto text-[8px] font-bold text-indigo-400 shrink-0">{g.role === 'ext' ? '← ext' : 'adel →'}</span>}
                                   </div>
                                 ))}
+                                <div className="flex gap-1.5 pt-0.5">
+                                  {extCount > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setNearbyExtObjId(isExtSrc ? null : group.objId)}
+                                      className={`flex-1 text-[9px] font-black py-1 rounded-lg border transition-colors ${isExtSrc ? 'bg-violet-500 border-violet-500 text-white' : 'border-violet-300 text-violet-700 hover:bg-violet-50'}`}
+                                    >
+                                      {isExtSrc ? '✓ Ext activo' : `← Usar para Ext (${extCount})`}
+                                    </button>
+                                  )}
+                                  {adelCount > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setNearbyAdelObjId(isAdelSrc ? null : group.objId)}
+                                      className={`flex-1 text-[9px] font-black py-1 rounded-lg border transition-colors ${isAdelSrc ? 'bg-cyan-500 border-cyan-500 text-white' : 'border-cyan-300 text-cyan-700 hover:bg-cyan-50'}`}
+                                    >
+                                      {isAdelSrc ? '✓ Adel activo' : `Usar para Adel → (${adelCount})`}
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             )}
                           </div>
