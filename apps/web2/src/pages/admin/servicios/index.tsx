@@ -521,18 +521,21 @@ export default function ServiciosSLAPage() {
     positionName?: string,
   ): Promise<number> => {
     const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'REF', 'ESC', 'FT']);
-    const desdeDate = new Date(desde + 'T00:00:00');
+    const desdeTs = Timestamp.fromDate(new Date(desde + 'T00:00:00'));
+    // Solo filtramos por objectiveId para evitar índice compuesto con rango;
+    // el filtro de fecha se aplica en JS.
     const snap = await getDocs(
       query(
         collection(db, 'turnos'),
         where('objectiveId', '==', objectiveId),
-        where('startTime', '>=', Timestamp.fromDate(desdeDate)),
       ),
     );
 
     const ops: Array<{ ref: ReturnType<typeof doc>; start: ReturnType<typeof Timestamp.fromDate>; end: ReturnType<typeof Timestamp.fromDate> }> = [];
     for (const docSnap of snap.docs) {
       const data = docSnap.data();
+      // Filtrar por fecha (en JS para evitar índice compuesto)
+      if (!data.startTime || data.startTime.seconds < desdeTs.seconds) continue;
       // Filtrar por puesto si se especificó uno
       if (positionName && String(data.positionName || '').trim() !== positionName.trim()) continue;
       const code = String(data.code || '').toUpperCase();
