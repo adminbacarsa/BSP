@@ -347,6 +347,42 @@ const SHIFT_HOURS_LOOKUP: Record<string, number> = {
     'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'RFZ': 8, 'TURA': 8, 'ESC': 8, 'C': 8,
 };
 
+/**
+ * Horas de banda para cupos 8h vs 12h.
+ * Prioriza la definición del puesto en el SLA (ej. M custom 08–20 = 12h), no el lookup CCT estándar (M=8).
+ */
+const resolveBandHours = (
+    code: string | undefined | null,
+    shiftLike?: { hours?: unknown; startTime?: unknown; endTime?: unknown } | null,
+    posShifts?: Array<{ code?: string; hours?: unknown; startTime?: unknown; endTime?: unknown }> | null,
+): number => {
+    const upper = String(code || '').toUpperCase();
+    const fromSla = (posShifts || []).find((s) => String(s.code || '').toUpperCase() === upper);
+    const slaH = Number(fromSla?.hours);
+    if (slaH > 0) return slaH;
+    const stored = Number(shiftLike?.hours);
+    if (stored > 0) return stored;
+    // Duración 08:00–20:00 si el turno la trae
+    const st = fromSla?.startTime ?? shiftLike?.startTime;
+    const en = fromSla?.endTime ?? shiftLike?.endTime;
+    if (typeof st === 'string' && typeof en === 'string') {
+        const parseH = (t: string) => {
+            const m = t.match(/^(\d{1,2}):(\d{2})$/);
+            return m ? +m[1] + +m[2] / 60 : null;
+        };
+        const s = parseH(st);
+        const e = parseH(en);
+        if (s !== null && e !== null) {
+            let dur = e - s;
+            if (dur <= 0) dur += 24;
+            if (dur > 0 && dur <= 24) return dur;
+        }
+    }
+    return SHIFT_HOURS_LOOKUP[upper] ?? 8;
+};
+
+const isShortBandHours = (hours: number) => hours < 12;
+
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
 const OBJECTIVE_NON_BILLABLE_CODES = PLANNING_NON_BILLABLE_CODES;
 
@@ -1778,6 +1814,7 @@ export default function PlanificacionPage() {
         const dominant = positionStructure.reduce((prev: any, curr: any) => ((prev?.qty || 0) >= (curr?.qty || 0) ? prev : curr), positionStructure[0]);
 
         const assigned: { code: string; hours: number }[] = [];
+        const posShiftsForBand = (posConfig?.shifts || uniqueSLAShifts || []) as any[];
         displayedEmployees.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
             const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
@@ -1787,22 +1824,23 @@ export default function PlanificacionPage() {
             if (!isWorking(shift.code)) return;
             const objectiveMatch = shift.objectiveId === selectedObjective || !!pendingChanges[key];
             if (!objectiveMatch) return;
-            const hours = Number(shift.hours) || SHIFT_HOURS_LOOKUP[shift.code] || 8;
-            assigned.push({ code: String(shift.code || shift.type || '').toUpperCase(), hours });
+            const code = String(shift.code || shift.type || '').toUpperCase();
+            const hours = resolveBandHours(code, shift, posShiftsForBand);
+            assigned.push({ code, hours });
         });
 
-        const assigned8h = assigned.filter(a => a.hours <= 10).map(a => a.code);
-        const assigned12h = assigned.filter(a => a.hours > 10).map(a => a.code);
-        const shifts8h = uniqueSLAShifts.filter((s: any) => (Number(s.hours) || 8) <= 10);
-        const shifts12h = uniqueSLAShifts.filter((s: any) => (Number(s.hours) || 8) > 10);
+        const assigned8h = assigned.filter(a => isShortBandHours(a.hours)).map(a => a.code);
+        const assigned12h = assigned.filter(a => !isShortBandHours(a.hours)).map(a => a.code);
+        const shifts8h = uniqueSLAShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShiftsForBand)));
+        const shifts12h = uniqueSLAShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShiftsForBand)));
         // Cada tipo de turno puede repetirse hasta PAX veces (un empleado por pax por franja)
         const max8hSlots = shifts8h.length * pax;
         const max12hSlots = shifts12h.length * pax;
 
         uniqueSLAShifts.forEach((s: any) => {
             const code = String(s.code || '').toUpperCase();
-            const hours = Number(s.hours) || 8;
-            const is8h = hours <= 10;
+            const hours = resolveBandHours(code, s, posShiftsForBand);
+            const is8h = isShortBandHours(hours);
 
             if (pax === 1) {
                 // 1 pax: no mezclar 8h con 12h (un solo guardia por posición)
@@ -1812,7 +1850,8 @@ export default function PlanificacionPage() {
                 if (assigned8h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
                 if (assigned12h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
             } else {
-                // Multi-pax: mismo esquema para todos (M+T+N o D12+N12, no mezclar)
+                // Multi-pax: mismo esquema para todos; el mismo código puede repetirse hasta `pax`
+                // (ej. DIRECTORIO 2×M 08–20). No usar lookup CCT (M=8) contra SLA custom (M=12).
                 if (assigned8h.length > 0 && !is8h) { disabled.add(code); return; }
                 if (assigned12h.length > 0 && is8h) { disabled.add(code); return; }
                 const codeCount = assigned.filter(a => a.code === code).length;
@@ -4273,6 +4312,7 @@ export default function PlanificacionPage() {
                 (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
                 positionStructure[0] || { qty: 1, positionName: 'General' },
             );
+            const posShifts = ((positionStructure || []).find((p: any) => p.positionName === posName)?.shifts || []) as any[];
             const codeCounts: Record<string, number> = {};
             const assigned: { code: string; hours: number }[] = [];
             displayedEmployees.forEach((emp: any) => {
@@ -4286,8 +4326,7 @@ export default function PlanificacionPage() {
                 const shiftPos = shift.positionName || dominant?.positionName || 'General';
                 if (shiftPos !== posName) return;
                 codeCounts[code] = (codeCounts[code] || 0) + 1;
-                const hours = Number(shift.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
-                assigned.push({ code, hours });
+                assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
             });
             return { codeCounts, assigned };
         };
@@ -4317,12 +4356,13 @@ export default function PlanificacionPage() {
             if (units.required > 0 && units.closed >= units.required) return true;
 
             const upper = String(code || '').toUpperCase();
-            const is8h = (Number(hours) || 8) <= 10;
-            const assigned8h = assigned.filter(a => a.hours <= 10);
-            const assigned12h = assigned.filter(a => a.hours > 10);
+            const bandH = resolveBandHours(upper, { hours }, posCfg.shifts);
+            const is8h = isShortBandHours(bandH);
+            const assigned8h = assigned.filter(a => isShortBandHours(a.hours));
+            const assigned12h = assigned.filter(a => !isShortBandHours(a.hours));
             const posShifts = posCfg.shifts || [];
-            const shifts8h = posShifts.filter((s: any) => (Number(s.hours) || 8) <= 10);
-            const shifts12h = posShifts.filter((s: any) => (Number(s.hours) || 8) > 10);
+            const shifts8h = posShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShifts)));
+            const shifts12h = posShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShifts)));
             const maxSlots = shifts8h.length * pax + shifts12h.length * pax;
 
             if (pax === 1) {
@@ -4380,7 +4420,7 @@ export default function PlanificacionPage() {
                     continue;
                 }
                 const def = shiftDefFor(assignPos, codeUpper);
-                const hours = Number(def?.hours ?? shiftConfig.hours) || SHIFT_HOURS_LOOKUP[codeUpper] || 8;
+                const hours = resolveBandHours(codeUpper, def || shiftConfig, (posCfg?.shifts || []) as any[]);
                 if (isCoverageBlocked(dateStr, assignPos, codeUpper, hours, newChanges)) {
                     skippedCoverage++;
                     continue;
@@ -4504,6 +4544,7 @@ export default function PlanificacionPage() {
         const collectCodeCounts = (dateStr: string, changes: Record<string, any>) => {
             const codeCounts: Record<string, number> = {};
             const assigned: { code: string; hours: number }[] = [];
+            const posShifts = (pos.shifts || []) as any[];
             displayedEmployees.forEach((emp: any) => {
                 const key = `${emp.id}_${dateStr}`;
                 const absence = absencesMap[key];
@@ -4515,7 +4556,7 @@ export default function PlanificacionPage() {
                 const shiftPos = shift.positionName || dominant?.positionName || 'General';
                 if (shiftPos !== posName) return;
                 codeCounts[code] = (codeCounts[code] || 0) + 1;
-                assigned.push({ code, hours: Number(shift.hours) || SHIFT_HOURS_LOOKUP[code] || 8 });
+                assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
             });
             return { codeCounts, assigned };
         };
@@ -4530,9 +4571,10 @@ export default function PlanificacionPage() {
             const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForBulk, true);
             if (units.required > 0 && units.closed >= units.required) return true;
             const upper = String(code).toUpperCase();
-            const is8h = (Number(hours) || 8) <= 10;
-            const a8 = assigned.filter(a => a.hours <= 10);
-            const a12 = assigned.filter(a => a.hours > 10);
+            const bandH = resolveBandHours(upper, { hours }, pos.shifts);
+            const is8h = isShortBandHours(bandH);
+            const a8 = assigned.filter(a => isShortBandHours(a.hours));
+            const a12 = assigned.filter(a => !isShortBandHours(a.hours));
             if (pax === 1) {
                 if (a8.length > 0 && a12.length > 0) return true;
                 if (a8.length > 0 && !is8h) return true;
