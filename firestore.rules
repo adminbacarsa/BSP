@@ -557,5 +557,12 @@ service cloud.firestore {
         && request.resource.data.userUid == request.auth.uid;
       allow delete: if tenantAdminDelete();
     }
+
+    match /grupos_objetivos/{grupoId} {
+      allow read:   if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
   }
 }
