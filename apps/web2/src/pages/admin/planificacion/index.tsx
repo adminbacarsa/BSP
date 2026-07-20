@@ -6847,12 +6847,12 @@ export default function PlanificacionPage() {
                                         }
                                         const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
                                         const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
+                                        const _cellShift = (p && !p.isDeleted) ? p : s;
+                                        const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
+                                            ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
+                                            : null;
                                         const cellRange = cellCode
-                                            ? (SHIFT_RANGES[cellCode] || (
-                                                activeShift?.startTime && activeShift?.endTime
-                                                    ? `${formatTime(activeShift.startTime)} - ${formatTime(activeShift.endTime)}`
-                                                    : null
-                                              ))
+                                            ? (_cellActualRange || SHIFT_RANGES[cellCode] || null)
                                             : null;
                                         const cellDateStr = getDateKey(day);
                                         const excludedOnDay = excludedPositionsByDate[cellDateStr];
