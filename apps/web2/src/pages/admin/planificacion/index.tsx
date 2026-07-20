@@ -387,6 +387,16 @@ function isOperationalOriginShift(data: any): boolean {
 }
 
 /**
+ * Publicado = tiene publishedAt. El doc planificacion_estados también guarda
+ * defaultPositionByEmp (asignación de puestos) sin publicar el cronograma.
+ */
+function isPlanificacionPublished(
+    status: { publishedAt?: unknown; publishedBy?: string } | null | undefined,
+): boolean {
+    return status != null && status.publishedAt != null && status.publishedAt !== '';
+}
+
+/**
  * Horas CCT / pie de grilla: solo turnos del objetivo en pantalla y NO operativos.
  * Importante: los borradores (draft:true) sí cuentan — son el crono planificado todavía
  * no publicado, hay que verlos en la grilla y sumarlos.
@@ -645,6 +655,9 @@ export default function PlanificacionPage() {
         objectiveName: string;
         periodLabel: string;
     } | null>(null);
+    const [publishConfirmPin, setPublishConfirmPin] = useState('');
+    const [publishConfirmPinError, setPublishConfirmPinError] = useState('');
+    const [publishConfirmPinChecking, setPublishConfirmPinChecking] = useState(false);
     const [correctionMode, setCorrectionMode] = useState(false);
     const [cellEditMode, setCellEditMode] = useState(false);
     // 🛑 SYNC-CORE: Estado activo inicial null para forzar limpieza
@@ -1677,7 +1690,7 @@ export default function PlanificacionPage() {
         );
     }, [selectedObjective, currentDate]);
 
-    const isCronogramaPublicado = !!publishStatusMap[objectivePublishLookupKey];
+    const isCronogramaPublicado = isPlanificacionPublished(publishStatusMap[objectivePublishLookupKey]);
 
     /** Slots cerrados y fechas pasadas bloqueadas solo con cronograma publicado (salvo modo corrección). */
     const enforcePlanningClosureRules = isCronogramaPublicado && !correctionMode;
@@ -2751,7 +2764,8 @@ export default function PlanificacionPage() {
         const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
         fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month)
             .then(row => {
-                if (row) {
+                // Solo publishedAt marca publicación. Asignar puestos crea el mismo doc sin publicar.
+                if (row && row.data.publishedAt) {
                     setPublishStatusMap(prev => ({
                         ...prev,
                         [lookupKey]: {
@@ -2773,7 +2787,7 @@ export default function PlanificacionPage() {
             currentDate.getFullYear(),
             currentDate.getMonth() + 1,
         );
-        if (!publishStatusMap[lookupKey]) return;
+        if (!isPlanificacionPublished(publishStatusMap[lookupKey])) return;
         setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
         if (!opts?.republishOnly && canCorrectPlanning) setCorrectionMode(true);
     }, [selectedObjective, currentDate, publishStatusMap, canCorrectPlanning]);
@@ -2783,7 +2797,7 @@ export default function PlanificacionPage() {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        if (!publishStatusMap[lookupKey]) return;
+        if (!isPlanificacionPublished(publishStatusMap[lookupKey])) return;
         const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
         const draftRfz = rfzTodos.filter(rfz =>
             rfz.objectiveId === selectedObjective &&
@@ -2831,6 +2845,13 @@ export default function PlanificacionPage() {
                 const prevSh: Record<string,string> = (prev.defaultShiftByEmp as Record<string, string>) || {};
                 if (applyOverlay(prevPos, prevSh)) {
                     setDoc(doc(db, 'planificacion_estados', stateKey), {
+                        empresaId: empresaId || null,
+                        objectiveId: selectedObjective,
+                        objetivoId: selectedObjective,
+                        year,
+                        month,
+                        año: year,
+                        mes: month,
                         defaultPositionByEmp: prevPos,
                         defaultShiftByEmp: prevSh,
                     }, { merge: true }).catch(() => {});
@@ -3054,7 +3075,7 @@ export default function PlanificacionPage() {
         if (!confirm('¿Quitar todos los puestos asignados en este mes?')) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
-        const stateKey = `${selectedObjective}_${year}_${month}`;
+        const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
         const prefix = `___${selectedObjective}`;
         const newPos = Object.fromEntries(Object.entries(empDefaultPos).filter(([k]) => !k.endsWith(prefix)));
         const newShift = Object.fromEntries(Object.entries(empDefaultShift).filter(([k]) => !k.endsWith(prefix)));
@@ -3062,6 +3083,13 @@ export default function PlanificacionPage() {
         setEmpDefaultShift(newShift);
         try {
             await setDoc(doc(db, 'planificacion_estados', stateKey), {
+                empresaId: empresaId || null,
+                objectiveId: selectedObjective,
+                objetivoId: selectedObjective,
+                year,
+                month,
+                año: year,
+                mes: month,
                 defaultPositionByEmp: {},
                 defaultShiftByEmp: {},
             }, { merge: true });
@@ -3178,21 +3206,38 @@ export default function PlanificacionPage() {
             const update: Record<string, any> = {
                 [posField]: posName ?? deleteField(),
                 [shiftField]: shiftCode ? shiftCode.toUpperCase() : deleteField(),
+                empresaId: empresaId || null,
+                objectiveId: selectedObjective,
+                objetivoId: selectedObjective,
+                year,
+                month,
+                año: year,
+                mes: month,
             };
             try {
                 await updateDoc(stateRef, update);
             } catch (e: any) {
                 if (e?.code === 'not-found') {
                     await setDoc(stateRef, {
+                        empresaId: empresaId || null,
+                        objectiveId: selectedObjective,
+                        objetivoId: selectedObjective,
+                        year,
+                        month,
+                        año: year,
+                        mes: month,
                         defaultPositionByEmp: posName ? { [empId]: posName } : {},
                         defaultShiftByEmp: shiftCode ? { [empId]: shiftCode.toUpperCase() } : {},
                     }, { merge: true });
                 } else throw e;
             }
-        } catch {
+        } catch (err: any) {
             setEmpDefaultPos(prevPosMap);
             setEmpDefaultShift(prevShiftMap);
-            toast.error('No se pudo guardar el puesto asignado');
+            const permDenied = err?.code === 'permission-denied' || /permission/i.test(String(err?.message || ''));
+            toast.error(permDenied
+                ? 'Sin permiso para asignar puestos (revisá rol / empresa del usuario)'
+                : 'No se pudo guardar el puesto asignado');
         }
     };
 
@@ -3316,7 +3361,7 @@ export default function PlanificacionPage() {
             const pubYear = currentDate.getFullYear();
             const pubMonth = currentDate.getMonth() + 1;
             const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
-            const isPublished = !!publishStatusMap[publishLookupKey];
+            const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
             const logData: any[] = [];
             const snapshotData: Record<string, any> = {};
 
@@ -3648,7 +3693,7 @@ export default function PlanificacionPage() {
         }
 
         const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        const isAlreadyPublished = !!publishStatusMap[publishLookupKey];
+        const isAlreadyPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
         const warnings: string[] = [];
         if (isSuperAdmin && slaHoursMismatch) {
             const delta = slaRounded - plannedRounded;
@@ -3670,6 +3715,8 @@ export default function PlanificacionPage() {
             objectiveName,
             periodLabel: `${String(month).padStart(2, '0')}/${year}`,
         });
+        setPublishConfirmPin('');
+        setPublishConfirmPinError('');
     };
 
     const executePublish = async () => {
@@ -4393,7 +4440,7 @@ export default function PlanificacionPage() {
                 else if (!isLocked && absence && !effectiveShift) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); }
                 else { if (!isLocked) { setModifiers({ plannedNovedad: effectiveShift?.plannedNovedad || '' }); setFrancoMode('NONE'); }
                     const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
-                    setCellEditMode(correctionMode && !!publishStatusMap[pubKey]);
+                    setCellEditMode(correctionMode && isPlanificacionPublished(publishStatusMap[pubKey]));
                     setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); }
             }
         } 
@@ -6160,7 +6207,7 @@ export default function PlanificacionPage() {
                                         const covNote = p?.coverageNote || s?.coverageNote;
                                         let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
                                         let absence = absencesMap[key];
-                                        if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]) absence = null as any;
+                                        if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)])) absence = null as any;
                                         const effectiveCode = p?.code || s?.code;
                                         const coveredByCell = p?.coveredBy || s?.coveredBy;
                                         let hasConflict = shouldShowLeaveConflictSiren({
@@ -6171,7 +6218,7 @@ export default function PlanificacionPage() {
                                             shiftStatus: s?.status,
                                         });
                                         let statusIndicator = null;
-                                        const _planPublished = !!publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)];
+                                        const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
                                         if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (_planPublished && (s.status === 'ABSENT' || s.isAbsent)) statusIndicator = 'bg-rose-500'; }
                                         let isSwap = s?.swapWith || p?.swapWith;
                                         const swapPending = !!(
@@ -6785,7 +6832,7 @@ export default function PlanificacionPage() {
                                     currentDate.getFullYear(),
                                     currentDate.getMonth() + 1,
                                 );
-                                const published = publishStatusMap[publishLookupKey];
+                                const published = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
                                 const needsRepublish = !!needsRepublishMap[publishLookupKey];
                                 return (
                                     <div className="flex items-center gap-2 no-print">
@@ -6946,7 +6993,7 @@ export default function PlanificacionPage() {
                                     </button>
                                     {(() => {
                                         const _pubKey = selectedObjective ? planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
-                                        const _isPublished = !!(_pubKey && publishStatusMap[_pubKey]);
+                                        const _isPublished = !!(_pubKey && isPlanificacionPublished(publishStatusMap[_pubKey]));
                                         const _blocked = _isPublished && !correctionMode;
                                         return (
                                     <button
@@ -7001,7 +7048,7 @@ export default function PlanificacionPage() {
                                                         <div className="h-px bg-slate-100 mx-2 my-1"/>
                                                         {(() => {
                                                             const _pubKey2 = selectedObjective ? planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
-                                                            const _blocked2 = !!(_pubKey2 && publishStatusMap[_pubKey2]) && !correctionMode;
+                                                            const _blocked2 = !!(_pubKey2 && isPlanificacionPublished(publishStatusMap[_pubKey2])) && !correctionMode;
                                                             return (
                                                                 <>
                                                                     <button
@@ -7256,7 +7303,7 @@ export default function PlanificacionPage() {
                                 currentDate.getFullYear(),
                                 currentDate.getMonth() + 1,
                             );
-                            const cronogramaPublicado = !!publishStatusMap[publishLookupKey];
+                            const cronogramaPublicado = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
                             if (!cronogramaPublicado || rfzDraftPendientesMes.length === 0) return null;
                             const asignados = rfzDraftPendientesMes.filter(rfz => rfz.employeeId && rfz.employeeId !== 'VACANTE');
                             return (
@@ -8075,7 +8122,7 @@ export default function PlanificacionPage() {
                                     currentDate.getFullYear(),
                                     currentDate.getMonth() + 1,
                                 );
-                                const previewIsPublished = !!publishStatusMap[previewPublishKey];
+                                const previewIsPublished = isPlanificacionPublished(publishStatusMap[previewPublishKey]);
                                 // Puede editar si: no está publicado, o está en modo corrección (superadmin)
                                 const canEdit = !previewIsPublished || correctionMode;
 
@@ -8502,7 +8549,7 @@ export default function PlanificacionPage() {
                 {publishConfirmModal && typeof document !== 'undefined' && createPortal(
                     <div
                         className="fixed inset-0 z-[9200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-                        onClick={() => !isPublishing && setPublishConfirmModal(null)}
+                        onClick={() => !isPublishing && !publishConfirmPinChecking && setPublishConfirmModal(null)}
                     >
                         <div
                             className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95"
@@ -8552,23 +8599,78 @@ export default function PlanificacionPage() {
                                         </p>
                                     </div>
                                 )}
+                                <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 px-3 py-3">
+                                    <label className="text-[10px] font-black text-indigo-700 uppercase tracking-wider block mb-2 text-center">
+                                        PIN de supervisor (obligatorio)
+                                    </label>
+                                    <input
+                                        type="password"
+                                        inputMode="numeric"
+                                        autoComplete="one-time-code"
+                                        maxLength={4}
+                                        value={publishConfirmPin}
+                                        onChange={(e) => {
+                                            setPublishConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                                            setPublishConfirmPinError('');
+                                        }}
+                                        placeholder="••••"
+                                        className="w-full text-center text-2xl font-black tracking-[0.4em] py-2.5 rounded-xl border-2 border-indigo-200 focus:border-indigo-500 outline-none bg-white"
+                                    />
+                                    {publishConfirmPinError && (
+                                        <p className="text-[11px] font-bold text-rose-600 text-center mt-2">{publishConfirmPinError}</p>
+                                    )}
+                                    <p className="text-[10px] text-slate-500 text-center mt-2">
+                                        La asignación de puestos no publica el cronograma. Solo este paso lo hace.
+                                    </p>
+                                </div>
                             </div>
                             <div className="p-4 border-t bg-slate-50 flex gap-3">
                                 <button
                                     type="button"
-                                    onClick={() => setPublishConfirmModal(null)}
-                                    disabled={isPublishing}
+                                    onClick={() => {
+                                        setPublishConfirmModal(null);
+                                        setPublishConfirmPin('');
+                                        setPublishConfirmPinError('');
+                                    }}
+                                    disabled={isPublishing || publishConfirmPinChecking}
                                     className="flex-1 py-3 rounded-xl text-xs font-black text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-50 transition-colors"
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={executePublish}
-                                    disabled={isPublishing || Object.keys(pendingChanges).length > 0}
+                                    onClick={async () => {
+                                        if (Object.keys(pendingChanges).length > 0) return;
+                                        setPublishConfirmPinChecking(true);
+                                        setPublishConfirmPinError('');
+                                        try {
+                                            const auth = await verifySupervisorPin(publishConfirmPin);
+                                            if (!auth.ok) {
+                                                setPublishConfirmPinError('PIN incorrecto. Intentá de nuevo.');
+                                                return;
+                                            }
+                                            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                                                action: 'AUTORIZACION_PUBLICAR_CRONOGRAMA',
+                                                module: 'PLANIFICADOR',
+                                                details: `PIN OK (${auth.name}) · ${publishConfirmModal.isRepublish ? 're-publicar' : 'publicar'} · ${publishConfirmModal.objectiveName} · ${publishConfirmModal.periodLabel}`,
+                                                timestamp: serverTimestamp(),
+                                                actorName: activeActorName || operatorName,
+                                                actorUid: getAuth().currentUser?.uid,
+                                                objectiveId: selectedObjective,
+                                                objectiveName: publishConfirmModal.objectiveName,
+                                            }, empresaId));
+                                            setPublishConfirmPin('');
+                                            await executePublish();
+                                        } catch {
+                                            setPublishConfirmPinError('No se pudo validar el PIN.');
+                                        } finally {
+                                            setPublishConfirmPinChecking(false);
+                                        }
+                                    }}
+                                    disabled={isPublishing || publishConfirmPinChecking || Object.keys(pendingChanges).length > 0 || publishConfirmPin.length !== 4}
                                     className="flex-1 py-3 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                                 >
-                                    {isPublishing ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>}
+                                    {(isPublishing || publishConfirmPinChecking) ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>}
                                     {publishConfirmModal.isRepublish ? 'Re-publicar' : 'Publicar'}
                                 </button>
                             </div>
@@ -11607,7 +11709,7 @@ export default function PlanificacionPage() {
                                                         currentDate.getFullYear(),
                                                         currentDate.getMonth() + 1,
                                                     );
-                                                    const yaPublicado = !!publishStatusMap[lookupKey];
+                                                    const yaPublicado = isPlanificacionPublished(publishStatusMap[lookupKey]);
                                                     toast.success(
                                                         yaPublicado
                                                             ? (cat.franco

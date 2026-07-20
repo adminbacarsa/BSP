@@ -154,6 +154,14 @@ service cloud.firestore {
       return isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
     }
 
+    // Admins de empresa pueden adoptar docs legacy de planificación sin empresaId
+    // (asignación de puestos / estados mensuales) sellando su tenant.
+    function planificacionEstadoClaimTenant() {
+      return isAdmin() && userEmpresaId() != '' &&
+        docEmpresaId(resource.data) == '' &&
+        docEmpresaId(request.resource.data) == userEmpresaId();
+    }
+
     function clientUserClientId() {
       return isClientUser()
         ? get(/databases/$(database)/documents/client_users/$(request.auth.uid)).data.get('clientId', '')
@@ -282,7 +290,7 @@ service cloud.firestore {
     match /planificacion_estados/{docId} {
       allow read: if tenantAdminRead() || request.auth != null;
       allow create: if tenantAdminCreate();
-      allow update: if tenantAdminUpdate();
+      allow update: if tenantAdminUpdate() || planificacionEstadoClaimTenant();
       allow delete: if tenantAdminDelete();
     }
 
