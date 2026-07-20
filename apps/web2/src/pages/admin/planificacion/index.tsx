@@ -6887,11 +6887,11 @@ export default function PlanificacionPage() {
 
                             <div className="flex-shrink-0 flex items-center gap-2 no-print">
                                 {/* CRONOGRAMAS — solo expandido */}
-                                {!toolbarCollapsed && isSuperAdmin && (
+                                {!toolbarCollapsed && (
                                     <button
                                         type="button"
                                         onClick={() => setShowCronogramasOverview(true)}
-                                        title="SuperAdmin: ver estado de cronogramas de todos los objetivos"
+                                        title="Ver estado de cronogramas de todos los objetivos"
                                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 shadow-sm"
                                     >
                                         <Database size={12}/>
@@ -9976,7 +9976,7 @@ export default function PlanificacionPage() {
                     document.body,
                 )}
 
-                {isSuperAdmin && showCronogramasOverview && typeof document !== 'undefined' && createPortal(
+                {showCronogramasOverview && typeof document !== 'undefined' && createPortal(
                     <PlanningCronogramasOverviewModal
                         isOpen={showCronogramasOverview}
                         onClose={() => setShowCronogramasOverview(false)}
