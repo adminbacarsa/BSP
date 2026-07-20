@@ -4293,6 +4293,9 @@ export default function PlanificacionPage() {
         };
 
         const isCoverageBlocked = (dateStr: string, posName: string, code: string, hours: number, changes: Record<string, any>) => {
+            const upperEarly = String(code || '').toUpperCase();
+            // RET/ESC/REF no consumen cupo de cobertura SLA
+            if (['RET', 'ESC', 'REF', 'RFZ'].includes(upperEarly)) return false;
             if (!isPlanningWorkShiftCode(code)) return false;
             const posCfg = (positionStructure || []).find((p: any) => p.positionName === posName) || positionStructure[0];
             if (!posCfg) return false;
