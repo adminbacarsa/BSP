@@ -9322,6 +9322,17 @@ export default function PlanificacionPage() {
 
                                             {/* Info adicional */}
                                             <div className="space-y-2 mb-5">
+                                                {selectedGrupo && grupoUnifiedMode && objectiveId && (() => {
+                                                    const _oi = selectedGrupo.objectiveIds.indexOf(objectiveId);
+                                                    const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length] || '#64748b';
+                                                    const _nm = _oi >= 0 ? selectedGrupo.objectiveNames[_oi] : (serviceName || objectiveId);
+                                                    return (
+                                                        <div className="flex items-center gap-2 text-xs font-bold px-2.5 py-1.5 rounded-lg" style={{ backgroundColor: _clr + '18', color: _clr }}>
+                                                            <MapPin size={12} className="shrink-0"/>
+                                                            <span>{_nm}</span>
+                                                        </div>
+                                                    );
+                                                })()}
                                                 {coveredPosition && coveredPosition !== 'General' && (
                                                     <div className="flex items-center gap-2 text-xs text-slate-500">
                                                         <Briefcase size={13}/> <span className="font-bold">{coveredPosition}</span>
