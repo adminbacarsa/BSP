@@ -583,6 +583,25 @@ function markNeedsReinforcement(
   });
 }
 
+function countBandSlotsFilled(
+  assignments: VplanAssignment[],
+  dateStr: string,
+  posName: string,
+  band: string,
+  defaultPositionByEmp: Record<string, string>,
+): number {
+  let n = 0;
+  for (const a of assignments) {
+    if (a.dateStr !== dateStr) continue;
+    const code = String(a.code || '').toUpperCase();
+    if (!WORK_CODES.has(code)) continue;
+    const pos = String(a.positionName || defaultPositionByEmp[a.employeeId] || '').trim();
+    if (pos !== posName) continue;
+    if (normBandCode(code) === band) n += 1;
+  }
+  return n;
+}
+
 export interface FillCoverageLadderOpts {
   draft: VplanScheduleDraft;
   dateStrs: Array<{ dateStr: string; dayLetter: string }>;
@@ -633,6 +652,10 @@ export interface FillAssignableGapsFromAuditOpts {
   rules?: PlanningRulesConfig;
   protectedCells?: Set<string>;
   allowFrancoTrabajado?: boolean;
+  openingSlotByEmp?: Record<string, number>;
+  defaultShiftByEmp?: Record<string, string>;
+  useTrailing?: boolean;
+  trailingEmployeeIds?: string[];
 }
 
 /** Misma regla que buildDetailedCoverageAudit.canAssign, sobre grilla actual (no snapshot obsoleto). */
@@ -649,6 +672,10 @@ function liveAuditGapCandidateCanFill(opts: {
   rules: PlanningRulesConfig;
   protectedCells?: Set<string>;
   francoTrabajado?: boolean;
+  openingSlotByEmp?: Record<string, number>;
+  defaultShiftByEmp?: Record<string, string>;
+  useTrailing?: boolean;
+  trailingEmpIds?: Set<string>;
 }): boolean {
   if (opts.protectedCells?.has(protectedCellKey(opts.empId, opts.dateStr))) return false;
   if (isVirtualEmployeeId(opts.empId)) return false;
@@ -673,7 +700,19 @@ function liveAuditGapCandidateCanFill(opts: {
     rules: opts.rules,
     francoTrabajado: opts.francoTrabajado === true,
   });
-  return evalResult.canAssign;
+  if (!evalResult.canAssign) return false;
+
+  if (opts.francoTrabajado || !opts.openingSlotByEmp) return true;
+  const expected = expectedBandForEmployeeDay(opts.empId, opts.dateStr, {
+    openingSlotByEmp: opts.openingSlotByEmp,
+    dateStrList: opts.dateStrList,
+    cycle: opts.cycle,
+    defaultShiftByEmp: opts.defaultShiftByEmp,
+    useTrailing: opts.useTrailing,
+    trailingEmpIds: opts.trailingEmpIds,
+  });
+  if (!expected || expected === 'F') return true;
+  return normBandCode(expected) === normBandCode(opts.shiftCode);
 }
 
 /**
@@ -706,6 +745,12 @@ export function fillAssignableGapsFromAudit(
     previousMonthAssignments: opts.previousMonthAssignments,
     rules,
     protectedCells: opts.protectedCells,
+    openingSlotByEmp: opts.openingSlotByEmp,
+    defaultShiftByEmp: opts.defaultShiftByEmp,
+    useTrailing: opts.useTrailing,
+    trailingEmpIds: opts.trailingEmployeeIds
+      ? new Set(opts.trailingEmployeeIds)
+      : undefined,
   };
 
   for (let round = 0; round < 32; round += 1) {
@@ -845,8 +890,19 @@ export function fillCoverageGapsWithLadder(
         const band = normBandCode(shiftCode);
         const key = slotKey(dateStr, posName, band);
         let used = daySlotCount.get(key) || 0;
+        let syntheticFilled = 0;
+        let slotAttempts = 0;
+        const maxSlotAttempts = limit + 8;
 
-        while (used < limit) {
+        while (used + syntheticFilled < limit) {
+          slotAttempts += 1;
+          if (slotAttempts > maxSlotAttempts) break;
+
+          const progressBefore = used + syntheticFilled;
+          used = countBandSlotsFilled(assignments, dateStr, posName, band, opts.defaultPositionByEmp);
+          daySlotCount.set(key, used);
+          if (used + syntheticFilled >= limit) break;
+
           hourHeadroom = computeHourHeadroom({
             slaVendidas: opts.slaVendidas ?? 0,
             billableHours: countBillableHours(assignments),
@@ -869,13 +925,24 @@ export function fillCoverageGapsWithLadder(
 
           const directSwap = tryDirectBandReassign(swapCtx);
           if (directSwap.ok && directSwap.idx !== undefined) {
+            const currentUsed = countBandSlotsFilled(
+              assignments,
+              dateStr,
+              posName,
+              band,
+              opts.defaultPositionByEmp,
+            );
+            if (currentUsed >= limit) {
+              filled = false;
+            } else {
             const fromBand = directSwap.fromBand || '';
             assignCell(assignments, directSwap.idx, shiftCode, posName, pos);
             if (fromBand) {
               const oldKey = slotKey(dateStr, posName, fromBand);
               daySlotCount.set(oldKey, Math.max(0, (daySlotCount.get(oldKey) || 0) - 1));
             }
-            daySlotCount.set(key, (daySlotCount.get(key) || 0) + 1);
+            used = countBandSlotsFilled(assignments, dateStr, posName, band, opts.defaultPositionByEmp);
+            daySlotCount.set(key, used);
             log.push({
               code: 'LADDER_BAND_SWAP',
               message: `${fromBand} → ${shiftCode} en ${posName} (${dateStr})`,
@@ -884,8 +951,7 @@ export function fillCoverageGapsWithLadder(
             });
             ladderStats.bandSwap += 1;
             filled = true;
-            used += 1;
-            continue;
+            }
           }
 
           if (!filled) {
@@ -910,8 +976,6 @@ export function fillCoverageGapsWithLadder(
               });
               ladderStats.bandSwap += 1;
               filled = true;
-              used += 1;
-              continue;
             }
           }
 
@@ -938,8 +1002,6 @@ export function fillCoverageGapsWithLadder(
               ladderStats.bandSwap += 1;
               if (opts.allowFrancoTrabajado) ladderStats.ft += 1;
               filled = true;
-              used += 1;
-              continue;
             }
           }
 
@@ -1138,21 +1200,21 @@ export function fillCoverageGapsWithLadder(
             }
           }
 
-          if (!filled) {
-            markNeedsReinforcement(assignments, dateStr, posName, shiftCode);
-            log.push({
-              code: 'NEEDS_REINFORCEMENT',
-              message: `Sin candidato 6+2 legal — ${shiftCode} en ${posName} (${dateStr})`,
-              dateStr,
-            });
-            ladderStats.needsReinforcement += 1;
-            used += 1;
+          if (filled) {
+            used = countBandSlotsFilled(assignments, dateStr, posName, band, opts.defaultPositionByEmp);
             daySlotCount.set(key, used);
-            continue;
+            if (used + syntheticFilled > progressBefore) continue;
+            filled = false;
           }
 
-          used += 1;
-          daySlotCount.set(key, used);
+          markNeedsReinforcement(assignments, dateStr, posName, shiftCode);
+          log.push({
+            code: 'NEEDS_REINFORCEMENT',
+            message: `Sin candidato 6+2 legal — ${shiftCode} en ${posName} (${dateStr})`,
+            dateStr,
+          });
+          ladderStats.needsReinforcement += 1;
+          syntheticFilled += 1;
         }
       }
     }

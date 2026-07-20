@@ -19,6 +19,7 @@ export type VplanIntent =
   | 'feasibility'
   | 'strategy'
   | 'generate'
+  | 'coverage'
   | 'exceptions'
   | 'verify'
   | 'fix'
@@ -56,6 +57,86 @@ export interface VplanDayDemand {
   hoursRequired: number;
 }
 
+/** Regla por puesto: qty pax → bandas exigidas cada día activo */
+export interface VplanPositionPlanningRule {
+  positionName: string;
+  qty: number;
+  coverageType: string;
+  schemeLabel: string;
+  activeDaysLabel: string;
+  dailyBandsLabel: string;
+  dailyRequirementLabel: string;
+  slotsPerActiveDay: number;
+  dailyHours: number;
+  monthlySlotsByBand: Record<string, number>;
+  monthlyTotalSlots: number;
+  activeDayCount: number;
+  monthlyFormulaLabel: string;
+}
+
+export interface VplanMonthBandRollup {
+  band: string;
+  total: number;
+  parts: Array<{ positionName: string; count: number }>;
+  label: string;
+}
+
+export interface VplanDayTypeExample {
+  label: string;
+  dateStr: string;
+  dayLetter: string;
+  positions: Array<{
+    positionName: string;
+    qty: number;
+    bandSlots: Record<string, number>;
+    hoursRequired: number;
+    requirementLabel: string;
+  }>;
+  totalSlots: number;
+  totalHours: number;
+  summaryLabel: string;
+}
+
+/** Objetivo de cobertura — lo primero que VPLAN debe entender antes de generar */
+export interface VplanPlanningTarget {
+  headline: string;
+  summary: string;
+  totalMonthlySlots: number;
+  totalMonthlyHours: number;
+  monthBandDemand: Record<string, number>;
+  positionRules: VplanPositionPlanningRule[];
+  dayTypeExamples: VplanDayTypeExample[];
+  slotArithmeticLines: string[];
+  totalFormulaLabel: string;
+  monthBandRollup: VplanMonthBandRollup[];
+}
+
+export interface VplanCoverageManifestSlot {
+  id: string;
+  dateStr: string;
+  dayLetter: string;
+  positionName: string;
+  band: string;
+  unitIndex: number;
+  shiftCode: string;
+}
+
+export interface VplanCoverageManifest {
+  totalRequiredSlots: number;
+  totalRequiredHours: number;
+  slots: VplanCoverageManifestSlot[];
+  byPosition: Array<{
+    positionName: string;
+    qty: number;
+    requiredSlots: number;
+    filledSlots: number;
+    missingSlots: number;
+    dailyBandsLabel: string;
+    activeDayCount: number;
+  }>;
+  summaryLabel: string;
+}
+
 export interface VplanDemandModel {
   slaVendidas: number;
   monthDemandHours: number;
@@ -63,6 +144,8 @@ export interface VplanDemandModel {
   dayDemands: VplanDayDemand[];
   monthBandDemand: Record<string, number>;
   warnings: string[];
+  planningTarget: VplanPlanningTarget;
+  coverageManifest: VplanCoverageManifest;
 }
 
 export interface VplanEmployeeAvailability {
@@ -109,6 +192,20 @@ export interface VplanScheduleDraft {
     targetHours: number;
     slaHoursClosed: boolean;
     employeeCount: number;
+    motorBillableHours?: number;
+    continuityFixes?: number;
+    trailingSlotCount?: number;
+    needsReinforcementCount?: number;
+    slotCoverage?: {
+      ok: boolean;
+      filledSlots: number;
+      missingSlots: number;
+      excessSlots: number;
+      totalRequired: number;
+      summaryLabel: string;
+      iterations: number;
+      byPosition: VplanCoverageManifest['byPosition'];
+    };
   };
 }
 
@@ -123,6 +220,122 @@ export interface VplanStrategy {
     patchAbsencesPostGenerate: boolean;
   };
   notes: string[];
+  planningMethod?: VplanPlanningMethod;
+  cycleSemantics?: VplanCycleSemantics;
+}
+
+export interface VplanCycleDefinition {
+  cycleKey: string;
+  workTurnCount: number;
+  restFrancoCount: number;
+  francoHours: number;
+  minRestHoursBetweenTurns: number;
+  patternExample: string;
+  unitLabel: string;
+  notCalendarDays: string;
+  shiftHours: number;
+  workBlockHours: number;
+  hoursFormula: string;
+  standardBlockHours: number;
+  stretchBlockHours: number;
+}
+
+export interface VplanCycleSemantics {
+  headline: string;
+  inviolableRules: Array<{
+    id: string;
+    priority: number;
+    label: string;
+    rule: string;
+  }>;
+  shiftTypes: Array<{
+    group: '8h' | '12h';
+    codes: string[];
+    hoursEach: number;
+    label: string;
+    dailyCoverageNote: string;
+  }>;
+  dailyCoverageEquivalence: {
+    hoursPerDay: number;
+    formula8h: string;
+    formula12h: string;
+    summary: string;
+  };
+  blockPatterns: Array<{
+    id: string;
+    label: string;
+    pattern: string;
+    totalWorkHours: number;
+    hoursFormula: string;
+    restFrancos: number;
+    valid: boolean;
+    note: string;
+  }>;
+  cycleDefinition: VplanCycleDefinition;
+  cycleVsCoverage: {
+    cycleLabel: string;
+    coverageLabel: string;
+    relationship: string;
+  };
+  planningOrder: Array<{
+    order: number;
+    key: string;
+    label: string;
+  }>;
+}
+
+export interface VplanPlanningMethodMandate {
+  order: number;
+  key: string;
+  label: string;
+  rule: string;
+}
+
+export interface VplanPlanningMethodPipelineStep {
+  step: number;
+  phase: string;
+  title: string;
+  description: string;
+}
+
+export interface VplanPlanningMethodPositionRule {
+  positionName: string;
+  assignmentMode: '24hs_rotativo' | 'custom_fijo';
+  qty: number;
+  headline: string;
+  description: string;
+}
+
+export interface VplanPlanningMethod {
+  headline: string;
+  summary: string;
+  engine: string;
+  cycle: string;
+  mode: VplanRunMode;
+  mandates: VplanPlanningMethodMandate[];
+  layers: Array<{
+    key: 'CICLO_OBJETIVO' | 'CONTINGENCIA_4X2' | 'OFFSET_RACHA';
+    label: string;
+    value: string;
+    notes: string;
+  }>;
+  pipelineSteps: VplanPlanningMethodPipelineStep[];
+  positionRules: VplanPlanningMethodPositionRule[];
+  coverageLadder: Array<{
+    step: number;
+    key: string;
+    label: string;
+    when: string;
+  }>;
+  rotationProfile: {
+    subgroupSize: number;
+    workersPerDay: number;
+    francosPerDay: number;
+    shiftHours: number;
+    workBlockDays: number;
+    restBlockDays: number;
+  };
+  strategyNotes: string[];
 }
 
 export interface VplanOptimizationResult {

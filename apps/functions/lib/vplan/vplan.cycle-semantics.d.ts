@@ -1,0 +1,25 @@
+import type { PlanningRulesConfig } from '../planning/planning-rules.types';
+import type { VplanCycleDefinition, VplanCycleSemantics } from './vplan.types';
+export declare const VPLAN_MIN_REST_HOURS_BETWEEN_TURNS = 12;
+export declare const VPLAN_FRANCO_REST_HOURS = 24;
+export declare const VPLAN_WORK_BLOCK_HOURS_STANDARD = 48;
+export declare const VPLAN_WORK_BLOCK_HOURS_STRETCH = 56;
+export declare const VPLAN_SHIFT_HOURS_BY_CODE: Record<string, number>;
+export declare function shiftHoursForTurnCode(code: string): number;
+export declare function isEightHourTurnCode(code: string): boolean;
+export declare function isTwelveHourTurnCode(code: string): boolean;
+export declare function sumTurnSequenceHours(codes: string[]): number;
+export declare function isValidWorkBlockHours(totalHours: number, rules?: PlanningRulesConfig | null): {
+    ok: boolean;
+    level: 'standard' | 'stretch' | 'invalid';
+    message: string;
+};
+export declare function buildShiftTypeCatalog(): VplanCycleSemantics['shiftTypes'];
+export declare function buildDailyCoverageEquivalence(): VplanCycleSemantics['dailyCoverageEquivalence'];
+export declare function buildBlockPatternsForCycle(cycleKey: string, rules?: PlanningRulesConfig | null): VplanCycleSemantics['blockPatterns'];
+export declare function isBillableWorkTurnCode(code: string, cycle?: string): boolean;
+export declare function isFrancoRestCode(code: string): boolean;
+export declare function isFrancoTrabajadoCode(code: string): boolean;
+export declare function getVplanCycleDefinition(cycle?: string, rules?: PlanningRulesConfig | null): VplanCycleDefinition;
+export declare function buildVplanCycleSemantics(cycle?: string, rules?: PlanningRulesConfig | null): VplanCycleSemantics;
+export declare function formatEmployeeTurnStreakLabel(workTurns: number, restFrancos: number): string;

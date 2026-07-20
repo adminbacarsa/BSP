@@ -6,6 +6,8 @@
 import type { VplanDemandModel, VplanDayDemand, VplanPositionDemand } from '../vplan.types';
 import type { VplanPositionDef } from '../vplan.positions';
 import { is24hsPosition, isPositionActiveOnDay, shiftBandHours, shiftsForCycle } from '../vplan.positions';
+import { buildVplanPlanningTarget } from '../vplan.coverage-target';
+import { buildVplanCoverageManifest } from '../vplan.coverage-manifest';
 
 function schemeLabelFromBands(bands: Record<string, number>): string {
   const keys = Object.keys(bands).sort();
@@ -121,6 +123,19 @@ export function buildVplanDemandModel(opts: {
     warnings.push('SLA sin puestos configurados');
   }
 
+  const planningTarget = buildVplanPlanningTarget({
+    positions: opts.positions,
+    dayDemands,
+    monthBandDemand,
+    monthDemandHours,
+    cycle: opts.cycle,
+  });
+
+  const coverageManifest = buildVplanCoverageManifest({
+    dayDemands,
+    planningTarget,
+  });
+
   return {
     slaVendidas,
     monthDemandHours,
@@ -128,5 +143,7 @@ export function buildVplanDemandModel(opts: {
     dayDemands,
     monthBandDemand,
     warnings,
+    planningTarget,
+    coverageManifest,
   };
 }

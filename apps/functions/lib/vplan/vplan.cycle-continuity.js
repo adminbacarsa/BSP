@@ -11,6 +11,7 @@ exports.isIllegalBandTransition = isIllegalBandTransition;
 exports.transitionIsLegal = transitionIsLegal;
 exports.expectedCycleCodeForEmployeeDay = expectedCycleCodeForEmployeeDay;
 exports.realignVplanDraftToCycle = realignVplanDraftToCycle;
+exports.computeCycleAlignedWorkCells = computeCycleAlignedWorkCells;
 exports.countFrancosBetweenAssignments = countFrancosBetweenAssignments;
 exports.guardIllegalBandTransitions = guardIllegalBandTransitions;
 exports.protectedCellKey = protectedCellKey;
@@ -154,6 +155,33 @@ function realignVplanDraftToCycle(opts) {
         draft: { ...opts.draft, assignments },
         log,
     };
+}
+function computeCycleAlignedWorkCells(opts) {
+    const cycle = opts.cycle ?? '6+2';
+    const aligned = new Set();
+    const trailingEmpIds = new Set(Object.keys(opts.prevPlanningState.lastShiftByEmp || {}));
+    for (const [empId, opening] of Object.entries(opts.openingSlotByEmp)) {
+        if (opening === undefined || opening === null)
+            continue;
+        const skipFixed = Boolean(opts.useTrailing && trailingEmpIds.has(empId));
+        const fixedBand = opts.defaultShiftByEmp?.[empId]?.toUpperCase();
+        opts.dateStrs.forEach((dateStr, dayIndex) => {
+            const cell = opts.assignments.find((a) => a.employeeId === empId && a.dateStr === dateStr);
+            if (!cell)
+                return;
+            const expected = expectedCycleCodeForEmployeeDay(opening, dayIndex, cycle, fixedBand, skipFixed);
+            const current = String(cell.code || '').toUpperCase();
+            if (expected === 'F') {
+                if (isFrancoCode(current))
+                    aligned.add(assignmentKey(empId, dateStr));
+                return;
+            }
+            if (current === expected) {
+                aligned.add(assignmentKey(empId, dateStr));
+            }
+        });
+    }
+    return aligned;
 }
 function countFrancosBetween(byDate, fromDate, toDate) {
     let count = 0;

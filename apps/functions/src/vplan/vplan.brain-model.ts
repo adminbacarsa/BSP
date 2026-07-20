@@ -3,9 +3,9 @@
  *
  * Tres capas DISTINTAS (no mezclar):
  *
- * 1. CICLO_OBJETIVO (6+2) — Regla de planificación del objetivo.
- *    Máx 6 días trab consecutivos → 2F. Turnos M/T/N 8h.
- *    Aplica a toda la plantilla titular.
+ * 1. CICLO_OBJETIVO — 6+2 = 6 TURNOS + 2 FRANCOS (24h c/u), NO 6 días calendario.
+ *    Máx 6 turnos consecutivos → 2F. Turnos M/T/N 8h.
+ *    INNEGOCIABLE: 12h mínimo entre fin de un turno e inicio del siguiente.
  *
  * 2. CONTINGENCIA (4+2) — Recurso opcional D12/N12 12h, 4 trab → 2F.
  *    Mismas 48h/ciclo que 6+2 pero otro régimen. NO es “4 días seguidos
@@ -17,9 +17,11 @@
  *    continúa su posición en el ciclo 6+2.
  *
  * Mandatos (orden de prioridad en planificación futura — RÍGIDO):
- *   1. CICLO_6X2 + racha mes anterior — INNEGOCIABLE (nunca 7º día)
- *   2. COBERTURA_OBJETIVO — slots SLA cubiertos
- *   3. HORAS_VENDIDAS — cerrar SLA vendidas
+ *   0. REST_12H — 12h entre turnos — INVIOLABLE
+ *   1. CICLO_TURNOS — 6 turnos → 2F (24h) — no días calendario
+ *   2. TRAILING — racha de turnos mes anterior
+ *   3. COBERTURA_OBJETIVO — slots SLA cubiertos
+ *   4. HORAS_VENDIDAS — cerrar SLA vendidas
  *
  * Si (1) impide cerrar (2) o (3), escalar por COVERAGE_LADDER (no romper 6+2).
  */

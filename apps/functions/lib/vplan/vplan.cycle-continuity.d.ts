@@ -31,6 +31,15 @@ export declare function realignVplanDraftToCycle(opts: {
     draft: VplanScheduleDraft;
     log: VplanFixerLogEntry[];
 };
+export declare function computeCycleAlignedWorkCells(opts: {
+    assignments: VplanAssignment[];
+    dateStrs: string[];
+    openingSlotByEmp: Record<string, number>;
+    prevPlanningState: VplanPlanningState;
+    defaultShiftByEmp?: Record<string, string>;
+    useTrailing?: boolean;
+    cycle?: string;
+}): Set<string>;
 export declare function countFrancosBetweenAssignments(assignments: VplanAssignment[], empId: string, fromDate: string, toDate: string): number;
 export declare function guardIllegalBandTransitions(opts: {
     draft: VplanScheduleDraft;

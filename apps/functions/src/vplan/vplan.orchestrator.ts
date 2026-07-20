@@ -64,6 +64,7 @@ function phasesForIntent(intent: VplanIntent): Set<string> {
     feasibility: 3,
     strategy: 4,
     generate: 5,
+    coverage: 7,
     exceptions: 6,
     verify: 7,
     fix: 8,
@@ -153,7 +154,7 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
     steps.push(step(
       '1_demand',
       true,
-      `${Math.round(context.demand.monthDemandHours)}h estructura · ${context.demand.slaVendidas}h vendidas`,
+      `${context.demand.planningTarget.summary} · ${context.demand.slaVendidas}h vendidas`,
       t1,
     ));
   }
@@ -238,11 +239,21 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       hasExistingAssignments: snapshot.existingAssignments.length > 0,
       hasTrailing: hasTrailing(snapshot),
       hasPrevMonthShifts: snapshot.previousMonthAssignments.length > 0,
+      demand: context.demand,
+      supply: context.supply,
+      feasibility: context.feasibility,
+      positions: snapshot.positions,
+      trailingEmployeeCount: countTrailingEmployees(snapshot.prevPlanningState),
+      planningRules,
     });
+    const sem = context.strategy.cycleSemantics;
+    const semLabel = sem
+      ? `${sem.cycleDefinition.patternExample} · 12h entre turnos`
+      : '';
     steps.push(step(
       '4_strategy',
       true,
-      `${context.strategy.engine} · ciclo ${context.strategy.cycle}${context.strategy.modes.useTrailing ? ` · racha ${countTrailingEmployees(snapshot.prevPlanningState)} guardias` : ''}`,
+      `${context.strategy.engine} · ciclo ${context.strategy.cycle}${context.strategy.modes.useTrailing ? ` · racha ${countTrailingEmployees(snapshot.prevPlanningState)} guardias` : ''}${semLabel ? ` · ${semLabel}` : ''}`,
       t4,
     ));
   }
@@ -263,10 +274,14 @@ export async function runVplanOrchestrator(request: VplanRunRequest): Promise<Vp
       const hoursLabel = motorH != null && motorH !== postH
         ? `${postH}h (motor ${motorH}h)`
         : `${postH}h`;
+      const slotCov = context.draft.stats?.slotCoverage;
+      const slotCovLabel = slotCov
+        ? ` · cobertura ${slotCov.summaryLabel}`
+        : '';
       steps.push(step(
         '5_generate',
         true,
-        `${context.draft.assignments.length} celdas · ${hoursLabel} · ${context.draft.sourceEngine}${context.draft.stats?.trailingSlotCount ? ` · ${context.draft.stats.trailingSlotCount} racha(s)` : ''}${context.draft.stats?.needsReinforcementCount ? ` · ${context.draft.stats.needsReinforcementCount} NR` : ''}${context.draft.stats?.continuityFixes ? ` · ${context.draft.stats.continuityFixes} ajuste(s)` : ''}`,
+        `${context.draft.assignments.length} celdas · ${hoursLabel} · ${context.draft.sourceEngine}${slotCovLabel}${context.draft.stats?.trailingSlotCount ? ` · ${context.draft.stats.trailingSlotCount} racha(s)` : ''}${context.draft.stats?.needsReinforcementCount ? ` · ${context.draft.stats.needsReinforcementCount} NR` : ''}${context.draft.stats?.continuityFixes ? ` · ${context.draft.stats.continuityFixes} ajuste(s)` : ''}`,
         t5,
       ));
     } catch (e: unknown) {

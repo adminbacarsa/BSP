@@ -2,6 +2,24 @@ import type { PlanningRulesConfig } from '../planning/planning-rules.types';
 import type { VplanExistingAssignment } from './vplan.firestore';
 import { type CoverageGuardContext } from './vplan.coverage-guard';
 import type { VplanAssignment, VplanFixerLogEntry, VplanScheduleDraft } from './vplan.types';
+export declare function computeMandatoryRestCells(opts: {
+    assignments: VplanAssignment[];
+    dateStrs: string[];
+    cycle: string;
+    previousMonthAssignments?: VplanExistingAssignment[];
+    rules?: PlanningRulesConfig;
+}): Set<string>;
+export declare function enforceMandatoryRestCells(opts: {
+    draft: VplanScheduleDraft;
+    mandatoryCells: Set<string>;
+    dateStrs: string[];
+    cycle: string;
+    skipCustomCodes?: Set<string>;
+    protectedCells?: Set<string>;
+}): {
+    draft: VplanScheduleDraft;
+    log: VplanFixerLogEntry[];
+};
 export declare function trailingWorkFromPrevMonth(prev: VplanExistingAssignment[] | undefined, empId: string, cycle: string): number;
 export declare function trailingRestFromPrevMonth(prev: VplanExistingAssignment[] | undefined, empId: string): number;
 export declare function wouldExceedCctWorkStreak(opts: {

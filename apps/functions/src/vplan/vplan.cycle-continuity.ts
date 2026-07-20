@@ -223,6 +223,55 @@ export function realignVplanDraftToCycle(opts: {
   };
 }
 
+/**
+ * Protege celdas donde el guardia ya está en la banda/código que marca su ciclo (opening slot).
+ * Evita que band-swap o escalera rompan M M M F F tras realinear.
+ */
+export function computeCycleAlignedWorkCells(opts: {
+  assignments: VplanAssignment[];
+  dateStrs: string[];
+  openingSlotByEmp: Record<string, number>;
+  prevPlanningState: VplanPlanningState;
+  defaultShiftByEmp?: Record<string, string>;
+  useTrailing?: boolean;
+  cycle?: string;
+}): Set<string> {
+  const cycle = opts.cycle ?? '6+2';
+  const aligned = new Set<string>();
+  const trailingEmpIds = new Set(Object.keys(opts.prevPlanningState.lastShiftByEmp || {}));
+
+  for (const [empId, opening] of Object.entries(opts.openingSlotByEmp)) {
+    if (opening === undefined || opening === null) continue;
+    const skipFixed = Boolean(opts.useTrailing && trailingEmpIds.has(empId));
+    const fixedBand = opts.defaultShiftByEmp?.[empId]?.toUpperCase();
+
+    opts.dateStrs.forEach((dateStr, dayIndex) => {
+      const cell = opts.assignments.find(
+        (a) => a.employeeId === empId && a.dateStr === dateStr,
+      );
+      if (!cell) return;
+
+      const expected = expectedCycleCodeForEmployeeDay(
+        opening,
+        dayIndex,
+        cycle,
+        fixedBand,
+        skipFixed,
+      );
+      const current = String(cell.code || '').toUpperCase();
+      if (expected === 'F') {
+        if (isFrancoCode(current)) aligned.add(assignmentKey(empId, dateStr));
+        return;
+      }
+      if (current === expected) {
+        aligned.add(assignmentKey(empId, dateStr));
+      }
+    });
+  }
+
+  return aligned;
+}
+
 function countFrancosBetween(
   byDate: Map<string, VplanAssignment>,
   fromDate: string,

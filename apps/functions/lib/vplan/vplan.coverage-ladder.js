@@ -386,6 +386,22 @@ function markNeedsReinforcement(assignments, dateStr, posName, shiftCode) {
         hours: 0,
     });
 }
+function countBandSlotsFilled(assignments, dateStr, posName, band, defaultPositionByEmp) {
+    let n = 0;
+    for (const a of assignments) {
+        if (a.dateStr !== dateStr)
+            continue;
+        const code = String(a.code || '').toUpperCase();
+        if (!WORK_CODES.has(code))
+            continue;
+        const pos = String(a.positionName || defaultPositionByEmp[a.employeeId] || '').trim();
+        if (pos !== posName)
+            continue;
+        if ((0, vplan_sla_enforce_1.normBandCode)(code) === band)
+            n += 1;
+    }
+    return n;
+}
 function liveAuditGapCandidateCanFill(opts) {
     if (opts.protectedCells?.has((0, vplan_cycle_continuity_1.protectedCellKey)(opts.empId, opts.dateStr)))
         return false;
@@ -409,7 +425,21 @@ function liveAuditGapCandidateCanFill(opts) {
         rules: opts.rules,
         francoTrabajado: opts.francoTrabajado === true,
     });
-    return evalResult.canAssign;
+    if (!evalResult.canAssign)
+        return false;
+    if (opts.francoTrabajado || !opts.openingSlotByEmp)
+        return true;
+    const expected = expectedBandForEmployeeDay(opts.empId, opts.dateStr, {
+        openingSlotByEmp: opts.openingSlotByEmp,
+        dateStrList: opts.dateStrList,
+        cycle: opts.cycle,
+        defaultShiftByEmp: opts.defaultShiftByEmp,
+        useTrailing: opts.useTrailing,
+        trailingEmpIds: opts.trailingEmpIds,
+    });
+    if (!expected || expected === 'F')
+        return true;
+    return (0, vplan_sla_enforce_1.normBandCode)(expected) === (0, vplan_sla_enforce_1.normBandCode)(opts.shiftCode);
 }
 function fillAssignableGapsFromAudit(opts) {
     const log = [];
@@ -434,6 +464,12 @@ function fillAssignableGapsFromAudit(opts) {
         previousMonthAssignments: opts.previousMonthAssignments,
         rules,
         protectedCells: opts.protectedCells,
+        openingSlotByEmp: opts.openingSlotByEmp,
+        defaultShiftByEmp: opts.defaultShiftByEmp,
+        useTrailing: opts.useTrailing,
+        trailingEmpIds: opts.trailingEmployeeIds
+            ? new Set(opts.trailingEmployeeIds)
+            : undefined,
     };
     for (let round = 0; round < 32; round += 1) {
         const audit = (0, vplan_coverage_audit_1.buildDetailedCoverageAudit)({
@@ -559,7 +595,18 @@ function fillCoverageGapsWithLadder(opts) {
                 const band = (0, vplan_sla_enforce_1.normBandCode)(shiftCode);
                 const key = slotKey(dateStr, posName, band);
                 let used = daySlotCount.get(key) || 0;
-                while (used < limit) {
+                let syntheticFilled = 0;
+                let slotAttempts = 0;
+                const maxSlotAttempts = limit + 8;
+                while (used + syntheticFilled < limit) {
+                    slotAttempts += 1;
+                    if (slotAttempts > maxSlotAttempts)
+                        break;
+                    const progressBefore = used + syntheticFilled;
+                    used = countBandSlotsFilled(assignments, dateStr, posName, band, opts.defaultPositionByEmp);
+                    daySlotCount.set(key, used);
+                    if (used + syntheticFilled >= limit)
+                        break;
                     hourHeadroom = (0, vplan_brain_model_1.computeHourHeadroom)({
                         slaVendidas: opts.slaVendidas ?? 0,
                         billableHours: countBillableHours(assignments),
@@ -579,23 +626,28 @@ function fillCoverageGapsWithLadder(opts) {
                     };
                     const directSwap = tryDirectBandReassign(swapCtx);
                     if (directSwap.ok && directSwap.idx !== undefined) {
-                        const fromBand = directSwap.fromBand || '';
-                        assignCell(assignments, directSwap.idx, shiftCode, posName, pos);
-                        if (fromBand) {
-                            const oldKey = slotKey(dateStr, posName, fromBand);
-                            daySlotCount.set(oldKey, Math.max(0, (daySlotCount.get(oldKey) || 0) - 1));
+                        const currentUsed = countBandSlotsFilled(assignments, dateStr, posName, band, opts.defaultPositionByEmp);
+                        if (currentUsed >= limit) {
+                            filled = false;
                         }
-                        daySlotCount.set(key, (daySlotCount.get(key) || 0) + 1);
-                        log.push({
-                            code: 'LADDER_BAND_SWAP',
-                            message: `${fromBand} → ${shiftCode} en ${posName} (${dateStr})`,
-                            employeeId: assignments[directSwap.idx].employeeId,
-                            dateStr,
-                        });
-                        ladderStats.bandSwap += 1;
-                        filled = true;
-                        used += 1;
-                        continue;
+                        else {
+                            const fromBand = directSwap.fromBand || '';
+                            assignCell(assignments, directSwap.idx, shiftCode, posName, pos);
+                            if (fromBand) {
+                                const oldKey = slotKey(dateStr, posName, fromBand);
+                                daySlotCount.set(oldKey, Math.max(0, (daySlotCount.get(oldKey) || 0) - 1));
+                            }
+                            used = countBandSlotsFilled(assignments, dateStr, posName, band, opts.defaultPositionByEmp);
+                            daySlotCount.set(key, used);
+                            log.push({
+                                code: 'LADDER_BAND_SWAP',
+                                message: `${fromBand} → ${shiftCode} en ${posName} (${dateStr})`,
+                                employeeId: assignments[directSwap.idx].employeeId,
+                                dateStr,
+                            });
+                            ladderStats.bandSwap += 1;
+                            filled = true;
+                        }
                     }
                     if (!filled) {
                         const pairSwap = tryPairBandSwap(swapCtx);
@@ -619,8 +671,6 @@ function fillCoverageGapsWithLadder(opts) {
                             });
                             ladderStats.bandSwap += 1;
                             filled = true;
-                            used += 1;
-                            continue;
                         }
                     }
                     if (!filled) {
@@ -647,8 +697,6 @@ function fillCoverageGapsWithLadder(opts) {
                             if (opts.allowFrancoTrabajado)
                                 ladderStats.ft += 1;
                             filled = true;
-                            used += 1;
-                            continue;
                         }
                     }
                     const francoOnPosition = assignments
@@ -835,20 +883,21 @@ function fillCoverageGapsWithLadder(opts) {
                             filled = true;
                         }
                     }
-                    if (!filled) {
-                        markNeedsReinforcement(assignments, dateStr, posName, shiftCode);
-                        log.push({
-                            code: 'NEEDS_REINFORCEMENT',
-                            message: `Sin candidato 6+2 legal — ${shiftCode} en ${posName} (${dateStr})`,
-                            dateStr,
-                        });
-                        ladderStats.needsReinforcement += 1;
-                        used += 1;
+                    if (filled) {
+                        used = countBandSlotsFilled(assignments, dateStr, posName, band, opts.defaultPositionByEmp);
                         daySlotCount.set(key, used);
-                        continue;
+                        if (used + syntheticFilled > progressBefore)
+                            continue;
+                        filled = false;
                     }
-                    used += 1;
-                    daySlotCount.set(key, used);
+                    markNeedsReinforcement(assignments, dateStr, posName, shiftCode);
+                    log.push({
+                        code: 'NEEDS_REINFORCEMENT',
+                        message: `Sin candidato 6+2 legal — ${shiftCode} en ${posName} (${dateStr})`,
+                        dateStr,
+                    });
+                    ladderStats.needsReinforcement += 1;
+                    syntheticFilled += 1;
                 }
             }
         }

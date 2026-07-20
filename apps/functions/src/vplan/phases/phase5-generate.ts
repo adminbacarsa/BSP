@@ -6,12 +6,21 @@
 import type { PlanningRulesConfig } from '../../planning/planning-rules.types';
 import { resolvePlanningRules } from '../../planning/planning-rules.service';
 import { generateSchedule } from '../../scheduling/autoScheduleEngine';
-import { enforceCctWorkRestPattern } from '../vplan.cct-enforce';
+import { enforceCctWorkRestPattern, computeMandatoryRestCells, enforceMandatoryRestCells } from '../vplan.cct-enforce';
 import { buildCoverageGuard } from '../vplan.coverage-guard';
-import { patchMonthOpeningContinuity, computeOpeningProtectedCells, computeOpeningRestProtectedCells, enforceIllegalBandRest } from '../vplan.cycle-continuity';
+import {
+  patchMonthOpeningContinuity,
+  computeOpeningProtectedCells,
+  computeOpeningRestProtectedCells,
+  enforceIllegalBandRest,
+  realignVplanDraftToCycle,
+} from '../vplan.cycle-continuity';
 import { resolveOpeningSlotsForVplan } from '../vplan.cycle-generate';
 import { previousMonth, buildMonthDays } from '../vplan.calendar';
 import { fillAssignableGapsFromAudit, fillCoverageGapsWithLadder } from '../vplan.coverage-ladder';
+import { runVplanSlotCoverage } from './phase5-cover-slots';
+import { countFilledSlotsFromAssignments } from '../vplan.coverage-manifest';
+import { buildDetailedCoverageAudit } from '../vplan.coverage-audit';
 import { rebalanceHoursTowardSla } from '../vplan.hour-rebalance';
 import { enforceCustomPositionSchedules, computeCustomScheduleProtectedCells, enforceMaxRestStreak } from '../vplan.custom-schedule';
 import { capDefaultPositionByEmp, stripExcessSlaAssignments } from '../vplan.sla-enforce';
@@ -196,6 +205,50 @@ export function runVplanGeneration(opts: {
     });
     assignments = strippedSla.draft.assignments;
     fixLog.push(...strippedSla.log);
+
+    const realigned = realignVplanDraftToCycle({
+      draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+ladder` },
+      dateStrs,
+      openingSlotByEmp,
+      prevPlanningState: opts.prevPlanningState,
+      defaultShiftByEmp: mergedDefaultShiftByEmp,
+      useTrailing: opts.strategy.modes.useTrailing,
+      cycle,
+      protectedCells,
+    });
+    assignments = realigned.draft.assignments;
+    fixLog.push(...realigned.log);
+
+    const mandatoryRest = computeMandatoryRestCells({
+      assignments,
+      dateStrs,
+      cycle,
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      rules,
+    });
+
+    const mandatoryFixed = enforceMandatoryRestCells({
+      draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+ladder` },
+      mandatoryCells: mandatoryRest,
+      dateStrs,
+      cycle,
+      protectedCells,
+    });
+    assignments = mandatoryFixed.draft.assignments;
+    fixLog.push(...mandatoryFixed.log);
+
+    if (mandatoryRest.size > 0) {
+      protectedCells = new Set([...(protectedCells ?? []), ...mandatoryRest]);
+    }
+
+    const earlyBandRest = enforceIllegalBandRest({
+      draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+ladder` },
+      dateStrs,
+      minRestHours: rules.minRestHoursBetweenBands ?? 12,
+      protectedCells,
+    });
+    assignments = earlyBandRest.draft.assignments;
+    fixLog.push(...earlyBandRest.log);
   } else {
     const strippedSla = stripExcessSlaAssignments({
       draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
@@ -231,6 +284,35 @@ export function runVplanGeneration(opts: {
   fixLog.push(...cctEnforced.log);
 
   const offerHours = opts.snapshot.employees.length * (rules.targetAvgHoursPerEmployee ?? 192);
+
+  let slotCoverageResult: ReturnType<typeof runVplanSlotCoverage> | undefined;
+  if (opts.demand?.coverageManifest) {
+    slotCoverageResult = runVplanSlotCoverage({
+      draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+cover` },
+      demand: opts.demand,
+      manifest: opts.demand.coverageManifest,
+      dateStrs: opts.snapshot.days,
+      positions: cyclePositions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      cycle,
+      dateStrList: dateStrs,
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      slaVendidas: opts.snapshot.slaVendidas,
+      offerHours,
+      employeeIds: opts.snapshot.employees.map((e) => e.id),
+      rules,
+      protectedCells,
+      openingSlotByEmp,
+      defaultShiftByEmp: mergedDefaultShiftByEmp,
+      useTrailing: opts.strategy.modes.useTrailing,
+      trailingEmployeeIds,
+      excludeCustomCrossPool: true,
+      allowFrancoTrabajado: true,
+    });
+    assignments = slotCoverageResult.draft.assignments;
+    fixLog.push(...slotCoverageResult.log);
+  }
+
   const gapFilled = fillCoverageGapsWithLadder({
     draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
     dateStrs: opts.snapshot.days,
@@ -402,6 +484,7 @@ export function runVplanGeneration(opts: {
         previousMonthAssignments: opts.snapshot.previousMonthAssignments,
         rules,
         protectedCells,
+        ...ladderCycleOpts,
       });
       assignments = auditFill.draft.assignments;
       fixLog.push(...auditFill.log);
@@ -429,6 +512,7 @@ export function runVplanGeneration(opts: {
         previousMonthAssignments: opts.snapshot.previousMonthAssignments,
         rules,
         protectedCells,
+        ...ladderCycleOpts,
       });
       assignments = finalAuditFill.draft.assignments;
       fixLog.push(...finalAuditFill.log);
@@ -448,6 +532,7 @@ export function runVplanGeneration(opts: {
         employeeIds: opts.snapshot.employees.map((e) => e.id),
         rules,
         protectedCells,
+        ...ladderCycleOpts,
       });
       assignments = ladderClose.draft.assignments;
       fixLog.push(...ladderClose.log);
@@ -499,6 +584,7 @@ export function runVplanGeneration(opts: {
         previousMonthAssignments: opts.snapshot.previousMonthAssignments,
         rules,
         protectedCells,
+        ...ladderCycleOpts,
       });
       assignments = postBandAudit.draft.assignments;
       fixLog.push(...postBandAudit.log);
@@ -518,6 +604,7 @@ export function runVplanGeneration(opts: {
         employeeIds: opts.snapshot.employees.map((e) => e.id),
         rules,
         protectedCells,
+        ...ladderCycleOpts,
       });
       assignments = postBandLadder.draft.assignments;
       fixLog.push(...postBandLadder.log);
@@ -598,6 +685,7 @@ export function runVplanGeneration(opts: {
       rules,
       protectedCells: weekendProtected,
       allowFrancoTrabajado: true,
+      ...ladderCycleOpts,
     });
     assignments = postCustomAudit.draft.assignments;
     fixLog.push(...postCustomAudit.log);
@@ -737,6 +825,7 @@ export function runVplanGeneration(opts: {
         rules,
         protectedCells: cycleProtectedCells,
         allowFrancoTrabajado: false,
+        ...ladderCycleOpts,
       });
       assignments = bandRestAudit.draft.assignments;
       fixLog.push(...bandRestAudit.log);
@@ -778,6 +867,73 @@ export function runVplanGeneration(opts: {
     assignments = postHourClose.draft.assignments;
     fixLog.push(...postHourClose.log);
     rebalanced.hoursAdded += postHourClose.hoursAdded;
+  }
+
+  const stripFinal = stripExcessSlaAssignments({
+    draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+    dateStrs: opts.snapshot.days,
+    positions: cyclePositions,
+    defaultPositionByEmp: mergedDefaultPositionByEmp,
+    protectedCells,
+  });
+  assignments = stripFinal.draft.assignments;
+  fixLog.push(...stripFinal.log);
+
+  for (let bandEndPass = 0; bandEndPass < 2; bandEndPass += 1) {
+    const bandEnd = enforceIllegalBandRest({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs,
+      minRestHours: rules.minRestHoursBetweenBands ?? 12,
+      protectedCells,
+    });
+    if (bandEnd.log.length === 0) break;
+    assignments = bandEnd.draft.assignments;
+    fixLog.push(...bandEnd.log);
+
+    const stripAfterBand = stripExcessSlaAssignments({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs: opts.snapshot.days,
+      positions: cyclePositions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      protectedCells,
+    });
+    assignments = stripAfterBand.draft.assignments;
+    fixLog.push(...stripAfterBand.log);
+
+    if (!opts.demand) continue;
+
+    const endRefill = fillCoverageGapsWithLadder({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs: opts.snapshot.days,
+      positions: cyclePositions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      cycle,
+      dateStrList: dateStrs,
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      slaVendidas: opts.snapshot.slaVendidas,
+      offerHours,
+      employeeIds: opts.snapshot.employees.map((e) => e.id),
+      rules,
+      protectedCells,
+      excludeCustomCrossPool: true,
+      allowFrancoTrabajado: false,
+      ...ladderCycleOpts,
+    });
+    assignments = endRefill.draft.assignments;
+    fixLog.push(...endRefill.log);
+    gapFilled.ladderStats.subgrupo6x2 += endRefill.ladderStats.subgrupo6x2;
+    gapFilled.ladderStats.bandSwap += endRefill.ladderStats.bandSwap;
+    gapFilled.ladderStats.sinTurno += endRefill.ladderStats.sinTurno;
+
+    const stripAfterRefill = stripExcessSlaAssignments({
+      draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+      dateStrs: opts.snapshot.days,
+      positions: cyclePositions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      protectedCells,
+    });
+    assignments = stripAfterRefill.draft.assignments;
+    fixLog.push(...stripAfterRefill.log);
   }
 
   const hourNormalizeFinal = normalizeAssignmentBillableHours(assignments, {
@@ -823,6 +979,38 @@ export function runVplanGeneration(opts: {
     positions: opts.snapshot.positions,
   });
 
+  let slotCoverageStats: NonNullable<NonNullable<VplanScheduleDraft['stats']>['slotCoverage']>;
+  if (opts.demand?.coverageManifest) {
+    const auditFinal = buildDetailedCoverageAudit({
+      draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+ladder` },
+      demand: opts.demand,
+      positions: cyclePositions,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      dateStrs,
+      cycle,
+      previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+      rules,
+    });
+    const progress = countFilledSlotsFromAssignments({
+      assignments,
+      defaultPositionByEmp: mergedDefaultPositionByEmp,
+      manifest: opts.demand.coverageManifest,
+    });
+    const ok = auditFinal.totalMissingSlots === 0 && auditFinal.totalExcessSlots === 0;
+    slotCoverageStats = {
+      ok,
+      filledSlots: progress.filledSlots,
+      missingSlots: auditFinal.totalMissingSlots,
+      excessSlots: auditFinal.totalExcessSlots,
+      totalRequired: opts.demand.coverageManifest.totalRequiredSlots,
+      iterations: slotCoverageResult?.iterations ?? 0,
+      byPosition: progress.byPosition,
+      summaryLabel: ok
+        ? `${progress.filledSlots}/${opts.demand.coverageManifest.totalRequiredSlots} turnos/slot cubiertos`
+        : `${progress.filledSlots}/${opts.demand.coverageManifest.totalRequiredSlots} · faltan ${auditFinal.totalMissingSlots}`,
+    };
+  }
+
   return {
     assignments,
     sourceEngine: `vplan:${opts.strategy.engine}:${cycle}${is4x2 ? ':D12N12' : ''}:motor+ladder`,
@@ -841,6 +1029,7 @@ export function runVplanGeneration(opts: {
       needsReinforcementCount: gapFilled.ladderStats.needsReinforcement,
       coverageLadder: gapFilled.ladderStats,
       hourRebalanceAdded: rebalanced.hoursAdded,
+      slotCoverage: slotCoverageStats,
     },
   };
 }

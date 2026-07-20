@@ -4,6 +4,11 @@
 
 import type { VplanRunMode, VplanStrategy } from '../vplan.types';
 import { getRotationProfile } from '../vplan.rotation';
+import { buildVplanPlanningMethod } from '../vplan.planning-method';
+import { buildVplanCycleSemantics } from '../vplan.cycle-semantics';
+import type { PlanningRulesConfig } from '../../planning/planning-rules.types';
+import type { VplanPositionDef } from '../vplan.positions';
+import type { VplanDemandModel, VplanFeasibilityReport, VplanSupplyModel } from '../vplan.types';
 
 export function buildVplanStrategy(opts: {
   mode: VplanRunMode;
@@ -11,6 +16,12 @@ export function buildVplanStrategy(opts: {
   hasExistingAssignments: boolean;
   hasTrailing: boolean;
   hasPrevMonthShifts?: boolean;
+  demand?: VplanDemandModel;
+  supply?: VplanSupplyModel;
+  feasibility?: VplanFeasibilityReport;
+  positions?: VplanPositionDef[];
+  trailingEmployeeCount?: number;
+  planningRules?: PlanningRulesConfig;
 }): VplanStrategy {
   const cycle = opts.preferredCycle ?? '6+2';
   const rot = getRotationProfile(cycle);
@@ -37,7 +48,7 @@ export function buildVplanStrategy(opts: {
 
   switch (opts.mode) {
     case 'CONTINUE':
-      return {
+      return attachPlanningMethod({
         ...withNotes(['Continuar rachas del mes anterior (turnos junio + planificacion_estados)']),
         continuity: 'continue_streaks',
         absenceTiming: 'pre_block',
@@ -46,9 +57,9 @@ export function buildVplanStrategy(opts: {
           preserveExisting: false,
           patchAbsencesPostGenerate: true,
         },
-      };
+      }, opts);
     case 'COMPLETE':
-      return {
+      return attachPlanningMethod({
         ...withNotes(['Preservar celdas ya planificadas; generación base para huecos']),
         continuity: 'continue_streaks',
         absenceTiming: 'hybrid',
@@ -57,10 +68,10 @@ export function buildVplanStrategy(opts: {
           preserveExisting: true,
           patchAbsencesPostGenerate: true,
         },
-      };
+      }, opts);
     case 'RESTORE':
     case 'REPLAN_ABSENCES':
-      return {
+      return attachPlanningMethod({
         ...withNotes(['Re-armar días afectados por licencias o novedades']),
         absenceTiming: 'post_replan',
         continuity: 'continue_streaks',
@@ -69,9 +80,9 @@ export function buildVplanStrategy(opts: {
           preserveExisting: opts.hasExistingAssignments,
           patchAbsencesPostGenerate: true,
         },
-      };
+      }, opts);
     case 'REBALANCE_HOURS':
-      return {
+      return attachPlanningMethod({
         ...withNotes(['Prioridad cierre horario vs SLA sin cambiar esquema']),
         absenceTiming: 'hybrid',
         modes: {
@@ -79,9 +90,9 @@ export function buildVplanStrategy(opts: {
           preserveExisting: true,
           patchAbsencesPostGenerate: false,
         },
-      };
+      }, opts);
     case 'MIGRATE_CYCLE':
-      return {
+      return attachPlanningMethod({
         ...withNotes([`Migración de ciclo hacia ${cycle}`]),
         engine: 'CycleMigrator',
         absenceTiming: 'pre_block',
@@ -90,10 +101,10 @@ export function buildVplanStrategy(opts: {
           preserveExisting: false,
           patchAbsencesPostGenerate: true,
         },
-      };
+      }, opts);
     case 'GREENFIELD':
     default:
-      return {
+      return attachPlanningMethod({
         ...withNotes(['Cronograma desde cero (sin trailing del mes anterior)']),
         continuity: 'reset',
         modes: {
@@ -101,6 +112,30 @@ export function buildVplanStrategy(opts: {
           preserveExisting: false,
           patchAbsencesPostGenerate: true,
         },
-      };
+      }, opts);
   }
+}
+
+function attachPlanningMethod(
+  strategy: VplanStrategy,
+  opts: Parameters<typeof buildVplanStrategy>[0],
+): VplanStrategy {
+  const cycleSemantics = buildVplanCycleSemantics(strategy.cycle, opts.planningRules ?? null);
+  if (!opts.positions?.length) {
+    return { ...strategy, cycleSemantics };
+  }
+  return {
+    ...strategy,
+    cycleSemantics,
+    planningMethod: buildVplanPlanningMethod({
+      strategy,
+      mode: opts.mode,
+      demand: opts.demand,
+      supply: opts.supply,
+      feasibility: opts.feasibility,
+      positions: opts.positions,
+      trailingEmployeeCount: opts.trailingEmployeeCount,
+      cycleSemantics,
+    }),
+  };
 }

@@ -52,6 +52,10 @@ export interface FillAssignableGapsFromAuditOpts {
     rules?: PlanningRulesConfig;
     protectedCells?: Set<string>;
     allowFrancoTrabajado?: boolean;
+    openingSlotByEmp?: Record<string, number>;
+    defaultShiftByEmp?: Record<string, string>;
+    useTrailing?: boolean;
+    trailingEmployeeIds?: string[];
 }
 export declare function fillAssignableGapsFromAudit(opts: FillAssignableGapsFromAuditOpts): FillCoverageLadderResult;
 export declare function fillCoverageGapsWithLadder(opts: FillCoverageLadderOpts): FillCoverageLadderResult;

@@ -9,6 +9,9 @@ const vplan_cycle_continuity_1 = require("../vplan.cycle-continuity");
 const vplan_cycle_generate_1 = require("../vplan.cycle-generate");
 const vplan_calendar_1 = require("../vplan.calendar");
 const vplan_coverage_ladder_1 = require("../vplan.coverage-ladder");
+const phase5_cover_slots_1 = require("./phase5-cover-slots");
+const vplan_coverage_manifest_1 = require("../vplan.coverage-manifest");
+const vplan_coverage_audit_1 = require("../vplan.coverage-audit");
 const vplan_hour_rebalance_1 = require("../vplan.hour-rebalance");
 const vplan_custom_schedule_1 = require("../vplan.custom-schedule");
 const vplan_sla_enforce_1 = require("../vplan.sla-enforce");
@@ -163,6 +166,45 @@ function runVplanGeneration(opts) {
         });
         assignments = strippedSla.draft.assignments;
         fixLog.push(...strippedSla.log);
+        const realigned = (0, vplan_cycle_continuity_1.realignVplanDraftToCycle)({
+            draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+ladder` },
+            dateStrs,
+            openingSlotByEmp,
+            prevPlanningState: opts.prevPlanningState,
+            defaultShiftByEmp: mergedDefaultShiftByEmp,
+            useTrailing: opts.strategy.modes.useTrailing,
+            cycle,
+            protectedCells,
+        });
+        assignments = realigned.draft.assignments;
+        fixLog.push(...realigned.log);
+        const mandatoryRest = (0, vplan_cct_enforce_1.computeMandatoryRestCells)({
+            assignments,
+            dateStrs,
+            cycle,
+            previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+            rules,
+        });
+        const mandatoryFixed = (0, vplan_cct_enforce_1.enforceMandatoryRestCells)({
+            draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+ladder` },
+            mandatoryCells: mandatoryRest,
+            dateStrs,
+            cycle,
+            protectedCells,
+        });
+        assignments = mandatoryFixed.draft.assignments;
+        fixLog.push(...mandatoryFixed.log);
+        if (mandatoryRest.size > 0) {
+            protectedCells = new Set([...(protectedCells ?? []), ...mandatoryRest]);
+        }
+        const earlyBandRest = (0, vplan_cycle_continuity_1.enforceIllegalBandRest)({
+            draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+ladder` },
+            dateStrs,
+            minRestHours: rules.minRestHoursBetweenBands ?? 12,
+            protectedCells,
+        });
+        assignments = earlyBandRest.draft.assignments;
+        fixLog.push(...earlyBandRest.log);
     }
     else {
         const strippedSla = (0, vplan_sla_enforce_1.stripExcessSlaAssignments)({
@@ -195,6 +237,33 @@ function runVplanGeneration(opts) {
     assignments = cctEnforced.draft.assignments;
     fixLog.push(...cctEnforced.log);
     const offerHours = opts.snapshot.employees.length * (rules.targetAvgHoursPerEmployee ?? 192);
+    let slotCoverageResult;
+    if (opts.demand?.coverageManifest) {
+        slotCoverageResult = (0, phase5_cover_slots_1.runVplanSlotCoverage)({
+            draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+cover` },
+            demand: opts.demand,
+            manifest: opts.demand.coverageManifest,
+            dateStrs: opts.snapshot.days,
+            positions: cyclePositions,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            cycle,
+            dateStrList: dateStrs,
+            previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+            slaVendidas: opts.snapshot.slaVendidas,
+            offerHours,
+            employeeIds: opts.snapshot.employees.map((e) => e.id),
+            rules,
+            protectedCells,
+            openingSlotByEmp,
+            defaultShiftByEmp: mergedDefaultShiftByEmp,
+            useTrailing: opts.strategy.modes.useTrailing,
+            trailingEmployeeIds,
+            excludeCustomCrossPool: true,
+            allowFrancoTrabajado: true,
+        });
+        assignments = slotCoverageResult.draft.assignments;
+        fixLog.push(...slotCoverageResult.log);
+    }
     const gapFilled = (0, vplan_coverage_ladder_1.fillCoverageGapsWithLadder)({
         draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
         dateStrs: opts.snapshot.days,
@@ -355,6 +424,7 @@ function runVplanGeneration(opts) {
                 previousMonthAssignments: opts.snapshot.previousMonthAssignments,
                 rules,
                 protectedCells,
+                ...ladderCycleOpts,
             });
             assignments = auditFill.draft.assignments;
             fixLog.push(...auditFill.log);
@@ -380,6 +450,7 @@ function runVplanGeneration(opts) {
                 previousMonthAssignments: opts.snapshot.previousMonthAssignments,
                 rules,
                 protectedCells,
+                ...ladderCycleOpts,
             });
             assignments = finalAuditFill.draft.assignments;
             fixLog.push(...finalAuditFill.log);
@@ -398,6 +469,7 @@ function runVplanGeneration(opts) {
                 employeeIds: opts.snapshot.employees.map((e) => e.id),
                 rules,
                 protectedCells,
+                ...ladderCycleOpts,
             });
             assignments = ladderClose.draft.assignments;
             fixLog.push(...ladderClose.log);
@@ -444,6 +516,7 @@ function runVplanGeneration(opts) {
                 previousMonthAssignments: opts.snapshot.previousMonthAssignments,
                 rules,
                 protectedCells,
+                ...ladderCycleOpts,
             });
             assignments = postBandAudit.draft.assignments;
             fixLog.push(...postBandAudit.log);
@@ -462,6 +535,7 @@ function runVplanGeneration(opts) {
                 employeeIds: opts.snapshot.employees.map((e) => e.id),
                 rules,
                 protectedCells,
+                ...ladderCycleOpts,
             });
             assignments = postBandLadder.draft.assignments;
             fixLog.push(...postBandLadder.log);
@@ -537,6 +611,7 @@ function runVplanGeneration(opts) {
             rules,
             protectedCells: weekendProtected,
             allowFrancoTrabajado: true,
+            ...ladderCycleOpts,
         });
         assignments = postCustomAudit.draft.assignments;
         fixLog.push(...postCustomAudit.log);
@@ -667,6 +742,7 @@ function runVplanGeneration(opts) {
                 rules,
                 protectedCells: cycleProtectedCells,
                 allowFrancoTrabajado: false,
+                ...ladderCycleOpts,
             });
             assignments = bandRestAudit.draft.assignments;
             fixLog.push(...bandRestAudit.log);
@@ -705,6 +781,69 @@ function runVplanGeneration(opts) {
         assignments = postHourClose.draft.assignments;
         fixLog.push(...postHourClose.log);
         rebalanced.hoursAdded += postHourClose.hoursAdded;
+    }
+    const stripFinal = (0, vplan_sla_enforce_1.stripExcessSlaAssignments)({
+        draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+        dateStrs: opts.snapshot.days,
+        positions: cyclePositions,
+        defaultPositionByEmp: mergedDefaultPositionByEmp,
+        protectedCells,
+    });
+    assignments = stripFinal.draft.assignments;
+    fixLog.push(...stripFinal.log);
+    for (let bandEndPass = 0; bandEndPass < 2; bandEndPass += 1) {
+        const bandEnd = (0, vplan_cycle_continuity_1.enforceIllegalBandRest)({
+            draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+            dateStrs,
+            minRestHours: rules.minRestHoursBetweenBands ?? 12,
+            protectedCells,
+        });
+        if (bandEnd.log.length === 0)
+            break;
+        assignments = bandEnd.draft.assignments;
+        fixLog.push(...bandEnd.log);
+        const stripAfterBand = (0, vplan_sla_enforce_1.stripExcessSlaAssignments)({
+            draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+            dateStrs: opts.snapshot.days,
+            positions: cyclePositions,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            protectedCells,
+        });
+        assignments = stripAfterBand.draft.assignments;
+        fixLog.push(...stripAfterBand.log);
+        if (!opts.demand)
+            continue;
+        const endRefill = (0, vplan_coverage_ladder_1.fillCoverageGapsWithLadder)({
+            draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+            dateStrs: opts.snapshot.days,
+            positions: cyclePositions,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            cycle,
+            dateStrList: dateStrs,
+            previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+            slaVendidas: opts.snapshot.slaVendidas,
+            offerHours,
+            employeeIds: opts.snapshot.employees.map((e) => e.id),
+            rules,
+            protectedCells,
+            excludeCustomCrossPool: true,
+            allowFrancoTrabajado: false,
+            ...ladderCycleOpts,
+        });
+        assignments = endRefill.draft.assignments;
+        fixLog.push(...endRefill.log);
+        gapFilled.ladderStats.subgrupo6x2 += endRefill.ladderStats.subgrupo6x2;
+        gapFilled.ladderStats.bandSwap += endRefill.ladderStats.bandSwap;
+        gapFilled.ladderStats.sinTurno += endRefill.ladderStats.sinTurno;
+        const stripAfterRefill = (0, vplan_sla_enforce_1.stripExcessSlaAssignments)({
+            draft: { assignments, sourceEngine: `vplan:${opts.strategy.engine}:${cycle}` },
+            dateStrs: opts.snapshot.days,
+            positions: cyclePositions,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            protectedCells,
+        });
+        assignments = stripAfterRefill.draft.assignments;
+        fixLog.push(...stripAfterRefill.log);
     }
     const hourNormalizeFinal = (0, vplan_assignment_hours_1.normalizeAssignmentBillableHours)(assignments, {
         cycle,
@@ -746,6 +885,37 @@ function runVplanGeneration(opts) {
         cycle,
         positions: opts.snapshot.positions,
     });
+    let slotCoverageStats;
+    if (opts.demand?.coverageManifest) {
+        const auditFinal = (0, vplan_coverage_audit_1.buildDetailedCoverageAudit)({
+            draft: { assignments, sourceEngine: `${sourceEngineBase}:motor+ladder` },
+            demand: opts.demand,
+            positions: cyclePositions,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            dateStrs,
+            cycle,
+            previousMonthAssignments: opts.snapshot.previousMonthAssignments,
+            rules,
+        });
+        const progress = (0, vplan_coverage_manifest_1.countFilledSlotsFromAssignments)({
+            assignments,
+            defaultPositionByEmp: mergedDefaultPositionByEmp,
+            manifest: opts.demand.coverageManifest,
+        });
+        const ok = auditFinal.totalMissingSlots === 0 && auditFinal.totalExcessSlots === 0;
+        slotCoverageStats = {
+            ok,
+            filledSlots: progress.filledSlots,
+            missingSlots: auditFinal.totalMissingSlots,
+            excessSlots: auditFinal.totalExcessSlots,
+            totalRequired: opts.demand.coverageManifest.totalRequiredSlots,
+            iterations: slotCoverageResult?.iterations ?? 0,
+            byPosition: progress.byPosition,
+            summaryLabel: ok
+                ? `${progress.filledSlots}/${opts.demand.coverageManifest.totalRequiredSlots} turnos/slot cubiertos`
+                : `${progress.filledSlots}/${opts.demand.coverageManifest.totalRequiredSlots} · faltan ${auditFinal.totalMissingSlots}`,
+        };
+    }
     return {
         assignments,
         sourceEngine: `vplan:${opts.strategy.engine}:${cycle}${is4x2 ? ':D12N12' : ''}:motor+ladder`,
@@ -764,6 +934,7 @@ function runVplanGeneration(opts) {
             needsReinforcementCount: gapFilled.ladderStats.needsReinforcement,
             coverageLadder: gapFilled.ladderStats,
             hourRebalanceAdded: rebalanced.hoursAdded,
+            slotCoverage: slotCoverageStats,
         },
     };
 }

@@ -81,13 +81,13 @@ function runVplanVerification(opts) {
     }
     if (coverageBundle.overCoveredSlots > 0) {
         issues.push({
-            severity: 'warning',
+            severity: 'blocking',
             code: 'COVERAGE_EXCESS',
             message: `${coverageBundle.overCoveredSlots} slot(s) de más vs SLA (sobre-asignación)`,
         });
         for (const row of coverageBundle.positionSlots.filter((r) => (r.excessSlots ?? 0) > 0)) {
             issues.push({
-                severity: 'warning',
+                severity: 'blocking',
                 code: 'SLOT_EXCESS',
                 message: `${row.positionName} ${row.shiftCode}: ${row.assignedSlots}/${row.requiredSlots} asignados (+${row.excessSlots})`,
                 positionName: row.positionName,

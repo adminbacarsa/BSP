@@ -14,6 +14,10 @@ import {
   DiffTable,
   VplanCoveragePanels,
 } from '@/components/vplan/VplanCoveragePanels';
+import { VplanPlanningTargetPanel } from '@/components/vplan/VplanPlanningTargetPanel';
+import { VplanSlotCoveragePanel } from '@/components/vplan/VplanSlotCoveragePanel';
+import { VplanCycleSemanticsPanel } from '@/components/vplan/VplanCycleSemanticsPanel';
+import { VplanPlanningMethodPanel } from '@/components/vplan/VplanPlanningMethodPanel';
 import {
   VPLAN_STAGE_BY_INTENT,
   VPLAN_STAGES,
@@ -67,8 +71,8 @@ export default function VplanLabPage() {
   const [objectiveId, setObjectiveId] = useState('');
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [mode, setMode] = useState<VplanRunMode>('GREENFIELD');
-  const [intent, setIntent] = useState<VplanIntent>('full');
+  const [mode, setMode] = useState<VplanRunMode>('CONTINUE');
+  const [intent, setIntent] = useState<VplanIntent>('demand');
   const [preferredCycle, setPreferredCycle] = useState<'6+2' | '4+2'>('6+2');
   const [runOptimization, setRunOptimization] = useState(false);
   const [supplyScope, setSupplyScope] = useState<'objective' | 'empresa'>('objective');
@@ -182,6 +186,30 @@ export default function VplanLabPage() {
               Modo emulador activo
             </div>
           )}
+        </div>
+
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 shadow-sm p-5 space-y-2">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="text-amber-600 shrink-0 mt-0.5" size={20} />
+            <div className="text-sm text-amber-950 space-y-2">
+              <p className="font-black">Estado actual — madurez por fases</p>
+              <ul className="space-y-1 text-xs list-none">
+                <li>
+                  <strong className="text-emerald-800">✓ Fase 1 (demanda):</strong> lee SLA, calcula qué planificar
+                  (418 turnos/slot, reglas por puesto). <strong>Confiable.</strong>
+                </li>
+                <li>
+                  <strong className="text-amber-900">⚠ Fases 4–7 (cómo + cronograma):</strong> la lógica está documentada
+                  pero la ejecución <strong>no respeta rachas, 6+2 ni apertura de mes</strong> de forma consistente.
+                  Los números 418/418 pueden cerrar con swaps que rompen el cronograma visible.
+                </li>
+              </ul>
+              <p className="text-[11px] text-amber-800">
+                Recomendado: intent <strong>1 · Demanda</strong> para validar servicios. No usar el cronograma generado
+                hasta corregir motor + continuidad.
+              </p>
+            </div>
+          </div>
         </div>
 
         <div className="grid lg:grid-cols-2 gap-6 items-start">
@@ -502,7 +530,33 @@ export default function VplanLabPage() {
           </div>
         </div>
 
-        {result?.context.verification?.coverage && (
+        {result?.context.demand?.planningTarget && (
+          <VplanPlanningTargetPanel target={result.context.demand.planningTarget} />
+        )}
+
+        {result?.context.strategy?.cycleSemantics && (
+          <VplanCycleSemanticsPanel semantics={result.context.strategy.cycleSemantics} />
+        )}
+
+        {result?.context.strategy?.planningMethod && intent !== 'demand' && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-2 text-xs text-amber-900">
+            El panel &quot;Cómo planificar&quot; describe el diseño objetivo. La grilla generada puede no cumplirlo
+            (rachas junio → julio, bloques 6+2, transiciones M/T/N).
+          </div>
+        )}
+
+        {result?.context.strategy?.planningMethod && intent !== 'demand' && (
+          <VplanPlanningMethodPanel method={result.context.strategy.planningMethod} />
+        )}
+
+        {result?.context.demand?.coverageManifest && result.context.draft?.stats?.slotCoverage && intent !== 'demand' && (
+          <VplanSlotCoveragePanel
+            manifest={result.context.demand.coverageManifest}
+            slotCoverage={result.context.draft.stats.slotCoverage}
+          />
+        )}
+
+        {result?.context.verification?.coverage && intent !== 'demand' && (
           <VplanCoveragePanels verification={result.context.verification} />
         )}
 

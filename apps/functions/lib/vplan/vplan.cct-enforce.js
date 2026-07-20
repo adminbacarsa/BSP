@@ -1,5 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.computeMandatoryRestCells = computeMandatoryRestCells;
+exports.enforceMandatoryRestCells = enforceMandatoryRestCells;
 exports.trailingWorkFromPrevMonth = trailingWorkFromPrevMonth;
 exports.trailingRestFromPrevMonth = trailingRestFromPrevMonth;
 exports.wouldExceedCctWorkStreak = wouldExceedCctWorkStreak;
@@ -8,7 +10,9 @@ exports.detectCctStreakViolations = detectCctStreakViolations;
 const planning_rules_defaults_1 = require("../planning/planning-rules.defaults");
 const planning_rules_service_1 = require("../planning/planning-rules.service");
 const vplan_cycle_templates_1 = require("./vplan.cycle-templates");
+const vplan_cycle_semantics_1 = require("./vplan.cycle-semantics");
 const vplan_coverage_guard_1 = require("./vplan.coverage-guard");
+const vplan_positions_1 = require("./vplan.positions");
 const FRANCO = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE = new Set(['V', 'L', 'E', 'A', 'PG', 'AA']);
 function isFranco(code) {
@@ -19,6 +23,114 @@ function isAbsence(code) {
 }
 function assignmentKey(empId, dateStr) {
     return `${empId}_${dateStr}`;
+}
+function resolveWorkBlockHoursCap(rules) {
+    const stretch = rules.maxConsecutiveWorkHours ?? vplan_cycle_semantics_1.VPLAN_WORK_BLOCK_HOURS_STRETCH;
+    return {
+        standard: vplan_cycle_semantics_1.VPLAN_WORK_BLOCK_HOURS_STANDARD,
+        stretch: Math.max(vplan_cycle_semantics_1.VPLAN_WORK_BLOCK_HOURS_STANDARD, stretch),
+    };
+}
+function workHoursForCode(code, cycle) {
+    const c = code.toUpperCase();
+    if (!(0, vplan_cycle_templates_1.isCycleWorkCode)(c, cycle))
+        return 0;
+    return (0, vplan_cycle_semantics_1.shiftHoursForTurnCode)(c);
+}
+function computeMandatoryRestCells(opts) {
+    const rules = (0, planning_rules_service_1.resolvePlanningRules)(opts.rules ?? null);
+    const cycle = opts.cycle;
+    const maxWork = (0, planning_rules_defaults_1.workDaysForCycle)(cycle, rules);
+    const maxRest = (0, planning_rules_defaults_1.restDaysForCycle)(cycle, rules);
+    const blockCap = resolveWorkBlockHoursCap(rules);
+    const mandatory = new Set();
+    const byEmp = new Map();
+    for (const a of opts.assignments) {
+        if (!byEmp.has(a.employeeId))
+            byEmp.set(a.employeeId, new Map());
+        byEmp.get(a.employeeId).set(a.dateStr, a);
+    }
+    const empIds = new Set(opts.assignments.map((a) => a.employeeId));
+    for (const empId of empIds) {
+        if ((0, vplan_positions_1.isVirtualEmployeeId)(empId))
+            continue;
+        let workRun = trailingWorkFromPrevMonth(opts.previousMonthAssignments, empId, cycle);
+        let workHoursRun = 0;
+        if (workRun > 0 && opts.previousMonthAssignments?.length) {
+            const rows = opts.previousMonthAssignments
+                .filter((a) => a.employeeId === empId)
+                .sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+            for (let i = rows.length - 1; i >= 0 && workHoursRun < blockCap.stretch; i--) {
+                const c = String(rows[i]?.code || '').toUpperCase();
+                if (isFranco(c) || isAbsence(c))
+                    break;
+                if ((0, vplan_cycle_templates_1.isCycleWorkCode)(c, cycle))
+                    workHoursRun += workHoursForCode(c, cycle);
+                else
+                    break;
+            }
+        }
+        let restPending = 0;
+        const prevRest = trailingRestFromPrevMonth(opts.previousMonthAssignments, empId);
+        if (workRun >= maxWork || workHoursRun >= blockCap.standard) {
+            restPending = Math.max(0, maxRest - prevRest);
+        }
+        for (const dateStr of opts.dateStrs) {
+            const cell = byEmp.get(empId)?.get(dateStr);
+            const code = String(cell?.code || '').toUpperCase();
+            if (restPending > 0) {
+                mandatory.add(assignmentKey(empId, dateStr));
+                if (isFranco(code) || isAbsence(code) || !code) {
+                    restPending -= 1;
+                    workRun = 0;
+                    workHoursRun = 0;
+                }
+                continue;
+            }
+            if ((0, vplan_cycle_templates_1.isCycleWorkCode)(code, cycle)) {
+                const h = workHoursForCode(code, cycle);
+                workRun += 1;
+                workHoursRun += h;
+                if (workRun > maxWork || workHoursRun > blockCap.stretch) {
+                    restPending = maxRest;
+                }
+                else if (workRun >= maxWork || workHoursRun >= blockCap.standard) {
+                    restPending = maxRest;
+                }
+            }
+            else if (isFranco(code) || isAbsence(code)) {
+                workRun = 0;
+                workHoursRun = 0;
+            }
+        }
+    }
+    return mandatory;
+}
+function enforceMandatoryRestCells(opts) {
+    const log = [];
+    const customSkip = opts.skipCustomCodes ?? new Set(['EN', 'RO', 'RON']);
+    const assignments = opts.draft.assignments.map((a) => ({ ...a }));
+    for (let i = 0; i < assignments.length; i += 1) {
+        const cell = assignments[i];
+        const key = assignmentKey(cell.employeeId, cell.dateStr);
+        if (!opts.mandatoryCells.has(key))
+            continue;
+        if (opts.protectedCells?.has(key))
+            continue;
+        const code = String(cell.code || '').toUpperCase();
+        if (customSkip.has(code))
+            continue;
+        if (!(0, vplan_cycle_templates_1.isCycleWorkCode)(code, opts.cycle))
+            continue;
+        assignments[i] = { ...cell, code: 'F', positionName: '', hours: 0 };
+        log.push({
+            code: 'CCT_MANDATORY_REST',
+            message: `${code} → F (bloque descanso CCT obligatorio)`,
+            employeeId: cell.employeeId,
+            dateStr: cell.dateStr,
+        });
+    }
+    return { draft: { ...opts.draft, assignments }, log };
 }
 function trailingWorkFromPrevMonth(prev, empId, cycle) {
     if (!prev?.length)
@@ -113,6 +225,7 @@ function enforceCctWorkRestPattern(opts) {
     const cycle = opts.cycle;
     const maxWork = (0, planning_rules_defaults_1.workDaysForCycle)(cycle, rules);
     const maxRest = (0, planning_rules_defaults_1.restDaysForCycle)(cycle, rules);
+    const blockCap = resolveWorkBlockHoursCap(rules);
     const customSkip = opts.skipCustomCodes ?? new Set(['EN', 'RO', 'RON']);
     const byEmp = new Map();
     const assignments = opts.draft.assignments.map((a) => ({ ...a }));
@@ -124,9 +237,24 @@ function enforceCctWorkRestPattern(opts) {
     const empIds = new Set(assignments.map((a) => a.employeeId));
     for (const empId of empIds) {
         let workRun = trailingWorkFromPrevMonth(opts.previousMonthAssignments, empId, cycle);
+        let workHoursRun = 0;
+        if (workRun > 0 && opts.previousMonthAssignments?.length) {
+            const rows = opts.previousMonthAssignments
+                .filter((a) => a.employeeId === empId)
+                .sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+            for (let i = rows.length - 1; i >= 0 && workHoursRun < blockCap.stretch; i--) {
+                const c = String(rows[i]?.code || '').toUpperCase();
+                if (isFranco(c) || isAbsence(c))
+                    break;
+                if ((0, vplan_cycle_templates_1.isCycleWorkCode)(c, cycle))
+                    workHoursRun += workHoursForCode(c, cycle);
+                else
+                    break;
+            }
+        }
         let restPending = 0;
         const prevRest = trailingRestFromPrevMonth(opts.previousMonthAssignments, empId);
-        if (workRun >= maxWork) {
+        if (workRun >= maxWork || workHoursRun >= blockCap.standard) {
             restPending = Math.max(0, maxRest - prevRest);
         }
         for (const dateStr of opts.dateStrs) {
@@ -135,44 +263,45 @@ function enforceCctWorkRestPattern(opts) {
             if (idx === undefined)
                 continue;
             const cell = assignments[idx];
-            const code = String(cell.code || '').toUpperCase();
+            let code = String(cell.code || '').toUpperCase();
             if (customSkip.has(code))
                 continue;
             if (restPending > 0) {
                 if ((0, vplan_cycle_templates_1.isCycleWorkCode)(code, cycle)) {
-                    const protectCoverage = opts.coverageGuard?.protect === true
-                        && (0, vplan_coverage_guard_1.wouldReduceCoverageByForcingFranco)({
-                            assignments,
-                            draftMeta: opts.draft,
-                            guard: opts.coverageGuard,
-                            empId,
-                            dateStr,
-                        });
-                    if (!protectCoverage && !opts.protectedCells?.has(assignmentKey(empId, dateStr))) {
+                    if (!opts.protectedCells?.has(assignmentKey(empId, dateStr))) {
                         assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
+                        code = 'F';
                         log.push({
                             code: 'CCT_REST_BLOCK',
-                            message: `${code} → F (descanso obligatorio ${maxRest}F tras ${maxWork} trab, ${cycle})`,
+                            message: `${cell.code} → F (descanso obligatorio ${maxRest}F tras bloque ${blockCap.standard}h, ${cycle})`,
                             employeeId: empId,
                             dateStr,
                         });
                     }
                     else {
                         log.push({
-                            code: 'CCT_REST_DEFER',
-                            message: `Preserva ${code} (${dateStr}) — cobertura/FT`,
+                            code: 'CCT_REST_PROTECTED',
+                            message: `Celda protegida mantiene ${code} en bloque descanso (${dateStr})`,
                             employeeId: empId,
                             dateStr,
                         });
+                        continue;
                     }
                 }
-                restPending -= 1;
-                workRun = 0;
+                if (isFranco(code) || isAbsence(code) || !code) {
+                    restPending -= 1;
+                    workRun = 0;
+                    workHoursRun = 0;
+                }
                 continue;
             }
             if ((0, vplan_cycle_templates_1.isCycleWorkCode)(code, cycle)) {
+                const turnH = workHoursForCode(code, cycle);
                 workRun += 1;
-                if (workRun > maxWork) {
+                workHoursRun += turnH;
+                const exceedsTurns = workRun > maxWork;
+                const exceedsHours = workHoursRun > blockCap.stretch;
+                if (exceedsTurns || exceedsHours) {
                     const protectCoverage = opts.coverageGuard?.protect === true
                         && (0, vplan_coverage_guard_1.wouldReduceCoverageByForcingFranco)({
                             assignments,
@@ -185,11 +314,12 @@ function enforceCctWorkRestPattern(opts) {
                         assignments[idx] = { ...cell, code: 'F', positionName: '', hours: 0 };
                         log.push({
                             code: 'CCT_MAX_WORK',
-                            message: `${code} → F (racha >${maxWork} días, ${cycle})`,
+                            message: `${code} → F (bloque >${maxWork} turnos o >${blockCap.stretch}h, ${cycle})`,
                             employeeId: empId,
                             dateStr,
                         });
                         workRun = 0;
+                        workHoursRun = 0;
                         restPending = maxRest;
                     }
                     else {
@@ -202,12 +332,13 @@ function enforceCctWorkRestPattern(opts) {
                         workRun = maxWork;
                     }
                 }
-                else if (workRun === maxWork) {
+                else if (workRun >= maxWork || workHoursRun >= blockCap.standard) {
                     restPending = maxRest;
                 }
             }
             else if (isFranco(code) || isAbsence(code)) {
                 workRun = 0;
+                workHoursRun = 0;
             }
         }
     }

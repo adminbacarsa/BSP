@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildVplanDemandModel = buildVplanDemandModel;
 const vplan_positions_1 = require("../vplan.positions");
+const vplan_coverage_target_1 = require("../vplan.coverage-target");
+const vplan_coverage_manifest_1 = require("../vplan.coverage-manifest");
 function schemeLabelFromBands(bands) {
     const keys = Object.keys(bands).sort();
     if (keys.length === 3 && keys.includes('M') && keys.includes('T') && keys.includes('N'))
@@ -96,6 +98,17 @@ function buildVplanDemandModel(opts) {
     if (!opts.positions.length) {
         warnings.push('SLA sin puestos configurados');
     }
+    const planningTarget = (0, vplan_coverage_target_1.buildVplanPlanningTarget)({
+        positions: opts.positions,
+        dayDemands,
+        monthBandDemand,
+        monthDemandHours,
+        cycle: opts.cycle,
+    });
+    const coverageManifest = (0, vplan_coverage_manifest_1.buildVplanCoverageManifest)({
+        dayDemands,
+        planningTarget,
+    });
     return {
         slaVendidas,
         monthDemandHours,
@@ -103,6 +116,8 @@ function buildVplanDemandModel(opts) {
         dayDemands,
         monthBandDemand,
         warnings,
+        planningTarget,
+        coverageManifest,
     };
 }
 //# sourceMappingURL=phase1-demand.js.map
