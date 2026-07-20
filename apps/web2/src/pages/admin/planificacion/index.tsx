@@ -683,6 +683,7 @@ export default function PlanificacionPage() {
     const longPressTimer = useRef<any>(null);
     const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>({});
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
+    const [grupoSlaMap, setGrupoSlaMap] = useState<Record<string, any[]>>({});
     const dotacionMigratedRef = useRef(false);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
@@ -1469,32 +1470,52 @@ export default function PlanificacionPage() {
                     ? positionStructure.find((p: any) => p.positionName === shiftPos)
                     : undefined;
                 if (posConfig && isPosExcludedOnDate(posConfig, dateStr)) return;
+                const _grupoObjIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
                 if (pending && !pending.isDeleted) {
-                    if (selectedObjective && activeShift.objectiveId != null && activeShift.objectiveId !== '' &&
-                        String(activeShift.objectiveId) !== String(selectedObjective)) return;
-                } else if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
+                    if (activeShift.objectiveId != null && activeShift.objectiveId !== '') {
+                        const _ao = String(activeShift.objectiveId);
+                        const _ok = _grupoObjIds ? _grupoObjIds.includes(_ao) : _ao === String(selectedObjective);
+                        if (!_ok) return;
+                    }
+                } else {
+                    if (_grupoObjIds) {
+                        if (!activeShift || isOperationalOriginShift(activeShift)) return;
+                        if (!activeShift.objectiveId || !_grupoObjIds.includes(String(activeShift.objectiveId))) return;
+                    } else if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
+                }
                 if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
                 total += calcShiftHours(activeShift, slaCodeHoursHint);
             });
             result[emp.id] = total;
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode]);
 
     // Días RET por empleado (0 h planificadas — sobrante disponible en otro objetivo).
     const empRetDays = useMemo(() => {
         const result: Record<string, number> = {};
+        const _grupoObjIdsRet = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
         displayedEmployees.forEach((emp: any) => {
             let count = 0;
             daysInMonth.forEach(day => {
                 const dateStr = getDateKey(day);
-                const activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
-                if (activeShift && String(activeShift.code || '').toUpperCase() === 'RET') count++;
+                const key = `${emp.id}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const existing = shiftsMap[key];
+                if (pending?.isDeleted) return;
+                const activeShift = pending && !pending.isDeleted ? pending : existing;
+                if (!activeShift) return;
+                if (_grupoObjIdsRet) {
+                    const ao = String(activeShift.objectiveId || '');
+                    if (!ao || !_grupoObjIdsRet.includes(ao)) return;
+                    if (isOperationalOriginShift(activeShift)) return;
+                } else if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
+                if (String(activeShift.code || '').toUpperCase() === 'RET') count++;
             });
             result[emp.id] = count;
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, selectedGrupo, grupoUnifiedMode]);
 
     // Celdas con descanso insuficiente (<12h o <35h post-racha) respecto a turnos adyacentes.
     const restViolationCells = useMemo(() => {
@@ -1544,20 +1565,31 @@ export default function PlanificacionPage() {
         for (let d = 26; d <= prevLast; d++) tailDays.push(new Date(prevYr, prevMo, d));
         // Mes activo: días 1..25
         const headDays = daysInMonth.filter((d: Date) => d.getDate() <= 25);
+        const _grupoObjIdsCct = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
+        const _shiftBelongsToContext = (shift: any) => {
+            if (!shift) return false;
+            if (isOperationalOriginShift(shift)) return false;
+            const ao = String(shift.objectiveId || '');
+            if (!ao) return false;
+            return _grupoObjIdsCct ? _grupoObjIdsCct.includes(ao) : ao === String(selectedObjective);
+        };
         const acumular = (empId: string, key: string, useShiftsMap: boolean) => {
             const pending = pendingChanges[key];
             const existing = shiftsMap[key];
             let activeShift: any = null;
             if (useShiftsMap) {
                 activeShift = existing;
-                if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
+                if (!_shiftBelongsToContext(activeShift)) return;
             } else if (pending && !pending.isDeleted) {
                 activeShift = pending;
-                if (selectedObjective && activeShift.objectiveId != null && activeShift.objectiveId !== '' &&
-                    String(activeShift.objectiveId) !== String(selectedObjective)) return;
+                if (activeShift.objectiveId != null && activeShift.objectiveId !== '') {
+                    const ao = String(activeShift.objectiveId);
+                    const ok = _grupoObjIdsCct ? _grupoObjIdsCct.includes(ao) : ao === String(selectedObjective);
+                    if (!ok) return;
+                }
             } else {
                 activeShift = existing;
-                if (activeShift && !turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
+                if (!_shiftBelongsToContext(activeShift)) return;
             }
             if (!activeShift) return;
             if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
@@ -1569,7 +1601,7 @@ export default function PlanificacionPage() {
             headDays.forEach((d) => acumular(emp.id, `${emp.id}_${getDateKey(d)}`, false));
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, currentDate, selectedObjective, slaCodeHoursHint]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, currentDate, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode]);
 
     /** Conteos del mes basados en turnos reales del objetivo (no tamaño de dotación asignada). */
     const objectiveMonthShiftMetrics = useMemo(() => {
@@ -1760,11 +1792,27 @@ export default function PlanificacionPage() {
         { code: 'N12', name: 'Nocturno 12h',  hours: 12, startTime: '19:00', endTime: '07:00' },
     ];
 
+    // En modo grupo unificado: estructura del SLA del objetivo nativo del empleado seleccionado
+    const effectivePosStructure = useMemo(() => {
+        if (selectedGrupo && grupoUnifiedMode && selectedCell?.empId && Object.keys(grupoSlaMap).length > 0) {
+            const _emp = employees.find((e: any) => e.id === selectedCell.empId);
+            if (_emp) {
+                const _native = selectedGrupo.objectiveIds.includes(_emp.preferredObjectiveId)
+                    ? _emp.preferredObjectiveId
+                    : (slaIdToObjId[_emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[_emp.preferredObjectiveId])
+                        ? slaIdToObjId[_emp.preferredObjectiveId]
+                        : null);
+                if (_native && grupoSlaMap[_native]) return grupoSlaMap[_native];
+            }
+        }
+        return positionStructure;
+    }, [selectedGrupo, grupoUnifiedMode, selectedCell?.empId, grupoSlaMap, positionStructure, employees, slaIdToObjId]);
+
     const uniqueSLAShifts = useMemo(() => {
-        const targetPos = activePosition || (positionStructure.length > 0 ? positionStructure[0].positionName : 'General');
-        const pos = positionStructure.find(p => p.positionName === targetPos);
+        const targetPos = activePosition || (effectivePosStructure.length > 0 ? effectivePosStructure[0].positionName : 'General');
+        const pos = effectivePosStructure.find((p: any) => p.positionName === targetPos);
         return pos ? pos.shifts : [];
-    }, [positionStructure, activePosition]);
+    }, [effectivePosStructure, activePosition]);
 
     const genderRestrictedPositionsCount = useMemo(
         () => positionStructure.filter((p: any) => getPreferenciaGeneroUi(p.preferenciaGenero)).length,
@@ -1838,12 +1886,12 @@ export default function PlanificacionPage() {
         const disabled = new Set<string>();
         if (!selectedCell?.dateStr || !selectedObjective || !uniqueSLAShifts.length) return disabled;
         const dateStr = selectedCell.dateStr;
-        const posName = activePosition || (positionStructure[0]?.positionName) || 'General';
+        const posName = activePosition || (effectivePosStructure[0]?.positionName) || 'General';
         // RET y francos nunca se bloquean por días; solo los turnos laborales reales
         const isWorking = (code: string) => !['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET'].includes(String(code || '').toUpperCase());
 
         // PAX del puesto actual
-        const posConfig = positionStructure.find((p: any) => p.positionName === posName) || positionStructure[0];
+        const posConfig = effectivePosStructure.find((p: any) => p.positionName === posName) || effectivePosStructure[0];
         const pax = Math.max(1, Number(posConfig?.qty) || 1);
 
         const dayLetter = getDayLetter(dateStr);
@@ -1884,7 +1932,7 @@ export default function PlanificacionPage() {
         }
 
         // Fallback de positionName igual que calculateCoverageStats
-        const dominant = positionStructure.reduce((prev: any, curr: any) => ((prev?.qty || 0) >= (curr?.qty || 0) ? prev : curr), positionStructure[0]);
+        const dominant = effectivePosStructure.reduce((prev: any, curr: any) => ((prev?.qty || 0) >= (curr?.qty || 0) ? prev : curr), effectivePosStructure[0]);
 
         const assigned: { code: string; hours: number }[] = [];
         const posShiftsForBand = (posConfig?.shifts || uniqueSLAShifts || []) as any[];
@@ -1974,7 +2022,7 @@ export default function PlanificacionPage() {
             }
         });
         return disabled;
-    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId]);
+    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
@@ -2171,7 +2219,7 @@ export default function PlanificacionPage() {
     // 🛑 MEMOIZACIÓN CRÍTICA PARA EL MODAL
     const modalCoverageStats = useMemo(() => {
         if (!selectedCell || !selectedObjective) return null;
-        const currentPosName = activePosition || selectedCell.currentShift?.positionName || (positionStructure.length > 0 ? positionStructure[0].positionName : 'General');
+        const currentPosName = activePosition || selectedCell.currentShift?.positionName || (effectivePosStructure.length > 0 ? effectivePosStructure[0].positionName : 'General');
         const dateStr = selectedCell.dateStr;
         const dayLetter = getDayLetter(dateStr);
         // En modo grupo unificado: filtrar empleados al objetivo nativo del empleado seleccionado
@@ -2192,8 +2240,8 @@ export default function PlanificacionPage() {
                     : displayedEmployees;
             })()
             : displayedEmployees;
-        const hoursStats = calculateCoverageStats(dateStr, currentPosName, positionStructure, _empsForModal, pendingChanges, shiftsMap);
-        const posConfig = positionStructure.find((p: any) => p.positionName === currentPosName) || positionStructure[0];
+        const hoursStats = calculateCoverageStats(dateStr, currentPosName, effectivePosStructure, _empsForModal, pendingChanges, shiftsMap);
+        const posConfig = effectivePosStructure.find((p: any) => p.positionName === currentPosName) || effectivePosStructure[0];
         const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
         const units = posConfig
             ? countPositionClosedUnits(dateStr, posConfig, dayLetter, _empsForModal, pendingChanges, shiftsMap, cycles)
@@ -2206,7 +2254,7 @@ export default function PlanificacionPage() {
             isPositionClosed: units.required > 0 && units.closed >= units.required,
             isExcludedDay: hoursStats.isExcludedDay,
         };
-    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, positionStructure, selectedObjective, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId]);
+    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, effectivePosStructure, positionStructure, selectedObjective, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId]);
 
     const coverageCyclesForObjective = autoSelectedCyclesRef.current?.length
         ? autoSelectedCyclesRef.current
@@ -2826,6 +2874,36 @@ export default function PlanificacionPage() {
         };
         fetchSLA();
     }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce]);
+
+    // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
+    useEffect(() => {
+        if (!selectedGrupo || !grupoUnifiedMode || !selectedClient) { setGrupoSlaMap({}); return; }
+        const fetchGroupSlas = async () => {
+            try {
+                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+                const allDocs = filterSlasForPlanningTenant(
+                    snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })),
+                    empresaId, scopeEmpresa, tenantClientIds,
+                );
+                const viewYear = currentDate.getFullYear();
+                const viewMonth = currentDate.getMonth();
+                const result: Record<string, any[]> = {};
+                for (const objId of selectedGrupo.objectiveIds) {
+                    const matching = filterSlasForPlanningContext(allDocs, selectedClient, objId, clients, slaIdToObjId);
+                    const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
+                    const srvForStructure = srv ?? fallback;
+                    const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
+                    const { structure } = buildPlanningPositionStructure(srvForStructure, { monthHasSla, hasExactMatch: !!hasExactMatch });
+                    result[objId] = structure.length > 0 ? structure : [{ positionName: 'General', shifts: DEFAULT_PLANNING_SHIFTS.map((s: any) => ({ ...s })), qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' }];
+                }
+                setGrupoSlaMap(result);
+            } catch (e) {
+                console.error('GRUPO SLA ERROR:', e);
+                setGrupoSlaMap({});
+            }
+        };
+        fetchGroupSlas();
+    }, [selectedGrupo, grupoUnifiedMode, selectedClient, currentDate, empresaId, scopeEmpresa, clients, tenantClientIds, slaIdToObjId]);
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
@@ -6921,7 +6999,12 @@ export default function PlanificacionPage() {
             </thead>
             <tbody>
                 {gridEmployees.map((emp, idx) => {
-                    const isGuest = selectedObjective && emp.preferredObjectiveId !== selectedObjective;
+                    const isGuest = selectedObjective && (
+                        (selectedGrupo && grupoUnifiedMode)
+                            ? !(selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId) ||
+                                (slaIdToObjId[emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[emp.preferredObjectiveId])))
+                            : emp.preferredObjectiveId !== selectedObjective
+                    );
                     const homeObjectiveName = getObjectiveName(emp.preferredObjectiveId);
                     
                     return (
@@ -7259,6 +7342,20 @@ export default function PlanificacionPage() {
                         const cyclesForCoverage = autoSelectedCyclesRef.current?.length
                             ? autoSelectedCyclesRef.current
                             : autoCycles;
+                        if (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0) {
+                            // Vista unificada: agregar cobertura de todos los objetivos del grupo
+                            selectedGrupo.objectiveIds.forEach((objId: string) => {
+                                const structure = grupoSlaMap[objId] || [];
+                                const objEmps = dotacionBaseEmployees.filter((e: any) =>
+                                    e.preferredObjectiveId === objId || slaIdToObjId[e.preferredObjectiveId] === objId,
+                                );
+                                structure.forEach((pos: any) => {
+                                    const units = countPositionClosedUnits(dateStr, pos, dayLetter, objEmps, pendingChanges, shiftsMap, cyclesForCoverage);
+                                    requiredPax += units.required;
+                                    closedPax += units.closed;
+                                });
+                            });
+                        } else {
                         (positionStructure || []).forEach((pos: any) => {
                             const units = countPositionClosedUnits(
                                 dateStr, pos, dayLetter,
@@ -7268,6 +7365,7 @@ export default function PlanificacionPage() {
                             requiredPax += units.required;
                             closedPax += units.closed;
                         });
+                        }
 
                         const isCovered = requiredPax > 0 && closedPax >= requiredPax;
                         const cls = requiredPax === 0 ? 'bg-slate-50 text-slate-400' : (isCovered ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 cursor-pointer');
