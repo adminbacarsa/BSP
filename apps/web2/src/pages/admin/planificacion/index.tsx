@@ -1208,11 +1208,21 @@ export default function PlanificacionPage() {
         if (!selectedObjective && !forceShowAll) return [];
         let list = employees.filter(e => e.status !== 'inactivo');
         if (selectedObjective && !forceShowAll) {
-            list = list.filter(e =>
-                e.preferredObjectiveId === selectedObjective ||
-                slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
-                activeGuestIdsForObjective.has(e.id),
-            );
+            if (selectedGrupo && grupoUnifiedMode) {
+                // Modo grupo unificado: incluir todos los empleados de cualquier objetivo del grupo
+                list = list.filter(e =>
+                    selectedGrupo.objectiveIds.some(objId =>
+                        e.preferredObjectiveId === objId ||
+                        slaIdToObjId[e.preferredObjectiveId] === objId,
+                    ) || activeGuestIdsForObjective.has(e.id),
+                );
+            } else {
+                list = list.filter(e =>
+                    e.preferredObjectiveId === selectedObjective ||
+                    slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
+                    activeGuestIdsForObjective.has(e.id),
+                );
+            }
         } else if (selectedObjective && forceShowAll) {
             const objLat = Number(selectedObjectiveData?.lat ?? 0);
             const objLng = Number(selectedObjectiveData?.lng ?? 0);
@@ -1225,7 +1235,7 @@ export default function PlanificacionPage() {
             });
         }
         return list;
-    }, [employees, selectedObjective, forceShowAll, slaIdToObjId, activeGuestIdsForObjective, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective]);
+    }, [employees, selectedObjective, forceShowAll, slaIdToObjId, activeGuestIdsForObjective, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective, selectedGrupo, grupoUnifiedMode]);
 
     const employeeMonthStats = useMemo(() => {
         const stats: Record<string, { shiftCount: number; dominantBand: string | null }> = {};
