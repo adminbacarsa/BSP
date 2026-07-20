@@ -1012,25 +1012,40 @@ export async function fetchPlanificacionEstadoDoc(
   return null;
 }
 
-/** Fusiona tenant + legacy: puestos/bandas de ambos docs; trailing del primero que lo tenga. */
+/** Fusiona tenant + legacy: puestos/bandas de ambos docs; trailing del primero que lo tenga.
+ *  publishedAt: si existe doc tenant, manda ese (aunque no tenga publishedAt = borrador).
+ *  No heredar publishedAt legacy si el doc tenant ya existe sin publicar. */
 export async function fetchMergedPlanificacionEstadoData(
   empresaId: string,
   objectiveId: string,
   year: number,
   month: number,
 ): Promise<Record<string, unknown>> {
-  const ids = [
-    buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month),
-    buildPlanificacionEstadoDocId('', objectiveId, year, month),
-  ].filter((id, index, arr) => arr.indexOf(id) === index);
+  const primaryId = buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month);
+  const legacyId = buildPlanificacionEstadoDocId('', objectiveId, year, month);
+  const ids = [primaryId, legacyId].filter((id, index, arr) => arr.indexOf(id) === index);
 
   let merged: Record<string, unknown> = {};
   let trailingFrom: Record<string, unknown> | null = null;
+  let primaryExists = false;
+  let primaryPublishedAt: unknown = undefined;
+  let primaryPublishedBy: unknown = undefined;
+  let legacyPublishedAt: unknown = undefined;
+  let legacyPublishedBy: unknown = undefined;
 
   for (const id of ids) {
     const snap = await getDoc(doc(db, 'planificacion_estados', id));
     if (!snap.exists()) continue;
     const d = snap.data() as Record<string, unknown>;
+    const isPrimary = id === primaryId;
+    if (isPrimary) {
+      primaryExists = true;
+      primaryPublishedAt = d.publishedAt;
+      primaryPublishedBy = d.publishedBy;
+    } else {
+      legacyPublishedAt = d.publishedAt;
+      legacyPublishedBy = d.publishedBy;
+    }
     merged = {
       ...merged,
       defaultPositionByEmp: {
@@ -1041,12 +1056,20 @@ export async function fetchMergedPlanificacionEstadoData(
         ...((merged.defaultShiftByEmp as Record<string, string>) || {}),
         ...((d.defaultShiftByEmp as Record<string, string>) || {}),
       },
-      publishedAt: merged.publishedAt ?? d.publishedAt,
-      publishedBy: merged.publishedBy ?? d.publishedBy,
     };
     if (!trailingFrom && (d.lastShiftByEmp || d.trailingWorkDays)) {
       trailingFrom = d;
     }
+  }
+
+  if (primaryExists) {
+    if (primaryPublishedAt != null && primaryPublishedAt !== '') {
+      merged.publishedAt = primaryPublishedAt;
+      merged.publishedBy = primaryPublishedBy;
+    }
+  } else if (legacyPublishedAt != null && legacyPublishedAt !== '') {
+    merged.publishedAt = legacyPublishedAt;
+    merged.publishedBy = legacyPublishedBy;
   }
 
   if (trailingFrom) {

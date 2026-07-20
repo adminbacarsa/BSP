@@ -3851,6 +3851,10 @@ export default function PlanificacionPage() {
 
     const executePublish = async () => {
         if (!selectedObjective || !canPublishPlanning) return;
+        if (!empresaId) {
+            toast.error('Seleccioná una empresa antes de publicar');
+            return;
+        }
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
@@ -3866,7 +3870,7 @@ export default function PlanificacionPage() {
         try {
             const auth = getAuth();
             const actorName = auth.currentUser?.displayName || auth.currentUser?.email || 'Sistema';
-            // 1. Registrar publicación (doc id con tenant)
+            // 1. Registrar publicación (merge: no borrar defaultPositionByEmp / defaultShiftByEmp)
             await setDoc(doc(db, 'planificacion_estados', publishDocId), {
                 objetivoId: selectedObjective,
                 objectiveId: selectedObjective,
@@ -3876,8 +3880,8 @@ export default function PlanificacionPage() {
                 month,
                 publishedAt: serverTimestamp(),
                 publishedBy: actorName,
-                empresaId: empresaId || null,
-            });
+                empresaId,
+            }, { merge: true });
             // 2. Buscar todos los turnos draft del objetivo+mes y actualizarlos a draft:false
             const firstDay = new Date(year, month - 1, 1);
             const lastDay = new Date(year, month, 0, 23, 59, 59);

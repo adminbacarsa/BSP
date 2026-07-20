@@ -1,24 +1,57 @@
 /**
  * onCronogramaPublished
- * Trigger: se crea un documento en `planificacion_estados` (publicación de cronograma).
- * Acción: envía UNA notificación push consolidada a cada guardia del objetivo/mes,
- *         en vez de una notificación por cada turno (comportamiento anterior de onTurnoWrite).
+ * Trigger: `publishedAt` aparece o cambia en `planificacion_estados`.
+ * Acción: envía UNA notificación push consolidada a cada guardia del objetivo/mes.
+ *
+ * Importante: asignar puestos también crea/actualiza este doc (sin publishedAt).
+ * Por eso NO usamos onCreate — solo notificamos cuando hay publicación real.
  */
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
+function publishedAtMillis(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  if (typeof (value as { toMillis?: () => number }).toMillis === 'function') {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  if (typeof (value as { seconds?: number }).seconds === 'number') {
+    return (value as { seconds: number }).seconds * 1000;
+  }
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string' || typeof value === 'number') {
+    const n = new Date(value).getTime();
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 export const onCronogramaPublished = functions
   .runWith({ timeoutSeconds: 60, memory: '256MB' })
   .firestore.document('planificacion_estados/{docId}')
-  .onCreate(async (snap) => {
-    const data = snap.data();
+  .onWrite(async (change) => {
+    if (!change.after.exists) return;
+
+    const data = change.after.data() || {};
+    const afterPub = publishedAtMillis(data.publishedAt);
+    if (afterPub == null) {
+      // Doc de puestos / borrador / despublicado — no notificar
+      return;
+    }
+
+    const beforeData = change.before.exists ? (change.before.data() || {}) : {};
+    const beforePub = publishedAtMillis(beforeData.publishedAt);
+    // Solo al publicar o re-publicar (nuevo timestamp), no en updates de puestos
+    if (beforePub != null && beforePub === afterPub) {
+      return;
+    }
+
     const objectiveId = String(data.objectiveId ?? data.objetivoId ?? '').trim();
-    const year        = Number(data.year ?? data.año);
-    const month       = Number(data.month ?? data.mes);
-    const empresaId   = String(data.empresaId ?? '').trim();
+    const year = Number(data.year ?? data.año);
+    const month = Number(data.month ?? data.mes);
+    const empresaId = String(data.empresaId ?? '').trim();
 
     if (!objectiveId || !year || !month) {
-      console.warn('[onCronogramaPublished] Documento incompleto:', snap.id, data);
+      console.warn('[onCronogramaPublished] Documento incompleto:', change.after.id, data);
       return;
     }
 
@@ -28,7 +61,7 @@ export const onCronogramaPublished = functions
     await new Promise(resolve => setTimeout(resolve, 4000));
 
     const firstDay = new Date(year, month - 1, 1);
-    const lastDay  = new Date(year, month, 0, 23, 59, 59);
+    const lastDay = new Date(year, month, 0, 23, 59, 59);
 
     // Buscar TODOS los turnos del objetivo/mes (draft o no — no filtramos draft
     // para no perder empleados cuyos turnos aún no se actualizaron)
@@ -77,11 +110,11 @@ export const onCronogramaPublished = functions
     // Enviar una notificación por empleado
     for (const [employeeId, info] of empMap.entries()) {
       const title = `📅 Cronograma de ${monthName} disponible`;
-      const body  = `${info.objectiveName} — ${info.work} turno${info.work !== 1 ? 's' : ''}${info.franco > 0 ? ` · ${info.franco} franco${info.franco !== 1 ? 's' : ''}` : ''}`;
+      const body = `${info.objectiveName} — ${info.work} turno${info.work !== 1 ? 's' : ''}${info.franco > 0 ? ` · ${info.franco} franco${info.franco !== 1 ? 's' : ''}` : ''}`;
 
       // Buscar uid y tokens
-      const empDoc  = await db.collection('empleados').doc(employeeId).get();
-      const empUid  = empDoc.exists ? (empDoc.data()?.uid as string | undefined) : undefined;
+      const empDoc = await db.collection('empleados').doc(employeeId).get();
+      const empUid = empDoc.exists ? (empDoc.data()?.uid as string | undefined) : undefined;
 
       const [byEmpId, byUid] = await Promise.all([
         db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
@@ -101,18 +134,18 @@ export const onCronogramaPublished = functions
       let notifDocId: string | null = null;
       try {
         const ref = await db.collection('user_notifications').add({
-          uid:        empUid || null,
+          uid: empUid || null,
           employeeId,
           title,
           body,
-          type:       'CRONOGRAMA_PUBLICADO',
-          target:     'employee',
+          type: 'CRONOGRAMA_PUBLICADO',
+          target: 'employee',
           objectiveId,
           year,
           month,
-          read:       false,
-          readAt:     null,
-          createdAt:  admin.firestore.FieldValue.serverTimestamp(),
+          read: false,
+          readAt: null,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         notifDocId = ref.id;
       } catch (e) {
@@ -128,17 +161,17 @@ export const onCronogramaPublished = functions
         const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
         const result = await admin.messaging().sendEachForMulticast({
           data: {
-            type:           'CRONOGRAMA_PUBLICADO',
+            type: 'CRONOGRAMA_PUBLICADO',
             title,
             body,
             objectiveId,
-            month:          String(month),
-            year:           String(year),
+            month: String(month),
+            year: String(year),
             notificationId: notifDocId || '',
             link,
           },
           webpush: {
-            headers:    { Urgency: 'normal' },
+            headers: { Urgency: 'normal' },
             fcmOptions: { link },
           },
           tokens,
