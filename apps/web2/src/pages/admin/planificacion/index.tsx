@@ -1669,16 +1669,38 @@ export default function PlanificacionPage() {
     };
 
     // Turnos para la barra flotante de selección múltiple.
-    // Combina todos los turnos de todas las posiciones del objetivo (sin duplicados).
+    // Combina turnos de todas las posiciones; si un código es de un solo puesto, guarda positionName.
     // Si ninguna posición tiene M/T/N/D12/N12, agrega los estándar como base mínima.
     const bulkShifts = useMemo(() => {
-        const STANDARD_CODES = new Set(['M','T','N','D12','N12']);
-        const allShifts: any[] = positionStructure.flatMap((pos: any) => pos.shifts || []);
-        const deduped: any[] = [...new Map(allShifts.map((s: any) => [String(s.code||'').toUpperCase(), s])).values()];
+        const STANDARD_CODES = new Set(['M', 'T', 'N', 'D12', 'N12']);
+        const byCode = new Map<string, any>();
+        for (const pos of positionStructure) {
+            for (const s of (pos.shifts || []) as any[]) {
+                const codeKey = String(s.code || '').toUpperCase();
+                if (!codeKey) continue;
+                const prev = byCode.get(codeKey);
+                if (!prev) {
+                    byCode.set(codeKey, {
+                        code: s.code,
+                        name: s.name,
+                        hours: s.hours,
+                        startTime: s.startTime,
+                        endTime: s.endTime,
+                        positionName: pos.positionName,
+                        ownerCount: 1,
+                    });
+                } else {
+                    prev.ownerCount = (prev.ownerCount || 1) + 1;
+                    // Ambiguo entre puestos: resolver por empleado al aplicar
+                    prev.positionName = undefined;
+                }
+            }
+        }
+        const deduped = [...byCode.values()];
         const base = deduped.length > 0 ? deduped : uniqueSLAShifts;
-        const hasStandard = base.some((s: any) => STANDARD_CODES.has(String(s.code||'').toUpperCase()));
+        const hasStandard = base.some((s: any) => STANDARD_CODES.has(String(s.code || '').toUpperCase()));
         if (hasStandard) return base;
-        const existingCodes = new Set(base.map((s: any) => String(s.code||'').toUpperCase()));
+        const existingCodes = new Set(base.map((s: any) => String(s.code || '').toUpperCase()));
         const missing = STANDARD_SHIFTS_BASE.filter(s => !existingCodes.has(s.code));
         return [...missing, ...base];
     }, [uniqueSLAShifts, positionStructure]);
@@ -4188,36 +4210,372 @@ export default function PlanificacionPage() {
         runApplyVacancy(francoConflicts.length > 0 || vacancyFrancoAuthApproved);
     };
     
-    // 🛑 FIX: Inyección de Puesto en Bulk
-    const applyBulkChange = (shiftConfig: any) => { 
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
-        if (!selection.start || !selection.end) return; 
-        const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)]; 
+    // Bulk: inyecta el puesto dueño del código SLA (no el default "Puesto 1") y respeta cupos de cobertura.
+    const applyBulkChange = (shiftConfig: any) => {
+        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (!selection.start || !selection.end) return;
+        const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)];
         if (isPlanningDateLocked(getDateKey(startDay))) {
             const c = String(shiftConfig?.code || '').toUpperCase();
-            if (!['RET','ESC','F','FF','FP','FT'].includes(c)) { toast.warning("Periodo cerrado — solo podés asignar RET, ESC o Franco en masa."); return; }
+            if (!['RET', 'ESC', 'F', 'FF', 'FP', 'FT'].includes(c)) {
+                toast.warning('Periodo cerrado — solo podés asignar RET, ESC o Franco en masa.');
+                return;
+            }
         }
-        const minR = Math.min(selection.start.r, selection.end.r); 
-        const maxR = Math.max(selection.start.r, selection.end.r); 
-        const minC = Math.min(selection.start.c, selection.end.c); 
-        const maxC = Math.max(selection.start.c, selection.end.c); 
-        const newChanges = { ...pendingChanges }; 
-        let count = 0; 
-        let francosReplaced = 0; 
+        const minR = Math.min(selection.start.r, selection.end.r);
+        const maxR = Math.max(selection.start.r, selection.end.r);
+        const minC = Math.min(selection.start.c, selection.end.c);
+        const maxC = Math.max(selection.start.c, selection.end.c);
+        const newChanges = { ...pendingChanges };
+        let count = 0;
+        let francosReplaced = 0;
         let skippedExcluded = 0;
-        
-        const fallbackPos = activePosition || (positionStructure[0]?.positionName) || 'General';
-        const getEmpPos = (emp: any) => empDefaultPos[`${emp.id}___${selectedObjective}`] || fallbackPos;
+        let skippedCoverage = 0;
 
-        for (let r = minR; r <= maxR; r++) { const emp = displayedEmployees[r]; if (!emp) continue; for (let c = minC; c <= maxC; c++) { const day = daysInMonth[c]; const key = `${emp.id}_${getDateKey(day)}`; const existing = shiftsMap[key]; if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig && shiftConfig.code !== 'F') { francosReplaced++; } } }
+        const fallbackPos = activePosition || (positionStructure[0]?.positionName) || 'General';
+        const cyclesForBulk = autoSelectedCyclesRef.current?.length
+            ? autoSelectedCyclesRef.current
+            : autoCycles;
+
+        const ownersForCode = (code: string) => {
+            const upper = String(code || '').toUpperCase();
+            return (positionStructure || []).filter((p: any) =>
+                (p.shifts || []).some((s: any) => String(s.code || '').toUpperCase() === upper),
+            );
+        };
+
+        const resolveAssignPos = (emp: any, code: string, hintPos?: string | null) => {
+            const upper = String(code || '').toUpperCase();
+            if (upper === 'RET') return 'Retén';
+            if (['F', 'FF', 'FP', 'FT'].includes(upper)) return 'General';
+            const owners = ownersForCode(upper);
+            const empPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || null;
+            if (owners.length === 0) {
+                // Código custom sin dueño explícito: preferir hint / default emp / activo
+                return hintPos || empPos || fallbackPos;
+            }
+            // Hint de la barra (código de un solo puesto en el SLA) — el usuario eligió ese turno
+            if (hintPos && owners.some((p: any) => p.positionName === hintPos)) return hintPos;
+            // Default del empleado si es dueño del código
+            if (empPos && owners.some((p: any) => p.positionName === empPos)) return empPos;
+            if (activePosition && owners.some((p: any) => p.positionName === activePosition)) return activePosition;
+            return owners[0].positionName;
+        };
+
+        const shiftDefFor = (posName: string, code: string) => {
+            const upper = String(code || '').toUpperCase();
+            const pos = (positionStructure || []).find((p: any) => p.positionName === posName);
+            return (pos?.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === upper) || null;
+        };
+
+        const collectCodeCounts = (dateStr: string, posName: string, changes: Record<string, any>) => {
+            const dominant = (positionStructure || []).reduce(
+                (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
+                positionStructure[0] || { qty: 1, positionName: 'General' },
+            );
+            const codeCounts: Record<string, number> = {};
+            const assigned: { code: string; hours: number }[] = [];
+            displayedEmployees.forEach((emp: any) => {
+                const key = `${emp.id}_${dateStr}`;
+                const absence = absencesMap[key];
+                if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
+                const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : shiftsMap[key];
+                if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
+                const code = String(shift.code || '').toUpperCase();
+                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                const shiftPos = shift.positionName || dominant?.positionName || 'General';
+                if (shiftPos !== posName) return;
+                codeCounts[code] = (codeCounts[code] || 0) + 1;
+                const hours = Number(shift.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
+                assigned.push({ code, hours });
+            });
+            return { codeCounts, assigned };
+        };
+
+        const isCoverageBlocked = (dateStr: string, posName: string, code: string, hours: number, changes: Record<string, any>) => {
+            if (!isPlanningWorkShiftCode(code)) return false;
+            const posCfg = (positionStructure || []).find((p: any) => p.positionName === posName) || positionStructure[0];
+            if (!posCfg) return false;
+            const dayLetter = getDayLetter(dateStr);
+            if (!isPosActiveOnDay(posCfg, dayLetter)) return true;
+            if (isPosExcludedOnDate(posCfg, dateStr)) return true;
+            const shiftRow = (posCfg.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === String(code).toUpperCase());
+            if (Array.isArray(shiftRow?.days) && shiftRow.days.length > 0 && !shiftRow.days.includes(dayLetter)) return true;
+
+            const pax = Math.max(1, Number(posCfg.qty) || 1);
+            const { codeCounts, assigned } = collectCodeCounts(dateStr, posName, changes);
+            const units = countPositionClosedUnitsFromShifts(
+                posCfg,
+                dayLetter,
+                codeCounts,
+                cyclesForBulk,
+                true,
+            );
+            if (units.required > 0 && units.closed >= units.required) return true;
+
+            const upper = String(code || '').toUpperCase();
+            const is8h = (Number(hours) || 8) <= 10;
+            const assigned8h = assigned.filter(a => a.hours <= 10);
+            const assigned12h = assigned.filter(a => a.hours > 10);
+            const posShifts = posCfg.shifts || [];
+            const shifts8h = posShifts.filter((s: any) => (Number(s.hours) || 8) <= 10);
+            const shifts12h = posShifts.filter((s: any) => (Number(s.hours) || 8) > 10);
+            const maxSlots = shifts8h.length * pax + shifts12h.length * pax;
+
+            if (pax === 1) {
+                if (assigned8h.length > 0 && assigned12h.length > 0) return true;
+                if (assigned8h.length > 0 && !is8h) return true;
+                if (assigned12h.length > 0 && is8h) return true;
+                if (assigned.filter(a => a.code === upper).length >= 1) return true;
+            } else {
+                if (assigned8h.length > 0 && !is8h) return true;
+                if (assigned12h.length > 0 && is8h) return true;
+                if ((codeCounts[upper] || 0) >= pax) return true;
+                if (assigned.length >= maxSlots && maxSlots > 0) return true;
+            }
+            return false;
+        };
+
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp) continue;
+            for (let c = minC; c <= maxC; c++) {
+                const day = daysInMonth[c];
+                const key = `${emp.id}_${getDateKey(day)}`;
+                const existing = shiftsMap[key];
+                if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig && shiftConfig.code !== 'F') {
+                    francosReplaced++;
+                }
+            }
+        }
         let markAsFT = false;
-        if (francosReplaced > 0) { if(confirm(`⚠️ Estás sobrescribiendo ${francosReplaced} Francos.\n¿Deseas marcarlos como FT?`)) { markAsFT = true; } }
+        if (francosReplaced > 0) {
+            if (confirm(`⚠️ Estás sobrescribiendo ${francosReplaced} Francos.\n¿Deseas marcarlos como FT?`)) {
+                markAsFT = true;
+            }
+        }
         const blockedEmps = new Set<string>();
-        for (let r = minR; r <= maxR; r++) { const emp = displayedEmployees[r]; if (!emp) continue; const empPos = getEmpPos(emp); for (let c = minC; c <= maxC; c++) { const day = daysInMonth[c]; const dateStr = getDateKey(day); const key = `${emp.id}_${dateStr}`; const existing = shiftsMap[key]; if (isShiftConsolidated(existing)) continue; if (shiftConfig === null) { newChanges[key] = { isDeleted: true }; count++; } else { const assignPos = shiftConfig.positionName || empPos; const posCfg = positionStructure.find((p: any) => p.positionName === assignPos); if (isPosExcludedOnDate(posCfg, dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) { skippedExcluded++; continue; } const { blocked, warnings } = checkRestricciones(emp, dateStr, assignPos, shiftConfig.code); if (blocked) { blockedEmps.add(emp.name); continue; } if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 })); let cellIsFT = false; if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { cellIsFT = markAsFT; } newChanges[key] = { ...shiftConfig, isTemp: true, oldObjectiveId: existing?.objectiveId, isFrancoTrabajado: cellIsFT, positionName: assignPos }; count++; } } }
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp) continue;
+            for (let c = minC; c <= maxC; c++) {
+                const day = daysInMonth[c];
+                const dateStr = getDateKey(day);
+                const key = `${emp.id}_${dateStr}`;
+                const existing = shiftsMap[key];
+                if (isShiftConsolidated(existing)) continue;
+                if (shiftConfig === null) {
+                    newChanges[key] = { isDeleted: true };
+                    count++;
+                    continue;
+                }
+                const codeUpper = String(shiftConfig.code || '').toUpperCase();
+                const assignPos = resolveAssignPos(emp, codeUpper, shiftConfig.positionName || null);
+                const posCfg = positionStructure.find((p: any) => p.positionName === assignPos);
+                if (isPosExcludedOnDate(posCfg, dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) {
+                    skippedExcluded++;
+                    continue;
+                }
+                const def = shiftDefFor(assignPos, codeUpper);
+                const hours = Number(def?.hours ?? shiftConfig.hours) || SHIFT_HOURS_LOOKUP[codeUpper] || 8;
+                if (isCoverageBlocked(dateStr, assignPos, codeUpper, hours, newChanges)) {
+                    skippedCoverage++;
+                    continue;
+                }
+                const { blocked, warnings } = checkRestricciones(emp, dateStr, assignPos, shiftConfig.code);
+                if (blocked) {
+                    blockedEmps.add(emp.name);
+                    continue;
+                }
+                if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 }));
+                let cellIsFT = false;
+                if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') {
+                    cellIsFT = markAsFT;
+                }
+                newChanges[key] = {
+                    code: def?.code || shiftConfig.code,
+                    name: def?.name || shiftConfig.name,
+                    hours,
+                    startTime: def?.startTime || shiftConfig.startTime,
+                    endTime: def?.endTime || shiftConfig.endTime,
+                    isTemp: true,
+                    oldObjectiveId: existing?.objectiveId,
+                    isFrancoTrabajado: cellIsFT,
+                    positionName: assignPos,
+                };
+                count++;
+            }
+        }
         if (blockedEmps.size > 0) toast.error(`🚫 Bloqueados (objetivo excluido): ${[...blockedEmps].join(', ')}`, { duration: 10000 });
         if (skippedExcluded > 0) toast.warning(`${skippedExcluded} celda(s) omitida(s): puesto excluido por SLA ese día`, { duration: 8000 });
+        if (skippedCoverage > 0) toast.warning(`${skippedCoverage} celda(s) omitida(s): cobertura SLA ya completa o cupo del turno lleno`, { duration: 9000 });
         setPendingChanges(newChanges);
-        toast.info(`${count} celdas`);
+        if (count > 0) {
+            const codeLabel = shiftConfig ? String(shiftConfig.code || '').toUpperCase() : 'BORRAR';
+            const samplePos = shiftConfig
+                ? (() => {
+                    // Mostrar el puesto realmente usado si es único en el lote
+                    return shiftConfig.positionName || '';
+                })()
+                : '';
+            toast.info(shiftConfig
+                ? `${count} celda(s) · ${codeLabel}${samplePos ? ` → ${samplePos}` : ''}`
+                : `${count} celda(s) marcadas para borrar`);
+        } else if (skippedCoverage > 0 || skippedExcluded > 0) {
+            toast.info('Ninguna celda aplicada');
+        } else {
+            toast.info(`${count} celdas`);
+        }
+    };
+
+    /** Completa la selección forzando un puesto SLA (elige banda por emp / primer turno del puesto). */
+    const applyBulkPositionFill = (posName: string) => {
+        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (!selection.start || !selection.end) return;
+        const pos = (positionStructure || []).find((p: any) => p.positionName === posName);
+        const shifts = (pos?.shifts || []) as any[];
+        if (!pos || shifts.length === 0) {
+            toast.error(`El puesto "${posName}" no tiene turnos en el SLA`);
+            return;
+        }
+        const minR = Math.min(selection.start.r, selection.end.r);
+        const maxR = Math.max(selection.start.r, selection.end.r);
+        const minC = Math.min(selection.start.c, selection.end.c);
+        const maxC = Math.max(selection.start.c, selection.end.c);
+        const startDay = daysInMonth[minC];
+        if (isPlanningDateLocked(getDateKey(startDay))) {
+            toast.warning('Periodo cerrado — no se puede completar puestos laborales en masa.');
+            return;
+        }
+
+        const pickShiftForEmp = (emp: any) => {
+            const pref = String(empDefaultShift[`${emp.id}___${selectedObjective}`] || '').toUpperCase();
+            if (pref && shifts.some((s: any) => String(s.code || '').toUpperCase() === pref)) {
+                return shifts.find((s: any) => String(s.code || '').toUpperCase() === pref);
+            }
+            for (const prefer of ['M', 'T', 'N', 'D12', 'N12', 'MA']) {
+                const hit = shifts.find((s: any) => String(s.code || '').toUpperCase() === prefer);
+                if (hit) return hit;
+            }
+            return shifts[0];
+        };
+
+        // Reutilizar applyBulkChange agrupando por código elegido (misma cobertura / reglas)
+        const byCode = new Map<string, { empIds: Set<string>; shift: any }>();
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp) continue;
+            const sh = pickShiftForEmp(emp);
+            if (!sh) continue;
+            const ck = String(sh.code || '').toUpperCase();
+            if (!byCode.has(ck)) byCode.set(ck, { empIds: new Set(), shift: sh });
+            byCode.get(ck)!.empIds.add(emp.id);
+        }
+
+        if (byCode.size === 1) {
+            const only = [...byCode.values()][0];
+            applyBulkChange({
+                code: only.shift.code,
+                name: only.shift.name,
+                hours: only.shift.hours,
+                startTime: only.shift.startTime,
+                endTime: only.shift.endTime,
+                positionName: posName,
+            });
+            return;
+        }
+
+        // Varios códigos: aplicar en un solo pase forzado al puesto
+        const newChanges = { ...pendingChanges };
+        let count = 0;
+        let skippedCoverage = 0;
+        let skippedExcluded = 0;
+        const cyclesForBulk = autoSelectedCyclesRef.current?.length
+            ? autoSelectedCyclesRef.current
+            : autoCycles;
+        const dominant = (positionStructure || []).reduce(
+            (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
+            positionStructure[0] || { qty: 1, positionName: 'General' },
+        );
+
+        const collectCodeCounts = (dateStr: string, changes: Record<string, any>) => {
+            const codeCounts: Record<string, number> = {};
+            const assigned: { code: string; hours: number }[] = [];
+            displayedEmployees.forEach((emp: any) => {
+                const key = `${emp.id}_${dateStr}`;
+                const absence = absencesMap[key];
+                if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
+                const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : shiftsMap[key];
+                if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
+                const code = String(shift.code || '').toUpperCase();
+                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                const shiftPos = shift.positionName || dominant?.positionName || 'General';
+                if (shiftPos !== posName) return;
+                codeCounts[code] = (codeCounts[code] || 0) + 1;
+                assigned.push({ code, hours: Number(shift.hours) || SHIFT_HOURS_LOOKUP[code] || 8 });
+            });
+            return { codeCounts, assigned };
+        };
+
+        const isBlocked = (dateStr: string, code: string, hours: number, changes: Record<string, any>) => {
+            if (!isPlanningWorkShiftCode(code)) return false;
+            const dayLetter = getDayLetter(dateStr);
+            if (!isPosActiveOnDay(pos, dayLetter)) return true;
+            if (isPosExcludedOnDate(pos, dateStr)) return true;
+            const pax = Math.max(1, Number(pos.qty) || 1);
+            const { codeCounts, assigned } = collectCodeCounts(dateStr, changes);
+            const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForBulk, true);
+            if (units.required > 0 && units.closed >= units.required) return true;
+            const upper = String(code).toUpperCase();
+            const is8h = (Number(hours) || 8) <= 10;
+            const a8 = assigned.filter(a => a.hours <= 10);
+            const a12 = assigned.filter(a => a.hours > 10);
+            if (pax === 1) {
+                if (a8.length > 0 && a12.length > 0) return true;
+                if (a8.length > 0 && !is8h) return true;
+                if (a12.length > 0 && is8h) return true;
+                if (assigned.filter(a => a.code === upper).length >= 1) return true;
+            } else {
+                if (a8.length > 0 && !is8h) return true;
+                if (a12.length > 0 && is8h) return true;
+                if ((codeCounts[upper] || 0) >= pax) return true;
+            }
+            return false;
+        };
+
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp) continue;
+            const sh = pickShiftForEmp(emp);
+            if (!sh) continue;
+            for (let c = minC; c <= maxC; c++) {
+                const dateStr = getDateKey(daysInMonth[c]);
+                const key = `${emp.id}_${dateStr}`;
+                const existing = shiftsMap[key];
+                if (isShiftConsolidated(existing)) continue;
+                if (isPosExcludedOnDate(pos, dateStr)) { skippedExcluded++; continue; }
+                const hours = Number(sh.hours) || SHIFT_HOURS_LOOKUP[String(sh.code || '').toUpperCase()] || 8;
+                if (isBlocked(dateStr, String(sh.code || ''), hours, newChanges)) { skippedCoverage++; continue; }
+                const { blocked, warnings } = checkRestricciones(emp, dateStr, posName, sh.code);
+                if (blocked) continue;
+                if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 }));
+                newChanges[key] = {
+                    code: sh.code,
+                    name: sh.name,
+                    hours,
+                    startTime: sh.startTime,
+                    endTime: sh.endTime,
+                    isTemp: true,
+                    oldObjectiveId: existing?.objectiveId,
+                    positionName: posName,
+                };
+                count++;
+            }
+        }
+        setPendingChanges(newChanges);
+        if (skippedCoverage > 0) toast.warning(`${skippedCoverage} celda(s) omitida(s): cobertura completa`, { duration: 8000 });
+        if (skippedExcluded > 0) toast.warning(`${skippedExcluded} celda(s) omitida(s): día excluido`, { duration: 8000 });
+        toast.info(count > 0 ? `${count} celda(s) · puesto ${posName}` : 'Ninguna celda aplicada');
     };
 
     const checkRestricciones = (emp: any, dateStr: string, positionName?: string | null, shiftCode?: string | null): { blocked: boolean; warnings: string[] } => {
@@ -7570,7 +7928,51 @@ export default function PlanificacionPage() {
                         ) : (
                             <>
                                 <span className="text-[10px] font-bold px-2 text-slate-300 uppercase tracking-wider">Asignar:</span>
-                                {bulkShifts.map((s: any) => ( <button key={s.code} onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime })} disabled={isServiceLocked} className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle(s.code)}`}>{s.code}</button>))}
+                                {positionStructure.length > 0 && (
+                                    <>
+                                        {positionStructure.map((p: any) => (
+                                            <button
+                                                key={`bulkpos_${p.positionName}`}
+                                                type="button"
+                                                onClick={() => applyBulkPositionFill(p.positionName)}
+                                                disabled={isServiceLocked}
+                                                title={`Completar selección con puesto ${p.positionName} (${p.qty || 1} pax)`}
+                                                className="px-2 h-8 rounded-lg font-black text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 max-w-[72px] truncate"
+                                            >
+                                                {abbrevPlanningPositionName(p.positionName, 5)}
+                                            </button>
+                                        ))}
+                                        <div className="h-6 w-px bg-slate-600 mx-0.5" />
+                                    </>
+                                )}
+                                {bulkShifts.map((s: any) => (
+                                    <button
+                                        key={`${String(s.code || '').toUpperCase()}_${s.positionName || 'any'}`}
+                                        onClick={() => applyBulkChange({
+                                            code: s.code,
+                                            name: s.name,
+                                            hours: s.hours,
+                                            startTime: s.startTime,
+                                            endTime: s.endTime,
+                                            positionName: s.positionName || undefined,
+                                        })}
+                                        disabled={isServiceLocked}
+                                        title={s.positionName
+                                            ? `${s.code} · puesto ${s.positionName}`
+                                            : `${s.code} · se asigna al puesto dueño del turno en el SLA`}
+                                        className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle(s.code)}`}
+                                    >
+                                        {s.code}
+                                    </button>
+                                ))}
+                                <button
+                                    onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' })}
+                                    disabled={isServiceLocked}
+                                    title="Retén — guardia disponible sin turno asignado (no suma cobertura SLA)"
+                                    className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle('RET') || 'bg-amber-100 text-amber-800 border border-amber-300'}`}
+                                >
+                                    RET
+                                </button>
                                 <button onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' })} disabled={isServiceLocked} className="w-8 h-8 rounded-lg bg-green-500 text-white font-black text-xs border border-green-600">F</button>
                                 <div className="h-6 w-px bg-slate-600 mx-1"></div>
                                 <button onClick={handleCopySelection} title="Copiar selección (Ctrl+C)" className="p-2 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-indigo-200 hover:text-white transition-colors flex items-center gap-1">
