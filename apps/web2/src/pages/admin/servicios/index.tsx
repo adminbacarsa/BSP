@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
-import { slaService, ServiceSLA, ServicePosition, ShiftVariant } from '@/services/slaService'; 
+import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -142,6 +142,13 @@ export default function ServiciosSLAPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [externalChange, setExternalChange] = useState(false);
+
+  // Historial de horarios
+  const [showHorarioForm, setShowHorarioForm] = useState(false);
+  const [horarioFormDesde, setHorarioFormDesde] = useState('');
+  const [horarioFormAnchorM, setHorarioFormAnchorM] = useState('07:00');
+  const [horarioFormAnchorD12, setHorarioFormAnchorD12] = useState('07:00');
+  const [savingHorario, setSavingHorario] = useState(false);
   const [showExcludedDatesPicker, setShowExcludedDatesPicker] = useState(false);
   const [excludedDatesScope, setExcludedDatesScope] = useState<'ALL' | string>('ALL');
   const savedSelfRef = useRef(false); // evita falsos positivos por nuestros propios guardados
@@ -494,6 +501,113 @@ export default function ServiciosSLAPage() {
       setPositionForm(prev => ({ ...prev, allowedShiftTypes: prev.allowedShiftTypes.filter(v => v.code !== code) }));
       if (editingShiftCode === code) cancelEditShift();
   };
+
+  // ── Historial de horarios ────────────────────────────────────────────────────
+
+  /** Deriva bandas M/T/N/D12/N12 a partir de dos anclas horarias. */
+  const buildBandasFromAnchors = (anchorM: string, anchorD12: string): HorarioVersion['bandas'] => {
+    const variants = rebuild24hsVariants(anchorM, anchorD12);
+    const result: HorarioVersion['bandas'] = {};
+    for (const v of variants) result[v.code] = { startTime: v.startTime, endTime: v.endTime, hours: v.hours };
+    return result;
+  };
+
+  /** Actualiza startTime/endTime en turnos del objetivo a partir de `desde`. */
+  const actualizarTurnosHorario = async (
+    objectiveId: string,
+    desde: string,
+    bandas: HorarioVersion['bandas'],
+  ): Promise<number> => {
+    const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'REF', 'ESC', 'FT']);
+    const desdeDate = new Date(desde + 'T00:00:00');
+    const snap = await getDocs(
+      query(
+        collection(db, 'turnos'),
+        where('objectiveId', '==', objectiveId),
+        where('startTime', '>=', Timestamp.fromDate(desdeDate)),
+      ),
+    );
+
+    const ops: Array<{ ref: ReturnType<typeof doc>; start: ReturnType<typeof Timestamp.fromDate>; end: ReturnType<typeof Timestamp.fromDate> }> = [];
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      const code = String(data.code || '').toUpperCase();
+      const banda = bandas[code];
+      if (!WORK_CODES.has(code) || !banda) continue;
+
+      const turnoDt: Date = data.startTime?.toDate?.();
+      if (!turnoDt) continue;
+
+      const [sh, sm] = banda.startTime.split(':').map(Number);
+      const start = new Date(turnoDt.getFullYear(), turnoDt.getMonth(), turnoDt.getDate());
+      start.setHours(sh, sm, 0, 0);
+
+      const [eh, em] = banda.endTime.split(':').map(Number);
+      const end = new Date(start);
+      end.setHours(eh, em, 0, 0);
+      if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
+
+      ops.push({ ref: docSnap.ref as ReturnType<typeof doc>, start: Timestamp.fromDate(start), end: Timestamp.fromDate(end) });
+    }
+
+    // Batch en chunks de 400 (límite Firestore = 500)
+    const CHUNK = 400;
+    for (let i = 0; i < ops.length; i += CHUNK) {
+      const batch = writeBatch(db);
+      for (const op of ops.slice(i, i + CHUNK)) batch.update(op.ref, { startTime: op.start, endTime: op.end });
+      await batch.commit();
+    }
+    return ops.length;
+  };
+
+  const handleApplyHorarioVersion = async () => {
+    if (!form.id || !horarioFormDesde) { addToast('Ingresá la fecha de inicio del cambio', 'error'); return; }
+    const bandas = buildBandasFromAnchors(horarioFormAnchorM, horarioFormAnchorD12);
+
+    const newVersiones: HorarioVersion[] = [
+      ...(form.horarioVersiones || []).filter(v => v.desde !== horarioFormDesde),
+      { desde: horarioFormDesde, bandas },
+    ].sort((a, b) => a.desde.localeCompare(b.desde));
+
+    // Actualizar allowedShiftTypes en todas las posiciones con el nuevo horario
+    const newPositions = form.positions.map(pos => ({
+      ...pos,
+      allowedShiftTypes: pos.allowedShiftTypes.map(sh => {
+        const b = bandas[sh.code.toUpperCase()];
+        return b ? { ...sh, startTime: b.startTime, endTime: b.endTime, hours: b.hours } : sh;
+      }),
+    }));
+
+    try {
+      setSavingHorario(true);
+      await slaService.update(form.id, {
+        horarioVersiones: JSON.parse(JSON.stringify(newVersiones)),
+        positions: JSON.parse(JSON.stringify(newPositions)),
+      } as Partial<ServiceSLA>, { empresaId, migracionCompleta });
+
+      const count = await actualizarTurnosHorario(form.objectiveId, horarioFormDesde, bandas);
+      setForm(prev => ({ ...prev, horarioVersiones: newVersiones, positions: newPositions }));
+      addToast(`Horario actualizado · ${count} turno(s) reprogramado(s)`, 'success');
+      setShowHorarioForm(false);
+    } catch (e) {
+      addToast('Error al actualizar horario', 'error');
+      console.error(e);
+    } finally {
+      setSavingHorario(false);
+    }
+  };
+
+  const openHorarioForm = () => {
+    // Pre-cargar con el horario actual del primer puesto con M
+    const mShift = form.positions.flatMap(p => p.allowedShiftTypes).find(s => s.code === 'M');
+    const d12Shift = form.positions.flatMap(p => p.allowedShiftTypes).find(s => s.code === 'D12');
+    setHorarioFormAnchorM(mShift?.startTime?.slice(0, 5) || '07:00');
+    setHorarioFormAnchorD12(d12Shift?.startTime?.slice(0, 5) || '07:00');
+    setHorarioFormDesde('');
+    setShowHorarioForm(true);
+  };
+
+  // ── Fin historial de horarios ─────────────────────────────────────────────────
 
   const handleSavePosition = () => {
       if (!positionForm.name) return addToast('Nombre requerido', 'error');
@@ -1875,6 +1989,114 @@ export default function ServiciosSLAPage() {
                   </div>
                </div>
             </div>
+            {/* ── Historial de horarios (solo al editar un contrato existente) ── */}
+            {isEditing && form.id && (
+              <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2">
+                    <Clock size={16} className="text-indigo-500"/> Historial de Horarios
+                  </h3>
+                  {!showHorarioForm && (
+                    <button
+                      onClick={openHorarioForm}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase flex items-center gap-1 shadow-md transition-colors"
+                    >
+                      <Plus size={11}/> Cambiar desde fecha
+                    </button>
+                  )}
+                </div>
+
+                {/* Timeline de versiones */}
+                {(!form.horarioVersiones || form.horarioVersiones.length === 0) ? (
+                  <p className="text-[10px] text-slate-400">
+                    Sin cambios de horario registrados — el horario base es el definido en cada puesto.
+                  </p>
+                ) : (
+                  <div className="space-y-1 mb-4">
+                    {[...form.horarioVersiones]
+                      .sort((a, b) => a.desde.localeCompare(b.desde))
+                      .map((v, i) => (
+                        <div key={i} className="flex items-start gap-3 text-[10px]">
+                          <span className="font-black text-indigo-600 dark:text-indigo-400 w-24 shrink-0">Desde {v.desde}</span>
+                          <span className="text-slate-600 dark:text-slate-400">
+                            {(['M','T','N','D12','N12'] as const)
+                              .filter(c => v.bandas[c])
+                              .map(c => `${c} ${v.bandas[c].startTime}–${v.bandas[c].endTime}`)
+                              .join(' · ')}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
+                {/* Formulario inline para nueva versión */}
+                {showHorarioForm && (() => {
+                  const preview = buildBandasFromAnchors(horarioFormAnchorM, horarioFormAnchorD12);
+                  return (
+                    <div className="mt-4 bg-white dark:bg-slate-800 p-5 rounded-xl border dark:border-slate-700 space-y-4">
+                      <p className="text-[10px] font-black uppercase text-slate-400">Nuevo cambio de horario</p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Desde (fecha)</label>
+                          <input
+                            type="date"
+                            value={horarioFormDesde}
+                            onChange={e => setHorarioFormDesde(e.target.value)}
+                            className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Inicio M → T → N</label>
+                          <input
+                            type="time"
+                            value={horarioFormAnchorM}
+                            onChange={e => setHorarioFormAnchorM(e.target.value)}
+                            className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Inicio D12 → N12</label>
+                          <input
+                            type="time"
+                            value={horarioFormAnchorD12}
+                            onChange={e => setHorarioFormAnchorD12(e.target.value)}
+                            className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Preview */}
+                      <div className="flex flex-wrap gap-2">
+                        {(['M','T','N','D12','N12'] as const).filter(c => preview[c]).map(c => (
+                          <span key={c} className="text-[10px] font-black bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                            {c} {preview[c].startTime} – {preview[c].endTime} · {preview[c].hours}h
+                          </span>
+                        ))}
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
+                        <button
+                          onClick={() => setShowHorarioForm(false)}
+                          className="flex-1 py-2 bg-slate-100 dark:bg-slate-700 text-slate-500 font-bold rounded-xl text-xs uppercase hover:bg-slate-200 transition-colors"
+                        >Cancelar</button>
+                        <button
+                          onClick={handleApplyHorarioVersion}
+                          disabled={savingHorario || !horarioFormDesde}
+                          className="flex-1 py-2 bg-indigo-600 text-white font-black rounded-xl text-xs uppercase shadow-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                        >
+                          {savingHorario ? 'Aplicando…' : 'Aplicar cambio'}
+                        </button>
+                      </div>
+                      <p className="text-[9px] text-slate-400">
+                        Al confirmar: se actualiza el SLA y se reprograman todos los turnos existentes de este objetivo a partir de la fecha indicada.
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             <div className="mt-8 flex justify-end gap-4 border-t dark:border-slate-700 pt-6"><button onClick={() => setView('list')} className="text-slate-400 font-bold uppercase text-xs hover:text-slate-600 transition-colors">Cancelar</button><button onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-sm transition-transform active:scale-95"><Save size={16} className="mr-2 inline"/> Guardar</button></div>
             </div>
           </div>

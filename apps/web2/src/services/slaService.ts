@@ -28,6 +28,14 @@ export interface ServicePosition {
   preferenciaGenero?: 'M' | 'F' | 'INDISTINTO';
 }
 
+/** Una versión del horario de bandas vigente a partir de `desde`. */
+export interface HorarioVersion {
+  /** Fecha de inicio de esta versión (YYYY-MM-DD). */
+  desde: string;
+  /** Horario por código de banda: M, T, N, D12, N12. */
+  bandas: Record<string, { startTime: string; endTime: string; hours: number }>;
+}
+
 // Definición de Contrato de Servicio (SLA)
 export interface ServiceSLA {
   id?: string;
@@ -41,6 +49,26 @@ export interface ServiceSLA {
   totalMonthlyHours: number;
   status: 'active' | 'inactive' | 'expired';
   excludedDates?: string[];  // YYYY-MM-DD: días sin servicio dentro del período del contrato
+  /** Historial de cambios de horario. Cada entrada reemplaza el horario de bandas desde su fecha. */
+  horarioVersiones?: HorarioVersion[];
+}
+
+/**
+ * Devuelve el horario de bandas activo para una fecha dada.
+ * Si no hay versiones, devuelve null (usar los allowedShiftTypes de las posiciones).
+ */
+export function getHorarioActivoParaFecha(
+  sla: ServiceSLA,
+  fecha: string,
+): Record<string, { startTime: string; endTime: string; hours: number }> | null {
+  if (!sla.horarioVersiones?.length) return null;
+  const sorted = [...sla.horarioVersiones].sort((a, b) => a.desde.localeCompare(b.desde));
+  let active: HorarioVersion['bandas'] | null = null;
+  for (const v of sorted) {
+    if (v.desde <= fecha) active = v.bandas;
+    else break;
+  }
+  return active;
 }
 
 export const slaService = {
