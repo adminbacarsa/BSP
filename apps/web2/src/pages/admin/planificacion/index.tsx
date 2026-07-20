@@ -2300,6 +2300,50 @@ export default function PlanificacionPage() {
         );
     }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
 
+    // Diagnóstico de cobertura agregado para la vista de grupo unificado
+    const grupoGapReport = useMemo(() => {
+        if (!selectedGrupo || !grupoUnifiedMode || Object.keys(grupoSlaMap).length === 0) return null;
+        let daysFull = 0, daysPartial = 0, daysEmpty = 0;
+        const worstDays: { dateStr: string; closedPax: number; requiredPax: number }[] = [];
+        for (const day of daysInMonth) {
+            const dateStr = getDateKey(day);
+            const dayLetter = getDayLetter(dateStr);
+            let requiredPax = 0, closedPax = 0;
+            for (const objId of selectedGrupo.objectiveIds) {
+                const structure = grupoSlaMap[objId] || [];
+                const objEmps = dotacionBaseEmployees.filter((e: any) =>
+                    e.preferredObjectiveId === objId || slaIdToObjId[e.preferredObjectiveId] === objId,
+                );
+                for (const pos of structure) {
+                    if (!isPosActiveOnDay(pos, dayLetter)) continue;
+                    if (isPosExcludedOnDate(pos, dateStr)) continue;
+                    const codeCounts: Record<string, number> = {};
+                    objEmps.forEach((emp: any) => {
+                        const key = `${emp.id}_${dateStr}`;
+                        const absence = absencesMap[key];
+                        if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
+                        const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
+                        if (!shift) return;
+                        if (!(shift.objectiveId === objId || !!pendingChanges[key])) return;
+                        const code = String(shift.code || '').toUpperCase();
+                        if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                        const shiftPos = shift.positionName || pos.positionName || 'General';
+                        if (shiftPos !== pos.positionName) return;
+                        codeCounts[code] = (codeCounts[code] || 0) + 1;
+                    });
+                    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts);
+                    requiredPax += units.required;
+                    closedPax += units.closed;
+                }
+            }
+            if (requiredPax === 0) continue;
+            if (closedPax >= requiredPax) { daysFull++; }
+            else if (closedPax > 0) { daysPartial++; worstDays.push({ dateStr, closedPax, requiredPax }); }
+            else { daysEmpty++; worstDays.push({ dateStr, closedPax, requiredPax }); }
+        }
+        return { daysFull, daysPartial, daysEmpty, worstDays };
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, slaIdToObjId]);
+
     const buildDayCoverageReport = (dateStr: string) => {
         if (!positionStructure?.length) return null;
         const dayLetter = getDayLetter(dateStr);
@@ -7847,7 +7891,10 @@ export default function PlanificacionPage() {
                             )}
 
                             {/* DIAGNÓSTICO DE COBERTURA — qué falta por objetivo/mes */}
-                            {selectedObjective && !isServiceLocked && objectiveCoverageGapReport && (
+                            {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
+                                const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
+                                const _ok = _rpt.worstDays.length === 0;
+                                return (
                                 <div className="relative hidden md:block">
                                     <button
                                         ref={coverageDiagnosticBtnRef}
@@ -7860,24 +7907,23 @@ export default function PlanificacionPage() {
                                             }
                                         }}
                                         className={`flex px-3 py-1.5 border rounded-xl items-center gap-2 animate-in fade-in shadow-sm transition-colors ${
-                                            objectiveCoverageGapReport.worstDays.length === 0
-                                                ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300'
-                                                : 'bg-rose-50 border-rose-200 hover:border-rose-300'
+                                            _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
                                         }`}
                                     >
-                                        <ShieldCheck size={14} className={objectiveCoverageGapReport.worstDays.length === 0 ? 'text-emerald-500' : 'text-rose-500 shrink-0'}/>
+                                        <ShieldCheck size={14} className={_ok ? 'text-emerald-500' : 'text-rose-500 shrink-0'}/>
                                         <div className="flex flex-col leading-none">
                                             <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Diagnóstico Cobertura</span>
                                             <span className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                                                <span className="text-emerald-600 font-black">{objectiveCoverageGapReport.daysFull} días OK</span>
+                                                <span className="text-emerald-600 font-black">{_rpt.daysFull} días OK</span>
                                                 <span className="text-slate-300">|</span>
-                                                <span className="text-rose-600 font-black">{objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty} con huecos</span>
+                                                <span className="text-rose-600 font-black">{_rpt.daysPartial + _rpt.daysEmpty} con huecos</span>
                                             </span>
                                         </div>
                                         <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
                                     </button>
                                 </div>
-                            )}
+                                );
+                            })()}
 
                             {selectedObjective && (() => {
                                 const publishLookupKey = planificacionPublishLookupKey(
@@ -12659,29 +12705,62 @@ export default function PlanificacionPage() {
                     >
                         <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Estructura del Servicio</p>
                         <div className="space-y-1.5">
-                            {positionStructure.map((pos, i) => (
-                                <div key={i} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-[10px] font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5 flex-wrap">
-                                            <span>{pos.positionName}</span>
-                                            {renderPositionGeneroBadge(pos.preferenciaGenero)}
-                                        </p>
-                                        <div className="flex flex-wrap gap-1 mt-0.5">
-                                            {(pos.shifts || []).map((sh: any, j: number) => (
-                                                <span key={j} className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-700 font-bold">
-                                                    {sh.code || sh.name}{sh.hours ? ` · ${sh.hours}h` : ''}
-                                                </span>
+                            {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                ? selectedGrupo.objectiveIds.map((objId: string, oi: number) => {
+                                    const struct = grupoSlaMap[objId] || [];
+                                    const clr = GRUPO_COLOR_HEX[oi % GRUPO_COLOR_HEX.length];
+                                    const nm = selectedGrupo.objectiveNames[oi] || objId;
+                                    return (
+                                        <div key={objId} className="mb-2">
+                                            <div className="flex items-center gap-1.5 mb-1 px-0.5">
+                                                <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: clr }}/>
+                                                <span className="text-[9px] font-black uppercase truncate" style={{ color: clr }}>{nm}</span>
+                                            </div>
+                                            {struct.map((pos: any, i: number) => (
+                                                <div key={i} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg mb-1">
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="text-[10px] font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5 flex-wrap">
+                                                            <span>{pos.positionName}</span>
+                                                            {renderPositionGeneroBadge(pos.preferenciaGenero)}
+                                                        </p>
+                                                        <div className="flex flex-wrap gap-1 mt-0.5">
+                                                            {(pos.shifts || []).map((sh: any, j: number) => (
+                                                                <span key={j} className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-700 font-bold">
+                                                                    {sh.code || sh.name}{sh.hours ? ` · ${sh.hours}h` : ''}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-[10px] font-black text-white bg-indigo-600 px-1.5 py-0.5 rounded shrink-0">{pos.qty} pax</span>
+                                                </div>
                                             ))}
                                         </div>
+                                    );
+                                })
+                                : positionStructure.map((pos, i) => (
+                                    <div key={i} className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[10px] font-black text-slate-700 dark:text-slate-200 flex items-center gap-1.5 flex-wrap">
+                                                <span>{pos.positionName}</span>
+                                                {renderPositionGeneroBadge(pos.preferenciaGenero)}
+                                            </p>
+                                            <div className="flex flex-wrap gap-1 mt-0.5">
+                                                {(pos.shifts || []).map((sh: any, j: number) => (
+                                                    <span key={j} className="text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-700 font-bold">
+                                                        {sh.code || sh.name}{sh.hours ? ` · ${sh.hours}h` : ''}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <span className="text-[10px] font-black text-white bg-indigo-600 px-1.5 py-0.5 rounded shrink-0">{pos.qty} pax</span>
                                     </div>
-                                    <span className="text-[10px] font-black text-white bg-indigo-600 px-1.5 py-0.5 rounded shrink-0">{pos.qty} pax</span>
-                                </div>
-                            ))}
+                                ))
+                            }
                         </div>
-                        {slaVendidas > 0 && (
+                        {(selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0 ? grupoTotalVendidas : slaVendidas) > 0 && (
                             <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-600 flex justify-between items-center">
                                 <span className="text-[9px] font-black text-slate-400 uppercase">Hs. Vendidas / mes</span>
-                                <span className="text-base font-black text-teal-600">{slaVendidas}h</span>
+                                <span className="text-base font-black text-teal-600">{selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0 ? grupoTotalVendidas : slaVendidas}h</span>
                             </div>
                         )}
                     </div>
@@ -12689,7 +12768,11 @@ export default function PlanificacionPage() {
                 document.body,
             )}
 
-            {showCoverageDiagnostic && coveragePanelPos && objectiveCoverageGapReport && typeof document !== 'undefined' && createPortal(
+            {showCoverageDiagnostic && coveragePanelPos && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && typeof document !== 'undefined' && createPortal(
+                (() => {
+                    const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
+                    const _isGroup = !!(selectedGrupo && grupoUnifiedMode);
+                    return (
                 <>
                     <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setShowCoverageDiagnostic(false)} />
                     <div
@@ -12700,25 +12783,25 @@ export default function PlanificacionPage() {
                         <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Qué falta para cerrar el SLA</p>
                         <div className="grid grid-cols-3 gap-2 mb-3">
                             <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-100">
-                                <div className="text-lg font-black text-emerald-700">{objectiveCoverageGapReport.daysFull}</div>
+                                <div className="text-lg font-black text-emerald-700">{_rpt.daysFull}</div>
                                 <div className="text-[8px] font-bold text-emerald-600 uppercase">Días 100%</div>
                             </div>
                             <div className="bg-amber-50 rounded-lg p-2 text-center border border-amber-100">
-                                <div className="text-lg font-black text-amber-700">{objectiveCoverageGapReport.daysPartial}</div>
+                                <div className="text-lg font-black text-amber-700">{_rpt.daysPartial}</div>
                                 <div className="text-[8px] font-bold text-amber-600 uppercase">Parcial</div>
                             </div>
                             <div className="bg-rose-50 rounded-lg p-2 text-center border border-rose-100">
-                                <div className="text-lg font-black text-rose-700">{objectiveCoverageGapReport.daysEmpty}</div>
+                                <div className="text-lg font-black text-rose-700">{_rpt.daysEmpty}</div>
                                 <div className="text-[8px] font-bold text-rose-600 uppercase">Sin cerrar</div>
                             </div>
                         </div>
-                        {Object.keys(objectiveCoverageGapReport.aggregateMissingPrimary).length > 0 && (
+                        {!_isGroup && (objectiveCoverageGapReport as any)?.aggregateMissingPrimary && Object.keys((objectiveCoverageGapReport as any).aggregateMissingPrimary).length > 0 && (
                             <div className="mb-3">
                                 <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Bandas faltantes en el mes (esquema M+T+N)</p>
                                 <div className="flex flex-wrap gap-1">
-                                    {Object.entries(objectiveCoverageGapReport.aggregateMissingPrimary)
-                                        .sort((a, b) => b[1] - a[1])
-                                        .map(([code, n]) => (
+                                    {Object.entries((objectiveCoverageGapReport as any).aggregateMissingPrimary)
+                                        .sort((a: any, b: any) => b[1] - a[1])
+                                        .map(([code, n]: any) => (
                                             <span key={code} className="text-[9px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded border border-rose-200">
                                                 {n}x{code}
                                             </span>
@@ -12726,24 +12809,23 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
                         )}
-                        {objectiveCoverageGapReport.worstDays.length > 0 && (
+                        {_rpt.worstDays.length > 0 && (
                             <div>
-                                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Peores días (click en pie para detalle)</p>
+                                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Días con huecos</p>
                                 <div className="space-y-1 max-h-[180px] overflow-y-auto">
-                                    {objectiveCoverageGapReport.worstDays.slice(0, 8).map(wd => {
-                                        const dayGaps = objectiveCoverageGapReport.byDay[wd.dateStr]?.positions || [];
+                                    {_rpt.worstDays.slice(0, 8).map((wd: any) => {
+                                        const dayGaps = !_isGroup ? ((objectiveCoverageGapReport as any)?.byDay?.[wd.dateStr]?.positions || []) : [];
                                         return (
                                             <div key={wd.dateStr} className="p-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
                                                 <div className="flex justify-between text-[10px] font-black text-slate-700 dark:text-slate-200 mb-0.5">
                                                     <span>Día {wd.dateStr.slice(8)}</span>
-                                                    <span className="text-rose-600">{wd.closed}/{wd.required}</span>
+                                                    <span className="text-rose-600">{_isGroup ? `${wd.closedPax}/${wd.requiredPax}` : `${wd.closed}/${wd.required}`}</span>
                                                 </div>
-                                                {dayGaps.slice(0, 3).map((g, i) => (
+                                                {dayGaps.slice(0, 3).map((g: any, i: number) => (
                                                     <p key={i} className="text-[9px] text-slate-500 leading-snug">{g.positionName}: {g.summary}</p>
                                                 ))}
                                                 {dayGaps.length > 3 && (
                                                     <p className="text-[8px] text-slate-400">+{dayGaps.length - 3} puestos más</p>
-                                      
                                                 )}
                                             </div>
                                         );
@@ -12752,7 +12834,9 @@ export default function PlanificacionPage() {
                             </div>
                         )}
                     </div>
-                </>,
+                </>
+                    );
+                })(),
                 document.body,
             )}
             {/* ── Modal asignar guardia a RFZ vacante ── */}
