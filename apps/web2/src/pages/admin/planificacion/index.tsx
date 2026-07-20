@@ -7350,14 +7350,32 @@ export default function PlanificacionPage() {
                             ? autoSelectedCyclesRef.current
                             : autoCycles;
                         if (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0) {
-                            // Vista unificada: agregar cobertura de todos los objetivos del grupo
+                            // Vista unificada: agregar cobertura de todos los objetivos del grupo.
+                            // No usamos countPositionClosedUnits porque usa selectedObjective internamente;
+                            // construimos codeCounts por objetivo y llamamos directamente a countPositionClosedUnitsFromShifts.
                             selectedGrupo.objectiveIds.forEach((objId: string) => {
                                 const structure = grupoSlaMap[objId] || [];
                                 const objEmps = dotacionBaseEmployees.filter((e: any) =>
                                     e.preferredObjectiveId === objId || slaIdToObjId[e.preferredObjectiveId] === objId,
                                 );
                                 structure.forEach((pos: any) => {
-                                    const units = countPositionClosedUnits(dateStr, pos, dayLetter, objEmps, pendingChanges, shiftsMap, cyclesForCoverage);
+                                    if (!isPosActiveOnDay(pos, dayLetter)) return;
+                                    if (isPosExcludedOnDate(pos, dateStr)) return;
+                                    const codeCounts: Record<string, number> = {};
+                                    objEmps.forEach((emp: any) => {
+                                        const key = `${emp.id}_${dateStr}`;
+                                        const absence = absencesMap[key];
+                                        if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
+                                        const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
+                                        if (!shift) return;
+                                        if (!(shift.objectiveId === objId || !!pendingChanges[key])) return;
+                                        const code = String(shift.code || '').toUpperCase();
+                                        if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                                        const shiftPos = shift.positionName || pos.positionName || 'General';
+                                        if (shiftPos !== pos.positionName) return;
+                                        codeCounts[code] = (codeCounts[code] || 0) + 1;
+                                    });
+                                    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForCoverage);
                                     requiredPax += units.required;
                                     closedPax += units.closed;
                                 });
@@ -7805,9 +7823,13 @@ export default function PlanificacionPage() {
                                         <div className="flex flex-col leading-none">
                                             <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">Diagnóstico de Estructura</span>
                                             <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1">
-                                                {positionStructure.length} Puestos
+                                                {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                                    ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
+                                                    : positionStructure.length} Puestos
                                                 <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                <span className="text-emerald-600 font-black">{positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0)} Pax</span>
+                                                <span className="text-emerald-600 font-black">{(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                                    ? Object.values(grupoSlaMap).reduce((s, st) => s + st.reduce((a: number, p: any) => a + (Number(p.qty) || 1), 0), 0)
+                                                    : positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0)} Pax</span>
                                                 {genderRestrictedPositionsCount > 0 && (
                                                     <>
                                                         <span className="text-slate-300 dark:text-slate-600">|</span>
