@@ -673,6 +673,7 @@ export default function PlanificacionPage() {
     const [grupoFormObjectiveIds, setGrupoFormObjectiveIds] = useState<string[]>([]);
     const [grupoFormEditId, setGrupoFormEditId] = useState<string | null>(null);
     const [savingGrupo, setSavingGrupo] = useState(false);
+    const [grupoUnifiedMode, setGrupoUnifiedMode] = useState(true);
     const longPressTimer = useRef<any>(null);
     const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>({});
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
@@ -1082,9 +1083,9 @@ export default function PlanificacionPage() {
         const ids = new Set<string>();
         const planYear = currentDate.getFullYear();
         const planMonth = currentDate.getMonth(); // 0-indexed
-        // En modo grupo: aceptar cualquier objetivo del grupo; sino solo el objetivo activo
+        // En modo grupo unificado: aceptar cualquier objetivo del grupo; sino solo el objetivo activo
         const matchesObjective = (objId: string) =>
-            selectedGrupo ? selectedGrupo.objectiveIds.includes(objId) : objId === selectedObjective;
+            (selectedGrupo && grupoUnifiedMode) ? selectedGrupo.objectiveIds.includes(objId) : objId === selectedObjective;
         for (const [key, shift] of Object.entries(shiftsMap) as [string, any][]) {
             if (matchesObjective(shift?.objectiveId) && shift?.employeeId) {
                 const [sy, sm] = key.slice(-10).split('-').map(Number);
@@ -1102,7 +1103,7 @@ export default function PlanificacionPage() {
             }
         }
         return ids;
-    }, [shiftsMap, pendingChanges, selectedObjective, selectedGrupo, currentDate]);
+    }, [shiftsMap, pendingChanges, selectedObjective, selectedGrupo, grupoUnifiedMode, currentDate]);
 
     const selectedObjectiveData = useMemo(() => {
         if (!selectedObjective || !selectedClient) return null;
@@ -1147,15 +1148,15 @@ export default function PlanificacionPage() {
             slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
             activeGuestIdsForObjective.has(e.id)
         ) return true;
-        // En modo grupo: incluir empleados de cualquiera de los objetivos del grupo
-        if (selectedGrupo) {
+        // En modo grupo unificado: incluir empleados de cualquiera de los objetivos del grupo
+        if (selectedGrupo && grupoUnifiedMode) {
             return selectedGrupo.objectiveIds.some(objId =>
                 e.preferredObjectiveId === objId ||
                 slaIdToObjId[e.preferredObjectiveId] === objId,
             );
         }
         return false;
-    }, [selectedObjective, slaIdToObjId, activeGuestIdsForObjective, selectedGrupo]);
+    }, [selectedObjective, slaIdToObjId, activeGuestIdsForObjective, selectedGrupo, grupoUnifiedMode]);
 
     /** Dotación propia del objetivo (sin invitados ni cobertura de otro servicio). */
     const isEmployeeNativeToObjective = useCallback((e: { preferredObjectiveId?: string }) => {
@@ -1878,7 +1879,7 @@ export default function PlanificacionPage() {
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
             if (shiftPos !== posName) return;
             if (!isWorking(shift.code)) return;
-            const objectiveMatch = (selectedGrupo
+            const objectiveMatch = ((selectedGrupo && grupoUnifiedMode)
                 ? selectedGrupo.objectiveIds.includes(shift.objectiveId)
                 : shift.objectiveId === selectedObjective
             ) || !!pendingChanges[key];
@@ -2403,6 +2404,7 @@ export default function PlanificacionPage() {
             setPendingNovedades({});
         }
         setSelectedGrupo(grupo);
+        setGrupoUnifiedMode(true);
         if (grupo && grupo.objectiveIds.length > 0) {
             setSelectedClient(grupo.clientId);
             setSelectedObjective(grupo.objectiveIds[0]);
@@ -2474,6 +2476,17 @@ export default function PlanificacionPage() {
             setSavingGrupo(false);
         }
     };
+
+    // En modo grupo unificado: devuelve el objectiveId correcto para el empleado según su objetivo nativo
+    const resolveObjectiveForEmp = useCallback((empId: string): string => {
+        if (!selectedGrupo || !grupoUnifiedMode) return selectedObjective;
+        const emp = employees.find((e: any) => e.id === empId);
+        if (!emp?.preferredObjectiveId) return selectedObjective;
+        if (selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId)) return emp.preferredObjectiveId;
+        const mapped = slaIdToObjId[emp.preferredObjectiveId];
+        if (mapped && selectedGrupo.objectiveIds.includes(mapped)) return mapped;
+        return selectedObjective;
+    }, [selectedObjective, selectedGrupo, grupoUnifiedMode, employees, slaIdToObjId]);
 
     const handleDeleteGrupo = async (grupo: GrupoObjetivos) => {
         if (!confirm(`¿Eliminar el grupo "${grupo.nombre}"?`)) return;
@@ -3875,7 +3888,7 @@ export default function PlanificacionPage() {
                         const turnoPayload: Record<string, unknown> = {
                             employeeId: empId,
                             clientId: selectedClient,
-                            objectiveId: selectedObjective,
+                            objectiveId: change.objectiveId || resolveObjectiveForEmp(empId),
                             code: change.isFrancoCompensatorio ? 'FF' : change.code,
                             type: change.name||change.code,
                             startTime: Timestamp.fromDate(start),
@@ -4870,7 +4883,8 @@ export default function PlanificacionPage() {
             isFranco: config.code === 'F' || config.code === 'FF' || config.isFranco,
             swapWith: config.swapWith || null,
             swapDate: config.swapDate || null,
-            positionName: config.positionName || activePosition || 'General'
+            positionName: config.positionName || activePosition || 'General',
+            objectiveId: config.objectiveId || resolveObjectiveForEmp(selectedCell.empId),
         };
         commitPendingChanges(newChanges);
         // Toast de alerta si el nuevo turno rompe el descanso mínimo de 12h
@@ -7016,7 +7030,9 @@ export default function PlanificacionPage() {
                                         // TURA: turno agregado por cliente → fondo rojo en celda padre
                                         if (activeShift?.id && turaMap[activeShift.id]) { style = 'bg-red-500 text-white border-red-600 font-black'; }
                                         const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
-                                        const isOtherObjectiveShift = isShiftAtOtherObjective(s, p, selectedObjective);
+                                        const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
+                                        const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
+                                        const isOtherObjectiveShift = _rawOtherObj && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
                                         if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (isOtherObjectiveShift && content != null) {
                                             style = String(content).toUpperCase() === 'RET'
@@ -7046,7 +7062,7 @@ export default function PlanificacionPage() {
                                             : String(cellCode || '').toUpperCase();
                                         const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
                                         const _covHint = covNote ? `\n📋 ${covNote}` : '';
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{covRole === 'EXTENSION' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded">EXT</div>}{covRole === 'EARLY_START' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-cyan-600 text-white px-0.5 rounded">ADEL</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{covRole === 'TARGET' && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-indigo-600 text-white px-0.5 rounded">✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (selectedGrupo ? (<div className="absolute bottom-0 left-0 right-0 text-[6px] font-black bg-violet-700/90 text-white px-0.5 rounded-b leading-tight text-center truncate">{(selectedGrupo.objectiveNames[selectedGrupo.objectiveIds.indexOf(activeShift?.objectiveId)] || activeShift?.objectiveId || '').slice(0, 6)}</div>) : (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>))}{hasRfzOverlay && (<div className="absolute top-0 right-0 text-[7px] font-black bg-red-600 text-white px-0.5 rounded-bl">RFZ</div>)}{rfzOnCell && !s && !p && !absence && rfzOnCell.draft && (<div className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full bg-amber-400 border border-white" title="Sin publicar"/>)}</div></td>;
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{covRole === 'EXTENSION' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded">EXT</div>}{covRole === 'EARLY_START' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-cyan-600 text-white px-0.5 rounded">ADEL</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{covRole === 'TARGET' && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-indigo-600 text-white px-0.5 rounded">✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && activeShift.objectiveId !== selectedGrupo.objectiveIds[0] && (<div className="absolute bottom-0 left-0 right-0 text-[6px] font-black bg-violet-600/80 text-white px-0.5 rounded-b leading-tight text-center truncate">{(selectedGrupo.objectiveNames[selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId)] || '').slice(0, 6)}</div>)}{hasRfzOverlay && (<div className="absolute top-0 right-0 text-[7px] font-black bg-red-600 text-white px-0.5 rounded-bl">RFZ</div>)}{rfzOnCell && !s && !p && !absence && rfzOnCell.draft && (<div className="absolute bottom-0 right-0 w-1.5 h-1.5 rounded-full bg-amber-400 border border-white" title="Sin publicar"/>)}</div></td>;
                                     })}
                                 </tr>
                             )}
@@ -7454,14 +7470,25 @@ export default function PlanificacionPage() {
                                 {selectedGrupo ? (
                                     /* MODO GRUPO: etiqueta del grupo + tabs por objetivo */
                                     <>
-                                        <span className="flex items-center gap-1.5 bg-violet-700 text-white px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide cursor-default select-none">
+                                        {/* Botón grupo: activo (violeta sólido) en modo unificado, outline en modo individual */}
+                                        <button
+                                            onClick={() => { setGrupoUnifiedMode(true); setSelectedObjective(selectedGrupo.objectiveIds[0]); }}
+                                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide transition-colors ${grupoUnifiedMode ? 'bg-violet-700 text-white' : 'bg-white text-violet-700 border border-violet-400 hover:bg-violet-50'}`}
+                                            title="Ver todos los objetivos juntos"
+                                        >
                                             <Layers size={11}/>{selectedGrupo.nombre}
-                                        </span>
+                                        </button>
                                         <ChevronRight size={12} className="text-slate-400"/>
-                                        {selectedGrupo.objectiveNames.map((name, i) => (
-                                            <span key={i} className="px-2 py-1 rounded-md text-[10px] font-bold bg-violet-100 text-violet-700 border border-violet-200 cursor-default select-none">
-                                                {name}
-                                            </span>
+                                        {/* Chips por objetivo: clickeables para foco individual */}
+                                        {selectedGrupo.objectiveIds.map((objId, i) => (
+                                            <button
+                                                key={objId}
+                                                onClick={() => { setGrupoUnifiedMode(false); setSelectedObjective(objId); }}
+                                                className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${!grupoUnifiedMode && selectedObjective === objId ? 'bg-indigo-600 text-white' : 'bg-violet-100 text-violet-700 border border-violet-200 hover:bg-indigo-100 hover:text-indigo-700'}`}
+                                                title={`Ver solo ${selectedGrupo.objectiveNames[i]}`}
+                                            >
+                                                {selectedGrupo.objectiveNames[i] || objId}
+                                            </button>
                                         ))}
                                         <button onClick={() => handleGrupoChange(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors" title="Salir del grupo"><X size={13}/></button>
                                     </>
