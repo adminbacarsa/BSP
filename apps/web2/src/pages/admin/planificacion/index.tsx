@@ -1082,18 +1082,19 @@ export default function PlanificacionPage() {
         const ids = new Set<string>();
         const planYear = currentDate.getFullYear();
         const planMonth = currentDate.getMonth(); // 0-indexed
+        // En modo grupo: aceptar cualquier objetivo del grupo; sino solo el objetivo activo
+        const matchesObjective = (objId: string) =>
+            selectedGrupo ? selectedGrupo.objectiveIds.includes(objId) : objId === selectedObjective;
         for (const [key, shift] of Object.entries(shiftsMap) as [string, any][]) {
-            if (shift?.objectiveId === selectedObjective && shift?.employeeId) {
-                // Key format: "${employeeId}_YYYY-MM-DD" — date is always last 10 chars
+            if (matchesObjective(shift?.objectiveId) && shift?.employeeId) {
                 const [sy, sm] = key.slice(-10).split('-').map(Number);
                 if (sy === planYear && sm - 1 === planMonth) {
                     ids.add(shift.employeeId);
                 }
             }
         }
-        // Incluir empleados asignados temporalmente via pendingChanges (cobertura externa de planificación)
         for (const [key, change] of Object.entries(pendingChanges) as [string, any][]) {
-            if (change?.objectiveId === selectedObjective && change?.employeeId && !change?.isDeleted) {
+            if (matchesObjective(change?.objectiveId) && change?.employeeId && !change?.isDeleted) {
                 const [cy, cm] = key.slice(-10).split('-').map(Number);
                 if (cy === planYear && cm - 1 === planMonth) {
                     ids.add(change.employeeId);
@@ -1101,7 +1102,7 @@ export default function PlanificacionPage() {
             }
         }
         return ids;
-    }, [shiftsMap, pendingChanges, selectedObjective, currentDate]);
+    }, [shiftsMap, pendingChanges, selectedObjective, selectedGrupo, currentDate]);
 
     const selectedObjectiveData = useMemo(() => {
         if (!selectedObjective || !selectedClient) return null;
@@ -1877,7 +1878,10 @@ export default function PlanificacionPage() {
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
             if (shiftPos !== posName) return;
             if (!isWorking(shift.code)) return;
-            const objectiveMatch = shift.objectiveId === selectedObjective || !!pendingChanges[key];
+            const objectiveMatch = (selectedGrupo
+                ? selectedGrupo.objectiveIds.includes(shift.objectiveId)
+                : shift.objectiveId === selectedObjective
+            ) || !!pendingChanges[key];
             if (!objectiveMatch) return;
             const code = String(shift.code || shift.type || '').toUpperCase();
             const hours = resolveBandHours(code, shift, posShiftsForBand);
@@ -7454,14 +7458,10 @@ export default function PlanificacionPage() {
                                             <Layers size={11}/>{selectedGrupo.nombre}
                                         </span>
                                         <ChevronRight size={12} className="text-slate-400"/>
-                                        {selectedGrupo.objectiveIds.map((objId, i) => (
-                                            <button
-                                                key={objId}
-                                                onClick={() => setSelectedObjective(objId)}
-                                                className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide transition-colors ${selectedObjective === objId ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 hover:bg-indigo-100 hover:text-indigo-700'}`}
-                                            >
-                                                {selectedGrupo.objectiveNames[i] || objId}
-                                            </button>
+                                        {selectedGrupo.objectiveNames.map((name, i) => (
+                                            <span key={i} className="px-2 py-1 rounded-md text-[10px] font-bold bg-violet-100 text-violet-700 border border-violet-200 cursor-default select-none">
+                                                {name}
+                                            </span>
                                         ))}
                                         <button onClick={() => handleGrupoChange(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors" title="Salir del grupo"><X size={13}/></button>
                                     </>
