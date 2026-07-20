@@ -289,8 +289,30 @@ service cloud.firestore {
 
     match /planificacion_estados/{docId} {
       allow read: if tenantAdminRead() || request.auth != null;
-      allow create: if tenantAdminCreate();
-      allow update: if tenantAdminUpdate() || planificacionEstadoClaimTenant();
+      // Asignación de puestos / estado mensual: admin autenticado con empresa sellada.
+      // Docs legacy sin empresaId se pueden adoptar sellando el tenant del usuario.
+      allow create: if isSuperAdmin() || systemUserHasAllEmpresas() || (
+        isAdmin() && userEmpresaId() != '' && (
+          docEmpresaId(request.resource.data) == userEmpresaId() ||
+          (userEmpresaId() == 'bacarsa' && (
+            docEmpresaId(request.resource.data) == '' ||
+            docEmpresaId(request.resource.data) == 'bacarsa'
+          ))
+        )
+      );
+      allow update: if isSuperAdmin() || systemUserHasAllEmpresas() || (
+        isAdmin() && userEmpresaId() != '' && (
+          docEmpresaId(request.resource.data) == userEmpresaId() ||
+          (userEmpresaId() == 'bacarsa' && (
+            docEmpresaId(request.resource.data) == '' ||
+            docEmpresaId(request.resource.data) == 'bacarsa'
+          ))
+        ) && (
+          tenantMatches(resource.data) ||
+          docEmpresaId(resource.data) == '' ||
+          bacarsaTenantDocMatches(resource.data)
+        )
+      );
       allow delete: if tenantAdminDelete();
     }
 

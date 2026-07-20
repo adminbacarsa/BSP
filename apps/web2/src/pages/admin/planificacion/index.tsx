@@ -648,6 +648,8 @@ export default function PlanificacionPage() {
     const [needsRepublishMap, setNeedsRepublishMap] = useState<Record<string, boolean>>({});
     const [isPublishing, setIsPublishing] = useState(false);
     const [isUnpublishing, setIsUnpublishing] = useState(false);
+    const [isRefreshingCrono, setIsRefreshingCrono] = useState(false);
+    const [dataRefreshNonce, setDataRefreshNonce] = useState(0);
     const [publishConfirmModal, setPublishConfirmModal] = useState<{
         isRepublish: boolean;
         warnings: string[];
@@ -2527,7 +2529,7 @@ export default function PlanificacionPage() {
             }
         };
         fetchSLA();
-    }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId]);
+    }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce]);
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
@@ -2777,9 +2779,9 @@ export default function PlanificacionPage() {
                     setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
                 }
             }).catch(() => {});
-    }, [selectedObjective, currentDate, empresaId]);
+    }, [selectedObjective, currentDate, empresaId, dataRefreshNonce]);
 
-    // RFZ en borrador sobre cronograma ya publicado → modo corrección + re-publicar pendiente.
+    // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
     const activateRfzCorrectionFlow = useCallback((opts?: { republishOnly?: boolean }) => {
         if (!selectedObjective) return;
         const lookupKey = planificacionPublishLookupKey(
@@ -2844,17 +2846,19 @@ export default function PlanificacionPage() {
                 const prevPos: Record<string,string> = (prev.defaultPositionByEmp as Record<string, string>) || {};
                 const prevSh: Record<string,string> = (prev.defaultShiftByEmp as Record<string, string>) || {};
                 if (applyOverlay(prevPos, prevSh)) {
-                    setDoc(doc(db, 'planificacion_estados', stateKey), {
-                        empresaId: empresaId || null,
-                        objectiveId: selectedObjective,
-                        objetivoId: selectedObjective,
-                        year,
-                        month,
-                        año: year,
-                        mes: month,
-                        defaultPositionByEmp: prevPos,
-                        defaultShiftByEmp: prevSh,
-                    }, { merge: true }).catch(() => {});
+                    if (empresaId) {
+                        setDoc(doc(db, 'planificacion_estados', stateKey), {
+                            empresaId,
+                            objectiveId: selectedObjective,
+                            objetivoId: selectedObjective,
+                            year,
+                            month,
+                            año: year,
+                            mes: month,
+                            defaultPositionByEmp: prevPos,
+                            defaultShiftByEmp: prevSh,
+                        }, { merge: true }).catch(() => {});
+                    }
                 }
             }).catch(() => {});
         }).catch(() => {});
@@ -3072,7 +3076,7 @@ export default function PlanificacionPage() {
 
     const clearAllPositions = async () => {
         if (!selectedObjective) return;
-        if (!confirm('¿Quitar todos los puestos asignados en este mes?')) return;
+        if (!confirm('¿Quitar todos los puestos asignados de este objetivo?')) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
@@ -3082,19 +3086,119 @@ export default function PlanificacionPage() {
         setEmpDefaultPos(newPos);
         setEmpDefaultShift(newShift);
         try {
-            await setDoc(doc(db, 'planificacion_estados', stateKey), {
-                empresaId: empresaId || null,
-                objectiveId: selectedObjective,
-                objetivoId: selectedObjective,
-                year,
-                month,
-                año: year,
-                mes: month,
-                defaultPositionByEmp: {},
-                defaultShiftByEmp: {},
-            }, { merge: true });
+            const batch = writeBatch(db);
+            const affected = employees.filter((e: any) => {
+                const cfg = e.planificacionDotacion?.[selectedObjective];
+                return !!cfg?.positionName || !!cfg?.shiftCode;
+            });
+            for (const emp of affected) {
+                const nextDotacion: PlanificacionDotacionMap = { ...(emp.planificacionDotacion || {}) };
+                delete nextDotacion[selectedObjective];
+                batch.update(doc(db, 'empleados', emp.id), { planificacionDotacion: nextDotacion });
+            }
+            if (empresaId) {
+                batch.set(doc(db, 'planificacion_estados', stateKey), {
+                    empresaId,
+                    objectiveId: selectedObjective,
+                    objetivoId: selectedObjective,
+                    year,
+                    month,
+                    año: year,
+                    mes: month,
+                    defaultPositionByEmp: {},
+                    defaultShiftByEmp: {},
+                }, { merge: true });
+            }
+            await batch.commit();
+            toast.success('Puestos quitados');
         } catch {
             toast.error('No se pudo limpiar los puestos');
+        }
+    };
+
+    const refreshCronogramaView = async () => {
+        if (!selectedObjective) {
+            toast.error('Seleccioná un objetivo');
+            return;
+        }
+        setIsRefreshingCrono(true);
+        try {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth() + 1;
+            const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+            const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
+
+            const [estadoRow, turnosSnap] = await Promise.all([
+                fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month),
+                getDocs(query(
+                    collection(db, 'turnos'),
+                    where('objectiveId', '==', selectedObjective),
+                )),
+            ]);
+
+            if (estadoRow && estadoRow.data.publishedAt) {
+                setPublishStatusMap(prev => ({
+                    ...prev,
+                    [lookupKey]: {
+                        publishedAt: estadoRow.data.publishedAt,
+                        publishedBy: String(estadoRow.data.publishedBy ?? ''),
+                    },
+                }));
+            } else {
+                setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
+            }
+
+            const mergedEstado = await fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, year, month);
+            const monthlyPos = (mergedEstado.defaultPositionByEmp as Record<string, string>) || {};
+            const monthlyShift = (mergedEstado.defaultShiftByEmp as Record<string, string>) || {};
+            const { pos: basePos, shift: baseShift } = buildDotacionMapsFromEmployees(employees);
+            const mergedPos = { ...basePos };
+            const mergedShift = { ...baseShift };
+            for (const [id, p] of Object.entries(monthlyPos)) mergedPos[`${id}___${selectedObjective}`] = p;
+            for (const [id, s] of Object.entries(monthlyShift)) mergedShift[`${id}___${selectedObjective}`] = s;
+            setEmpDefaultPos(mergedPos);
+            setEmpDefaultShift(mergedShift);
+
+            setShiftsMap(prev => {
+                const next = { ...prev };
+                for (const key of Object.keys(next)) {
+                    const s = next[key];
+                    if (!s) continue;
+                    if (String(s.objectiveId || '') !== String(selectedObjective)) continue;
+                    const dateKey = key.includes('_') ? key.slice(key.indexOf('_') + 1) : '';
+                    if (dateKey.startsWith(monthPrefix)) delete next[key];
+                }
+                turnosSnap.docs.forEach(d => {
+                    const data = d.data();
+                    if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+                    const code = String(data.code || data.type || '').toUpperCase();
+                    if (code === 'RFZ' || code === 'TURA') return;
+                    if (!data.startTime?.seconds) return;
+                    const dateKey = getDateKey(data.startTime);
+                    if (!dateKey.startsWith(monthPrefix)) return;
+                    const empKey = `${data.employeeId}_${dateKey}`;
+                    next[empKey] = {
+                        id: d.id, ...data, code: data.code || data.type, objectiveId: data.objectiveId,
+                        startTime: data.startTime, endTime: data.endTime, realStartTime: data.realStartTime,
+                        status: data.status, isPresent: data.isPresent || false, isAbsent: data.isAbsent || false,
+                        isExtended: data.isExtended, isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
+                        isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
+                        swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
+                        positionName: data.positionName,
+                        coveredBy: data.coveredBy,
+                        draft: data.draft,
+                    };
+                });
+                return next;
+            });
+
+            setDataRefreshNonce(n => n + 1);
+            toast.success('Cronograma actualizado');
+        } catch (e) {
+            console.error('[plan] refreshCronogramaView', e);
+            toast.error('No se pudo actualizar el cronograma');
+        } finally {
+            setIsRefreshingCrono(false);
         }
     };
 
@@ -3186,6 +3290,10 @@ export default function PlanificacionPage() {
 
     const saveEmpPos = async (empId: string, posName: string | null, shiftCode?: string | null) => {
         if (!selectedObjective) return;
+        if (!empresaId) {
+            toast.error('Seleccioná una empresa antes de asignar puestos');
+            return;
+        }
         const key = `${empId}___${selectedObjective}`;
         const prevPosMap = { ...empDefaultPos };
         const prevShiftMap = { ...empDefaultShift };
@@ -3196,17 +3304,35 @@ export default function PlanificacionPage() {
         if (shiftCode) { newShiftMap[key] = shiftCode.toUpperCase(); } else { delete newShiftMap[key]; }
         setEmpDefaultShift(newShiftMap);
         setEmpPosPicker(null);
+
+        const emp = employees.find((e: any) => e.id === empId);
+        const nextDotacion: PlanificacionDotacionMap = { ...(emp?.planificacionDotacion || {}) };
+        if (posName) {
+            nextDotacion[selectedObjective] = {
+                positionName: posName,
+                ...(shiftCode ? { shiftCode: shiftCode.toUpperCase() } : {}),
+            };
+        } else {
+            delete nextDotacion[selectedObjective];
+        }
+
         try {
+            // 1) Persistencia durable en legajo (sobrevive despublicar / borrar estado mensual)
+            await updateDoc(doc(db, 'empleados', empId), {
+                planificacionDotacion: nextDotacion,
+            });
+
+            // 2) Overlay mensual (best-effort; no bloquea si falla)
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth() + 1;
             const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
             const stateRef = doc(db, 'planificacion_estados', stateKey);
             const posField = `defaultPositionByEmp.${empId}`;
             const shiftField = `defaultShiftByEmp.${empId}`;
-            const update: Record<string, any> = {
+            const estadoPayload: Record<string, any> = {
                 [posField]: posName ?? deleteField(),
                 [shiftField]: shiftCode ? shiftCode.toUpperCase() : deleteField(),
-                empresaId: empresaId || null,
+                empresaId,
                 objectiveId: selectedObjective,
                 objetivoId: selectedObjective,
                 year,
@@ -3215,11 +3341,11 @@ export default function PlanificacionPage() {
                 mes: month,
             };
             try {
-                await updateDoc(stateRef, update);
+                await updateDoc(stateRef, estadoPayload);
             } catch (e: any) {
                 if (e?.code === 'not-found') {
                     await setDoc(stateRef, {
-                        empresaId: empresaId || null,
+                        empresaId,
                         objectiveId: selectedObjective,
                         objetivoId: selectedObjective,
                         year,
@@ -3229,7 +3355,11 @@ export default function PlanificacionPage() {
                         defaultPositionByEmp: posName ? { [empId]: posName } : {},
                         defaultShiftByEmp: shiftCode ? { [empId]: shiftCode.toUpperCase() } : {},
                     }, { merge: true });
-                } else throw e;
+                } else if (e?.code === 'permission-denied') {
+                    console.warn('[plan] planificacion_estados sin permiso (puesto ya guardado en legajo)', e);
+                } else {
+                    console.warn('[plan] overlay mensual puestos', e);
+                }
             }
         } catch (err: any) {
             setEmpDefaultPos(prevPosMap);
@@ -3862,14 +3992,27 @@ export default function PlanificacionPage() {
                     restoredDrafts++;
                 });
 
-            batch.delete(doc(db, 'planificacion_estados', primaryDocId));
+            // Solo quitar flags de publicación — preservar defaultPositionByEmp / defaultShiftByEmp
+            const clearPublish = {
+                publishedAt: deleteField(),
+                publishedBy: deleteField(),
+            };
+            const primaryRef = doc(db, 'planificacion_estados', primaryDocId);
+            const primarySnap = await getDoc(primaryRef);
+            if (primarySnap.exists()) {
+                batch.update(primaryRef, clearPublish);
+            }
             if (legacyDocId !== primaryDocId) {
-                batch.delete(doc(db, 'planificacion_estados', legacyDocId));
+                const legacyRef = doc(db, 'planificacion_estados', legacyDocId);
+                const legacySnap = await getDoc(legacyRef);
+                if (legacySnap.exists()) {
+                    batch.update(legacyRef, clearPublish);
+                }
             }
             batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
                 action: 'DESPUBLICACION_CRONOGRAMA',
                 module: 'PLANIFICADOR',
-                details: `Cronograma despublicado — ${objectiveName} · ${month}/${year} · ${restoredDrafts} turno(s) vuelven a borrador`,
+                details: `Cronograma despublicado — ${objectiveName} · ${month}/${year} · ${restoredDrafts} turno(s) vuelven a borrador (puestos conservados)`,
                 timestamp: serverTimestamp(),
                 actorName,
                 actorUid: auth.currentUser?.uid || null,
@@ -6836,6 +6979,16 @@ export default function PlanificacionPage() {
                                 const needsRepublish = !!needsRepublishMap[publishLookupKey];
                                 return (
                                     <div className="flex items-center gap-2 no-print">
+                                        <button
+                                            type="button"
+                                            onClick={() => void refreshCronogramaView()}
+                                            disabled={isRefreshingCrono}
+                                            title="Actualizar turnos y puestos sin recargar la página"
+                                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shadow-sm disabled:opacity-60"
+                                        >
+                                            <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
+                                            {isRefreshingCrono ? '…' : 'ACTUALIZAR'}
+                                        </button>
                                         {published ? (
                                             <span className="flex items-center gap-1.5 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
                                                 <CheckCircle size={12}/> PUBLICADO
