@@ -148,6 +148,7 @@ export default function ServiciosSLAPage() {
   const [horarioFormDesde, setHorarioFormDesde] = useState('');
   const [horarioFormAnchorM, setHorarioFormAnchorM] = useState('07:00');
   const [horarioFormAnchorD12, setHorarioFormAnchorD12] = useState('07:00');
+  const [horarioFormPuesto, setHorarioFormPuesto] = useState<'ALL' | string>('ALL');
   const [savingHorario, setSavingHorario] = useState(false);
   const [showExcludedDatesPicker, setShowExcludedDatesPicker] = useState(false);
   const [excludedDatesScope, setExcludedDatesScope] = useState<'ALL' | string>('ALL');
@@ -512,11 +513,12 @@ export default function ServiciosSLAPage() {
     return result;
   };
 
-  /** Actualiza startTime/endTime en turnos del objetivo a partir de `desde`. */
+  /** Actualiza startTime/endTime en turnos del objetivo a partir de `desde`, opcionalmente filtrando por puesto. */
   const actualizarTurnosHorario = async (
     objectiveId: string,
     desde: string,
     bandas: HorarioVersion['bandas'],
+    positionName?: string,
   ): Promise<number> => {
     const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'REF', 'ESC', 'FT']);
     const desdeDate = new Date(desde + 'T00:00:00');
@@ -531,6 +533,8 @@ export default function ServiciosSLAPage() {
     const ops: Array<{ ref: ReturnType<typeof doc>; start: ReturnType<typeof Timestamp.fromDate>; end: ReturnType<typeof Timestamp.fromDate> }> = [];
     for (const docSnap of snap.docs) {
       const data = docSnap.data();
+      // Filtrar por puesto si se especificó uno
+      if (positionName && String(data.positionName || '').trim() !== positionName.trim()) continue;
       const code = String(data.code || '').toUpperCase();
       const banda = bandas[code];
       if (!WORK_CODES.has(code) || !banda) continue;
@@ -550,7 +554,6 @@ export default function ServiciosSLAPage() {
       ops.push({ ref: docSnap.ref as ReturnType<typeof doc>, start: Timestamp.fromDate(start), end: Timestamp.fromDate(end) });
     }
 
-    // Batch en chunks de 400 (límite Firestore = 500)
     const CHUNK = 400;
     for (let i = 0; i < ops.length; i += CHUNK) {
       const batch = writeBatch(db);
@@ -563,20 +566,25 @@ export default function ServiciosSLAPage() {
   const handleApplyHorarioVersion = async () => {
     if (!form.id || !horarioFormDesde) { addToast('Ingresá la fecha de inicio del cambio', 'error'); return; }
     const bandas = buildBandasFromAnchors(horarioFormAnchorM, horarioFormAnchorD12);
+    const applyToAll = horarioFormPuesto === 'ALL';
+    const targetPosName = applyToAll ? null : horarioFormPuesto;
 
     const newVersiones: HorarioVersion[] = [
-      ...(form.horarioVersiones || []).filter(v => v.desde !== horarioFormDesde),
-      { desde: horarioFormDesde, bandas },
+      ...(form.horarioVersiones || []).filter(v => !(v.desde === horarioFormDesde && (v as any).puesto === (targetPosName ?? undefined))),
+      { desde: horarioFormDesde, bandas, ...(targetPosName ? { puesto: targetPosName } : {}) } as HorarioVersion & { puesto?: string },
     ].sort((a, b) => a.desde.localeCompare(b.desde));
 
-    // Actualizar allowedShiftTypes en todas las posiciones con el nuevo horario
-    const newPositions = form.positions.map(pos => ({
-      ...pos,
-      allowedShiftTypes: pos.allowedShiftTypes.map(sh => {
-        const b = bandas[sh.code.toUpperCase()];
-        return b ? { ...sh, startTime: b.startTime, endTime: b.endTime, hours: b.hours } : sh;
-      }),
-    }));
+    // Actualizar allowedShiftTypes solo en los puestos afectados
+    const newPositions = form.positions.map(pos => {
+      if (!applyToAll && pos.name !== targetPosName) return pos;
+      return {
+        ...pos,
+        allowedShiftTypes: pos.allowedShiftTypes.map(sh => {
+          const b = bandas[sh.code.toUpperCase()];
+          return b ? { ...sh, startTime: b.startTime, endTime: b.endTime, hours: b.hours } : sh;
+        }),
+      };
+    });
 
     try {
       setSavingHorario(true);
@@ -585,9 +593,15 @@ export default function ServiciosSLAPage() {
         positions: JSON.parse(JSON.stringify(newPositions)),
       } as Partial<ServiceSLA>, { empresaId, migracionCompleta });
 
-      const count = await actualizarTurnosHorario(form.objectiveId, horarioFormDesde, bandas);
+      const count = await actualizarTurnosHorario(
+        form.objectiveId,
+        horarioFormDesde,
+        bandas,
+        targetPosName ?? undefined,
+      );
       setForm(prev => ({ ...prev, horarioVersiones: newVersiones, positions: newPositions }));
-      addToast(`Horario actualizado · ${count} turno(s) reprogramado(s)`, 'success');
+      const puestoLabel = targetPosName ? `puesto "${targetPosName}"` : 'todos los puestos';
+      addToast(`Horario actualizado (${puestoLabel}) · ${count} turno(s) reprogramado(s)`, 'success');
       setShowHorarioForm(false);
     } catch (e) {
       addToast('Error al actualizar horario', 'error');
@@ -598,12 +612,14 @@ export default function ServiciosSLAPage() {
   };
 
   const openHorarioForm = () => {
-    // Pre-cargar con el horario actual del primer puesto con M
-    const mShift = form.positions.flatMap(p => p.allowedShiftTypes).find(s => s.code === 'M');
-    const d12Shift = form.positions.flatMap(p => p.allowedShiftTypes).find(s => s.code === 'D12');
+    // Pre-cargar con el horario del primer puesto que tenga M
+    const firstPos = form.positions[0];
+    const mShift = (firstPos?.allowedShiftTypes || form.positions.flatMap(p => p.allowedShiftTypes)).find(s => s.code === 'M');
+    const d12Shift = (firstPos?.allowedShiftTypes || form.positions.flatMap(p => p.allowedShiftTypes)).find(s => s.code === 'D12');
     setHorarioFormAnchorM(mShift?.startTime?.slice(0, 5) || '07:00');
     setHorarioFormAnchorD12(d12Shift?.startTime?.slice(0, 5) || '07:00');
     setHorarioFormDesde('');
+    setHorarioFormPuesto(form.positions.length === 1 ? form.positions[0].name : 'ALL');
     setShowHorarioForm(true);
   };
 
@@ -2018,6 +2034,9 @@ export default function ServiciosSLAPage() {
                       .map((v, i) => (
                         <div key={i} className="flex items-start gap-3 text-[10px]">
                           <span className="font-black text-indigo-600 dark:text-indigo-400 w-24 shrink-0">Desde {v.desde}</span>
+                          {(v as any).puesto && (
+                            <span className="text-[9px] font-black bg-slate-100 dark:bg-slate-700 text-slate-500 px-2 py-0.5 rounded shrink-0">{(v as any).puesto}</span>
+                          )}
                           <span className="text-slate-600 dark:text-slate-400">
                             {(['M','T','N','D12','N12'] as const)
                               .filter(c => v.bandas[c])
@@ -2035,6 +2054,38 @@ export default function ServiciosSLAPage() {
                   return (
                     <div className="mt-4 bg-white dark:bg-slate-800 p-5 rounded-xl border dark:border-slate-700 space-y-4">
                       <p className="text-[10px] font-black uppercase text-slate-400">Nuevo cambio de horario</p>
+
+                      {/* Selector de puesto */}
+                      {form.positions.length > 1 && (
+                        <div>
+                          <label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Puesto a modificar</label>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              onClick={() => {
+                                setHorarioFormPuesto('ALL');
+                                const m = form.positions.flatMap(p => p.allowedShiftTypes).find(s => s.code === 'M');
+                                const d = form.positions.flatMap(p => p.allowedShiftTypes).find(s => s.code === 'D12');
+                                if (m) setHorarioFormAnchorM(m.startTime.slice(0, 5));
+                                if (d) setHorarioFormAnchorD12(d.startTime.slice(0, 5));
+                              }}
+                              className={`px-3 py-1.5 rounded-xl text-[10px] font-black border transition-colors ${horarioFormPuesto === 'ALL' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 border-slate-200 dark:border-slate-600 hover:bg-slate-200'}`}
+                            >Todos los puestos</button>
+                            {form.positions.map(pos => (
+                              <button
+                                key={pos.id}
+                                onClick={() => {
+                                  setHorarioFormPuesto(pos.name);
+                                  const m = pos.allowedShiftTypes.find(s => s.code === 'M');
+                                  const d = pos.allowedShiftTypes.find(s => s.code === 'D12');
+                                  setHorarioFormAnchorM(m?.startTime?.slice(0, 5) || '07:00');
+                                  setHorarioFormAnchorD12(d?.startTime?.slice(0, 5) || '07:00');
+                                }}
+                                className={`px-3 py-1.5 rounded-xl text-[10px] font-black border transition-colors ${horarioFormPuesto === pos.name ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 border-slate-200 dark:border-slate-600 hover:bg-slate-200'}`}
+                              >{pos.name}</button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
