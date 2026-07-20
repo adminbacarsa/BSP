@@ -684,6 +684,7 @@ export default function PlanificacionPage() {
     const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>({});
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
     const [grupoSlaMap, setGrupoSlaMap] = useState<Record<string, any[]>>({});
+    const [grupoTotalVendidas, setGrupoTotalVendidas] = useState(0);
     const dotacionMigratedRef = useRef(false);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
@@ -2877,7 +2878,7 @@ export default function PlanificacionPage() {
 
     // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
     useEffect(() => {
-        if (!selectedGrupo || !grupoUnifiedMode || !selectedClient) { setGrupoSlaMap({}); return; }
+        if (!selectedGrupo || !grupoUnifiedMode || !selectedClient) { setGrupoSlaMap({}); setGrupoTotalVendidas(0); return; }
         const fetchGroupSlas = async () => {
             try {
                 const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
@@ -2888,18 +2889,24 @@ export default function PlanificacionPage() {
                 const viewYear = currentDate.getFullYear();
                 const viewMonth = currentDate.getMonth();
                 const result: Record<string, any[]> = {};
+                let totalVendidas = 0;
                 for (const objId of selectedGrupo.objectiveIds) {
                     const matching = filterSlasForPlanningContext(allDocs, selectedClient, objId, clients, slaIdToObjId);
                     const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
                     const srvForStructure = srv ?? fallback;
                     const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
+                    if (monthHasSla && srvForStructure) {
+                        totalVendidas += Number(srvForStructure.totalMonthlyHours) || 0;
+                    }
                     const { structure } = buildPlanningPositionStructure(srvForStructure, { monthHasSla, hasExactMatch: !!hasExactMatch });
                     result[objId] = structure.length > 0 ? structure : [{ positionName: 'General', shifts: DEFAULT_PLANNING_SHIFTS.map((s: any) => ({ ...s })), qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' }];
                 }
                 setGrupoSlaMap(result);
+                setGrupoTotalVendidas(totalVendidas);
             } catch (e) {
                 console.error('GRUPO SLA ERROR:', e);
                 setGrupoSlaMap({});
+                setGrupoTotalVendidas(0);
             }
         };
         fetchGroupSlas();
@@ -7809,7 +7816,7 @@ export default function PlanificacionPage() {
                                                         </span>
                                                     </>
                                                 )}
-                                                {slaVendidas > 0 && <><span className="text-slate-300 dark:text-slate-600">|</span><span className="text-teal-600 font-black">{slaVendidas}h vend.</span></>}
+                                                {((selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas) > 0 && <><span className="text-slate-300 dark:text-slate-600">|</span><span className="text-teal-600 font-black">{(selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas}h vend.</span></>}
                                             </span>
                                         </div>
                                         <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showDiagnostic ? 'rotate-180' : ''}`}/>
@@ -8529,7 +8536,8 @@ export default function PlanificacionPage() {
                         .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
                     const empCount = planningDotacionEmployees.length;
                     const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
-                    const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
+                    const effectiveSlaVendidas = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
+                    const slaMismatch = effectiveSlaVendidas > 0 && Math.round(totalHrs) !== Math.round(effectiveSlaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/REF/ESC/francos/licencias.'
@@ -8554,9 +8562,9 @@ export default function PlanificacionPage() {
                                 {hoursMode === 'cct' && <span className="text-[7px] text-indigo-500">CCT</span>}
                             </p>
                             <p className={`text-sm font-black leading-tight ${slaMismatch ? 'text-rose-600' : 'text-indigo-600'}`}>{totalHrs.toFixed(0)}</p>
-                            {slaMismatch && slaVendidas > 0 && (
+                            {slaMismatch && effectiveSlaVendidas > 0 && (
                                 <p className="text-[8px] font-black text-rose-500 leading-none mt-0.5">
-                                    {Math.round(slaVendidas - totalHrs) > 0 ? `−${Math.round(slaVendidas - totalHrs)}h SLA` : `+${Math.round(totalHrs - slaVendidas)}h SLA`}
+                                    {Math.round(effectiveSlaVendidas - totalHrs) > 0 ? `−${Math.round(effectiveSlaVendidas - totalHrs)}h SLA` : `+${Math.round(totalHrs - effectiveSlaVendidas)}h SLA`}
                                 </p>
                             )}
                         </div>
@@ -8612,10 +8620,10 @@ export default function PlanificacionPage() {
                                 <p className="text-[8px] font-bold text-rose-400 leading-none mt-0.5">{extrasCount} ref.</p>
                             </div>
                         )}
-                        {slaVendidas > 0 && (
+                        {effectiveSlaVendidas > 0 && (
                             <div className={`text-center pl-3 ${slaMismatch ? 'rounded-lg bg-rose-50 px-2 py-0.5' : ''}`}>
                                 <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Vendidas</p>
-                                <p className="text-sm font-black text-teal-600 leading-tight">{slaVendidas}</p>
+                                <p className="text-sm font-black text-teal-600 leading-tight">{effectiveSlaVendidas}</p>
                             </div>
                         )}
                         <button onClick={() => { setStatsBarCollapsed(true); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '1'); }} className="shrink-0 ml-2 flex items-center gap-1 px-2 py-1 text-[9px] font-black text-slate-400 hover:text-slate-600 border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors" title="Ocultar estadísticas"><ChevronDown size={10}/></button>
@@ -8698,7 +8706,8 @@ export default function PlanificacionPage() {
                         .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
                     const empCount = planningDotacionEmployees.length;
                     const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
-                    const slaMismatch = slaVendidas > 0 && Math.round(totalHrs) !== Math.round(slaVendidas);
+                    const effectiveSlaVendidas = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
+                    const slaMismatch = effectiveSlaVendidas > 0 && Math.round(totalHrs) !== Math.round(effectiveSlaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
                     return (
                     <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/60 backdrop-blur-sm no-print" onClick={() => setShowCompareSummaryModal(false)}>
@@ -8711,7 +8720,7 @@ export default function PlanificacionPage() {
                                 <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">Empleados</p><p className="text-xl font-black text-slate-800">{empCount}</p></div>
                                 <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">{hsLabel}</p><p className={`text-xl font-black ${slaMismatch ? 'text-rose-600' : 'text-indigo-600'}`}>{totalHrs.toFixed(0)}</p></div>
                                 {empCountBillable > 0 && <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">Prom./Emp.</p><p className="text-xl font-black text-slate-600">{Math.round(nativeAssignedHours / empCountBillable)}h</p></div>}
-                                {slaVendidas > 0 && <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">Vendidas SLA</p><p className="text-xl font-black text-teal-600">{slaVendidas}</p></div>}
+                                {effectiveSlaVendidas > 0 && <div className="rounded-lg border p-3"><p className="text-[9px] font-black text-slate-400 uppercase">Vendidas SLA</p><p className="text-xl font-black text-teal-600">{effectiveSlaVendidas}</p></div>}
                             </div>
                             <p className="px-4 pb-4 text-[10px] text-slate-500">Snapshot: {compareSnapshotLabel} · {planningCompareDiff?.changedCount ?? 0} celda(s) distinta(s) vs actual.</p>
                         </div>
