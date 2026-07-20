@@ -2351,17 +2351,27 @@ export default function ServiciosSLAPage() {
                             {positionForm.allowedShiftTypes.length > 0 ? positionForm.allowedShiftTypes.map((v, vIdx) => {
                                 const isBeingEdited = editingShiftCode === v.code;
                                 return (
-                                <div key={`${v.code}_${vIdx}`} className={`flex items-center gap-3 bg-white dark:bg-slate-800 px-3 py-2.5 rounded-xl border shadow-sm transition-all ${isBeingEdited ? 'border-indigo-400 ring-2 ring-indigo-200' : 'dark:border-slate-600'}`}>
-                                    {/* Sigla editable inline */}
+                                <div key={`shift_row_${vIdx}`} className={`flex items-center gap-3 bg-white dark:bg-slate-800 px-3 py-2.5 rounded-xl border shadow-sm transition-all ${isBeingEdited ? 'border-indigo-400 ring-2 ring-indigo-200' : 'dark:border-slate-600'}`}>
+                                    {/* Sigla editable inline — key estable por índice para no perder foco al tipear */}
                                     <input
                                       value={v.code}
-                                      maxLength={4}
-                                      title="Sigla del turno en planificador (editable)"
-                                      className={`w-10 h-8 text-center text-[10px] font-black rounded-lg border focus:outline-none focus:ring-2 focus:ring-indigo-400 uppercase cursor-text ${v.isCustom ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 text-orange-600' : 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 text-indigo-700 dark:text-indigo-300'}`}
+                                      maxLength={3}
+                                      title="Sigla del turno en planificador (hasta 3 letras)"
+                                      className={`w-12 h-8 text-center text-[10px] font-black rounded-lg border focus:outline-none focus:ring-2 focus:ring-indigo-400 uppercase cursor-text ${v.isCustom ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 text-orange-600' : 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 text-indigo-700 dark:text-indigo-300'}`}
                                       onChange={e => {
-                                        const newCode = e.target.value.toUpperCase().slice(0, 4);
-                                        const updated = positionForm.allowedShiftTypes.map((x, i) => i === vIdx ? { ...x, code: newCode } : x);
-                                        setPositionForm({ ...positionForm, allowedShiftTypes: updated });
+                                        const prevCode = v.code;
+                                        const newCode = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+                                        setPositionForm(prev => ({
+                                          ...prev,
+                                          allowedShiftTypes: prev.allowedShiftTypes.map((x, i) =>
+                                            i === vIdx ? { ...x, code: newCode } : x
+                                          ),
+                                        }));
+                                        // Mantener vínculo de edición si estábamos editando este turno
+                                        if (editingShiftCode !== null && editingShiftCode === prevCode) {
+                                          setEditingShiftCode(newCode);
+                                          setNewCustomShift(prev => ({ ...prev, code: newCode }));
+                                        }
                                       }}
                                     />
                                     <div className="flex-1 min-w-0">
