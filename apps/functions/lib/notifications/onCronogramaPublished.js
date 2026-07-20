@@ -3,17 +3,45 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onCronogramaPublished = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+function publishedAtMillis(value) {
+    if (value == null || value === '')
+        return null;
+    if (typeof value.toMillis === 'function') {
+        return value.toMillis();
+    }
+    if (typeof value.seconds === 'number') {
+        return value.seconds * 1000;
+    }
+    if (value instanceof Date)
+        return value.getTime();
+    if (typeof value === 'string' || typeof value === 'number') {
+        const n = new Date(value).getTime();
+        return Number.isFinite(n) ? n : null;
+    }
+    return null;
+}
 exports.onCronogramaPublished = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
     .firestore.document('planificacion_estados/{docId}')
-    .onCreate(async (snap) => {
-    const data = snap.data();
+    .onWrite(async (change) => {
+    if (!change.after.exists)
+        return;
+    const data = change.after.data() || {};
+    const afterPub = publishedAtMillis(data.publishedAt);
+    if (afterPub == null) {
+        return;
+    }
+    const beforeData = change.before.exists ? (change.before.data() || {}) : {};
+    const beforePub = publishedAtMillis(beforeData.publishedAt);
+    if (beforePub != null && beforePub === afterPub) {
+        return;
+    }
     const objectiveId = String(data.objectiveId ?? data.objetivoId ?? '').trim();
     const year = Number(data.year ?? data.año);
     const month = Number(data.month ?? data.mes);
     const empresaId = String(data.empresaId ?? '').trim();
     if (!objectiveId || !year || !month) {
-        console.warn('[onCronogramaPublished] Documento incompleto:', snap.id, data);
+        console.warn('[onCronogramaPublished] Documento incompleto:', change.after.id, data);
         return;
     }
     const db = admin.firestore();
