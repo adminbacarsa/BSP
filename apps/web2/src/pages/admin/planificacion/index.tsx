@@ -383,6 +383,12 @@ const resolveBandHours = (
 
 const isShortBandHours = (hours: number) => hours < 12;
 
+/** Puestos 24hs usan esquema CCT M+T+N / D12+N12. Custom: turnos con nombre libre. */
+const is24hCoverageType = (pos: { coverageType?: unknown } | null | undefined): boolean => {
+    const cov = String(pos?.coverageType || '').toLowerCase();
+    return cov === '24hs' || cov === '24' || cov === '24h';
+};
+
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
 const OBJECTIVE_NON_BILLABLE_CODES = PLANNING_NON_BILLABLE_CODES;
 
@@ -1829,11 +1835,35 @@ export default function PlanificacionPage() {
             assigned.push({ code, hours });
         });
 
+        const is24hPos = is24hCoverageType(posConfig);
+
+        // Custom: turnos con nombre libre — solo cupo por código (hasta pax) y cierre de esquema.
+        // No aplicar mezcla 8h/12h (eso es de puestos 24hs M+T+N vs D12+N12).
+        if (!is24hPos) {
+            const codeCounts: Record<string, number> = {};
+            assigned.forEach(a => { codeCounts[a.code] = (codeCounts[a.code] || 0) + 1; });
+            const units = countPositionClosedUnitsFromShifts(
+                posConfig,
+                dayLetter,
+                codeCounts,
+                autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles,
+                true,
+            );
+            const schemeFull = units.required > 0 && units.closed >= units.required;
+            uniqueSLAShifts.forEach((s: any) => {
+                const code = String(s.code || '').toUpperCase();
+                if (!isWorking(code)) return;
+                if (schemeFull) { disabled.add(code); return; }
+                if ((codeCounts[code] || 0) >= pax) disabled.add(code);
+            });
+            return disabled;
+        }
+
         const assigned8h = assigned.filter(a => isShortBandHours(a.hours)).map(a => a.code);
         const assigned12h = assigned.filter(a => !isShortBandHours(a.hours)).map(a => a.code);
         const shifts8h = uniqueSLAShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShiftsForBand)));
         const shifts12h = uniqueSLAShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShiftsForBand)));
-        // Cada tipo de turno puede repetirse hasta PAX veces (un empleado por pax por franja)
+        // 24hs: M+T+N (8h) o D12+N12 (12h); cada código hasta pax
         const max8hSlots = shifts8h.length * pax;
         const max12hSlots = shifts12h.length * pax;
 
@@ -1843,15 +1873,13 @@ export default function PlanificacionPage() {
             const is8h = isShortBandHours(hours);
 
             if (pax === 1) {
-                // 1 pax: no mezclar 8h con 12h (un solo guardia por posición)
+                // 1 pax: no mezclar M+T+N con D12+N12
                 if (assigned8h.length > 0 && assigned12h.length > 0) { disabled.add(code); return; }
                 if (assigned8h.length > 0 && !is8h) { disabled.add(code); return; }
                 if (assigned12h.length > 0 && is8h) { disabled.add(code); return; }
                 if (assigned8h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
                 if (assigned12h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
             } else {
-                // Multi-pax: mismo esquema para todos; el mismo código puede repetirse hasta `pax`
-                // (ej. DIRECTORIO 2×M 08–20). No usar lookup CCT (M=8) contra SLA custom (M=12).
                 if (assigned8h.length > 0 && !is8h) { disabled.add(code); return; }
                 if (assigned12h.length > 0 && is8h) { disabled.add(code); return; }
                 const codeCount = assigned.filter(a => a.code === code).length;
@@ -1860,7 +1888,7 @@ export default function PlanificacionPage() {
             }
         });
         return disabled;
-    }, [selectedCell?.dateStr, selectedObjective, activePosition, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts]);
+    }, [selectedCell?.dateStr, selectedObjective, activePosition, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
@@ -4356,6 +4384,12 @@ export default function PlanificacionPage() {
             if (units.required > 0 && units.closed >= units.required) return true;
 
             const upper = String(code || '').toUpperCase();
+            const paxLeft = (codeCounts[upper] || 0) >= pax;
+            if (paxLeft) return true;
+
+            // Custom: solo cupo por código / esquema cerrado (arriba). Sin mezcla 8h/12h.
+            if (!is24hCoverageType(posCfg)) return false;
+
             const bandH = resolveBandHours(upper, { hours }, posCfg.shifts);
             const is8h = isShortBandHours(bandH);
             const assigned8h = assigned.filter(a => isShortBandHours(a.hours));
@@ -4373,7 +4407,6 @@ export default function PlanificacionPage() {
             } else {
                 if (assigned8h.length > 0 && !is8h) return true;
                 if (assigned12h.length > 0 && is8h) return true;
-                if ((codeCounts[upper] || 0) >= pax) return true;
                 if (assigned.length >= maxSlots && maxSlots > 0) return true;
             }
             return false;
@@ -4571,6 +4604,9 @@ export default function PlanificacionPage() {
             const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForBulk, true);
             if (units.required > 0 && units.closed >= units.required) return true;
             const upper = String(code).toUpperCase();
+            if ((codeCounts[upper] || 0) >= pax) return true;
+            // Custom: sin mezcla 8h/12h
+            if (!is24hCoverageType(pos)) return false;
             const bandH = resolveBandHours(upper, { hours }, pos.shifts);
             const is8h = isShortBandHours(bandH);
             const a8 = assigned.filter(a => isShortBandHours(a.hours));
@@ -4583,7 +4619,6 @@ export default function PlanificacionPage() {
             } else {
                 if (a8.length > 0 && !is8h) return true;
                 if (a12.length > 0 && is8h) return true;
-                if ((codeCounts[upper] || 0) >= pax) return true;
             }
             return false;
         };
@@ -4928,7 +4963,7 @@ export default function PlanificacionPage() {
                 }
                 setClipboard(cells);
                 setClipboardDim({ rows: maxR - minR + 1, cols: maxC - minC + 1 });
-                toast.success(`${maxR - minR + 1}×${maxC - minC + 1} copiado — Ctrl+V o botón para pegar`);
+                toast.success(`${maxR - minR + 1}×${maxC - minC + 1} copiado — Ctrl+V o botón para pegar (se mantiene)`);
                 e.preventDefault();
             }
             if (e.ctrlKey && e.key === 'v' && clipboard && selection.start) {
@@ -4947,13 +4982,13 @@ export default function PlanificacionPage() {
                     else { newChanges[key] = { ...shift, isTemp: true, employeeId: emp.id, objectiveId: selectedObjective }; pasted++; }
                 });
                 setPendingChanges(newChanges);
-                setClipboard(null); setClipboardDim(null); setSelection({ start: null, end: null });
-                toast.success(`${pasted} turno(s) pegado(s)`);
+                // Mantener portapapeles y selección para poder pegar de nuevo
+                toast.success(`${pasted} turno(s) pegado(s) — portapapeles listo para repetir`);
                 e.preventDefault();
             }
             if (e.key === 'Escape') {
                 setSelection({ start: null, end: null });
-                setClipboard(null); setClipboardDim(null);
+                // Escape solo limpia selección; el portapapeles vive hasta copiar otra cosa o cerrar con X
                 setColumnSelectMode(false); setColumnSelectSource(null); setIsDragging(false);
             }
         };
@@ -5045,7 +5080,7 @@ export default function PlanificacionPage() {
         }
         setClipboard(cells);
         setClipboardDim({ rows: maxR - minR + 1, cols: maxC - minC + 1 });
-        toast.success(`${maxR - minR + 1}×${maxC - minC + 1} copiado — seleccioná destino y pegá`);
+        toast.success(`${maxR - minR + 1}×${maxC - minC + 1} copiado — seleccioná destino y pegá (se mantiene hasta copiar otra cosa)`);
     };
 
     // Pegar clipboard en posición objetivo
@@ -5069,10 +5104,8 @@ export default function PlanificacionPage() {
             }
         });
         setPendingChanges(newChanges);
-        setClipboard(null);
-        setClipboardDim(null);
-        setSelection({ start: null, end: null });
-        toast.success(`${pasted} turno(s) pegado(s)`);
+        // Mantener portapapeles y selección para pegar varias veces
+        toast.success(`${pasted} turno(s) pegado(s) — portapapeles listo para repetir`);
     };
 
     // Importar mes anterior como plantilla (solo celdas vacías)
@@ -7956,19 +7989,19 @@ export default function PlanificacionPage() {
                             <>
                                 <ClipboardPaste size={14} className="text-emerald-400 ml-1"/>
                                 <span className="text-[10px] font-bold px-1 text-emerald-300 uppercase tracking-wider">
-                                    Portapapeles {clipboardDim ? `${clipboardDim.rows}×${clipboardDim.cols}` : ''}
+                                    Portapapeles {clipboardDim ? `${clipboardDim.rows}×${clipboardDim.cols}` : ''} · se mantiene
                                 </span>
                                 <button
                                     onClick={() => { if (selection.start) { const minR = Math.min(selection.start.r, selection.end?.r ?? selection.start.r); const minC = Math.min(selection.start.c, selection.end?.c ?? selection.start.c); handlePasteAt(minR, minC); } }}
                                     disabled={!selection.start}
-                                    title={selection.start ? 'Pegar en la selección actual' : 'Seleccioná una celda destino primero'}
+                                    title={selection.start ? 'Pegar en la selección (podés repetir)' : 'Seleccioná una celda o rango destino'}
                                     className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-lg text-white font-black text-xs flex items-center gap-1.5 shadow-sm"
                                 >
                                     <ArrowRightCircle size={14}/> Pegar aquí
                                 </button>
                                 <span className="text-[9px] text-slate-400 px-1">Ctrl+V</span>
                                 <div className="h-6 w-px bg-slate-600 mx-1"></div>
-                                <button onClick={() => { setClipboard(null); setClipboardDim(null); setSelection({start:null,end:null}); }} className="p-2 hover:bg-slate-700 rounded-lg"><X size={16}/></button>
+                                <button onClick={() => { setClipboard(null); setClipboardDim(null); }} className="p-2 hover:bg-slate-700 rounded-lg" title="Vaciar portapapeles"><X size={16}/></button>
                             </>
                         ) : (
                             <>
