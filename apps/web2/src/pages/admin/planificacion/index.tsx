@@ -8363,59 +8363,17 @@ export default function PlanificacionPage() {
                                     </span>
                                 )}
 
-                                {/* BUSCAR GUARDIA EXTERNO — agregar al cronograma sin cambiar su objetivo */}
-                                {selectedObjective && (() => {
-                                    const dotacionIds = new Set(dotacionBaseEmployees.map((e: any) => e.id));
-                                    const externalMatches = searchTerm.length >= 2
-                                        ? employees.filter((e: any) =>
-                                            e.status !== 'inactivo' &&
-                                            !dotacionIds.has(e.id) &&
-                                            e.name.toLowerCase().includes(searchTerm.toLowerCase()),
-                                          ).slice(0, 8)
-                                        : [];
-                                    return (
-                                        <div className="relative">
-                                            <div className={`flex items-center gap-1 px-2 py-1.5 rounded-xl border transition-colors ${searchTerm ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-slate-200'}`}>
-                                                <Search size={12} className={searchTerm ? 'text-indigo-500' : 'text-slate-400'}/>
-                                                <input
-                                                    type="text"
-                                                    placeholder="Agregar externo…"
-                                                    value={searchTerm}
-                                                    onChange={e => setSearchTerm(e.target.value)}
-                                                    className="bg-transparent text-[11px] font-bold outline-none w-28 placeholder:text-slate-300 text-slate-700"
-                                                />
-                                                {searchTerm && (
-                                                    <button onClick={() => setSearchTerm('')} className="text-indigo-400 hover:text-indigo-600 leading-none"><X size={11}/></button>
-                                                )}
-                                            </div>
-                                            {externalMatches.length > 0 && (
-                                                <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl w-60 overflow-hidden">
-                                                    <div className="px-2.5 py-1.5 text-[9px] font-black uppercase text-slate-400 bg-slate-50 border-b border-slate-100">
-                                                        Agregar al cronograma (temporal)
-                                                    </div>
-                                                    {externalMatches.map((emp: any) => (
-                                                        <button
-                                                            key={emp.id}
-                                                            className="w-full px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2"
-                                                            onClick={() => {
-                                                                setPinnedExternalEmpIds(prev => new Set([...prev, emp.id]));
-                                                                setSearchTerm('');
-                                                            }}
-                                                        >
-                                                            <UserPlus size={11} className="text-indigo-400 shrink-0"/>
-                                                            <span className="truncate">{emp.name}</span>
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {searchTerm.length >= 2 && externalMatches.length === 0 && (
-                                                <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl w-52 px-3 py-2 text-[11px] text-slate-400 font-bold">
-                                                    Sin resultados externos
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })()}
+
+                                {/* BUSCAR EXTERNO — activa la barra de búsqueda encima del grid */}
+                                {selectedObjective && (
+                                    <button
+                                        onClick={() => setSearchTerm(searchTerm ? '' : ' ')}
+                                        title="Buscar guardia externo para agregar al cronograma"
+                                        className={`p-2 rounded-xl border text-xs transition-colors ${searchTerm || pinnedExternalEmpIds.size > 0 ? 'bg-indigo-100 border-indigo-300 text-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600'}`}
+                                    >
+                                        <Search size={14}/>
+                                    </button>
+                                )}
 
                                 {/* ASIGNAR — siempre visible */}
                                 <button onClick={() => setShowAddModal(true)} disabled={!selectedObjective || isServiceLocked} className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-slate-800 disabled:opacity-50"><UserPlus size={14}/> Asignar</button>
@@ -8505,6 +8463,70 @@ export default function PlanificacionPage() {
                             )}
                             </>
                         )}
+                        {/* BUSCAR GUARDIA EXTERNO — barra encima del grid, solo cuando hay objetivo */}
+                        {selectedObjective && !comparingSnapshot && (() => {
+                            const dotacionIds = new Set(dotacionBaseEmployees.map((e: any) => e.id));
+                            const q = searchTerm.trim();
+                            const externalMatches = q.length >= 2
+                                ? employees.filter((e: any) =>
+                                    e.status !== 'inactivo' &&
+                                    !dotacionIds.has(e.id) &&
+                                    e.name.toLowerCase().includes(q.toLowerCase()),
+                                  ).slice(0, 8)
+                                : [];
+                            const hasPinned = pinnedExternalEmpIds.size > 0;
+                            if (!searchTerm && !hasPinned) return null;
+                            return (
+                                <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl mb-1 relative">
+                                    <Search size={12} className="text-indigo-400 shrink-0"/>
+                                    <input
+                                        type="text"
+                                        placeholder="Buscar externo para agregar…"
+                                        value={searchTerm}
+                                        onChange={e => setSearchTerm(e.target.value)}
+                                        autoFocus
+                                        className="bg-transparent text-[11px] font-bold outline-none flex-1 min-w-0 placeholder:text-indigo-300 text-indigo-800"
+                                    />
+                                    {hasPinned && (
+                                        <div className="flex items-center gap-1">
+                                            {[...pinnedExternalEmpIds].map(id => {
+                                                const emp = employees.find((e: any) => e.id === id);
+                                                if (!emp) return null;
+                                                return (
+                                                    <span key={id} className="flex items-center gap-1 bg-indigo-100 text-indigo-700 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                                        {emp.name.split(' ')[0]}
+                                                        <button onClick={() => setPinnedExternalEmpIds(prev => { const s = new Set(prev); s.delete(id); return s; })} className="hover:text-indigo-900 leading-none ml-0.5"><X size={9}/></button>
+                                                    </span>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                    {searchTerm && (
+                                        <button onClick={() => setSearchTerm('')} className="text-indigo-400 hover:text-indigo-600 shrink-0"><X size={12}/></button>
+                                    )}
+                                    {externalMatches.length > 0 && (
+                                        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl w-64 overflow-hidden">
+                                            <div className="px-2.5 py-1.5 text-[9px] font-black uppercase text-slate-400 bg-slate-50 border-b border-slate-100">
+                                                Agregar al cronograma (temporal)
+                                            </div>
+                                            {externalMatches.map((emp: any) => (
+                                                <button
+                                                    key={emp.id}
+                                                    className="w-full px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2"
+                                                    onClick={() => { setPinnedExternalEmpIds(prev => new Set([...prev, emp.id])); setSearchTerm(''); }}
+                                                >
+                                                    <UserPlus size={11} className="text-indigo-400 shrink-0"/>
+                                                    <span className="truncate">{emp.name}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {q.length >= 2 && externalMatches.length === 0 && (
+                                        <span className="text-[10px] text-indigo-400 font-bold">Sin resultados externos</span>
+                                    )}
+                                </div>
+                            );
+                        })()}
                         {comparingSnapshot ? (
                             <div className={`flex h-full min-h-0 gap-1 p-0.5 ${compareLayout === 'side' ? 'flex-col xl:flex-row' : 'flex-col'}`}>
                                 <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden rounded-lg border-2 border-amber-400 bg-white">
