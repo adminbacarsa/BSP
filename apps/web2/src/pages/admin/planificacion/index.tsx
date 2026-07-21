@@ -730,6 +730,7 @@ export default function PlanificacionPage() {
 
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [cellTargetObjectiveId, setCellTargetObjectiveId] = useState<string | null>(null);
     const [bandFilter, setBandFilter] = useState<string | null>(null);
     const [addSearchTerm, setAddSearchTerm] = useState('');
     const [selectedCell, setSelectedCell] = useState<any>(null);
@@ -2404,6 +2405,7 @@ export default function PlanificacionPage() {
 
     // Sincronización Reactiva del Modal
     useEffect(() => {
+        setCellTargetObjectiveId(null);
         if (selectedCell) {
             const empPreferred = empDefaultPos[`${selectedCell.empId}___${selectedObjective}`];
             const smartDefault = selectedCell.currentShift?.positionName || empPreferred || dominantPosition.positionName || 'General';
@@ -5063,7 +5065,7 @@ export default function PlanificacionPage() {
             swapWith: config.swapWith || null,
             swapDate: config.swapDate || null,
             positionName: config.positionName || activePosition || 'General',
-            objectiveId: config.objectiveId || resolveObjectiveForEmp(selectedCell.empId),
+            objectiveId: config.objectiveId || (selectedGrupo && grupoUnifiedMode && cellTargetObjectiveId) || resolveObjectiveForEmp(selectedCell.empId),
         };
         commitPendingChanges(newChanges);
         // Toast de alerta si el nuevo turno rompe el descanso mínimo de 12h
@@ -8363,6 +8365,21 @@ export default function PlanificacionPage() {
                                     </span>
                                 )}
 
+                                {/* BUSCAR GUARDIA — filtro por nombre */}
+                                <div className={`flex items-center gap-1 px-2 py-1.5 rounded-xl border transition-colors ${searchTerm ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-slate-200'}`}>
+                                    <Search size={12} className={searchTerm ? 'text-indigo-500' : 'text-slate-400'}/>
+                                    <input
+                                        type="text"
+                                        placeholder="Buscar guardia…"
+                                        value={searchTerm}
+                                        onChange={e => setSearchTerm(e.target.value)}
+                                        className="bg-transparent text-[11px] font-bold outline-none w-28 placeholder:text-slate-300 text-slate-700"
+                                    />
+                                    {searchTerm && (
+                                        <button onClick={() => setSearchTerm('')} className="text-indigo-400 hover:text-indigo-600 leading-none"><X size={11}/></button>
+                                    )}
+                                </div>
+
                                 {/* ASIGNAR — siempre visible */}
                                 <button onClick={() => setShowAddModal(true)} disabled={!selectedObjective || isServiceLocked} className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-slate-800 disabled:opacity-50"><UserPlus size={14}/> Asignar</button>
 
@@ -9506,6 +9523,42 @@ export default function PlanificacionPage() {
                                                 <span>Descanso total: <span className="font-black text-emerald-700">{francoRestHModal}h</span></span>
                                             </div>
                                         )}
+                                        {selectedGrupo && grupoUnifiedMode && (() => {
+                                            const _emp = employees.find((e: any) => e.id === selectedCell.empId);
+                                            const _nativeObjId = _emp ? (
+                                                selectedGrupo.objectiveIds.includes(_emp.preferredObjectiveId)
+                                                    ? _emp.preferredObjectiveId
+                                                    : (slaIdToObjId[_emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[_emp.preferredObjectiveId]) ? slaIdToObjId[_emp.preferredObjectiveId] : null)
+                                            ) : null;
+                                            const _isExternal = !_nativeObjId;
+                                            const _currentTarget = cellTargetObjectiveId || _nativeObjId || selectedGrupo.objectiveIds[0];
+                                            const _oi = selectedGrupo.objectiveIds.indexOf(_currentTarget);
+                                            const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length] || '#64748b';
+                                            return (
+                                                <div className="mb-3">
+                                                    <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block">
+                                                        Objetivo {_isExternal && <span className="text-amber-500 normal-case font-bold ml-1">(externo — elegí dónde planificar)</span>}
+                                                    </label>
+                                                    {_isExternal ? (
+                                                        <select
+                                                            className="w-full border p-2 rounded-lg text-xs font-bold"
+                                                            style={{ borderColor: _clr, backgroundColor: _clr + '12', color: _clr }}
+                                                            value={_currentTarget}
+                                                            onChange={e => setCellTargetObjectiveId(e.target.value)}
+                                                        >
+                                                            {selectedGrupo.objectiveIds.map((objId: string, oi: number) => (
+                                                                <option key={objId} value={objId}>{selectedGrupo.objectiveNames[oi]}</option>
+                                                            ))}
+                                                        </select>
+                                                    ) : (
+                                                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-bold" style={{ backgroundColor: _clr + '18', color: _clr }}>
+                                                            <MapPin size={12} className="shrink-0"/>
+                                                            <span>{selectedGrupo.objectiveNames[_oi] || _nativeObjId}</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })()}
                                         <div className="mb-2">
                                             <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block flex items-center gap-2">
                                                 Puesto / Función
@@ -9513,9 +9566,9 @@ export default function PlanificacionPage() {
                                                     positionStructure.find((p: any) => p.positionName === (activePosition || positionStructure[0]?.positionName))?.preferenciaGenero,
                                                 )}
                                             </label>
-                                            <select 
+                                            <select
                                                 className="w-full bg-slate-50 border p-2 rounded-lg text-xs font-bold"
-                                                value={activePosition || ''} 
+                                                value={activePosition || ''}
                                                 id="positionSelector"
                                                 disabled={isServiceLocked}
                                                 onChange={(e) => setActivePosition(e.target.value)}
