@@ -37,6 +37,14 @@ export default function UsersTab() {
 
     useEffect(() => { loadData(); }, [myEmpresaId, isSuperAdmin]);
 
+    // Refresca solo los roles al abrir el modal (puede haber creado uno nuevo en RolesTab)
+    useEffect(() => {
+        if (!isModalOpen) return;
+        getDocs(collection(db, 'roles')).then(snap => {
+            setRolesList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        }).catch(() => {});
+    }, [isModalOpen]);
+
     const loadData = async () => {
         setLoading(true);
         try {
@@ -338,7 +346,10 @@ export default function UsersTab() {
                                         <option value="SUPERADMIN">⭐ Superadmin</option>
                                     )}
                                     {rolesList
-                                        .filter(r => !isSuperAdminRole(r.id))
+                                        .filter(r =>
+                                            !isSuperAdminRole(r.id) &&
+                                            (!r.empresaId || r.empresaId === myEmpresaId)
+                                        )
                                         .map(r => (
                                             <option key={r.id} value={r.id}>{r.name || r.id}</option>
                                         ))
