@@ -34,6 +34,26 @@ function displayCode(cell: PlanningSnapshotCell | undefined | null): string | nu
   return c;
 }
 
+/** Empleados con celdas en el objetivo (evita recorrer toda la dotación del grupo). */
+export function collectSnapshotEmployeeIds(
+  pendingChanges: Record<string, unknown>,
+  shiftsMap: Record<string, { objectiveId?: string } | undefined>,
+  objectiveId: string,
+): string[] {
+  const ids = new Set<string>();
+  for (const key of Object.keys(pendingChanges)) {
+    const empId = key.split('_')[0];
+    if (empId) ids.add(empId);
+  }
+  for (const [key, shift] of Object.entries(shiftsMap)) {
+    if (shift?.objectiveId === objectiveId) {
+      const empId = key.split('_')[0];
+      if (empId) ids.add(empId);
+    }
+  }
+  return [...ids];
+}
+
 /** Arma snapshot del estado visible (turnos guardados + pendientes). */
 export function buildPlanningSnapshotFromGrid(args: {
   employeeIds: string[];

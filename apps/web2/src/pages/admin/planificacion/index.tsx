@@ -191,6 +191,7 @@ import { usePlanningRules } from '@/hooks/usePlanningRules';
 import { enabledPlanningCycles, planningHourLimits } from '@/lib/planning/planning-rules.runtime';
 import {
     buildPlanningSnapshotFromGrid,
+    collectSnapshotEmployeeIds,
     diffPlanningSnapshots,
 } from '@/lib/planificacion/planningSnapshotDiff';
 import {
@@ -4098,7 +4099,24 @@ export default function PlanificacionPage() {
 
         const doSave = async () => {
             setIsProcessing(true);
-            const batch = writeBatch(db);
+            const toastId = toast.loading('Guardando turnos…');
+            let batch = writeBatch(db);
+            let batchOps = 0;
+            const BATCH_LIMIT = 450;
+            const trackBatchOp = async () => {
+                batchOps++;
+                if (batchOps >= BATCH_LIMIT) {
+                    await batch.commit();
+                    batch = writeBatch(db);
+                    batchOps = 0;
+                }
+            };
+            const flushBatch = async () => {
+                if (batchOps === 0) return;
+                await batch.commit();
+                batch = writeBatch(db);
+                batchOps = 0;
+            };
             const auth = getAuth();
             const realActorName = activeActorName || 'Sistema';
             const pubYear = currentDate.getFullYear();
@@ -4106,26 +4124,21 @@ export default function PlanificacionPage() {
             const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
             const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
             const logData: any[] = [];
-            const snapshotData: Record<string, any> = {};
-
-            displayedEmployees.forEach(emp => {
-                daysInMonth.forEach(day => {
-                    const key = `${emp.id}_${getDateKey(day)}`;
-                    const pending = pendingChanges[key];
-                    const existing = shiftsMap[key];
-                    if (pending) {
-                        if (!pending.isDeleted) {
-                            snapshotData[key] = { code: pending.code, isFranco: pending.isFranco, isFrancoTrabajado: pending.isFrancoTrabajado, isFrancoCompensatorio: pending.isFrancoCompensatorio, swapWith: pending.swapWith, objectiveId: selectedObjective, isExtended: pending.isExtended, isEarlyStart: pending.isEarlyStart };
-                        }
-                    } else if (existing) {
-                        if(existing.objectiveId === selectedObjective) {
-                            snapshotData[key] = { code: existing.code, isFranco: existing.isFranco, isFrancoTrabajado: existing.isFrancoTrabajado, isFrancoCompensatorio: existing.isFrancoCompensatorio, swapWith: existing.swapWith, objectiveId: selectedObjective, isExtended: existing.isExtended, isEarlyStart: existing.isEarlyStart };
-                        }
-                    }
-                });
+            const dateKeys = daysInMonth.map((d) => getDateKey(d));
+            const snapshotData = buildPlanningSnapshotFromGrid({
+                employeeIds: collectSnapshotEmployeeIds(pendingChanges, shiftsMap, selectedObjective),
+                dateKeys,
+                shiftsMap,
+                pendingChanges,
+                objectiveId: selectedObjective,
             });
+            const employeesById: Record<string, any> = {};
+            employees.forEach((e: any) => { employeesById[e.id] = e; });
+            const savedPendingChanges = pendingChanges;
+            const savedPendingNovedades = pendingNovedades;
+            const savedRecompositionPackages = pendingRecompositionPackages;
 
-            const registerPlanificacionCorreccion = (
+            const registerPlanificacionCorreccion = async (
                 empId: string,
                 empName: string,
                 dateStr: string,
@@ -4152,6 +4165,7 @@ export default function PlanificacionPage() {
                     employeeName: empName,
                     fecha: corrFechaTs,
                 }, empresaId));
+                await trackBatchOp();
                 batch.set(doc(collection(db, 'ajustes_horas')), stampEmpresaId({
                     employeeId: empId,
                     employeeName: empName,
@@ -4167,13 +4181,14 @@ export default function PlanificacionPage() {
                     creadoPorNombre: realActorName,
                     creadoEn: serverTimestamp(),
                 }, empresaId));
+                await trackBatchOp();
             };
 
             try {
                 for (const [key, change] of Object.entries(pendingChanges)) {
                     const [empId, dateStr] = key.split('_');
                     const existing = shiftsMap[key];
-                    const empObj = employees.find(e => e.id === empId);
+                    const empObj = employeesById[empId];
                     const empName = empObj ? empObj.name : 'Desconocido';
                     let actionType = 'ASIGNACION_MASIVA';
                     let actionDetail = change.coveredBy
@@ -4184,15 +4199,19 @@ export default function PlanificacionPage() {
                                 ? `${change.name || change.code} — ${empName} el ${dateStr}`
                                 : `Asignó ${change.code} a ${empName} el ${dateStr}`;
 
-                    // Borrar TODOS los documentos existentes para este empId+fecha (evita docs huérfanos duplicados)
                     const allExistingIds = allShiftIds[key] ?? (existing?.id ? [existing.id] : []);
-                    const deleteAllExisting = () => allExistingIds.forEach(docId => batch.delete(doc(db, 'turnos', docId)));
+                    const deleteAllExisting = async () => {
+                        for (const docId of allExistingIds) {
+                            batch.delete(doc(db, 'turnos', docId));
+                            await trackBatchOp();
+                        }
+                    };
 
                     if (change.isDeleted) {
                         actionType = 'ELIMINACION_MASIVA';
                         actionDetail = `Borró turno de ${empName} el ${dateStr}`;
-                        deleteAllExisting();
-                        registerPlanificacionCorreccion(
+                        await deleteAllExisting();
+                        await registerPlanificacionCorreccion(
                             empId,
                             empName,
                             dateStr,
@@ -4201,7 +4220,7 @@ export default function PlanificacionPage() {
                             '(eliminado)',
                         );
                     } else {
-                        deleteAllExisting();
+                        await deleteAllExisting();
 
                         if (existing) {
                             if ((existing.code === 'F' || existing.isFranco) && change.code !== 'F') {
@@ -4222,9 +4241,8 @@ export default function PlanificacionPage() {
                         else if (typeof change.endTime === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(change.endTime)) {
                             const [eh, em] = change.endTime.split(':').map(Number);
                             end.setHours(eh, em, 0);
-                            if (end <= start) end.setTime(end.getTime() + 24 * 3600000); // turno nocturno
+                            if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
                         } else {
-                            // endTime no disponible en el change: buscar en positionStructure (SLA)
                             const slaPos = positionStructure.find((p: any) => p.positionName === (change.positionName || ''));
                             const slaSh = slaPos?.shifts?.find((s: any) => String(s.code || '').toUpperCase() === String(change.code || '').toUpperCase());
                             const slaEnd = typeof slaSh?.endTime === 'string' ? slaSh.endTime : null;
@@ -4242,8 +4260,6 @@ export default function PlanificacionPage() {
 
                         const safeSwapWith = change.swapWith || null;
                         const safeSwapDate = change.swapDate || null;
-
-                        // FIX DE SEGURIDAD: Evitar undefined en positionName
                         const safePositionName = change.positionName || 'General';
 
                         const turnoPayload: Record<string, unknown> = {
@@ -4296,10 +4312,11 @@ export default function PlanificacionPage() {
                         }
 
                         batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
+                        await trackBatchOp();
 
                         if (correctionMode) {
                             const codigoNuevo = change.isFrancoCompensatorio ? 'FF' : change.code;
-                            registerPlanificacionCorreccion(
+                            await registerPlanificacionCorreccion(
                                 empId,
                                 empName,
                                 dateStr,
@@ -4321,21 +4338,40 @@ export default function PlanificacionPage() {
                                     objectiveName: getObjectiveName(selectedObjective),
                                     clientId: selectedClient || undefined,
                                 }, empresaId));
+                                await trackBatchOp();
                             }
                         }
                     }
                 }
 
-                await addDoc(collection(db, 'planificaciones_historial'), { timestamp: serverTimestamp(), user: realActorName, period: `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`, objectiveId: selectedObjective, changes: logData, count, snapshot: JSON.stringify(snapshotData) });
-                await batch.commit();
+                await flushBatch();
+
+                setPendingChanges({});
+                setPendingNovedades({});
+                setPendingRecompositionPackages([]);
+                clearUndoStack();
+                if (isPublished) {
+                    setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
+                }
+                toast.success('Guardado exitoso', { id: toastId });
+
+                const postSaveTasks: Promise<unknown>[] = [
+                    addDoc(collection(db, 'planificaciones_historial'), {
+                        timestamp: serverTimestamp(),
+                        user: realActorName,
+                        period: `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`,
+                        objectiveId: selectedObjective,
+                        changes: logData,
+                        count,
+                        snapshot: JSON.stringify(snapshotData),
+                    }).catch((err) => { console.warn('[plan] historial', err); }),
+                ];
 
                 if (isPublished && empresaId) {
-                    const employeesById: Record<string, any> = {};
-                    employees.forEach((e: any) => { employeesById[e.id] = e; });
                     const objName = getObjectiveName(selectedObjective);
                     const packages = [
-                        ...pendingRecompositionPackages,
-                        ...extractPackagesFromPending(pendingChanges, employeesById, selectedObjective),
+                        ...savedRecompositionPackages,
+                        ...extractPackagesFromPending(savedPendingChanges, employeesById, selectedObjective),
                     ];
                     const seenPkg = new Set<string>();
                     for (const pkg of packages) {
@@ -4344,8 +4380,8 @@ export default function PlanificacionPage() {
                         const extName = employeesById[pkg.extension.employeeId]?.name || pkg.extension.employeeId;
                         const adelName = employeesById[pkg.earlyStart.employeeId]?.name || pkg.earlyStart.employeeId;
                         const targetName = employeesById[pkg.target.employeeId]?.name || pkg.target.employeeId;
-                        try {
-                            await emitRecompositionNotifications(pkg, {
+                        postSaveTasks.push(
+                            emitRecompositionNotifications(pkg, {
                                 empresaId,
                                 clientId: selectedClient,
                                 objectiveId: selectedObjective,
@@ -4353,20 +4389,20 @@ export default function PlanificacionPage() {
                                 extName,
                                 adelName,
                                 targetName,
-                            });
-                        } catch (notifyErr) {
-                            console.warn('[plan] cobertura notify', notifyErr);
-                        }
+                            }).catch((notifyErr) => {
+                                console.warn('[plan] cobertura notify', notifyErr);
+                            }),
+                        );
                     }
                 }
 
                 const experienciaPatches = new Map<string, Record<string, unknown>>();
-                for (const [key, change] of Object.entries(pendingChanges)) {
+                for (const [key, change] of Object.entries(savedPendingChanges)) {
                     if (change.isDeleted) continue;
                     const code = String(change.code || '').toUpperCase();
                     if (code !== 'REF' && code !== 'ESC') continue;
                     const empId = key.split('_')[0];
-                    const empObj = employees.find(e => e.id === empId);
+                    const empObj = employeesById[empId];
                     if (!empObj || !selectedObjective) continue;
                     const prev = (empObj.experienciaObjetivos || {}) as Record<string, unknown>;
                     const next = patchExperienciaForTurno(
@@ -4377,26 +4413,41 @@ export default function PlanificacionPage() {
                     );
                     experienciaPatches.set(empId, next);
                 }
-                await Promise.all(
-                    [...experienciaPatches.entries()].map(([empId, exp]) =>
-                        updateDoc(doc(db, 'empleados', empId), { experienciaObjetivos: exp }).catch(() => {}),
-                    ),
-                );
-                // Guardar ausencias pendientes (novedades RRHH)
-                for (const novedad of Object.values(pendingNovedades)) {
-                    await addDoc(collection(db, 'ausencias'), stampEmpresaId({ ...novedad, createdAt: serverTimestamp() }, empresaId));
+                if (experienciaPatches.size > 0) {
+                    postSaveTasks.push(
+                        Promise.all(
+                            [...experienciaPatches.entries()].map(([empId, exp]) =>
+                                updateDoc(doc(db, 'empleados', empId), { experienciaObjetivos: exp }).catch(() => {}),
+                            ),
+                        ),
+                    );
                 }
-                setPendingChanges({});
-                setPendingNovedades({});
-                setPendingRecompositionPackages([]);
-                clearUndoStack();
-                if (isPublished) {
-                    setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
+
+                const novedades = Object.values(savedPendingNovedades);
+                if (novedades.length > 0) {
+                    postSaveTasks.push((async () => {
+                        let ausBatch = writeBatch(db);
+                        let ausOps = 0;
+                        for (const novedad of novedades) {
+                            ausBatch.set(
+                                doc(collection(db, 'ausencias')),
+                                stampEmpresaId({ ...novedad, createdAt: serverTimestamp() }, empresaId),
+                            );
+                            ausOps++;
+                            if (ausOps >= BATCH_LIMIT) {
+                                await ausBatch.commit();
+                                ausBatch = writeBatch(db);
+                                ausOps = 0;
+                            }
+                        }
+                        if (ausOps > 0) await ausBatch.commit();
+                    })());
                 }
-                toast.success("Guardado exitoso");
+
+                await Promise.all(postSaveTasks);
             } catch(e) {
                 console.error(e);
-                toast.error("Error al guardar");
+                toast.error('Error al guardar', { id: toastId });
             } finally {
                 setIsProcessing(false);
             }
