@@ -17,7 +17,7 @@ import {
 
 export default function UsersTab() {
     const { isSuperAdmin } = useAuth();
-    const { empresaId: myEmpresaId, empresas } = useEmpresa();
+    const { empresaId: myEmpresaId, empresa, empresas } = useEmpresa();
 
     const [users, setUsers]         = useState<any[]>([]);
     const [rolesList, setRolesList] = useState<any[]>([]);
@@ -348,7 +348,7 @@ export default function UsersTab() {
                                     {rolesList
                                         .filter(r =>
                                             !isSuperAdminRole(r.id) &&
-                                            (!r.empresaId || r.empresaId === myEmpresaId)
+                                            (!r.empresaId || r.empresaId === myEmpresaId || r.empresaId === empresa?.name)
                                         )
                                         .map(r => (
                                             <option key={r.id} value={r.id}>{r.name || r.id}</option>

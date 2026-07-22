@@ -28,7 +28,7 @@ const actionBadgeClass = (action: string) => {
 
 export default function RolesTab() {
     const { isSuperAdmin } = useAuth();
-    const { empresaId } = useEmpresa();
+    const { empresaId, empresa, empresas } = useEmpresa();
     const [roles, setRoles] = useState<IRole[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [roleName, setRoleName] = useState('');
@@ -58,7 +58,11 @@ export default function RolesTab() {
     const handleOpenEdit = (role: IRole) => {
         if (!canEditRole(role)) return alert('Rol global: solo lectura');
         setEditId(role.id); setRoleName(role.name); setMatrix(role.permissions || {});
-        setRoleEmpresaId(role.empresaId || '');
+        // Normaliza: si el rol guardó el nombre en vez del ID, buscar el ID real
+        const storedVal = role.empresaId || '';
+        const matchById = empresas.find(e => e.id === storedVal);
+        const matchByName = empresas.find(e => e.name === storedVal);
+        setRoleEmpresaId(matchById?.id || matchByName?.id || storedVal);
         setIsModalOpen(true);
     };
 
@@ -83,7 +87,7 @@ export default function RolesTab() {
         const roleData: Record<string, unknown> = { name: roleName, permissions: matrix };
         const emp = String(roleEmpresaId || '').trim();
         if (emp) roleData.empresaId = emp;
-        else if (!isSuperAdmin) roleData.empresaId = empresaId;
+        else roleData.empresaId = empresaId;
         try {
             if (editId) await updateDoc(doc(db, 'roles', editId), roleData);
             else await setDoc(doc(db, 'roles', roleName.toUpperCase().replace(/\s+/g, '_')), roleData);
@@ -110,7 +114,7 @@ export default function RolesTab() {
                         <div className="flex justify-between items-start mb-4">
                             <div>
                                 <h3 className="font-black text-xl text-slate-800 dark:text-white uppercase">{role.name}</h3>
-                                {role.empresaId && <p className="text-[10px] text-indigo-500 font-bold mt-1">Tenant: {role.empresaId}</p>}
+                                {role.empresaId && <p className="text-[10px] text-indigo-500 font-bold mt-1">{empresas.find(e => e.id === role.empresaId || e.name === role.empresaId)?.name || role.empresaId}</p>}
                                 {!role.empresaId && <p className="text-[10px] text-slate-400 font-bold mt-1">Global</p>}
                             </div>
                             {canEditRole(role) && (
@@ -153,9 +157,11 @@ export default function RolesTab() {
                                 <div className="mt-4">
                                   <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Empresa</label>
                                   {isSuperAdmin ? (
-                                    <input type="text" value={roleEmpresaId} onChange={e => setRoleEmpresaId(e.target.value)} placeholder="vacío = global" className="w-full p-2 border rounded-lg dark:bg-slate-900 dark:border-slate-600 dark:text-white text-sm" />
+                                    <select value={roleEmpresaId} onChange={e => setRoleEmpresaId(e.target.value)} className="w-full p-2 border rounded-lg dark:bg-slate-900 dark:border-slate-600 dark:text-white text-sm">
+                                        {empresas.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                                    </select>
                                   ) : (
-                                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-900 border rounded-lg border-slate-200 dark:border-slate-600">{roleEmpresaId}</p>
+                                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-900 border rounded-lg border-slate-200 dark:border-slate-600">{empresa?.name || roleEmpresaId}</p>
                                   )}
                                 </div>
                             </div>
