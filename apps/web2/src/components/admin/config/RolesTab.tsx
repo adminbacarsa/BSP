@@ -28,7 +28,7 @@ const actionBadgeClass = (action: string) => {
 
 export default function RolesTab() {
     const { isSuperAdmin } = useAuth();
-    const { empresaId, empresa } = useEmpresa();
+    const { empresaId } = useEmpresa();
     const [roles, setRoles] = useState<IRole[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [roleName, setRoleName] = useState('');
@@ -37,10 +37,9 @@ export default function RolesTab() {
 
     useEffect(() => { loadRoles(); }, [empresaId, isSuperAdmin]);
 
+    const normId = (s?: string) => (s || '').toLowerCase().replace(/[\s.]/g, '');
     const matchesEmpresa = (r: IRole) =>
-        !r.empresaId ||
-        r.empresaId === empresaId ||
-        r.empresaId === empresa?.name;
+        !r.empresaId || normId(r.empresaId) === normId(empresaId);
 
     const loadRoles = async () => {
         const snap = await getDocs(collection(db, 'roles'));
