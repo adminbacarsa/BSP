@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Edit3, Trash2, Save, Shield, Check, X } from 'lucide-react';
+import { Edit3, Trash2, Save, Shield, Check, X } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { SYSTEM_MODULES, PERMISSION_ACTIONS } from '@/config/modules';
@@ -28,41 +28,36 @@ const actionBadgeClass = (action: string) => {
 
 export default function RolesTab() {
     const { isSuperAdmin } = useAuth();
-    const { empresaId, empresa, empresas } = useEmpresa();
+    const { empresaId, empresa } = useEmpresa();
     const [roles, setRoles] = useState<IRole[]>([]);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [roleName, setRoleName] = useState('');
     const [editId, setEditId] = useState<string | null>(null);
     const [matrix, setMatrix] = useState<Record<string, string[]>>({});
-    const [roleEmpresaId, setRoleEmpresaId] = useState('');
 
     useEffect(() => { loadRoles(); }, [empresaId, isSuperAdmin]);
+
+    const matchesEmpresa = (r: IRole) =>
+        !r.empresaId ||
+        r.empresaId === empresaId ||
+        r.empresaId === empresa?.name;
 
     const loadRoles = async () => {
         const snap = await getDocs(collection(db, 'roles'));
         const all = snap.docs.map(d => ({ id: d.id, ...d.data() })) as IRole[];
-        const filtered = isSuperAdmin
-          ? all
-          : all.filter(r => !r.empresaId || String(r.empresaId).trim() === String(empresaId).trim());
-        setRoles(filtered);
+        setRoles(all.filter(matchesEmpresa));
     };
 
-    const canEditRole = (role: IRole) => isSuperAdmin || (!!role.empresaId && role.empresaId === empresaId);
+    const canEditRole = (role: IRole) => isSuperAdmin || matchesEmpresa(role);
 
     const handleOpenCreate = () => {
         setEditId(null); setRoleName(''); setMatrix({});
-        setRoleEmpresaId(empresaId || '');
         setIsModalOpen(true);
     };
 
     const handleOpenEdit = (role: IRole) => {
         if (!canEditRole(role)) return alert('Rol global: solo lectura');
         setEditId(role.id); setRoleName(role.name); setMatrix(role.permissions || {});
-        // Normaliza: si el rol guardó el nombre en vez del ID, buscar el ID real
-        const storedVal = role.empresaId || '';
-        const matchById = empresas.find(e => e.id === storedVal);
-        const matchByName = empresas.find(e => e.name === storedVal);
-        setRoleEmpresaId(matchById?.id || matchByName?.id || storedVal);
         setIsModalOpen(true);
     };
 
@@ -84,10 +79,7 @@ export default function RolesTab() {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!roleName.trim()) return alert("Nombre requerido");
-        const roleData: Record<string, unknown> = { name: roleName, permissions: matrix };
-        const emp = String(roleEmpresaId || '').trim();
-        if (emp) roleData.empresaId = emp;
-        else roleData.empresaId = empresaId;
+        const roleData: Record<string, unknown> = { name: roleName, permissions: matrix, empresaId };
         try {
             if (editId) await updateDoc(doc(db, 'roles', editId), roleData);
             else await setDoc(doc(db, 'roles', roleName.toUpperCase().replace(/\s+/g, '_')), roleData);
@@ -97,7 +89,7 @@ export default function RolesTab() {
 
     const handleDelete = async (id: string) => {
         const role = roles.find(r => r.id === id);
-        if (role && !canEditRole(role)) return alert('No podés borrar roles globales');
+        if (role && !canEditRole(role)) return alert('No podés borrar este rol');
         if (confirm("¿Borrar rol?")) { await deleteDoc(doc(db, 'roles', id)); loadRoles(); }
     };
 
@@ -112,11 +104,7 @@ export default function RolesTab() {
                 {roles.map(role => (
                     <div key={role.id} className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm hover:shadow-md transition-all group relative">
                         <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <h3 className="font-black text-xl text-slate-800 dark:text-white uppercase">{role.name}</h3>
-                                {role.empresaId && <p className="text-[10px] text-indigo-500 font-bold mt-1">{empresas.find(e => e.id === role.empresaId || e.name === role.empresaId)?.name || role.empresaId}</p>}
-                                {!role.empresaId && <p className="text-[10px] text-slate-400 font-bold mt-1">Global</p>}
-                            </div>
+                            <h3 className="font-black text-xl text-slate-800 dark:text-white uppercase">{role.name}</h3>
                             {canEditRole(role) && (
                             <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity absolute top-4 right-4 bg-white dark:bg-slate-800 p-1 rounded-lg shadow-sm border dark:border-slate-600">
                                 <button onClick={()=>handleOpenEdit(role)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-indigo-500"><Edit3 size={16}/></button>
@@ -154,16 +142,6 @@ export default function RolesTab() {
                                     value={roleName}
                                     onChange={e => setRoleName(e.target.value)}
                                 />
-                                <div className="mt-4">
-                                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Empresa</label>
-                                  {isSuperAdmin ? (
-                                    <select value={roleEmpresaId} onChange={e => setRoleEmpresaId(e.target.value)} className="w-full p-2 border rounded-lg dark:bg-slate-900 dark:border-slate-600 dark:text-white text-sm">
-                                        {empresas.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                                    </select>
-                                  ) : (
-                                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-900 border rounded-lg border-slate-200 dark:border-slate-600">{empresa?.name || roleEmpresaId}</p>
-                                  )}
-                                </div>
                             </div>
                             <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-400"><X/></button>
                         </div>
