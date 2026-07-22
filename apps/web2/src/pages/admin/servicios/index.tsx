@@ -17,6 +17,7 @@ import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSche
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
 import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdvisor';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { useAuth } from '@/context/AuthContext';
 import {
   filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
   collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, deleteDocsByIdsForEmpresa, TenantIsolationError,
@@ -102,6 +103,10 @@ function buildClientGroups(
 export default function ServiciosSLAPage() {
   const { addToast } = useToast();
   const { empresaId, empresa } = useEmpresa();
+  const { isSuperAdmin, rolePermissions } = useAuth();
+  const canDeleteService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('delete');
+  const canCreateService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('create');
+  const canUpdateService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update');
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   
@@ -791,6 +796,7 @@ export default function ServiciosSLAPage() {
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDeleteService) { addToast('Sin permiso para eliminar servicios', 'error'); return; }
     const srv = services.find(s => s.id === id);
     if (!srv) return;
 
@@ -1233,9 +1239,11 @@ export default function ServiciosSLAPage() {
                                   <button onClick={() => handleEdit(currentSrv)} title="Editar" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
                                     <Edit2 size={11}/>
                                   </button>
+                                  {canDeleteService && (
                                   <button onClick={() => currentSrv.id && handleDelete(currentSrv.id)} title="Eliminar" className="p-1.5 rounded-lg bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
                                     <Trash2 size={11}/>
                                   </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -1380,9 +1388,11 @@ export default function ServiciosSLAPage() {
                                     <button onClick={() => { handleEdit(srv); }} title="Editar" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
                                       <Edit2 size={11}/>
                                     </button>
+                                    {canDeleteService && (
                                     <button onClick={() => { srv.id && handleDelete(srv.id); }} title="Eliminar" className="p-1.5 rounded-lg bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
                                       <Trash2 size={11}/>
                                     </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1691,9 +1701,11 @@ export default function ServiciosSLAPage() {
                   <button onClick={() => { handleEdit(srv); close(); }} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-black text-xs uppercase hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors">
                     <Edit2 size={13}/> Editar
                   </button>
+                  {canDeleteService && (
                   <button onClick={() => { srv.id && handleDelete(srv.id); close(); }} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 font-black text-xs uppercase hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors">
                     <Trash2 size={13}/> Eliminar
                   </button>
+                  )}
                 </div>
               </div>
             );
