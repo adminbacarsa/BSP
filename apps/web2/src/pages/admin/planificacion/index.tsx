@@ -496,6 +496,52 @@ function resolveCellShiftAtObjective(
     return activeShift;
 }
 
+/** Turno(s) visibles en celda según objetivo activo o grupo unificado. */
+function resolveCellShiftDisplay(
+    empId: string,
+    dateStr: string,
+    selectedObjective: string | null | undefined,
+    selectedGrupo: GrupoObjetivos | null | undefined,
+    grupoUnifiedMode: boolean,
+    pendingChanges: Record<string, any>,
+    shiftsMap: Record<string, any>,
+): { s: any | null; p: any | null } {
+    const key = `${empId}_${dateStr}`;
+    const rawP = pendingChanges[key];
+    const rawS = shiftsMap[key];
+
+    if (rawP?.isDeleted) {
+        return { s: rawS ?? null, p: rawP };
+    }
+
+    if (selectedGrupo && grupoUnifiedMode) {
+        const active = rawP && !rawP.isDeleted ? rawP : rawS;
+        if (!active) {
+            return { s: rawS ?? null, p: rawP && !rawP.isDeleted ? rawP : null };
+        }
+        const objId = active.objectiveId != null && active.objectiveId !== ''
+            ? String(active.objectiveId)
+            : null;
+        if (rawP && !rawP.isDeleted) {
+            if (objId && !selectedGrupo.objectiveIds.includes(objId)) {
+                return { s: null, p: null };
+            }
+            return { s: rawS ?? null, p: rawP };
+        }
+        if (objId && selectedGrupo.objectiveIds.includes(objId) && !isOperationalOriginShift(active)) {
+            return { s: rawS, p: null };
+        }
+        return { s: null, p: null };
+    }
+
+    const resolved = resolveCellShiftAtObjective(empId, dateStr, selectedObjective, pendingChanges, shiftsMap);
+    if (!resolved) return { s: null, p: null };
+    if (rawP && !rawP.isDeleted) {
+        return { s: rawS ?? null, p: rawP };
+    }
+    return { s: resolved, p: null };
+}
+
 const getDateKey = (dateInput: any) => {
     const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
     const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' };
@@ -1791,21 +1837,34 @@ export default function PlanificacionPage() {
         { code: 'N12', name: 'Nocturno 12h',  hours: 12, startTime: '19:00', endTime: '07:00' },
     ];
 
-    // En modo grupo unificado: estructura del SLA del objetivo nativo del empleado seleccionado
-    const effectivePosStructure = useMemo(() => {
-        if (selectedGrupo && grupoUnifiedMode && selectedCell?.empId && Object.keys(grupoSlaMap).length > 0) {
-            const _emp = employees.find((e: any) => e.id === selectedCell.empId);
-            if (_emp) {
-                const _native = selectedGrupo.objectiveIds.includes(_emp.preferredObjectiveId)
-                    ? _emp.preferredObjectiveId
-                    : (slaIdToObjId[_emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[_emp.preferredObjectiveId])
-                        ? slaIdToObjId[_emp.preferredObjectiveId]
-                        : null);
-                if (_native && grupoSlaMap[_native]) return grupoSlaMap[_native];
+    /** Objetivo destino al planificar una celda (grupo unificado: selector o nativo del empleado). */
+    const cellPlanningObjectiveId = useMemo(() => {
+        if (!selectedObjective) return null;
+        if (!selectedGrupo || !grupoUnifiedMode) return selectedObjective;
+        if (cellTargetObjectiveId) return cellTargetObjectiveId;
+        if (selectedCell?.currentShift?.objectiveId) {
+            const oid = String(selectedCell.currentShift.objectiveId);
+            if (selectedGrupo.objectiveIds.includes(oid)) return oid;
+        }
+        if (selectedCell?.empId) {
+            const emp = employees.find((e: any) => e.id === selectedCell.empId);
+            if (emp) {
+                if (selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId)) return emp.preferredObjectiveId;
+                const mapped = slaIdToObjId[emp.preferredObjectiveId];
+                if (mapped && selectedGrupo.objectiveIds.includes(mapped)) return mapped;
             }
         }
+        return selectedGrupo.objectiveIds[0] ?? selectedObjective;
+    }, [selectedObjective, selectedGrupo, grupoUnifiedMode, cellTargetObjectiveId, selectedCell, employees, slaIdToObjId]);
+
+    // En modo grupo unificado: SLA del objetivo elegido en el modal (no siempre el 1º del grupo)
+    const effectivePosStructure = useMemo(() => {
+        if (selectedGrupo && grupoUnifiedMode && cellPlanningObjectiveId && Object.keys(grupoSlaMap).length > 0) {
+            const struct = grupoSlaMap[cellPlanningObjectiveId];
+            if (struct?.length) return struct;
+        }
         return positionStructure;
-    }, [selectedGrupo, grupoUnifiedMode, selectedCell?.empId, grupoSlaMap, positionStructure, employees, slaIdToObjId]);
+    }, [selectedGrupo, grupoUnifiedMode, cellPlanningObjectiveId, grupoSlaMap, positionStructure]);
 
     const uniqueSLAShifts = useMemo(() => {
         const targetPos = activePosition || (effectivePosStructure.length > 0 ? effectivePosStructure[0].positionName : 'General');
@@ -1935,22 +1994,10 @@ export default function PlanificacionPage() {
 
         const assigned: { code: string; hours: number }[] = [];
         const posShiftsForBand = (posConfig?.shifts || uniqueSLAShifts || []) as any[];
-        // En modo grupo unificado: contar solo empleados del objetivo nativo del empleado seleccionado
-        const _empsForDisabled = (selectedGrupo && grupoUnifiedMode && selectedCell?.empId)
-            ? (() => {
-                const _se = displayedEmployees.find((e: any) => e.id === selectedCell.empId);
-                const _noid = _se
-                    ? (selectedGrupo.objectiveIds.includes(_se.preferredObjectiveId)
-                        ? _se.preferredObjectiveId
-                        : (slaIdToObjId[_se.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[_se.preferredObjectiveId])
-                            ? slaIdToObjId[_se.preferredObjectiveId]
-                            : selectedObjective))
-                    : selectedObjective;
-                return displayedEmployees.filter((e: any) =>
-                    e.preferredObjectiveId === _noid || slaIdToObjId[e.preferredObjectiveId] === _noid,
-                );
-            })()
-            : displayedEmployees;
+        const covObjIdForDisable = (selectedGrupo && grupoUnifiedMode && cellPlanningObjectiveId)
+            ? cellPlanningObjectiveId
+            : selectedObjective;
+        const _empsForDisabled = displayedEmployees;
         _empsForDisabled.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
             const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
@@ -1958,10 +2005,7 @@ export default function PlanificacionPage() {
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
             if (shiftPos !== posName) return;
             if (!isWorking(shift.code)) return;
-            const objectiveMatch = ((selectedGrupo && grupoUnifiedMode)
-                ? selectedGrupo.objectiveIds.includes(shift.objectiveId)
-                : shift.objectiveId === selectedObjective
-            ) || !!pendingChanges[key];
+            const objectiveMatch = (String(shift.objectiveId || '') === String(covObjIdForDisable)) || !!pendingChanges[key];
             if (!objectiveMatch) return;
             const code = String(shift.code || shift.type || '').toUpperCase();
             const hours = resolveBandHours(code, shift, posShiftsForBand);
@@ -2021,7 +2065,7 @@ export default function PlanificacionPage() {
             }
         });
         return disabled;
-    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId]);
+    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
@@ -2109,7 +2153,16 @@ export default function PlanificacionPage() {
     // 5. MOTORES DE CÁLCULO (NIVEL 4 - SLA INTELLIGENCE V9.00)
     // ============================================================================
 
-    const calculateCoverageStats = (dateStr: string, positionName: string, structure: any[], employeesList: any[], changes: any, existing: any) => {
+    const calculateCoverageStats = (
+        dateStr: string,
+        positionName: string,
+        structure: any[],
+        employeesList: any[],
+        changes: any,
+        existing: any,
+        objectiveId?: string | null,
+    ) => {
+        const covObjId = objectiveId ?? selectedObjective;
         const posConfig = structure.find((p: any) => p.positionName === positionName) || structure[0] || { qty: 1, shifts: [], coverageType: '24hs' };
         const pax = Number(posConfig.qty) > 0 ? Number(posConfig.qty) : 1;
         const coverageType = posConfig.coverageType || 'custom';
@@ -2146,7 +2199,7 @@ export default function PlanificacionPage() {
             const absence = absencesMap[key];
             if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
-            if (shift && (shift.objectiveId === selectedObjective || changes[key])) {
+            if (shift && (String(shift.objectiveId || '') === String(covObjId) || changes[key])) {
                 let shiftPos = shift.positionName || dominant?.positionName || 'General';
                 if (shiftPos === positionName && !OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) {
                     current += calcShiftHours(shift, slaCodeHoursHint);
@@ -2168,13 +2221,17 @@ export default function PlanificacionPage() {
         changes: any,
         existing: any,
         cycles?: string[],
+        objectiveId?: string | null,
+        structureForDominant?: any[],
     ): { closed: number; required: number; schemeLabel: string } => {
+        const covObjId = objectiveId ?? selectedObjective;
         if (!isPosActiveOnDay(pos, dayLetter)) return { closed: 0, required: 0, schemeLabel: '' };
         if (isPosExcludedOnDate(pos, dateStr)) return { closed: 0, required: 0, schemeLabel: 'EXCL' };
 
-        const dominant = (positionStructure || []).reduce(
+        const structDom = structureForDominant?.length ? structureForDominant : (positionStructure || []);
+        const dominant = structDom.reduce(
             (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
-            positionStructure[0] || { qty: 1, positionName: 'General' },
+            structDom[0] || { qty: 1, positionName: 'General' },
         );
         const codeCounts: Record<string, number> = {};
         employeesList.forEach((emp: any) => {
@@ -2182,7 +2239,7 @@ export default function PlanificacionPage() {
             const absence = absencesMap[key];
             if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
-            if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
+            if (!shift || !(String(shift.objectiveId || '') === String(covObjId) || changes[key])) return;
             const code = String(shift.code || '').toUpperCase();
             if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
@@ -2200,7 +2257,7 @@ export default function PlanificacionPage() {
                 return pending ? pending : existing[k] || null;
             },
             {
-                selectedObjective,
+                selectedObjective: covObjId,
                 isPendingChange: (empId, ds) => !!changes[`${empId}_${ds}`],
                 resolveOriginalShift: (empId, ds) => existing[`${empId}_${ds}`] || null,
                 shiftsMap: existing,
@@ -2218,32 +2275,19 @@ export default function PlanificacionPage() {
     // 🛑 MEMOIZACIÓN CRÍTICA PARA EL MODAL
     const modalCoverageStats = useMemo(() => {
         if (!selectedCell || !selectedObjective) return null;
+        const covObjId = (selectedGrupo && grupoUnifiedMode && cellPlanningObjectiveId)
+            ? cellPlanningObjectiveId
+            : selectedObjective;
         const currentPosName = activePosition || selectedCell.currentShift?.positionName || (effectivePosStructure.length > 0 ? effectivePosStructure[0].positionName : 'General');
         const dateStr = selectedCell.dateStr;
         const dayLetter = getDayLetter(dateStr);
-        // En modo grupo unificado: filtrar empleados al objetivo nativo del empleado seleccionado
-        const _empsForModal = (selectedGrupo && grupoUnifiedMode)
-            ? (() => {
-                const _se = displayedEmployees.find((e: any) => e.id === selectedCell.empId);
-                const _noid = _se
-                    ? (selectedGrupo.objectiveIds.includes(_se.preferredObjectiveId)
-                        ? _se.preferredObjectiveId
-                        : (slaIdToObjId[_se.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[_se.preferredObjectiveId])
-                            ? slaIdToObjId[_se.preferredObjectiveId]
-                            : null))
-                    : null;
-                return _noid
-                    ? displayedEmployees.filter((e: any) =>
-                        e.preferredObjectiveId === _noid || slaIdToObjId[e.preferredObjectiveId] === _noid,
-                    )
-                    : displayedEmployees;
-            })()
-            : displayedEmployees;
-        const hoursStats = calculateCoverageStats(dateStr, currentPosName, effectivePosStructure, _empsForModal, pendingChanges, shiftsMap);
+        // Grupo unificado: todos los visibles en grilla; el filtro por objetivo va en covObjId al contar turnos
+        const _empsForModal = displayedEmployees;
+        const hoursStats = calculateCoverageStats(dateStr, currentPosName, effectivePosStructure, _empsForModal, pendingChanges, shiftsMap, covObjId);
         const posConfig = effectivePosStructure.find((p: any) => p.positionName === currentPosName) || effectivePosStructure[0];
         const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
         const units = posConfig
-            ? countPositionClosedUnits(dateStr, posConfig, dayLetter, _empsForModal, pendingChanges, shiftsMap, cycles)
+            ? countPositionClosedUnits(dateStr, posConfig, dayLetter, _empsForModal, pendingChanges, shiftsMap, cycles, covObjId, effectivePosStructure)
             : { closed: 0, required: 0, schemeLabel: '' };
         return {
             ...hoursStats,
@@ -2253,7 +2297,7 @@ export default function PlanificacionPage() {
             isPositionClosed: units.required > 0 && units.closed >= units.required,
             isExcludedDay: hoursStats.isExcludedDay,
         };
-    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, effectivePosStructure, positionStructure, selectedObjective, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId]);
+    }, [selectedCell, activePosition, displayedEmployees, pendingChanges, shiftsMap, effectivePosStructure, positionStructure, selectedObjective, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId]);
 
     const coverageCyclesForObjective = autoSelectedCyclesRef.current?.length
         ? autoSelectedCyclesRef.current
@@ -2402,10 +2446,20 @@ export default function PlanificacionPage() {
 
     // Sincronización Reactiva del Modal
     useEffect(() => {
-        setCellTargetObjectiveId(null);
+        if (selectedCell?.currentShift?.objectiveId && selectedGrupo?.objectiveIds.includes(String(selectedCell.currentShift.objectiveId))) {
+            setCellTargetObjectiveId(String(selectedCell.currentShift.objectiveId));
+        } else {
+            setCellTargetObjectiveId(null);
+        }
         if (selectedCell) {
-            const empPreferred = empDefaultPos[`${selectedCell.empId}___${selectedObjective}`];
-            const smartDefault = selectedCell.currentShift?.positionName || empPreferred || dominantPosition.positionName || 'General';
+            const planObj = selectedGrupo && grupoUnifiedMode
+                ? (cellTargetObjectiveId || selectedCell.currentShift?.objectiveId || selectedObjective)
+                : selectedObjective;
+            const struct = (selectedGrupo && grupoUnifiedMode && planObj && grupoSlaMap[planObj])
+                ? grupoSlaMap[planObj]
+                : positionStructure;
+            const empPreferred = empDefaultPos[`${selectedCell.empId}___${planObj}`] || empDefaultPos[`${selectedCell.empId}___${selectedObjective}`];
+            const smartDefault = selectedCell.currentShift?.positionName || empPreferred || struct[0]?.positionName || dominantPosition.positionName || 'General';
             // Si no hay turno asignado y hay exactamente un puesto con faltante, pre-seleccionarlo
             if (!selectedCell.currentShift) {
                 const dayReport = buildDayCoverageReport(selectedCell.dateStr);
@@ -2415,11 +2469,21 @@ export default function PlanificacionPage() {
                     return;
                 }
             }
-            setActivePosition(smartDefault);
+            const validNames = new Set((struct || []).map((p: any) => p.positionName));
+            setActivePosition(validNames.has(smartDefault) ? smartDefault : (struct[0]?.positionName || smartDefault));
         } else {
             setActivePosition(null);
         }
-    }, [selectedCell, dominantPosition, empDefaultPos, selectedObjective]);
+    }, [selectedCell, dominantPosition, empDefaultPos, selectedObjective, selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
+
+    // Al cambiar objetivo destino en el modal de grupo: recargar puesto/turnos del SLA correcto
+    useEffect(() => {
+        if (!selectedCell || !selectedGrupo || !grupoUnifiedMode || !cellPlanningObjectiveId) return;
+        const struct = grupoSlaMap[cellPlanningObjectiveId] || [];
+        if (!struct.length) return;
+        const names = new Set(struct.map((p: any) => p.positionName));
+        setActivePosition(prev => (prev && names.has(prev) ? prev : struct[0].positionName));
+    }, [cellPlanningObjectiveId, selectedCell, selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
 
     const getPositionHoursCoverage = (dateStr: string) => {
         const coverage: Record<string, { coveredHours: number, count: number }> = {};
@@ -5063,7 +5127,7 @@ export default function PlanificacionPage() {
             swapWith: config.swapWith || null,
             swapDate: config.swapDate || null,
             positionName: config.positionName || activePosition || 'General',
-            objectiveId: config.objectiveId || (selectedGrupo && grupoUnifiedMode && cellTargetObjectiveId) || resolveObjectiveForEmp(selectedCell.empId),
+            objectiveId: config.objectiveId || (selectedGrupo && grupoUnifiedMode && cellPlanningObjectiveId) || resolveObjectiveForEmp(selectedCell.empId),
         };
         commitPendingChanges(newChanges);
         // Toast de alerta si el nuevo turno rompe el descanso mínimo de 12h
@@ -5330,7 +5394,9 @@ export default function PlanificacionPage() {
                     ...shift,
                     isTemp: true,
                     employeeId: emp.id,
-                    objectiveId: selectedObjective,
+                    objectiveId: (selectedGrupo && grupoUnifiedMode)
+                        ? resolveObjectiveForEmp(emp.id)
+                        : (shift.objectiveId || selectedObjective),
                 };
                 pasted++;
             }
@@ -5342,7 +5408,7 @@ export default function PlanificacionPage() {
                 : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
         );
         if (clipboardIsCut) setClipboardIsCut(false);
-    }, [clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked]);
+    }, [clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
 
     const cutSelection = useCallback(() => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
@@ -5420,14 +5486,16 @@ export default function PlanificacionPage() {
             const dateStr = getDateKey(day); 
             const key = `${emp.id}_${dateStr}`; 
             const rfzOnCell = rfzByEmpDate[key];
-            const shift = pendingChanges[key] || shiftsMap[key]; 
+            const { s: cellS, p: cellP } = resolveCellShiftDisplay(
+                emp.id, dateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
+            );
             const absence = absencesMap[key]; 
             if (selection.start.r === selection.end.r && selection.start.c === selection.end.c) { setSelection({ start: null, end: null }); } 
             {
                 // Si la celda tiene borrado pendiente, tratar como vacía para permitir reasignar sin guardar
                 const effectiveShift = pendingChanges[key]?.isDeleted
                     ? null
-                    : (shift || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
+                    : ((cellP && !cellP.isDeleted ? cellP : cellS) || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
                 const empPreferred = empDefaultPos[`${emp.id}___${selectedObjective}`];
                 const defaultPos = effectiveShift?.positionName || empPreferred || dominantPosition.positionName;
                 setActivePosition(defaultPos);
@@ -7168,8 +7236,11 @@ export default function PlanificacionPage() {
                                         })()}
                                     </td>
                                     {daysInMonth.map((day, dayIndex) => {
-                                        const key = `${emp.id}_${getDateKey(day)}`;
-                                        const s = shiftsMap[key]; const p = pendingChanges[key];
+                                        const cellDateStr = getDateKey(day);
+                                        const key = `${emp.id}_${cellDateStr}`;
+                                        const { s, p } = resolveCellShiftDisplay(
+                                            emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
+                                        );
                                         const rfzOnCell = rfzByEmpDate[key];
                                         const selected = !isSnapshotView && isCellSelected(idx, dayIndex);
                                         const isLockedDate = !isSnapshotView && isPlanningDateLocked(getDateKey(day));
@@ -7247,7 +7318,6 @@ export default function PlanificacionPage() {
                                         const cellRange = cellCode
                                             ? (_cellActualRange || SHIFT_RANGES[cellCode] || null)
                                             : null;
-                                        const cellDateStr = getDateKey(day);
                                         const excludedOnDay = excludedPositionsByDate[cellDateStr];
                                         const isExclusionCol = !!excludedOnDay?.length;
                                         const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
@@ -9583,6 +9653,9 @@ export default function PlanificacionPage() {
                                             </div>
                                         )}
                                         {selectedGrupo && grupoUnifiedMode && (() => {
+                                            const _currentTarget = cellPlanningObjectiveId || selectedGrupo.objectiveIds[0];
+                                            const _oi = selectedGrupo.objectiveIds.indexOf(_currentTarget);
+                                            const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length] || '#64748b';
                                             const _emp = employees.find((e: any) => e.id === selectedCell.empId);
                                             const _nativeObjId = _emp ? (
                                                 selectedGrupo.objectiveIds.includes(_emp.preferredObjectiveId)
@@ -9590,31 +9663,21 @@ export default function PlanificacionPage() {
                                                     : (slaIdToObjId[_emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[_emp.preferredObjectiveId]) ? slaIdToObjId[_emp.preferredObjectiveId] : null)
                                             ) : null;
                                             const _isExternal = !_nativeObjId;
-                                            const _currentTarget = cellTargetObjectiveId || _nativeObjId || selectedGrupo.objectiveIds[0];
-                                            const _oi = selectedGrupo.objectiveIds.indexOf(_currentTarget);
-                                            const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length] || '#64748b';
                                             return (
                                                 <div className="mb-3">
                                                     <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block">
                                                         Objetivo {_isExternal && <span className="text-amber-500 normal-case font-bold ml-1">(externo — elegí dónde planificar)</span>}
                                                     </label>
-                                                    {_isExternal ? (
-                                                        <select
-                                                            className="w-full border p-2 rounded-lg text-xs font-bold"
-                                                            style={{ borderColor: _clr, backgroundColor: _clr + '12', color: _clr }}
-                                                            value={_currentTarget}
-                                                            onChange={e => setCellTargetObjectiveId(e.target.value)}
-                                                        >
-                                                            {selectedGrupo.objectiveIds.map((objId: string, oi: number) => (
-                                                                <option key={objId} value={objId}>{selectedGrupo.objectiveNames[oi]}</option>
-                                                            ))}
-                                                        </select>
-                                                    ) : (
-                                                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-bold" style={{ backgroundColor: _clr + '18', color: _clr }}>
-                                                            <MapPin size={12} className="shrink-0"/>
-                                                            <span>{selectedGrupo.objectiveNames[_oi] || _nativeObjId}</span>
-                                                        </div>
-                                                    )}
+                                                    <select
+                                                        className="w-full border p-2 rounded-lg text-xs font-bold"
+                                                        style={{ borderColor: _clr, backgroundColor: _clr + '12', color: _clr }}
+                                                        value={_currentTarget}
+                                                        onChange={e => setCellTargetObjectiveId(e.target.value)}
+                                                    >
+                                                        {selectedGrupo.objectiveIds.map((objId: string, oi: number) => (
+                                                            <option key={objId} value={objId}>{selectedGrupo.objectiveNames[oi]}</option>
+                                                        ))}
+                                                    </select>
                                                 </div>
                                             );
                                         })()}
@@ -9622,7 +9685,7 @@ export default function PlanificacionPage() {
                                             <label className="text-[10px] font-black uppercase text-slate-400 mb-1 block flex items-center gap-2">
                                                 Puesto / Función
                                                 {renderPositionGeneroBadge(
-                                                    positionStructure.find((p: any) => p.positionName === (activePosition || positionStructure[0]?.positionName))?.preferenciaGenero,
+                                                    effectivePosStructure.find((p: any) => p.positionName === (activePosition || effectivePosStructure[0]?.positionName))?.preferenciaGenero,
                                                 )}
                                             </label>
                                             <select
@@ -9632,7 +9695,7 @@ export default function PlanificacionPage() {
                                                 disabled={isServiceLocked}
                                                 onChange={(e) => setActivePosition(e.target.value)}
                                             >
-                                                {positionStructure.map(p => {
+                                                {effectivePosStructure.map(p => {
                                                     const excludedToday = isPosExcludedOnDate(p, selectedCell.dateStr);
                                                     return (
                                                     <option key={p.positionName} value={p.positionName} disabled={excludedToday}>
@@ -9643,8 +9706,8 @@ export default function PlanificacionPage() {
                                             </select>
                                         </div>
                                         {(() => {
-                                            const currentPosName = activePosition || positionStructure[0]?.positionName || 'General';
-                                            const posCfg = positionStructure.find((p: any) => p.positionName === currentPosName);
+                                            const currentPosName = activePosition || effectivePosStructure[0]?.positionName || 'General';
+                                            const posCfg = effectivePosStructure.find((p: any) => p.positionName === currentPosName);
                                             const generoUi = getPreferenciaGeneroUi(posCfg?.preferenciaGenero);
                                             if (!generoUi) return null;
                                             const emp = displayedEmployees.find((e: any) => e.id === selectedCell.empId);
@@ -9664,8 +9727,8 @@ export default function PlanificacionPage() {
                                             );
                                         })()}
                                         {(() => {
-                                            const currentPosName = activePosition || positionStructure[0]?.positionName || 'General';
-                                            const posCfg = positionStructure.find((p: any) => p.positionName === currentPosName);
+                                            const currentPosName = activePosition || effectivePosStructure[0]?.positionName || 'General';
+                                            const posCfg = effectivePosStructure.find((p: any) => p.positionName === currentPosName);
                                             const isExcludedToday = isPosExcludedOnDate(posCfg, selectedCell.dateStr);
                                             if (!isExcludedToday) return null;
                                             return (
@@ -9686,7 +9749,7 @@ export default function PlanificacionPage() {
                                                 closedUnits: 0, requiredUnits: 1, schemeLabel: '', isPositionClosed: false,
                                             };
                                             const currentPosName = activePosition || 'General';
-                                            const posCfg = positionStructure.find((p: any) => p.positionName === currentPosName);
+                                            const posCfg = effectivePosStructure.find((p: any) => p.positionName === currentPosName);
                                             const isExcludedDay = coverageData.isExcludedDay;
                                             const isHoursCovered = coverageData.current >= coverageData.target;
                                             const isUnitsCovered = coverageData.isPositionClosed;
