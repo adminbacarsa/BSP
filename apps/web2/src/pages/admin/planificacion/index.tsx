@@ -778,6 +778,10 @@ export default function PlanificacionPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [pinnedExternalEmpIds, setPinnedExternalEmpIds] = useState<Set<string>>(new Set());
     const [cellTargetObjectiveId, setCellTargetObjectiveId] = useState<string | null>(null);
+    /** Objetivo destino al asignar en masa a colaboradores EXT (grupo unificado). */
+    const [bulkTargetObjectiveId, setBulkTargetObjectiveId] = useState<string | null>(null);
+    /** Objetivo por EXT cuando hay varios en la misma selección (empId → objectiveId). */
+    const [bulkEmpObjectiveOverrides, setBulkEmpObjectiveOverrides] = useState<Record<string, string>>({});
     const [bandFilter, setBandFilter] = useState<string | null>(null);
     const [addSearchTerm, setAddSearchTerm] = useState('');
     const [selectedCell, setSelectedCell] = useState<any>(null);
@@ -1223,6 +1227,27 @@ export default function PlanificacionPage() {
         );
     }, [selectedObjective, slaIdToObjId]);
 
+    /** Objetivo nativo del empleado dentro del grupo (null = EXT / sin asignación en el grupo). */
+    const resolveNativeObjectiveInGrupo = useCallback((e: { preferredObjectiveId?: string }): string | null => {
+        if (!selectedGrupo || !e?.preferredObjectiveId) return null;
+        if (selectedGrupo.objectiveIds.includes(e.preferredObjectiveId)) return e.preferredObjectiveId;
+        const mapped = slaIdToObjId[e.preferredObjectiveId];
+        if (mapped && selectedGrupo.objectiveIds.includes(mapped)) return mapped;
+        return null;
+    }, [selectedGrupo, slaIdToObjId]);
+
+    /** Objetivo efectivo de un turno (explícito en shift/pending o nativo del legajo). */
+    const resolveEffectiveShiftObjectiveId = useCallback((
+        emp: { preferredObjectiveId?: string },
+        shift: { objectiveId?: string } | null | undefined,
+        pendingKey?: string,
+    ): string | null => {
+        const pending = pendingKey ? pendingChanges[pendingKey] : null;
+        const explicit = pending?.objectiveId ?? shift?.objectiveId;
+        if (explicit) return String(explicit);
+        return resolveNativeObjectiveInGrupo(emp);
+    }, [pendingChanges, resolveNativeObjectiveInGrupo]);
+
     const clearNearbyCustomOrder = useCallback(() => {
         if (!selectedObjective) return;
         setCustomOrderMap(m => {
@@ -1390,6 +1415,69 @@ export default function PlanificacionPage() {
         () => displayedEmployees.filter((e: any) => !isEmpExcludedFromPlanningDotacion(e, selectedObjective)),
         [displayedEmployees, selectedObjective],
     );
+
+    /** Metadatos de la selección múltiple en grupo unificado (nativos vs EXT). */
+    const bulkSelectionMeta = useMemo(() => {
+        if (!selection.start || !selection.end) return { hasExt: false, hasNative: false, empCount: 0 };
+        const minR = Math.min(selection.start.r, selection.end.r);
+        const maxR = Math.max(selection.start.r, selection.end.r);
+        let hasExt = false;
+        let hasNative = false;
+        const seen = new Set<string>();
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp || seen.has(emp.id)) continue;
+            seen.add(emp.id);
+            if (selectedGrupo && grupoUnifiedMode) {
+                if (resolveNativeObjectiveInGrupo(emp)) hasNative = true;
+                else hasExt = true;
+            }
+        }
+        return { hasExt, hasNative, empCount: seen.size };
+    }, [selection, displayedEmployees, selectedGrupo, grupoUnifiedMode, resolveNativeObjectiveInGrupo]);
+
+    /** Colaboradores únicos en la selección múltiple actual. */
+    const bulkSelectionEmployees = useMemo(() => {
+        if (!selection.start || !selection.end) return [] as any[];
+        const minR = Math.min(selection.start.r, selection.end.r);
+        const maxR = Math.max(selection.start.r, selection.end.r);
+        const seen = new Set<string>();
+        const list: any[] = [];
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp || seen.has(emp.id)) continue;
+            seen.add(emp.id);
+            list.push(emp);
+        }
+        return list;
+    }, [selection, displayedEmployees]);
+
+    /** Turnos únicos del SLA de un objetivo (incluye códigos custom como M2). */
+    const getShiftsForObjective = useCallback((objId: string) => {
+        const structure = (selectedGrupo && grupoUnifiedMode && grupoSlaMap[objId]?.length)
+            ? grupoSlaMap[objId]
+            : positionStructure;
+        const byCode = new Map<string, any>();
+        for (const pos of (structure || [])) {
+            for (const s of ((pos.shifts || []) as any[])) {
+                const ck = String(s.code || '').toUpperCase();
+                if (!ck || byCode.has(ck)) continue;
+                byCode.set(ck, {
+                    code: s.code,
+                    name: s.name,
+                    hours: s.hours,
+                    startTime: s.startTime,
+                    endTime: s.endTime,
+                    positionName: pos.positionName,
+                });
+            }
+        }
+        return [...byCode.values()];
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
+
+    useEffect(() => {
+        if (!selection.start) setBulkEmpObjectiveOverrides({});
+    }, [selection.start]);
 
     // Bell de planificación = novedades + vacantes RFZ derivadas de turnos (scope confiable, independiente del pipeline de novedades).
     const bellNotifications = useMemo(() => {
@@ -1886,10 +1974,26 @@ export default function PlanificacionPage() {
     // Turnos para la barra flotante de selección múltiple.
     // Combina turnos de todas las posiciones; si un código es de un solo puesto, guarda positionName.
     // Si ninguna posición tiene M/T/N/D12/N12, agrega los estándar como base mínima.
+    const bulkEffectiveStructure = useMemo(() => {
+        if (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0) {
+            const byName = new Map<string, any>();
+            for (const objId of selectedGrupo.objectiveIds) {
+                for (const p of (grupoSlaMap[objId] || [])) {
+                    if (!byName.has(p.positionName)) byName.set(p.positionName, p);
+                }
+            }
+            if (byName.size > 0) return [...byName.values()];
+        }
+        return positionStructure;
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
+
     const bulkShifts = useMemo(() => {
         const STANDARD_CODES = new Set(['M', 'T', 'N', 'D12', 'N12']);
         const byCode = new Map<string, any>();
-        for (const pos of positionStructure) {
+        const sourcePositions = (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+            ? selectedGrupo.objectiveIds.flatMap((objId: string) => grupoSlaMap[objId] || [])
+            : (positionStructure || []);
+        for (const pos of sourcePositions) {
             for (const s of (pos.shifts || []) as any[]) {
                 const codeKey = String(s.code || '').toUpperCase();
                 if (!codeKey) continue;
@@ -1906,7 +2010,6 @@ export default function PlanificacionPage() {
                     });
                 } else {
                     prev.ownerCount = (prev.ownerCount || 1) + 1;
-                    // Ambiguo entre puestos: resolver por empleado al aplicar
                     prev.positionName = undefined;
                 }
             }
@@ -1918,7 +2021,7 @@ export default function PlanificacionPage() {
         const existingCodes = new Set(base.map((s: any) => String(s.code || '').toUpperCase()));
         const missing = STANDARD_SHIFTS_BASE.filter(s => !existingCodes.has(s.code));
         return [...missing, ...base];
-    }, [uniqueSLAShifts, positionStructure]);
+    }, [uniqueSLAShifts, positionStructure, selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
 
     const objectivePublishLookupKey = useMemo(() => {
         if (!selectedObjective) return '';
@@ -2199,11 +2302,16 @@ export default function PlanificacionPage() {
             const absence = absencesMap[key];
             if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
-            if (shift && (String(shift.objectiveId || '') === String(covObjId) || changes[key])) {
-                let shiftPos = shift.positionName || dominant?.positionName || 'General';
-                if (shiftPos === positionName && !OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) {
-                    current += calcShiftHours(shift, slaCodeHoursHint);
-                }
+            if (!shift) return;
+            const pending = changes[key];
+            const explicitObj = pending?.objectiveId ?? shift.objectiveId;
+            const effectiveObjId = explicitObj
+                ? String(explicitObj)
+                : (resolveNativeObjectiveInGrupo(emp) || (emp.preferredObjectiveId === covObjId || slaIdToObjId[emp.preferredObjectiveId] === covObjId ? covObjId : null));
+            if (String(effectiveObjId || '') !== String(covObjId)) return;
+            let shiftPos = shift.positionName || dominant?.positionName || 'General';
+            if (shiftPos === positionName && !OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) {
+                current += calcShiftHours(shift, slaCodeHoursHint);
             }
         });
         return { current, target, pax, isActiveDay: isDayActive && !isDayExcluded, isExcludedDay: isDayExcluded };
@@ -2239,7 +2347,13 @@ export default function PlanificacionPage() {
             const absence = absencesMap[key];
             if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || existing[key]?.code, absence })) return;
             const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : existing[key];
-            if (!shift || !(String(shift.objectiveId || '') === String(covObjId) || changes[key])) return;
+            if (!shift) return;
+            const pending = changes[key];
+            const explicitObj = pending?.objectiveId ?? shift.objectiveId;
+            const effectiveObjId = explicitObj
+                ? String(explicitObj)
+                : (resolveNativeObjectiveInGrupo(emp) || (emp.preferredObjectiveId === covObjId || slaIdToObjId[emp.preferredObjectiveId] === covObjId ? covObjId : null));
+            if (String(effectiveObjId || '') !== String(covObjId)) return;
             const code = String(shift.code || '').toUpperCase();
             if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
@@ -2353,20 +2467,18 @@ export default function PlanificacionPage() {
             let requiredPax = 0, closedPax = 0;
             for (const objId of selectedGrupo.objectiveIds) {
                 const structure = grupoSlaMap[objId] || [];
-                const objEmps = dotacionBaseEmployees.filter((e: any) =>
-                    e.preferredObjectiveId === objId || slaIdToObjId[e.preferredObjectiveId] === objId,
-                );
                 for (const pos of structure) {
                     if (!isPosActiveOnDay(pos, dayLetter)) continue;
                     if (isPosExcludedOnDate(pos, dateStr)) continue;
                     const codeCounts: Record<string, number> = {};
-                    objEmps.forEach((emp: any) => {
+                    dotacionBaseEmployees.forEach((emp: any) => {
                         const key = `${emp.id}_${dateStr}`;
                         const absence = absencesMap[key];
                         if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
                         const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
                         if (!shift) return;
-                        if (!(shift.objectiveId === objId || !!pendingChanges[key])) return;
+                        const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
+                        if (String(effectiveObjId || '') !== String(objId)) return;
                         const code = String(shift.code || '').toUpperCase();
                         if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
                         const shiftPos = shift.positionName || pos.positionName || 'General';
@@ -2384,7 +2496,7 @@ export default function PlanificacionPage() {
             else { daysEmpty++; worstDays.push({ dateStr, closedPax, requiredPax }); }
         }
         return { daysFull, daysPartial, daysEmpty, worstDays };
-    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, slaIdToObjId]);
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId]);
 
     const buildDayCoverageReport = (dateStr: string) => {
         if (!positionStructure?.length) return null;
@@ -4685,7 +4797,7 @@ export default function PlanificacionPage() {
     };
     
     // Bulk: inyecta el puesto dueño del código SLA (no el default "Puesto 1") y respeta cupos de cobertura.
-    const applyBulkChange = (shiftConfig: any) => {
+    const applyBulkChange = (shiftConfig: any, opts?: { onlyEmpId?: string }) => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
         const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)];
@@ -4700,128 +4812,156 @@ export default function PlanificacionPage() {
         const maxR = Math.max(selection.start.r, selection.end.r);
         const minC = Math.min(selection.start.c, selection.end.c);
         const maxC = Math.max(selection.start.c, selection.end.c);
+
+        const getEmpBulkObjective = (emp: any): string | null => {
+            if (!selectedGrupo || !grupoUnifiedMode) return selectedObjective;
+            const native = resolveNativeObjectiveInGrupo(emp);
+            if (native) return native;
+            return bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
+        };
+
+        const getStructureForObj = (objId: string) => {
+            if (selectedGrupo && grupoUnifiedMode && grupoSlaMap[objId]?.length) return grupoSlaMap[objId];
+            return positionStructure;
+        };
+
+        if (shiftConfig !== null && selectedGrupo && grupoUnifiedMode) {
+            for (let r = minR; r <= maxR; r++) {
+                const emp = displayedEmployees[r];
+                if (!emp) continue;
+                if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
+                const extFallback = bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
+                if (!resolveNativeObjectiveInGrupo(emp) && !extFallback) {
+                    toast.error('Seleccioná el objetivo para colaboradores EXT en la barra de asignación.');
+                    return;
+                }
+            }
+        }
+
         const newChanges = { ...pendingChanges };
         let count = 0;
         let francosReplaced = 0;
         let skippedExcluded = 0;
         let skippedCoverage = 0;
+        let skippedExt = 0;
 
-        const fallbackPos = activePosition || (positionStructure[0]?.positionName) || 'General';
         const cyclesForBulk = autoSelectedCyclesRef.current?.length
             ? autoSelectedCyclesRef.current
             : autoCycles;
 
-        const ownersForCode = (code: string) => {
-            const upper = String(code || '').toUpperCase();
-            return (positionStructure || []).filter((p: any) =>
-                (p.shifts || []).some((s: any) => String(s.code || '').toUpperCase() === upper),
-            );
-        };
+        const buildBulkHelpers = (empStructure: any[], covObjId: string) => {
+            const fallbackPosLocal = activePosition || (empStructure[0]?.positionName) || 'General';
 
-        const resolveAssignPos = (emp: any, code: string, hintPos?: string | null) => {
-            const upper = String(code || '').toUpperCase();
-            if (upper === 'RET') return 'Retén';
-            if (['F', 'FF', 'FP', 'FT'].includes(upper)) return 'General';
-            const owners = ownersForCode(upper);
-            const empPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || null;
-            if (owners.length === 0) {
-                // Código custom sin dueño explícito: preferir hint / default emp / activo
-                return hintPos || empPos || fallbackPos;
-            }
-            // Hint de la barra (código de un solo puesto en el SLA) — el usuario eligió ese turno
-            if (hintPos && owners.some((p: any) => p.positionName === hintPos)) return hintPos;
-            // Default del empleado si es dueño del código
-            if (empPos && owners.some((p: any) => p.positionName === empPos)) return empPos;
-            if (activePosition && owners.some((p: any) => p.positionName === activePosition)) return activePosition;
-            return owners[0].positionName;
-        };
+            const ownersForCode = (code: string) => {
+                const upper = String(code || '').toUpperCase();
+                return (empStructure || []).filter((p: any) =>
+                    (p.shifts || []).some((s: any) => String(s.code || '').toUpperCase() === upper),
+                );
+            };
 
-        const shiftDefFor = (posName: string, code: string) => {
-            const upper = String(code || '').toUpperCase();
-            const pos = (positionStructure || []).find((p: any) => p.positionName === posName);
-            return (pos?.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === upper) || null;
-        };
+            const resolveAssignPos = (emp: any, code: string, hintPos?: string | null) => {
+                const upper = String(code || '').toUpperCase();
+                if (upper === 'RET') return 'Retén';
+                if (['F', 'FF', 'FP', 'FT'].includes(upper)) return 'General';
+                const owners = ownersForCode(upper);
+                const empPos = empDefaultPos[`${emp.id}___${covObjId}`] || null;
+                if (owners.length === 0) {
+                    return hintPos || empPos || fallbackPosLocal;
+                }
+                if (hintPos && owners.some((p: any) => p.positionName === hintPos)) return hintPos;
+                if (empPos && owners.some((p: any) => p.positionName === empPos)) return empPos;
+                if (activePosition && owners.some((p: any) => p.positionName === activePosition)) return activePosition;
+                return owners[0].positionName;
+            };
 
-        const collectCodeCounts = (dateStr: string, posName: string, changes: Record<string, any>) => {
-            const dominant = (positionStructure || []).reduce(
-                (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
-                positionStructure[0] || { qty: 1, positionName: 'General' },
-            );
-            const posShifts = ((positionStructure || []).find((p: any) => p.positionName === posName)?.shifts || []) as any[];
-            const codeCounts: Record<string, number> = {};
-            const assigned: { code: string; hours: number }[] = [];
-            displayedEmployees.forEach((emp: any) => {
-                const key = `${emp.id}_${dateStr}`;
-                const absence = absencesMap[key];
-                if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
-                const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : shiftsMap[key];
-                if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
-                const code = String(shift.code || '').toUpperCase();
-                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                const shiftPos = shift.positionName || dominant?.positionName || 'General';
-                if (shiftPos !== posName) return;
-                codeCounts[code] = (codeCounts[code] || 0) + 1;
-                assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
-            });
-            return { codeCounts, assigned };
-        };
+            const shiftDefFor = (posName: string, code: string) => {
+                const upper = String(code || '').toUpperCase();
+                const pos = (empStructure || []).find((p: any) => p.positionName === posName);
+                return (pos?.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === upper) || null;
+            };
 
-        const isCoverageBlocked = (dateStr: string, posName: string, code: string, hours: number, changes: Record<string, any>) => {
-            const upperEarly = String(code || '').toUpperCase();
-            // RET/ESC/REF no consumen cupo de cobertura SLA
-            if (['RET', 'ESC', 'REF', 'RFZ'].includes(upperEarly)) return false;
-            if (!isPlanningWorkShiftCode(code)) return false;
-            const posCfg = (positionStructure || []).find((p: any) => p.positionName === posName) || positionStructure[0];
-            if (!posCfg) return false;
-            const dayLetter = getDayLetter(dateStr);
-            if (!isPosActiveOnDay(posCfg, dayLetter)) return true;
-            if (isPosExcludedOnDate(posCfg, dateStr)) return true;
-            const shiftRow = (posCfg.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === String(code).toUpperCase());
-            if (Array.isArray(shiftRow?.days) && shiftRow.days.length > 0 && !shiftRow.days.includes(dayLetter)) return true;
+            const collectCodeCounts = (dateStr: string, posName: string, changes: Record<string, any>) => {
+                const dominant = (empStructure || []).reduce(
+                    (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
+                    empStructure[0] || { qty: 1, positionName: 'General' },
+                );
+                const posShifts = ((empStructure || []).find((p: any) => p.positionName === posName)?.shifts || []) as any[];
+                const codeCounts: Record<string, number> = {};
+                const assigned: { code: string; hours: number }[] = [];
+                displayedEmployees.forEach((e: any) => {
+                    const key = `${e.id}_${dateStr}`;
+                    const absence = absencesMap[key];
+                    if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
+                    const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : shiftsMap[key];
+                    if (!shift || !(String(shift.objectiveId || '') === String(covObjId) || changes[key])) return;
+                    const code = String(shift.code || '').toUpperCase();
+                    if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                    const shiftPos = shift.positionName || dominant?.positionName || 'General';
+                    if (shiftPos !== posName) return;
+                    codeCounts[code] = (codeCounts[code] || 0) + 1;
+                    assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
+                });
+                return { codeCounts, assigned };
+            };
 
-            const pax = Math.max(1, Number(posCfg.qty) || 1);
-            const { codeCounts, assigned } = collectCodeCounts(dateStr, posName, changes);
-            const units = countPositionClosedUnitsFromShifts(
-                posCfg,
-                dayLetter,
-                codeCounts,
-                cyclesForBulk,
-                true,
-            );
-            if (units.required > 0 && units.closed >= units.required) return true;
+            const isCoverageBlocked = (dateStr: string, posName: string, code: string, hours: number, changes: Record<string, any>) => {
+                const upperEarly = String(code || '').toUpperCase();
+                if (['RET', 'ESC', 'REF', 'RFZ'].includes(upperEarly)) return false;
+                if (!isPlanningWorkShiftCode(code)) return false;
+                const posCfg = (empStructure || []).find((p: any) => p.positionName === posName) || empStructure[0];
+                if (!posCfg) return false;
+                const dayLetter = getDayLetter(dateStr);
+                if (!isPosActiveOnDay(posCfg, dayLetter)) return true;
+                if (isPosExcludedOnDate(posCfg, dateStr)) return true;
+                const shiftRow = (posCfg.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === String(code).toUpperCase());
+                if (Array.isArray(shiftRow?.days) && shiftRow.days.length > 0 && !shiftRow.days.includes(dayLetter)) return true;
 
-            const upper = String(code || '').toUpperCase();
-            const paxLeft = (codeCounts[upper] || 0) >= pax;
-            if (paxLeft) return true;
+                const pax = Math.max(1, Number(posCfg.qty) || 1);
+                const { codeCounts, assigned } = collectCodeCounts(dateStr, posName, changes);
+                const units = countPositionClosedUnitsFromShifts(
+                    posCfg,
+                    dayLetter,
+                    codeCounts,
+                    cyclesForBulk,
+                    true,
+                );
+                if (units.required > 0 && units.closed >= units.required) return true;
 
-            // Custom: solo cupo por código / esquema cerrado (arriba). Sin mezcla 8h/12h.
-            if (!is24hCoverageType(posCfg)) return false;
+                const upper = String(code || '').toUpperCase();
+                const paxLeft = (codeCounts[upper] || 0) >= pax;
+                if (paxLeft) return true;
 
-            const bandH = resolveBandHours(upper, { hours }, posCfg.shifts);
-            const is8h = isShortBandHours(bandH);
-            const assigned8h = assigned.filter(a => isShortBandHours(a.hours));
-            const assigned12h = assigned.filter(a => !isShortBandHours(a.hours));
-            const posShifts = posCfg.shifts || [];
-            const shifts8h = posShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShifts)));
-            const shifts12h = posShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShifts)));
-            const maxSlots = shifts8h.length * pax + shifts12h.length * pax;
+                if (!is24hCoverageType(posCfg)) return false;
 
-            if (pax === 1) {
-                if (assigned8h.length > 0 && assigned12h.length > 0) return true;
-                if (assigned8h.length > 0 && !is8h) return true;
-                if (assigned12h.length > 0 && is8h) return true;
-                if (assigned.filter(a => a.code === upper).length >= 1) return true;
-            } else {
-                if (assigned8h.length > 0 && !is8h) return true;
-                if (assigned12h.length > 0 && is8h) return true;
-                if (assigned.length >= maxSlots && maxSlots > 0) return true;
-            }
-            return false;
+                const bandH = resolveBandHours(upper, { hours }, posCfg.shifts);
+                const is8h = isShortBandHours(bandH);
+                const assigned8h = assigned.filter(a => isShortBandHours(a.hours));
+                const assigned12h = assigned.filter(a => !isShortBandHours(a.hours));
+                const posShifts = posCfg.shifts || [];
+                const shifts8h = posShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShifts)));
+                const shifts12h = posShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShifts)));
+                const maxSlots = shifts8h.length * pax + shifts12h.length * pax;
+
+                if (pax === 1) {
+                    if (assigned8h.length > 0 && assigned12h.length > 0) return true;
+                    if (assigned8h.length > 0 && !is8h) return true;
+                    if (assigned12h.length > 0 && is8h) return true;
+                    if (assigned.filter(a => a.code === upper).length >= 1) return true;
+                } else {
+                    if (assigned8h.length > 0 && !is8h) return true;
+                    if (assigned12h.length > 0 && is8h) return true;
+                    if (assigned.length >= maxSlots && maxSlots > 0) return true;
+                }
+                return false;
+            };
+
+            return { resolveAssignPos, shiftDefFor, isCoverageBlocked, empStructure };
         };
 
         for (let r = minR; r <= maxR; r++) {
             const emp = displayedEmployees[r];
             if (!emp) continue;
+            if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
             for (let c = minC; c <= maxC; c++) {
                 const day = daysInMonth[c];
                 const key = `${emp.id}_${getDateKey(day)}`;
@@ -4837,10 +4977,22 @@ export default function PlanificacionPage() {
                 markAsFT = true;
             }
         }
+
         const blockedEmps = new Set<string>();
+        const helpersCache = new Map<string, ReturnType<typeof buildBulkHelpers>>();
+
         for (let r = minR; r <= maxR; r++) {
             const emp = displayedEmployees[r];
             if (!emp) continue;
+            if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
+            const covObjId = getEmpBulkObjective(emp);
+            let rowHelpers: ReturnType<typeof buildBulkHelpers> | null = null;
+            if (shiftConfig !== null) {
+                if (!covObjId) { skippedExt++; continue; }
+                rowHelpers = helpersCache.get(covObjId) || buildBulkHelpers(getStructureForObj(covObjId), covObjId);
+                helpersCache.set(covObjId, rowHelpers);
+            }
+
             for (let c = minC; c <= maxC; c++) {
                 const day = daysInMonth[c];
                 const dateStr = getDateKey(day);
@@ -4852,9 +5004,11 @@ export default function PlanificacionPage() {
                     count++;
                     continue;
                 }
+
+                const { resolveAssignPos, shiftDefFor, isCoverageBlocked, empStructure } = rowHelpers!;
                 const codeUpper = String(shiftConfig.code || '').toUpperCase();
                 const assignPos = resolveAssignPos(emp, codeUpper, shiftConfig.positionName || null);
-                const posCfg = positionStructure.find((p: any) => p.positionName === assignPos);
+                const posCfg = empStructure.find((p: any) => p.positionName === assignPos);
                 if (isPosExcludedOnDate(posCfg, dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) {
                     skippedExcluded++;
                     continue;
@@ -4865,7 +5019,7 @@ export default function PlanificacionPage() {
                     skippedCoverage++;
                     continue;
                 }
-                const { blocked, warnings } = checkRestricciones(emp, dateStr, assignPos, shiftConfig.code);
+                const { blocked, warnings } = checkRestricciones(emp, dateStr, assignPos, shiftConfig.code, covObjId || undefined, empStructure);
                 if (blocked) {
                     blockedEmps.add(emp.name);
                     continue;
@@ -4885,11 +5039,13 @@ export default function PlanificacionPage() {
                     oldObjectiveId: existing?.objectiveId,
                     isFrancoTrabajado: cellIsFT,
                     positionName: assignPos,
+                    objectiveId: covObjId || undefined,
                 };
                 count++;
             }
         }
         if (blockedEmps.size > 0) toast.error(`🚫 Bloqueados (objetivo excluido): ${[...blockedEmps].join(', ')}`, { duration: 10000 });
+        if (skippedExt > 0) toast.warning(`${skippedExt} fila(s) omitida(s): elegí objetivo para EXT`, { duration: 8000 });
         if (skippedExcluded > 0) toast.warning(`${skippedExcluded} celda(s) omitida(s): puesto excluido por SLA ese día`, { duration: 8000 });
         if (skippedCoverage > 0) toast.warning(`${skippedCoverage} celda(s) omitida(s): cobertura SLA ya completa o cupo del turno lleno`, { duration: 9000 });
         commitPendingChanges(newChanges);
@@ -4897,7 +5053,6 @@ export default function PlanificacionPage() {
             const codeLabel = shiftConfig ? String(shiftConfig.code || '').toUpperCase() : 'BORRAR';
             const samplePos = shiftConfig
                 ? (() => {
-                    // Mostrar el puesto realmente usado si es único en el lote
                     return shiftConfig.positionName || '';
                 })()
                 : '';
@@ -4915,12 +5070,19 @@ export default function PlanificacionPage() {
     const applyBulkPositionFill = (posName: string) => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
-        const pos = (positionStructure || []).find((p: any) => p.positionName === posName);
-        const shifts = (pos?.shifts || []) as any[];
-        if (!pos || shifts.length === 0) {
-            toast.error(`El puesto "${posName}" no tiene turnos en el SLA`);
-            return;
-        }
+
+        const getEmpBulkObjective = (emp: any): string | null => {
+            if (!selectedGrupo || !grupoUnifiedMode) return selectedObjective;
+            const native = resolveNativeObjectiveInGrupo(emp);
+            if (native) return native;
+            return bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
+        };
+
+        const getStructureForObj = (objId: string) => {
+            if (selectedGrupo && grupoUnifiedMode && grupoSlaMap[objId]?.length) return grupoSlaMap[objId];
+            return positionStructure;
+        };
+
         const minR = Math.min(selection.start.r, selection.end.r);
         const maxR = Math.max(selection.start.r, selection.end.r);
         const minC = Math.min(selection.start.c, selection.end.c);
@@ -4931,28 +5093,52 @@ export default function PlanificacionPage() {
             return;
         }
 
-        const pickShiftForEmp = (emp: any) => {
-            const pref = String(empDefaultShift[`${emp.id}___${selectedObjective}`] || '').toUpperCase();
-            if (pref && shifts.some((s: any) => String(s.code || '').toUpperCase() === pref)) {
-                return shifts.find((s: any) => String(s.code || '').toUpperCase() === pref);
+        if (selectedGrupo && grupoUnifiedMode) {
+            for (let r = minR; r <= maxR; r++) {
+                const emp = displayedEmployees[r];
+                if (!emp) continue;
+                const extFallback = bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
+                if (!resolveNativeObjectiveInGrupo(emp) && !extFallback) {
+                    toast.error('Seleccioná el objetivo para colaboradores EXT en la barra de asignación.');
+                    return;
+                }
+            }
+        }
+
+        const hasPosInAnySla = selectedGrupo && grupoUnifiedMode
+            ? selectedGrupo.objectiveIds.some(objId => (grupoSlaMap[objId] || []).some((p: any) => p.positionName === posName))
+            : (positionStructure || []).some((p: any) => p.positionName === posName);
+        if (!hasPosInAnySla) {
+            toast.error(`El puesto "${posName}" no tiene turnos en el SLA`);
+            return;
+        }
+
+        const pickShiftForEmp = (emp: any, posShifts: any[], covObjId: string) => {
+            const pref = String(empDefaultShift[`${emp.id}___${covObjId}`] || '').toUpperCase();
+            if (pref && posShifts.some((s: any) => String(s.code || '').toUpperCase() === pref)) {
+                return posShifts.find((s: any) => String(s.code || '').toUpperCase() === pref);
             }
             for (const prefer of ['M', 'T', 'N', 'D12', 'N12', 'MA']) {
-                const hit = shifts.find((s: any) => String(s.code || '').toUpperCase() === prefer);
+                const hit = posShifts.find((s: any) => String(s.code || '').toUpperCase() === prefer);
                 if (hit) return hit;
             }
-            return shifts[0];
+            return posShifts[0];
         };
 
-        // Reutilizar applyBulkChange agrupando por código elegido (misma cobertura / reglas)
-        const byCode = new Map<string, { empIds: Set<string>; shift: any }>();
+        const byCode = new Map<string, { shift: any }>();
         for (let r = minR; r <= maxR; r++) {
             const emp = displayedEmployees[r];
             if (!emp) continue;
-            const sh = pickShiftForEmp(emp);
+            const covObjId = getEmpBulkObjective(emp);
+            if (!covObjId) continue;
+            const empStructure = getStructureForObj(covObjId);
+            const pos = empStructure.find((p: any) => p.positionName === posName);
+            const posShifts = (pos?.shifts || []) as any[];
+            if (!pos || posShifts.length === 0) continue;
+            const sh = pickShiftForEmp(emp, posShifts, covObjId);
             if (!sh) continue;
-            const ck = String(sh.code || '').toUpperCase();
-            if (!byCode.has(ck)) byCode.set(ck, { empIds: new Set(), shift: sh });
-            byCode.get(ck)!.empIds.add(emp.id);
+            const ck = `${String(sh.code || '').toUpperCase()}__${covObjId}`;
+            if (!byCode.has(ck)) byCode.set(ck, { shift: sh });
         }
 
         if (byCode.size === 1) {
@@ -4968,73 +5154,79 @@ export default function PlanificacionPage() {
             return;
         }
 
-        // Varios códigos: aplicar en un solo pase forzado al puesto
         const newChanges = { ...pendingChanges };
         let count = 0;
         let skippedCoverage = 0;
         let skippedExcluded = 0;
+        let skippedNoPos = 0;
         const cyclesForBulk = autoSelectedCyclesRef.current?.length
             ? autoSelectedCyclesRef.current
             : autoCycles;
-        const dominant = (positionStructure || []).reduce(
-            (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
-            positionStructure[0] || { qty: 1, positionName: 'General' },
-        );
-
-        const collectCodeCounts = (dateStr: string, changes: Record<string, any>) => {
-            const codeCounts: Record<string, number> = {};
-            const assigned: { code: string; hours: number }[] = [];
-            const posShifts = (pos.shifts || []) as any[];
-            displayedEmployees.forEach((emp: any) => {
-                const key = `${emp.id}_${dateStr}`;
-                const absence = absencesMap[key];
-                if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
-                const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : shiftsMap[key];
-                if (!shift || !(shift.objectiveId === selectedObjective || changes[key])) return;
-                const code = String(shift.code || '').toUpperCase();
-                if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                const shiftPos = shift.positionName || dominant?.positionName || 'General';
-                if (shiftPos !== posName) return;
-                codeCounts[code] = (codeCounts[code] || 0) + 1;
-                assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
-            });
-            return { codeCounts, assigned };
-        };
-
-        const isBlocked = (dateStr: string, code: string, hours: number, changes: Record<string, any>) => {
-            if (!isPlanningWorkShiftCode(code)) return false;
-            const dayLetter = getDayLetter(dateStr);
-            if (!isPosActiveOnDay(pos, dayLetter)) return true;
-            if (isPosExcludedOnDate(pos, dateStr)) return true;
-            const pax = Math.max(1, Number(pos.qty) || 1);
-            const { codeCounts, assigned } = collectCodeCounts(dateStr, changes);
-            const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForBulk, true);
-            if (units.required > 0 && units.closed >= units.required) return true;
-            const upper = String(code).toUpperCase();
-            if ((codeCounts[upper] || 0) >= pax) return true;
-            // Custom: sin mezcla 8h/12h
-            if (!is24hCoverageType(pos)) return false;
-            const bandH = resolveBandHours(upper, { hours }, pos.shifts);
-            const is8h = isShortBandHours(bandH);
-            const a8 = assigned.filter(a => isShortBandHours(a.hours));
-            const a12 = assigned.filter(a => !isShortBandHours(a.hours));
-            if (pax === 1) {
-                if (a8.length > 0 && a12.length > 0) return true;
-                if (a8.length > 0 && !is8h) return true;
-                if (a12.length > 0 && is8h) return true;
-                if (assigned.filter(a => a.code === upper).length >= 1) return true;
-            } else {
-                if (a8.length > 0 && !is8h) return true;
-                if (a12.length > 0 && is8h) return true;
-            }
-            return false;
-        };
 
         for (let r = minR; r <= maxR; r++) {
             const emp = displayedEmployees[r];
             if (!emp) continue;
-            const sh = pickShiftForEmp(emp);
+            const covObjId = getEmpBulkObjective(emp);
+            if (!covObjId) continue;
+            const empStructure = getStructureForObj(covObjId);
+            const pos = empStructure.find((p: any) => p.positionName === posName);
+            const posShifts = (pos?.shifts || []) as any[];
+            if (!pos || posShifts.length === 0) { skippedNoPos++; continue; }
+            const sh = pickShiftForEmp(emp, posShifts, covObjId);
             if (!sh) continue;
+
+            const dominant = (empStructure || []).reduce(
+                (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
+                empStructure[0] || { qty: 1, positionName: 'General' },
+            );
+
+            const collectCodeCounts = (dateStr: string, changes: Record<string, any>) => {
+                const codeCounts: Record<string, number> = {};
+                const assigned: { code: string; hours: number }[] = [];
+                displayedEmployees.forEach((e: any) => {
+                    const key = `${e.id}_${dateStr}`;
+                    const absence = absencesMap[key];
+                    if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
+                    const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : shiftsMap[key];
+                    if (!shift || !(String(shift.objectiveId || '') === String(covObjId) || changes[key])) return;
+                    const code = String(shift.code || '').toUpperCase();
+                    if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                    const shiftPos = shift.positionName || dominant?.positionName || 'General';
+                    if (shiftPos !== posName) return;
+                    codeCounts[code] = (codeCounts[code] || 0) + 1;
+                    assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
+                });
+                return { codeCounts, assigned };
+            };
+
+            const isBlocked = (dateStr: string, code: string, hours: number, changes: Record<string, any>) => {
+                if (!isPlanningWorkShiftCode(code)) return false;
+                const dayLetter = getDayLetter(dateStr);
+                if (!isPosActiveOnDay(pos, dayLetter)) return true;
+                if (isPosExcludedOnDate(pos, dateStr)) return true;
+                const pax = Math.max(1, Number(pos.qty) || 1);
+                const { codeCounts, assigned } = collectCodeCounts(dateStr, changes);
+                const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForBulk, true);
+                if (units.required > 0 && units.closed >= units.required) return true;
+                const upper = String(code).toUpperCase();
+                if ((codeCounts[upper] || 0) >= pax) return true;
+                if (!is24hCoverageType(pos)) return false;
+                const bandH = resolveBandHours(upper, { hours }, pos.shifts);
+                const is8h = isShortBandHours(bandH);
+                const a8 = assigned.filter(a => isShortBandHours(a.hours));
+                const a12 = assigned.filter(a => !isShortBandHours(a.hours));
+                if (pax === 1) {
+                    if (a8.length > 0 && a12.length > 0) return true;
+                    if (a8.length > 0 && !is8h) return true;
+                    if (a12.length > 0 && is8h) return true;
+                    if (assigned.filter(a => a.code === upper).length >= 1) return true;
+                } else {
+                    if (a8.length > 0 && !is8h) return true;
+                    if (a12.length > 0 && is8h) return true;
+                }
+                return false;
+            };
+
             for (let c = minC; c <= maxC; c++) {
                 const dateStr = getDateKey(daysInMonth[c]);
                 const key = `${emp.id}_${dateStr}`;
@@ -5043,7 +5235,7 @@ export default function PlanificacionPage() {
                 if (isPosExcludedOnDate(pos, dateStr)) { skippedExcluded++; continue; }
                 const hours = Number(sh.hours) || SHIFT_HOURS_LOOKUP[String(sh.code || '').toUpperCase()] || 8;
                 if (isBlocked(dateStr, String(sh.code || ''), hours, newChanges)) { skippedCoverage++; continue; }
-                const { blocked, warnings } = checkRestricciones(emp, dateStr, posName, sh.code);
+                const { blocked, warnings } = checkRestricciones(emp, dateStr, posName, sh.code, covObjId, empStructure);
                 if (blocked) continue;
                 if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 }));
                 newChanges[key] = {
@@ -5055,26 +5247,30 @@ export default function PlanificacionPage() {
                     isTemp: true,
                     oldObjectiveId: existing?.objectiveId,
                     positionName: posName,
+                    objectiveId: covObjId,
                 };
                 count++;
             }
         }
         commitPendingChanges(newChanges);
+        if (skippedNoPos > 0) toast.warning(`${skippedNoPos} fila(s) omitida(s): el puesto no existe en el SLA del objetivo`, { duration: 8000 });
         if (skippedCoverage > 0) toast.warning(`${skippedCoverage} celda(s) omitida(s): cobertura completa`, { duration: 8000 });
         if (skippedExcluded > 0) toast.warning(`${skippedExcluded} celda(s) omitida(s): día excluido`, { duration: 8000 });
         toast.info(count > 0 ? `${count} celda(s) · puesto ${posName}` : 'Ninguna celda aplicada');
     };
 
-    const checkRestricciones = (emp: any, dateStr: string, positionName?: string | null, shiftCode?: string | null): { blocked: boolean; warnings: string[] } => {
+    const checkRestricciones = (emp: any, dateStr: string, positionName?: string | null, shiftCode?: string | null, objectiveIdOverride?: string | null, structureOverride?: any[]): { blocked: boolean; warnings: string[] } => {
         const warnings: string[] = [];
-        const currentObjName = getObjectiveName(selectedObjective);
+        const objId = objectiveIdOverride || selectedObjective;
+        const struct = structureOverride || positionStructure;
+        const currentObjName = getObjectiveName(objId);
         const posForGenero = positionName || activePosition || selectedCell?.currentShift?.positionName || null;
-        const posCfg = positionStructure.find((p: any) => p.positionName === posForGenero);
+        const posCfg = struct.find((p: any) => p.positionName === posForGenero);
         if (posForGenero && isPosExcludedOnDate(posCfg, dateStr) && (shiftCode == null || isPlanningWorkShiftCode(shiftCode))) {
             warnings.push(`🚫 Puesto "${posForGenero}" excluido por SLA (${planningPositionExclusionLabel(dateStr)}) — sin servicio ese día`);
             return { blocked: true, warnings };
         }
-        const prefGenero = getPreferenciaGeneroFromPositionStructure(positionStructure, posForGenero);
+        const prefGenero = getPreferenciaGeneroFromPositionStructure(struct, posForGenero);
         const generoCheck = checkGeneroPuesto(emp.genero, prefGenero);
         if (generoCheck.blocked && generoCheck.message) {
             const posLabel = posForGenero ? ` (${posForGenero})` : '';
@@ -5082,7 +5278,7 @@ export default function PlanificacionPage() {
         }
         // Objetivo excluido (match por id o nombre como fallback)
         const objRestr = (emp.restriccionesObjetivo || []).find((r: any) =>
-            r.objectiveId === selectedObjective || r.objectiveName === currentObjName
+            r.objectiveId === objId || r.objectiveName === currentObjName
         );
         if (objRestr) warnings.push(`🚫 ${emp.name} está EXCLUIDO de este objetivo${objRestr.reason ? ` (${objRestr.reason})` : ''}`);
         // Cliente excluido
@@ -5096,7 +5292,7 @@ export default function PlanificacionPage() {
                 const otherKey = `${other.id}_${dateStr}`;
                 const otherShift = pendingChanges[otherKey] || shiftsMap[otherKey];
                 if (!otherShift || otherShift.isDeleted) return;
-                if (otherShift.objectiveId !== selectedObjective && !pendingChanges[otherKey]) return;
+                if (otherShift.objectiveId !== objId && !pendingChanges[otherKey]) return;
                 if (conflictIds.has(other.id)) {
                     const conflict = (emp.conflictosEmpleados || []).find((c: any) => c.employeeId === other.id);
                     warnings.push(`⚠️ Conflicto con ${other.name}${conflict?.reason ? ` (${conflict.reason})` : ''}`);
@@ -7469,20 +7665,18 @@ export default function PlanificacionPage() {
                             // construimos codeCounts por objetivo y llamamos directamente a countPositionClosedUnitsFromShifts.
                             selectedGrupo.objectiveIds.forEach((objId: string) => {
                                 const structure = grupoSlaMap[objId] || [];
-                                const objEmps = dotacionBaseEmployees.filter((e: any) =>
-                                    e.preferredObjectiveId === objId || slaIdToObjId[e.preferredObjectiveId] === objId,
-                                );
                                 structure.forEach((pos: any) => {
                                     if (!isPosActiveOnDay(pos, dayLetter)) return;
                                     if (isPosExcludedOnDate(pos, dateStr)) return;
                                     const codeCounts: Record<string, number> = {};
-                                    objEmps.forEach((emp: any) => {
+                                    dotacionBaseEmployees.forEach((emp: any) => {
                                         const key = `${emp.id}_${dateStr}`;
                                         const absence = absencesMap[key];
                                         if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
                                         const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
                                         if (!shift) return;
-                                        if (!(shift.objectiveId === objId || !!pendingChanges[key])) return;
+                                        const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
+                                        if (String(effectiveObjId || '') !== String(objId)) return;
                                         const code = String(shift.code || '').toUpperCase();
                                         if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
                                         const shiftPos = shift.positionName || pos.positionName || 'General';
@@ -8668,9 +8862,12 @@ export default function PlanificacionPage() {
                         ) : (
                             <>
                                 <span className="text-[10px] font-bold px-2 text-slate-300 uppercase tracking-wider">Asignar:</span>
-                                {positionStructure.length > 0 && (
+                                {(bulkSelectionEmployees.length >= 2 || bulkSelectionMeta.hasExt) && (
+                                    <span className="text-[8px] text-indigo-300 font-bold px-1 hidden sm:inline" title="Usá el panel Por colaborador debajo para turnos distintos por persona">↓ individual</span>
+                                )}
+                                {bulkEffectiveStructure.length > 0 && (
                                     <>
-                                        {positionStructure.map((p: any) => (
+                                        {bulkEffectiveStructure.map((p: any) => (
                                             <button
                                                 key={`bulkpos_${p.positionName}`}
                                                 type="button"
@@ -8732,6 +8929,85 @@ export default function PlanificacionPage() {
                                 <button onClick={() => setSelection({start:null, end:null})} className="ml-1 p-2 hover:bg-slate-700 rounded-lg"><X size={16}/></button>
                             </>
                         )}
+                    </div>
+                )}
+
+                {/* Panel por colaborador — turnos/objetivo distintos en la misma selección (grupo unificado) */}
+                {!comparingSnapshot && !isServiceLocked && selectedGrupo && grupoUnifiedMode && clipboard === null && !columnSelectMode
+                    && selection.start && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c)
+                    && bulkSelectionEmployees.length > 0 && (bulkSelectionEmployees.length >= 2 || bulkSelectionMeta.hasExt) && (
+                    <div className="absolute top-[4.75rem] left-1/2 -translate-x-1/2 z-[99] bg-slate-800/95 text-white p-2.5 rounded-xl shadow-2xl border border-slate-600 no-print max-w-[min(96vw,720px)] max-h-52 overflow-y-auto custom-scrollbar animate-in zoom-in-95">
+                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-2 sticky top-0 bg-slate-800/95 pb-1">
+                            <Users size={11} className="text-indigo-400"/>
+                            Por colaborador — turno y objetivo (EXT) por fila
+                        </div>
+                        <div className="space-y-1">
+                            {bulkSelectionEmployees.map((emp: any) => {
+                                const nativeObjId = resolveNativeObjectiveInGrupo(emp);
+                                const objId = nativeObjId || bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || '';
+                                const objIdx = selectedGrupo.objectiveIds.indexOf(objId);
+                                const objClr = GRUPO_COLOR_HEX[objIdx % GRUPO_COLOR_HEX.length] || '#64748b';
+                                const objShort = (selectedGrupo.objectiveNames[objIdx] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || '';
+                                const empShifts = getShiftsForObjective(objId);
+                                const nameParts = String(emp.name || '').split(',');
+                                const shortLabel = (nameParts[0] || emp.name || '').trim().slice(0, 14);
+                                return (
+                                    <div key={emp.id} className="flex items-center gap-1.5 flex-wrap py-0.5 border-b border-slate-700/40 last:border-0">
+                                        <span className="text-[9px] font-bold text-slate-200 min-w-[72px] max-w-[100px] truncate shrink-0" title={emp.name}>{shortLabel}</span>
+                                        {nativeObjId ? (
+                                            <span className="shrink-0 px-1 py-0.5 rounded text-[7px] font-black text-white" style={{ backgroundColor: objClr }} title={selectedGrupo.objectiveNames[objIdx]}>{objShort}</span>
+                                        ) : (
+                                            <>
+                                                <span className="shrink-0 px-1 py-0.5 rounded bg-amber-500 text-[7px] font-black text-white">EXT</span>
+                                                <select
+                                                    value={objId}
+                                                    onChange={e => setBulkEmpObjectiveOverrides(prev => ({ ...prev, [emp.id]: e.target.value }))}
+                                                    className="h-6 max-w-[100px] rounded border border-amber-400/50 bg-amber-950/60 text-amber-100 text-[8px] font-bold px-1 truncate shrink-0"
+                                                    title="Objetivo donde planificar a este EXT"
+                                                >
+                                                    {selectedGrupo.objectiveIds.map((oid: string, oi: number) => (
+                                                        <option key={oid} value={oid}>{selectedGrupo.objectiveNames[oi]}</option>
+                                                    ))}
+                                                </select>
+                                            </>
+                                        )}
+                                        <div className="flex flex-wrap gap-0.5 items-center">
+                                            {empShifts.map((s: any) => (
+                                                <button
+                                                    key={`${emp.id}_${String(s.code || '').toUpperCase()}`}
+                                                    type="button"
+                                                    onClick={() => applyBulkChange({
+                                                        code: s.code,
+                                                        name: s.name,
+                                                        hours: s.hours,
+                                                        startTime: s.startTime,
+                                                        endTime: s.endTime,
+                                                        positionName: s.positionName || undefined,
+                                                    }, { onlyEmpId: emp.id })}
+                                                    disabled={isServiceLocked}
+                                                    title={`${emp.name} → ${s.code} (${selectedGrupo.objectiveNames[objIdx] || 'objetivo'})`}
+                                                    className={`min-w-[26px] h-6 px-1 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}
+                                                >
+                                                    {s.code}
+                                                </button>
+                                            ))}
+                                            <button
+                                                type="button"
+                                                onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' }, { onlyEmpId: emp.id })}
+                                                disabled={isServiceLocked}
+                                                className={`min-w-[26px] h-6 px-1 rounded font-black text-[9px] ${getDefaultStyle('RET')}`}
+                                            >RET</button>
+                                            <button
+                                                type="button"
+                                                onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, { onlyEmpId: emp.id })}
+                                                disabled={isServiceLocked}
+                                                className="min-w-[26px] h-6 px-1 rounded bg-green-600 text-white text-[9px] font-black"
+                                            >F</button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
                 )}
 
