@@ -1452,6 +1452,12 @@ export default function PlanificacionPage() {
         return list;
     }, [selection, displayedEmployees]);
 
+    /** Grupo unificado: panel integrado por colaborador en la barra de asignación. */
+    const bulkPerEmpMode = useMemo(() => (
+        !!(selectedGrupo && grupoUnifiedMode && bulkSelectionEmployees.length >= 1
+            && (bulkSelectionEmployees.length >= 2 || bulkSelectionMeta.hasExt))
+    ), [selectedGrupo, grupoUnifiedMode, bulkSelectionEmployees, bulkSelectionMeta.hasExt]);
+
     /** Turnos únicos del SLA de un objetivo (incluye códigos custom como M2). */
     const getShiftsForObjective = useCallback((objId: string) => {
         const structure = (selectedGrupo && grupoUnifiedMode && grupoSlaMap[objId]?.length)
@@ -8826,9 +8832,9 @@ export default function PlanificacionPage() {
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
-                    <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-800 text-white p-2 rounded-xl shadow-2xl flex gap-1 animate-in zoom-in-95 items-center border border-slate-600 no-print">
+                    <div className={`absolute top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-800 text-white rounded-xl shadow-2xl border border-slate-600 no-print animate-in zoom-in-95 ${bulkPerEmpMode ? 'max-w-[min(96vw,820px)]' : ''}`}>
                         {columnSelectMode ? (
-                            <>
+                            <div className="flex gap-1 items-center p-2">
                                 <span className="text-[10px] font-bold px-2 text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
                                     <FastForward size={12}/> Copiar día {columnSelectSource !== null ? daysInMonth[columnSelectSource]?.getDate() : ''} →
                                 </span>
@@ -8840,9 +8846,9 @@ export default function PlanificacionPage() {
                                 </button>
                                 <div className="h-6 w-px bg-slate-600 mx-1"></div>
                                 <button onClick={() => { setSelection({start:null, end:null}); setColumnSelectMode(false); setColumnSelectSource(null); setIsDragging(false); }} className="p-2 hover:bg-slate-700 rounded-lg"><X size={16}/></button>
-                            </>
+                            </div>
                         ) : clipboard !== null ? (
-                            <>
+                            <div className="flex gap-1 items-center p-2 flex-wrap">
                                 <ClipboardPaste size={14} className="text-emerald-400 ml-1"/>
                                 <span className="text-[10px] font-bold px-1 text-emerald-300 uppercase tracking-wider">
                                     Portapapeles {clipboardDim ? `${clipboardDim.rows}×${clipboardDim.cols}` : ''}{clipboardIsCut ? ' · cortado' : ' · se mantiene'}
@@ -8858,13 +8864,67 @@ export default function PlanificacionPage() {
                                 <span className="text-[9px] text-slate-400 px-1">Ctrl+V</span>
                                 <div className="h-6 w-px bg-slate-600 mx-1"></div>
                                 <button onClick={() => { setClipboard(null); setClipboardDim(null); }} className="p-2 hover:bg-slate-700 rounded-lg" title="Vaciar portapapeles"><X size={16}/></button>
+                            </div>
+                        ) : bulkPerEmpMode && selectedGrupo ? (
+                            <>
+                                <div className="flex flex-wrap items-center gap-1 p-2 pb-1.5 border-b border-slate-700/80">
+                                    <span className="text-[9px] font-black text-indigo-300 uppercase tracking-wider px-1 shrink-0">A todos</span>
+                                    {bulkEffectiveStructure.map((p: any) => (
+                                        <button key={`bulkpos_${p.positionName}`} type="button" onClick={() => applyBulkPositionFill(p.positionName)} disabled={isServiceLocked} title={`Puesto ${p.positionName}`} className="px-2 h-7 rounded-lg font-black text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 max-w-[72px] truncate">{abbrevPlanningPositionName(p.positionName, 5)}</button>
+                                    ))}
+                                    {bulkShifts.map((s: any) => (
+                                        <button key={`all_${String(s.code || '').toUpperCase()}`} onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: s.positionName || undefined })} disabled={isServiceLocked} className={`w-7 h-7 rounded-lg font-black text-[10px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
+                                    ))}
+                                    <button onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' })} disabled={isServiceLocked} className={`w-7 h-7 rounded-lg font-black text-[10px] ${getDefaultStyle('RET')}`}>RET</button>
+                                    <button onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' })} disabled={isServiceLocked} className="w-7 h-7 rounded-lg bg-green-500 text-white font-black text-[10px]">F</button>
+                                    <div className="h-5 w-px bg-slate-600 mx-0.5" />
+                                    <button onClick={handleCopySelection} title="Copiar" className="p-1.5 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-indigo-200"><Copy size={13}/></button>
+                                    <button onClick={cutSelection} disabled={isServiceLocked} className="p-1.5 bg-violet-700 hover:bg-violet-600 rounded-lg text-violet-100"><Scissors size={13}/></button>
+                                    <button onClick={undoLastPending} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-300"><Undo size={13}/></button>
+                                    <button onClick={() => setShowRRHHModal(true)} disabled={isServiceLocked} className="p-1.5 bg-amber-600 rounded-lg text-white"><FileText size={12}/></button>
+                                    <button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="p-1.5 hover:bg-rose-600 rounded-lg text-rose-300"><Trash2 size={14}/></button>
+                                    <button onClick={() => setSelection({start:null, end:null})} className="p-1.5 hover:bg-slate-700 rounded-lg"><X size={14}/></button>
+                                </div>
+                                <div className="px-2 py-1.5 max-h-36 overflow-y-auto custom-scrollbar">
+                                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1 mb-1.5"><Users size={10} className="text-indigo-400"/> Por colaborador</div>
+                                    <div className="space-y-1">
+                                        {bulkSelectionEmployees.map((emp: any) => {
+                                            const nativeObjId = resolveNativeObjectiveInGrupo(emp);
+                                            const objId = nativeObjId || bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || '';
+                                            const objIdx = selectedGrupo.objectiveIds.indexOf(objId);
+                                            const objClr = GRUPO_COLOR_HEX[objIdx % GRUPO_COLOR_HEX.length] || '#64748b';
+                                            const objShort = (selectedGrupo.objectiveNames[objIdx] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || '';
+                                            const empShifts = getShiftsForObjective(objId);
+                                            const shortLabel = String(emp.name || '').split(',')[0]?.trim().slice(0, 16) || emp.name;
+                                            return (
+                                                <div key={emp.id} className="flex items-center gap-1.5 flex-wrap rounded-lg bg-slate-900/50 px-1.5 py-1">
+                                                    <span className="text-[9px] font-bold text-slate-200 min-w-[64px] max-w-[110px] truncate shrink-0" title={emp.name}>{shortLabel}</span>
+                                                    {nativeObjId ? (
+                                                        <span className="shrink-0 px-1 py-0.5 rounded text-[7px] font-black text-white" style={{ backgroundColor: objClr }}>{objShort}</span>
+                                                    ) : (
+                                                        <>
+                                                            <span className="shrink-0 px-1 py-0.5 rounded bg-amber-500 text-[7px] font-black text-white">EXT</span>
+                                                            <select value={objId} onChange={e => setBulkEmpObjectiveOverrides(prev => ({ ...prev, [emp.id]: e.target.value }))} className="h-6 max-w-[96px] rounded border border-amber-400/50 bg-amber-950/60 text-amber-100 text-[8px] font-bold px-1 truncate shrink-0">
+                                                                {selectedGrupo.objectiveIds.map((oid: string, oi: number) => (<option key={oid} value={oid}>{selectedGrupo.objectiveNames[oi]}</option>))}
+                                                            </select>
+                                                        </>
+                                                    )}
+                                                    <div className="flex flex-wrap gap-0.5 items-center">
+                                                        {empShifts.map((s: any) => (
+                                                            <button key={`${emp.id}_${String(s.code || '').toUpperCase()}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: s.positionName || undefined }, { onlyEmpId: emp.id })} disabled={isServiceLocked} title={`${emp.name} → ${s.code}`} className={`min-w-[24px] h-6 px-1 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
+                                                        ))}
+                                                        <button type="button" onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className={`min-w-[24px] h-6 px-1 rounded font-black text-[9px] ${getDefaultStyle('RET')}`}>RET</button>
+                                                        <button type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className="min-w-[24px] h-6 px-1 rounded bg-green-600 text-white text-[9px] font-black">F</button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
                             </>
                         ) : (
-                            <>
+                            <div className="flex gap-1 items-center p-2 flex-wrap">
                                 <span className="text-[10px] font-bold px-2 text-slate-300 uppercase tracking-wider">Asignar:</span>
-                                {(bulkSelectionEmployees.length >= 2 || bulkSelectionMeta.hasExt) && (
-                                    <span className="text-[8px] text-indigo-300 font-bold px-1 hidden sm:inline" title="Usá el panel Por colaborador debajo para turnos distintos por persona">↓ individual</span>
-                                )}
                                 {bulkEffectiveStructure.length > 0 && (
                                     <>
                                         {bulkEffectiveStructure.map((p: any) => (
@@ -8927,87 +8987,8 @@ export default function PlanificacionPage() {
                                 <div className="h-6 w-px bg-slate-600 mx-1"></div>
                                 <button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="p-2 hover:bg-rose-600 rounded-lg text-rose-300 hover:text-white transition-colors" title="Borrar"><Trash2 size={16}/></button>
                                 <button onClick={() => setSelection({start:null, end:null})} className="ml-1 p-2 hover:bg-slate-700 rounded-lg"><X size={16}/></button>
-                            </>
+                            </div>
                         )}
-                    </div>
-                )}
-
-                {/* Panel por colaborador — turnos/objetivo distintos en la misma selección (grupo unificado) */}
-                {!comparingSnapshot && !isServiceLocked && selectedGrupo && grupoUnifiedMode && clipboard === null && !columnSelectMode
-                    && selection.start && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c)
-                    && bulkSelectionEmployees.length > 0 && (bulkSelectionEmployees.length >= 2 || bulkSelectionMeta.hasExt) && (
-                    <div className="absolute top-[4.75rem] left-1/2 -translate-x-1/2 z-[99] bg-slate-800/95 text-white p-2.5 rounded-xl shadow-2xl border border-slate-600 no-print max-w-[min(96vw,720px)] max-h-52 overflow-y-auto custom-scrollbar animate-in zoom-in-95">
-                        <div className="text-[9px] font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5 mb-2 sticky top-0 bg-slate-800/95 pb-1">
-                            <Users size={11} className="text-indigo-400"/>
-                            Por colaborador — turno y objetivo (EXT) por fila
-                        </div>
-                        <div className="space-y-1">
-                            {bulkSelectionEmployees.map((emp: any) => {
-                                const nativeObjId = resolveNativeObjectiveInGrupo(emp);
-                                const objId = nativeObjId || bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || '';
-                                const objIdx = selectedGrupo.objectiveIds.indexOf(objId);
-                                const objClr = GRUPO_COLOR_HEX[objIdx % GRUPO_COLOR_HEX.length] || '#64748b';
-                                const objShort = (selectedGrupo.objectiveNames[objIdx] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || '';
-                                const empShifts = getShiftsForObjective(objId);
-                                const nameParts = String(emp.name || '').split(',');
-                                const shortLabel = (nameParts[0] || emp.name || '').trim().slice(0, 14);
-                                return (
-                                    <div key={emp.id} className="flex items-center gap-1.5 flex-wrap py-0.5 border-b border-slate-700/40 last:border-0">
-                                        <span className="text-[9px] font-bold text-slate-200 min-w-[72px] max-w-[100px] truncate shrink-0" title={emp.name}>{shortLabel}</span>
-                                        {nativeObjId ? (
-                                            <span className="shrink-0 px-1 py-0.5 rounded text-[7px] font-black text-white" style={{ backgroundColor: objClr }} title={selectedGrupo.objectiveNames[objIdx]}>{objShort}</span>
-                                        ) : (
-                                            <>
-                                                <span className="shrink-0 px-1 py-0.5 rounded bg-amber-500 text-[7px] font-black text-white">EXT</span>
-                                                <select
-                                                    value={objId}
-                                                    onChange={e => setBulkEmpObjectiveOverrides(prev => ({ ...prev, [emp.id]: e.target.value }))}
-                                                    className="h-6 max-w-[100px] rounded border border-amber-400/50 bg-amber-950/60 text-amber-100 text-[8px] font-bold px-1 truncate shrink-0"
-                                                    title="Objetivo donde planificar a este EXT"
-                                                >
-                                                    {selectedGrupo.objectiveIds.map((oid: string, oi: number) => (
-                                                        <option key={oid} value={oid}>{selectedGrupo.objectiveNames[oi]}</option>
-                                                    ))}
-                                                </select>
-                                            </>
-                                        )}
-                                        <div className="flex flex-wrap gap-0.5 items-center">
-                                            {empShifts.map((s: any) => (
-                                                <button
-                                                    key={`${emp.id}_${String(s.code || '').toUpperCase()}`}
-                                                    type="button"
-                                                    onClick={() => applyBulkChange({
-                                                        code: s.code,
-                                                        name: s.name,
-                                                        hours: s.hours,
-                                                        startTime: s.startTime,
-                                                        endTime: s.endTime,
-                                                        positionName: s.positionName || undefined,
-                                                    }, { onlyEmpId: emp.id })}
-                                                    disabled={isServiceLocked}
-                                                    title={`${emp.name} → ${s.code} (${selectedGrupo.objectiveNames[objIdx] || 'objetivo'})`}
-                                                    className={`min-w-[26px] h-6 px-1 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}
-                                                >
-                                                    {s.code}
-                                                </button>
-                                            ))}
-                                            <button
-                                                type="button"
-                                                onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' }, { onlyEmpId: emp.id })}
-                                                disabled={isServiceLocked}
-                                                className={`min-w-[26px] h-6 px-1 rounded font-black text-[9px] ${getDefaultStyle('RET')}`}
-                                            >RET</button>
-                                            <button
-                                                type="button"
-                                                onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, { onlyEmpId: emp.id })}
-                                                disabled={isServiceLocked}
-                                                className="min-w-[26px] h-6 px-1 rounded bg-green-600 text-white text-[9px] font-black"
-                                            >F</button>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
                     </div>
                 )}
 
