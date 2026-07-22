@@ -783,6 +783,8 @@ export default function PlanificacionPage() {
     const [bulkTargetObjectiveId, setBulkTargetObjectiveId] = useState<string | null>(null);
     /** Objetivo por EXT cuando hay varios en la misma selección (empId → objectiveId). */
     const [bulkEmpObjectiveOverrides, setBulkEmpObjectiveOverrides] = useState<Record<string, string>>({});
+    /** Puesto elegido en la barra masiva mono-objetivo (paso previo al turno). */
+    const [bulkBarPosition, setBulkBarPosition] = useState<string | null>(null);
     const [bandFilter, setBandFilter] = useState<string | null>(null);
     const [addSearchTerm, setAddSearchTerm] = useState('');
     const [selectedCell, setSelectedCell] = useState<any>(null);
@@ -1483,7 +1485,10 @@ export default function PlanificacionPage() {
     }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
 
     useEffect(() => {
-        if (!selection.start) setBulkEmpObjectiveOverrides({});
+        if (!selection.start) {
+            setBulkEmpObjectiveOverrides({});
+            setBulkBarPosition(null);
+        }
     }, [selection.start]);
 
     // Bell de planificación = novedades + vacantes RFZ derivadas de turnos (scope confiable, independiente del pipeline de novedades).
@@ -2030,6 +2035,164 @@ export default function PlanificacionPage() {
         return [...missing, ...base];
     }, [uniqueSLAShifts, positionStructure, selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
 
+    /** Mono-objetivo: puesto ya resuelto por legajo/celda vs necesita elegir en la barra. */
+    const bulkMonoPositionInfo = useMemo(() => {
+        const empty = {
+            needsPick: false,
+            resolvedPos: null as string | null,
+            showPositionButtons: false,
+            effectivePos: null as string | null,
+        };
+        if (!selection.start || !selection.end || !selectedObjective) return empty;
+        if (selectedGrupo && grupoUnifiedMode) return empty; // la barra de grupo tiene otro flujo
+        if (bulkPerEmpMode) return empty;
+
+        const minR = Math.min(selection.start.r, selection.end.r);
+        const maxR = Math.max(selection.start.r, selection.end.r);
+        const minC = Math.min(selection.start.c, selection.end.c);
+        const maxC = Math.max(selection.start.c, selection.end.c);
+        const resolved = new Set<string>();
+        let missing = 0;
+        let checked = 0;
+
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp) continue;
+            for (let c = minC; c <= maxC; c++) {
+                const day = daysInMonth[c];
+                if (!day) continue;
+                checked++;
+                const dateStr = getDateKey(day);
+                const key = `${emp.id}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                const cellPos = shift?.positionName && !['General', 'Retén', ''].includes(String(shift.positionName))
+                    ? String(shift.positionName)
+                    : null;
+                const defaultPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || null;
+                const pos = cellPos || defaultPos;
+                if (pos) resolved.add(pos);
+                else missing++;
+            }
+        }
+
+        const resolvedPos = resolved.size === 1 ? [...resolved][0] : null;
+        const needsPick = missing > 0 || resolved.size > 1;
+        const showPositionButtons = needsPick && (positionStructure?.length || 0) > 0;
+        const effectivePos = bulkBarPosition || resolvedPos || null;
+        return { needsPick, resolvedPos, showPositionButtons, effectivePos, checked };
+    }, [
+        selection.start, selection.end, selectedObjective, selectedGrupo, grupoUnifiedMode, bulkPerEmpMode,
+        displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos, positionStructure, bulkBarPosition,
+    ]);
+
+    /** Turnos de la barra mono filtrados por puesto efectivo (si hay). */
+    const bulkMonoShifts = useMemo(() => {
+        const posName = bulkMonoPositionInfo.effectivePos;
+        if (!posName || !positionStructure?.length) return bulkShifts;
+        const pos = positionStructure.find((p: any) => p.positionName === posName);
+        if (!pos?.shifts?.length) return bulkShifts;
+        return (pos.shifts as any[]).map((s: any) => ({
+            code: s.code,
+            name: s.name,
+            hours: s.hours,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            positionName: pos.positionName,
+        }));
+    }, [bulkMonoPositionInfo.effectivePos, positionStructure, bulkShifts]);
+
+    /** Códigos apagados en barra mono: cupo lleno / esquema cerrado en todos los días de la selección. */
+    const bulkMonoDisabledCodes = useMemo(() => {
+        const disabled = new Map<string, string>();
+        if (!selection.start || !selection.end || !selectedObjective) return disabled;
+        if (selectedGrupo && grupoUnifiedMode) return disabled;
+
+        const posName = bulkMonoPositionInfo.effectivePos
+            || (positionStructure?.[0]?.positionName)
+            || 'General';
+        const posCfg = (positionStructure || []).find((p: any) => p.positionName === posName) || positionStructure?.[0];
+        if (!posCfg) return disabled;
+
+        const minC = Math.min(selection.start.c, selection.end.c);
+        const maxC = Math.max(selection.start.c, selection.end.c);
+        const pax = Math.max(1, Number(posCfg.qty) || 1);
+        const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
+        const dominant = (positionStructure || []).reduce(
+            (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
+            positionStructure?.[0] || { qty: 1, positionName: 'General' },
+        );
+
+        const codes = new Set<string>();
+        for (const s of bulkMonoShifts) {
+            const c = String(s.code || '').toUpperCase();
+            if (c && isPlanningWorkShiftCode(c)) codes.add(c);
+        }
+
+        for (const code of codes) {
+            let blockedOnAllDays = true;
+            let lastReason = '';
+            for (let c = minC; c <= maxC; c++) {
+                const day = daysInMonth[c];
+                if (!day) continue;
+                const dateStr = getDateKey(day);
+                const dayLetter = getDayLetter(dateStr);
+                if (!isPosActiveOnDay(posCfg, dayLetter) || isPosExcludedOnDate(posCfg, dateStr)) {
+                    lastReason = 'Puesto sin servicio ese día';
+                    continue;
+                }
+                const codeCounts: Record<string, number> = {};
+                const assigned: { code: string; hours: number }[] = [];
+                displayedEmployees.forEach((e: any) => {
+                    const key = `${e.id}_${dateStr}`;
+                    const absence = absencesMap[key];
+                    if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
+                    const pending = pendingChanges[key];
+                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                    if (!shift) return;
+                    const effectiveObjId = resolveEffectiveShiftObjectiveId(e, shift, key);
+                    if (String(effectiveObjId || '') !== String(selectedObjective)) return;
+                    const sc = String(shift.code || '').toUpperCase();
+                    if (OBJECTIVE_NON_BILLABLE_CODES.has(sc)) return;
+                    const shiftPos = shift.positionName || dominant?.positionName || 'General';
+                    if (shiftPos !== posName) return;
+                    codeCounts[sc] = (codeCounts[sc] || 0) + 1;
+                    assigned.push({ code: sc, hours: resolveBandHours(sc, shift, posCfg.shifts || []) });
+                });
+
+                const units = countPositionClosedUnitsFromShifts(posCfg, dayLetter, codeCounts, cycles, true);
+                if (units.required > 0 && units.closed >= units.required) {
+                    lastReason = 'Cobertura SLA completa';
+                    continue;
+                }
+                if ((codeCounts[code] || 0) >= pax) {
+                    lastReason = `Cupo ${code} completo (${pax} pax)`;
+                    continue;
+                }
+                if (is24hCoverageType(posCfg)) {
+                    const bandH = resolveBandHours(code, { hours: SHIFT_HOURS_LOOKUP[code] || 8 }, posCfg.shifts || []);
+                    const is8h = isShortBandHours(bandH);
+                    const a8 = assigned.filter(a => isShortBandHours(a.hours));
+                    const a12 = assigned.filter(a => !isShortBandHours(a.hours));
+                    if (a8.length > 0 && !is8h) { lastReason = 'Ya hay turnos 8h en el puesto'; continue; }
+                    if (a12.length > 0 && is8h) { lastReason = 'Ya hay turnos 12h en el puesto'; continue; }
+                    if (pax === 1 && assigned.some(a => a.code === code)) {
+                        lastReason = `${code} ya asignado`;
+                        continue;
+                    }
+                }
+                blockedOnAllDays = false;
+                break;
+            }
+            if (blockedOnAllDays) disabled.set(code, lastReason || 'Sin cupo disponible');
+        }
+        return disabled;
+    }, [
+        selection.start, selection.end, selectedObjective, selectedGrupo, grupoUnifiedMode,
+        bulkMonoPositionInfo.effectivePos, positionStructure, bulkMonoShifts, daysInMonth,
+        displayedEmployees, pendingChanges, shiftsMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
+    ]);
+
     const objectivePublishLookupKey = useMemo(() => {
         if (!selectedObjective) return '';
         return planificacionPublishLookupKey(
@@ -2115,8 +2278,9 @@ export default function PlanificacionPage() {
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
             if (shiftPos !== posName) return;
             if (!isWorking(shift.code)) return;
-            const objectiveMatch = (String(shift.objectiveId || '') === String(covObjIdForDisable)) || !!pendingChanges[key];
-            if (!objectiveMatch) return;
+            // Cupo por objetivo: un M en Ville no cierra el M de María (ni ningún otro del grupo).
+            const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
+            if (String(effectiveObjId || '') !== String(covObjIdForDisable)) return;
             const code = String(shift.code || shift.type || '').toUpperCase();
             const hours = resolveBandHours(code, shift, posShiftsForBand);
             assigned.push({ code, hours });
@@ -2175,7 +2339,7 @@ export default function PlanificacionPage() {
             }
         });
         return disabled;
-    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId]);
+    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId, resolveEffectiveShiftObjectiveId]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
@@ -2610,14 +2774,15 @@ export default function PlanificacionPage() {
         displayedEmployees.forEach(emp => {
             const key = `${emp.id}_${dateStr}`;
             const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
-            if (shift && (shift.objectiveId === selectedObjective || pendingChanges[key])) {
-                if (OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) return;
-                const posName = shift.positionName || 'General';
-                const hours = calcShiftHours(shift);
-                if (!coverage[posName]) coverage[posName] = { coveredHours: 0, count: 0 };
-                coverage[posName].coveredHours += hours;
-                coverage[posName].count += 1;
-            }
+            if (!shift) return;
+            const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
+            if (String(effectiveObjId || '') !== String(selectedObjective)) return;
+            if (OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) return;
+            const posName = shift.positionName || 'General';
+            const hours = calcShiftHours(shift);
+            if (!coverage[posName]) coverage[posName] = { coveredHours: 0, count: 0 };
+            coverage[posName].coveredHours += hours;
+            coverage[posName].count += 1;
         });
         return coverage;
     };
@@ -4949,8 +5114,14 @@ export default function PlanificacionPage() {
                     const key = `${e.id}_${dateStr}`;
                     const absence = absencesMap[key];
                     if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
-                    const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : shiftsMap[key];
-                    if (!shift || !(String(shift.objectiveId || '') === String(covObjId) || changes[key])) return;
+                    const pending = changes[key];
+                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                    if (!shift) return;
+                    const explicitObj = pending?.objectiveId ?? shift.objectiveId;
+                    const effectiveObjId = explicitObj
+                        ? String(explicitObj)
+                        : (resolveNativeObjectiveInGrupo(e) || (e.preferredObjectiveId === covObjId || slaIdToObjId[e.preferredObjectiveId] === covObjId ? covObjId : null));
+                    if (String(effectiveObjId || '') !== String(covObjId)) return;
                     const code = String(shift.code || '').toUpperCase();
                     if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
                     const shiftPos = shift.positionName || dominant?.positionName || 'General';
@@ -5244,8 +5415,14 @@ export default function PlanificacionPage() {
                     const key = `${e.id}_${dateStr}`;
                     const absence = absencesMap[key];
                     if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
-                    const shift = changes[key] ? (changes[key].isDeleted ? null : changes[key]) : shiftsMap[key];
-                    if (!shift || !(String(shift.objectiveId || '') === String(covObjId) || changes[key])) return;
+                    const pending = changes[key];
+                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+                    if (!shift) return;
+                    const explicitObj = pending?.objectiveId ?? shift.objectiveId;
+                    const effectiveObjId = explicitObj
+                        ? String(explicitObj)
+                        : (resolveNativeObjectiveInGrupo(e) || (e.preferredObjectiveId === covObjId || slaIdToObjId[e.preferredObjectiveId] === covObjId ? covObjId : null));
+                    if (String(effectiveObjId || '') !== String(covObjId)) return;
                     const code = String(shift.code || '').toUpperCase();
                     if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
                     const shiftPos = shift.positionName || dominant?.positionName || 'General';
@@ -5349,7 +5526,8 @@ export default function PlanificacionPage() {
                 const otherKey = `${other.id}_${dateStr}`;
                 const otherShift = pendingChanges[otherKey] || shiftsMap[otherKey];
                 if (!otherShift || otherShift.isDeleted) return;
-                if (otherShift.objectiveId !== objId && !pendingChanges[otherKey]) return;
+                const otherObjId = resolveEffectiveShiftObjectiveId(other, otherShift, otherKey);
+                if (String(otherObjId || '') !== String(objId)) return;
                 if (conflictIds.has(other.id)) {
                     const conflict = (emp.conflictosEmpleados || []).find((c: any) => c.employeeId === other.id);
                     warnings.push(`⚠️ Conflicto con ${other.name}${conflict?.reason ? ` (${conflict.reason})` : ''}`);
@@ -8976,43 +9154,75 @@ export default function PlanificacionPage() {
                         ) : (
                             <div className="flex gap-1 items-center p-2 flex-wrap">
                                 <span className="text-[10px] font-bold px-2 text-slate-300 uppercase tracking-wider">Asignar:</span>
-                                {bulkEffectiveStructure.length > 0 && (
+                                {!bulkMonoPositionInfo.showPositionButtons && bulkMonoPositionInfo.effectivePos && (
+                                    <span
+                                        className="px-2 h-7 rounded-lg bg-slate-700 border border-slate-500 text-[9px] font-black text-indigo-200 max-w-[88px] truncate flex items-center"
+                                        title={`Puesto: ${bulkMonoPositionInfo.effectivePos}`}
+                                    >
+                                        {abbrevPlanningPositionName(bulkMonoPositionInfo.effectivePos, 8)}
+                                    </span>
+                                )}
+                                {bulkMonoPositionInfo.showPositionButtons && (
                                     <>
-                                        {bulkEffectiveStructure.map((p: any) => (
-                                            <button
-                                                key={`bulkpos_${p.positionName}`}
-                                                type="button"
-                                                onClick={() => applyBulkPositionFill(p.positionName)}
-                                                disabled={isServiceLocked}
-                                                title={`Completar selección con puesto ${p.positionName} (${p.qty || 1} pax)`}
-                                                className="px-2 h-8 rounded-lg font-black text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 max-w-[72px] truncate"
-                                            >
-                                                {abbrevPlanningPositionName(p.positionName, 5)}
-                                            </button>
-                                        ))}
+                                        <span className="text-[8px] font-black text-indigo-300 uppercase tracking-wider px-0.5">Puesto</span>
+                                        {bulkEffectiveStructure.map((p: any) => {
+                                            const selected = bulkBarPosition === p.positionName;
+                                            return (
+                                                <button
+                                                    key={`bulkpos_${p.positionName}`}
+                                                    type="button"
+                                                    onClick={() => setBulkBarPosition(selected ? null : p.positionName)}
+                                                    disabled={isServiceLocked}
+                                                    title={selected
+                                                        ? `Puesto ${p.positionName} seleccionado — ahora elegí el turno`
+                                                        : `Elegir puesto ${p.positionName}, después el turno`}
+                                                    className={`px-2 h-8 rounded-lg font-black text-[10px] border max-w-[72px] truncate transition-colors ${
+                                                        selected
+                                                            ? 'bg-indigo-400 text-white border-indigo-200 ring-2 ring-indigo-300'
+                                                            : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400'
+                                                    }`}
+                                                >
+                                                    {abbrevPlanningPositionName(p.positionName, 5)}
+                                                </button>
+                                            );
+                                        })}
                                         <div className="h-6 w-px bg-slate-600 mx-0.5" />
                                     </>
                                 )}
-                                {bulkShifts.map((s: any) => (
-                                    <button
-                                        key={`${String(s.code || '').toUpperCase()}_${s.positionName || 'any'}`}
-                                        onClick={() => applyBulkChange({
-                                            code: s.code,
-                                            name: s.name,
-                                            hours: s.hours,
-                                            startTime: s.startTime,
-                                            endTime: s.endTime,
-                                            positionName: s.positionName || undefined,
-                                        })}
-                                        disabled={isServiceLocked}
-                                        title={s.positionName
+                                {bulkMonoPositionInfo.showPositionButtons && !bulkMonoPositionInfo.effectivePos && (
+                                    <span className="text-[8px] font-bold text-amber-300/90 px-1">Elegí puesto →</span>
+                                )}
+                                {(bulkMonoPositionInfo.effectivePos || !bulkMonoPositionInfo.showPositionButtons) && bulkMonoShifts.map((s: any) => {
+                                    const code = String(s.code || '').toUpperCase();
+                                    const covReason = bulkMonoDisabledCodes.get(code);
+                                    const disabled = isServiceLocked || !!covReason;
+                                    const title = covReason
+                                        ? covReason
+                                        : (s.positionName
                                             ? `${s.code} · puesto ${s.positionName}`
-                                            : `${s.code} · se asigna al puesto dueño del turno en el SLA`}
-                                        className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle(s.code)}`}
-                                    >
-                                        {s.code}
-                                    </button>
-                                ))}
+                                            : `${s.code} · se asigna al puesto dueño del turno en el SLA`);
+                                    return (
+                                        <button
+                                            key={`${code}_${s.positionName || 'any'}`}
+                                            onClick={() => {
+                                                if (disabled) return;
+                                                applyBulkChange({
+                                                    code: s.code,
+                                                    name: s.name,
+                                                    hours: s.hours,
+                                                    startTime: s.startTime,
+                                                    endTime: s.endTime,
+                                                    positionName: bulkMonoPositionInfo.effectivePos || s.positionName || undefined,
+                                                });
+                                            }}
+                                            disabled={disabled}
+                                            title={title}
+                                            className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle(s.code)} ${disabled ? 'opacity-35 grayscale cursor-not-allowed' : ''}`}
+                                        >
+                                            {s.code}
+                                        </button>
+                                    );
+                                })}
                                 <button
                                     onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' })}
                                     disabled={isServiceLocked}

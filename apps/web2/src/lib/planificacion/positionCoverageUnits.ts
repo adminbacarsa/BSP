@@ -30,6 +30,16 @@ export type PlanningShiftSlice = {
 
 type ShiftRow = PlanningShiftSlice & { employeeId: string };
 
+/** True si el turno pertenece al objetivo. Pending sin objectiveId → se asume del activo (vista individual). */
+function shiftBelongsToObjective(
+    shift: { objectiveId?: string },
+    selectedObjective: string,
+    isPending?: boolean,
+): boolean {
+    if (shift.objectiveId) return String(shift.objectiveId) === String(selectedObjective);
+    return !!isPending;
+}
+
 export function normalizePlanningPositionName(name: unknown): string {
     return String(name ?? '')
         .trim()
@@ -184,7 +194,7 @@ function collectLegacyExtAdelPairs(
         if (packagedEmpIds.has(emp.id)) continue;
         const shift = resolveShift(emp.id, dateStr);
         if (!shift || shift.isDeleted) continue;
-        if (!(shift.objectiveId === options.selectedObjective || options.isPendingChange?.(emp.id, dateStr))) continue;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, dateStr))) continue;
 
         const row: ShiftRow = { ...shift, employeeId: emp.id };
         const code = normBandCode(shift.code);
@@ -259,7 +269,7 @@ export function collectSplitBandCreditsForDay(
             || shift.isEarlyStart
             || !!shift.coversPositionName;
         if (!isSplitSegment) continue;
-        if (!(shift.objectiveId === options.selectedObjective || options.isPendingChange?.(emp.id, dateStr))) continue;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, dateStr))) continue;
 
         const pkgId = shift.coveragePackageId;
         const key = pkgId
@@ -493,7 +503,7 @@ export function buildCodeCountsByPositionForDay(
         const key = `${emp.id}_${dateStr}`;
         const raw = resolveShift(emp.id, dateStr);
         if (!raw || raw.isDeleted) return;
-        if (!(raw.objectiveId === options.selectedObjective || options.isPendingChange(emp.id, dateStr))) return;
+        if (!shiftBelongsToObjective(raw, options.selectedObjective, options.isPendingChange(emp.id, dateStr))) return;
         const code = String(raw.code || '').toUpperCase();
         if (PLANNING_NON_BILLABLE_CODES.has(code)) return;
         const shiftPos = raw.positionName || options.dominantPositionName || 'General';
