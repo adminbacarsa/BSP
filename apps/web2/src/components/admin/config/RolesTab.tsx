@@ -51,7 +51,7 @@ export default function RolesTab() {
 
     const handleOpenCreate = () => {
         setEditId(null); setRoleName(''); setMatrix({});
-        setRoleEmpresaId(isSuperAdmin ? '' : empresaId);
+        setRoleEmpresaId(empresaId || '');
         setIsModalOpen(true);
     };
 
@@ -150,12 +150,14 @@ export default function RolesTab() {
                                     value={roleName}
                                     onChange={e => setRoleName(e.target.value)}
                                 />
-                                {isSuperAdmin && (
-                                  <div className="mt-4">
-                                    <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Empresa (vacío = global)</label>
-                                    <input type="text" value={roleEmpresaId} onChange={e => setRoleEmpresaId(e.target.value)} placeholder="bacarsa, prueba_sa…" className="w-full p-2 border rounded-lg dark:bg-slate-900 dark:border-slate-600 dark:text-white text-sm" />
-                                  </div>
-                                )}
+                                <div className="mt-4">
+                                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Empresa {isSuperAdmin && <span className="text-[10px] normal-case font-normal text-slate-400">(dejá vacío para rol global)</span>}</label>
+                                  {isSuperAdmin ? (
+                                    <input type="text" value={roleEmpresaId} onChange={e => setRoleEmpresaId(e.target.value)} placeholder="vacío = global" className="w-full p-2 border rounded-lg dark:bg-slate-900 dark:border-slate-600 dark:text-white text-sm" />
+                                  ) : (
+                                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300 p-2 bg-slate-50 dark:bg-slate-900 border rounded-lg border-slate-200 dark:border-slate-600">{roleEmpresaId}</p>
+                                  )}
+                                </div>
                             </div>
                             <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full text-slate-400"><X/></button>
                         </div>

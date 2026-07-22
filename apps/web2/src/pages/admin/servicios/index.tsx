@@ -154,6 +154,7 @@ export default function ServiciosSLAPage() {
   const [horarioFormAnchorM, setHorarioFormAnchorM] = useState('07:00');
   const [horarioFormAnchorD12, setHorarioFormAnchorD12] = useState('07:00');
   const [horarioFormPuesto, setHorarioFormPuesto] = useState<'ALL' | string>('ALL');
+  const [horarioFormCustomTimes, setHorarioFormCustomTimes] = useState<Record<string, { startTime: string; endTime: string }>>({});
   const [savingHorario, setSavingHorario] = useState(false);
   const [showExcludedDatesPicker, setShowExcludedDatesPicker] = useState(false);
   const [excludedDatesScope, setExcludedDatesScope] = useState<'ALL' | string>('ALL');
@@ -510,11 +511,29 @@ export default function ServiciosSLAPage() {
 
   // ── Historial de horarios ────────────────────────────────────────────────────
 
+  const isCustomPosition = (pos: { allowedShiftTypes: ShiftVariant[] }) =>
+    pos.allowedShiftTypes.length > 0 && pos.allowedShiftTypes.every(s => s.isCustom);
+
   /** Deriva bandas M/T/N/D12/N12 a partir de dos anclas horarias. */
   const buildBandasFromAnchors = (anchorM: string, anchorD12: string): HorarioVersion['bandas'] => {
     const variants = rebuild24hsVariants(anchorM, anchorD12);
     const result: HorarioVersion['bandas'] = {};
     for (const v of variants) result[v.code] = { startTime: v.startTime, endTime: v.endTime, hours: v.hours };
+    return result;
+  };
+
+  /** Deriva bandas para un puesto con turnos personalizados. */
+  const buildBandasForCustom = (
+    customTimes: Record<string, { startTime: string; endTime: string }>,
+    shifts: ShiftVariant[],
+  ): HorarioVersion['bandas'] => {
+    const result: HorarioVersion['bandas'] = {};
+    for (const sh of shifts) {
+      const override = customTimes[sh.code];
+      const start = override?.startTime || sh.startTime;
+      const end = override?.endTime || sh.endTime;
+      result[sh.code] = { startTime: start, endTime: end, hours: calculateShiftHours(start, end) };
+    }
     return result;
   };
 
@@ -525,7 +544,8 @@ export default function ServiciosSLAPage() {
     bandas: HorarioVersion['bandas'],
     positionName?: string,
   ): Promise<number> => {
-    const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'REF', 'ESC', 'FT']);
+    // Incluye todos los códigos presentes en bandas (cubre custom además de los estándar)
+    const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'REF', 'ESC', 'FT', ...Object.keys(bandas)]);
     const desdeTs = Timestamp.fromDate(new Date(desde + 'T00:00:00'));
     // Solo filtramos por objectiveId para evitar índice compuesto con rango;
     // el filtro de fecha se aplica en JS.
@@ -573,13 +593,24 @@ export default function ServiciosSLAPage() {
 
   const handleApplyHorarioVersion = async () => {
     if (!form.id || !horarioFormDesde) { addToast('Ingresá la fecha de inicio del cambio', 'error'); return; }
-    const bandas = buildBandasFromAnchors(horarioFormAnchorM, horarioFormAnchorD12);
+    const today = new Date().toISOString().slice(0, 10);
+    if (horarioFormDesde < today) { addToast('La fecha debe ser hoy o posterior', 'error'); return; }
+
     const applyToAll = horarioFormPuesto === 'ALL';
     const targetPosName = applyToAll ? null : horarioFormPuesto;
+    const selectedPos = targetPosName ? form.positions.find(p => p.name === targetPosName) : null;
+    const posIsCustom = selectedPos ? isCustomPosition(selectedPos) : false;
+
+    const bandas = posIsCustom
+      ? buildBandasForCustom(horarioFormCustomTimes, selectedPos!.allowedShiftTypes)
+      : buildBandasFromAnchors(horarioFormAnchorM, horarioFormAnchorD12);
+
+    const currentUser = (await import('@/lib/firebase')).auth.currentUser;
+    const changedBy = currentUser?.displayName || currentUser?.email || 'Sistema';
 
     const newVersiones: HorarioVersion[] = [
       ...(form.horarioVersiones || []).filter(v => !(v.desde === horarioFormDesde && (v as any).puesto === (targetPosName ?? undefined))),
-      { desde: horarioFormDesde, bandas, ...(targetPosName ? { puesto: targetPosName } : {}) } as HorarioVersion & { puesto?: string },
+      { desde: horarioFormDesde, bandas, changedBy, ...(targetPosName ? { puesto: targetPosName } : {}) } as HorarioVersion & { puesto?: string; changedBy?: string },
     ].sort((a, b) => a.desde.localeCompare(b.desde));
 
     // Actualizar allowedShiftTypes solo en los puestos afectados
@@ -588,7 +619,7 @@ export default function ServiciosSLAPage() {
       return {
         ...pos,
         allowedShiftTypes: pos.allowedShiftTypes.map(sh => {
-          const b = bandas[sh.code.toUpperCase()];
+          const b = bandas[sh.code.toUpperCase()] || bandas[sh.code];
           return b ? { ...sh, startTime: b.startTime, endTime: b.endTime, hours: b.hours } : sh;
         }),
       };
@@ -610,6 +641,7 @@ export default function ServiciosSLAPage() {
       setForm(prev => ({ ...prev, horarioVersiones: newVersiones, positions: newPositions }));
       const puestoLabel = targetPosName ? `puesto "${targetPosName}"` : 'todos los puestos';
       addToast(`Horario actualizado (${puestoLabel}) · ${count} turno(s) reprogramado(s)`, 'success');
+      await registrarAuditoria('UPDATE_HORARIO', `Cambio de horario desde ${horarioFormDesde} · ${puestoLabel} · ${form.clientName} - ${form.objectiveName}`);
       setShowHorarioForm(false);
     } catch (e) {
       addToast('Error al actualizar horario', 'error');
@@ -619,15 +651,26 @@ export default function ServiciosSLAPage() {
     }
   };
 
+  const initCustomTimesForPos = (pos: { allowedShiftTypes: ShiftVariant[] }) => {
+    const times: Record<string, { startTime: string; endTime: string }> = {};
+    for (const sh of pos.allowedShiftTypes) {
+      times[sh.code] = { startTime: sh.startTime.slice(0, 5), endTime: sh.endTime.slice(0, 5) };
+    }
+    setHorarioFormCustomTimes(times);
+  };
+
   const openHorarioForm = () => {
-    // Pre-cargar con el horario del primer puesto que tenga M
     const firstPos = form.positions[0];
-    const mShift = (firstPos?.allowedShiftTypes || form.positions.flatMap(p => p.allowedShiftTypes)).find(s => s.code === 'M');
-    const d12Shift = (firstPos?.allowedShiftTypes || form.positions.flatMap(p => p.allowedShiftTypes)).find(s => s.code === 'D12');
+    const mShift = form.positions.flatMap(p => p.allowedShiftTypes).find(s => s.code === 'M');
+    const d12Shift = form.positions.flatMap(p => p.allowedShiftTypes).find(s => s.code === 'D12');
     setHorarioFormAnchorM(mShift?.startTime?.slice(0, 5) || '07:00');
     setHorarioFormAnchorD12(d12Shift?.startTime?.slice(0, 5) || '07:00');
     setHorarioFormDesde('');
-    setHorarioFormPuesto(form.positions.length === 1 ? form.positions[0].name : 'ALL');
+    const initialPos = form.positions.length === 1 ? form.positions[0].name : 'ALL';
+    setHorarioFormPuesto(initialPos);
+    if (form.positions.length === 1 && isCustomPosition(form.positions[0])) {
+      initCustomTimesForPos(form.positions[0]);
+    }
     setShowHorarioForm(true);
   };
 
@@ -1057,9 +1100,11 @@ export default function ServiciosSLAPage() {
                 <p className="text-xs text-slate-400">Contratos, puestos y proyección de costos</p>
               </div>
             </div>
+            {canCreateService && (
             <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
               <Plus size={14}/> Nuevo Servicio
             </button>
+            )}
           </div>
 
           {/* Búsqueda */}
@@ -1236,9 +1281,11 @@ export default function ServiciosSLAPage() {
                                   <button onClick={() => handleNewVersion(currentSrv)} title="Nueva versión" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">
                                     <Copy size={11}/>
                                   </button>
+                                  {canUpdateService && (
                                   <button onClick={() => handleEdit(currentSrv)} title="Editar" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
                                     <Edit2 size={11}/>
                                   </button>
+                                  )}
                                   {canDeleteService && (
                                   <button onClick={() => currentSrv.id && handleDelete(currentSrv.id)} title="Eliminar" className="p-1.5 rounded-lg bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
                                     <Trash2 size={11}/>
@@ -1385,9 +1432,11 @@ export default function ServiciosSLAPage() {
                                     <button onClick={() => { handleNewVersion(srv); }} title="Nueva versión" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">
                                       <Copy size={11}/>
                                     </button>
+                                    {canUpdateService && (
                                     <button onClick={() => { handleEdit(srv); }} title="Editar" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
                                       <Edit2 size={11}/>
                                     </button>
+                                    )}
                                     {canDeleteService && (
                                     <button onClick={() => { srv.id && handleDelete(srv.id); }} title="Eliminar" className="p-1.5 rounded-lg bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
                                       <Trash2 size={11}/>
@@ -1698,9 +1747,11 @@ export default function ServiciosSLAPage() {
                   <button onClick={() => { handleNewVersion(srv); close(); }} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 font-black text-xs uppercase hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
                     <Copy size={13}/> Nueva versión
                   </button>
+                  {canUpdateService && (
                   <button onClick={() => { handleEdit(srv); close(); }} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-black text-xs uppercase hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors">
                     <Edit2 size={13}/> Editar
                   </button>
+                  )}
                   {canDeleteService && (
                   <button onClick={() => { srv.id && handleDelete(srv.id); close(); }} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 font-black text-xs uppercase hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors">
                     <Trash2 size={13}/> Eliminar
@@ -2045,19 +2096,21 @@ export default function ServiciosSLAPage() {
                 ) : (
                   <div className="space-y-1 mb-4">
                     {[...form.horarioVersiones]
-                      .sort((a, b) => a.desde.localeCompare(b.desde))
+                      .sort((a, b) => b.desde.localeCompare(a.desde))
                       .map((v, i) => (
-                        <div key={i} className="flex items-start gap-3 text-[10px]">
+                        <div key={i} className="flex items-start gap-3 text-[10px] py-1 border-b border-slate-100 dark:border-slate-700/50 last:border-0">
                           <span className="font-black text-indigo-600 dark:text-indigo-400 w-24 shrink-0">Desde {v.desde}</span>
                           {(v as any).puesto && (
                             <span className="text-[9px] font-black bg-slate-100 dark:bg-slate-700 text-slate-500 px-2 py-0.5 rounded shrink-0">{(v as any).puesto}</span>
                           )}
-                          <span className="text-slate-600 dark:text-slate-400">
-                            {(['M','T','N','D12','N12'] as const)
-                              .filter(c => v.bandas[c])
-                              .map(c => `${c} ${v.bandas[c].startTime}–${v.bandas[c].endTime}`)
+                          <span className="text-slate-600 dark:text-slate-400 flex-1">
+                            {Object.entries(v.bandas)
+                              .map(([c, b]) => `${c} ${b.startTime}–${b.endTime}`)
                               .join(' · ')}
                           </span>
+                          {(v as any).changedBy && (
+                            <span className="text-[9px] text-slate-400 shrink-0 italic">{(v as any).changedBy}</span>
+                          )}
                         </div>
                       ))}
                   </div>
@@ -2065,7 +2118,12 @@ export default function ServiciosSLAPage() {
 
                 {/* Formulario inline para nueva versión */}
                 {showHorarioForm && (() => {
-                  const preview = buildBandasFromAnchors(horarioFormAnchorM, horarioFormAnchorD12);
+                  const today = new Date().toISOString().slice(0, 10);
+                  const selPos = horarioFormPuesto !== 'ALL' ? form.positions.find(p => p.name === horarioFormPuesto) : null;
+                  const posCustom = selPos ? isCustomPosition(selPos) : false;
+                  const preview = posCustom
+                    ? buildBandasForCustom(horarioFormCustomTimes, selPos!.allowedShiftTypes)
+                    : buildBandasFromAnchors(horarioFormAnchorM, horarioFormAnchorD12);
                   return (
                     <div className="mt-4 bg-white dark:bg-slate-800 p-5 rounded-xl border dark:border-slate-700 space-y-4">
                       <p className="text-[10px] font-black uppercase text-slate-400">Nuevo cambio de horario</p>
@@ -2090,53 +2148,102 @@ export default function ServiciosSLAPage() {
                                 key={pos.id}
                                 onClick={() => {
                                   setHorarioFormPuesto(pos.name);
-                                  const m = pos.allowedShiftTypes.find(s => s.code === 'M');
-                                  const d = pos.allowedShiftTypes.find(s => s.code === 'D12');
-                                  setHorarioFormAnchorM(m?.startTime?.slice(0, 5) || '07:00');
-                                  setHorarioFormAnchorD12(d?.startTime?.slice(0, 5) || '07:00');
+                                  if (isCustomPosition(pos)) {
+                                    initCustomTimesForPos(pos);
+                                  } else {
+                                    const m = pos.allowedShiftTypes.find(s => s.code === 'M');
+                                    const d = pos.allowedShiftTypes.find(s => s.code === 'D12');
+                                    setHorarioFormAnchorM(m?.startTime?.slice(0, 5) || '07:00');
+                                    setHorarioFormAnchorD12(d?.startTime?.slice(0, 5) || '07:00');
+                                  }
                                 }}
                                 className={`px-3 py-1.5 rounded-xl text-[10px] font-black border transition-colors ${horarioFormPuesto === pos.name ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 border-slate-200 dark:border-slate-600 hover:bg-slate-200'}`}
-                              >{pos.name}</button>
+                              >
+                                {pos.name}
+                                {isCustomPosition(pos) && <span className="ml-1 text-[8px] opacity-70">custom</span>}
+                              </button>
                             ))}
                           </div>
                         </div>
                       )}
 
+                      {/* Fecha */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
                           <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Desde (fecha)</label>
                           <input
                             type="date"
                             value={horarioFormDesde}
+                            min={today}
                             onChange={e => setHorarioFormDesde(e.target.value)}
                             className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
                           />
+                          {horarioFormDesde && horarioFormDesde < today && (
+                            <p className="text-[9px] text-rose-500 font-bold mt-1">La fecha debe ser hoy o posterior</p>
+                          )}
                         </div>
-                        <div>
-                          <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Inicio M → T → N</label>
-                          <input
-                            type="time"
-                            value={horarioFormAnchorM}
-                            onChange={e => setHorarioFormAnchorM(e.target.value)}
-                            className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Inicio D12 → N12</label>
-                          <input
-                            type="time"
-                            value={horarioFormAnchorD12}
-                            onChange={e => setHorarioFormAnchorD12(e.target.value)}
-                            className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
-                          />
-                        </div>
+                        {/* Anclas para puestos estándar */}
+                        {!posCustom && (
+                          <>
+                            <div>
+                              <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Inicio M → T → N</label>
+                              <input
+                                type="time"
+                                value={horarioFormAnchorM}
+                                onChange={e => setHorarioFormAnchorM(e.target.value)}
+                                className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Inicio D12 → N12</label>
+                              <input
+                                type="time"
+                                value={horarioFormAnchorD12}
+                                onChange={e => setHorarioFormAnchorD12(e.target.value)}
+                                className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
+                              />
+                            </div>
+                          </>
+                        )}
                       </div>
+
+                      {/* Inputs individuales para puestos custom */}
+                      {posCustom && selPos && (
+                        <div>
+                          <label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Horarios por turno (puesto custom)</label>
+                          <div className="space-y-2">
+                            {selPos.allowedShiftTypes.filter(s => s.isCustom).map(sh => (
+                              <div key={sh.code} className="grid grid-cols-3 gap-2 items-center">
+                                <span className="text-[11px] font-black text-slate-700 dark:text-slate-300">{sh.code} <span className="font-normal text-slate-400">{sh.name}</span></span>
+                                <div>
+                                  <label className="text-[9px] font-black uppercase text-slate-400 block mb-0.5">Inicio</label>
+                                  <input
+                                    type="time"
+                                    value={horarioFormCustomTimes[sh.code]?.startTime || sh.startTime.slice(0, 5)}
+                                    onChange={e => setHorarioFormCustomTimes(prev => ({ ...prev, [sh.code]: { ...prev[sh.code], startTime: e.target.value, endTime: prev[sh.code]?.endTime || sh.endTime.slice(0, 5) } }))}
+                                    className="w-full p-2 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-lg text-xs font-bold dark:text-white"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-black uppercase text-slate-400 block mb-0.5">Fin</label>
+                                  <input
+                                    type="time"
+                                    value={horarioFormCustomTimes[sh.code]?.endTime || sh.endTime.slice(0, 5)}
+                                    onChange={e => setHorarioFormCustomTimes(prev => ({ ...prev, [sh.code]: { startTime: prev[sh.code]?.startTime || sh.startTime.slice(0, 5), endTime: e.target.value } }))}
+                                    className="w-full p-2 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-lg text-xs font-bold dark:text-white"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Preview */}
                       <div className="flex flex-wrap gap-2">
-                        {(['M','T','N','D12','N12'] as const).filter(c => preview[c]).map(c => (
+                        {Object.entries(preview).map(([c, b]) => (
                           <span key={c} className="text-[10px] font-black bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-700">
-                            {c} {preview[c].startTime} – {preview[c].endTime} · {preview[c].hours}h
+                            {c} {b.startTime} – {b.endTime} · {b.hours}h
                           </span>
                         ))}
                       </div>
@@ -2148,7 +2255,7 @@ export default function ServiciosSLAPage() {
                         >Cancelar</button>
                         <button
                           onClick={handleApplyHorarioVersion}
-                          disabled={savingHorario || !horarioFormDesde}
+                          disabled={savingHorario || !horarioFormDesde || horarioFormDesde < today}
                           className="flex-1 py-2 bg-indigo-600 text-white font-black rounded-xl text-xs uppercase shadow-sm hover:bg-indigo-700 disabled:opacity-50 transition-colors"
                         >
                           {savingHorario ? 'Aplicando…' : 'Aplicar cambio'}
