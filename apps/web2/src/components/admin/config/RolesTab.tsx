@@ -151,7 +151,7 @@ export default function RolesTab() {
                                     onChange={e => setRoleName(e.target.value)}
                                 />
                                 <div className="mt-4">
-                                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Empresa {isSuperAdmin && <span className="text-[10px] normal-case font-normal text-slate-400">(dejá vacío para rol global)</span>}</label>
+                                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Empresa</label>
                                   {isSuperAdmin ? (
                                     <input type="text" value={roleEmpresaId} onChange={e => setRoleEmpresaId(e.target.value)} placeholder="vacío = global" className="w-full p-2 border rounded-lg dark:bg-slate-900 dark:border-slate-600 dark:text-white text-sm" />
                                   ) : (
