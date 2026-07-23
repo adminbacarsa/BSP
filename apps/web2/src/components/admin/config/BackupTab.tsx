@@ -311,11 +311,18 @@ export default function BackupTab() {
     setRunning(true); setLastResult(null);
     try {
       await refreshAuthTokenForBackup();
-      const fn = httpsCallable(functions, 'triggerBackup');
+      const fn = httpsCallable(functions, 'triggerBackup', { timeout: 600000 });
       const res: any = await fn({ empresaId: empresaId || '' });
       setLastResult({ ok: true, msg: `Backup creado: ${res.data.fileName} (${fmt(res.data.sizeBytes)}, ${res.data.totalDocs} docs)` });
     } catch (e: any) {
-      setLastResult({ ok: false, msg: e?.message || 'Error al crear backup' });
+      const msg = String(e?.message || '');
+      const isTimeout = /deadline.exceeded|timeout/i.test(`${e?.code ?? ''} ${msg}`);
+      setLastResult({
+        ok: false,
+        msg: isTimeout
+          ? 'El backup tardó demasiado (puede estar corriendo igual en el servidor). Revisá el historial en unos minutos o los logs de Functions.'
+          : (msg || 'Error al crear backup'),
+      });
     } finally { setRunning(false); }
   };
 
@@ -323,7 +330,7 @@ export default function BackupTab() {
     setSyncing(true); setLastResult(null);
     try {
       await refreshAuthTokenForBackup();
-      const fn = httpsCallable(functions, 'syncBackups');
+      const fn = httpsCallable(functions, 'syncBackups', { timeout: 300000 });
       const res: any = await fn({ empresaId: empresaId || '' });
       const removed = Number(res?.data?.removed ?? 0);
       const checked = Number(res?.data?.checked ?? 0);
@@ -551,7 +558,7 @@ export default function BackupTab() {
     setSavingSchedule(true);
     try {
       await refreshAuthTokenForBackup();
-      const fn = httpsCallable(functions, 'updateBackupSchedule');
+      const fn = httpsCallable(functions, 'updateBackupSchedule', { timeout: 60000 });
       await fn({ hour: scheduleHour, enabled: scheduleEnabled });
       toast.success(`Horario guardado: backup automático a las ${String(scheduleHour).padStart(2, '0')}:00 AR${scheduleEnabled ? '' : ' (deshabilitado)'}`);
     } catch (e: any) {
