@@ -1461,6 +1461,31 @@ export default function PlanificacionPage() {
             && (bulkSelectionEmployees.length >= 2 || bulkSelectionMeta.hasExt))
     ), [selectedGrupo, grupoUnifiedMode, bulkSelectionEmployees, bulkSelectionMeta.hasExt]);
 
+    /**
+     * Objetivo único de la selección actual.
+     * En grupo: si todos los seleccionados son del mismo objetivo nativo (o EXT con el mismo destino),
+     * la barra mono usa solo ese SLA (no mezcla M de Ville con M2 de María).
+     */
+    const bulkBarScopeObjectiveId = useMemo((): string | null => {
+        if (!bulkSelectionEmployees.length) return selectedObjective || null;
+        if (!(selectedGrupo && grupoUnifiedMode)) return selectedObjective || null;
+        const objIds = new Set<string>();
+        for (const emp of bulkSelectionEmployees) {
+            const native = resolveNativeObjectiveInGrupo(emp);
+            if (native) {
+                objIds.add(native);
+                continue;
+            }
+            const extObj = bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId;
+            if (!extObj) return null;
+            objIds.add(extObj);
+        }
+        return objIds.size === 1 ? [...objIds][0]! : null;
+    }, [
+        bulkSelectionEmployees, selectedGrupo, grupoUnifiedMode, selectedObjective,
+        resolveNativeObjectiveInGrupo, bulkEmpObjectiveOverrides, bulkTargetObjectiveId,
+    ]);
+
     /** Turnos únicos del SLA de un objetivo (incluye códigos custom como M2). */
     const getShiftsForObjective = useCallback((objId: string) => {
         const structure = (selectedGrupo && grupoUnifiedMode && grupoSlaMap[objId]?.length)
@@ -1986,8 +2011,13 @@ export default function PlanificacionPage() {
     // Turnos para la barra flotante de selección múltiple.
     // Combina turnos de todas las posiciones; si un código es de un solo puesto, guarda positionName.
     // Si ninguna posición tiene M/T/N/D12/N12, agrega los estándar como base mínima.
+    // En grupo: si la selección es de un solo objetivo, solo el SLA de ese objetivo.
     const bulkEffectiveStructure = useMemo(() => {
         if (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0) {
+            if (bulkBarScopeObjectiveId && (grupoSlaMap[bulkBarScopeObjectiveId]?.length || 0) > 0) {
+                return grupoSlaMap[bulkBarScopeObjectiveId];
+            }
+            if (bulkBarScopeObjectiveId) return positionStructure;
             const byName = new Map<string, any>();
             for (const objId of selectedGrupo.objectiveIds) {
                 for (const p of (grupoSlaMap[objId] || [])) {
@@ -1997,14 +2027,21 @@ export default function PlanificacionPage() {
             if (byName.size > 0) return [...byName.values()];
         }
         return positionStructure;
-    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure, bulkBarScopeObjectiveId]);
 
     const bulkShifts = useMemo(() => {
         const STANDARD_CODES = new Set(['M', 'T', 'N', 'D12', 'N12']);
         const byCode = new Map<string, any>();
-        const sourcePositions = (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
-            ? selectedGrupo.objectiveIds.flatMap((objId: string) => grupoSlaMap[objId] || [])
-            : (positionStructure || []);
+        let sourcePositions: any[] = positionStructure || [];
+        if (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0) {
+            if (bulkBarScopeObjectiveId) {
+                sourcePositions = grupoSlaMap[bulkBarScopeObjectiveId]?.length
+                    ? grupoSlaMap[bulkBarScopeObjectiveId]
+                    : (positionStructure || []);
+            } else {
+                sourcePositions = selectedGrupo.objectiveIds.flatMap((objId: string) => grupoSlaMap[objId] || []);
+            }
+        }
         for (const pos of sourcePositions) {
             for (const s of (pos.shifts || []) as any[]) {
                 const codeKey = String(s.code || '').toUpperCase();
@@ -2033,19 +2070,27 @@ export default function PlanificacionPage() {
         const existingCodes = new Set(base.map((s: any) => String(s.code || '').toUpperCase()));
         const missing = STANDARD_SHIFTS_BASE.filter(s => !existingCodes.has(s.code));
         return [...missing, ...base];
-    }, [uniqueSLAShifts, positionStructure, selectedGrupo, grupoUnifiedMode, grupoSlaMap]);
+    }, [uniqueSLAShifts, positionStructure, selectedGrupo, grupoUnifiedMode, grupoSlaMap, bulkBarScopeObjectiveId]);
 
-    /** Mono-objetivo: puesto ya resuelto por legajo/celda vs necesita elegir en la barra. */
+    /** Mono-objetivo (o selección de un solo objetivo en grupo): puesto vs elegir en la barra. */
     const bulkMonoPositionInfo = useMemo(() => {
         const empty = {
             needsPick: false,
             resolvedPos: null as string | null,
+            resolvedPositions: [] as string[],
             showPositionButtons: false,
             effectivePos: null as string | null,
+            scopeObj: null as string | null,
+            structure: [] as any[],
         };
-        if (!selection.start || !selection.end || !selectedObjective) return empty;
-        if (selectedGrupo && grupoUnifiedMode) return empty; // la barra de grupo tiene otro flujo
+        if (!selection.start || !selection.end) return empty;
         if (bulkPerEmpMode) return empty;
+        const scopeObj = bulkBarScopeObjectiveId || selectedObjective;
+        if (!scopeObj) return empty;
+
+        const structure = (selectedGrupo && grupoUnifiedMode && grupoSlaMap[scopeObj]?.length)
+            ? grupoSlaMap[scopeObj]
+            : (bulkEffectiveStructure?.length ? bulkEffectiveStructure : positionStructure);
 
         const minR = Math.min(selection.start.r, selection.end.r);
         const maxR = Math.max(selection.start.r, selection.end.r);
@@ -2069,7 +2114,9 @@ export default function PlanificacionPage() {
                 const cellPos = shift?.positionName && !['General', 'Retén', ''].includes(String(shift.positionName))
                     ? String(shift.positionName)
                     : null;
-                const defaultPos = empDefaultPos[`${emp.id}___${selectedObjective}`] || null;
+                const defaultPos = empDefaultPos[`${emp.id}___${scopeObj}`]
+                    || empDefaultPos[`${emp.id}___${selectedObjective}`]
+                    || null;
                 const pos = cellPos || defaultPos;
                 if (pos) resolved.add(pos);
                 else missing++;
@@ -2077,50 +2124,82 @@ export default function PlanificacionPage() {
         }
 
         const resolvedPos = resolved.size === 1 ? [...resolved][0] : null;
-        const needsPick = missing > 0 || resolved.size > 1;
-        const showPositionButtons = needsPick && (positionStructure?.length || 0) > 0;
+        const resolvedPositions = [...resolved];
+        const needsPick = missing > 0;
+        const showPositionButtons = needsPick && (structure?.length || 0) > 0;
         const effectivePos = bulkBarPosition || resolvedPos || null;
-        return { needsPick, resolvedPos, showPositionButtons, effectivePos, checked };
+        return { needsPick, resolvedPos, resolvedPositions, showPositionButtons, effectivePos, checked, scopeObj, structure };
     }, [
         selection.start, selection.end, selectedObjective, selectedGrupo, grupoUnifiedMode, bulkPerEmpMode,
-        displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos, positionStructure, bulkBarPosition,
+        bulkBarScopeObjectiveId, grupoSlaMap, bulkEffectiveStructure, positionStructure,
+        displayedEmployees, daysInMonth, pendingChanges, shiftsMap, empDefaultPos, bulkBarPosition,
     ]);
 
     /** Turnos de la barra mono filtrados por puesto efectivo (si hay). */
     const bulkMonoShifts = useMemo(() => {
+        const structure = bulkMonoPositionInfo.structure || bulkEffectiveStructure || positionStructure;
         const posName = bulkMonoPositionInfo.effectivePos;
-        if (!posName || !positionStructure?.length) return bulkShifts;
-        const pos = positionStructure.find((p: any) => p.positionName === posName);
-        if (!pos?.shifts?.length) return bulkShifts;
-        return (pos.shifts as any[]).map((s: any) => ({
-            code: s.code,
-            name: s.name,
-            hours: s.hours,
-            startTime: s.startTime,
-            endTime: s.endTime,
-            positionName: pos.positionName,
-        }));
-    }, [bulkMonoPositionInfo.effectivePos, positionStructure, bulkShifts]);
+        if (posName && structure?.length) {
+            const pos = structure.find((p: any) => p.positionName === posName);
+            if (pos?.shifts?.length) {
+                return (pos.shifts as any[]).map((s: any) => ({
+                    code: s.code,
+                    name: s.name,
+                    hours: s.hours,
+                    startTime: s.startTime,
+                    endTime: s.endTime,
+                    positionName: pos.positionName,
+                }));
+            }
+        }
+        const multiPos = bulkMonoPositionInfo.resolvedPositions;
+        if (multiPos && multiPos.length > 1 && structure?.length) {
+            const byCode = new Map<string, any>();
+            for (const pn of multiPos) {
+                const pos = structure.find((p: any) => p.positionName === pn);
+                for (const s of ((pos?.shifts || []) as any[])) {
+                    const ck = String(s.code || '').toUpperCase();
+                    if (!ck || byCode.has(ck)) continue;
+                    byCode.set(ck, {
+                        code: s.code,
+                        name: s.name,
+                        hours: s.hours,
+                        startTime: s.startTime,
+                        endTime: s.endTime,
+                        positionName: undefined,
+                    });
+                }
+            }
+            if (byCode.size > 0) return [...byCode.values()];
+        }
+        return bulkShifts;
+    }, [bulkMonoPositionInfo, bulkEffectiveStructure, positionStructure, bulkShifts]);
 
     /** Códigos apagados en barra mono: cupo lleno / esquema cerrado en todos los días de la selección. */
     const bulkMonoDisabledCodes = useMemo(() => {
         const disabled = new Map<string, string>();
-        if (!selection.start || !selection.end || !selectedObjective) return disabled;
-        if (selectedGrupo && grupoUnifiedMode) return disabled;
+        if (!selection.start || !selection.end) return disabled;
+        if (bulkPerEmpMode) return disabled;
+        const scopeObj = bulkBarScopeObjectiveId || selectedObjective;
+        if (!scopeObj) return disabled;
 
-        const posName = bulkMonoPositionInfo.effectivePos
-            || (positionStructure?.[0]?.positionName)
-            || 'General';
-        const posCfg = (positionStructure || []).find((p: any) => p.positionName === posName) || positionStructure?.[0];
+        const structure = bulkMonoPositionInfo.structure || bulkEffectiveStructure || positionStructure || [];
+        const posName = bulkMonoPositionInfo.effectivePos;
+        const multiPos = bulkMonoPositionInfo.resolvedPositions;
+        if (!posName && multiPos && multiPos.length > 1) {
+            return disabled;
+        }
+        const evalPosName = posName || (structure?.[0]?.positionName) || 'General';
+        const posCfg = structure.find((p: any) => p.positionName === evalPosName) || structure[0];
         if (!posCfg) return disabled;
 
         const minC = Math.min(selection.start.c, selection.end.c);
         const maxC = Math.max(selection.start.c, selection.end.c);
         const pax = Math.max(1, Number(posCfg.qty) || 1);
         const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
-        const dominant = (positionStructure || []).reduce(
+        const dominant = structure.reduce(
             (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
-            positionStructure?.[0] || { qty: 1, positionName: 'General' },
+            structure[0] || { qty: 1, positionName: 'General' },
         );
 
         const codes = new Set<string>();
@@ -2151,11 +2230,11 @@ export default function PlanificacionPage() {
                     const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
                     if (!shift) return;
                     const effectiveObjId = resolveEffectiveShiftObjectiveId(e, shift, key);
-                    if (String(effectiveObjId || '') !== String(selectedObjective)) return;
+                    if (String(effectiveObjId || '') !== String(scopeObj)) return;
                     const sc = String(shift.code || '').toUpperCase();
                     if (OBJECTIVE_NON_BILLABLE_CODES.has(sc)) return;
                     const shiftPos = shift.positionName || dominant?.positionName || 'General';
-                    if (shiftPos !== posName) return;
+                    if (shiftPos !== evalPosName) return;
                     codeCounts[sc] = (codeCounts[sc] || 0) + 1;
                     assigned.push({ code: sc, hours: resolveBandHours(sc, shift, posCfg.shifts || []) });
                 });
@@ -2188,8 +2267,8 @@ export default function PlanificacionPage() {
         }
         return disabled;
     }, [
-        selection.start, selection.end, selectedObjective, selectedGrupo, grupoUnifiedMode,
-        bulkMonoPositionInfo.effectivePos, positionStructure, bulkMonoShifts, daysInMonth,
+        selection.start, selection.end, selectedObjective, bulkPerEmpMode, bulkBarScopeObjectiveId,
+        bulkMonoPositionInfo, bulkEffectiveStructure, positionStructure, bulkMonoShifts, daysInMonth,
         displayedEmployees, pendingChanges, shiftsMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
     ]);
 
@@ -9154,6 +9233,22 @@ export default function PlanificacionPage() {
                         ) : (
                             <div className="flex gap-1 items-center p-2 flex-wrap">
                                 <span className="text-[10px] font-bold px-2 text-slate-300 uppercase tracking-wider">Asignar:</span>
+                                {selectedGrupo && grupoUnifiedMode && bulkBarScopeObjectiveId && (() => {
+                                    const oi = selectedGrupo.objectiveIds.indexOf(bulkBarScopeObjectiveId);
+                                    const clr = GRUPO_COLOR_HEX[oi % GRUPO_COLOR_HEX.length] || '#64748b';
+                                    const nm = (selectedGrupo.objectiveNames[oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 8).toUpperCase()
+                                        || (selectedGrupo.objectiveNames[oi] || '').slice(0, 8).toUpperCase()
+                                        || 'OBJ';
+                                    return (
+                                        <span
+                                            className="px-1.5 h-7 rounded-lg text-[8px] font-black text-white flex items-center"
+                                            style={{ backgroundColor: clr }}
+                                            title={selectedGrupo.objectiveNames[oi] || bulkBarScopeObjectiveId}
+                                        >
+                                            {nm}
+                                        </span>
+                                    );
+                                })()}
                                 {!bulkMonoPositionInfo.showPositionButtons && bulkMonoPositionInfo.effectivePos && (
                                     <span
                                         className="px-2 h-7 rounded-lg bg-slate-700 border border-slate-500 text-[9px] font-black text-indigo-200 max-w-[88px] truncate flex items-center"
