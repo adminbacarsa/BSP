@@ -382,6 +382,7 @@ export default function BackupTab() {
 
   const [localRestoreMode, setLocalRestoreMode] = useState<'empresa' | 'full'>('empresa');
   const [localDevMode, setLocalDevMode] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   // Carga backup JSON al emulador vía API local (evita parsear JSON grande en el browser)
   const handleLoadLocalFile = async (file: File) => {
@@ -518,6 +519,42 @@ export default function BackupTab() {
     } finally {
       setLoadingLocal(false);
       setProgress(null);
+    }
+  };
+
+  const handleExportLocal = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setLastResult(null);
+    try {
+      await assertBridgeReachable();
+      const scope = localRestoreMode === 'full' ? 'full' : 'empresa';
+      const url = `${BRIDGE_URL}/export-backup?empresaId=${encodeURIComponent(empresaId || 'bacarsa')}&scope=${scope}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const fileNameHeader = res.headers.get('X-File-Name');
+      const fileName = fileNameHeader ? decodeURIComponent(fileNameHeader) : 'backup.json';
+      const totalDocs = res.headers.get('X-Total-Docs') || '?';
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      setLastResult({ ok: true, msg: `Backup exportado: ${fileName} (${totalDocs} docs). Guardado en tu carpeta de descargas.` });
+      toast.success(`Backup exportado: ${fileName}`);
+    } catch (e: any) {
+      const msg = e?.message || 'Error al exportar backup';
+      setLastResult({ ok: false, msg });
+      toast.error(msg);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -805,17 +842,29 @@ export default function BackupTab() {
                   </p>
                 </div>
               ) : (
-                <label className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow ${
-                  bridgeOnline === false
-                    ? 'bg-amber-300 text-amber-900 cursor-not-allowed opacity-80'
-                    : 'bg-amber-500 hover:bg-amber-600 text-white cursor-pointer'
-                }`}>
-                  <Upload size={15} />
-                  Seleccionar backup .json
-                  <input ref={fileInputRef} type="file" accept=".json,application/json" className="hidden"
-                    disabled={loadingLocal || bridgeOnline === false}
-                    onChange={e => { const f = e.target.files?.[0]; if (f) handleLoadLocalFile(f); e.target.value = ''; }} />
-                </label>
+                <div className="flex flex-wrap gap-2">
+                  <label className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-sm transition-colors shadow ${
+                    bridgeOnline === false
+                      ? 'bg-amber-300 text-amber-900 cursor-not-allowed opacity-80'
+                      : 'bg-amber-500 hover:bg-amber-600 text-white cursor-pointer'
+                  }`}>
+                    <Upload size={15} />
+                    Seleccionar backup .json
+                    <input ref={fileInputRef} type="file" accept=".json,application/json" className="hidden"
+                      disabled={loadingLocal || bridgeOnline === false}
+                      onChange={e => { const f = e.target.files?.[0]; if (f) handleLoadLocalFile(f); e.target.value = ''; }} />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleExportLocal}
+                    disabled={exporting || bridgeOnline === false}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-black text-sm bg-white border-2 border-amber-400 text-amber-700 hover:bg-amber-50 disabled:opacity-60 transition-colors shadow"
+                    title="Exporta los datos del emulador como backup .json"
+                  >
+                    {exporting ? <RefreshCw size={15} className="animate-spin" /> : <Database size={15} />}
+                    {exporting ? 'Exportando…' : 'Crear backup local'}
+                  </button>
+                </div>
               )}
 
               {/* Versión activa cargada en el emulador */}

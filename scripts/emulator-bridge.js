@@ -15,6 +15,21 @@ const PORT = 3010;
 const IMPORT_TIMEOUT_MS = 15 * 60 * 1000;
 const FOLDER_ID = process.env.DRIVE_BACKUP_FOLDER_ID || '0AI2aip_4UuafUk9PVA';
 
+// Firebase Admin para export (apunta al emulador local)
+process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+let _adminDb = null;
+function getAdminDb() {
+  if (_adminDb) return _adminDb;
+  const { initializeApp, getApps, applicationDefault } = require('firebase-admin/app');
+  const { getFirestore } = require('firebase-admin/firestore');
+  if (!getApps().length) initializeApp({ projectId: 'comtroldata' });
+  _adminDb = getFirestore();
+  return _adminDb;
+}
+
+const EXPORT_EXCLUDE = new Set(['system_backups', 'restore_jobs', 'empresa_migrate_jobs', 'scheduled_job_logs']);
+const EXPORT_DOC_ID_IS_EMPRESA = new Set(['planning_rules']);
+
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -107,6 +122,108 @@ function listDriveBackups() {
     }));
 }
 
+async function exportBackup(req, res) {
+  const queryStr = (req.url || '').split('?')[1] || '';
+  const params = new URLSearchParams(queryStr);
+  const empresaId = String(params.get('empresaId') || '').trim();
+  const scope = params.get('scope') || 'empresa';
+  const scopeEmpresa = scope === 'empresa' && !!empresaId;
+
+  try {
+    const db = getAdminDb();
+    const data = {};
+    let totalDocs = 0;
+    const exportedCollections = [];
+
+    const rootCollections = await db.listCollections();
+
+    for (const colRef of rootCollections) {
+      const col = colRef.id;
+      if (EXPORT_EXCLUDE.has(col)) continue;
+
+      if (col === 'empresas' && scopeEmpresa) {
+        try {
+          const snap = await db.collection('empresas').doc(empresaId).get();
+          if (snap.exists) {
+            data[col] = [{ _id: snap.id, ...snap.data() }];
+            totalDocs += 1;
+            exportedCollections.push(col);
+          }
+        } catch {}
+        continue;
+      }
+
+      try {
+        const snap = await db.collection(col).limit(50000).get();
+        if (snap.empty) continue;
+        let docs = snap.docs.map(d => ({ _id: d.id, ...d.data() }));
+        if (scopeEmpresa) {
+          docs = docs.filter(row => {
+            const docEmpId = String(row.empresaId ?? '').trim();
+            return docEmpId === empresaId || (empresaId === 'bacarsa' && docEmpId === '');
+          });
+        }
+        if (docs.length > 0) {
+          data[col] = docs;
+          totalDocs += docs.length;
+          exportedCollections.push(col);
+        }
+      } catch {}
+    }
+
+    if (scopeEmpresa) {
+      for (const col of EXPORT_DOC_ID_IS_EMPRESA) {
+        try {
+          const snap = await db.collection(col).doc(empresaId).get();
+          if (snap.exists) {
+            data[col] = [{ _id: snap.id, ...snap.data() }];
+            totalDocs += 1;
+            if (!exportedCollections.includes(col)) exportedCollections.push(col);
+          }
+        } catch {}
+      }
+    }
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toISOString().slice(11, 16).replace(':', '-');
+    const fileName = scopeEmpresa
+      ? `backup_${empresaId}_${dateStr}_${timeStr}.json`
+      : `backup_${dateStr}_${timeStr}.json`;
+
+    const payload = {
+      _meta: {
+        project: 'comtroldata',
+        exportedAt: now.toISOString(),
+        collections: exportedCollections,
+        totalDocs,
+        authUsers: 0,
+        source: 'emulator-export',
+        ...(scopeEmpresa ? { empresaId, scopeEmpresa: true } : {}),
+      },
+      _auth_users: [],
+      ...data,
+    };
+
+    const jsonStr = JSON.stringify(payload);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Expose-Headers': 'Content-Disposition, X-File-Name, X-Total-Docs',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'X-File-Name': encodeURIComponent(fileName),
+      'X-Total-Docs': String(totalDocs),
+    });
+    res.end(jsonStr);
+    console.log(`[emulator-bridge] export-backup → ${fileName} (${totalDocs} docs)`);
+  } catch (e) {
+    console.error('[emulator-bridge] export-backup', e.message);
+    res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
 const server = http.createServer((req, res) => {
   setCors(res);
 
@@ -122,6 +239,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'POST' && url === '/import-backup-file') {
     importBackupFile(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && url === '/export-backup') {
+    exportBackup(req, res);
     return;
   }
 
