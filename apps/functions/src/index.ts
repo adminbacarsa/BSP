@@ -1,5 +1,8 @@
 ﻿import './bootstrap-env';
 import * as functions from 'firebase-functions/v1';
+import { onCall as onCallV2, HttpsError as HttpsErrorV2 } from 'firebase-functions/v2/https';
+import { onSchedule as onScheduleV2 } from 'firebase-functions/v2/scheduler';
+import { onDocumentWritten as onDocumentWrittenV2 } from 'firebase-functions/v2/firestore';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { runBackup, resolveDriveBackupFolderId, syncDriveBackups, deleteDriveBackup } from './backup/backup.service';
@@ -2681,19 +2684,19 @@ export const gestionarVacantes = functions
 // =========================================================
 // BACKUP — Firestore → Google Drive
 // =========================================================
-export const triggerBackup = functions
-  .runWith({ timeoutSeconds: 540, memory: '2GB' })
-  .https.onCall(async (data, context) => {
-    await assertBackupCallableAllowed(context);
+export const triggerBackup = onCallV2(
+  { timeoutSeconds: 3600, memory: '4GiB', region: 'us-central1' },
+  async (request) => {
+    await assertBackupCallableAllowed(request.auth);
 
     const folderId = await resolveDriveBackupFolderId();
-    if (!folderId) throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
+    if (!folderId) throw new HttpsErrorV2('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
 
     const db = admin.firestore();
-    const claimedEmpresa = String((data as { empresaId?: string; jobId?: string })?.empresaId ?? '').trim();
-    const clientJobId = String((data as { jobId?: string })?.jobId ?? '').trim();
+    const claimedEmpresa = String((request.data as { empresaId?: string; jobId?: string })?.empresaId ?? '').trim();
+    const clientJobId = String((request.data as { jobId?: string })?.jobId ?? '').trim();
     let empresaId = claimedEmpresa;
-    const caller = await resolveBackupCaller(context.auth!.uid, context.auth!.token?.role);
+    const caller = await resolveBackupCaller(request.auth!.uid, request.auth!.token?.role);
     if (!caller.isSuper) {
       empresaId = caller.profileEmpresa || 'bacarsa';
     } else if (!empresaId) {
@@ -2741,62 +2744,64 @@ export const triggerBackup = functions
         ...(empresaId ? { empresaId } : {}),
         ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
       });
-      throw new functions.https.HttpsError('internal', msg);
+      throw new HttpsErrorV2('internal', msg);
     }
-  });
+  },
+);
 
 /** Reconcilia el historial con Google Drive: borra de system_backups los registros cuyo archivo ya no existe. */
-export const syncBackups = functions
-  .runWith({ timeoutSeconds: 300, memory: '512MB' })
-  .https.onCall(async (data, context) => {
-    await assertBackupCallableAllowed(context);
-    const caller = await resolveBackupCaller(context.auth!.uid, context.auth!.token?.role);
-    const claimedEmpresa = String((data as { empresaId?: string })?.empresaId ?? '').trim();
+export const syncBackups = onCallV2(
+  { timeoutSeconds: 300, memory: '512MiB', region: 'us-central1' },
+  async (request) => {
+    await assertBackupCallableAllowed(request.auth);
+    const caller = await resolveBackupCaller(request.auth!.uid, request.auth!.token?.role);
+    const claimedEmpresa = String((request.data as { empresaId?: string })?.empresaId ?? '').trim();
     const empresaId = caller.isSuper ? claimedEmpresa : (caller.profileEmpresa || 'bacarsa');
     const scopeEmpresa = !caller.isSuper;
     try {
       const result = await syncDriveBackups({ empresaId, scopeEmpresa });
       return result;
     } catch (e: any) {
-      throw new functions.https.HttpsError('internal', e?.message || 'Error al sincronizar backups con Drive');
+      throw new HttpsErrorV2('internal', e?.message || 'Error al sincronizar backups con Drive');
     }
-  });
+  },
+);
 
 /** Borra un backup puntual (archivo en Drive + registro en Firestore). */
-export const deleteBackup = functions
-  .runWith({ timeoutSeconds: 120, memory: '256MB' })
-  .https.onCall(async (data, context) => {
-    await assertBackupCallableAllowed(context);
-    const caller = await resolveBackupCaller(context.auth!.uid, context.auth!.token?.role);
-    const docId = String((data as { docId?: string })?.docId ?? '').trim();
-    if (!docId) throw new functions.https.HttpsError('invalid-argument', 'docId requerido');
+export const deleteBackup = onCallV2(
+  { timeoutSeconds: 120, memory: '256MiB', region: 'us-central1' },
+  async (request) => {
+    await assertBackupCallableAllowed(request.auth);
+    const caller = await resolveBackupCaller(request.auth!.uid, request.auth!.token?.role);
+    const docId = String((request.data as { docId?: string })?.docId ?? '').trim();
+    if (!docId) throw new HttpsErrorV2('invalid-argument', 'docId requerido');
     const empresaId = caller.isSuper
-      ? String((data as { empresaId?: string })?.empresaId ?? '').trim()
+      ? String((request.data as { empresaId?: string })?.empresaId ?? '').trim()
       : (caller.profileEmpresa || 'bacarsa');
     try {
       const result = await deleteDriveBackup(docId, { empresaId, scopeEmpresa: !caller.isSuper, isSuper: caller.isSuper });
-      if (!result.deleted) throw new functions.https.HttpsError('not-found', 'El backup ya no existe.');
+      if (!result.deleted) throw new HttpsErrorV2('not-found', 'El backup ya no existe.');
       return result;
     } catch (e: any) {
-      if (e instanceof functions.https.HttpsError) throw e;
+      if (e instanceof HttpsErrorV2) throw e;
       if (/pertenece a otra empresa/i.test(e?.message || '')) {
-        throw new functions.https.HttpsError('permission-denied', e.message);
+        throw new HttpsErrorV2('permission-denied', e.message);
       }
-      throw new functions.https.HttpsError('internal', e?.message || 'Error al borrar backup');
+      throw new HttpsErrorV2('internal', e?.message || 'Error al borrar backup');
     }
-  });
+  },
+);
 
 /** Encola restauración (rápido). El trabajo pesado corre en processRestoreJob (hasta 1 h). */
-export const restoreBackup = functions
-  .region('us-central1')
-  .runWith({ timeoutSeconds: 120, memory: '512MB' })
-  .https.onCall(async (data, context) => {
-    await assertBackupCallableAllowed(context);
-    const payload = (data ?? {}) as RestoreRequestPayload;
+export const restoreBackup = onCallV2(
+  { timeoutSeconds: 120, memory: '512MiB', region: 'us-central1' },
+  async (request) => {
+    await assertBackupCallableAllowed(request.auth);
+    const payload = (request.data ?? {}) as RestoreRequestPayload;
     try {
       const { jobId, restoreOpts, fileName } = await assertRestoreRequestAllowed(
-        context.auth!.uid,
-        context.auth!.token?.role,
+        request.auth!.uid,
+        request.auth!.token?.role,
         payload,
       );
       const db = admin.firestore();
@@ -2815,7 +2820,7 @@ export const restoreBackup = functions
         sourceEmpresaId: restoreOpts.sourceEmpresaId ?? '',
         storagePath: storagePath || null,
         driveFileId: driveFileId || null,
-        requestedBy: context.auth!.uid,
+        requestedBy: request.auth!.uid,
         docsRestored: 0,
         docsDeleted: 0,
         total: 0,
@@ -2829,21 +2834,22 @@ export const restoreBackup = functions
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error al encolar restauración';
       if (/pertenece a otra empresa|plataforma completa|Solo superadmin|panel de administración/i.test(msg)) {
-        throw new functions.https.HttpsError('permission-denied', msg);
+        throw new HttpsErrorV2('permission-denied', msg);
       }
       if (/storagePath inválido|merge o full|storagePath requerido|driveFileId/i.test(msg)) {
-        throw new functions.https.HttpsError('invalid-argument', msg);
+        throw new HttpsErrorV2('invalid-argument', msg);
       }
-      throw new functions.https.HttpsError('internal', msg);
+      throw new HttpsErrorV2('internal', msg);
     }
-  });
+  },
+);
 
-/** Ejecuta restore_jobs en background (hasta 9 min por invocación). */
-export const processRestoreJob = functions
-  .region('us-central1')
-  .runWith({ timeoutSeconds: 540, memory: '4GB' })
-  .firestore.document('restore_jobs/{jobId}')
-  .onWrite(async (change) => {
+/** Ejecuta restore_jobs en background (hasta 60 min por invocación). */
+export const processRestoreJob = onDocumentWrittenV2(
+  { document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 3600, memory: '4GiB' },
+  async (event) => {
+    const change = event.data;
+    if (!change) return;
     const after = change.after;
     if (!after.exists) return;
     const data = after.data() ?? {};
@@ -2889,15 +2895,15 @@ export const processRestoreJob = functions
     } catch (e) {
       console.error('[processRestoreJob] failed', jobId, e);
     }
-  });
+  },
+);
 
 /** Copia todos los datos de una empresa a otra (superadmin). IDs nuevos + empresaId destino. */
-export const migrateEmpresaData = functions
-  .region('us-central1')
-  .runWith({ timeoutSeconds: 120, memory: '1GB' })
-  .https.onCall(async (data, context) => {
-    await assertBackupCallableAllowed(context);
-    const payload = (data ?? {}) as MigrateEmpresaRequestPayload & {
+export const migrateEmpresaData = onCallV2(
+  { timeoutSeconds: 120, memory: '1GiB', region: 'us-central1' },
+  async (request) => {
+    await assertBackupCallableAllowed(request.auth);
+    const payload = (request.data ?? {}) as MigrateEmpresaRequestPayload & {
       startColIndex?: number;
       idMaps?: Record<string, Record<string, string>> | null;
       docsCopied?: number;
@@ -2905,8 +2911,8 @@ export const migrateEmpresaData = functions
     };
     try {
       const { jobId, sourceEmpresaId, targetEmpresaId } = await assertMigrateEmpresaRequestAllowed(
-        context.auth!.uid,
-        context.auth!.token?.role,
+        request.auth!.uid,
+        request.auth!.token?.role,
         payload,
       );
       const db = admin.firestore();
@@ -2921,7 +2927,7 @@ export const migrateEmpresaData = functions
           phase: 'Iniciando migración…',
           sourceEmpresaId,
           targetEmpresaId,
-          requestedBy: context.auth!.uid,
+          requestedBy: request.auth!.uid,
           docsCopied: 0,
           docsDeleted: 0,
           startedAt: FieldValue.serverTimestamp(),
@@ -2960,18 +2966,19 @@ export const migrateEmpresaData = functions
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error en migración';
       if (/Solo superadmin|Solo usuarios del panel|no existe|obligatorias|misma empresa/i.test(msg)) {
-        throw new functions.https.HttpsError('permission-denied', msg);
+        throw new HttpsErrorV2('permission-denied', msg);
       }
-      throw new functions.https.HttpsError('internal', msg);
+      throw new HttpsErrorV2('internal', msg);
     }
-  });
+  },
+);
 
 /** Ejecuta empresa_migrate_jobs en background. */
-export const processEmpresaMigrateJob = functions
-  .region('us-central1')
-  .runWith({ timeoutSeconds: 540, memory: '4GB' })
-  .firestore.document('empresa_migrate_jobs/{jobId}')
-  .onWrite(async (change) => {
+export const processEmpresaMigrateJob = onDocumentWrittenV2(
+  { document: 'empresa_migrate_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 3600, memory: '4GiB' },
+  async (event) => {
+    const change = event.data;
+    if (!change) return;
     const after = change.after;
     if (!after.exists) return;
     const status = String(after.data()?.status ?? '');
@@ -2987,7 +2994,8 @@ export const processEmpresaMigrateJob = functions
     } catch (e) {
       console.error('[processEmpresaMigrateJob] failed', jobId, e);
     }
-  });
+  },
+);
 
 // =========================================================
 // 18. TRIGGER: AUSENCIA DESDE PORTAL EMPLEADO
@@ -3050,12 +3058,15 @@ export const onAusenciaCreatedFromPortal = functions
   });
 
 // Backup automático horario — el cron dispara cada hora; la hora real se configura en system_config/backup_schedule
-export const scheduledBackup = functions
-  .region('us-central1')
-  .runWith({ timeoutSeconds: 540, memory: '2GB' })
-  .pubsub.schedule('0 * * * *')
-  .timeZone('America/Argentina/Buenos_Aires')
-  .onRun(async () => {
+export const scheduledBackup = onScheduleV2(
+  {
+    schedule: '0 * * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 3600,
+    memory: '4GiB',
+    region: 'us-central1',
+  },
+  async () => {
     const db = admin.firestore();
 
     // Leer configuración de horario y habilitación
@@ -3074,7 +3085,7 @@ export const scheduledBackup = functions
 
     if (!enabled) {
       console.log('[scheduledBackup] Backup automático deshabilitado en configuración, saltando.');
-      return null;
+      return;
     }
 
     const hourArg = parseInt(
@@ -3088,7 +3099,7 @@ export const scheduledBackup = functions
 
     if (hourArg !== configHour) {
       console.log(`[scheduledBackup] Hora AR: ${hourArg}, configurada: ${configHour}. Saltando.`);
-      return null;
+      return;
     }
 
     const folderId = await resolveDriveBackupFolderId();
@@ -3101,7 +3112,7 @@ export const scheduledBackup = functions
         source: 'scheduledBackup',
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      return null;
+      return;
     }
     const jobLogRef = db.collection('scheduled_job_logs').doc('scheduledBackup');
     try {
@@ -3131,24 +3142,24 @@ export const scheduledBackup = functions
         error: msg.slice(0, 500),
       }, { merge: true });
     }
-    return null;
-  });
+  },
+);
 
 /** Actualiza el horario del backup automático en system_config/backup_schedule (solo SuperAdmin). */
-export const updateBackupSchedule = functions
-  .runWith({ timeoutSeconds: 30, memory: '256MB' })
-  .https.onCall(async (data, context) => {
-    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
-    const role = String(context.auth.token?.role ?? '').toUpperCase().replace(/_/g, '');
+export const updateBackupSchedule = onCallV2(
+  { timeoutSeconds: 30, memory: '256MiB', region: 'us-central1' },
+  async (request) => {
+    if (!request.auth) throw new HttpsErrorV2('unauthenticated', 'Autenticación requerida.');
+    const role = String(request.auth.token?.role ?? '').toUpperCase().replace(/_/g, '');
     const isSuper = role === 'SUPERADMIN' || role === 'SP';
-    if (!isSuper) throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede modificar el horario de backup.');
+    if (!isSuper) throw new HttpsErrorV2('permission-denied', 'Solo superadmin puede modificar el horario de backup.');
 
-    const d = data as { hour?: number; enabled?: boolean };
+    const d = request.data as { hour?: number; enabled?: boolean };
     const hour = typeof d.hour === 'number' ? Math.round(d.hour) : undefined;
     const enabled = typeof d.enabled === 'boolean' ? d.enabled : undefined;
 
     if (hour !== undefined && (hour < 0 || hour > 23)) {
-      throw new functions.https.HttpsError('invalid-argument', 'hour debe ser un entero entre 0 y 23.');
+      throw new HttpsErrorV2('invalid-argument', 'hour debe ser un entero entre 0 y 23.');
     }
 
     const db = admin.firestore();
@@ -3159,7 +3170,8 @@ export const updateBackupSchedule = functions
     await db.collection('system_config').doc('backup_schedule').set(update, { merge: true });
     const snap = await db.collection('system_config').doc('backup_schedule').get();
     return snap.data() ?? {};
-  });
+  },
+);
 
 // Consulta padrón AFIP (Constancia de Inscripción) — certificado en Secret Manager / .env emulador
 const afipLookupSecrets = ['AFIP_CUIT', 'AFIP_CERT', 'AFIP_PRIVATE_KEY', 'AFIP_PRODUCTION'] as const;

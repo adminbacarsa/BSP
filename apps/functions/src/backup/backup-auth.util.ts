@@ -1,5 +1,5 @@
 import * as admin from 'firebase-admin';
-import * as functions from 'firebase-functions/v1';
+import { HttpsError } from 'firebase-functions/v2/https';
 
 export function normalizeBackupRole(role: unknown): string {
   return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
@@ -53,13 +53,15 @@ export async function resolveBackupCaller(
   return { isPanelUser: false, isSuper: false, profileEmpresa: '', sysRole: '' };
 }
 
-export async function assertBackupCallableAllowed(context: functions.https.CallableContext): Promise<void> {
-  if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
+export async function assertBackupCallableAllowed(
+  auth: { uid: string; token?: { [key: string]: any } } | undefined,
+): Promise<void> {
+  if (!auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Autenticación requerida');
   }
-  const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
+  const caller = await resolveBackupCaller(auth.uid, auth.token?.role);
   if (!caller.isPanelUser) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError(
       'permission-denied',
       'Solo usuarios del panel de administración pueden usar backups.',
     );
