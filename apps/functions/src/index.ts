@@ -2682,7 +2682,7 @@ export const gestionarVacantes = functions
 // BACKUP — Firestore → Google Drive
 // =========================================================
 export const triggerBackup = functions
-  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .runWith({ timeoutSeconds: 540, memory: '2GB' })
   .https.onCall(async (data, context) => {
     await assertBackupCallableAllowed(context);
 
@@ -3052,7 +3052,7 @@ export const onAusenciaCreatedFromPortal = functions
 // Backup automático horario — el cron dispara cada hora; la hora real se configura en system_config/backup_schedule
 export const scheduledBackup = functions
   .region('us-central1')
-  .runWith({ timeoutSeconds: 540, memory: '512MB' })
+  .runWith({ timeoutSeconds: 540, memory: '2GB' })
   .pubsub.schedule('0 * * * *')
   .timeZone('America/Argentina/Buenos_Aires')
   .onRun(async () => {

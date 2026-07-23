@@ -210,7 +210,7 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     ...data,
   };
 
-  const jsonStr = JSON.stringify(payload, null, 2);
+  const jsonStr = JSON.stringify(payload);
   const sizeBytes = Buffer.byteLength(jsonStr, 'utf8');
 
   if (opts.jobRef) {
