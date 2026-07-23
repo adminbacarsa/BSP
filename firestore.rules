@@ -462,6 +462,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /backup_jobs/{jobId} {
+      allow read: if isSuperAdmin() || (isAdmin() && resource.data.empresaId == userEmpresaId());
+      allow write: if false;
+    }
+
     match /restore_jobs/{jobId} {
       allow read: if isSuperAdmin() || (
         isAdmin() && resource.data.requestedBy == request.auth.uid

@@ -261,6 +261,36 @@ export default function BackupTab() {
     return () => window.clearInterval(id);
   }, [loadingLocal]);
 
+  // Suscripción a backup job activo (persiste aunque se salga de la página)
+  const subscribeToBackupJob = (jobId: string) => {
+    if (backupJobUnsubRef.current) backupJobUnsubRef.current();
+    const unsub = onSnapshot(fsDoc(db, 'backup_jobs', jobId), snap => {
+      if (!snap.exists()) return;
+      const d = snap.data() as any;
+      setBackupJob({ jobId, ...d });
+      if (d.status === 'done' || d.status === 'error') {
+        localStorage.removeItem(BACKUP_JOB_KEY);
+      }
+    }, () => {});
+    backupJobUnsubRef.current = unsub;
+  };
+
+  // Al montar: restaurar job activo desde localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(BACKUP_JOB_KEY);
+      if (stored) {
+        const { jobId, ts } = JSON.parse(stored);
+        if (jobId && Date.now() - ts < 30 * 60 * 1000) {
+          subscribeToBackupJob(jobId);
+        } else {
+          localStorage.removeItem(BACKUP_JOB_KEY);
+        }
+      }
+    } catch {}
+    return () => { backupJobUnsubRef.current?.(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Suscripción a configuración de horario y último run automático
   useEffect(() => {
     if (!isSuperAdmin) { setScheduleLoading(false); return; }
@@ -309,10 +339,13 @@ export default function BackupTab() {
 
   const handleRunBackup = async () => {
     setRunning(true); setLastResult(null);
+    const jobId = `backup_${Date.now()}`;
     try {
+      localStorage.setItem(BACKUP_JOB_KEY, JSON.stringify({ jobId, ts: Date.now() }));
+      subscribeToBackupJob(jobId);
       await refreshAuthTokenForBackup();
       const fn = httpsCallable(functions, 'triggerBackup', { timeout: 600000 });
-      const res: any = await fn({ empresaId: empresaId || '' });
+      const res: any = await fn({ empresaId: empresaId || '', jobId });
       setLastResult({ ok: true, msg: `Backup creado: ${res.data.fileName} (${fmt(res.data.sizeBytes)}, ${res.data.totalDocs} docs)` });
     } catch (e: any) {
       const msg = String(e?.message || '');
@@ -320,7 +353,7 @@ export default function BackupTab() {
       setLastResult({
         ok: false,
         msg: isTimeout
-          ? 'El backup tardó demasiado (puede estar corriendo igual en el servidor). Revisá el historial en unos minutos o los logs de Functions.'
+          ? 'El backup puede estar corriendo en el servidor. Revisá el historial en unos minutos.'
           : (msg || 'Error al crear backup'),
       });
     } finally { setRunning(false); }
@@ -415,6 +448,24 @@ export default function BackupTab() {
   const [scheduleLoading, setScheduleLoading] = useState(true);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [lastAutoRun, setLastAutoRun] = useState<{ at: any; status: string; fileName?: string } | null>(null);
+  const [backupJob, setBackupJob] = useState<{
+    jobId: string;
+    status: string;
+    totalCollections: number;
+    collectionsProcessed: number;
+    docsExported: number;
+    currentCollection: string;
+    phase: string;
+    sizeBytes?: number;
+    durationMs?: number;
+    fileName?: string;
+    driveLink?: string;
+    error?: string;
+    startedAt?: any;
+    totalDocs?: number;
+  } | null>(null);
+  const backupJobUnsubRef = useRef<(() => void) | null>(null);
+  const BACKUP_JOB_KEY = 'cosp_active_backup_job';
 
   // Carga backup JSON al emulador vía API local (evita parsear JSON grande en el browser)
   const handleLoadLocalFile = async (file: File) => {
@@ -762,6 +813,85 @@ export default function BackupTab() {
           {lastResult.msg}
         </div>
       )}
+
+      {/* ── Progreso de backup activo ── */}
+      {backupJob && (backupJob.status === 'running' || backupJob.status === 'done' || backupJob.status === 'error') && (() => {
+        const isDone = backupJob.status === 'done';
+        const isError = backupJob.status === 'error';
+        const isUploading = backupJob.phase === 'uploading';
+        const pct = backupJob.totalCollections > 0
+          ? Math.min(99, Math.round((backupJob.collectionsProcessed / backupJob.totalCollections) * 100))
+          : 0;
+        const displayPct = isDone ? 100 : (isUploading ? 99 : pct);
+        const elapsed = backupJob.startedAt
+          ? Math.round((Date.now() - (backupJob.startedAt.toMillis?.() ?? Date.now())) / 1000)
+          : 0;
+        const etaSec = !isDone && pct > 5 ? Math.round(elapsed * (100 - pct) / pct) : null;
+
+        return (
+          <div className={`rounded-2xl border-2 p-5 ${isDone ? 'bg-emerald-50 border-emerald-200' : isError ? 'bg-rose-50 border-rose-200' : 'bg-violet-50 border-violet-200'}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                {isDone
+                  ? <CheckCircle size={18} className="text-emerald-600 shrink-0" />
+                  : isError
+                    ? <AlertTriangle size={18} className="text-rose-600 shrink-0" />
+                    : <RefreshCw size={18} className="text-violet-600 animate-spin shrink-0" />}
+                <span className={`font-black text-sm ${isDone ? 'text-emerald-800' : isError ? 'text-rose-800' : 'text-violet-800'}`}>
+                  {isDone
+                    ? `Backup completado — ${backupJob.fileName || ''}`
+                    : isError
+                      ? 'Error en el backup'
+                      : isUploading
+                        ? 'Subiendo a Google Drive…'
+                        : `Exportando colección: ${backupJob.currentCollection || '…'}`}
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                {isDone && backupJob.driveLink && (
+                  <a href={backupJob.driveLink} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-black text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50">
+                    <ExternalLink size={11} /> Drive
+                  </a>
+                )}
+                {(isDone || isError) && (
+                  <button onClick={() => { setBackupJob(null); localStorage.removeItem(BACKUP_JOB_KEY); }}
+                    className="p-1 text-slate-400 hover:text-slate-600">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+            {/* Barra de progreso */}
+            <div className="h-3 bg-white/70 rounded-full overflow-hidden mb-2 border border-violet-100">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${isDone ? 'bg-emerald-500' : isError ? 'bg-rose-500' : 'bg-violet-500'}`}
+                style={{ width: `${displayPct}%` }}
+              />
+            </div>
+            {/* Stats */}
+            <div className={`flex items-center gap-4 text-xs font-bold flex-wrap ${isDone ? 'text-emerald-700' : isError ? 'text-rose-700' : 'text-violet-700'}`}>
+              <span>{displayPct}%</span>
+              {!isDone && !isError && (
+                <>
+                  <span>{backupJob.collectionsProcessed}/{backupJob.totalCollections} colecciones</span>
+                  <span>{(backupJob.docsExported || 0).toLocaleString()} docs</span>
+                  {elapsed > 0 && <span>{elapsed}s transcurridos</span>}
+                  {etaSec && <span>~{etaSec}s restantes</span>}
+                </>
+              )}
+              {isDone && (
+                <>
+                  <span>{(backupJob.totalDocs || backupJob.docsExported || 0).toLocaleString()} docs</span>
+                  {backupJob.sizeBytes && <span>{fmt(backupJob.sizeBytes)}</span>}
+                  {backupJob.durationMs && <span>en {(backupJob.durationMs / 1000).toFixed(1)}s</span>}
+                </>
+              )}
+              {isError && <span>{backupJob.error}</span>}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Horario de backup automático (solo SuperAdmin) ── */}
       {isSuperAdmin && !scheduleLoading && (

@@ -2690,7 +2690,8 @@ export const triggerBackup = functions
     if (!folderId) throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
 
     const db = admin.firestore();
-    const claimedEmpresa = String((data as { empresaId?: string })?.empresaId ?? '').trim();
+    const claimedEmpresa = String((data as { empresaId?: string; jobId?: string })?.empresaId ?? '').trim();
+    const clientJobId = String((data as { jobId?: string })?.jobId ?? '').trim();
     let empresaId = claimedEmpresa;
     const caller = await resolveBackupCaller(context.auth!.uid, context.auth!.token?.role);
     if (!caller.isSuper) {
@@ -2700,24 +2701,47 @@ export const triggerBackup = functions
     }
 
     const scopeEmpresa = !!empresaId;
+    const jobId = clientJobId || `backup_${Date.now()}`;
+    const jobRef = db.collection('backup_jobs').doc(jobId);
 
+    await jobRef.set({
+      status: 'running',
+      startedAt: admin.firestore.FieldValue.serverTimestamp(),
+      empresaId: empresaId || '',
+      source: 'triggerBackup',
+      totalCollections: 0,
+      collectionsProcessed: 0,
+      docsExported: 0,
+      currentCollection: '',
+      phase: 'collecting',
+    });
+
+    const startMs = Date.now();
     try {
-      const result = await runBackup(folderId, { empresaId, scopeEmpresa, source: 'triggerBackup' });
-      return result;
+      const result = await runBackup(folderId, { empresaId, scopeEmpresa, source: 'triggerBackup', jobRef });
+      const durationMs = Date.now() - startMs;
+      await jobRef.update({
+        status: 'done',
+        durationMs,
+        fileName: result.fileName,
+        sizeBytes: result.sizeBytes,
+        totalDocs: result.totalDocs,
+        driveLink: result.driveLink,
+        phase: 'done',
+        currentCollection: '',
+      }).catch(() => {});
+      return { jobId, ...result };
     } catch (e: any) {
-      const errDoc = {
+      const msg = e?.message || 'Error desconocido';
+      await jobRef.update({ status: 'error', error: msg.slice(0, 500), phase: 'error' }).catch(() => {});
+      await db.collection('system_backups').add({
         status: 'error',
-        error: e?.message || 'Error desconocido',
+        error: msg,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         ...(empresaId ? { empresaId } : {}),
         ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
-      };
-      if (scopeEmpresa && empresaId) {
-        await db.collection('system_backups').doc(`${empresaId}_latest`).set(errDoc);
-      } else {
-        await db.collection('system_backups').add(errDoc);
-      }
-      throw new functions.https.HttpsError('internal', e?.message || 'Error al ejecutar backup');
+      });
+      throw new functions.https.HttpsError('internal', msg);
     }
   });
 

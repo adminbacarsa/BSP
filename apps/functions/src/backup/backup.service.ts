@@ -29,6 +29,8 @@ export interface BackupOptions {
   scopeEmpresa?: boolean;
   /** scheduledBackup | triggerBackup */
   source?: string;
+  /** Ref a backup_jobs/{jobId} para escribir progreso en tiempo real */
+  jobRef?: FirebaseFirestore.DocumentReference;
 }
 
 function docBelongsToEmpresa(data: Record<string, unknown>, empresaId: string, scopeEmpresa: boolean): boolean {
@@ -107,11 +109,22 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
 
   const authUsers = scopeEmpresa ? [] : await exportAuthUsers();
 
-  const rootCollections = await db.listCollections();
+  const allRootCollections = await db.listCollections();
+  const rootCollections = allRootCollections.filter(c => !EXCLUDE_COLLECTIONS.has(c.id));
+  const totalCollections = rootCollections.length + (scopeEmpresa ? DOC_ID_IS_EMPRESA_COLLECTIONS.size : 0);
+  let collectionsProcessed = 0;
+
+  // Informar inicio de progreso
+  if (opts.jobRef) {
+    await opts.jobRef.update({ totalCollections, collectionsProcessed: 0, docsExported: 0 }).catch(() => {});
+  }
 
   for (const colRef of rootCollections) {
     const col = colRef.id;
-    if (EXCLUDE_COLLECTIONS.has(col)) continue;
+
+    if (opts.jobRef) {
+      await opts.jobRef.update({ currentCollection: col }).catch(() => {});
+    }
 
     // empresas: en backup de empresa solo el doc propio
     if (col === 'empresas' && scopeEmpresa) {
@@ -123,35 +136,45 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
           exportedCollections.push(col);
         }
       } catch { /* omit */ }
+      collectionsProcessed++;
+      if (opts.jobRef) {
+        await opts.jobRef.update({ collectionsProcessed, docsExported: totalDocs }).catch(() => {});
+      }
       continue;
     }
 
     try {
       const snap = await db.collection(col).limit(MAX_DOCS_PER_COLLECTION).get();
-      if (snap.empty) continue;
+      if (!snap.empty) {
+        const docs = snap.docs
+          .map(d => ({ _id: d.id, ...d.data() as Record<string, unknown> }))
+          .filter(row => {
+            if (!scopeEmpresa) return true;
+            return docBelongsToEmpresa(row, empresaId, true);
+          });
 
-      const docs = snap.docs
-        .map(d => ({ _id: d.id, ...d.data() as Record<string, unknown> }))
-        .filter(row => {
-          if (!scopeEmpresa) return true;
-          // Dinámico: cualquier colección con empresaId coincidente entra.
-          // Sin empresaId → 0 docs → colección omitida automáticamente.
-          return docBelongsToEmpresa(row, empresaId, true);
-        });
-
-      if (docs.length > 0) {
-        data[col] = docs;
-        totalDocs += docs.length;
-        exportedCollections.push(col);
+        if (docs.length > 0) {
+          data[col] = docs;
+          totalDocs += docs.length;
+          exportedCollections.push(col);
+        }
       }
     } catch {
       // colección sin permisos, se omite
+    }
+
+    collectionsProcessed++;
+    if (opts.jobRef) {
+      await opts.jobRef.update({ collectionsProcessed, docsExported: totalDocs }).catch(() => {});
     }
   }
 
   // Colecciones cuyo doc ID = empresaId (sin campo interno empresaId)
   if (scopeEmpresa) {
     for (const col of DOC_ID_IS_EMPRESA_COLLECTIONS) {
+      if (opts.jobRef) {
+        await opts.jobRef.update({ currentCollection: col }).catch(() => {});
+      }
       try {
         const snap = await db.collection(col).doc(empresaId).get();
         if (snap.exists) {
@@ -160,6 +183,10 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
           if (!exportedCollections.includes(col)) exportedCollections.push(col);
         }
       } catch { /* omit */ }
+      collectionsProcessed++;
+      if (opts.jobRef) {
+        await opts.jobRef.update({ collectionsProcessed, docsExported: totalDocs }).catch(() => {});
+      }
     }
   }
 
@@ -186,6 +213,10 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
   const jsonStr = JSON.stringify(payload, null, 2);
   const sizeBytes = Buffer.byteLength(jsonStr, 'utf8');
 
+  if (opts.jobRef) {
+    await opts.jobRef.update({ currentCollection: '', phase: 'uploading', sizeBytes }).catch(() => {});
+  }
+
   const { google } = await import('googleapis');
   const auth = new google.auth.GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/drive'],
@@ -193,9 +224,15 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
   const drive = google.drive({ version: 'v3', auth });
 
   // Backup de empresa → subcarpeta /{empresaId}/ dentro de la carpeta raíz
+  // Si el service account no tiene permiso para crear subcarpetas, cae al folder raíz.
   let uploadFolderId = folderId;
   if (scopeEmpresa) {
-    uploadFolderId = await resolveOrCreateDriveFolder(drive, folderId, empresaId);
+    try {
+      uploadFolderId = await resolveOrCreateDriveFolder(drive, folderId, empresaId);
+    } catch (e) {
+      console.warn(`[backup] No se pudo crear subcarpeta "${empresaId}" en Drive, usando carpeta raíz.`, e);
+      uploadFolderId = folderId;
+    }
   }
 
   const stream = Readable.from([jsonStr]);
