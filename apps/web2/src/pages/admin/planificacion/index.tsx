@@ -733,6 +733,7 @@ export default function PlanificacionPage() {
     const [grupoSlaMap, setGrupoSlaMap] = useState<Record<string, any[]>>({});
     const [grupoTotalVendidas, setGrupoTotalVendidas] = useState(0);
     const dotacionMigratedRef = useRef(false);
+    const objectiveSortAppliedRef = useRef<string | null>(null);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
@@ -1533,6 +1534,35 @@ export default function PlanificacionPage() {
         return empDefaultPos[`${emp.id}___${obj}`] || null;
     }, [empDefaultPos, selectedObjective]);
 
+    /** Puesto del guardia para panel bulk: default SLA o inferido de turnos en la selección. */
+    const resolveBulkPanelEmpPosition = useCallback((emp: { id: string }, scopeObj?: string | null) => {
+        const obj = scopeObj || bulkBarScopeObjectiveId || selectedObjective;
+        if (!obj) return null;
+        const fromDefault = empDefaultPos[`${emp.id}___${obj}`]
+            || (selectedObjective ? empDefaultPos[`${emp.id}___${selectedObjective}`] : null);
+        if (fromDefault) return fromDefault;
+        if (!selection.start || !selection.end) return null;
+        const minC = Math.min(selection.start.c, selection.end.c);
+        const maxC = Math.max(selection.start.c, selection.end.c);
+        const inferred = new Set<string>();
+        for (let c = minC; c <= maxC; c++) {
+            const day = daysInMonth[c];
+            if (!day) continue;
+            const dateStr = getDateKey(day);
+            const key = `${emp.id}_${dateStr}`;
+            const pending = pendingChanges[key];
+            const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
+            const cellPos = shift?.positionName && !['General', 'Retén', ''].includes(String(shift.positionName))
+                ? String(shift.positionName)
+                : null;
+            if (cellPos) inferred.add(cellPos);
+        }
+        return inferred.size === 1 ? [...inferred][0]! : null;
+    }, [
+        empDefaultPos, selectedObjective, bulkBarScopeObjectiveId,
+        selection.start, selection.end, daysInMonth, pendingChanges, shiftsMap,
+    ]);
+
     useEffect(() => {
         if (!selection.start) {
             setBulkEmpObjectiveOverrides({});
@@ -1647,6 +1677,16 @@ export default function PlanificacionPage() {
         });
         return hint;
     }, [positionStructure]);
+
+    /** Objetivos multi-puesto: ordenar dotación por puesto al entrar al cronograma. */
+    useEffect(() => {
+        if (!selectedObjective || positionStructure.length <= 1) return;
+        const key = `${selectedObjective}__${positionStructure.map((p: any) => p.positionName).join('|')}`;
+        if (objectiveSortAppliedRef.current === key) return;
+        objectiveSortAppliedRef.current = key;
+        setSortBy('position');
+        setSortDir('asc');
+    }, [selectedObjective, positionStructure]);
 
     const empMonthlyHours = useMemo(() => {
         const result: Record<string, number> = {};
@@ -2297,16 +2337,14 @@ export default function PlanificacionPage() {
     ]);
 
     /**
-     * Mono-objetivo: multiselección con puesto conocido por guardia → panel por colaborador
-     * (misma UX que grupo unificado, turnos del SLA de cada puesto).
+     * Mono-objetivo: multiselección con 2+ guardias → panel por colaborador
+     * (turnos del SLA de cada puesto; no exige puesto único en toda la selección).
      */
     const bulkMonoPerEmpMode = useMemo(() => {
         if (bulkPerEmpMode) return false;
         if (bulkSelectionEmployees.length < 2) return false;
-        if (!selectedObjective) return false;
-        if (bulkMonoPositionInfo.needsPick) return false;
-        return bulkSelectionEmployees.every((emp: any) => !!resolveBulkEmpPosition(emp));
-    }, [bulkPerEmpMode, bulkSelectionEmployees, selectedObjective, bulkMonoPositionInfo.needsPick, resolveBulkEmpPosition]);
+        return !!(bulkBarScopeObjectiveId || selectedObjective);
+    }, [bulkPerEmpMode, bulkSelectionEmployees.length, bulkBarScopeObjectiveId, selectedObjective]);
 
     const bulkShowPerEmpPanel = bulkPerEmpMode || bulkMonoPerEmpMode;
 
@@ -2323,7 +2361,7 @@ export default function PlanificacionPage() {
                 const objId = emp.objectiveId || emp.objetivoId || selectedGrupo.objetivos?.[0]?.id;
                 return getShiftsForObjective(objId);
             }
-            const posName = resolveBulkEmpPosition(emp);
+            const posName = resolveBulkPanelEmpPosition(emp);
             if (posName) return getShiftsForPosition(posName);
             return bulkMonoShifts;
         };
@@ -2346,7 +2384,7 @@ export default function PlanificacionPage() {
         });
     }, [
         bulkShowPerEmpPanel, bulkPerEmpMode, bulkMonoPerEmpMode, bulkSelectionEmployees,
-        selectedGrupo, getShiftsForObjective, resolveBulkEmpPosition, getShiftsForPosition,
+        selectedGrupo, getShiftsForObjective, resolveBulkPanelEmpPosition, getShiftsForPosition,
         bulkMonoShifts,
     ]);
 
@@ -2372,7 +2410,7 @@ export default function PlanificacionPage() {
                 const fromObj = empDefaultPos[`${emp.id}___${objId}`];
                 if (fromObj) return fromObj;
             }
-            return resolveBulkEmpPosition(emp, objId || null) || '';
+            return resolveBulkPanelEmpPosition(emp, objId || null) || '';
         };
 
         const getStructureForEmp = (emp: any) => {
@@ -2409,7 +2447,7 @@ export default function PlanificacionPage() {
     }, [
         bulkShowPerEmpPanel, bulkSelectionEmployees, bulkPerEmpMode, selectedGrupo,
         bulkBarScopeObjectiveId, resolveNativeObjectiveInGrupo, bulkEmpObjectiveOverrides,
-        bulkTargetObjectiveId, selectedObjective, empDefaultPos, resolveBulkEmpPosition,
+        bulkTargetObjectiveId, selectedObjective, empDefaultPos, resolveBulkPanelEmpPosition,
         grupoUnifiedMode, grupoSlaMap, bulkEffectiveStructure, positionStructure,
     ]);
 
@@ -9411,19 +9449,37 @@ export default function PlanificacionPage() {
                                                     </div>
                                                 );
                                             }
-                                            const posName = resolveBulkEmpPosition(emp);
+                                            const posName = resolveBulkPanelEmpPosition(emp);
                                             const empShifts = posName ? getShiftsForPosition(posName) : bulkMonoShifts;
                                             const empShiftByCode = new Map(empShifts.map((s: any) => [String(s.code || '').toUpperCase(), s]));
+                                            const panelStructure = bulkMonoPositionInfo.structure || bulkEffectiveStructure || positionStructure || [];
                                             return (
                                                 <div key={emp.id} className="flex items-center gap-1.5 rounded-lg bg-slate-900/50 px-1.5 py-1">
                                                     <span className="w-[148px] shrink-0 text-[9px] font-bold text-slate-200 truncate" title={emp.name}>{shortLabel}</span>
-                                                    <div className="w-[88px] shrink-0 flex items-center justify-start min-w-0">
+                                                    <div className="w-[88px] shrink-0 flex flex-wrap items-center gap-0.5 min-w-0">
                                                         {posName ? (
                                                             <span className="shrink-0 px-1.5 py-0.5 rounded bg-indigo-600 text-[8px] font-black text-white max-w-[84px] truncate" title={posName}>
                                                                 {abbrevPlanningPositionName(posName, 8)}
                                                             </span>
+                                                        ) : panelStructure.length > 1 ? (
+                                                            panelStructure.map((p: any) => (
+                                                                <button
+                                                                    key={`${emp.id}_pickpos_${p.positionName}`}
+                                                                    type="button"
+                                                                    disabled={isServiceLocked}
+                                                                    title={`Asignar puesto ${p.positionName} a ${emp.name}`}
+                                                                    onClick={() => {
+                                                                        const obj = bulkBarScopeObjectiveId || selectedObjective;
+                                                                        if (!obj) return;
+                                                                        setEmpDefaultPos(prev => ({ ...prev, [`${emp.id}___${obj}`]: p.positionName }));
+                                                                    }}
+                                                                    className="shrink-0 px-1 py-0.5 rounded bg-slate-700 hover:bg-indigo-600 text-[7px] font-black text-slate-200 border border-slate-500"
+                                                                >
+                                                                    {abbrevPlanningPositionName(p.positionName, 4)}
+                                                                </button>
+                                                            ))
                                                         ) : (
-                                                            <span className="w-[84px]" aria-hidden />
+                                                            <span className="text-[7px] text-amber-400 font-bold">Sin puesto</span>
                                                         )}
                                                     </div>
                                                     <div className="flex gap-0.5 items-center shrink-0">
@@ -9440,6 +9496,7 @@ export default function PlanificacionPage() {
                                                             }
                                                             const s = empShiftByCode.get(code);
                                                             if (!s) return <span key={`${emp.id}_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
+                                                            const needsPos = !posName && code !== 'RET' && code !== 'F';
                                                             return (
                                                                 <button
                                                                     key={`${emp.id}_${code}`}
@@ -9452,9 +9509,9 @@ export default function PlanificacionPage() {
                                                                         endTime: s.endTime,
                                                                         positionName: posName || s.positionName || undefined,
                                                                     }, { onlyEmpId: emp.id })}
-                                                                    disabled={isServiceLocked}
-                                                                    title={`${emp.name} · ${posName || 'puesto'} → ${s.code}`}
-                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}
+                                                                    disabled={isServiceLocked || needsPos}
+                                                                    title={needsPos ? 'Elegí puesto primero' : `${emp.name} · ${posName || 'puesto'} → ${s.code}`}
+                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${needsPos ? 'opacity-30 cursor-not-allowed' : ''}`}
                                                                 >
                                                                     {s.code}
                                                                 </button>
