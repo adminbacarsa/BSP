@@ -1509,6 +1509,30 @@ export default function PlanificacionPage() {
         return [...byCode.values()];
     }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure]);
 
+    /** Turnos del SLA de un puesto concreto (mono-objetivo / barra por colaborador). */
+    const getShiftsForPosition = useCallback((posName: string, objId?: string | null) => {
+        const scopeObj = objId || selectedObjective;
+        const structure = (selectedGrupo && grupoUnifiedMode && scopeObj && grupoSlaMap[scopeObj]?.length)
+            ? grupoSlaMap[scopeObj]
+            : positionStructure;
+        const pos = (structure || []).find((p: any) => p.positionName === posName);
+        if (!pos?.shifts?.length) return [];
+        return (pos.shifts as any[]).map((s: any) => ({
+            code: s.code,
+            name: s.name,
+            hours: s.hours,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            positionName: pos.positionName,
+        }));
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, positionStructure, selectedObjective]);
+
+    const resolveBulkEmpPosition = useCallback((emp: { id: string }, scopeObj?: string | null) => {
+        const obj = scopeObj || selectedObjective;
+        if (!obj) return null;
+        return empDefaultPos[`${emp.id}___${obj}`] || null;
+    }, [empDefaultPos, selectedObjective]);
+
     useEffect(() => {
         if (!selection.start) {
             setBulkEmpObjectiveOverrides({});
@@ -2270,6 +2294,123 @@ export default function PlanificacionPage() {
         selection.start, selection.end, selectedObjective, bulkPerEmpMode, bulkBarScopeObjectiveId,
         bulkMonoPositionInfo, bulkEffectiveStructure, positionStructure, bulkMonoShifts, daysInMonth,
         displayedEmployees, pendingChanges, shiftsMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
+    ]);
+
+    /**
+     * Mono-objetivo: multiselección con puesto conocido por guardia → panel por colaborador
+     * (misma UX que grupo unificado, turnos del SLA de cada puesto).
+     */
+    const bulkMonoPerEmpMode = useMemo(() => {
+        if (bulkPerEmpMode) return false;
+        if (bulkSelectionEmployees.length < 2) return false;
+        if (!selectedObjective) return false;
+        if (bulkMonoPositionInfo.needsPick) return false;
+        return bulkSelectionEmployees.every((emp: any) => !!resolveBulkEmpPosition(emp));
+    }, [bulkPerEmpMode, bulkSelectionEmployees, selectedObjective, bulkMonoPositionInfo.needsPick, resolveBulkEmpPosition]);
+
+    const bulkShowPerEmpPanel = bulkPerEmpMode || bulkMonoPerEmpMode;
+
+    /** Columnas de turno alineadas en el panel por colaborador (unión de códigos del SLA). */
+    const bulkPanelShiftColumns = useMemo(() => {
+        if (!bulkShowPerEmpPanel) return [] as string[];
+        const codes = new Set<string>();
+        const addCode = (c: string) => {
+            const u = String(c || '').toUpperCase();
+            if (u) codes.add(u);
+        };
+        const shiftsForEmp = (emp: any) => {
+            if (bulkPerEmpMode && selectedGrupo) {
+                const objId = emp.objectiveId || emp.objetivoId || selectedGrupo.objetivos?.[0]?.id;
+                return getShiftsForObjective(objId);
+            }
+            const posName = resolveBulkEmpPosition(emp);
+            if (posName) return getShiftsForPosition(posName);
+            return bulkMonoShifts;
+        };
+        for (const emp of bulkSelectionEmployees) {
+            shiftsForEmp(emp).forEach((s: any) => addCode(s.code));
+        }
+        if (bulkMonoPerEmpMode) {
+            bulkMonoShifts.forEach((s: any) => addCode(s.code));
+        }
+        addCode('RET');
+        addCode('F');
+        const ORDER = ['M', 'T', 'N', 'D12', 'N12', 'RO', 'EN', 'ESC', 'REF', 'RET', 'F'];
+        return [...codes].sort((a, b) => {
+            const ia = ORDER.indexOf(a);
+            const ib = ORDER.indexOf(b);
+            if (ia >= 0 && ib >= 0) return ia - ib;
+            if (ia >= 0) return -1;
+            if (ib >= 0) return 1;
+            return a.localeCompare(b);
+        });
+    }, [
+        bulkShowPerEmpPanel, bulkPerEmpMode, bulkMonoPerEmpMode, bulkSelectionEmployees,
+        selectedGrupo, getShiftsForObjective, resolveBulkEmpPosition, getShiftsForPosition,
+        bulkMonoShifts,
+    ]);
+
+    /** Guardias del panel ordenados por puesto (orden SLA) y luego por nombre. */
+    const bulkPanelEmployeesSorted = useMemo(() => {
+        if (!bulkShowPerEmpPanel || !bulkSelectionEmployees.length) return bulkSelectionEmployees;
+
+        const getEmpObjId = (emp: any): string => {
+            if (bulkPerEmpMode && selectedGrupo) {
+                const native = resolveNativeObjectiveInGrupo(emp);
+                return native
+                    || bulkEmpObjectiveOverrides[emp.id]
+                    || bulkTargetObjectiveId
+                    || selectedGrupo.objectiveIds[0]
+                    || '';
+            }
+            return selectedObjective || '';
+        };
+
+        const getPosForEmp = (emp: any): string => {
+            const objId = getEmpObjId(emp);
+            if (objId) {
+                const fromObj = empDefaultPos[`${emp.id}___${objId}`];
+                if (fromObj) return fromObj;
+            }
+            return resolveBulkEmpPosition(emp, objId || null) || '';
+        };
+
+        const getStructureForEmp = (emp: any) => {
+            const objId = getEmpObjId(emp);
+            if (selectedGrupo && grupoUnifiedMode && objId && grupoSlaMap[objId]?.length) {
+                return grupoSlaMap[objId];
+            }
+            return bulkEffectiveStructure || positionStructure || [];
+        };
+
+        const positionOrderIndex = (posName: string, structure: any[]) => {
+            if (!posName) return 9999;
+            const idx = structure.findIndex((p: any) => p.positionName === posName);
+            return idx >= 0 ? idx : 9998;
+        };
+
+        return [...bulkSelectionEmployees].sort((a, b) => {
+            const objA = getEmpObjId(a);
+            const objB = getEmpObjId(b);
+            if (bulkPerEmpMode && selectedGrupo && !bulkBarScopeObjectiveId) {
+                const oiA = selectedGrupo.objectiveIds.indexOf(objA);
+                const oiB = selectedGrupo.objectiveIds.indexOf(objB);
+                if (oiA !== oiB) return oiA - oiB;
+            }
+            const posA = getPosForEmp(a);
+            const posB = getPosForEmp(b);
+            const piA = positionOrderIndex(posA, getStructureForEmp(a));
+            const piB = positionOrderIndex(posB, getStructureForEmp(b));
+            if (piA !== piB) return piA - piB;
+            const cmpPos = posA.localeCompare(posB, 'es');
+            if (cmpPos !== 0) return cmpPos;
+            return String(a.name || '').localeCompare(String(b.name || ''), 'es');
+        });
+    }, [
+        bulkShowPerEmpPanel, bulkSelectionEmployees, bulkPerEmpMode, selectedGrupo,
+        bulkBarScopeObjectiveId, resolveNativeObjectiveInGrupo, bulkEmpObjectiveOverrides,
+        bulkTargetObjectiveId, selectedObjective, empDefaultPos, resolveBulkEmpPosition,
+        grupoUnifiedMode, grupoSlaMap, bulkEffectiveStructure, positionStructure,
     ]);
 
     const objectivePublishLookupKey = useMemo(() => {
@@ -9140,7 +9281,7 @@ export default function PlanificacionPage() {
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
-                    <div className={`absolute top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-800 text-white rounded-xl shadow-2xl border border-slate-600 no-print animate-in zoom-in-95 ${bulkPerEmpMode ? 'max-w-[min(96vw,820px)]' : ''}`}>
+                    <div className={`absolute top-24 left-1/2 -translate-x-1/2 z-[100] bg-slate-800 text-white rounded-xl shadow-2xl border border-slate-600 no-print animate-in zoom-in-95 ${bulkShowPerEmpPanel ? 'max-w-[min(98vw,1000px)]' : ''}`}>
                         {columnSelectMode ? (
                             <div className="flex gap-1 items-center p-2">
                                 <span className="text-[10px] font-bold px-2 text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -9173,56 +9314,152 @@ export default function PlanificacionPage() {
                                 <div className="h-6 w-px bg-slate-600 mx-1"></div>
                                 <button onClick={() => { setClipboard(null); setClipboardDim(null); }} className="p-2 hover:bg-slate-700 rounded-lg" title="Vaciar portapapeles"><X size={16}/></button>
                             </div>
-                        ) : bulkPerEmpMode && selectedGrupo ? (
+                        ) : bulkShowPerEmpPanel ? (
                             <>
-                                <div className="flex flex-wrap items-center gap-1 p-2 pb-1.5 border-b border-slate-700/80">
-                                    <span className="text-[9px] font-black text-indigo-300 uppercase tracking-wider px-1 shrink-0">A todos</span>
-                                    {bulkEffectiveStructure.map((p: any) => (
-                                        <button key={`bulkpos_${p.positionName}`} type="button" onClick={() => applyBulkPositionFill(p.positionName)} disabled={isServiceLocked} title={`Puesto ${p.positionName}`} className="px-2 h-7 rounded-lg font-black text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 max-w-[72px] truncate">{abbrevPlanningPositionName(p.positionName, 5)}</button>
-                                    ))}
-                                    {bulkShifts.map((s: any) => (
-                                        <button key={`all_${String(s.code || '').toUpperCase()}`} onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: s.positionName || undefined })} disabled={isServiceLocked} className={`w-7 h-7 rounded-lg font-black text-[10px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
-                                    ))}
-                                    <button onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' })} disabled={isServiceLocked} className={`w-7 h-7 rounded-lg font-black text-[10px] ${getDefaultStyle('RET')}`}>RET</button>
-                                    <button onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' })} disabled={isServiceLocked} className="w-7 h-7 rounded-lg bg-green-500 text-white font-black text-[10px]">F</button>
-                                    <div className="h-5 w-px bg-slate-600 mx-0.5" />
-                                    <button onClick={handleCopySelection} title="Copiar" className="p-1.5 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-indigo-200"><Copy size={13}/></button>
-                                    <button onClick={cutSelection} disabled={isServiceLocked} className="p-1.5 bg-violet-700 hover:bg-violet-600 rounded-lg text-violet-100"><Scissors size={13}/></button>
-                                    <button onClick={undoLastPending} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-300"><Undo size={13}/></button>
-                                    <button onClick={() => setShowRRHHModal(true)} disabled={isServiceLocked} className="p-1.5 bg-amber-600 rounded-lg text-white"><FileText size={12}/></button>
-                                    <button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="p-1.5 hover:bg-rose-600 rounded-lg text-rose-300"><Trash2 size={14}/></button>
-                                    <button onClick={() => setSelection({start:null, end:null})} className="p-1.5 hover:bg-slate-700 rounded-lg"><X size={14}/></button>
-                                </div>
-                                <div className="px-2 py-1.5 max-h-36 overflow-y-auto custom-scrollbar">
-                                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1 mb-1.5"><Users size={10} className="text-indigo-400"/> Por colaborador</div>
-                                    <div className="space-y-1">
-                                        {bulkSelectionEmployees.map((emp: any) => {
-                                            const nativeObjId = resolveNativeObjectiveInGrupo(emp);
-                                            const objId = nativeObjId || bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || '';
-                                            const objIdx = selectedGrupo.objectiveIds.indexOf(objId);
-                                            const objClr = GRUPO_COLOR_HEX[objIdx % GRUPO_COLOR_HEX.length] || '#64748b';
-                                            const objShort = (selectedGrupo.objectiveNames[objIdx] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || '';
-                                            const empShifts = getShiftsForObjective(objId);
-                                            const shortLabel = String(emp.name || '').split(',')[0]?.trim().slice(0, 16) || emp.name;
+                                <div className="flex items-center gap-1.5 px-2 py-2 border-b border-slate-700/80">
+                                    <span className="w-[148px] shrink-0 text-[9px] font-black text-indigo-300 uppercase tracking-wider">A todos</span>
+                                    <div className="w-[88px] shrink-0 flex flex-wrap gap-0.5">
+                                        {bulkPerEmpMode && selectedGrupo && bulkEffectiveStructure.map((p: any) => (
+                                            <button key={`bulkpos_${p.positionName}`} type="button" onClick={() => applyBulkPositionFill(p.positionName)} disabled={isServiceLocked} title={`Puesto ${p.positionName}`} className="px-1.5 h-6 rounded-lg font-black text-[9px] bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 max-w-[84px] truncate">{abbrevPlanningPositionName(p.positionName, 5)}</button>
+                                        ))}
+                                    </div>
+                                    <div className="flex gap-0.5 items-center shrink-0">
+                                        {bulkPanelShiftColumns.map((code) => {
+                                            if (code === 'RET') {
+                                                return (
+                                                    <button key="all_RET" type="button" onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' })} disabled={isServiceLocked} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('RET')}`}>RET</button>
+                                                );
+                                            }
+                                            if (code === 'F') {
+                                                return (
+                                                    <button key="all_F" type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' })} disabled={isServiceLocked} className="w-7 h-6 rounded bg-green-500 text-white font-black text-[9px]">F</button>
+                                                );
+                                            }
+                                            const pool = bulkMonoPerEmpMode ? bulkMonoShifts : bulkShifts;
+                                            const s = pool.find((x: any) => String(x.code || '').toUpperCase() === code);
+                                            if (!s) return <span key={`all_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
                                             return (
-                                                <div key={emp.id} className="flex items-center gap-1.5 flex-wrap rounded-lg bg-slate-900/50 px-1.5 py-1">
-                                                    <span className="text-[9px] font-bold text-slate-200 min-w-[64px] max-w-[110px] truncate shrink-0" title={emp.name}>{shortLabel}</span>
-                                                    {nativeObjId ? (
-                                                        <span className="shrink-0 px-1 py-0.5 rounded text-[7px] font-black text-white" style={{ backgroundColor: objClr }}>{objShort}</span>
-                                                    ) : (
-                                                        <>
-                                                            <span className="shrink-0 px-1 py-0.5 rounded bg-amber-500 text-[7px] font-black text-white">EXT</span>
-                                                            <select value={objId} onChange={e => setBulkEmpObjectiveOverrides(prev => ({ ...prev, [emp.id]: e.target.value }))} className="h-6 max-w-[96px] rounded border border-amber-400/50 bg-amber-950/60 text-amber-100 text-[8px] font-bold px-1 truncate shrink-0">
-                                                                {selectedGrupo.objectiveIds.map((oid: string, oi: number) => (<option key={oid} value={oid}>{selectedGrupo.objectiveNames[oi]}</option>))}
-                                                            </select>
-                                                        </>
-                                                    )}
-                                                    <div className="flex flex-wrap gap-0.5 items-center">
-                                                        {empShifts.map((s: any) => (
-                                                            <button key={`${emp.id}_${String(s.code || '').toUpperCase()}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: s.positionName || undefined }, { onlyEmpId: emp.id })} disabled={isServiceLocked} title={`${emp.name} → ${s.code}`} className={`min-w-[24px] h-6 px-1 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
-                                                        ))}
-                                                        <button type="button" onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className={`min-w-[24px] h-6 px-1 rounded font-black text-[9px] ${getDefaultStyle('RET')}`}>RET</button>
-                                                        <button type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className="min-w-[24px] h-6 px-1 rounded bg-green-600 text-white text-[9px] font-black">F</button>
+                                                <button key={`all_${code}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: s.positionName || undefined })} disabled={isServiceLocked} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="ml-auto flex items-center gap-0.5 shrink-0">
+                                        <div className="h-5 w-px bg-slate-600 mx-0.5" />
+                                        <button onClick={handleCopySelection} title="Copiar" className="p-1.5 bg-indigo-700 hover:bg-indigo-600 rounded-lg text-indigo-200"><Copy size={13}/></button>
+                                        <button onClick={cutSelection} disabled={isServiceLocked} className="p-1.5 bg-violet-700 hover:bg-violet-600 rounded-lg text-violet-100"><Scissors size={13}/></button>
+                                        <button onClick={undoLastPending} className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-300"><Undo size={13}/></button>
+                                        <button onClick={() => setShowRRHHModal(true)} disabled={isServiceLocked} className="p-1.5 bg-amber-600 rounded-lg text-white"><FileText size={12}/></button>
+                                        <button onClick={() => applyBulkChange(null)} disabled={isServiceLocked} className="p-1.5 hover:bg-rose-600 rounded-lg text-rose-300"><Trash2 size={14}/></button>
+                                        <button onClick={() => setSelection({start:null, end:null})} className="p-1.5 hover:bg-slate-700 rounded-lg"><X size={14}/></button>
+                                    </div>
+                                </div>
+                                <div className="px-2 py-2 max-h-56 overflow-y-auto custom-scrollbar">
+                                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1 mb-1.5 px-0.5">
+                                        <Users size={10} className="text-indigo-400"/> Por colaborador · ordenado por puesto
+                                    </div>
+                                    <div className="space-y-1">
+                                        {bulkPanelEmployeesSorted.map((emp: any) => {
+                                            const shortLabel = String(emp.name || '').split(',')[0]?.trim().slice(0, 18) || emp.name;
+                                            if (bulkPerEmpMode && selectedGrupo) {
+                                                const nativeObjId = resolveNativeObjectiveInGrupo(emp);
+                                                const objId = nativeObjId || bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || '';
+                                                const objIdx = selectedGrupo.objectiveIds.indexOf(objId);
+                                                const objClr = GRUPO_COLOR_HEX[objIdx % GRUPO_COLOR_HEX.length] || '#64748b';
+                                                const objShort = (selectedGrupo.objectiveNames[objIdx] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || '';
+                                                const empShifts = getShiftsForObjective(objId);
+                                                const empShiftByCode = new Map(empShifts.map((s: any) => [String(s.code || '').toUpperCase(), s]));
+                                                const empPos = empDefaultPos[`${emp.id}___${objId}`] || '';
+                                                return (
+                                                    <div key={emp.id} className="flex items-center gap-1.5 rounded-lg bg-slate-900/50 px-1.5 py-1">
+                                                        <span className="w-[148px] shrink-0 text-[9px] font-bold text-slate-200 truncate" title={emp.name}>{shortLabel}</span>
+                                                        <div className="w-[88px] shrink-0 flex items-center gap-0.5 min-w-0">
+                                                            {empPos && (
+                                                                <span className="shrink-0 px-1 py-0.5 rounded bg-indigo-600 text-[7px] font-black text-white max-w-[40px] truncate" title={empPos}>
+                                                                    {abbrevPlanningPositionName(empPos, 4)}
+                                                                </span>
+                                                            )}
+                                                            {nativeObjId ? (
+                                                                <span className="shrink-0 px-1 py-0.5 rounded text-[7px] font-black text-white" style={{ backgroundColor: objClr }}>{objShort}</span>
+                                                            ) : (
+                                                                <>
+                                                                    <span className="shrink-0 px-1 py-0.5 rounded bg-amber-500 text-[7px] font-black text-white">EXT</span>
+                                                                    <select value={objId} onChange={e => setBulkEmpObjectiveOverrides(prev => ({ ...prev, [emp.id]: e.target.value }))} className="h-6 w-full min-w-0 rounded border border-amber-400/50 bg-amber-950/60 text-amber-100 text-[8px] font-bold px-0.5 truncate">
+                                                                        {selectedGrupo.objectiveIds.map((oid: string, oi: number) => (<option key={oid} value={oid}>{selectedGrupo.objectiveNames[oi]}</option>))}
+                                                                    </select>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex gap-0.5 items-center shrink-0">
+                                                            {bulkPanelShiftColumns.map((code) => {
+                                                                if (code === 'RET') {
+                                                                    return (
+                                                                        <button key={`${emp.id}_RET`} type="button" onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('RET')}`}>RET</button>
+                                                                    );
+                                                                }
+                                                                if (code === 'F') {
+                                                                    return (
+                                                                        <button key={`${emp.id}_F`} type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className="w-7 h-6 rounded bg-green-600 text-white text-[9px] font-black">F</button>
+                                                                    );
+                                                                }
+                                                                const s = empShiftByCode.get(code);
+                                                                if (!s) return <span key={`${emp.id}_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
+                                                                return (
+                                                                    <button key={`${emp.id}_${code}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: s.positionName || undefined }, { onlyEmpId: emp.id })} disabled={isServiceLocked} title={`${emp.name} → ${s.code}`} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            const posName = resolveBulkEmpPosition(emp);
+                                            const empShifts = posName ? getShiftsForPosition(posName) : bulkMonoShifts;
+                                            const empShiftByCode = new Map(empShifts.map((s: any) => [String(s.code || '').toUpperCase(), s]));
+                                            return (
+                                                <div key={emp.id} className="flex items-center gap-1.5 rounded-lg bg-slate-900/50 px-1.5 py-1">
+                                                    <span className="w-[148px] shrink-0 text-[9px] font-bold text-slate-200 truncate" title={emp.name}>{shortLabel}</span>
+                                                    <div className="w-[88px] shrink-0 flex items-center justify-start min-w-0">
+                                                        {posName ? (
+                                                            <span className="shrink-0 px-1.5 py-0.5 rounded bg-indigo-600 text-[8px] font-black text-white max-w-[84px] truncate" title={posName}>
+                                                                {abbrevPlanningPositionName(posName, 8)}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="w-[84px]" aria-hidden />
+                                                        )}
+                                                    </div>
+                                                    <div className="flex gap-0.5 items-center shrink-0">
+                                                        {bulkPanelShiftColumns.map((code) => {
+                                                            if (code === 'RET') {
+                                                                return (
+                                                                    <button key={`${emp.id}_RET`} type="button" onClick={() => applyBulkChange({ code: 'RET', name: 'Retén', hours: 0, startTime: '00:00', positionName: 'Retén' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('RET')}`}>RET</button>
+                                                                );
+                                                            }
+                                                            if (code === 'F') {
+                                                                return (
+                                                                    <button key={`${emp.id}_F`} type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className="w-7 h-6 rounded bg-green-600 text-white text-[9px] font-black">F</button>
+                                                                );
+                                                            }
+                                                            const s = empShiftByCode.get(code);
+                                                            if (!s) return <span key={`${emp.id}_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
+                                                            return (
+                                                                <button
+                                                                    key={`${emp.id}_${code}`}
+                                                                    type="button"
+                                                                    onClick={() => applyBulkChange({
+                                                                        code: s.code,
+                                                                        name: s.name,
+                                                                        hours: s.hours,
+                                                                        startTime: s.startTime,
+                                                                        endTime: s.endTime,
+                                                                        positionName: posName || s.positionName || undefined,
+                                                                    }, { onlyEmpId: emp.id })}
+                                                                    disabled={isServiceLocked}
+                                                                    title={`${emp.name} · ${posName || 'puesto'} → ${s.code}`}
+                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}
+                                                                >
+                                                                    {s.code}
+                                                                </button>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             );
