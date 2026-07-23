@@ -2,16 +2,42 @@ import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { Readable } from 'stream';
 
-// Colecciones a excluir del backup
+// Colecciones de sistema que no deben incluirse en el backup
 const EXCLUDE_COLLECTIONS = new Set<string>([
-  // ninguna por ahora — system_backups se incluye para que el emulador muestre el historial
+  'system_backups',
+  'restore_jobs',
+  'empresa_migrate_jobs',
+  'scheduled_job_logs',
 ]);
 
-/** Colecciones con campo empresaId (misma lista que migración multiempresa). */
+/**
+ * Colecciones con campo `empresaId` (filtradas en backup de empresa).
+ * Mantener sincronizado con restore.service.ts y seed-from-backup-file.js.
+ */
 const EMPRESA_SCOPED_COLLECTIONS = new Set([
+  // Core operativo
   'empleados', 'clients', 'clientes', 'turnos', 'ausencias', 'novedades',
   'swap_requests', 'contratos_servicio', 'tipos_turno', 'servicios_sla',
-  'objetivos', 'audit_logs', 'user_notifications', 'system_users',
+  'objetivos', 'grupos_objetivos',
+  // RRHH / ajustes
+  'ajustes_crono', 'ajustes_horas', 'fichajes', 'sesiones_operador',
+  'solicitudes_refuerzo', 'supervision_visitas', 'objetivo_consignas',
+  // Planificación
+  'planificacion_estados',
+  // Liquidación
+  'liquidacion_turno_contrib',
+  // Comunicación / logs
+  'user_notifications', 'assistant_interaction_logs', 'audit_logs',
+  // Sistema empresa
+  'roles', 'feriados', 'system_users', 'client_users', 'integraciones_api',
+]);
+
+/**
+ * Colecciones cuyo doc ID = empresaId (sin campo interno).
+ * Se exportan leyendo el doc por ID en backup de empresa.
+ */
+const DOC_ID_IS_EMPRESA_COLLECTIONS = new Set([
+  'planning_rules',
 ]);
 
 const MAX_DOCS_PER_COLLECTION = 50000;
@@ -64,6 +90,31 @@ async function exportAuthUsers(): Promise<any[]> {
   return users;
 }
 
+/**
+ * Resuelve o crea una subcarpeta en Google Drive.
+ * Devuelve el ID de la carpeta (existente o recién creada).
+ */
+async function resolveOrCreateDriveFolder(drive: any, parentId: string, folderName: string): Promise<string> {
+  const res = await drive.files.list({
+    q: `'${parentId}' in parents and name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    fields: 'files(id)',
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  });
+  if (res.data.files?.length > 0) return res.data.files[0].id as string;
+
+  const created = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId],
+    },
+    fields: 'id',
+  });
+  return created.data.id as string;
+}
+
 export async function runBackup(folderId: string, opts: BackupOptions = {}): Promise<BackupResult> {
   const db = admin.firestore();
   const empresaId = String(opts.empresaId ?? '').trim();
@@ -80,6 +131,7 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     const col = colRef.id;
     if (EXCLUDE_COLLECTIONS.has(col)) continue;
 
+    // empresas: en backup de empresa solo el doc propio
     if (col === 'empresas' && scopeEmpresa) {
       try {
         const snap = await db.collection('empresas').doc(empresaId).get();
@@ -116,6 +168,20 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     }
   }
 
+  // Colecciones cuyo doc ID = empresaId (sin campo interno empresaId)
+  if (scopeEmpresa) {
+    for (const col of DOC_ID_IS_EMPRESA_COLLECTIONS) {
+      try {
+        const snap = await db.collection(col).doc(empresaId).get();
+        if (snap.exists) {
+          data[col] = [{ _id: snap.id, ...snap.data() }];
+          totalDocs += 1;
+          if (!exportedCollections.includes(col)) exportedCollections.push(col);
+        }
+      } catch { /* omit */ }
+    }
+  }
+
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
   const timeStr = now.toISOString().slice(11, 16).replace(':', '-');
@@ -139,20 +205,24 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
   const jsonStr = JSON.stringify(payload, null, 2);
   const sizeBytes = Buffer.byteLength(jsonStr, 'utf8');
 
-  // Subir a Google Drive usando Application Default Credentials
-  // (comtroldata@appspot.gserviceaccount.com — service account de Cloud Functions)
   const { google } = await import('googleapis');
   const auth = new google.auth.GoogleAuth({
     scopes: ['https://www.googleapis.com/auth/drive'],
   });
   const drive = google.drive({ version: 'v3', auth });
 
+  // Backup de empresa → subcarpeta /{empresaId}/ dentro de la carpeta raíz
+  let uploadFolderId = folderId;
+  if (scopeEmpresa) {
+    uploadFolderId = await resolveOrCreateDriveFolder(drive, folderId, empresaId);
+  }
+
   const stream = Readable.from([jsonStr]);
   const driveRes = await drive.files.create({
     supportsAllDrives: true,
     requestBody: {
       name: fileName,
-      parents: [folderId],
+      parents: [uploadFolderId],
       mimeType: 'application/json',
     },
     media: { mimeType: 'application/json', body: stream },
@@ -162,7 +232,7 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
   const driveFileId = driveRes.data.id!;
   const driveLink = driveRes.data.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`;
 
-  // Registrar en Firestore — uno por empresa (fixed ID) o acumulativo si es plataforma
+  // Siempre crear doc nuevo (historial acumulativo, igual que backups de plataforma)
   const backupDoc = {
     driveFileId,
     driveLink,
@@ -170,7 +240,8 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     sizeBytes,
     collections: exportedCollections,
     totalDocs,
-    driveBackupFolderId: folderId,
+    driveBackupFolderId: folderId,          // carpeta raíz (para resolveDriveBackupFolderId)
+    ...(scopeEmpresa ? { driveEmpresaFolderId: uploadFolderId } : {}),
     createdAt: FieldValue.serverTimestamp(),
     status: 'ok',
     backupScope: scopeEmpresa ? 'empresa' : 'platform',
@@ -178,13 +249,8 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
     ...(empresaId ? { empresaId } : {}),
     ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
   };
-  let ref: FirebaseFirestore.DocumentReference;
-  if (scopeEmpresa && empresaId) {
-    ref = db.collection('system_backups').doc(`${empresaId}_latest`);
-    await ref.set(backupDoc);
-  } else {
-    ref = await db.collection('system_backups').add(backupDoc);
-  }
+
+  const ref = await db.collection('system_backups').add(backupDoc);
 
   return {
     id: ref.id,
@@ -210,7 +276,6 @@ export interface SyncDriveBackupsResult {
 /**
  * Reconcilia `system_backups` con Google Drive: elimina los documentos cuyo
  * archivo `driveFileId` ya no existe (borrado manualmente o movido a papelera).
- * No toca documentos sin `driveFileId` (registros de error / informativos).
  */
 export async function syncDriveBackups(opts: { empresaId?: string; scopeEmpresa?: boolean } = {}): Promise<SyncDriveBackupsResult> {
   const db = admin.firestore();
@@ -232,7 +297,6 @@ export async function syncDriveBackups(opts: { empresaId?: string; scopeEmpresa?
   let kept = 0;
   const removedIds: string[] = [];
 
-  // Cache de existencia por fileId para no consultar dos veces el mismo archivo
   const existenceCache = new Map<string, boolean>();
 
   for (const docSnap of snap.docs) {
@@ -253,7 +317,7 @@ export async function syncDriveBackups(opts: { empresaId?: string; scopeEmpresa?
       } catch (e: any) {
         const code = e?.code || e?.response?.status;
         if (code === 404) exists = false;
-        else { kept++; existenceCache.set(driveFileId, true); continue; } // error transitorio: no borrar
+        else { kept++; existenceCache.set(driveFileId, true); continue; }
       }
       existenceCache.set(driveFileId, exists);
     }
@@ -297,7 +361,7 @@ export async function deleteDriveBackup(
       driveDeleted = true;
     } catch (e: any) {
       const code = e?.code || e?.response?.status;
-      if (code !== 404) throw e; // 404 = ya no estaba; cualquier otro error sube
+      if (code !== 404) throw e;
     }
   }
 
@@ -305,7 +369,7 @@ export async function deleteDriveBackup(
   return { deleted: true, driveDeleted };
 }
 
-/** Carpeta Drive: env de la función o último backup OK en Firestore (scheduled y manual comparten config). */
+/** Carpeta Drive raíz: env de la función o último backup OK en Firestore. */
 export async function resolveDriveBackupFolderId(): Promise<string | null> {
   const fromEnv = String(process.env.DRIVE_BACKUP_FOLDER_ID ?? '').trim();
   if (fromEnv) return fromEnv;
@@ -319,6 +383,7 @@ export async function resolveDriveBackupFolderId(): Promise<string | null> {
     for (const d of snap.docs) {
       const meta = d.data();
       if (meta.status !== 'ok') continue;
+      // Preferir carpeta raíz (driveBackupFolderId) sobre subcarpeta de empresa
       const folder = String(meta.driveBackupFolderId ?? meta.driveFolderId ?? '').trim();
       if (folder) return folder;
     }

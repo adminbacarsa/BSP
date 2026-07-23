@@ -22,16 +22,29 @@ const PROJECT_ID = 'comtroldata';
 const BATCH_SIZE = 400;
 const DEFAULT_PASSWORD = 'admin1234';
 
+// Sincronizado con backup.service.ts y restore.service.ts
 const EMPRESA_SCOPED_COLS = new Set([
-  'empleados', 'turnos', 'ausencias', 'objetivos', 'clientes', 'clients',
-  'novedades', 'audit_logs', 'planificacion_estados', 'servicios_sla',
-  'contratos_servicio', 'tipos_turno', 'user_notifications', 'system_backups',
-  'roles', 'feriados', 'planificaciones_historial', 'historial_operaciones',
-  'contracts', 'quotes', 'system_users', 'swap_requests',
+  // Core operativo
+  'empleados', 'clients', 'clientes', 'turnos', 'ausencias', 'novedades',
+  'swap_requests', 'contratos_servicio', 'tipos_turno', 'servicios_sla',
+  'objetivos', 'grupos_objetivos',
+  // RRHH / ajustes
+  'ajustes_crono', 'ajustes_horas', 'fichajes', 'sesiones_operador',
+  'solicitudes_refuerzo', 'supervision_visitas', 'objetivo_consignas',
+  // Planificación
+  'planificacion_estados',
+  // Liquidación
+  'liquidacion_turno_contrib',
+  // Comunicación / logs
+  'user_notifications', 'assistant_interaction_logs', 'audit_logs',
+  // Sistema empresa
+  'roles', 'feriados', 'system_users', 'client_users', 'integraciones_api',
+  // Legacy / emulador
+  'planificaciones_historial', 'contracts', 'quotes',
 ]);
 
-// Colecciones pesadas que no se necesitan para desarrollo (~13k docs en prod)
-const DEV_SKIP_COLS = new Set(['audit_logs', 'user_notifications', 'system_backups', 'historial_operaciones']);
+// Colecciones pesadas que no se necesitan para desarrollo
+const DEV_SKIP_COLS = new Set(['audit_logs', 'user_notifications', 'assistant_interaction_logs', 'historial_operaciones']);
 
 const args = process.argv.slice(2);
 const fullMode = args.includes('--full');

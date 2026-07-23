@@ -82,18 +82,39 @@ const SKIP_DELETE = new Set(['system_backups', 'audit_logs', 'restore_jobs']);
 /** No clonar usuarios del panel ni auditoría — comparten uid global y pisan otras empresas. */
 const SKIP_CLONE_COLLECTIONS = new Set(['system_users', 'audit_logs']);
 
+/**
+ * Colecciones con campo `empresaId`.
+ * Mantener sincronizado con backup.service.ts y seed-from-backup-file.js.
+ */
 const EMPRESA_SCOPED_COLLECTIONS = new Set([
+  // Core operativo
   'empleados', 'clients', 'clientes', 'turnos', 'ausencias', 'novedades',
   'swap_requests', 'contratos_servicio', 'tipos_turno', 'servicios_sla',
-  'objetivos', 'audit_logs', 'user_notifications', 'system_users',
+  'objetivos', 'grupos_objetivos',
+  // RRHH / ajustes
+  'ajustes_crono', 'ajustes_horas', 'fichajes', 'sesiones_operador',
+  'solicitudes_refuerzo', 'supervision_visitas', 'objetivo_consignas',
+  // Planificación
+  'planificacion_estados',
+  // Liquidación
+  'liquidacion_turno_contrib',
+  // Comunicación / logs
+  'user_notifications', 'assistant_interaction_logs', 'audit_logs',
+  // Sistema empresa
+  'roles', 'feriados', 'system_users', 'client_users', 'integraciones_api',
 ]);
 
 /** Orden para clonar/importar: padres antes que hijos (remap de FKs). */
 export const RESTORE_COLLECTION_ORDER = [
-  'clients', 'clientes', 'empleados', 'objetivos', 'tipos_turno',
-  'servicios_sla', 'contratos_servicio', 'turnos', 'ausencias',
-  'novedades', 'swap_requests', 'user_notifications', 'planificacion_estados',
-  'empresas',
+  'clients', 'clientes', 'empleados', 'objetivos', 'grupos_objetivos',
+  'tipos_turno', 'servicios_sla', 'contratos_servicio',
+  'turnos', 'ausencias', 'novedades', 'swap_requests',
+  'planificacion_estados', 'ajustes_crono', 'ajustes_horas',
+  'fichajes', 'solicitudes_refuerzo', 'supervision_visitas', 'objetivo_consignas',
+  'sesiones_operador', 'liquidacion_turno_contrib',
+  'user_notifications', 'assistant_interaction_logs',
+  'roles', 'feriados', 'client_users', 'integraciones_api',
+  'audit_logs', 'empresas',
 ];
 
 type IdMaps = Record<string, Map<string, string>>;
