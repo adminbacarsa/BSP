@@ -10,27 +10,9 @@ const EXCLUDE_COLLECTIONS = new Set<string>([
   'scheduled_job_logs',
 ]);
 
-/**
- * Colecciones con campo `empresaId` (filtradas en backup de empresa).
- * Mantener sincronizado con restore.service.ts y seed-from-backup-file.js.
- */
-const EMPRESA_SCOPED_COLLECTIONS = new Set([
-  // Core operativo
-  'empleados', 'clients', 'clientes', 'turnos', 'ausencias', 'novedades',
-  'swap_requests', 'contratos_servicio', 'tipos_turno', 'servicios_sla',
-  'objetivos', 'grupos_objetivos',
-  // RRHH / ajustes
-  'ajustes_crono', 'ajustes_horas', 'fichajes', 'sesiones_operador',
-  'solicitudes_refuerzo', 'supervision_visitas', 'objetivo_consignas',
-  // Planificación
-  'planificacion_estados',
-  // Liquidación
-  'liquidacion_turno_contrib',
-  // Comunicación / logs
-  'user_notifications', 'assistant_interaction_logs', 'audit_logs',
-  // Sistema empresa
-  'roles', 'feriados', 'system_users', 'client_users', 'integraciones_api',
-]);
+// No hay lista fija de colecciones para el backup de empresa.
+// El filtro es dinámico: cualquier colección cuyos docs tengan empresaId coincidente
+// queda incluida automáticamente. Las colecciones sin empresaId devuelven 0 docs y se omiten.
 
 /**
  * Colecciones cuyo doc ID = empresaId (sin campo interno).
@@ -152,10 +134,9 @@ export async function runBackup(folderId: string, opts: BackupOptions = {}): Pro
         .map(d => ({ _id: d.id, ...d.data() as Record<string, unknown> }))
         .filter(row => {
           if (!scopeEmpresa) return true;
-          if (EMPRESA_SCOPED_COLLECTIONS.has(col)) {
-            return docBelongsToEmpresa(row, empresaId, true);
-          }
-          return false;
+          // Dinámico: cualquier colección con empresaId coincidente entra.
+          // Sin empresaId → 0 docs → colección omitida automáticamente.
+          return docBelongsToEmpresa(row, empresaId, true);
         });
 
       if (docs.length > 0) {
