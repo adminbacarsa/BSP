@@ -54,6 +54,83 @@ export function collectSnapshotEmployeeIds(
   return [...ids];
 }
 
+/**
+ * Snapshot liviano: solo celdas en pendingChanges (estado visible pre-guardado).
+ * Evita recorrer empleados × días del mes completo en guardados masivos.
+ */
+export function buildPlanningSnapshotForPendingChanges(
+  pendingChanges: Record<string, PlanningSnapshotCell & { isDeleted?: boolean; objectiveId?: string } | undefined>,
+  shiftsMap: Record<string, {
+    code?: string;
+    isFranco?: boolean;
+    isFrancoTrabajado?: boolean;
+    isFrancoCompensatorio?: boolean;
+    objectiveId?: string;
+  } | undefined>,
+  objectiveId: string,
+): PlanningSnapshot {
+  const out: PlanningSnapshot = {};
+  for (const key of Object.keys(pendingChanges)) {
+    const pending = pendingChanges[key];
+    const existing = shiftsMap[key];
+    if (pending && !pending.isDeleted) {
+      out[key] = {
+        code: pending.code,
+        isFranco: pending.isFranco,
+        isFrancoTrabajado: pending.isFrancoTrabajado,
+        isFrancoCompensatorio: pending.isFrancoCompensatorio,
+      };
+    } else if (existing && existing.objectiveId === objectiveId) {
+      out[key] = {
+        code: existing.code,
+        isFranco: existing.isFranco,
+        isFrancoTrabajado: existing.isFrancoTrabajado,
+        isFrancoCompensatorio: existing.isFrancoCompensatorio,
+      };
+    }
+  }
+  return out;
+}
+
+/** Snapshot actual solo para claves del historial (comparación delta). */
+export function buildPlanningSnapshotForKeys(args: {
+  keys: string[];
+  shiftsMap: Record<string, {
+    code?: string;
+    isFranco?: boolean;
+    isFrancoTrabajado?: boolean;
+    isFrancoCompensatorio?: boolean;
+    objectiveId?: string;
+  } | undefined>;
+  pendingChanges: Record<string, PlanningSnapshotCell & { isDeleted?: boolean; objectiveId?: string } | undefined>;
+  objectiveId: string;
+}): PlanningSnapshot {
+  const { keys, shiftsMap, pendingChanges, objectiveId } = args;
+  const out: PlanningSnapshot = {};
+  for (const key of keys) {
+    const pending = pendingChanges[key];
+    const existing = shiftsMap[key];
+    if (pending) {
+      if (!pending.isDeleted) {
+        out[key] = {
+          code: pending.code,
+          isFranco: pending.isFranco,
+          isFrancoTrabajado: pending.isFrancoTrabajado,
+          isFrancoCompensatorio: pending.isFrancoCompensatorio,
+        };
+      }
+    } else if (existing && existing.objectiveId === objectiveId) {
+      out[key] = {
+        code: existing.code,
+        isFranco: existing.isFranco,
+        isFrancoTrabajado: existing.isFrancoTrabajado,
+        isFrancoCompensatorio: existing.isFrancoCompensatorio,
+      };
+    }
+  }
+  return out;
+}
+
 /** Arma snapshot del estado visible (turnos guardados + pendientes). */
 export function buildPlanningSnapshotFromGrid(args: {
   employeeIds: string[];

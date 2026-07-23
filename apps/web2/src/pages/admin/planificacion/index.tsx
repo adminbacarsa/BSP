@@ -190,8 +190,9 @@ import EquilibrarCronoModal from '@/components/admin/planificacion/EquilibrarCro
 import { usePlanningRules } from '@/hooks/usePlanningRules';
 import { enabledPlanningCycles, planningHourLimits } from '@/lib/planning/planning-rules.runtime';
 import {
+    buildPlanningSnapshotForKeys,
+    buildPlanningSnapshotForPendingChanges,
     buildPlanningSnapshotFromGrid,
-    collectSnapshotEmployeeIds,
     diffPlanningSnapshots,
 } from '@/lib/planificacion/planningSnapshotDiff';
 import {
@@ -667,7 +668,7 @@ export default function PlanificacionPage() {
     const [isFilterPending, startFilterTransition] = useTransition();
     const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
     const [showEquilibrarModal, setShowEquilibrarModal] = useState(false);
-    const [isProcessing, setIsProcessing] = useState(false);
+    const [backgroundSaveCount, setBackgroundSaveCount] = useState(0);
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [sortDropOpen, setSortDropOpen] = useState(false);
@@ -4503,7 +4504,6 @@ export default function PlanificacionPage() {
     };
 
     const handleSaveAll = async () => {
-        if (isProcessing) return;
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
         const count = Object.keys(pendingChanges).length;
         if (count === 0) return;
@@ -4520,19 +4520,44 @@ export default function PlanificacionPage() {
             }
         });
 
-        const doSave = async () => {
-            setIsProcessing(true);
-            const toastId = toast.loading('Guardando turnos…');
+        const doSave = () => {
+            const jobPending = { ...pendingChanges };
+            const jobKeys = Object.keys(jobPending);
+            if (jobKeys.length === 0) return;
+
+            const jobShiftsMap: Record<string, any> = {};
+            const jobAllShiftIds: Record<string, string[]> = {};
+            for (const key of jobKeys) {
+                if (shiftsMap[key]) jobShiftsMap[key] = shiftsMap[key];
+                if (allShiftIds[key]?.length) jobAllShiftIds[key] = [...allShiftIds[key]];
+            }
+            const jobNovedades = { ...pendingNovedades };
+            const jobPackages = [...pendingRecompositionPackages];
+            const jobCount = jobKeys.length;
+
+            setPendingChanges((prev) => {
+                const next = { ...prev };
+                for (const k of jobKeys) delete next[k];
+                return next;
+            });
+            setPendingNovedades({});
+            setPendingRecompositionPackages([]);
+            clearUndoStack();
+            setBackgroundSaveCount((c) => c + 1);
+
+            const toastId = toast.loading(`Guardando ${jobCount} cambios en segundo plano…`);
+
+            void (async () => {
             let batch = writeBatch(db);
             let batchOps = 0;
             const BATCH_LIMIT = 450;
-            const trackBatchOp = async () => {
-                batchOps++;
-                if (batchOps >= BATCH_LIMIT) {
-                    await batch.commit();
-                    batch = writeBatch(db);
-                    batchOps = 0;
-                }
+            const AUDIT_CONSOLIDATE_MIN = 3;
+            const bumpBatchOp = () => { batchOps++; };
+            const flushBatchWhenFull = async () => {
+                if (batchOps < BATCH_LIMIT) return;
+                await batch.commit();
+                batch = writeBatch(db);
+                batchOps = 0;
             };
             const flushBatch = async () => {
                 if (batchOps === 0) return;
@@ -4546,20 +4571,36 @@ export default function PlanificacionPage() {
             const pubMonth = currentDate.getMonth() + 1;
             const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
             const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-            const logData: any[] = [];
-            const dateKeys = daysInMonth.map((d) => getDateKey(d));
-            const snapshotData = buildPlanningSnapshotFromGrid({
-                employeeIds: collectSnapshotEmployeeIds(pendingChanges, shiftsMap, selectedObjective),
-                dateKeys,
-                shiftsMap,
-                pendingChanges,
-                objectiveId: selectedObjective,
-            });
+            const logData: { empId: string; date: string; action: string; detail: string }[] = [];
+            const snapshotData = buildPlanningSnapshotForPendingChanges(jobPending, jobShiftsMap, selectedObjective);
             const employeesById: Record<string, any> = {};
             employees.forEach((e: any) => { employeesById[e.id] = e; });
-            const savedPendingChanges = pendingChanges;
-            const savedPendingNovedades = pendingNovedades;
-            const savedRecompositionPackages = pendingRecompositionPackages;
+            const savedPendingChanges = jobPending;
+            const savedPendingNovedades = jobNovedades;
+            const savedRecompositionPackages = jobPackages;
+            const slaShiftByPosCode = new Map<string, any>();
+            for (const pos of positionStructure) {
+                for (const sh of ((pos.shifts || []) as any[])) {
+                    const ck = `${pos.positionName}__${String(sh.code || '').toUpperCase()}`;
+                    if (!slaShiftByPosCode.has(ck)) slaShiftByPosCode.set(ck, sh);
+                }
+            }
+
+            const restorePendingOnFailure = () => {
+                setPendingChanges((prev) => {
+                    const next = { ...prev };
+                    for (const [k, v] of Object.entries(jobPending)) {
+                        if (!(k in next)) next[k] = v;
+                    }
+                    return next;
+                });
+                if (Object.keys(jobNovedades).length > 0) {
+                    setPendingNovedades((prev) => ({ ...jobNovedades, ...prev }));
+                }
+                if (jobPackages.length > 0) {
+                    setPendingRecompositionPackages((prev) => [...jobPackages, ...prev]);
+                }
+            };
 
             const registerPlanificacionCorreccion = async (
                 empId: string,
@@ -4588,7 +4629,8 @@ export default function PlanificacionPage() {
                     employeeName: empName,
                     fecha: corrFechaTs,
                 }, empresaId));
-                await trackBatchOp();
+                bumpBatchOp();
+                await flushBatchWhenFull();
                 batch.set(doc(collection(db, 'ajustes_horas')), stampEmpresaId({
                     employeeId: empId,
                     employeeName: empName,
@@ -4604,13 +4646,14 @@ export default function PlanificacionPage() {
                     creadoPorNombre: realActorName,
                     creadoEn: serverTimestamp(),
                 }, empresaId));
-                await trackBatchOp();
+                bumpBatchOp();
+                await flushBatchWhenFull();
             };
 
             try {
-                for (const [key, change] of Object.entries(pendingChanges)) {
+                for (const [key, change] of Object.entries(jobPending)) {
                     const [empId, dateStr] = key.split('_');
-                    const existing = shiftsMap[key];
+                    const existing = jobShiftsMap[key];
                     const empObj = employeesById[empId];
                     const empName = empObj ? empObj.name : 'Desconocido';
                     let actionType = 'ASIGNACION_MASIVA';
@@ -4622,18 +4665,18 @@ export default function PlanificacionPage() {
                                 ? `${change.name || change.code} — ${empName} el ${dateStr}`
                                 : `Asignó ${change.code} a ${empName} el ${dateStr}`;
 
-                    const allExistingIds = allShiftIds[key] ?? (existing?.id ? [existing.id] : []);
-                    const deleteAllExisting = async () => {
+                    const allExistingIds = jobAllShiftIds[key] ?? (existing?.id ? [existing.id] : []);
+                    const deleteAllExisting = () => {
                         for (const docId of allExistingIds) {
                             batch.delete(doc(db, 'turnos', docId));
-                            await trackBatchOp();
+                            bumpBatchOp();
                         }
                     };
 
                     if (change.isDeleted) {
                         actionType = 'ELIMINACION_MASIVA';
                         actionDetail = `Borró turno de ${empName} el ${dateStr}`;
-                        await deleteAllExisting();
+                        deleteAllExisting();
                         await registerPlanificacionCorreccion(
                             empId,
                             empName,
@@ -4643,7 +4686,8 @@ export default function PlanificacionPage() {
                             '(eliminado)',
                         );
                     } else {
-                        await deleteAllExisting();
+                        deleteAllExisting();
+                        await flushBatchWhenFull();
 
                         if (existing) {
                             if ((existing.code === 'F' || existing.isFranco) && change.code !== 'F') {
@@ -4656,6 +4700,7 @@ export default function PlanificacionPage() {
 
                         const [y, m, d] = dateStr.split('-').map(Number);
                         const tDate = new Date(y, m-1, d);
+                        const safePositionName = change.positionName || 'General';
                         const [sh, sm] = getSafeTime(change.startTime);
                         const start = new Date(tDate); start.setHours(sh, sm, 0);
                         const end = new Date(start);
@@ -4666,8 +4711,7 @@ export default function PlanificacionPage() {
                             end.setHours(eh, em, 0);
                             if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
                         } else {
-                            const slaPos = positionStructure.find((p: any) => p.positionName === (change.positionName || ''));
-                            const slaSh = slaPos?.shifts?.find((s: any) => String(s.code || '').toUpperCase() === String(change.code || '').toUpperCase());
+                            const slaSh = slaShiftByPosCode.get(`${safePositionName}__${String(change.code || '').toUpperCase()}`);
                             const slaEnd = typeof slaSh?.endTime === 'string' ? slaSh.endTime : null;
                             const slaHours = Number(slaSh?.hours) > 0 ? Number(slaSh.hours) : null;
                             if (slaEnd && /^\d{1,2}:\d{2}(:\d{2})?$/.test(slaEnd)) {
@@ -4683,7 +4727,6 @@ export default function PlanificacionPage() {
 
                         const safeSwapWith = change.swapWith || null;
                         const safeSwapDate = change.swapDate || null;
-                        const safePositionName = change.positionName || 'General';
 
                         const turnoPayload: Record<string, unknown> = {
                             employeeId: empId,
@@ -4735,7 +4778,8 @@ export default function PlanificacionPage() {
                         }
 
                         batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
-                        await trackBatchOp();
+                        bumpBatchOp();
+                        await flushBatchWhenFull();
 
                         if (correctionMode) {
                             const codigoNuevo = change.isFrancoCompensatorio ? 'FF' : change.code;
@@ -4748,35 +4792,51 @@ export default function PlanificacionPage() {
                                 codigoNuevo,
                             );
                         } else {
-                            logData.push({ empId, date: dateStr, action: actionType });
-                            if (isPublished) {
-                                batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
-                                    action: actionType,
-                                    module: 'PLANIFICADOR',
-                                    details: actionDetail,
-                                    timestamp: serverTimestamp(),
-                                    actorName: realActorName,
-                                    actorUid: auth.currentUser?.uid,
-                                    objectiveId: selectedObjective,
-                                    objectiveName: getObjectiveName(selectedObjective),
-                                    clientId: selectedClient || undefined,
-                                }, empresaId));
-                                await trackBatchOp();
-                            }
+                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail });
                         }
                     }
+                    await flushBatchWhenFull();
+                }
+
+                if (isPublished && !correctionMode && logData.length > 0) {
+                    if (logData.length >= AUDIT_CONSOLIDATE_MIN) {
+                        batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
+                            action: 'ASIGNACION_MASIVA',
+                            module: 'PLANIFICADOR',
+                            details: `Guardado masivo: ${logData.length} celdas en ${getObjectiveName(selectedObjective)}`,
+                            timestamp: serverTimestamp(),
+                            actorName: realActorName,
+                            actorUid: auth.currentUser?.uid,
+                            objectiveId: selectedObjective,
+                            objectiveName: getObjectiveName(selectedObjective),
+                            clientId: selectedClient || undefined,
+                        }, empresaId));
+                        bumpBatchOp();
+                    } else {
+                        for (const entry of logData) {
+                            batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
+                                action: entry.action,
+                                module: 'PLANIFICADOR',
+                                details: entry.detail,
+                                timestamp: serverTimestamp(),
+                                actorName: realActorName,
+                                actorUid: auth.currentUser?.uid,
+                                objectiveId: selectedObjective,
+                                objectiveName: getObjectiveName(selectedObjective),
+                                clientId: selectedClient || undefined,
+                            }, empresaId));
+                            bumpBatchOp();
+                        }
+                    }
+                    await flushBatchWhenFull();
                 }
 
                 await flushBatch();
 
-                setPendingChanges({});
-                setPendingNovedades({});
-                setPendingRecompositionPackages([]);
-                clearUndoStack();
                 if (isPublished) {
                     setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
                 }
-                toast.success('Guardado exitoso', { id: toastId });
+                toast.success(`${jobCount} cambios guardados`, { id: toastId });
 
                 const postSaveTasks: Promise<unknown>[] = [
                     addDoc(collection(db, 'planificaciones_historial'), {
@@ -4785,7 +4845,7 @@ export default function PlanificacionPage() {
                         period: `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`,
                         objectiveId: selectedObjective,
                         changes: logData,
-                        count,
+                        count: jobCount,
                         snapshot: JSON.stringify(snapshotData),
                     }).catch((err) => { console.warn('[plan] historial', err); }),
                 ];
@@ -4867,13 +4927,18 @@ export default function PlanificacionPage() {
                     })());
                 }
 
-                await Promise.all(postSaveTasks);
+                void Promise.all(postSaveTasks).catch((postErr) => {
+                    console.warn('[plan] post-save', postErr);
+                    toast.warning('Turnos guardados; historial o notificaciones pendientes de sincronizar.');
+                });
             } catch(e) {
                 console.error(e);
-                toast.error('Error al guardar', { id: toastId });
+                restorePendingOnFailure();
+                toast.error('Error al guardar — cambios restaurados en pendientes', { id: toastId });
             } finally {
-                setIsProcessing(false);
+                setBackgroundSaveCount((c) => Math.max(0, c - 1));
             }
+            })();
         };
 
         if (overCap.length > 0) {
@@ -4883,7 +4948,7 @@ export default function PlanificacionPage() {
             return;
         }
 
-        await doSave();
+        doSave();
     };
 
     const openPublishConfirm = () => {
@@ -7650,15 +7715,21 @@ export default function PlanificacionPage() {
 
     const planningCompareDiff = useMemo(() => {
         if (!comparingSnapshot?.data || !selectedObjective) return null;
-        const dateKeys = daysInMonth.map((d) => getDateKey(d));
-        const employeeIds = displayedEmployees.map((e: { id: string }) => e.id);
-        const currentSnap = buildPlanningSnapshotFromGrid({
-            employeeIds,
-            dateKeys,
-            shiftsMap,
-            pendingChanges,
-            objectiveId: selectedObjective,
-        });
+        const histKeys = Object.keys(comparingSnapshot.data);
+        const currentSnap = histKeys.length > 0
+            ? buildPlanningSnapshotForKeys({
+                keys: histKeys,
+                shiftsMap,
+                pendingChanges,
+                objectiveId: selectedObjective,
+            })
+            : buildPlanningSnapshotFromGrid({
+                employeeIds: displayedEmployees.map((e: { id: string }) => e.id),
+                dateKeys: daysInMonth.map((d) => getDateKey(d)),
+                shiftsMap,
+                pendingChanges,
+                objectiveId: selectedObjective,
+            });
         return diffPlanningSnapshots(comparingSnapshot.data, currentSnap);
     }, [comparingSnapshot, daysInMonth, displayedEmployees, shiftsMap, pendingChanges, selectedObjective]);
 
@@ -8748,7 +8819,30 @@ export default function PlanificacionPage() {
                                     </div>
                                 );
                             })()}
-                            {Object.keys(pendingChanges).length > 0 && !isServiceLocked && <div className="flex items-center gap-2 animate-in slide-in-from-top-2 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-lg no-print"><span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest hidden md:inline">Planificando como: {operatorName}</span><div className="h-4 w-px bg-amber-200 mx-1"></div><span className="text-xs font-black text-amber-700 px-1">{Object.keys(pendingChanges).length} cambios</span><button type="button" onClick={undoLastPending} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button><button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button><button onClick={handleSaveAll} disabled={isProcessing} className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 shadow">{isProcessing ? <Loader2 size={14} className="animate-spin"/> : <Save size={14}/>}{isProcessing ? 'GUARDANDO…' : 'GUARDAR'}</button></div>}
+                            {!isServiceLocked && (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
+                                <div className="flex items-center gap-2 animate-in slide-in-from-top-2 flex-wrap no-print">
+                                    {backgroundSaveCount > 0 && (
+                                        <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-200 shadow-sm">
+                                            <Loader2 size={14} className="animate-spin text-indigo-600 shrink-0"/>
+                                            <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wide">
+                                                Guardando en segundo plano{backgroundSaveCount > 1 ? ` (${backgroundSaveCount})` : ''}…
+                                            </span>
+                                        </div>
+                                    )}
+                                    {Object.keys(pendingChanges).length > 0 && (
+                                        <div className="flex items-center gap-2 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-lg">
+                                            <span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest hidden md:inline">Planificando como: {operatorName}</span>
+                                            <div className="h-4 w-px bg-amber-200 mx-1 hidden md:block"></div>
+                                            <span className="text-xs font-black text-amber-700 px-1">{Object.keys(pendingChanges).length} cambios</span>
+                                            <button type="button" onClick={undoLastPending} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
+                                            <button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button>
+                                            <button onClick={handleSaveAll} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 shadow">
+                                                <Save size={14}/> GUARDAR
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                             </div>
 
                             <div className="flex-shrink-0 flex items-center gap-2 no-print">
@@ -9163,7 +9257,6 @@ export default function PlanificacionPage() {
 
                 {/* --- ÁREA PRINCIPAL DE LA GRILLA (PLANIFICACIÓN + COMPARACIÓN SPLIT VIEW) --- */}
                 <div className={`flex-1 min-h-0 overflow-hidden relative z-0 flex flex-col ${isServiceLocked ? 'opacity-75 grayscale-[0.5] pointer-events-none' : ''}`}>
-                    {isProcessing && <div className="absolute inset-0 bg-white/50 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" size={40}/></div>}
                     
                     {!selectedObjective ? (
                         <div className="flex flex-col items-center justify-center flex-1 gap-3 select-none">
@@ -10846,11 +10939,13 @@ export default function PlanificacionPage() {
                                         ))}
                                     </div>
                                 )}
-                                {Object.keys(pendingChanges).length > 0 && (
+                                {(Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
                                     <div className="rounded-xl border-2 border-rose-300 bg-rose-50 px-3 py-2.5">
                                         <p className="text-[11px] font-bold text-rose-800 flex items-center gap-1.5">
                                             <AlertTriangle size={13}/>
-                                            Tenés {Object.keys(pendingChanges).length} cambio(s) sin guardar. Guardá antes de publicar para que entren en las notificaciones.
+                                            {backgroundSaveCount > 0
+                                                ? 'Hay un guardado en segundo plano. Esperá a que termine antes de publicar.'
+                                                : `Tenés ${Object.keys(pendingChanges).length} cambio(s) sin guardar. Guardá antes de publicar para que entren en las notificaciones.`}
                                         </p>
                                     </div>
                                 )}
@@ -10895,7 +10990,7 @@ export default function PlanificacionPage() {
                                 <button
                                     type="button"
                                     onClick={async () => {
-                                        if (Object.keys(pendingChanges).length > 0) return;
+                                        if (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) return;
                                         setPublishConfirmPinChecking(true);
                                         setPublishConfirmPinError('');
                                         try {
@@ -10922,7 +11017,7 @@ export default function PlanificacionPage() {
                                             setPublishConfirmPinChecking(false);
                                         }
                                     }}
-                                    disabled={isPublishing || publishConfirmPinChecking || Object.keys(pendingChanges).length > 0 || publishConfirmPin.length !== 4}
+                                    disabled={isPublishing || publishConfirmPinChecking || Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0 || publishConfirmPin.length !== 4}
                                     className="flex-1 py-3 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                                 >
                                     {(isPublishing || publishConfirmPinChecking) ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>}
