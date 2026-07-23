@@ -790,6 +790,8 @@ export default function PlanificacionPage() {
     const [bulkEmpObjectiveOverrides, setBulkEmpObjectiveOverrides] = useState<Record<string, string>>({});
     /** Puesto elegido en la barra masiva mono-objetivo (paso previo al turno). */
     const [bulkBarPosition, setBulkBarPosition] = useState<string | null>(null);
+    /** Filtro de puesto por guardia en panel bulk (solo paleta de turnos; no persiste asignación). */
+    const [bulkEmpPositionFilter, setBulkEmpPositionFilter] = useState<Record<string, string>>({});
     const [bandFilter, setBandFilter] = useState<string | null>(null);
     const [addSearchTerm, setAddSearchTerm] = useState('');
     const [selectedCell, setSelectedCell] = useState<any>(null);
@@ -1571,6 +1573,7 @@ export default function PlanificacionPage() {
         if (!selection.start) {
             setBulkEmpObjectiveOverrides({});
             setBulkBarPosition(null);
+            setBulkEmpPositionFilter({});
         }
     }, [selection.start]);
 
@@ -2243,6 +2246,55 @@ export default function PlanificacionPage() {
         return bulkShifts;
     }, [bulkMonoPositionInfo, bulkEffectiveStructure, positionStructure, bulkShifts]);
 
+    const getBulkEmpObjectiveId = useCallback((emp: { id: string }) => {
+        if (selectedGrupo && grupoUnifiedMode) {
+            return resolveNativeObjectiveInGrupo(emp)
+                || bulkEmpObjectiveOverrides[emp.id]
+                || bulkTargetObjectiveId
+                || selectedGrupo.objectiveIds[0]
+                || '';
+        }
+        return bulkBarScopeObjectiveId || selectedObjective || '';
+    }, [
+        selectedGrupo, grupoUnifiedMode, resolveNativeObjectiveInGrupo,
+        bulkEmpObjectiveOverrides, bulkTargetObjectiveId, bulkBarScopeObjectiveId, selectedObjective,
+    ]);
+
+    /** Turnos SLA del guardia según su puesto asignado (o filtro UI si aún no tiene puesto). */
+    const getBulkEmpShifts = useCallback((emp: { id: string }) => {
+        const objId = getBulkEmpObjectiveId(emp);
+        if (!objId) return bulkMonoShifts;
+        const empPos = empDefaultPos[`${emp.id}___${objId}`]
+            || resolveBulkPanelEmpPosition(emp, objId);
+        const filterPos = bulkEmpPositionFilter[emp.id] || null;
+        const posForShifts = empPos || filterPos || bulkBarPosition || null;
+        if (posForShifts) {
+            const fromPos = getShiftsForPosition(posForShifts, objId);
+            if (fromPos.length > 0) return fromPos;
+        }
+        if (bulkPerEmpMode && selectedGrupo) return getShiftsForObjective(objId);
+        return bulkMonoShifts;
+    }, [
+        getBulkEmpObjectiveId, empDefaultPos, resolveBulkPanelEmpPosition, bulkEmpPositionFilter,
+        bulkBarPosition, getShiftsForPosition, bulkPerEmpMode, selectedGrupo,
+        getShiftsForObjective, bulkMonoShifts,
+    ]);
+
+    const bulkHeaderShiftPool = useMemo(() => {
+        if (bulkBarPosition) {
+            const objId = bulkBarScopeObjectiveId || selectedObjective;
+            if (objId) {
+                const fromPos = getShiftsForPosition(bulkBarPosition, objId);
+                if (fromPos.length > 0) return fromPos;
+            }
+        }
+        if (bulkMonoPerEmpMode) return bulkMonoShifts;
+        return bulkShifts;
+    }, [
+        bulkBarPosition, bulkBarScopeObjectiveId, selectedObjective, getShiftsForPosition,
+        bulkMonoPerEmpMode, bulkMonoShifts, bulkShifts,
+    ]);
+
     /** Códigos apagados en barra mono: cupo lleno / esquema cerrado en todos los días de la selección. */
     const bulkMonoDisabledCodes = useMemo(() => {
         const disabled = new Map<string, string>();
@@ -2360,15 +2412,7 @@ export default function PlanificacionPage() {
             const u = String(c || '').toUpperCase();
             if (u) codes.add(u);
         };
-        const shiftsForEmp = (emp: any) => {
-            if (bulkPerEmpMode && selectedGrupo) {
-                const objId = emp.objectiveId || emp.objetivoId || selectedGrupo.objetivos?.[0]?.id;
-                return getShiftsForObjective(objId);
-            }
-            const posName = resolveBulkPanelEmpPosition(emp);
-            if (posName) return getShiftsForPosition(posName);
-            return bulkMonoShifts;
-        };
+        const shiftsForEmp = (emp: any) => getBulkEmpShifts(emp);
         for (const emp of bulkSelectionEmployees) {
             shiftsForEmp(emp).forEach((s: any) => addCode(s.code));
         }
@@ -2388,8 +2432,7 @@ export default function PlanificacionPage() {
         });
     }, [
         bulkShowPerEmpPanel, bulkPerEmpMode, bulkMonoPerEmpMode, bulkSelectionEmployees,
-        selectedGrupo, getShiftsForObjective, resolveBulkPanelEmpPosition, getShiftsForPosition,
-        bulkMonoShifts,
+        getBulkEmpShifts, bulkMonoShifts,
     ]);
 
     /** Guardias del panel ordenados por puesto (orden SLA) y luego por nombre. */
@@ -5413,11 +5456,13 @@ export default function PlanificacionPage() {
                 if (['F', 'FF', 'FP', 'FT'].includes(upper)) return 'General';
                 const owners = ownersForCode(upper);
                 const empPos = empDefaultPos[`${emp.id}___${covObjId}`] || null;
+                const filterPos = bulkEmpPositionFilter[emp.id] || bulkBarPosition || null;
                 if (owners.length === 0) {
-                    return hintPos || empPos || fallbackPosLocal;
+                    return empPos || filterPos || hintPos || fallbackPosLocal;
                 }
-                if (hintPos && owners.some((p: any) => p.positionName === hintPos)) return hintPos;
                 if (empPos && owners.some((p: any) => p.positionName === empPos)) return empPos;
+                if (filterPos && owners.some((p: any) => p.positionName === filterPos)) return filterPos;
+                if (hintPos && owners.some((p: any) => p.positionName === hintPos)) return hintPos;
                 if (activePosition && owners.some((p: any) => p.positionName === activePosition)) return activePosition;
                 return owners[0].positionName;
             };
@@ -9464,9 +9509,27 @@ export default function PlanificacionPage() {
                                 <div className="flex items-center gap-1.5 px-2 py-2 border-b border-slate-700/80">
                                     <span className="w-[148px] shrink-0 text-[9px] font-black text-indigo-300 uppercase tracking-wider">A todos</span>
                                     <div className="w-[88px] shrink-0 flex flex-wrap gap-0.5">
-                                        {bulkPerEmpMode && selectedGrupo && bulkEffectiveStructure.map((p: any) => (
-                                            <button key={`bulkpos_${p.positionName}`} type="button" onClick={() => applyBulkPositionFill(p.positionName)} disabled={isServiceLocked} title={`Puesto ${p.positionName}`} className="px-1.5 h-6 rounded-lg font-black text-[9px] bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 max-w-[84px] truncate">{abbrevPlanningPositionName(p.positionName, 5)}</button>
-                                        ))}
+                                        {bulkPerEmpMode && selectedGrupo && bulkEffectiveStructure.map((p: any) => {
+                                            const selected = bulkBarPosition === p.positionName;
+                                            return (
+                                                <button
+                                                    key={`bulkpos_${p.positionName}`}
+                                                    type="button"
+                                                    onClick={() => setBulkBarPosition(selected ? null : p.positionName)}
+                                                    disabled={isServiceLocked}
+                                                    title={selected
+                                                        ? `Paleta ${p.positionName} — elegí turno (no asigna puesto)`
+                                                        : `Ver turnos del puesto ${p.positionName}`}
+                                                    className={`px-1.5 h-6 rounded-lg font-black text-[9px] border max-w-[84px] truncate transition-colors ${
+                                                        selected
+                                                            ? 'bg-indigo-400 text-white border-indigo-200 ring-1 ring-indigo-300'
+                                                            : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400'
+                                                    }`}
+                                                >
+                                                    {abbrevPlanningPositionName(p.positionName, 5)}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                     <div className="flex gap-0.5 items-center shrink-0">
                                         {bulkPanelShiftColumns.map((code) => {
@@ -9480,11 +9543,11 @@ export default function PlanificacionPage() {
                                                     <button key="all_F" type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' })} disabled={isServiceLocked} className="w-7 h-6 rounded bg-green-500 text-white font-black text-[9px]">F</button>
                                                 );
                                             }
-                                            const pool = bulkMonoPerEmpMode ? bulkMonoShifts : bulkShifts;
+                                            const pool = bulkHeaderShiftPool;
                                             const s = pool.find((x: any) => String(x.code || '').toUpperCase() === code);
                                             if (!s) return <span key={`all_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
                                             return (
-                                                <button key={`all_${code}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: s.positionName || undefined })} disabled={isServiceLocked} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
+                                                <button key={`all_${code}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime })} disabled={isServiceLocked} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
                                             );
                                         })}
                                     </div>
@@ -9511,9 +9574,9 @@ export default function PlanificacionPage() {
                                                 const objIdx = selectedGrupo.objectiveIds.indexOf(objId);
                                                 const objClr = GRUPO_COLOR_HEX[objIdx % GRUPO_COLOR_HEX.length] || '#64748b';
                                                 const objShort = (selectedGrupo.objectiveNames[objIdx] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || '';
-                                                const empShifts = getShiftsForObjective(objId);
+                                                const empShifts = getBulkEmpShifts(emp);
                                                 const empShiftByCode = new Map(empShifts.map((s: any) => [String(s.code || '').toUpperCase(), s]));
-                                                const empPos = empDefaultPos[`${emp.id}___${objId}`] || '';
+                                                const empPos = empDefaultPos[`${emp.id}___${objId}`] || resolveBulkPanelEmpPosition(emp, objId) || '';
                                                 return (
                                                     <div key={emp.id} className="flex items-center gap-1.5 rounded-lg bg-slate-900/50 px-1.5 py-1">
                                                         <span className="w-[148px] shrink-0 text-[9px] font-bold text-slate-200 truncate" title={emp.name}>{shortLabel}</span>
@@ -9549,7 +9612,7 @@ export default function PlanificacionPage() {
                                                                 const s = empShiftByCode.get(code);
                                                                 if (!s) return <span key={`${emp.id}_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
                                                                 return (
-                                                                    <button key={`${emp.id}_${code}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime, positionName: s.positionName || undefined }, { onlyEmpId: emp.id })} disabled={isServiceLocked} title={`${emp.name} → ${s.code}`} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
+                                                                    <button key={`${emp.id}_${code}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime }, { onlyEmpId: emp.id })} disabled={isServiceLocked} title={`${emp.name} · ${empPos || 'puesto'} → ${s.code}`} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
                                                                 );
                                                             })}
                                                         </div>
@@ -9557,9 +9620,11 @@ export default function PlanificacionPage() {
                                                 );
                                             }
                                             const posName = resolveBulkPanelEmpPosition(emp);
-                                            const empShifts = posName ? getShiftsForPosition(posName) : bulkMonoShifts;
+                                            const empShifts = getBulkEmpShifts(emp);
                                             const empShiftByCode = new Map(empShifts.map((s: any) => [String(s.code || '').toUpperCase(), s]));
                                             const panelStructure = bulkMonoPositionInfo.structure || bulkEffectiveStructure || positionStructure || [];
+                                            const filterPos = bulkEmpPositionFilter[emp.id] || null;
+                                            const hasAssignPos = !!posName || !!filterPos || !!bulkBarPosition;
                                             return (
                                                 <div key={emp.id} className="flex items-center gap-1.5 rounded-lg bg-slate-900/50 px-1.5 py-1">
                                                     <span className="w-[148px] shrink-0 text-[9px] font-bold text-slate-200 truncate" title={emp.name}>{shortLabel}</span>
@@ -9569,22 +9634,34 @@ export default function PlanificacionPage() {
                                                                 {abbrevPlanningPositionName(posName, 8)}
                                                             </span>
                                                         ) : panelStructure.length > 1 ? (
-                                                            panelStructure.map((p: any) => (
-                                                                <button
-                                                                    key={`${emp.id}_pickpos_${p.positionName}`}
-                                                                    type="button"
-                                                                    disabled={isServiceLocked}
-                                                                    title={`Asignar puesto ${p.positionName} a ${emp.name}`}
-                                                                    onClick={() => {
-                                                                        const obj = bulkBarScopeObjectiveId || selectedObjective;
-                                                                        if (!obj) return;
-                                                                        setEmpDefaultPos(prev => ({ ...prev, [`${emp.id}___${obj}`]: p.positionName }));
-                                                                    }}
-                                                                    className="shrink-0 px-1 py-0.5 rounded bg-slate-700 hover:bg-indigo-600 text-[7px] font-black text-slate-200 border border-slate-500"
-                                                                >
-                                                                    {abbrevPlanningPositionName(p.positionName, 4)}
-                                                                </button>
-                                                            ))
+                                                            panelStructure.map((p: any) => {
+                                                                const selected = filterPos === p.positionName;
+                                                                return (
+                                                                    <button
+                                                                        key={`${emp.id}_pickpos_${p.positionName}`}
+                                                                        type="button"
+                                                                        disabled={isServiceLocked}
+                                                                        title={selected
+                                                                            ? `Paleta ${p.positionName} — elegí turno`
+                                                                            : `Ver turnos del puesto ${p.positionName}`}
+                                                                        onClick={() => {
+                                                                            setBulkEmpPositionFilter(prev => {
+                                                                                const next = { ...prev };
+                                                                                if (selected) delete next[emp.id];
+                                                                                else next[emp.id] = p.positionName;
+                                                                                return next;
+                                                                            });
+                                                                        }}
+                                                                        className={`shrink-0 px-1 py-0.5 rounded text-[7px] font-black border transition-colors ${
+                                                                            selected
+                                                                                ? 'bg-indigo-400 text-white border-indigo-200'
+                                                                                : 'bg-slate-700 hover:bg-indigo-600 text-slate-200 border-slate-500'
+                                                                        }`}
+                                                                    >
+                                                                        {abbrevPlanningPositionName(p.positionName, 4)}
+                                                                    </button>
+                                                                );
+                                                            })
                                                         ) : (
                                                             <span className="text-[7px] text-amber-400 font-bold">Sin puesto</span>
                                                         )}
@@ -9603,7 +9680,7 @@ export default function PlanificacionPage() {
                                                             }
                                                             const s = empShiftByCode.get(code);
                                                             if (!s) return <span key={`${emp.id}_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
-                                                            const needsPos = !posName && code !== 'RET' && code !== 'F';
+                                                            const needsPos = !hasAssignPos && code !== 'RET' && code !== 'F';
                                                             return (
                                                                 <button
                                                                     key={`${emp.id}_${code}`}
@@ -9614,10 +9691,9 @@ export default function PlanificacionPage() {
                                                                         hours: s.hours,
                                                                         startTime: s.startTime,
                                                                         endTime: s.endTime,
-                                                                        positionName: posName || s.positionName || undefined,
                                                                     }, { onlyEmpId: emp.id })}
                                                                     disabled={isServiceLocked || needsPos}
-                                                                    title={needsPos ? 'Elegí puesto primero' : `${emp.name} · ${posName || 'puesto'} → ${s.code}`}
+                                                                    title={needsPos ? 'Elegí puesto (paleta) primero' : `${emp.name} · ${posName || filterPos || bulkBarPosition || 'puesto'} → ${s.code}`}
                                                                     className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${needsPos ? 'opacity-30 cursor-not-allowed' : ''}`}
                                                                 >
                                                                     {s.code}
@@ -9708,7 +9784,6 @@ export default function PlanificacionPage() {
                                                     hours: s.hours,
                                                     startTime: s.startTime,
                                                     endTime: s.endTime,
-                                                    positionName: bulkMonoPositionInfo.effectivePos || s.positionName || undefined,
                                                 });
                                             }}
                                             disabled={disabled}
