@@ -20,5 +20,6 @@ export const PERMISSION_ACTIONS: { key: string; label: string; onlyModules?: str
     { key: 'delete', label: 'Borrar' },
     { key: 'publish', label: 'Publicar', onlyModules: ['PLANNING'] },
     { key: 'correct', label: 'Corregir', onlyModules: ['PLANNING'] },
+    { key: 'auto_lab', label: 'Auto Lab', onlyModules: ['PLANNING'] },
     { key: 'adjust', label: 'Ajustar', onlyModules: ['RRHH'] },
 ];

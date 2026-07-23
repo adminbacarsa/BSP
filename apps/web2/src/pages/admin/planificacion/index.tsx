@@ -15,8 +15,10 @@ import {
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
     PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
-    ChevronsUp, ChevronsDown, MoreHorizontal
+    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical
 } from 'lucide-react';
+
+import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
@@ -652,6 +654,7 @@ export default function PlanificacionPage() {
     const { isSuperAdmin, rolePermissions } = useAuth();
     const canPublishPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('publish');
     const canCorrectPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('correct');
+    const canAutoLab = canAccessAutoLab(isSuperAdmin, rolePermissions);
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
@@ -8995,6 +8998,17 @@ export default function PlanificacionPage() {
                                                 <>
                                                     <div className="fixed inset-0 z-40" onClick={() => setToolbarMoreOpen(false)}/>
                                                     <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 min-w-[210px]">
+                                                        {canAutoLab && (
+                                                            <a
+                                                                href="/admin/planificacion/auto-lab"
+                                                                onClick={() => setToolbarMoreOpen(false)}
+                                                                className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-50 flex items-center gap-2.5"
+                                                                title="Laboratorio de casos sintéticos para auto-planificación"
+                                                            >
+                                                                <FlaskConical size={14} className="text-indigo-500"/> Lab de casos
+                                                            </a>
+                                                        )}
+                                                        {canAutoLab && <div className="h-px bg-slate-100 mx-2 my-1"/>}
                                                         <button
                                                             onClick={() => {
                                                                 if (selectedClient) openCronoPopout({ clientId: selectedClient, objectiveId: floatingInitialObjective, month: currentDate, mainObjectiveId: selectedObjective });

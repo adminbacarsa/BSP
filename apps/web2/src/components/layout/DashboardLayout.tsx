@@ -11,17 +11,19 @@ import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, Brain
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtils';
+import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/dashboard'))       return 'Dashboard';
   if (pathname.startsWith('/admin/operaciones'))     return 'Operaciones';
+  if (pathname.startsWith('/admin/planificacion/auto-lab')) return 'Auto Lab';
   if (pathname.startsWith('/admin/planificacion'))   return 'Planificador';
   if (pathname.startsWith('/admin/vplan'))           return 'VPLAN Lab';
   if (pathname.startsWith('/admin/crm'))             return 'CRM';
@@ -299,8 +301,8 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const [topbarVisible, setTopbarVisible] = useState(false);
   const router = useRouter();
   const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
-  const { canReadModule, user, isSuperAdmin } = useAuth();
-  const isVplanLabVisible = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
+  const { canReadModule, user, isSuperAdmin, rolePermissions } = useAuth();
+  const showAutoLabNav = canReadModule('PLANNING') && canAccessAutoLab(isSuperAdmin, rolePermissions);
   const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
@@ -512,15 +514,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {canReadModule('PLANNING') && isVplanLabVisible && (
-            <Link href="/admin/vplan" prefetch={false} title="VPLAN Lab (emulador)"
-              className={getLinkHoverClass('/admin/vplan')}
-              style={getLinkStyle('/admin/vplan')}>
-              <Brain size={18} className="shrink-0" />
+          {showAutoLabNav && (
+            <Link href="/admin/planificacion/auto-lab" prefetch={false} title="Auto Lab — casos de planificación"
+              className={getLinkHoverClass('/admin/planificacion/auto-lab')}
+              style={getLinkStyle('/admin/planificacion/auto-lab')}>
+              <FlaskConical size={18} className="shrink-0" />
               {sidebarOpen && (
                 <span className="animate-in fade-in whitespace-nowrap flex items-center gap-1">
-                  VPLAN Lab
-                  <span className="text-[8px] font-black uppercase bg-amber-200 text-amber-900 px-1 rounded">β</span>
+                  Auto Lab
+                  <span className="text-[8px] font-black uppercase bg-indigo-200 text-indigo-900 px-1 rounded">β</span>
                 </span>
               )}
             </Link>
