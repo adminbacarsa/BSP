@@ -2280,21 +2280,6 @@ export default function PlanificacionPage() {
         getShiftsForObjective, bulkMonoShifts,
     ]);
 
-    const bulkHeaderShiftPool = useMemo(() => {
-        if (bulkBarPosition) {
-            const objId = bulkBarScopeObjectiveId || selectedObjective;
-            if (objId) {
-                const fromPos = getShiftsForPosition(bulkBarPosition, objId);
-                if (fromPos.length > 0) return fromPos;
-            }
-        }
-        if (bulkMonoPerEmpMode) return bulkMonoShifts;
-        return bulkShifts;
-    }, [
-        bulkBarPosition, bulkBarScopeObjectiveId, selectedObjective, getShiftsForPosition,
-        bulkMonoPerEmpMode, bulkMonoShifts, bulkShifts,
-    ]);
-
     /** Códigos apagados en barra mono: cupo lleno / esquema cerrado en todos los días de la selección. */
     const bulkMonoDisabledCodes = useMemo(() => {
         const disabled = new Map<string, string>();
@@ -2403,6 +2388,21 @@ export default function PlanificacionPage() {
     }, [bulkPerEmpMode, bulkSelectionEmployees.length, bulkBarScopeObjectiveId, selectedObjective]);
 
     const bulkShowPerEmpPanel = bulkPerEmpMode || bulkMonoPerEmpMode;
+
+    const bulkHeaderShiftPool = useMemo(() => {
+        if (bulkBarPosition) {
+            const objId = bulkBarScopeObjectiveId || selectedObjective;
+            if (objId) {
+                const fromPos = getShiftsForPosition(bulkBarPosition, objId);
+                if (fromPos.length > 0) return fromPos;
+            }
+        }
+        if (bulkMonoPerEmpMode) return bulkMonoShifts;
+        return bulkShifts;
+    }, [
+        bulkBarPosition, bulkBarScopeObjectiveId, selectedObjective, getShiftsForPosition,
+        bulkMonoPerEmpMode, bulkMonoShifts, bulkShifts,
+    ]);
 
     /** Columnas de turno alineadas en el panel por colaborador (unión de códigos del SLA). */
     const bulkPanelShiftColumns = useMemo(() => {
