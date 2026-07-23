@@ -452,6 +452,16 @@ service cloud.firestore {
       allow update, delete: if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
     }
 
+    match /system_config/{docId} {
+      allow read: if isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    match /scheduled_job_logs/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     match /restore_jobs/{jobId} {
       allow read: if isSuperAdmin() || (
         isAdmin() && resource.data.requestedBy == request.auth.uid

@@ -261,6 +261,26 @@ export default function BackupTab() {
     return () => window.clearInterval(id);
   }, [loadingLocal]);
 
+  // Suscripción a configuración de horario y último run automático
+  useEffect(() => {
+    if (!isSuperAdmin) { setScheduleLoading(false); return; }
+    const unsubCfg = onSnapshot(fsDoc(db, 'system_config', 'backup_schedule'), snap => {
+      if (snap.exists()) {
+        const d = snap.data() as { hour?: number; enabled?: boolean };
+        if (typeof d.hour === 'number') setScheduleHour(d.hour);
+        if (typeof d.enabled === 'boolean') setScheduleEnabled(d.enabled);
+      }
+      setScheduleLoading(false);
+    }, () => setScheduleLoading(false));
+    const unsubLog = onSnapshot(fsDoc(db, 'scheduled_job_logs', 'scheduledBackup'), snap => {
+      if (snap.exists()) {
+        const d = snap.data() as { lastRunAt?: any; lastStatus?: string; lastFileName?: string };
+        setLastAutoRun({ at: d.lastRunAt, status: d.lastStatus || '', fileName: d.lastFileName });
+      }
+    }, () => {});
+    return () => { unsubCfg(); unsubLog(); };
+  }, [isSuperAdmin]);
+
   // Suscripción Firestore (producción: remota / emulador: local localhost:8080)
   useEffect(() => {
     if (!empresaId) return;
@@ -383,6 +403,11 @@ export default function BackupTab() {
   const [localRestoreMode, setLocalRestoreMode] = useState<'empresa' | 'full'>('empresa');
   const [localDevMode, setLocalDevMode] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [scheduleHour, setScheduleHour] = useState(3);
+  const [scheduleEnabled, setScheduleEnabled] = useState(true);
+  const [scheduleLoading, setScheduleLoading] = useState(true);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [lastAutoRun, setLastAutoRun] = useState<{ at: any; status: string; fileName?: string } | null>(null);
 
   // Carga backup JSON al emulador vía API local (evita parsear JSON grande en el browser)
   const handleLoadLocalFile = async (file: File) => {
@@ -519,6 +544,20 @@ export default function BackupTab() {
     } finally {
       setLoadingLocal(false);
       setProgress(null);
+    }
+  };
+
+  const handleSaveSchedule = async () => {
+    setSavingSchedule(true);
+    try {
+      await refreshAuthTokenForBackup();
+      const fn = httpsCallable(functions, 'updateBackupSchedule');
+      await fn({ hour: scheduleHour, enabled: scheduleEnabled });
+      toast.success(`Horario guardado: backup automático a las ${String(scheduleHour).padStart(2, '0')}:00 AR${scheduleEnabled ? '' : ' (deshabilitado)'}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Error al guardar configuración');
+    } finally {
+      setSavingSchedule(false);
     }
   };
 
@@ -714,6 +753,68 @@ export default function BackupTab() {
         <div className={`flex items-start gap-3 p-4 rounded-xl border font-bold text-sm ${lastResult.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'}`}>
           {lastResult.ok ? <CheckCircle size={16} className="mt-0.5 shrink-0" /> : <AlertTriangle size={16} className="mt-0.5 shrink-0" />}
           {lastResult.msg}
+        </div>
+      )}
+
+      {/* ── Horario de backup automático (solo SuperAdmin) ── */}
+      {isSuperAdmin && !scheduleLoading && (
+        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-violet-100 dark:bg-violet-900/30 rounded-xl flex items-center justify-center shrink-0">
+                <Clock size={18} className="text-violet-600 dark:text-violet-400" />
+              </div>
+              <div>
+                <h3 className="font-black text-sm text-slate-800 dark:text-white">Backup automático</h3>
+                <p className="text-xs text-slate-500 font-bold">
+                  {lastAutoRun
+                    ? `Último: ${fmtDate(lastAutoRun.at)} — ${lastAutoRun.status === 'ok' ? '✓ OK' : '✗ Error'}${lastAutoRun.fileName ? ` (${lastAutoRun.fileName})` : ''}`
+                    : 'Sin ejecuciones registradas'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Habilitado / deshabilitado */}
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <div
+                  onClick={() => setScheduleEnabled(v => !v)}
+                  className={`relative w-10 h-6 rounded-full transition-colors cursor-pointer ${scheduleEnabled ? 'bg-violet-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                >
+                  <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${scheduleEnabled ? 'translate-x-4' : ''}`} />
+                </div>
+                <span className="text-xs font-black text-slate-600 dark:text-slate-300">
+                  {scheduleEnabled ? 'Habilitado' : 'Deshabilitado'}
+                </span>
+              </label>
+              {/* Selector de hora */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-slate-500 uppercase">Hora AR</span>
+                <select
+                  value={scheduleHour}
+                  onChange={e => setScheduleHour(Number(e.target.value))}
+                  disabled={!scheduleEnabled}
+                  className="text-sm font-black border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-white disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                >
+                  {Array.from({ length: 24 }, (_, i) => (
+                    <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleSaveSchedule}
+                disabled={savingSchedule}
+                className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white rounded-xl font-black text-sm transition-colors shadow"
+              >
+                {savingSchedule ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+                {savingSchedule ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+          </div>
+          {scheduleEnabled && (
+            <p className="text-[11px] text-slate-400 font-bold mt-3 ml-13">
+              El backup corre automáticamente a las <span className="text-violet-600">{String(scheduleHour).padStart(2, '0')}:00 (AR)</span> todos los días — plataforma completa a Google Drive.
+            </p>
+          )}
         </div>
       )}
 

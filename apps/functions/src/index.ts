@@ -3025,14 +3025,48 @@ export const onAusenciaCreatedFromPortal = functions
     return null;
   });
 
-// Backup automático diario a las 3:00 AM (America/Argentina/Buenos_Aires)
+// Backup automático horario — el cron dispara cada hora; la hora real se configura en system_config/backup_schedule
 export const scheduledBackup = functions
   .region('us-central1')
   .runWith({ timeoutSeconds: 540, memory: '512MB' })
-  .pubsub.schedule('0 3 * * *')
+  .pubsub.schedule('0 * * * *')
   .timeZone('America/Argentina/Buenos_Aires')
   .onRun(async () => {
     const db = admin.firestore();
+
+    // Leer configuración de horario y habilitación
+    let configHour = 3; // default 03:00 AR
+    let enabled = true;
+    try {
+      const cfgSnap = await db.collection('system_config').doc('backup_schedule').get();
+      if (cfgSnap.exists) {
+        const cfg = cfgSnap.data() as { hour?: number; enabled?: boolean };
+        if (typeof cfg.hour === 'number' && cfg.hour >= 0 && cfg.hour <= 23) configHour = cfg.hour;
+        if (cfg.enabled === false) enabled = false;
+      }
+    } catch (e) {
+      console.warn('[scheduledBackup] No se pudo leer system_config/backup_schedule, usando 03:00 AR.', e);
+    }
+
+    if (!enabled) {
+      console.log('[scheduledBackup] Backup automático deshabilitado en configuración, saltando.');
+      return null;
+    }
+
+    const hourArg = parseInt(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Argentina/Buenos_Aires',
+        hour: 'numeric',
+        hour12: false,
+      }).format(new Date()),
+      10,
+    ) % 24;
+
+    if (hourArg !== configHour) {
+      console.log(`[scheduledBackup] Hora AR: ${hourArg}, configurada: ${configHour}. Saltando.`);
+      return null;
+    }
+
     const folderId = await resolveDriveBackupFolderId();
     if (!folderId) {
       const msg = 'DRIVE_BACKUP_FOLDER_ID no configurado (ni fallback en system_backups)';
@@ -3054,6 +3088,7 @@ export const scheduledBackup = functions
         lastStatus: 'ok',
         lastFileName: result.fileName,
         totalDocs: result.totalDocs,
+        configuredHour: configHour,
         error: null,
       }, { merge: true });
     } catch (e: unknown) {
@@ -3073,6 +3108,33 @@ export const scheduledBackup = functions
       }, { merge: true });
     }
     return null;
+  });
+
+/** Actualiza el horario del backup automático en system_config/backup_schedule (solo SuperAdmin). */
+export const updateBackupSchedule = functions
+  .runWith({ timeoutSeconds: 30, memory: '256MB' })
+  .https.onCall(async (data, context) => {
+    if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    const role = String(context.auth.token?.role ?? '').toUpperCase().replace(/_/g, '');
+    const isSuper = role === 'SUPERADMIN' || role === 'SP';
+    if (!isSuper) throw new functions.https.HttpsError('permission-denied', 'Solo superadmin puede modificar el horario de backup.');
+
+    const d = data as { hour?: number; enabled?: boolean };
+    const hour = typeof d.hour === 'number' ? Math.round(d.hour) : undefined;
+    const enabled = typeof d.enabled === 'boolean' ? d.enabled : undefined;
+
+    if (hour !== undefined && (hour < 0 || hour > 23)) {
+      throw new functions.https.HttpsError('invalid-argument', 'hour debe ser un entero entre 0 y 23.');
+    }
+
+    const db = admin.firestore();
+    const update: Record<string, unknown> = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (hour !== undefined) update.hour = hour;
+    if (enabled !== undefined) update.enabled = enabled;
+
+    await db.collection('system_config').doc('backup_schedule').set(update, { merge: true });
+    const snap = await db.collection('system_config').doc('backup_schedule').get();
+    return snap.data() ?? {};
   });
 
 // Consulta padrón AFIP (Constancia de Inscripción) — certificado en Secret Manager / .env emulador
