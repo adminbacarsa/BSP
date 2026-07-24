@@ -2846,7 +2846,7 @@ export const restoreBackup = onCallV2(
 
 /** Ejecuta restore_jobs en background (hasta 60 min por invocación). */
 export const processRestoreJob = onDocumentWrittenV2(
-  { document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 3600, memory: '4GiB' },
+  { document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 540, memory: '4GiB' },
   async (event) => {
     const change = event.data;
     if (!change) return;
@@ -2975,7 +2975,7 @@ export const migrateEmpresaData = onCallV2(
 
 /** Ejecuta empresa_migrate_jobs en background. */
 export const processEmpresaMigrateJob = onDocumentWrittenV2(
-  { document: 'empresa_migrate_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 3600, memory: '4GiB' },
+  { document: 'empresa_migrate_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 540, memory: '4GiB' },
   async (event) => {
     const change = event.data;
     if (!change) return;
@@ -3062,7 +3062,7 @@ export const scheduledBackup = onScheduleV2(
   {
     schedule: '0 * * * *',
     timeZone: 'America/Argentina/Buenos_Aires',
-    timeoutSeconds: 3600,
+    timeoutSeconds: 1800,
     memory: '4GiB',
     region: 'us-central1',
   },
