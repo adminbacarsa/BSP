@@ -22,10 +22,21 @@ export interface PlanningShiftCell {
     code: string;
     positionName?: string;
     coveredBy?: string;
+    coveredByEmployeeId?: string;
+    coveredByEmployeeName?: string;
     coversEmployeeId?: string;
     coverageSegmentRole?: string;
+    comments?: string;
     isFrancoTrabajado?: boolean;
     draft?: boolean;
+}
+
+export interface PlanningAbsenceRecord {
+    employeeId: string;
+    employeeName?: string;
+    dateStr: string;
+    code: string;
+    absenceId: string;
 }
 
 export interface CoverageWisdomEvent {
@@ -61,6 +72,8 @@ export interface PlanningCoverageWisdom {
     month: number;
     periodLabel: string;
     daysAnalyzed: number;
+    cellsAnalyzed: number;
+    absenceContextsFound: number;
     events: CoverageWisdomEvent[];
     coverers: CovererWisdomProfile[];
     strategyCounts: Partial<Record<CoverageStrategyObserved, number>>;
@@ -138,11 +151,93 @@ function buildNameMaps(cells: PlanningShiftCell[]): {
     return { idToName, nameToId };
 }
 
+function parseCoveringComment(comment: string): string | null {
+    const m = String(comment || '').match(/Cubriendo a\s+(.+?)(?:\s*\(|$)/i);
+    return m ? m[1].trim() : null;
+}
+
+function inferPositionForEmployee(employeeId: string, scoped: PlanningShiftCell[]): string {
+    const counts = new Map<string, number>();
+    for (const c of scoped) {
+        if (c.employeeId !== employeeId) continue;
+        if (!WORK_BANDS.has(normCode(c.code))) continue;
+        const p = c.positionName || '';
+        counts.set(p, (counts.get(p) || 0) + 1);
+    }
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    return sorted[0]?.[0] || '';
+}
+
+type AbsentContext = {
+    absentEmpId: string;
+    absentEmpName: string;
+    absentCode: string;
+    dateStr: string;
+    positionName: string;
+    coveredBy?: string;
+    source: 'turno' | 'ausencias';
+};
+
+function collectAbsentContexts(
+    scoped: PlanningShiftCell[],
+    absences: PlanningAbsenceRecord[],
+    idToName: Map<string, string>,
+): AbsentContext[] {
+    const contexts: AbsentContext[] = [];
+    const keys = new Set<string>();
+
+    for (const c of scoped) {
+        if (!ABSENCE_CODES.has(normCode(c.code))) continue;
+        const key = `${c.employeeId}__${c.dateStr}`;
+        if (keys.has(key)) continue;
+        keys.add(key);
+        contexts.push({
+            absentEmpId: c.employeeId,
+            absentEmpName: idToName.get(c.employeeId) || c.employeeName || c.employeeId,
+            absentCode: normCode(c.code),
+            dateStr: c.dateStr,
+            positionName: c.positionName || inferPositionForEmployee(c.employeeId, scoped),
+            coveredBy: c.coveredBy,
+            source: 'turno',
+        });
+    }
+
+    for (const a of absences) {
+        const key = `${a.employeeId}__${a.dateStr}`;
+        if (keys.has(key)) continue;
+        keys.add(key);
+        contexts.push({
+            absentEmpId: a.employeeId,
+            absentEmpName: a.employeeName || idToName.get(a.employeeId) || a.employeeId,
+            absentCode: normCode(a.code),
+            dateStr: a.dateStr,
+            positionName: inferPositionForEmployee(a.employeeId, scoped),
+            source: 'ausencias',
+        });
+    }
+
+    return contexts;
+}
+
+function resolveCovererFromLabel(
+    label: string,
+    nameToId: Map<string, string>,
+): string | null {
+    const clean = String(label || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+    if (!clean) return null;
+    return resolveEmpIdByName(clean, nameToId);
+}
+
 export function extractPlanningCoverageWisdom(
     cells: PlanningShiftCell[],
-    params: { objectiveId: string; year: number; month: number },
+    params: {
+        objectiveId: string;
+        year: number;
+        month: number;
+        absences?: PlanningAbsenceRecord[];
+    },
 ): PlanningCoverageWisdom {
-    const { objectiveId, year, month } = params;
+    const { objectiveId, year, month, absences = [] } = params;
     const scoped = cells.filter((c) => c.objectiveId === objectiveId);
     const { idToName, nameToId } = buildNameMaps(scoped);
     const events: CoverageWisdomEvent[] = [];
@@ -161,6 +256,116 @@ export function extractPlanningCoverageWisdom(
     }
 
     const dates = [...new Set(scoped.map((c) => c.dateStr))].sort();
+    const absentContexts = collectAbsentContexts(scoped, absences, idToName);
+
+    const linkCovererToAbsent = (
+        absent: AbsentContext,
+        covererEmpId: string,
+        covererCode: string,
+        strategy: CoverageStrategyObserved,
+        source: CoverageWisdomEvent['source'],
+        note?: string,
+    ) => {
+        if (!covererEmpId || covererEmpId === absent.absentEmpId) return;
+        pushEvent({
+            dateStr: absent.dateStr,
+            objectiveId,
+            positionName: absent.positionName,
+            absentEmpId: absent.absentEmpId,
+            absentEmpName: absent.absentEmpName,
+            absentCode: absent.absentCode,
+            covererEmpId,
+            covererEmpName: idToName.get(covererEmpId) || covererEmpId,
+            covererCode: normCode(covererCode),
+            bandCovered: bandFromCode(covererCode),
+            strategy,
+            source,
+            note,
+        });
+    };
+
+    for (const absent of absentContexts) {
+        const posCells = scoped.filter(
+            (c) => c.dateStr === absent.dateStr && (c.positionName || '') === (absent.positionName || ''),
+        );
+        const dayCells = scoped.filter((c) => c.dateStr === absent.dateStr);
+        const isHybrid = detectHybridDay(scoped, absent.dateStr, absent.positionName || '');
+
+        if (absent.coveredBy) {
+            const label = String(absent.coveredBy);
+            const strategy = strategyFromCoveredByLabel(label);
+            const covererId = resolveCovererFromLabel(label, nameToId);
+            if (covererId) {
+                const covererCell = byEmpDate.get(`${covererId}__${absent.dateStr}`);
+                linkCovererToAbsent(
+                    absent,
+                    covererId,
+                    covererCell?.code || 'M',
+                    strategy,
+                    'coveredBy_field',
+                    label,
+                );
+            } else if (strategy === 'extension_12h' || strategy === 'hybrid_12_8') {
+                const d12 = posCells.find((c) => normCode(c.code) === 'D12' && c.employeeId !== absent.absentEmpId);
+                const n12 = posCells.find((c) => normCode(c.code) === 'N12' && c.employeeId !== absent.absentEmpId);
+                if (d12) {
+                    linkCovererToAbsent(absent, d12.employeeId, 'D12', isHybrid ? 'hybrid_12_8' : 'extension_12h', 'coveredBy_field', label);
+                }
+                if (n12) {
+                    linkCovererToAbsent(absent, n12.employeeId, 'N12', isHybrid ? 'hybrid_12_8' : 'extension_12h', 'coveredBy_field', label);
+                }
+            }
+        }
+
+        const absentCell = byEmpDate.get(`${absent.absentEmpId}__${absent.dateStr}`);
+        if (absentCell?.coveredByEmployeeId) {
+            const covererCell = byEmpDate.get(`${absentCell.coveredByEmployeeId}__${absent.dateStr}`);
+            linkCovererToAbsent(
+                absent,
+                absentCell.coveredByEmployeeId,
+                covererCell?.code || 'M',
+                strategyFromCovererCode(covererCell?.code || 'M', covererCell?.isFrancoTrabajado),
+                'coveredBy_field',
+                absentCell.coveredByEmployeeName,
+            );
+        }
+
+        for (const c of dayCells) {
+            if (c.employeeId === absent.absentEmpId) continue;
+
+            if (c.coversEmployeeId === absent.absentEmpId) {
+                const strategy = isHybrid && ['D12', 'N12'].includes(normCode(c.code))
+                    ? 'hybrid_12_8'
+                    : strategyFromCovererCode(c.code, c.isFrancoTrabajado);
+                linkCovererToAbsent(absent, c.employeeId, c.code, strategy, 'coversEmployeeId');
+            }
+
+            if (c.coveredByEmployeeId === absent.absentEmpId) {
+                linkCovererToAbsent(
+                    absent,
+                    c.employeeId,
+                    c.code,
+                    strategyFromCovererCode(c.code, c.isFrancoTrabajado),
+                    'coversEmployeeId',
+                );
+            }
+
+            const titularFromComment = parseCoveringComment(c.comments || '');
+            if (titularFromComment) {
+                const titularId = resolveCovererFromLabel(titularFromComment, nameToId);
+                if (titularId === absent.absentEmpId) {
+                    linkCovererToAbsent(
+                        absent,
+                        c.employeeId,
+                        c.code,
+                        strategyFromCovererCode(c.code, c.isFrancoTrabajado),
+                        'inferred_grid',
+                        c.comments,
+                    );
+                }
+            }
+        }
+    }
 
     for (const dateStr of dates) {
         const dayCells = scoped.filter((c) => c.dateStr === dateStr);
@@ -169,125 +374,39 @@ export function extractPlanningCoverageWisdom(
         for (const positionName of positions) {
             const posCells = dayCells.filter((c) => (c.positionName || '') === positionName);
             const isHybrid = detectHybridDay(scoped, dateStr, positionName);
-            const absentCells = posCells.filter((c) => ABSENCE_CODES.has(normCode(c.code)));
+            const dayAbsents = absentContexts.filter(
+                (a) => a.dateStr === dateStr && (a.positionName || '') === positionName,
+            );
+            if (dayAbsents.length === 0) continue;
 
-            for (const absent of absentCells) {
-                const absentName = idToName.get(absent.employeeId) || absent.employeeName || absent.employeeId;
+            const absentIds = new Set(dayAbsents.map((a) => a.absentEmpId));
+            const workers = posCells.filter(
+                (c) => !absentIds.has(c.employeeId) && WORK_BANDS.has(normCode(c.code)),
+            );
+            const hasEventsForDay = events.some(
+                (e) => e.dateStr === dateStr && e.positionName === positionName,
+            );
 
-                if (absent.coveredBy) {
-                    const label = String(absent.coveredBy);
-                    const strategy = strategyFromCoveredByLabel(label);
-                    const covererId = resolveEmpIdByName(label.replace(/\s*\([^)]*\)\s*$/, ''), nameToId);
-                    if (covererId) {
-                        const covererCell = byEmpDate.get(`${covererId}__${dateStr}`);
-                        pushEvent({
-                            dateStr,
-                            objectiveId,
-                            positionName,
-                            absentEmpId: absent.employeeId,
-                            absentEmpName: absentName,
-                            absentCode: normCode(absent.code),
-                            covererEmpId: covererId,
-                            covererEmpName: idToName.get(covererId) || covererId,
-                            covererCode: normCode(covererCell?.code || 'M'),
-                            bandCovered: bandFromCode(covererCell?.code || 'M'),
-                            strategy,
-                            source: 'coveredBy_field',
-                            note: label,
-                        });
-                    } else if (strategy === 'extension_12h' || strategy === 'hybrid_12_8') {
-                        const d12 = posCells.find((c) => normCode(c.code) === 'D12' && c.employeeId !== absent.employeeId);
-                        const n12 = posCells.find((c) => normCode(c.code) === 'N12' && c.employeeId !== absent.employeeId);
-                        if (d12) {
-                            pushEvent({
-                                dateStr,
-                                objectiveId,
-                                positionName,
-                                absentEmpId: absent.employeeId,
-                                absentEmpName: absentName,
-                                absentCode: normCode(absent.code),
-                                covererEmpId: d12.employeeId,
-                                covererEmpName: idToName.get(d12.employeeId) || d12.employeeId,
-                                covererCode: 'D12',
-                                bandCovered: 'M',
-                                strategy: isHybrid ? 'hybrid_12_8' : 'extension_12h',
-                                source: 'coveredBy_field',
-                                note: label,
-                            });
-                        }
-                        if (n12) {
-                            pushEvent({
-                                dateStr,
-                                objectiveId,
-                                positionName,
-                                absentEmpId: absent.employeeId,
-                                absentEmpName: absentName,
-                                absentCode: normCode(absent.code),
-                                covererEmpId: n12.employeeId,
-                                covererEmpName: idToName.get(n12.employeeId) || n12.employeeId,
-                                covererCode: 'N12',
-                                bandCovered: 'N',
-                                strategy: isHybrid ? 'hybrid_12_8' : 'extension_12h',
-                                source: 'coveredBy_field',
-                                note: label,
-                            });
-                        }
+            if (isHybrid && !hasEventsForDay) {
+                for (const w of workers) {
+                    const c = normCode(w.code);
+                    const strategy: CoverageStrategyObserved =
+                        c === 'D12' || c === 'N12' ? 'hybrid_12_8' : 'modo8_plantilla';
+                    for (const absent of dayAbsents) {
+                        linkCovererToAbsent(absent, w.employeeId, c, strategy, 'inferred_grid', 'Patrón híbrido D12+N12 + M+T+N');
                     }
                 }
-
-                for (const c of posCells) {
-                    if (c.coversEmployeeId === absent.employeeId) {
-                        const strategy = isHybrid && ['D12', 'N12'].includes(normCode(c.code))
-                            ? 'hybrid_12_8'
-                            : strategyFromCovererCode(c.code, c.isFrancoTrabajado);
-                        pushEvent({
-                            dateStr,
-                            objectiveId,
-                            positionName,
-                            absentEmpId: absent.employeeId,
-                            absentEmpName: absentName,
-                            absentCode: normCode(absent.code),
-                            covererEmpId: c.employeeId,
-                            covererEmpName: idToName.get(c.employeeId) || c.employeeName || c.employeeId,
-                            covererCode: normCode(c.code),
-                            bandCovered: bandFromCode(c.code),
-                            strategy,
-                            source: 'coversEmployeeId',
-                        });
-                    }
-                }
-            }
-
-            if (absentCells.length > 0) {
-                const absentIds = new Set(absentCells.map((a) => a.employeeId));
-                const workers = posCells.filter(
-                    (c) => !absentIds.has(c.employeeId) && WORK_BANDS.has(normCode(c.code)),
-                );
-                const hasEventsForDay = events.some(
-                    (e) => e.dateStr === dateStr && e.positionName === positionName,
-                );
-                if (isHybrid && !hasEventsForDay) {
+            } else if (!hasEventsForDay && workers.length > 0) {
+                for (const absent of dayAbsents) {
                     for (const w of workers) {
-                        const c = normCode(w.code);
-                        const strategy: CoverageStrategyObserved =
-                            c === 'D12' || c === 'N12' ? 'hybrid_12_8' : 'modo8_plantilla';
-                        for (const absent of absentCells) {
-                            pushEvent({
-                                dateStr,
-                                objectiveId,
-                                positionName,
-                                absentEmpId: absent.employeeId,
-                                absentEmpName: idToName.get(absent.employeeId) || absent.employeeId,
-                                absentCode: normCode(absent.code),
-                                covererEmpId: w.employeeId,
-                                covererEmpName: idToName.get(w.employeeId) || w.employeeId,
-                                covererCode: c,
-                                bandCovered: bandFromCode(c),
-                                strategy,
-                                source: 'inferred_grid',
-                                note: 'Patrón híbrido D12+N12 + M+T+N',
-                            });
-                        }
+                        linkCovererToAbsent(
+                            absent,
+                            w.employeeId,
+                            w.code,
+                            strategyFromCovererCode(w.code, w.isFrancoTrabajado),
+                            'inferred_grid',
+                            'Misma fecha/puesto — sin coveredBy explícito',
+                        );
                     }
                 }
             }
@@ -329,7 +448,9 @@ export function extractPlanningCoverageWisdom(
     const periodLabel = `${String(month).padStart(2, '0')}/${year}`;
     let summary: string;
     if (events.length === 0) {
-        summary = `Sin eventos de cobertura detectados en ${periodLabel} (revisar ausencias V/L/E y campo coveredBy).`;
+        summary = absentContexts.length > 0
+            ? `Sin coberturas detectadas en ${periodLabel}: ${scoped.length} celdas, ${absentContexts.length} ausencia(s) V/L/E (turnos o RRHH).`
+            : `Sin ausencias V/L/E ni coberturas en ${periodLabel} (${scoped.length} celdas de turno).`;
     } else {
         const top = coverers.slice(0, 3).map((c) => `${c.nombre} (${c.totalCoverages})`).join(', ');
         summary = `${events.length} cobertura(s) en ${periodLabel}. Referentes: ${top}.`;
@@ -341,6 +462,8 @@ export function extractPlanningCoverageWisdom(
         month,
         periodLabel,
         daysAnalyzed: dates.length,
+        cellsAnalyzed: scoped.length,
+        absenceContextsFound: absentContexts.length,
         events,
         coverers,
         strategyCounts,

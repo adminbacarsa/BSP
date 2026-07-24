@@ -12,7 +12,7 @@ import {
 import { toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useObjectivePlanningCatalog } from '@/hooks/useObjectivePlanningCatalog';
-import { fetchPlanningMonthShifts, previousCalendarMonth } from '@/lib/planificacion/loadPlanningMonthShifts';
+import { fetchPlanningMonthAbsences, fetchPlanningMonthShifts, previousCalendarMonth } from '@/lib/planificacion/loadPlanningMonthShifts';
 import {
     COVERAGE_STRATEGY_LABELS,
     extractPlanningCoverageWisdom,
@@ -80,7 +80,6 @@ export default function PlanningCoverageWisdomPanel({
     const [selectedKey, setSelectedKey] = useState('');
     const [year, setYear] = useState(prev.year);
     const [month, setMonth] = useState(prev.month);
-    const [publishedOnly, setPublishedOnly] = useState(true);
     const [loading, setLoading] = useState(false);
     const [wisdom, setWisdom] = useState<PlanningCoverageWisdom | null>(null);
     const [cachedCount, setCachedCount] = useState(0);
@@ -157,27 +156,36 @@ export default function PlanningCoverageWisdomPanel({
                 objectiveId: selectedObjective.objectiveId,
                 year,
                 month,
-                publishedOnly,
+            });
+            const rosterEmployeeIds = new Set(cells.map((c) => c.employeeId));
+            const absences = await fetchPlanningMonthAbsences({
+                empresaId,
+                year,
+                month,
+                rosterEmployeeIds,
             });
             const extracted = extractPlanningCoverageWisdom(cells, {
                 objectiveId: selectedObjective.objectiveId,
                 year,
                 month,
+                absences,
             });
             setWisdom(extracted);
             saveWisdomEntry(extracted);
             setCachedCount(countCachedWisdomEntries());
+            const draftCount = cells.filter((c) => c.draft).length;
+            const publishedCount = cells.length - draftCount;
             toast.success(
-                cells.length > 0
-                    ? `Sabiduría extraída: ${extracted.events.length} cobertura(s) de ${cells.length} celdas`
-                    : 'Sin turnos en ese período — probá otro mes',
+                cells.length > 0 || absences.length > 0
+                    ? `Sabiduría: ${extracted.events.length} cobertura(s) · ${cells.length} celdas (${draftCount} borrador · ${publishedCount} publicado) · ${absences.length} ausencia(s) RRHH`
+                    : 'Sin turnos ni ausencias en ese período — probá otro mes u objetivo',
             );
         } catch (err) {
             toast.error(err instanceof Error ? err.message : 'Error al cargar cronograma');
         } finally {
             setLoading(false);
         }
-    }, [selectedObjective, empresaId, year, month, publishedOnly]);
+    }, [selectedObjective, empresaId, year, month]);
 
     const suggestedCoverers = useMemo(() => {
         if (!wisdom || !suggestBand) return [];
@@ -205,7 +213,7 @@ export default function PlanningCoverageWisdomPanel({
                     </h3>
                     <p className="text-xs text-indigo-800/80 mt-1 max-w-2xl">
                         Catálogo permanente de objetivos de la plataforma con sus servicios SLA reales.
-                        Consultá la dotación vigente y extraé memoria de coberturas desde cronogramas publicados.
+                        Consultá la dotación vigente y extraé memoria de coberturas desde el cronograma (borrador o publicado).
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2 text-[10px] font-bold">
@@ -306,7 +314,7 @@ export default function PlanningCoverageWisdomPanel({
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                <div className="grid grid-cols-2 gap-2">
                                     <label className="block">
                                         <span className="text-[10px] font-black uppercase text-slate-500">Mes referencia</span>
                                         <select
@@ -328,16 +336,10 @@ export default function PlanningCoverageWisdomPanel({
                                             className="mt-1 w-full rounded-xl border border-slate-200 px-2 py-1.5 text-xs font-bold"
                                         />
                                     </label>
-                                    <label className="flex items-end gap-2 text-xs font-bold text-slate-700 pb-1.5">
-                                        <input
-                                            type="checkbox"
-                                            checked={publishedOnly}
-                                            onChange={(e) => setPublishedOnly(e.target.checked)}
-                                            className="rounded"
-                                        />
-                                        Solo publicados
-                                    </label>
                                 </div>
+                                <p className="text-[11px] font-semibold text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                                    Lee turnos en <strong>borrador</strong> y publicados — no hace falta publicar el cronograma para extraer sabiduría.
+                                </p>
                             </div>
 
                             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-sm space-y-3">

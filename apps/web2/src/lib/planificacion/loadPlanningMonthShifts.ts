@@ -1,7 +1,13 @@
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { belongsToEmpresaView } from '@/lib/multiempresa';
-import type { PlanningShiftCell } from './planningCoverageWisdom';
+import { belongsToEmpresaView, empresaCollectionQuery } from '@/lib/multiempresa';
+import type { PlanningAbsenceRecord, PlanningShiftCell } from './planningCoverageWisdom';
+import {
+    inferAbsenceCode,
+    isActiveAbsence,
+    iterateCalendarDateRange,
+    toCalendarDateStr,
+} from './absenceCodes';
 
 function isOperationalOriginShift(data: Record<string, unknown>): boolean {
     const o = String(data?.origin || '').toUpperCase();
@@ -57,8 +63,11 @@ function turnoToCell(
         code,
         positionName: String(data.positionName || data.puesto || '').trim() || undefined,
         coveredBy: data.coveredBy ? String(data.coveredBy) : undefined,
+        coveredByEmployeeId: data.coveredByEmployeeId ? String(data.coveredByEmployeeId) : undefined,
+        coveredByEmployeeName: data.coveredByEmployeeName ? String(data.coveredByEmployeeName) : undefined,
         coversEmployeeId: data.coversEmployeeId ? String(data.coversEmployeeId) : undefined,
         coverageSegmentRole: data.coverageSegmentRole ? String(data.coverageSegmentRole) : undefined,
+        comments: data.comments ? String(data.comments) : undefined,
         isFrancoTrabajado: data.isFrancoTrabajado === true || code === 'FT',
         draft: data.draft === true,
     };
@@ -114,6 +123,71 @@ export async function fetchPlanningMonthShifts(params: {
     });
 
     return cells;
+}
+
+export async function fetchPlanningMonthAbsences(params: {
+    empresaId: string;
+    year: number;
+    month: number;
+    rosterEmployeeIds: Set<string>;
+    scopeEmpresa?: boolean;
+    migracionCompleta?: boolean;
+}): Promise<PlanningAbsenceRecord[]> {
+    const {
+        empresaId,
+        year,
+        month,
+        rosterEmployeeIds,
+        scopeEmpresa = true,
+        migracionCompleta = true,
+    } = params;
+
+    if (rosterEmployeeIds.size === 0) return [];
+
+    const lastDay = new Date(year, month, 0).getDate();
+    const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
+    const monthEnd = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    const ausenciasQ = scopeEmpresa
+        ? empresaCollectionQuery('ausencias', empresaId, true)
+        : collection(db, 'ausencias');
+    const snap = await getDocs(ausenciasQ as ReturnType<typeof query>);
+    const records: PlanningAbsenceRecord[] = [];
+    const keys = new Set<string>();
+
+    snap.docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+        if (!isActiveAbsence(data)) return;
+
+        const employeeId = String(data.employeeId || '').trim();
+        if (!employeeId || !rosterEmployeeIds.has(employeeId)) return;
+
+        const startStr = toCalendarDateStr(data.startDate);
+        const endStr = toCalendarDateStr(data.endDate) || startStr;
+        if (!startStr) return;
+        if (endStr < monthStart || startStr > monthEnd) return;
+
+        const code = inferAbsenceCode(data);
+        const employeeName = String(data.employeeName || data.empleadoNombre || '').trim() || undefined;
+        const rangeStart = startStr > monthStart ? startStr : monthStart;
+        const rangeEnd = endStr < monthEnd ? endStr : monthEnd;
+
+        iterateCalendarDateRange(rangeStart, rangeEnd).forEach((dateStr) => {
+            const key = `${employeeId}__${dateStr}`;
+            if (keys.has(key)) return;
+            keys.add(key);
+            records.push({
+                employeeId,
+                employeeName,
+                dateStr,
+                code,
+                absenceId: d.id,
+            });
+        });
+    });
+
+    return records;
 }
 
 export function previousCalendarMonth(year: number, month: number): { year: number; month: number } {
