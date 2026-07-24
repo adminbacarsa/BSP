@@ -299,7 +299,7 @@ function sortCandidates(
     inCurrent: boolean,
     options?: TryFillOptions,
 ): string[] {
-    const { runtime, limitedEmpIds, empMeta } = params;
+    const { runtime, limitedEmpIds, empMeta, ctx } = params;
     const c = normBand(code);
     return [...ids].sort((a, b) => {
         const la = normBand(runtime[a].lastShiftCode);

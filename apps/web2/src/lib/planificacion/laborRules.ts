@@ -4,9 +4,12 @@
  */
 export {
     checkRestBetweenShifts,
+    checkRestBetweenShiftsDetail,
+    describeShiftSchedule,
     getAgreementRestConfig,
     getShiftStartEndAbs,
     isWorkShift,
+    resolveWorkShiftStartTime,
     workStreakHoursBackward,
     workStreakStatsBackward,
 } from './restBetweenShifts';

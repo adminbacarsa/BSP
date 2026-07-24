@@ -79,9 +79,44 @@ const HOURS_BY_CODE: Record<string, number> = {
     RET: 0,
 };
 
-/** Defaults de reloj si la celda no trae start/end (protocolo 8+8+8 estándar). */
-const END_DEF: Record<string, number> = { M: 14, T: 22, N: 6, D12: 19, N12: 7 };
-const START_DEF: Record<string, number> = { M: 6, T: 14, N: 22, D12: 7, N12: 19 };
+/** Defaults de reloj si la celda no trae start/end (protocolo 8+8+8 — alineado con fixedBandFloater). */
+const END_DEF: Record<string, number> = { M: 15, T: 23, N: 7, D12: 19, N12: 7 };
+const START_DEF: Record<string, number> = { M: 7, T: 15, N: 23, D12: 7, N12: 19 };
+
+/** Horario HH:mm por código cuando la celda no trae `startTime` válido. */
+export const DEFAULT_SHIFT_START: Record<string, string> = {
+    M: '07:00', T: '15:00', N: '23:00', D12: '07:00', N12: '19:00', EN: '09:00',
+};
+
+export const resolveWorkShiftStartTime = (code: string, startTime?: string | null): string => {
+    const c = String(code || '').toUpperCase();
+    if (!startTime || startTime === '00:00') return DEFAULT_SHIFT_START[c] || '07:00';
+    return startTime;
+};
+
+const fmtHm = (d: Date): string => {
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+};
+
+const fmtDateShort = (dateStr: string): string => {
+    const [, month, day] = dateStr.split('-');
+    return `${day}/${month}`;
+};
+
+/** Etiqueta legible: `08/07 M (07:00→15:00)` o con fin al día siguiente. */
+export const describeShiftSchedule = (dateStr: string, sh: any): string => {
+    const code = String(sh?.code || sh?.type || '?').toUpperCase();
+    const se = getShiftStartEndAbs(dateStr, sh);
+    if (!se) return `${fmtDateShort(dateStr)} ${code}`;
+    const endDateKey = getDateKey(se.end);
+    const overnight = endDateKey !== dateStr;
+    const endPart = overnight
+        ? `${fmtDateShort(endDateKey)} ${fmtHm(se.end)}`
+        : fmtHm(se.end);
+    return `${fmtDateShort(dateStr)} ${code} (${fmtHm(se.start)}→${endPart})`;
+};
 
 const parseHour = (t: any): number | null => {
     if (t == null || t === '' || t === '00:00') return null;
@@ -297,6 +332,15 @@ export const getAgreementRestConfig = (emp: any, agreements: any[]): AgreementRe
     return null;
 };
 
+export type RestCheckViolation = {
+    message: string;
+    proposedSchedule: string;
+    neighborBefore?: string;
+    neighborAfter?: string;
+    gapHours?: number;
+    requiredRestHours?: number;
+};
+
 export type RestCheckParams = {
     empId: string;
     targetDateStr: string;
@@ -307,9 +351,9 @@ export type RestCheckParams = {
 };
 
 /**
- * Devuelve mensaje de advertencia o null si cumple.
+ * Devuelve detalle de advertencia o null si cumple.
  */
-export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
+export const checkRestBetweenShiftsDetail = (p: RestCheckParams): RestCheckViolation | null => {
     const minRest = Number.isFinite(p.cfg.minRestBetweenShiftsHours!) ? p.cfg.minRestBetweenShiftsHours! : DEFAULT_MIN_REST;
     const thr = Number.isFinite(p.cfg.longRestAfterWorkedHours!) ? p.cfg.longRestAfterWorkedHours! : DEFAULT_STREAK_THRESHOLD;
     const longRest = Number.isFinite(p.cfg.minLongRestHours!) ? p.cfg.minLongRestHours! : DEFAULT_LONG_REST;
@@ -318,23 +362,33 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
 
     const proposedShift = {
         code: p.proposed.code,
-        startTime: p.proposed.startTime,
+        startTime: resolveWorkShiftStartTime(p.proposed.code, p.proposed.startTime),
         endTime: p.proposed.endTime,
         hours: p.proposed.hours,
     };
     const seNew = getShiftStartEndAbs(p.targetDateStr, proposedShift);
     if (!seNew) return null;
 
+    const proposedSchedule = describeShiftSchedule(p.targetDateStr, proposedShift);
     const newCode = String(p.proposed.code || '').toUpperCase();
     if (!NIGHT_BANDS.has(newCode) && nightBlocksNonNightWithoutFranco(p.empId, p.targetDateStr, p.getShift)) {
-        return 'Tras noche (N/N12) debe haber franco (F/FF/FP/FT) antes del siguiente turno (mín. 12h de descanso).';
+        return {
+            message: 'Tras noche (N/N12) debe haber franco (F/FF/FP/FT) antes del siguiente turno (mín. 12h de descanso).',
+            proposedSchedule,
+        };
     }
 
-    const prevCal = p.getShift(p.empId, addDaysStr(p.targetDateStr, -1));
+    const prevCalDate = addDaysStr(p.targetDateStr, -1);
+    const prevCal = p.getShift(p.empId, prevCalDate);
     if (prevCal && isWorkShift(prevCal)) {
         const prevCode = String(prevCal.code || prevCal.type || '').toUpperCase();
         if (forbiddenEveningToMorningWithoutBreak(prevCode, newCode)) {
-            return 'T→M consecutivo prohibido: mínimo 12h de descanso entre tarde y mañana del día siguiente.';
+            const prevSchedule = describeShiftSchedule(prevCalDate, prevCal);
+            return {
+                message: `T→M consecutivo prohibido: ${prevSchedule} → ${proposedSchedule} (mín. 12h entre tarde y mañana del día siguiente).`,
+                proposedSchedule,
+                neighborBefore: prevSchedule,
+            };
         }
     }
 
@@ -347,13 +401,19 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
         const need = needLong ? longRest : minRest;
         const gap = hoursBetween(prev.end, seNew.start);
         if (gap + 1e-6 < need) {
-            return `Convenio: descanso insuficiente respecto al turno anterior (${gap.toFixed(1)}h < ${need}h; racha previa ~${streakBeforePrev.hours}h / ${streakBeforePrev.workDays}d).`;
+            const prevSchedule = describeShiftSchedule(prev.dateStr, prev.shift);
+            return {
+                message: `Convenio: descanso insuficiente respecto al turno anterior — ${prevSchedule} → ${proposedSchedule}: ${gap.toFixed(1)}h < ${need}h (racha previa ~${streakBeforePrev.hours}h / ${streakBeforePrev.workDays}d).`,
+                proposedSchedule,
+                neighborBefore: prevSchedule,
+                gapHours: gap,
+                requiredRestHours: need,
+            };
         }
     }
 
     const next = findNextWorkBoundary(p.empId, p.targetDateStr, p.getShift);
     if (next) {
-        // Racha de trabajo que termina al cerrar el turno propuesto (incluye propuesto + días laborales consecutivos hacia atrás).
         const streakEndingAtProposed = workStreakStatsBackward(p.empId, p.targetDateStr, p.getShift);
         const needLongAfter =
             streakEndingAtProposed.hours >= thr ||
@@ -361,26 +421,38 @@ export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
         const needAfter = needLongAfter ? longRest : minRest;
         const gap2 = hoursBetween(seNew.end, next.start);
         if (gap2 + 1e-6 < needAfter) {
-            return `Convenio: descanso insuficiente respecto al turno siguiente (${gap2.toFixed(1)}h < ${needAfter}h; racha que termina este día ~${streakEndingAtProposed.hours}h / ${streakEndingAtProposed.workDays}d).`;
+            const nextSchedule = describeShiftSchedule(next.dateStr, next.shift);
+            return {
+                message: `Convenio: descanso insuficiente respecto al turno siguiente — ${proposedSchedule} → ${nextSchedule}: ${gap2.toFixed(1)}h < ${needAfter}h (racha que termina este día ~${streakEndingAtProposed.hours}h / ${streakEndingAtProposed.workDays}d).`,
+                proposedSchedule,
+                neighborAfter: nextSchedule,
+                gapHours: gap2,
+                requiredRestHours: needAfter,
+            };
         }
     }
 
-    // ── BLOQUEO DURO DEL CICLO ────────────────────────────────────────────
-    // La racha TOTAL = días trabajados antes del propuesto (inclusive) + días
-    // laborales consecutivos DESPUÉS del propuesto. Hay que contar ambos lados
-    // porque el balance-swap o el emergency pass pueden insertar un turno entre
-    // dos bloques de trabajo, creando 7 días corridos sin que la check backward
-    // (unilateral) lo detecte.
     const maxConsRaw = p.cfg.maxConsecutiveWorkDays;
     if (Number.isFinite(maxConsRaw!) && (maxConsRaw as number) > 0) {
         const maxCons = maxConsRaw as number;
         const backStreak = workStreakStatsBackward(p.empId, p.targetDateStr, p.getShift);
-        const fwdStreak  = workStreakStatsForward(p.empId, p.targetDateStr, p.getShift);
+        const fwdStreak = workStreakStatsForward(p.empId, p.targetDateStr, p.getShift);
         const total = backStreak.workDays + fwdStreak.workDays;
         if (total > maxCons) {
-            return `Ciclo: ${total} días seguidos de trabajo (máximo permitido por el ciclo: ${maxCons}).`;
+            return {
+                message: `Ciclo: ${total} días seguidos de trabajo (máximo permitido por el ciclo: ${maxCons}).`,
+                proposedSchedule,
+            };
         }
     }
 
     return null;
+};
+
+/**
+ * Devuelve mensaje de advertencia o null si cumple.
+ */
+export const checkRestBetweenShifts = (p: RestCheckParams): string | null => {
+    const detail = checkRestBetweenShiftsDetail(p);
+    return detail?.message ?? null;
 };

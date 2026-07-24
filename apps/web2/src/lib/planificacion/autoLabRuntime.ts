@@ -5,6 +5,8 @@ import {
 } from './autoPlanningBrain';
 import type { V2AbsenceMap, V2EmployeeDef } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
+import type { AutoLabScheduleOutcome } from './autoLabSchedule';
+import { buildEmployeePositionMap } from './autoLabSchedule';
 import {
     calculateSlaHoursForVigencia,
     getServiceDaysInMonth,
@@ -67,20 +69,30 @@ export function estimateSlaVendidas(
 
 export function buildAbsencesForCase(
     caseDef: AutoLabCaseDefinition,
-    daysInMonth: Date[],
+    fullMonthDays: Date[],
     employees: V2EmployeeDef[],
 ): V2AbsenceMap {
     const absences: V2AbsenceMap = {};
-    if (!caseDef.absences?.length) return absences;
 
-    for (const a of caseDef.absences) {
-        const emp = employees[a.empIndex];
-        const day = daysInMonth[a.dayOfMonth - 1];
-        if (!emp || !day) continue;
-        const dateStr = getAutoLabDateKey(day);
-        if (!absences[emp.id]) absences[emp.id] = new Map();
-        absences[emp.id].set(dateStr, a.code);
+    if (caseDef.absencesByDate?.length) {
+        for (const a of caseDef.absencesByDate) {
+            if (!employees.some((e) => e.id === a.empId)) continue;
+            if (!absences[a.empId]) absences[a.empId] = new Map();
+            absences[a.empId].set(a.dateStr, a.code);
+        }
     }
+
+    if (caseDef.absences?.length) {
+        for (const a of caseDef.absences) {
+            const emp = employees[a.empIndex];
+            const day = fullMonthDays[a.dayOfMonth - 1];
+            if (!emp || !day) continue;
+            const dateStr = getAutoLabDateKey(day);
+            if (!absences[emp.id]) absences[emp.id] = new Map();
+            absences[emp.id].set(dateStr, a.code);
+        }
+    }
+
     return absences;
 }
 
@@ -91,6 +103,7 @@ export interface AutoLabRunResult {
     brain: AutoPlanningBrainResult;
     employees: V2EmployeeDef[];
     positions: AutoLabCaseDefinition['positions'];
+    absences: V2AbsenceMap;
     slaVendidas: number;
     daysInMonth: Date[];
     fullMonthDays: Date[];
@@ -174,6 +187,7 @@ export function runAutoLabCase(
         brain,
         employees,
         positions: caseDef.positions,
+        absences,
         slaVendidas,
         daysInMonth,
         fullMonthDays,
@@ -185,8 +199,15 @@ export function runAutoLabCase(
 export function buildAutoLabExportJson(
     result: AutoLabRunResult,
     caseDef: AutoLabCaseDefinition,
+    scheduleOutcome?: AutoLabScheduleOutcome | null,
 ): Record<string, unknown> {
     const { brain } = result;
+    const gen = scheduleOutcome?.generation;
+    const positionGroups = gen?.stats.positionGroups;
+    const empPositionMap = gen
+        ? buildEmployeePositionMap(result.employees, gen.assignments, positionGroups)
+        : {};
+
     return {
         autoLabVersion: 1,
         exportedAt: new Date().toISOString(),
@@ -217,6 +238,9 @@ export function buildAutoLabExportJson(
             rotationMode: caseDef.rotationMode,
             slotsPerDay: result.slotsPerDay,
             peakConcurrent: result.peakConcurrent,
+            absences: Object.entries(result.absences).flatMap(([empId, byDate]) =>
+                Array.from(byDate.entries()).map(([dateStr, code]) => ({ empId, dateStr, code })),
+            ),
         },
         brain: {
             pickedCycle: brain.pickedCycle,
@@ -239,5 +263,28 @@ export function buildAutoLabExportJson(
             warnings: brain.warnings,
             diagnosis: brain.diagnosis,
         },
+        schedule: gen
+            ? {
+                pipeline: scheduleOutcome?.pipeline,
+                totalBillableHours: gen.stats.totalBillableHours,
+                uncoveredSlots: gen.stats.uncoveredSlots,
+                positionGroups,
+                primaryShiftByEmp: gen.stats.primaryShiftByEmp,
+                employeePositionMap: empPositionMap,
+                externalRetEmployees: (scheduleOutcome?.externalRetEmployees ?? []).map((e) => ({
+                    id: e.id,
+                    nombre: e.nombre,
+                })),
+                externalRetActions: scheduleOutcome?.externalRetActions ?? [],
+                assignmentsSample: gen.assignments.slice(0, 40).map((a) => ({
+                    date: a.dateStr,
+                    empId: a.empId,
+                    positionName: a.positionName,
+                    code: a.code,
+                })),
+            }
+            : scheduleOutcome?.error
+              ? { error: scheduleOutcome.error }
+              : undefined,
     };
 }

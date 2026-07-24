@@ -40,6 +40,8 @@ export const SUVICO_POLICY = {
      */
     ALERTS: {
         WEEK_BILLABLE_HOURS_DEFAULT: 48,
+        /** Tope semanal con extensión 12h (contingencia: 4×8 + 2×12 = 56h). */
+        MAX_WEEKLY_BILLABLE_HOURS_WITH_EXTENSION: 56,
         /** Puestos L–V u otros no 24×7 con jornadas largas estructurales (ej. 5×10h → 50h/semana). */
         WEEK_BILLABLE_HOURS_LIMITED_POSITION: 50,
         /** Sugerencias post-grilla: priorizar “gastar” RET entre quienes llevan menos horas facturables en el mes. */

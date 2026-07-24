@@ -8,6 +8,13 @@ export interface AutoLabCaseAbsence {
     code: string;
 }
 
+/** Ausencia por guardia y fecha (YYYY-MM-DD) — lab custom y autocorrección. */
+export interface AutoLabCaseAbsenceByDate {
+    empId: string;
+    dateStr: string;
+    code: string;
+}
+
 export interface AutoLabCaseDefinition {
     id: string;
     order: number;
@@ -23,6 +30,8 @@ export interface AutoLabCaseDefinition {
     rotateShiftsOverride?: boolean;
     cycleOverride?: string;
     absences?: AutoLabCaseAbsence[];
+    /** Ausencias por guardia y fecha (prioridad sobre absences por índice). */
+    absencesByDate?: AutoLabCaseAbsenceByDate[];
     contingencyDays?: number[];
     slaVendidas?: number;
     /** Vigencia del contrato (modo custom / servicio real). */
@@ -158,6 +167,40 @@ export const AUTO_LAB_CASES: AutoLabCaseDefinition[] = [
         rotationMode: 'rotative',
         rotateShiftsOverride: true,
         slaVendidas: 2880,
+    },
+    {
+        id: 'case-05-pax2-ausencia',
+        order: 5,
+        title: '24hs pax 2 — ausencia y cobertura',
+        subtitle: '1 puesto · pax 2 · 8 guardias · ausencia día 17',
+        description:
+            'Escenario real Bacar: un puesto 24hs con dos personas simultáneas (pax 2). G01 con enfermedad el día 17. Valida RET externo, contingencia híbrida sin RET y que no se mezcle D12+D12+N12+M+T.',
+        expectations: [
+            'Servicio diario = 6 slots (2× M+T+N).',
+            'Con RET externo: dos rotaciones M+T+N × 8h (ej. G02 M, G03 T, G05 N + G06 M, G07 T, RET1 N).',
+            'Sin RET: contingencia híbrida — 1× D12+N12 + 1× M+T+N (5 guardias).',
+            'RET en celda = capacidad disponible, no hueco SLA.',
+            'No mezclar esquemas incompatibles (D12+M+T = 28h).',
+        ],
+        coverageNotes:
+            'Prioridad: Modo 8 → RET interno → RET externo → híbrido D12+N12+M+T+N → FT manual.',
+        positions: [puesto24hs('Puesto 1', 2)],
+        employeeCount: 8,
+        cycle: '6+2',
+        rotationMode: 'rotative',
+        rotateShiftsOverride: true,
+        absences: [{ empIndex: 0, dayOfMonth: 17, code: 'E' }],
+    },
+];
+
+/** Próximo ítem (fuera del lab por ahora): servicios reales desde Firestore/SLA. */
+export const AUTO_LAB_PLANNED_CASES: Pick<AutoLabCaseDefinition, 'id' | 'title' | 'subtitle' | 'description'>[] = [
+    {
+        id: 'case-06-servicio-real',
+        title: 'Servicio real — SLA + turnos publicados',
+        subtitle: 'Cargar desde emulador/producción',
+        description:
+            'Conectar un objetivo real (servicios_sla + turnos del mes anterior) para validar el motor contra datos Bacar. Sabiduría de coberturas y ranking histórico — pendiente de integrar.',
     },
 ];
 

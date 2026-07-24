@@ -17,14 +17,14 @@ import type {
     V2GenerateStats,
 } from './autoScheduleEngineV2';
 import { effectiveShiftsForPositionDay, pickRepresentativeCycle, positionIsActiveOn } from './autoScheduleEngineV2';
-import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
+import { isModo12Day } from './objectiveCoverageDemand';
+import { checkRestBetweenShiftsDetail, resolveWorkShiftStartTime, type AgreementRestConfig } from './restBetweenShifts';
 import { SUVICO_POLICY } from './suvicoPolicy';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
 const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET']);
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
-const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00', EN: '09:00' };
 
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S']; // 0=Dom, 1=Lun...
 
@@ -56,6 +56,12 @@ export interface RestViolation {
     dateStr: string;
     shiftCode: string;
     reason: string;
+    /** Horario del turno evaluado, ej. `08/07 M (07:00→15:00)`. */
+    shiftSchedule?: string;
+    neighborBefore?: string;
+    neighborAfter?: string;
+    gapHours?: number;
+    requiredRestHours?: number;
 }
 
 export interface LicenseConflict {
@@ -127,7 +133,20 @@ function buildDemandSlots(
             if (pos.excludedDates?.includes(dateStr)) return;
             const qty = Number(pos.qty) || 0;
             if (!qty) return;
-            const eff = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+            const modo12Day = isModo12Day(dateStr, ctx);
+            let eff = modo12Day
+                ? (pos.shifts || [])
+                    .filter((sh) => {
+                        const code = String(sh.code || '').toUpperCase();
+                        return code === 'D12' || code === 'N12';
+                    })
+                : effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles, dateStr);
+            if (modo12Day && eff.length === 0) {
+                eff = [
+                    { code: 'D12', name: 'Diurno 12h', hours: 12 },
+                    { code: 'N12', name: 'Nocturno 12h', hours: 12 },
+                ];
+            }
             eff.forEach((sh) => {
                 const code = String(sh.code || '').toUpperCase();
                 if (!code || NON_BILLABLE.has(code) || ABSENCE_CODES.has(code)) return;
@@ -160,7 +179,7 @@ export function buildAssignmentGetShift(assignments: V2Assignment[], absences: V
         const isNonWork = c === 'RET' || FRANCO_CODES.has(c) || ABSENCE_CODES.has(c);
         return {
             code: c,
-            startTime: a.startTime || (isNonWork ? '00:00' : DEFAULT_START[c] || '07:00'),
+            startTime: isNonWork ? '00:00' : resolveWorkShiftStartTime(c, a.startTime),
             hours: isNonWork ? 0 : (Number(a.hours) || SHIFT_HRS[c] || 8),
         };
     };
@@ -189,14 +208,21 @@ export function verifyScheduleCoverage(
     // D12 ≡ M y N12 ≡ N para matching: en modo extensión el motor asigna D12/N12
     // cuando T está en franco; el slot de demanda sigue siendo M/N.
     const normCode = (c: string): string => c === 'D12' ? 'M' : c === 'N12' ? 'N' : c;
-    const assignKey = (a: V2Assignment) => `${a.dateStr}__${a.positionName}__${normCode(String(a.code || '').toUpperCase())}`;
+    const slotKey = (dateStr: string, positionName: string, shiftCode: string) =>
+        `${dateStr}__${positionName}__${shiftCode}`;
+
     const realCount: Record<string, number> = {};
     assignments.forEach((a) => {
         const c = String(a.code || '').toUpperCase();
         if (!c || NON_BILLABLE.has(c) || ABSENCE_CODES.has(c)) return;
         if (!a.positionName) return;
-        const k = assignKey(a);
-        realCount[k] = (realCount[k] || 0) + 1;
+        const rawK = slotKey(a.dateStr, a.positionName, c);
+        realCount[rawK] = (realCount[rawK] || 0) + 1;
+        const normalized = normCode(c);
+        const normK = slotKey(a.dateStr, a.positionName, normalized);
+        if (normK !== rawK) {
+            realCount[normK] = (realCount[normK] || 0) + 1;
+        }
     });
 
     // Inferencia Modo 12 (opcional): D12+N12 no cubren la franja T (14-22) sin solape real.
@@ -214,8 +240,16 @@ export function verifyScheduleCoverage(
                 const dateStr = ctx.getDateKey(d);
                 const kD12 = `${dateStr}__${pos.positionName}__D12`;
                 const kN12 = `${dateStr}__${pos.positionName}__N12`;
-                const kT   = `${dateStr}__${pos.positionName}__T`;
-                if ((ext12Count[kD12] ?? 0) >= pqty && (ext12Count[kN12] ?? 0) >= pqty && !(realCount[kT] > 0)) {
+                const kT = `${dateStr}__${pos.positionName}__T`;
+                const d12Have = ext12Count[kD12] ?? 0;
+                const n12Have = ext12Count[kN12] ?? 0;
+                const tHave = realCount[kT] ?? 0;
+                const hybridPairs = Math.min(d12Have, n12Have);
+
+                if (hybridPairs > 0 && hybridPairs < pqty) {
+                    const tInfer = Math.min(hybridPairs, Math.max(0, pqty - tHave));
+                    realCount[kT] = tHave + tInfer;
+                } else if (d12Have >= pqty && n12Have >= pqty && tHave === 0) {
                     realCount[kT] = pqty;
                 }
             });
@@ -225,7 +259,7 @@ export function verifyScheduleCoverage(
     const uncovered: UncoveredSlot[] = [];
     let coveredCount = 0;
     demand.forEach((slot) => {
-        const k = `${slot.dateStr}__${slot.positionName}__${slot.shiftCode}`;
+        const k = slotKey(slot.dateStr, slot.positionName, slot.shiftCode);
         const have = realCount[k] || 0;
         const covered = Math.min(have, slot.qty);
         coveredCount += covered;
@@ -281,13 +315,13 @@ export function verifyScheduleCoverage(
         if (FRANCO_CODES.has(c) || ABSENCE_CODES.has(c) || c === 'RET') return;
         // Assignments sin puesto son registros informativos (standby/banda), no cuentan para descanso
         if (!a.positionName) return;
-        const startResolved = a.startTime || DEFAULT_START[c] || '07:00';
+        const startResolved = resolveWorkShiftStartTime(c, a.startTime);
         const hrs = Number(a.hours) || SHIFT_HRS[c] || 8;
         // Puestos L-V/custom: su horario está fijo por el servicio, no aplica tope consecutivo del ciclo.
         const assignedPos = a.positionName ? ctx.positions.find(p => p.positionName === a.positionName) : null;
         const isLimitedPos = !!assignedPos && !DAY_LETTERS.every(l => positionIsActiveOn(assignedPos!, l));
         const restCfg = isLimitedPos ? VERIFY_REST_BASE : VERIFY_REST_CFG;
-        const violation = checkRestBetweenShifts({
+        const violation = checkRestBetweenShiftsDetail({
             empId: a.empId,
             targetDateStr: a.dateStr,
             proposed: { code: c, startTime: startResolved, hours: hrs },
@@ -299,7 +333,12 @@ export function verifyScheduleCoverage(
                 empId: a.empId,
                 dateStr: a.dateStr,
                 shiftCode: c,
-                reason: violation,
+                reason: violation.message,
+                shiftSchedule: violation.proposedSchedule,
+                neighborBefore: violation.neighborBefore,
+                neighborAfter: violation.neighborAfter,
+                gapHours: violation.gapHours,
+                requiredRestHours: violation.requiredRestHours,
             });
         }
     });

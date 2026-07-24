@@ -27,6 +27,7 @@ import type {
 import { pickRepresentativeCycle, effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
 import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
+import { rankReplacementCandidates } from './coverageCandidateRank';
 import { SUVICO_POLICY } from './suvicoPolicy';
 
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9, RO: 10 };
@@ -34,6 +35,15 @@ const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:0
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
 const WEEK_HARD_CAP = 48; // CCT 422/05 — nunca superar 48h en una semana ISO
+
+function canSwapFromFranco(ctx: V2EngineContext): boolean {
+    return ctx.allowFrancoWorkedRescue === true;
+}
+
+function isSwapCandidateCode(code: string, ctx: V2EngineContext): boolean {
+    if (code === 'RET') return true;
+    return canSwapFromFranco(ctx) && FRANCO_CODES.has(code);
+}
 
 function isoWeekKey(dateStr: string): string {
     const d = new Date(dateStr);
@@ -59,8 +69,19 @@ function billableHoursByEmp(assignments: V2Assignment[]): Map<string, number> {
     return m;
 }
 
-function sortGroupByBillableAsc(group: string[], hours: Map<string, number>): string[] {
-    return [...group].sort((a, b) => (hours.get(a) || 0) - (hours.get(b) || 0));
+function sortGroupForReplacement(
+    group: string[],
+    ctx: V2EngineContext,
+    positionName: string,
+    dateStr: string,
+    hours: Map<string, number>,
+): string[] {
+    return rankReplacementCandidates(group, ctx, {
+        positionName,
+        dateStr,
+        positionGroup: group,
+        billableHours: hours,
+    });
 }
 
 const FIX_REST_BASE: AgreementRestConfig = {
@@ -242,14 +263,14 @@ function fixRestViolation(
     // 1. Buscar un compañero del grupo con RET/F ese día que pueda tomar el turno
     const group = siblings(positionName, stats);
     const hrsMap = billableHoursByEmp(assignments);
-    const groupSorted = sortGroupByBillableAsc(group, hrsMap);
+    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap);
     for (const otherId of groupSorted) {
         if (otherId === empId) continue;
         const otherKey = `${otherId}__${dateStr}`;
         const other = byKey.get(otherKey);
         if (!other) continue;
         const c = String(other.code || '').toUpperCase();
-        if (c !== 'RET' && !FRANCO_CODES.has(c)) continue;
+        if (!isSwapCandidateCode(c, ctx)) continue;
 
         // Simular: poner a "other" en ese turno y "mine" en RET; ver si cumple
         const saveOther = { ...other };
@@ -273,7 +294,46 @@ function fixRestViolation(
         Object.assign(mine, saveMine);
     }
 
-    // 2. Sin swap viable → degradar a RET (cae el slot, queda legal)
+    // 2. Pool RET externo (otro objetivo) antes de degradar el slot
+    const retPool = ctx.globalRetPool ?? [];
+    for (const ext of retPool) {
+        if (group.includes(ext.id)) continue;
+        const extKey = `${ext.id}__${dateStr}`;
+        let extCell = byKey.get(extKey);
+        if (!extCell) {
+            extCell = {
+                empId: ext.id,
+                dateStr,
+                positionName: '',
+                code: 'RET',
+                name: 'Retén',
+                hours: 0,
+                startTime: '00:00',
+                isReten: true,
+                isFranco: false,
+            };
+            assignments.push(extCell);
+            byKey.set(extKey, extCell);
+        }
+        const saveExt = { ...extCell };
+        const saveMine = { ...mine };
+        setAsShift(extCell, shiftCode, positionName);
+        setAsRet(mine);
+        if (canTakeShift(ext.id, dateStr, shiftCode, assignments, ctx, cfg)) {
+            log.push({
+                iteration,
+                issueType: 'rest_swap',
+                empId,
+                dateStr,
+                detail: `Swap RET externo: ${empId} → RET, ${ext.id} toma ${shiftCode} en ${positionName}.`,
+            });
+            return 'swapped';
+        }
+        Object.assign(extCell, saveExt);
+        Object.assign(mine, saveMine);
+    }
+
+    // 3. Sin swap viable → degradar a RET (cae el slot, queda legal)
     setAsRet(mine);
     log.push({
         iteration,
@@ -317,13 +377,13 @@ function fixLicenseConflict(
     // Buscar reemplazo en el mismo grupo (RET/F)
     const group = siblings(positionName, stats);
     const hrsMap = billableHoursByEmp(assignments);
-    const groupSorted = sortGroupByBillableAsc(group, hrsMap);
+    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap);
     for (const otherId of groupSorted) {
         if (otherId === empId) continue;
         const other = byKey.get(`${otherId}__${dateStr}`);
         if (!other) continue;
         const c = String(other.code || '').toUpperCase();
-        if (c !== 'RET' && !FRANCO_CODES.has(c)) continue;
+        if (!isSwapCandidateCode(c, ctx)) continue;
         if (!canTakeShift(otherId, dateStr, shiftCode, assignments, ctx, cfg)) continue;
         setAsShift(other, shiftCode, positionName);
         log.push({
@@ -437,7 +497,7 @@ function fixOverlapRebalance(
     return filled;
 }
 
-/** Intenta cubrir un slot descubierto (positionName, dateStr, shiftCode) con un RET/F del grupo. */
+/** Intenta cubrir un slot descubierto con RET/F del grupo o guardia libre del objetivo. */
 function fixUncoveredSlot(
     positionName: string,
     dateStr: string,
@@ -454,24 +514,70 @@ function fixUncoveredSlot(
     let filled = 0;
     const group = siblings(positionName, stats);
     const hrsMap = billableHoursByEmp(assignments);
-    const groupSorted = sortGroupByBillableAsc(group, hrsMap);
-    for (const otherId of groupSorted) {
-        if (filled >= qtyMissing) break;
-        const other = byKey.get(`${otherId}__${dateStr}`);
-        if (!other) continue;
-        const c = String(other.code || '').toUpperCase();
-        if (c !== 'RET' && !FRANCO_CODES.has(c)) continue;
-        if (!canTakeShift(otherId, dateStr, shiftCode, assignments, ctx, cfg)) continue;
-        setAsShift(other, shiftCode, positionName);
+    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap);
+
+    const tryFill = (otherId: string, prevCode: string): boolean => {
+        if (!canTakeShift(otherId, dateStr, shiftCode, assignments, ctx, cfg)) return false;
+        let other = byKey.get(`${otherId}__${dateStr}`);
+        if (!other) {
+            other = {
+                empId: otherId,
+                dateStr,
+                positionName,
+                code: shiftCode,
+                name: shiftCode,
+                hours: SHIFT_HRS[shiftCode] || 8,
+                startTime: DEFAULT_START[shiftCode] || '07:00',
+                isFranco: false,
+            };
+            assignments.push(other);
+            byKey.set(`${otherId}__${dateStr}`, other);
+        } else {
+            setAsShift(other, shiftCode, positionName);
+        }
         filled++;
         log.push({
             iteration,
             issueType: 'uncovered_fill',
             empId: otherId,
             dateStr,
-            detail: `Cubre ${shiftCode} en ${positionName} (estaba ${c}).`,
+            detail: `Cubre ${shiftCode} en ${positionName} (estaba ${prevCode}).`,
         });
+        return true;
+    };
+
+    for (const otherId of groupSorted) {
+        if (filled >= qtyMissing) break;
+        const other = byKey.get(`${otherId}__${dateStr}`);
+        if (!other) {
+            tryFill(otherId, 'ST');
+            continue;
+        }
+        const c = String(other.code || '').toUpperCase();
+        if (!isSwapCandidateCode(c, ctx)) continue;
+        tryFill(otherId, c);
     }
+
+    if (filled < qtyMissing) {
+        const retPool = ctx.globalRetPool ?? [];
+        for (const ext of retPool) {
+            if (filled >= qtyMissing) break;
+            if (group.includes(ext.id)) continue;
+            tryFill(ext.id, 'RET');
+        }
+    }
+
+    if (filled < qtyMissing) {
+        const objectivePool = ctx.employees.map((e) => e.id);
+        const extraSorted = sortGroupForReplacement(objectivePool, ctx, positionName, dateStr, hrsMap)
+            .filter((id) => !group.includes(id));
+        for (const otherId of extraSorted) {
+            if (filled >= qtyMissing) break;
+            if (byKey.has(`${otherId}__${dateStr}`)) continue;
+            tryFill(otherId, 'ST');
+        }
+    }
+
     return filled;
 }
 

@@ -61,6 +61,7 @@ import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagg
 import { enforceFrancoStreakRules } from './francoStreakGuard';
 import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
 import { assignmentBreaksBandTransition, nextAssignmentBreaksBandTransition, normBand } from './rotativeBandGuard';
+import { computeModo12AbsenceOfferCredit } from './planningCoveragePolicy';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -419,6 +420,10 @@ export interface V2FeasibilityReport {
         effectiveTargetHours: number;
         /** Capacidad máxima del equipo (Σ availableHours). */
         offerHours: number;
+        /** Crédito Modo 12: ausencias V/L/E cubiertas con D12+N12 (menos cabezas que M+T+N). */
+        modo12AbsenceOfferCredit?: number;
+        /** offerHours + modo12AbsenceOfferCredit */
+        adjustedOfferHours?: number;
         peopleAvailable: number;
         /** Personas en simultáneo en el día estructural más cargado. */
         peakConcurrent: number;
@@ -915,10 +920,33 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
             `Estos empleados van a quedar sin turnos facturables (como mucho 1 en RET stand-by; el resto en Franco).`
         );
     }
-    if (offerHours < effectiveTargetHours) {
-        const falta = Math.round(effectiveTargetHours - offerHours);
+
+    const monthDateStrs = ctx.daysInMonth.map((d) => ctx.getDateKey(d));
+    const employeeIds = ctx.employees.map((e) => e.id);
+    const modo12AbsenceOfferCredit = computeModo12AbsenceOfferCredit({
+        absences: ctx.absences,
+        employeeIds,
+        monthDateStrs,
+        avgShiftHours,
+    });
+    const adjustedOfferHours = offerHours + modo12AbsenceOfferCredit;
+
+    if (adjustedOfferHours < effectiveTargetHours) {
+        const falta = Math.round(effectiveTargetHours - adjustedOfferHours);
+        const retHint = falta <= 40
+            ? ' Podés cubrir el remanente con RET externo (fuera de plantilla) sin forzar horas extra CCT.'
+            : '';
         reasons.push(
-            `Horas insuficientes: el equipo aporta como máximo ${Math.round(offerHours)}h y el objetivo es ${Math.round(effectiveTargetHours)}h (faltan ${falta}h).`
+            `Horas insuficientes: el equipo aporta como máximo ${Math.round(adjustedOfferHours)}h `
+            + `(oferta ${Math.round(offerHours)}h`
+            + (modo12AbsenceOfferCredit > 0 ? ` + crédito Modo 12 ${Math.round(modo12AbsenceOfferCredit)}h` : '')
+            + `) y el objetivo es ${Math.round(effectiveTargetHours)}h (faltan ${falta}h).${retHint}`,
+        );
+    } else if (modo12AbsenceOfferCredit > 0 && offerHours < effectiveTargetHours) {
+        warnings.push(
+            `Modo 12 por ausencias V/L/E: crédito de ${Math.round(modo12AbsenceOfferCredit)}h en oferta `
+            + `(D12+N12 cierra con 2 guardias en lugar de 3). Oferta ajustada ${Math.round(adjustedOfferHours)}h `
+            + `vs ${Math.round(effectiveTargetHours)}h objetivo.`,
         );
     }
     // Pico simultáneo solo bloquea si encima ya falta gente (evita pánico cuando estructura > vendidas).
@@ -974,6 +1002,8 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
             contractedHours,
             effectiveTargetHours,
             offerHours,
+            modo12AbsenceOfferCredit,
+            adjustedOfferHours,
             peopleAvailable,
             peakConcurrent,
             peopleNeededForTarget,

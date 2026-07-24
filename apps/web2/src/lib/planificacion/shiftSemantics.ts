@@ -14,9 +14,9 @@ export const SHIFT_PROTOCOL = {
         /** Cobertura típica administrativa; el puesto puede acotar `activeDays` en el SLA. */
         typicalActiveDays: ['L', 'M', 'X', 'J', 'V'] as const,
     },
-    M: { label: 'Mañana', defaultHours: 8, defaultStart: '06:00', defaultEnd: '14:00' },
-    T: { label: 'Tarde', defaultHours: 8, defaultStart: '14:00', defaultEnd: '22:00' },
-    N: { label: 'Noche', defaultHours: 8, defaultStart: '22:00', defaultEnd: '06:00' },
+    M: { label: 'Mañana', defaultHours: 8, defaultStart: '07:00', defaultEnd: '15:00' },
+    T: { label: 'Tarde', defaultHours: 8, defaultStart: '15:00', defaultEnd: '23:00' },
+    N: { label: 'Noche', defaultHours: 8, defaultStart: '23:00', defaultEnd: '07:00' },
     D12: { label: 'Diurno 12h', defaultHours: 12, defaultStart: '07:00', defaultEnd: '19:00' },
     N12: { label: 'Nocturno 12h', defaultHours: 12, defaultStart: '19:00', defaultEnd: '07:00' },
     RET: { label: 'Retención pasiva', defaultHours: 0 },

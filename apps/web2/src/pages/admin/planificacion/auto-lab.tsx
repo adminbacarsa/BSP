@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -11,6 +11,7 @@ import {
     createDefaultCustomDraft,
     loadCustomDraftPreset,
     suggestCustomEmployeeCount,
+    type AutoLabAbsenceCode,
     type AutoLabCustomDraft,
     type AutoLabCustomPositionDraft,
 } from '@/lib/planificacion/autoLabCustomCase';
@@ -18,9 +19,14 @@ import {
     AUTO_LAB_DAY_LETTERS,
     calculateSlaHoursForVigencia,
 } from '@/lib/planificacion/autoLabServicePeriod';
-import AutoLabServiceCalendar from '@/components/planificacion/AutoLabServiceCalendar';
+import AutoLabServiceCalendar, { type AutoLabCalendarMode } from '@/components/planificacion/AutoLabServiceCalendar';
+import AutoLabResolutionGrid from '@/components/planificacion/AutoLabResolutionGrid';
+import AutoLabCoveragePanel from '@/components/planificacion/AutoLabCoveragePanel';
+import PlanningCoverageWisdomPanel from '@/components/planificacion/PlanningCoverageWisdomPanel';
+import { generateAutoLabSchedule, verifyAutoLabCoverage } from '@/lib/planificacion/autoLabSchedule';
 import {
     buildAutoLabExportJson,
+    buildSyntheticEmployees,
     estimateSlaVendidas,
     buildDaysInMonth,
     runAutoLabCase,
@@ -133,6 +139,20 @@ function CustomServiceEditor({
     onExcludedScopeChange: (scope: 'ALL' | string) => void;
 }) {
     const suggestedPax = suggestCustomEmployeeCount(draft);
+    const [calendarMode, setCalendarMode] = useState<AutoLabCalendarMode>('exclude');
+    const [absenceEmpId, setAbsenceEmpId] = useState('lab-emp-01');
+    const [absenceCode, setAbsenceCode] = useState<AutoLabAbsenceCode>('E');
+
+    const draftEmployees = useMemo(() => {
+        const n = draft.autoEmployeeCount ? suggestedPax : draft.employeeCount;
+        return buildSyntheticEmployees(n).map((e) => ({ id: e.id, nombre: e.nombre }));
+    }, [draft.autoEmployeeCount, draft.employeeCount, suggestedPax]);
+
+    useEffect(() => {
+        if (!draftEmployees.some((e) => e.id === absenceEmpId) && draftEmployees[0]) {
+            setAbsenceEmpId(draftEmployees[0].id);
+        }
+    }, [draftEmployees, absenceEmpId]);
 
     const updatePosition = (id: string, patch: Partial<AutoLabCustomPositionDraft>) => {
         onChange({
@@ -232,11 +252,32 @@ function CustomServiceEditor({
         });
     };
 
+    const toggleAbsence = (dateStr: string) => {
+        const exists = draft.absences.some((a) => a.empId === absenceEmpId && a.dateStr === dateStr);
+        if (exists) {
+            onChange({
+                ...draft,
+                absences: draft.absences.filter((a) => !(a.empId === absenceEmpId && a.dateStr === dateStr)),
+            });
+            return;
+        }
+        onChange({
+            ...draft,
+            absences: [
+                ...draft.absences,
+                { empId: absenceEmpId, dateStr, code: absenceCode },
+            ].sort((a, b) => a.dateStr.localeCompare(b.dateStr) || a.empId.localeCompare(b.empId)),
+        });
+    };
+
+    const clearAbsences = () => onChange({ ...draft, absences: [] });
+
     return (
         <div className="space-y-4">
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-950">
-                <strong>Armar servicio</strong> — vigencia, puestos con pax, días activos y calendario de exclusiones.
-                El cerebro corre en vivo a la derecha (mes simulado en la barra superior).
+                <strong>Armar servicio</strong> — vigencia, puestos con pax, días activos, exclusiones SLA y{' '}
+                <strong>ausencias</strong> (calendario) para probar la autocorrección del cerebro.
+                El cronograma y las coberturas se actualizan en vivo (mes simulado en la barra superior).
             </div>
 
             <div>
@@ -492,6 +533,16 @@ function CustomServiceEditor({
                 onClearScope={clearExcludedScope}
                 simulationYear={simulationYear}
                 simulationMonth={simulationMonth}
+                calendarMode={calendarMode}
+                onCalendarModeChange={setCalendarMode}
+                absenceEmpId={absenceEmpId}
+                onAbsenceEmpIdChange={setAbsenceEmpId}
+                absenceCode={absenceCode}
+                onAbsenceCodeChange={setAbsenceCode}
+                absences={draft.absences}
+                employees={draftEmployees}
+                onToggleAbsence={toggleAbsence}
+                onClearAbsences={clearAbsences}
             />
         </div>
     );
@@ -541,9 +592,19 @@ export default function AutoLabPage() {
         }
     }, [activeCase, year, month]);
 
+    const scheduleOutcome = useMemo(() => {
+        if (!runResult || !activeCase) return null;
+        return generateAutoLabSchedule(activeCase, runResult);
+    }, [runResult, activeCase]);
+
+    const coverageReport = useMemo(() => {
+        if (!runResult || !activeCase || !scheduleOutcome) return null;
+        return verifyAutoLabCoverage(activeCase, runResult, scheduleOutcome);
+    }, [runResult, activeCase, scheduleOutcome]);
+
     const handleCopyJson = async () => {
         if (!runResult || !activeCase) return;
-        const payload = buildAutoLabExportJson(runResult, activeCase);
+        const payload = buildAutoLabExportJson(runResult, activeCase, scheduleOutcome);
         try {
             await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
             toast.success('JSON copiado — pegalo en el chat');
@@ -915,6 +976,29 @@ export default function AutoLabPage() {
                         </div>
                     </div>
                 </div>
+
+                {runResult && scheduleOutcome && (
+                    <div className="space-y-4">
+                        <AutoLabResolutionGrid
+                            runResult={runResult}
+                            scheduleOutcome={scheduleOutcome}
+                        />
+                        <AutoLabCoveragePanel
+                            report={coverageReport}
+                            employees={[
+                                ...runResult.employees,
+                                ...(scheduleOutcome.externalRetEmployees ?? []),
+                            ]}
+                            absenceCoverageGaps={scheduleOutcome.absenceCoverageGaps}
+                            absenceSplitActions={scheduleOutcome.absenceSplitActions}
+                            absenceCoveragePlan={scheduleOutcome.absenceCoveragePlan}
+                            externalRetActions={scheduleOutcome.externalRetActions}
+                            fixerLog={scheduleOutcome.fixerLog}
+                            fixerSummary={scheduleOutcome.fixerSummary}
+                        />
+                        <PlanningCoverageWisdomPanel />
+                    </div>
+                )}
             </div>
         </DashboardLayout>
     );

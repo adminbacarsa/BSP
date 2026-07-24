@@ -12554,7 +12554,9 @@ export default function PlanificacionPage() {
                                                         <tr key={i} className="border-t border-rose-100">
                                                             <td className="px-2 py-1 text-slate-700">{emp?.name || emp?.nombre || r.empId}</td>
                                                             <td className="px-2 py-1 font-mono text-slate-700">{r.dateStr}</td>
-                                                            <td className="px-2 py-1 font-bold text-slate-800">{r.shiftCode}</td>
+                                                            <td className="px-2 py-1 font-bold text-slate-800">
+                                                                {r.shiftSchedule || r.shiftCode}
+                                                            </td>
                                                             <td className="px-2 py-1 text-rose-700 text-[10px]">{r.reason}</td>
                                                         </tr>
                                                     );

@@ -34,6 +34,54 @@ export interface PlanningCoverageRule {
     extraCost: boolean;
 }
 
+/** Orden de decisión ante V/L/E — fuente única para cerebro, Auto Lab y UI. */
+export const ABSENCE_COVERAGE_PRIORITY_STEPS = [
+    {
+        step: 1,
+        key: 'modo8_plantilla',
+        label: 'Modo 8 — plantilla objetivo',
+        detail: 'M+T+N con guardias del objetivo (sin extensión 12h).',
+        auto: true,
+        extraCost: false,
+    },
+    {
+        step: 2,
+        key: 'ret_externo_modo8',
+        label: 'RET externo + Modo 8',
+        detail: 'Un RET de otro objetivo cubre la banda faltante (8h). Sin contingencia D12/N12.',
+        auto: true,
+        extraCost: false,
+    },
+    {
+        step: 3,
+        key: 'extension_12h',
+        label: 'Extensión 12h / contingencia',
+        detail: 'D12+N12 cuando no alcanza plantilla + RET externo. Tope 56h/sem y 200h/mes.',
+        auto: true,
+        extraCost: false,
+    },
+    {
+        step: 4,
+        key: 'ret_interno',
+        label: 'RET / libre del objetivo',
+        detail: 'Stand-by o guardia sin turno ese día en la misma dotación.',
+        auto: true,
+        extraCost: false,
+    },
+    {
+        step: 5,
+        key: 'ft',
+        label: 'Franco trabajado (FT)',
+        detail: 'Último recurso: persona en F ese día. Solo manual — costo doble CCT. Nunca automático.',
+        auto: false,
+        extraCost: true,
+    },
+] as const;
+
+export const ABSENCE_COVERAGE_PRIORITY_SUMMARY =
+    '① Modo 8 plantilla → ② RET externo + Modo 8 (8h, sin contingencia) → ③ Extensión 12h (≤56h/sem) → '
+    + '④ RET/libre plantilla → ⑤ FT manual (último recurso, costo doble)';
+
 /** Texto operativo compartido por cerebro Auto y UI del wizard. */
 export const PLANNING_COVERAGE_RULES: PlanningCoverageRule[] = [
     {
@@ -47,8 +95,7 @@ export const PLANNING_COVERAGE_RULES: PlanningCoverageRule[] = [
         id: 'modo12_ausencia',
         title: 'Modo 12 — vacaciones / licencias / enfermedad',
         summary:
-            'Ese día el SLA pasa a D12+N12. Se cubre con la plantilla del mismo objetivo (reorganizar turnos). '
-            + 'No se saca a nadie de franco: eso sería franco trabajado (extra).',
+            ABSENCE_COVERAGE_PRIORITY_SUMMARY,
         autoApplies: true,
         extraCost: false,
     },
@@ -65,8 +112,8 @@ export const PLANNING_COVERAGE_RULES: PlanningCoverageRule[] = [
         id: 'franco_trabajado',
         title: 'Franco trabajado — refuerzo',
         summary:
-            'Asignar turno a quien estaba en F. Solo manual en la grilla; implica costo extra. '
-            + 'El Auto no convierte F→turno para cerrar huecos.',
+            'Último recurso tras agotar extensión 12h y RET: asignar turno a quien estaba en F/FF. '
+            + 'Solo manual en la grilla — costo doble CCT (franco + jornada). El Auto nunca convierte F→turno solo.',
         autoApplies: false,
         extraCost: true,
     },
@@ -99,6 +146,54 @@ function countAbsenceOnDate(
         if (!codes || codes.has(up)) n++;
     }
     return n;
+}
+
+/**
+ * Crédito de horas-oferta cuando hay V/L/E en días Modo 12.
+ * Cada ausencia resta ~8h del cupo del ausente; en Modo 12 el SLA cierra con
+ * D12+N12 (2 personas) en lugar de M+T+N (3), así que ese día no exige la
+ * jornada del ausente en el balance agregado del equipo.
+ */
+export function computeModo12AbsenceOfferCredit(params: {
+    absences: V2AbsenceMap;
+    employeeIds: string[];
+    monthDateStrs: string[];
+    modo12Days?: string[];
+    avgShiftHours?: number;
+}): number {
+    const {
+        absences,
+        employeeIds,
+        monthDateStrs,
+        avgShiftHours = 8,
+    } = params;
+    const modo12Set = new Set(params.modo12Days ?? []);
+    if (modo12Set.size === 0) {
+        for (const empId of employeeIds) {
+            const map = absences[empId];
+            if (!map) continue;
+            map.forEach((code, dateStr) => {
+                if (!monthDateStrs.includes(dateStr)) return;
+                if (MODO12_ABSENCE_CODES.has(String(code || '').toUpperCase())) {
+                    modo12Set.add(dateStr);
+                }
+            });
+        }
+    }
+    if (modo12Set.size === 0) return 0;
+
+    let credit = 0;
+    for (const empId of employeeIds) {
+        const map = absences[empId];
+        if (!map) continue;
+        for (const [dateStr, code] of map.entries()) {
+            if (!monthDateStrs.includes(dateStr)) continue;
+            if (!MODO12_ABSENCE_CODES.has(String(code || '').toUpperCase())) continue;
+            if (!modo12Set.has(dateStr)) continue;
+            credit += avgShiftHours;
+        }
+    }
+    return credit;
 }
 
 function expectedWorkersOnDate(

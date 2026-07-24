@@ -21,6 +21,15 @@ const BAND_DEFS: Record<string, { name: string; hours: number }> = {
     N12: { name: 'Nocturno 12h', hours: 12 },
 };
 
+export const AUTO_LAB_ABSENCE_CODES = ['V', 'L', 'E', 'A', 'PG', 'AA'] as const;
+export type AutoLabAbsenceCode = (typeof AUTO_LAB_ABSENCE_CODES)[number];
+
+export interface AutoLabAbsenceDraft {
+    empId: string;
+    dateStr: string;
+    code: AutoLabAbsenceCode;
+}
+
 export interface AutoLabCustomPositionDraft {
     id: string;
     positionName: string;
@@ -43,6 +52,8 @@ export interface AutoLabCustomDraft {
     rotationMode: AutoLabRotationMode;
     slaVendidasOverride: number | null;
     positions: AutoLabCustomPositionDraft[];
+    /** Ausencias / novedades para autocorrección del cronograma. */
+    absences: AutoLabAbsenceDraft[];
 }
 
 function newPositionId(): string {
@@ -66,6 +77,7 @@ export function createDefaultCustomDraft(): AutoLabCustomDraft {
         cycle: '6+2',
         rotationMode: 'rotative',
         slaVendidasOverride: null,
+        absences: [],
         positions: [
             {
                 id: newPositionId(),
@@ -92,6 +104,7 @@ export function customDraftFromCatalogCase(c: AutoLabCaseDefinition): AutoLabCus
         cycle: c.cycle,
         rotationMode: c.rotationMode,
         slaVendidasOverride: c.slaVendidas ?? null,
+        absences: [],
         positions: c.positions.map((pos, idx) => {
             const cov = String(pos.coverageType || '').toLowerCase();
             const is24 = cov === '24hs' || cov === '24' || cov === '24h';
@@ -178,6 +191,7 @@ export function buildCaseFromCustomDraft(draft: AutoLabCustomDraft): AutoLabCase
         serviceStartDate: draft.serviceStartDate,
         serviceEndDate: draft.serviceEndDate,
         excludedDates: draft.excludedDates.length > 0 ? [...draft.excludedDates] : undefined,
+        absencesByDate: draft.absences.length > 0 ? [...draft.absences] : undefined,
     };
 }
 

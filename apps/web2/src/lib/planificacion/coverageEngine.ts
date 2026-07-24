@@ -1,23 +1,19 @@
 /**
  * Motor de cobertura automática para ausencias conocidas (V/L/E/A/PG/AA).
- * Se ejecuta como post-procesado sobre las asignaciones del motor 6+2 bandas fijas.
+ * Post-procesado sobre el cronograma 6+2 bandas fijas.
  *
- * Prioridad de asignación AUTOMÁTICA (no rompen el ciclo 6+2):
- *  1. ST  — empleado sin turno asignado ese día (libre)
- *  2. RET — retención pasiva (stand-by)
- *  3. ESC — escuela/capacitación (se redirige al puesto)
+ * Orden COSP (ver `ABSENCE_COVERAGE_PRIORITY_STEPS`):
+ *  1. Extensión 12h (D12+N12) — `applyAbsenceSplitCoverage`, no en este módulo
+ *  2. RET otro objetivo / RET interno / sin turno (ST) en plantilla
+ *  3. FT (franco trabajado) — NUNCA automático; último recurso, costo doble
  *
- * FT (franco trabajado) NO se asigna automáticamente porque rompe el ciclo 6+2
- * y requiere decisión explícita del supervisor. Se detectan candidatos y se
- * muestran en el panel para asignación manual.
- *
- * Días franco del ausente (F/FF en su ciclo 6+2): el período de licencia puede
- * abarcarlos pero NO requieren cobertura — se saltan silenciosamente.
- * Cada día laboral del ausente genera un gap; el supervisor decide si cubrirlo.
+ * Asignación automática en este módulo: ST → RET → ESC (FT excluido).
+ * Día franco del ausente en su ciclo → sin brecha.
  */
 
 import { CYCLE_24_MTN } from './fixedBandFloaterScheduleEngine';
 import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
+import { rankReplacementCandidates } from './coverageCandidateRank';
 
 const WORK_BANDS = new Set(['M', 'T', 'N']);
 
@@ -56,6 +52,7 @@ export function applyAbsenceCoverage(
     assignments: V2Assignment[],
     ctx: V2EngineContext,
     openingSlotByEmp: Record<string, number>,
+    skipDayPositionKeys?: Set<string>,
 ): AbsenceCoverageResult {
     const aIdx = new Map<string, number>();
     assignments.forEach((a, i) => aIdx.set(`${a.empId}__${a.dateStr}`, i));
@@ -91,6 +88,8 @@ export function applyAbsenceCoverage(
         for (const dateStr of absentDates.keys()) {
             const di = ctx.daysInMonth.findIndex(d => ctx.getDateKey(d) === dateStr);
             if (di < 0) continue;
+
+            if (skipDayPositionKeys?.has(`${dateStr}__${posName}`)) continue;
 
             const neededBand = CYCLE_24_MTN[(opening + di) % 24] as string;
 
@@ -141,6 +140,13 @@ function tryAutoAssign(
 ): { empId: string; type: CoverageGap['coverageType'] } | null {
     const meta = shiftMetaForBand(neededBand);
 
+    const groupIds = [...objectiveEmpIds];
+    const ranked = rankReplacementCandidates(groupIds, ctx, {
+        absentEmpId,
+        positionName: posName,
+        dateStr,
+    });
+
     const assignExisting = (empId: string): boolean => {
         const ai = aIdx.get(`${empId}__${dateStr}`);
         if (ai === undefined) return false;
@@ -157,10 +163,8 @@ function tryAutoAssign(
         return true;
     };
 
-    // 1. Sin turno: empleado sin asignación ese día
-    for (const empId of objectiveEmpIds) {
-        if (empId === absentEmpId) continue;
-        if (ctx.absences[empId]?.has(dateStr)) continue;
+    // 1. Sin turno: empleado sin asignación ese día (prioridad titular / conocido del objetivo)
+    for (const empId of ranked) {
         if (!aIdx.has(`${empId}__${dateStr}`)) {
             result.push({ empId, dateStr, positionName: posName, code: neededBand, name: meta.name, hours: meta.hours, startTime: meta.startTime, endTime: meta.endTime, isFranco: false });
             aIdx.set(`${empId}__${dateStr}`, result.length - 1);
@@ -169,14 +173,34 @@ function tryAutoAssign(
     }
 
     // 2. RET libre
-    const retId = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['RET']);
-    if (retId && assignExisting(retId)) return { empId: retId, type: 'ret' };
+    const retIds = findAllByCode(result, aIdx, ranked, dateStr, ['RET']);
+    for (const retId of retIds) {
+        if (assignExisting(retId)) return { empId: retId, type: 'ret' };
+    }
 
     // 3. ESC libre
-    const escId = findByCode(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx, ['ESC']);
-    if (escId && assignExisting(escId)) return { empId: escId, type: 'esc' };
+    const escIds = findAllByCode(result, aIdx, ranked, dateStr, ['ESC']);
+    for (const escId of escIds) {
+        if (assignExisting(escId)) return { empId: escId, type: 'esc' };
+    }
 
     return null;
+}
+
+function findAllByCode(
+    assignments: V2Assignment[],
+    aIdx: Map<string, number>,
+    pool: string[],
+    dateStr: string,
+    codes: string[],
+): string[] {
+    const codeSet = new Set(codes);
+    const out: string[] = [];
+    for (const empId of pool) {
+        const ai = aIdx.get(`${empId}__${dateStr}`);
+        if (ai !== undefined && codeSet.has(assignments[ai].code)) out.push(empId);
+    }
+    return out;
 }
 
 /** Devuelve empleados con F/FF ese día disponibles para FT manual */
@@ -198,25 +222,6 @@ function getFtCandidates(
         }
     }
     return candidates;
-}
-
-function findByCode(
-    assignments: V2Assignment[],
-    aIdx: Map<string, number>,
-    objectiveEmpIds: Set<string>,
-    absentEmpId: string,
-    dateStr: string,
-    ctx: V2EngineContext,
-    codes: string[],
-): string | null {
-    const codeSet = new Set(codes);
-    for (const empId of objectiveEmpIds) {
-        if (empId === absentEmpId) continue;
-        if (ctx.absences[empId]?.has(dateStr)) continue;
-        const ai = aIdx.get(`${empId}__${dateStr}`);
-        if (ai !== undefined && codeSet.has(assignments[ai].code)) return empId;
-    }
-    return null;
 }
 
 function shiftMetaForBand(band: string): { name: string; hours: number; startTime: string; endTime: string } {
