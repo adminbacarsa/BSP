@@ -2,6 +2,7 @@ export interface BackupOptions {
     empresaId?: string;
     scopeEmpresa?: boolean;
     source?: string;
+    jobRef?: FirebaseFirestore.DocumentReference;
 }
 export interface BackupResult {
     id: string;

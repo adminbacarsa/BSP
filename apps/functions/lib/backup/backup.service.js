@@ -7,11 +7,14 @@ exports.resolveDriveBackupFolderId = resolveDriveBackupFolderId;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const stream_1 = require("stream");
-const EXCLUDE_COLLECTIONS = new Set([]);
-const EMPRESA_SCOPED_COLLECTIONS = new Set([
-    'empleados', 'clients', 'clientes', 'turnos', 'ausencias', 'novedades',
-    'swap_requests', 'contratos_servicio', 'tipos_turno', 'servicios_sla',
-    'objetivos', 'audit_logs', 'user_notifications', 'system_users',
+const EXCLUDE_COLLECTIONS = new Set([
+    'system_backups',
+    'restore_jobs',
+    'empresa_migrate_jobs',
+    'scheduled_job_logs',
+]);
+const DOC_ID_IS_EMPRESA_COLLECTIONS = new Set([
+    'planning_rules',
 ]);
 const MAX_DOCS_PER_COLLECTION = 50000;
 function docBelongsToEmpresa(data, empresaId, scopeEmpresa) {
@@ -42,6 +45,26 @@ async function exportAuthUsers() {
     } while (pageToken);
     return users;
 }
+async function resolveOrCreateDriveFolder(drive, parentId, folderName) {
+    const res = await drive.files.list({
+        q: `'${parentId}' in parents and name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+        fields: 'files(id)',
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+    });
+    if (res.data.files?.length > 0)
+        return res.data.files[0].id;
+    const created = await drive.files.create({
+        supportsAllDrives: true,
+        requestBody: {
+            name: folderName,
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: [parentId],
+        },
+        fields: 'id',
+    });
+    return created.data.id;
+}
 async function runBackup(folderId, opts = {}) {
     const db = admin.firestore();
     const empresaId = String(opts.empresaId ?? '').trim();
@@ -50,11 +73,18 @@ async function runBackup(folderId, opts = {}) {
     let totalDocs = 0;
     const exportedCollections = [];
     const authUsers = scopeEmpresa ? [] : await exportAuthUsers();
-    const rootCollections = await db.listCollections();
+    const allRootCollections = await db.listCollections();
+    const rootCollections = allRootCollections.filter(c => !EXCLUDE_COLLECTIONS.has(c.id));
+    const totalCollections = rootCollections.length + (scopeEmpresa ? DOC_ID_IS_EMPRESA_COLLECTIONS.size : 0);
+    let collectionsProcessed = 0;
+    if (opts.jobRef) {
+        await opts.jobRef.update({ totalCollections, collectionsProcessed: 0, docsExported: 0 }).catch(() => { });
+    }
     for (const colRef of rootCollections) {
         const col = colRef.id;
-        if (EXCLUDE_COLLECTIONS.has(col))
-            continue;
+        if (opts.jobRef) {
+            await opts.jobRef.update({ currentCollection: col }).catch(() => { });
+        }
         if (col === 'empresas' && scopeEmpresa) {
             try {
                 const snap = await db.collection('empresas').doc(empresaId).get();
@@ -65,29 +95,55 @@ async function runBackup(folderId, opts = {}) {
                 }
             }
             catch { }
+            collectionsProcessed++;
+            if (opts.jobRef) {
+                await opts.jobRef.update({ collectionsProcessed, docsExported: totalDocs }).catch(() => { });
+            }
             continue;
         }
         try {
             const snap = await db.collection(col).limit(MAX_DOCS_PER_COLLECTION).get();
-            if (snap.empty)
-                continue;
-            const docs = snap.docs
-                .map(d => ({ _id: d.id, ...d.data() }))
-                .filter(row => {
-                if (!scopeEmpresa)
-                    return true;
-                if (EMPRESA_SCOPED_COLLECTIONS.has(col)) {
+            if (!snap.empty) {
+                const docs = snap.docs
+                    .map(d => ({ _id: d.id, ...d.data() }))
+                    .filter(row => {
+                    if (!scopeEmpresa)
+                        return true;
                     return docBelongsToEmpresa(row, empresaId, true);
+                });
+                if (docs.length > 0) {
+                    data[col] = docs;
+                    totalDocs += docs.length;
+                    exportedCollections.push(col);
                 }
-                return false;
-            });
-            if (docs.length > 0) {
-                data[col] = docs;
-                totalDocs += docs.length;
-                exportedCollections.push(col);
             }
         }
         catch {
+        }
+        collectionsProcessed++;
+        if (opts.jobRef) {
+            await opts.jobRef.update({ collectionsProcessed, docsExported: totalDocs }).catch(() => { });
+        }
+    }
+    if (scopeEmpresa) {
+        for (const col of DOC_ID_IS_EMPRESA_COLLECTIONS) {
+            if (opts.jobRef) {
+                await opts.jobRef.update({ currentCollection: col }).catch(() => { });
+            }
+            try {
+                const snap = await db.collection(col).doc(empresaId).get();
+                if (snap.exists) {
+                    data[col] = [{ _id: snap.id, ...snap.data() }];
+                    totalDocs += 1;
+                    if (!exportedCollections.includes(col))
+                        exportedCollections.push(col);
+                }
+            }
+            catch { }
+            collectionsProcessed++;
+            if (opts.jobRef) {
+                await opts.jobRef.update({ collectionsProcessed, docsExported: totalDocs }).catch(() => { });
+            }
         }
     }
     const now = new Date();
@@ -108,19 +164,32 @@ async function runBackup(folderId, opts = {}) {
         _auth_users: authUsers,
         ...data,
     };
-    const jsonStr = JSON.stringify(payload, null, 2);
+    const jsonStr = JSON.stringify(payload);
     const sizeBytes = Buffer.byteLength(jsonStr, 'utf8');
+    if (opts.jobRef) {
+        await opts.jobRef.update({ currentCollection: '', phase: 'uploading', sizeBytes }).catch(() => { });
+    }
     const { google } = await Promise.resolve().then(() => require('googleapis'));
     const auth = new google.auth.GoogleAuth({
         scopes: ['https://www.googleapis.com/auth/drive'],
     });
     const drive = google.drive({ version: 'v3', auth });
+    let uploadFolderId = folderId;
+    if (scopeEmpresa) {
+        try {
+            uploadFolderId = await resolveOrCreateDriveFolder(drive, folderId, empresaId);
+        }
+        catch (e) {
+            console.warn(`[backup] No se pudo crear subcarpeta "${empresaId}" en Drive, usando carpeta raíz.`, e);
+            uploadFolderId = folderId;
+        }
+    }
     const stream = stream_1.Readable.from([jsonStr]);
     const driveRes = await drive.files.create({
         supportsAllDrives: true,
         requestBody: {
             name: fileName,
-            parents: [folderId],
+            parents: [uploadFolderId],
             mimeType: 'application/json',
         },
         media: { mimeType: 'application/json', body: stream },
@@ -136,6 +205,7 @@ async function runBackup(folderId, opts = {}) {
         collections: exportedCollections,
         totalDocs,
         driveBackupFolderId: folderId,
+        ...(scopeEmpresa ? { driveEmpresaFolderId: uploadFolderId } : {}),
         createdAt: firestore_1.FieldValue.serverTimestamp(),
         status: 'ok',
         backupScope: scopeEmpresa ? 'empresa' : 'platform',
@@ -143,14 +213,7 @@ async function runBackup(folderId, opts = {}) {
         ...(empresaId ? { empresaId } : {}),
         ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
     };
-    let ref;
-    if (scopeEmpresa && empresaId) {
-        ref = db.collection('system_backups').doc(`${empresaId}_latest`);
-        await ref.set(backupDoc);
-    }
-    else {
-        ref = await db.collection('system_backups').add(backupDoc);
-    }
+    const ref = await db.collection('system_backups').add(backupDoc);
     return {
         id: ref.id,
         driveFileId,

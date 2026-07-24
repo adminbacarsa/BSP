@@ -2685,7 +2685,7 @@ export const gestionarVacantes = functions
 // BACKUP — Firestore → Google Drive
 // =========================================================
 export const triggerBackup = onCallV2(
-  { timeoutSeconds: 3600, memory: '4GiB', region: 'us-central1' },
+  { timeoutSeconds: 3600, memory: '4GiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' },
   async (request) => {
     await assertBackupCallableAllowed(request.auth);
 
@@ -2751,7 +2751,7 @@ export const triggerBackup = onCallV2(
 
 /** Reconcilia el historial con Google Drive: borra de system_backups los registros cuyo archivo ya no existe. */
 export const syncBackups = onCallV2(
-  { timeoutSeconds: 300, memory: '512MiB', region: 'us-central1' },
+  { timeoutSeconds: 300, memory: '512MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' },
   async (request) => {
     await assertBackupCallableAllowed(request.auth);
     const caller = await resolveBackupCaller(request.auth!.uid, request.auth!.token?.role);
@@ -2769,7 +2769,7 @@ export const syncBackups = onCallV2(
 
 /** Borra un backup puntual (archivo en Drive + registro en Firestore). */
 export const deleteBackup = onCallV2(
-  { timeoutSeconds: 120, memory: '256MiB', region: 'us-central1' },
+  { timeoutSeconds: 120, memory: '256MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' },
   async (request) => {
     await assertBackupCallableAllowed(request.auth);
     const caller = await resolveBackupCaller(request.auth!.uid, request.auth!.token?.role);
@@ -2794,7 +2794,7 @@ export const deleteBackup = onCallV2(
 
 /** Encola restauración (rápido). El trabajo pesado corre en processRestoreJob (hasta 1 h). */
 export const restoreBackup = onCallV2(
-  { timeoutSeconds: 120, memory: '512MiB', region: 'us-central1' },
+  { timeoutSeconds: 120, memory: '512MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' },
   async (request) => {
     await assertBackupCallableAllowed(request.auth);
     const payload = (request.data ?? {}) as RestoreRequestPayload;
@@ -2846,7 +2846,7 @@ export const restoreBackup = onCallV2(
 
 /** Ejecuta restore_jobs en background (hasta 60 min por invocación). */
 export const processRestoreJob = onDocumentWrittenV2(
-  { document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 540, memory: '4GiB' },
+  { document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 540, memory: '4GiB', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' },
   async (event) => {
     const change = event.data;
     if (!change) return;
@@ -3065,6 +3065,7 @@ export const scheduledBackup = onScheduleV2(
     timeoutSeconds: 1800,
     memory: '4GiB',
     region: 'us-central1',
+    serviceAccount: 'comtroldata@appspot.gserviceaccount.com',
   },
   async () => {
     const db = admin.firestore();

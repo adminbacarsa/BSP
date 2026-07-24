@@ -1,11 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = void 0;
+exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
+const https_1 = require("firebase-functions/v2/https");
+const scheduler_1 = require("firebase-functions/v2/scheduler");
+const firestore_1 = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
-const firestore_1 = require("firebase-admin/firestore");
+const firestore_2 = require("firebase-admin/firestore");
 const backup_service_1 = require("./backup/backup.service");
 const restore_job_runner_1 = require("./backup/restore-job.runner");
 const migrate_job_runner_1 = require("./backup/migrate-job.runner");
@@ -2221,17 +2224,16 @@ exports.gestionarVacantes = functions
     }
     return null;
 });
-exports.triggerBackup = functions
-    .runWith({ timeoutSeconds: 540, memory: '512MB' })
-    .https.onCall(async (data, context) => {
-    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
+exports.triggerBackup = (0, https_1.onCall)({ timeoutSeconds: 3600, memory: '4GiB', region: 'us-central1' }, async (request) => {
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const folderId = await (0, backup_service_1.resolveDriveBackupFolderId)();
     if (!folderId)
-        throw new functions.https.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
+        throw new https_1.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
     const db = admin.firestore();
-    const claimedEmpresa = String(data?.empresaId ?? '').trim();
+    const claimedEmpresa = String(request.data?.empresaId ?? '').trim();
+    const clientJobId = String(request.data?.jobId ?? '').trim();
     let empresaId = claimedEmpresa;
-    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
     if (!caller.isSuper) {
         empresaId = caller.profileEmpresa || 'bacarsa';
     }
@@ -2239,33 +2241,52 @@ exports.triggerBackup = functions
         empresaId = caller.profileEmpresa;
     }
     const scopeEmpresa = !!empresaId;
+    const jobId = clientJobId || `backup_${Date.now()}`;
+    const jobRef = db.collection('backup_jobs').doc(jobId);
+    await jobRef.set({
+        status: 'running',
+        startedAt: admin.firestore.FieldValue.serverTimestamp(),
+        empresaId: empresaId || '',
+        source: 'triggerBackup',
+        totalCollections: 0,
+        collectionsProcessed: 0,
+        docsExported: 0,
+        currentCollection: '',
+        phase: 'collecting',
+    });
+    const startMs = Date.now();
     try {
-        const result = await (0, backup_service_1.runBackup)(folderId, { empresaId, scopeEmpresa, source: 'triggerBackup' });
-        return result;
+        const result = await (0, backup_service_1.runBackup)(folderId, { empresaId, scopeEmpresa, source: 'triggerBackup', jobRef });
+        const durationMs = Date.now() - startMs;
+        await jobRef.update({
+            status: 'done',
+            durationMs,
+            fileName: result.fileName,
+            sizeBytes: result.sizeBytes,
+            totalDocs: result.totalDocs,
+            driveLink: result.driveLink,
+            phase: 'done',
+            currentCollection: '',
+        }).catch(() => { });
+        return { jobId, ...result };
     }
     catch (e) {
-        const errDoc = {
+        const msg = e?.message || 'Error desconocido';
+        await jobRef.update({ status: 'error', error: msg.slice(0, 500), phase: 'error' }).catch(() => { });
+        await db.collection('system_backups').add({
             status: 'error',
-            error: e?.message || 'Error desconocido',
+            error: msg,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             ...(empresaId ? { empresaId } : {}),
             ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
-        };
-        if (scopeEmpresa && empresaId) {
-            await db.collection('system_backups').doc(`${empresaId}_latest`).set(errDoc);
-        }
-        else {
-            await db.collection('system_backups').add(errDoc);
-        }
-        throw new functions.https.HttpsError('internal', e?.message || 'Error al ejecutar backup');
+        });
+        throw new https_1.HttpsError('internal', msg);
     }
 });
-exports.syncBackups = functions
-    .runWith({ timeoutSeconds: 300, memory: '512MB' })
-    .https.onCall(async (data, context) => {
-    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
-    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
-    const claimedEmpresa = String(data?.empresaId ?? '').trim();
+exports.syncBackups = (0, https_1.onCall)({ timeoutSeconds: 300, memory: '512MiB', region: 'us-central1' }, async (request) => {
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
+    const claimedEmpresa = String(request.data?.empresaId ?? '').trim();
     const empresaId = caller.isSuper ? claimedEmpresa : (caller.profileEmpresa || 'bacarsa');
     const scopeEmpresa = !caller.isSuper;
     try {
@@ -2273,43 +2294,38 @@ exports.syncBackups = functions
         return result;
     }
     catch (e) {
-        throw new functions.https.HttpsError('internal', e?.message || 'Error al sincronizar backups con Drive');
+        throw new https_1.HttpsError('internal', e?.message || 'Error al sincronizar backups con Drive');
     }
 });
-exports.deleteBackup = functions
-    .runWith({ timeoutSeconds: 120, memory: '256MB' })
-    .https.onCall(async (data, context) => {
-    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
-    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
-    const docId = String(data?.docId ?? '').trim();
+exports.deleteBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '256MiB', region: 'us-central1' }, async (request) => {
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
+    const docId = String(request.data?.docId ?? '').trim();
     if (!docId)
-        throw new functions.https.HttpsError('invalid-argument', 'docId requerido');
+        throw new https_1.HttpsError('invalid-argument', 'docId requerido');
     const empresaId = caller.isSuper
-        ? String(data?.empresaId ?? '').trim()
+        ? String(request.data?.empresaId ?? '').trim()
         : (caller.profileEmpresa || 'bacarsa');
     try {
         const result = await (0, backup_service_1.deleteDriveBackup)(docId, { empresaId, scopeEmpresa: !caller.isSuper, isSuper: caller.isSuper });
         if (!result.deleted)
-            throw new functions.https.HttpsError('not-found', 'El backup ya no existe.');
+            throw new https_1.HttpsError('not-found', 'El backup ya no existe.');
         return result;
     }
     catch (e) {
-        if (e instanceof functions.https.HttpsError)
+        if (e instanceof https_1.HttpsError)
             throw e;
         if (/pertenece a otra empresa/i.test(e?.message || '')) {
-            throw new functions.https.HttpsError('permission-denied', e.message);
+            throw new https_1.HttpsError('permission-denied', e.message);
         }
-        throw new functions.https.HttpsError('internal', e?.message || 'Error al borrar backup');
+        throw new https_1.HttpsError('internal', e?.message || 'Error al borrar backup');
     }
 });
-exports.restoreBackup = functions
-    .region('us-central1')
-    .runWith({ timeoutSeconds: 120, memory: '512MB' })
-    .https.onCall(async (data, context) => {
-    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
-    const payload = (data ?? {});
+exports.restoreBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '512MiB', region: 'us-central1' }, async (request) => {
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
+    const payload = (request.data ?? {});
     try {
-        const { jobId, restoreOpts, fileName } = await (0, restore_job_runner_1.assertRestoreRequestAllowed)(context.auth.uid, context.auth.token?.role, payload);
+        const { jobId, restoreOpts, fileName } = await (0, restore_job_runner_1.assertRestoreRequestAllowed)(request.auth.uid, request.auth.token?.role, payload);
         const db = admin.firestore();
         const storagePath = String(payload.storagePath ?? '').trim();
         const driveFileId = String(payload.driveFileId ?? '').trim();
@@ -2325,7 +2341,7 @@ exports.restoreBackup = functions
             sourceEmpresaId: restoreOpts.sourceEmpresaId ?? '',
             storagePath: storagePath || null,
             driveFileId: driveFileId || null,
-            requestedBy: context.auth.uid,
+            requestedBy: request.auth.uid,
             docsRestored: 0,
             docsDeleted: 0,
             total: 0,
@@ -2339,19 +2355,18 @@ exports.restoreBackup = functions
     catch (e) {
         const msg = e instanceof Error ? e.message : 'Error al encolar restauración';
         if (/pertenece a otra empresa|plataforma completa|Solo superadmin|panel de administración/i.test(msg)) {
-            throw new functions.https.HttpsError('permission-denied', msg);
+            throw new https_1.HttpsError('permission-denied', msg);
         }
         if (/storagePath inválido|merge o full|storagePath requerido|driveFileId/i.test(msg)) {
-            throw new functions.https.HttpsError('invalid-argument', msg);
+            throw new https_1.HttpsError('invalid-argument', msg);
         }
-        throw new functions.https.HttpsError('internal', msg);
+        throw new https_1.HttpsError('internal', msg);
     }
 });
-exports.processRestoreJob = functions
-    .region('us-central1')
-    .runWith({ timeoutSeconds: 540, memory: '4GB' })
-    .firestore.document('restore_jobs/{jobId}')
-    .onWrite(async (change) => {
+exports.processRestoreJob = (0, firestore_1.onDocumentWritten)({ document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 3600, memory: '4GiB' }, async (event) => {
+    const change = event.data;
+    if (!change)
+        return;
     const after = change.after;
     if (!after.exists)
         return;
@@ -2399,14 +2414,11 @@ exports.processRestoreJob = functions
         console.error('[processRestoreJob] failed', jobId, e);
     }
 });
-exports.migrateEmpresaData = functions
-    .region('us-central1')
-    .runWith({ timeoutSeconds: 120, memory: '1GB' })
-    .https.onCall(async (data, context) => {
-    await (0, backup_auth_util_1.assertBackupCallableAllowed)(context);
-    const payload = (data ?? {});
+exports.migrateEmpresaData = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '1GiB', region: 'us-central1' }, async (request) => {
+    await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
+    const payload = (request.data ?? {});
     try {
-        const { jobId, sourceEmpresaId, targetEmpresaId } = await (0, migrate_job_runner_1.assertMigrateEmpresaRequestAllowed)(context.auth.uid, context.auth.token?.role, payload);
+        const { jobId, sourceEmpresaId, targetEmpresaId } = await (0, migrate_job_runner_1.assertMigrateEmpresaRequestAllowed)(request.auth.uid, request.auth.token?.role, payload);
         const db = admin.firestore();
         const startColIndex = Number(payload.startColIndex ?? 0);
         const idMaps = (0, empresa_migrate_service_1.deserializeIdMaps)(payload.idMaps ?? null);
@@ -2418,10 +2430,10 @@ exports.migrateEmpresaData = functions
                 phase: 'Iniciando migración…',
                 sourceEmpresaId,
                 targetEmpresaId,
-                requestedBy: context.auth.uid,
+                requestedBy: request.auth.uid,
                 docsCopied: 0,
                 docsDeleted: 0,
-                startedAt: firestore_1.FieldValue.serverTimestamp(),
+                startedAt: firestore_2.FieldValue.serverTimestamp(),
             });
         }
         const result = await (0, empresa_migrate_service_1.runEmpresaMigrate)(sourceEmpresaId, targetEmpresaId, jobId, {
@@ -2438,7 +2450,7 @@ exports.migrateEmpresaData = functions
                 phase: 'Completado',
                 docsCopied: result.docsCopied,
                 docsDeleted: result.docsDeleted,
-                completedAt: firestore_1.FieldValue.serverTimestamp(),
+                completedAt: firestore_2.FieldValue.serverTimestamp(),
             }, { merge: true });
         }
         return {
@@ -2454,16 +2466,15 @@ exports.migrateEmpresaData = functions
     catch (e) {
         const msg = e instanceof Error ? e.message : 'Error en migración';
         if (/Solo superadmin|Solo usuarios del panel|no existe|obligatorias|misma empresa/i.test(msg)) {
-            throw new functions.https.HttpsError('permission-denied', msg);
+            throw new https_1.HttpsError('permission-denied', msg);
         }
-        throw new functions.https.HttpsError('internal', msg);
+        throw new https_1.HttpsError('internal', msg);
     }
 });
-exports.processEmpresaMigrateJob = functions
-    .region('us-central1')
-    .runWith({ timeoutSeconds: 540, memory: '4GB' })
-    .firestore.document('empresa_migrate_jobs/{jobId}')
-    .onWrite(async (change) => {
+exports.processEmpresaMigrateJob = (0, firestore_1.onDocumentWritten)({ document: 'empresa_migrate_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 3600, memory: '4GiB' }, async (event) => {
+    const change = event.data;
+    if (!change)
+        return;
     const after = change.after;
     if (!after.exists)
         return;
@@ -2531,13 +2542,42 @@ exports.onAusenciaCreatedFromPortal = functions
     });
     return null;
 });
-exports.scheduledBackup = functions
-    .region('us-central1')
-    .runWith({ timeoutSeconds: 540, memory: '512MB' })
-    .pubsub.schedule('0 3 * * *')
-    .timeZone('America/Argentina/Buenos_Aires')
-    .onRun(async () => {
+exports.scheduledBackup = (0, scheduler_1.onSchedule)({
+    schedule: '0 * * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 3600,
+    memory: '4GiB',
+    region: 'us-central1',
+}, async () => {
     const db = admin.firestore();
+    let configHour = 3;
+    let enabled = true;
+    try {
+        const cfgSnap = await db.collection('system_config').doc('backup_schedule').get();
+        if (cfgSnap.exists) {
+            const cfg = cfgSnap.data();
+            if (typeof cfg.hour === 'number' && cfg.hour >= 0 && cfg.hour <= 23)
+                configHour = cfg.hour;
+            if (cfg.enabled === false)
+                enabled = false;
+        }
+    }
+    catch (e) {
+        console.warn('[scheduledBackup] No se pudo leer system_config/backup_schedule, usando 03:00 AR.', e);
+    }
+    if (!enabled) {
+        console.log('[scheduledBackup] Backup automático deshabilitado en configuración, saltando.');
+        return;
+    }
+    const hourArg = parseInt(new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Argentina/Buenos_Aires',
+        hour: 'numeric',
+        hour12: false,
+    }).format(new Date()), 10) % 24;
+    if (hourArg !== configHour) {
+        console.log(`[scheduledBackup] Hora AR: ${hourArg}, configurada: ${configHour}. Saltando.`);
+        return;
+    }
     const folderId = await (0, backup_service_1.resolveDriveBackupFolderId)();
     if (!folderId) {
         const msg = 'DRIVE_BACKUP_FOLDER_ID no configurado (ni fallback en system_backups)';
@@ -2548,7 +2588,7 @@ exports.scheduledBackup = functions
             source: 'scheduledBackup',
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        return null;
+        return;
     }
     const jobLogRef = db.collection('scheduled_job_logs').doc('scheduledBackup');
     try {
@@ -2559,6 +2599,7 @@ exports.scheduledBackup = functions
             lastStatus: 'ok',
             lastFileName: result.fileName,
             totalDocs: result.totalDocs,
+            configuredHour: configHour,
             error: null,
         }, { merge: true });
     }
@@ -2578,7 +2619,29 @@ exports.scheduledBackup = functions
             error: msg.slice(0, 500),
         }, { merge: true });
     }
-    return null;
+});
+exports.updateBackupSchedule = (0, https_1.onCall)({ timeoutSeconds: 30, memory: '256MiB', region: 'us-central1' }, async (request) => {
+    if (!request.auth)
+        throw new https_1.HttpsError('unauthenticated', 'Autenticación requerida.');
+    const role = String(request.auth.token?.role ?? '').toUpperCase().replace(/_/g, '');
+    const isSuper = role === 'SUPERADMIN' || role === 'SP';
+    if (!isSuper)
+        throw new https_1.HttpsError('permission-denied', 'Solo superadmin puede modificar el horario de backup.');
+    const d = request.data;
+    const hour = typeof d.hour === 'number' ? Math.round(d.hour) : undefined;
+    const enabled = typeof d.enabled === 'boolean' ? d.enabled : undefined;
+    if (hour !== undefined && (hour < 0 || hour > 23)) {
+        throw new https_1.HttpsError('invalid-argument', 'hour debe ser un entero entre 0 y 23.');
+    }
+    const db = admin.firestore();
+    const update = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+    if (hour !== undefined)
+        update.hour = hour;
+    if (enabled !== undefined)
+        update.enabled = enabled;
+    await db.collection('system_config').doc('backup_schedule').set(update, { merge: true });
+    const snap = await db.collection('system_config').doc('backup_schedule').get();
+    return snap.data() ?? {};
 });
 const afipLookupSecrets = ['AFIP_CUIT', 'AFIP_CERT', 'AFIP_PRIVATE_KEY', 'AFIP_PRODUCTION'];
 const functionsEmulator = process.env.FUNCTIONS_EMULATOR === 'true' ||

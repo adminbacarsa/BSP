@@ -1,5 +1,6 @@
 import './bootstrap-env';
 import * as functions from 'firebase-functions/v1';
+import * as admin from 'firebase-admin';
 export declare const createUser: functions.HttpsFunction & functions.Runnable<any>;
 export declare const scheduleShift: functions.HttpsFunction & functions.Runnable<any>;
 export declare const manageShifts: functions.HttpsFunction & functions.Runnable<any>;
@@ -38,15 +39,47 @@ export declare const sendTestNotification: functions.HttpsFunction & functions.R
 export declare const autoCompletarTurnos: functions.CloudFunction<unknown>;
 export declare const detectarAusencias: functions.CloudFunction<unknown>;
 export declare const gestionarVacantes: functions.CloudFunction<unknown>;
-export declare const triggerBackup: functions.HttpsFunction & functions.Runnable<any>;
-export declare const syncBackups: functions.HttpsFunction & functions.Runnable<any>;
-export declare const deleteBackup: functions.HttpsFunction & functions.Runnable<any>;
-export declare const restoreBackup: functions.HttpsFunction & functions.Runnable<any>;
-export declare const processRestoreJob: functions.CloudFunction<functions.Change<functions.firestore.DocumentSnapshot>>;
-export declare const migrateEmpresaData: functions.HttpsFunction & functions.Runnable<any>;
-export declare const processEmpresaMigrateJob: functions.CloudFunction<functions.Change<functions.firestore.DocumentSnapshot>>;
+export declare const triggerBackup: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    id: string;
+    driveFileId: string;
+    driveLink: string;
+    fileName: string;
+    sizeBytes: number;
+    collections: string[];
+    totalDocs: number;
+    createdAt: string;
+    status: "ok" | "error";
+    error?: string;
+    empresaId?: string;
+    jobId: string;
+}>, unknown>;
+export declare const syncBackups: import("firebase-functions/v2/https").CallableFunction<any, Promise<import("./backup/backup.service").SyncDriveBackupsResult>, unknown>;
+export declare const deleteBackup: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    deleted: boolean;
+    driveDeleted: boolean;
+}>, unknown>;
+export declare const restoreBackup: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    jobId: string;
+    queued: boolean;
+}>, unknown>;
+export declare const processRestoreJob: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
+    jobId: string;
+}>>;
+export declare const migrateEmpresaData: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    jobId: string;
+    isComplete: boolean;
+    nextColIndex: number;
+    idMaps: Record<string, Record<string, string>>;
+    docsCopied: number;
+    docsDeleted: number;
+    totalCollections: number;
+}>, unknown>;
+export declare const processEmpresaMigrateJob: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
+    jobId: string;
+}>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
-export declare const scheduledBackup: functions.CloudFunction<unknown>;
+export declare const scheduledBackup: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const updateBackupSchedule: import("firebase-functions/v2/https").CallableFunction<any, Promise<admin.firestore.DocumentData>, unknown>;
 export declare const lookupClientByCuit: functions.HttpsFunction & functions.Runnable<any>;
 export declare const saveEmpresaAfipCredentials: functions.HttpsFunction & functions.Runnable<any>;
 export declare const getEmpresaAfipConfig: functions.HttpsFunction & functions.Runnable<any>;
