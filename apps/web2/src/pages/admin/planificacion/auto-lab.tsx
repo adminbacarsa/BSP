@@ -10,9 +10,15 @@ import {
     buildCaseFromCustomDraft,
     createDefaultCustomDraft,
     loadCustomDraftPreset,
+    suggestCustomEmployeeCount,
     type AutoLabCustomDraft,
     type AutoLabCustomPositionDraft,
 } from '@/lib/planificacion/autoLabCustomCase';
+import {
+    AUTO_LAB_DAY_LETTERS,
+    calculateSlaHoursForVigencia,
+} from '@/lib/planificacion/autoLabServicePeriod';
+import AutoLabServiceCalendar from '@/components/planificacion/AutoLabServiceCalendar';
 import {
     buildAutoLabExportJson,
     estimateSlaVendidas,
@@ -24,6 +30,7 @@ import {
     AlertTriangle,
     ArrowLeft,
     Brain,
+    CalendarDays,
     CheckCircle2,
     Copy,
     FlaskConical,
@@ -112,11 +119,21 @@ function CustomServiceEditor({
     draft,
     onChange,
     estimatedSla,
+    simulationYear,
+    simulationMonth,
+    excludedScope,
+    onExcludedScopeChange,
 }: {
     draft: AutoLabCustomDraft;
     onChange: (next: AutoLabCustomDraft) => void;
     estimatedSla: number;
+    simulationYear: number;
+    simulationMonth: number;
+    excludedScope: 'ALL' | string;
+    onExcludedScopeChange: (scope: 'ALL' | string) => void;
 }) {
+    const suggestedPax = suggestCustomEmployeeCount(draft);
+
     const updatePosition = (id: string, patch: Partial<AutoLabCustomPositionDraft>) => {
         onChange({
             ...draft,
@@ -128,6 +145,18 @@ function CustomServiceEditor({
         const has = pos.bands.includes(band);
         const bands = has ? pos.bands.filter((b) => b !== band) : [...pos.bands, band];
         updatePosition(pos.id, { bands });
+    };
+
+    const toggleActiveDay = (pos: AutoLabCustomPositionDraft, letter: (typeof AUTO_LAB_DAY_LETTERS)[number]) => {
+        const has = pos.activeDayLetters.includes(letter);
+        if (has && pos.activeDayLetters.length <= 1) {
+            toast.error('Debe quedar al menos un día activo');
+            return;
+        }
+        const activeDayLetters = has
+            ? pos.activeDayLetters.filter((d) => d !== letter)
+            : [...pos.activeDayLetters, letter];
+        updatePosition(pos.id, { activeDayLetters });
     };
 
     const addPosition = () => {
@@ -142,7 +171,8 @@ function CustomServiceEditor({
                     qty: 1,
                     coverageType: '24hs',
                     bands: ['M', 'T', 'N'],
-                    weekdaysOnly: false,
+                    activeDayLetters: [...AUTO_LAB_DAY_LETTERS],
+                    excludedDates: [],
                 },
             ],
         });
@@ -154,13 +184,59 @@ function CustomServiceEditor({
             return;
         }
         onChange({ ...draft, positions: draft.positions.filter((p) => p.id !== id) });
+        if (excludedScope === id) onExcludedScopeChange('ALL');
+    };
+
+    const handleServiceStartChange = (value: string) => {
+        let end = draft.serviceEndDate;
+        if (value > end) end = value;
+        onChange({ ...draft, serviceStartDate: value, serviceEndDate: end });
+    };
+
+    const handleServiceEndChange = (value: string) => {
+        let start = draft.serviceStartDate;
+        if (value < start) start = value;
+        onChange({ ...draft, serviceStartDate: start, serviceEndDate: value });
+    };
+
+    const toggleExcludedDate = (dateStr: string) => {
+        if (excludedScope === 'ALL') {
+            const next = new Set(draft.excludedDates);
+            if (next.has(dateStr)) next.delete(dateStr);
+            else next.add(dateStr);
+            onChange({ ...draft, excludedDates: Array.from(next).sort() });
+            return;
+        }
+        onChange({
+            ...draft,
+            positions: draft.positions.map((p) => {
+                if (p.id !== excludedScope) return p;
+                const cur = new Set(p.excludedDates);
+                if (cur.has(dateStr)) cur.delete(dateStr);
+                else cur.add(dateStr);
+                return { ...p, excludedDates: Array.from(cur).sort() };
+            }),
+        });
+    };
+
+    const clearExcludedScope = () => {
+        if (excludedScope === 'ALL') {
+            onChange({ ...draft, excludedDates: [] });
+            return;
+        }
+        onChange({
+            ...draft,
+            positions: draft.positions.map((p) =>
+                p.id === excludedScope ? { ...p, excludedDates: [] } : p,
+            ),
+        });
     };
 
     return (
         <div className="space-y-4">
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-950">
-                <strong>Armar servicio</strong> — definí acá el SLA sintético (como en Servicios/CRM pero sin guardar en Firestore).
-                El cerebro corre en vivo a la derecha.
+                <strong>Armar servicio</strong> — vigencia, puestos con pax, días activos y calendario de exclusiones.
+                El cerebro corre en vivo a la derecha (mes simulado en la barra superior).
             </div>
 
             <div>
@@ -172,6 +248,27 @@ function CustomServiceEditor({
                     className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800 bg-white"
                     placeholder="Ej. Coniferal 2 puestos"
                 />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500">Inicio servicio</label>
+                    <input
+                        type="date"
+                        value={draft.serviceStartDate}
+                        onChange={(e) => handleServiceStartChange(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold bg-white"
+                    />
+                </div>
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500">Fin servicio</label>
+                    <input
+                        type="date"
+                        value={draft.serviceEndDate}
+                        onChange={(e) => handleServiceEndChange(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold bg-white"
+                    />
+                </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -206,101 +303,136 @@ function CustomServiceEditor({
                     </button>
                 </div>
 
-                {draft.positions.map((pos) => (
-                    <div key={pos.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3 shadow-sm">
-                        <div className="flex items-start gap-2">
-                            <input
-                                type="text"
-                                value={pos.positionName}
-                                onChange={(e) => updatePosition(pos.id, { positionName: e.target.value })}
-                                className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold text-slate-800 bg-white"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => removePosition(pos.id)}
-                                className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
-                                title="Quitar puesto"
-                            >
-                                <Trash2 size={14} />
-                            </button>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                                <label className="text-[10px] font-black uppercase text-slate-500">Cantidad (qty)</label>
+                {draft.positions.map((pos) => {
+                    const minRot = pos.coverageType === '24hs' ? pos.qty * 2 : pos.qty;
+                    return (
+                        <div key={pos.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3 shadow-sm">
+                            <div className="flex items-start gap-2">
                                 <input
-                                    type="number"
-                                    min={1}
-                                    max={20}
-                                    value={pos.qty}
-                                    onChange={(e) => updatePosition(pos.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
-                                    className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold bg-white"
+                                    type="text"
+                                    value={pos.positionName}
+                                    onChange={(e) => updatePosition(pos.id, { positionName: e.target.value })}
+                                    className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold text-slate-800 bg-white"
                                 />
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-black uppercase text-slate-500">Cobertura</label>
-                                <select
-                                    value={pos.coverageType}
-                                    onChange={(e) => updatePosition(pos.id, {
-                                        coverageType: e.target.value as '24hs' | 'custom',
-                                        bands: e.target.value === '24hs' && pos.bands.length === 0
-                                            ? ['M', 'T', 'N']
-                                            : pos.bands,
-                                    })}
-                                    className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold bg-white"
+                                <button
+                                    type="button"
+                                    onClick={() => removePosition(pos.id)}
+                                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
+                                    title="Quitar puesto"
                                 >
-                                    <option value="24hs">24hs</option>
-                                    <option value="custom">Custom</option>
-                                </select>
+                                    <Trash2 size={14} />
+                                </button>
                             </div>
-                        </div>
 
-                        <div>
-                            <p className="text-[10px] font-black uppercase text-slate-500 mb-1.5">Bandas</p>
-                            <div className="flex flex-wrap gap-1">
-                                {AUTO_LAB_BAND_OPTIONS.map((band) => {
-                                    const on = pos.bands.includes(band);
-                                    return (
-                                        <button
-                                            key={band}
-                                            type="button"
-                                            onClick={() => toggleBand(pos, band)}
-                                            className={`px-2 py-1 rounded-lg text-[10px] font-black border transition-colors ${
-                                                on
-                                                    ? 'bg-indigo-600 text-white border-indigo-500'
-                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
-                                            }`}
-                                        >
-                                            {band}
-                                        </button>
-                                    );
-                                })}
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-slate-500">Pax (en paralelo)</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={20}
+                                        value={pos.qty}
+                                        onChange={(e) => updatePosition(pos.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                                        className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold bg-white"
+                                    />
+                                    <p className="text-[9px] text-indigo-600 mt-1 font-bold">Rotación mín. ≈ {minRot} guardias</p>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-slate-500">Cobertura</label>
+                                    <select
+                                        value={pos.coverageType}
+                                        onChange={(e) => updatePosition(pos.id, {
+                                            coverageType: e.target.value as '24hs' | 'custom',
+                                            bands: e.target.value === '24hs' && pos.bands.length === 0
+                                                ? ['M', 'T', 'N']
+                                                : pos.bands,
+                                        })}
+                                        className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold bg-white"
+                                    >
+                                        <option value="24hs">24hs</option>
+                                        <option value="custom">Custom</option>
+                                    </select>
+                                </div>
                             </div>
-                        </div>
 
-                        <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={pos.weekdaysOnly}
-                                onChange={(e) => updatePosition(pos.id, { weekdaysOnly: e.target.checked })}
-                                className="rounded border-slate-300"
-                            />
-                            Solo L–V (sin fin de semana)
-                        </label>
-                    </div>
-                ))}
+                            <div>
+                                <p className="text-[10px] font-black uppercase text-slate-500 mb-1.5">Bandas</p>
+                                <div className="flex flex-wrap gap-1">
+                                    {AUTO_LAB_BAND_OPTIONS.map((band) => {
+                                        const on = pos.bands.includes(band);
+                                        return (
+                                            <button
+                                                key={band}
+                                                type="button"
+                                                onClick={() => toggleBand(pos, band)}
+                                                className={`px-2 py-1 rounded-lg text-[10px] font-black border transition-colors ${
+                                                    on
+                                                        ? 'bg-indigo-600 text-white border-indigo-500'
+                                                        : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                                                }`}
+                                            >
+                                                {band}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            <div>
+                                <p className="text-[10px] font-black uppercase text-slate-500 mb-1.5">Días activos</p>
+                                <div className="flex flex-wrap gap-1">
+                                    {AUTO_LAB_DAY_LETTERS.map((letter) => {
+                                        const on = pos.activeDayLetters.includes(letter);
+                                        return (
+                                            <button
+                                                key={letter}
+                                                type="button"
+                                                onClick={() => toggleActiveDay(pos, letter)}
+                                                className={`w-8 h-8 rounded-lg text-[10px] font-black border transition-colors ${
+                                                    on
+                                                        ? 'bg-emerald-600 text-white border-emerald-500'
+                                                        : 'bg-white text-slate-400 border-slate-200'
+                                                }`}
+                                            >
+                                                {letter}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {pos.excludedDates.length > 0 && (
+                                <p className="text-[9px] text-rose-600 font-bold">
+                                    {pos.excludedDates.length} día(s) excluido(s) solo para este puesto
+                                </p>
+                            )}
+                        </div>
+                    );
+                })}
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="col-span-2">
+                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-semibold">
+                        <input
+                            type="checkbox"
+                            checked={draft.autoEmployeeCount}
+                            onChange={(e) => onChange({ ...draft, autoEmployeeCount: e.target.checked })}
+                            className="rounded border-slate-300"
+                        />
+                        Dotación automática (suma rotación mín. por puesto ≈ {suggestedPax})
+                    </label>
+                </div>
                 <div>
-                    <label className="text-[10px] font-black uppercase text-slate-500">Dotación (guardias)</label>
+                    <label className="text-[10px] font-black uppercase text-slate-500">Dotación total</label>
                     <input
                         type="number"
                         min={1}
                         max={64}
-                        value={draft.employeeCount}
+                        disabled={draft.autoEmployeeCount}
+                        value={draft.autoEmployeeCount ? suggestedPax : draft.employeeCount}
                         onChange={(e) => onChange({ ...draft, employeeCount: Math.max(1, Number(e.target.value) || 1) })}
-                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-bold bg-white"
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-bold bg-white disabled:bg-slate-100 disabled:text-slate-500"
                     />
                 </div>
                 <div>
@@ -331,7 +463,7 @@ function CustomServiceEditor({
                     </select>
                 </div>
                 <div>
-                    <label className="text-[10px] font-black uppercase text-slate-500">SLA hs (vacío = auto)</label>
+                    <label className="text-[10px] font-black uppercase text-slate-500">SLA hs mes sim. (vacío = auto)</label>
                     <input
                         type="number"
                         min={0}
@@ -348,6 +480,19 @@ function CustomServiceEditor({
                     />
                 </div>
             </div>
+
+            <AutoLabServiceCalendar
+                serviceStartDate={draft.serviceStartDate}
+                serviceEndDate={draft.serviceEndDate}
+                excludedDates={draft.excludedDates}
+                positions={draft.positions}
+                excludedScope={excludedScope}
+                onExcludedScopeChange={onExcludedScopeChange}
+                onToggleExcluded={toggleExcludedDate}
+                onClearScope={clearExcludedScope}
+                simulationYear={simulationYear}
+                simulationMonth={simulationMonth}
+            />
         </div>
     );
 }
@@ -357,6 +502,7 @@ export default function AutoLabPage() {
     const now = new Date();
     const [selectedId, setSelectedId] = useState(AUTO_LAB_CASES[0]?.id ?? '');
     const [customDraft, setCustomDraft] = useState<AutoLabCustomDraft>(createDefaultCustomDraft);
+    const [excludedScope, setExcludedScope] = useState<'ALL' | string>('ALL');
     const [year, setYear] = useState(now.getFullYear());
     const [month, setMonth] = useState(now.getMonth() + 1);
 
@@ -372,6 +518,16 @@ export default function AutoLabPage() {
     const estimatedCustomSla = useMemo(() => {
         if (!isCustomMode) return 0;
         const built = buildCaseFromCustomDraft(customDraft);
+        if (built.serviceStartDate && built.serviceEndDate) {
+            return calculateSlaHoursForVigencia(
+                built.positions,
+                built.serviceStartDate,
+                built.serviceEndDate,
+                built.excludedDates,
+                year,
+                month,
+            );
+        }
         const days = buildDaysInMonth(year, month);
         return estimateSlaVendidas(built.positions, days);
     }, [isCustomMode, customDraft, year, month]);
@@ -475,7 +631,10 @@ export default function AutoLabPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-white border border-slate-200 shadow-sm p-4">
-                    <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">Período</label>
+                    <label className="text-xs font-bold text-slate-600 uppercase tracking-wide flex items-center gap-1">
+                        <CalendarDays size={14} />
+                        Mes simulado
+                    </label>
                     <select
                         value={month}
                         onChange={(e) => setMonth(Number(e.target.value))}
@@ -493,6 +652,14 @@ export default function AutoLabPage() {
                         min={2020}
                         max={2035}
                     />
+                    {isCustomMode && runResult && (
+                        <span className="text-xs text-slate-500">
+                            {runResult.daysInMonth.length} día(s) activos en vigencia
+                            {runResult.fullMonthDays.length !== runResult.daysInMonth.length && (
+                                <> (de {runResult.fullMonthDays.length} del mes)</>
+                            )}
+                        </span>
+                    )}
                     <button
                         type="button"
                         onClick={handleCopyJson}
@@ -565,6 +732,10 @@ export default function AutoLabPage() {
                                             draft={customDraft}
                                             onChange={setCustomDraft}
                                             estimatedSla={estimatedCustomSla}
+                                            simulationYear={year}
+                                            simulationMonth={month}
+                                            excludedScope={excludedScope}
+                                            onExcludedScopeChange={setExcludedScope}
                                         />
                                     ) : (
                                         <>

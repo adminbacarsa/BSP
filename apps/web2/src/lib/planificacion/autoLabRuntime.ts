@@ -5,6 +5,10 @@ import {
 } from './autoPlanningBrain';
 import type { V2AbsenceMap, V2EmployeeDef } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
+import {
+    calculateSlaHoursForVigencia,
+    getServiceDaysInMonth,
+} from './autoLabServicePeriod';
 
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
@@ -89,6 +93,7 @@ export interface AutoLabRunResult {
     positions: AutoLabCaseDefinition['positions'];
     slaVendidas: number;
     daysInMonth: Date[];
+    fullMonthDays: Date[];
     slotsPerDay: number;
     peakConcurrent: number;
 }
@@ -98,10 +103,36 @@ export function runAutoLabCase(
     year: number,
     month: number,
 ): AutoLabRunResult {
-    const daysInMonth = buildDaysInMonth(year, month);
+    const fullMonthDays = buildDaysInMonth(year, month);
+    const hasVigencia = !!(caseDef.serviceStartDate && caseDef.serviceEndDate);
+    const daysInMonth = hasVigencia
+        ? getServiceDaysInMonth(
+            year,
+            month,
+            caseDef.serviceStartDate!,
+            caseDef.serviceEndDate!,
+            caseDef.excludedDates,
+        )
+        : fullMonthDays;
+
     const employees = buildSyntheticEmployees(caseDef.employeeCount);
-    const absences = buildAbsencesForCase(caseDef, daysInMonth, employees);
-    const slaVendidas = caseDef.slaVendidas ?? estimateSlaVendidas(caseDef.positions, daysInMonth);
+    const absences = buildAbsencesForCase(caseDef, fullMonthDays, employees);
+
+    let slaVendidas: number;
+    if (caseDef.slaVendidas != null) {
+        slaVendidas = caseDef.slaVendidas;
+    } else if (hasVigencia) {
+        slaVendidas = calculateSlaHoursForVigencia(
+            caseDef.positions,
+            caseDef.serviceStartDate!,
+            caseDef.serviceEndDate!,
+            caseDef.excludedDates,
+            year,
+            month,
+        );
+    } else {
+        slaVendidas = estimateSlaVendidas(caseDef.positions, daysInMonth);
+    }
 
     const contingencyDaysManual = (caseDef.contingencyDays || [])
         .map((d) => {
@@ -145,6 +176,7 @@ export function runAutoLabCase(
         positions: caseDef.positions,
         slaVendidas,
         daysInMonth,
+        fullMonthDays,
         slotsPerDay: slots.slotsPerDay,
         peakConcurrent: slots.peakConcurrent,
     };
@@ -164,7 +196,19 @@ export function buildAutoLabExportJson(
             title: caseDef.title,
             subtitle: caseDef.subtitle,
         },
-        period: { year: result.year, month: result.month, daysInMonth: result.daysInMonth.length },
+        period: {
+            year: result.year,
+            month: result.month,
+            daysInMonth: result.daysInMonth.length,
+            fullMonthDays: result.fullMonthDays.length,
+        },
+        vigencia: caseDef.serviceStartDate && caseDef.serviceEndDate
+            ? {
+                serviceStartDate: caseDef.serviceStartDate,
+                serviceEndDate: caseDef.serviceEndDate,
+                excludedDates: caseDef.excludedDates || [],
+            }
+            : undefined,
         synthetic: {
             positions: result.positions,
             employees: result.employees.map((e) => ({ id: e.id, nombre: e.nombre })),

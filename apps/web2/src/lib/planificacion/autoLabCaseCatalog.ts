@@ -25,6 +25,11 @@ export interface AutoLabCaseDefinition {
     absences?: AutoLabCaseAbsence[];
     contingencyDays?: number[];
     slaVendidas?: number;
+    /** Vigencia del contrato (modo custom / servicio real). */
+    serviceStartDate?: string;
+    serviceEndDate?: string;
+    /** Días sin servicio a nivel contrato (YYYY-MM-DD). */
+    excludedDates?: string[];
 }
 
 const WEEKDAYS = ['L', 'M', 'X', 'J', 'V'] as const;
