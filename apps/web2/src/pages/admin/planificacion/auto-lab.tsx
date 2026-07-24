@@ -5,7 +5,18 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { AUTO_LAB_CASES, type AutoLabCaseDefinition } from '@/lib/planificacion/autoLabCaseCatalog';
 import {
+    AUTO_LAB_BAND_OPTIONS,
+    AUTO_LAB_CUSTOM_CASE_ID,
+    buildCaseFromCustomDraft,
+    createDefaultCustomDraft,
+    loadCustomDraftPreset,
+    type AutoLabCustomDraft,
+    type AutoLabCustomPositionDraft,
+} from '@/lib/planificacion/autoLabCustomCase';
+import {
     buildAutoLabExportJson,
+    estimateSlaVendidas,
+    buildDaysInMonth,
     runAutoLabCase,
     type AutoLabRunResult,
 } from '@/lib/planificacion/autoLabRuntime';
@@ -17,7 +28,10 @@ import {
     Copy,
     FlaskConical,
     Layers,
+    Plus,
     RotateCw,
+    SlidersHorizontal,
+    Trash2,
     Users,
     XCircle,
 } from 'lucide-react';
@@ -31,6 +45,8 @@ const MONTH_NAMES = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
+
+const CYCLE_OPTIONS = ['6+2', '6+1', '5+1', '4+2'] as const;
 
 function rotationLabel(mode: AutoLabCaseDefinition['rotationMode']): string {
     if (mode === 'fixed') return 'Banda fija';
@@ -92,33 +108,286 @@ function FeasibilityBadge({ ok }: { ok: boolean }) {
     );
 }
 
+function CustomServiceEditor({
+    draft,
+    onChange,
+    estimatedSla,
+}: {
+    draft: AutoLabCustomDraft;
+    onChange: (next: AutoLabCustomDraft) => void;
+    estimatedSla: number;
+}) {
+    const updatePosition = (id: string, patch: Partial<AutoLabCustomPositionDraft>) => {
+        onChange({
+            ...draft,
+            positions: draft.positions.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+        });
+    };
+
+    const toggleBand = (pos: AutoLabCustomPositionDraft, band: (typeof AUTO_LAB_BAND_OPTIONS)[number]) => {
+        const has = pos.bands.includes(band);
+        const bands = has ? pos.bands.filter((b) => b !== band) : [...pos.bands, band];
+        updatePosition(pos.id, { bands });
+    };
+
+    const addPosition = () => {
+        const n = draft.positions.length + 1;
+        onChange({
+            ...draft,
+            positions: [
+                ...draft.positions,
+                {
+                    id: `pos-${Date.now()}`,
+                    positionName: `Puesto ${n}`,
+                    qty: 1,
+                    coverageType: '24hs',
+                    bands: ['M', 'T', 'N'],
+                    weekdaysOnly: false,
+                },
+            ],
+        });
+    };
+
+    const removePosition = (id: string) => {
+        if (draft.positions.length <= 1) {
+            toast.error('Debe haber al menos un puesto');
+            return;
+        }
+        onChange({ ...draft, positions: draft.positions.filter((p) => p.id !== id) });
+    };
+
+    return (
+        <div className="space-y-4">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-950">
+                <strong>Armar servicio</strong> — definí acá el SLA sintético (como en Servicios/CRM pero sin guardar en Firestore).
+                El cerebro corre en vivo a la derecha.
+            </div>
+
+            <div>
+                <label className="text-[10px] font-black uppercase text-slate-500">Nombre del escenario</label>
+                <input
+                    type="text"
+                    value={draft.title}
+                    onChange={(e) => onChange({ ...draft, title: e.target.value })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800 bg-white"
+                    placeholder="Ej. Coniferal 2 puestos"
+                />
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+                <span className="text-[10px] font-black uppercase text-slate-500 w-full">Plantillas rápidas</span>
+                {AUTO_LAB_CASES.map((c) => (
+                    <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                            const loaded = loadCustomDraftPreset(c.id);
+                            if (loaded) {
+                                onChange(loaded);
+                                toast.info(`Plantilla: Caso ${c.order}`);
+                            }
+                        }}
+                        className="rounded-lg border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 px-2 py-1 text-[10px] font-bold text-slate-700"
+                    >
+                        Caso {c.order}
+                    </button>
+                ))}
+            </div>
+
+            <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                    <p className="text-xs font-black uppercase text-slate-600">Puestos</p>
+                    <button
+                        type="button"
+                        onClick={addPosition}
+                        className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 text-[10px] font-black"
+                    >
+                        <Plus size={12} /> Puesto
+                    </button>
+                </div>
+
+                {draft.positions.map((pos) => (
+                    <div key={pos.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3 shadow-sm">
+                        <div className="flex items-start gap-2">
+                            <input
+                                type="text"
+                                value={pos.positionName}
+                                onChange={(e) => updatePosition(pos.id, { positionName: e.target.value })}
+                                className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm font-bold text-slate-800 bg-white"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => removePosition(pos.id)}
+                                className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
+                                title="Quitar puesto"
+                            >
+                                <Trash2 size={14} />
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500">Cantidad (qty)</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={20}
+                                    value={pos.qty}
+                                    onChange={(e) => updatePosition(pos.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                                    className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold bg-white"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500">Cobertura</label>
+                                <select
+                                    value={pos.coverageType}
+                                    onChange={(e) => updatePosition(pos.id, {
+                                        coverageType: e.target.value as '24hs' | 'custom',
+                                        bands: e.target.value === '24hs' && pos.bands.length === 0
+                                            ? ['M', 'T', 'N']
+                                            : pos.bands,
+                                    })}
+                                    className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 font-semibold bg-white"
+                                >
+                                    <option value="24hs">24hs</option>
+                                    <option value="custom">Custom</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <p className="text-[10px] font-black uppercase text-slate-500 mb-1.5">Bandas</p>
+                            <div className="flex flex-wrap gap-1">
+                                {AUTO_LAB_BAND_OPTIONS.map((band) => {
+                                    const on = pos.bands.includes(band);
+                                    return (
+                                        <button
+                                            key={band}
+                                            type="button"
+                                            onClick={() => toggleBand(pos, band)}
+                                            className={`px-2 py-1 rounded-lg text-[10px] font-black border transition-colors ${
+                                                on
+                                                    ? 'bg-indigo-600 text-white border-indigo-500'
+                                                    : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                                            }`}
+                                        >
+                                            {band}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={pos.weekdaysOnly}
+                                onChange={(e) => updatePosition(pos.id, { weekdaysOnly: e.target.checked })}
+                                className="rounded border-slate-300"
+                            />
+                            Solo L–V (sin fin de semana)
+                        </label>
+                    </div>
+                ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500">Dotación (guardias)</label>
+                    <input
+                        type="number"
+                        min={1}
+                        max={64}
+                        value={draft.employeeCount}
+                        onChange={(e) => onChange({ ...draft, employeeCount: Math.max(1, Number(e.target.value) || 1) })}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-bold bg-white"
+                    />
+                </div>
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500">Ciclo CCT</label>
+                    <select
+                        value={draft.cycle}
+                        onChange={(e) => onChange({ ...draft, cycle: e.target.value })}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-bold bg-white"
+                    >
+                        {CYCLE_OPTIONS.map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                        ))}
+                    </select>
+                </div>
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500">Rotación</label>
+                    <select
+                        value={draft.rotationMode}
+                        onChange={(e) => onChange({
+                            ...draft,
+                            rotationMode: e.target.value as AutoLabCustomDraft['rotationMode'],
+                        })}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-bold bg-white"
+                    >
+                        <option value="rotative">Rotativo M→T→N</option>
+                        <option value="fixed">Banda fija</option>
+                        <option value="auto">Auto (cerebro)</option>
+                    </select>
+                </div>
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500">SLA hs (vacío = auto)</label>
+                    <input
+                        type="number"
+                        min={0}
+                        value={draft.slaVendidasOverride ?? ''}
+                        onChange={(e) => {
+                            const v = e.target.value;
+                            onChange({
+                                ...draft,
+                                slaVendidasOverride: v === '' ? null : Math.max(0, Number(v) || 0),
+                            });
+                        }}
+                        placeholder={String(estimatedSla)}
+                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-bold bg-white"
+                    />
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function AutoLabPage() {
     const { isSuperAdmin, canReadModule, rolePermissions } = useAuth();
     const now = new Date();
     const [selectedId, setSelectedId] = useState(AUTO_LAB_CASES[0]?.id ?? '');
+    const [customDraft, setCustomDraft] = useState<AutoLabCustomDraft>(createDefaultCustomDraft);
     const [year, setYear] = useState(now.getFullYear());
     const [month, setMonth] = useState(now.getMonth() + 1);
 
     const canPlan = canReadModule('PLANNING');
     const canAccess = canAccessAutoLab(isSuperAdmin, rolePermissions);
+    const isCustomMode = selectedId === AUTO_LAB_CUSTOM_CASE_ID;
 
-    const selectedCase = useMemo(
-        () => AUTO_LAB_CASES.find((c) => c.id === selectedId) ?? AUTO_LAB_CASES[0],
-        [selectedId],
-    );
+    const activeCase = useMemo((): AutoLabCaseDefinition | null => {
+        if (isCustomMode) return buildCaseFromCustomDraft(customDraft);
+        return AUTO_LAB_CASES.find((c) => c.id === selectedId) ?? AUTO_LAB_CASES[0] ?? null;
+    }, [isCustomMode, customDraft, selectedId]);
+
+    const estimatedCustomSla = useMemo(() => {
+        if (!isCustomMode) return 0;
+        const built = buildCaseFromCustomDraft(customDraft);
+        const days = buildDaysInMonth(year, month);
+        return estimateSlaVendidas(built.positions, days);
+    }, [isCustomMode, customDraft, year, month]);
 
     const runResult: AutoLabRunResult | null = useMemo(() => {
-        if (!selectedCase) return null;
+        if (!activeCase) return null;
         try {
-            return runAutoLabCase(selectedCase, year, month);
+            return runAutoLabCase(activeCase, year, month);
         } catch {
             return null;
         }
-    }, [selectedCase, year, month]);
+    }, [activeCase, year, month]);
 
     const handleCopyJson = async () => {
-        if (!runResult || !selectedCase) return;
-        const payload = buildAutoLabExportJson(runResult, selectedCase);
+        if (!runResult || !activeCase) return;
+        const payload = buildAutoLabExportJson(runResult, activeCase);
         try {
             await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
             toast.success('JSON copiado — pegalo en el chat');
@@ -149,7 +418,6 @@ export default function AutoLabPage() {
                     <h1 className="text-lg font-black text-slate-800">Sin permiso Auto Lab</h1>
                     <p className="text-sm text-slate-600 mt-2">
                         Necesitás el permiso <strong>Auto Lab</strong> en el rol de Planificación, o ingresar como SuperAdmin.
-                        Un administrador puede activarlo en Configuración → Roles.
                     </p>
                     <Link
                         href="/admin/planificacion"
@@ -186,9 +454,7 @@ export default function AutoLabPage() {
                                 </p>
                                 <h1 className="text-2xl font-black tracking-tight">Auto Lab</h1>
                                 <p className="text-sm text-indigo-100 mt-1 max-w-2xl">
-                                    Catálogo de casos de menor a mayor complejidad. Corre el cerebro real
-                                    (<code className="bg-white/10 px-1 rounded">resolveAutoPlanningBrain</code>) sin
-                                    Firestore ni publicar cronogramas.
+                                    Catálogo de casos o <strong>armá tu propio servicio</strong>. Corre el cerebro real sin Firestore.
                                 </p>
                             </div>
                         </div>
@@ -246,7 +512,7 @@ export default function AutoLabPage() {
                             </div>
                             <div className="p-2 space-y-1">
                                 {AUTO_LAB_CASES.map((c) => {
-                                    const active = c.id === selectedCase?.id;
+                                    const active = !isCustomMode && c.id === activeCase?.id;
                                     return (
                                         <button
                                             key={c.id}
@@ -268,43 +534,70 @@ export default function AutoLabPage() {
                                         </button>
                                     );
                                 })}
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedId(AUTO_LAB_CUSTOM_CASE_ID)}
+                                    className={`w-full text-left rounded-xl px-3 py-3 transition-colors border ${
+                                        isCustomMode
+                                            ? 'bg-emerald-50 border-emerald-300 shadow-sm'
+                                            : 'hover:bg-emerald-50/50 border-dashed border-emerald-300'
+                                    }`}
+                                >
+                                    <p className="text-[10px] font-black text-emerald-700 uppercase flex items-center gap-1">
+                                        <SlidersHorizontal size={12} />
+                                        Armar servicio
+                                    </p>
+                                    <p className="text-sm font-bold text-slate-800 leading-tight mt-0.5">
+                                        Custom — tus puestos y bandas
+                                    </p>
+                                    <p className="text-[11px] text-slate-500 mt-1">Editor sintético · sin Firestore</p>
+                                </button>
                             </div>
                         </div>
                     </div>
 
                     <div className="lg:col-span-5 space-y-4">
-                        {selectedCase && (
+                        {activeCase && (
                             <>
                                 <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
-                                    <div className="flex items-start gap-3 mb-4">
-                                        <div className="rounded-xl bg-indigo-100 p-2">
-                                            <Layers size={18} className="text-indigo-700" />
-                                        </div>
-                                        <div>
-                                            <h2 className="font-black text-slate-800">{selectedCase.title}</h2>
-                                            <p className="text-sm text-slate-600 mt-1">{selectedCase.description}</p>
-                                        </div>
-                                    </div>
-
-                                    <PositionDiagram positions={selectedCase.positions} />
+                                    {isCustomMode ? (
+                                        <CustomServiceEditor
+                                            draft={customDraft}
+                                            onChange={setCustomDraft}
+                                            estimatedSla={estimatedCustomSla}
+                                        />
+                                    ) : (
+                                        <>
+                                            <div className="flex items-start gap-3 mb-4">
+                                                <div className="rounded-xl bg-indigo-100 p-2">
+                                                    <Layers size={18} className="text-indigo-700" />
+                                                </div>
+                                                <div>
+                                                    <h2 className="font-black text-slate-800">{activeCase.title}</h2>
+                                                    <p className="text-sm text-slate-600 mt-1">{activeCase.description}</p>
+                                                </div>
+                                            </div>
+                                            <PositionDiagram positions={activeCase.positions} />
+                                        </>
+                                    )}
 
                                     <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                             <p className="font-black uppercase text-slate-500 text-[10px]">Ciclo</p>
-                                            <p className="font-bold text-slate-800 mt-1">{selectedCase.cycle}</p>
+                                            <p className="font-bold text-slate-800 mt-1">{activeCase.cycle}</p>
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                             <p className="font-black uppercase text-slate-500 text-[10px]">Rotación</p>
                                             <p className="font-bold text-slate-800 mt-1 flex items-center gap-1">
                                                 <RotateCw size={12} className="text-indigo-600" />
-                                                {rotationLabel(selectedCase.rotationMode)}
+                                                {rotationLabel(activeCase.rotationMode)}
                                             </p>
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                             <p className="font-black uppercase text-slate-500 text-[10px]">Dotación</p>
                                             <p className="font-bold text-slate-800 mt-1 flex items-center gap-1">
                                                 <Users size={12} className="text-emerald-600" />
-                                                {selectedCase.employeeCount} guardias sintéticos
+                                                {activeCase.employeeCount} guardias sintéticos
                                             </p>
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -316,20 +609,29 @@ export default function AutoLabPage() {
                                     </div>
                                 </div>
 
-                                <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 space-y-3">
-                                    <p className="text-xs font-black uppercase text-slate-600">Qué esperar</p>
-                                    <ul className="space-y-2">
-                                        {selectedCase.expectations.map((exp) => (
-                                            <li key={exp} className="text-sm text-slate-700 flex gap-2">
-                                                <CheckCircle2 size={14} className="text-emerald-600 shrink-0 mt-0.5" />
-                                                {exp}
-                                            </li>
-                                        ))}
-                                    </ul>
-                                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
-                                        <strong>Cobertura:</strong> {selectedCase.coverageNotes}
+                                {!isCustomMode && (
+                                    <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5 space-y-3">
+                                        <p className="text-xs font-black uppercase text-slate-600">Qué esperar</p>
+                                        <ul className="space-y-2">
+                                            {activeCase.expectations.map((exp) => (
+                                                <li key={exp} className="text-sm text-slate-700 flex gap-2">
+                                                    <CheckCircle2 size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+                                                    {exp}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                                            <strong>Cobertura:</strong> {activeCase.coverageNotes}
+                                        </div>
                                     </div>
-                                </div>
+                                )}
+
+                                {isCustomMode && activeCase.positions.length > 0 && (
+                                    <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
+                                        <p className="text-xs font-black uppercase text-slate-600 mb-3">Vista previa SLA</p>
+                                        <PositionDiagram positions={activeCase.positions} />
+                                    </div>
+                                )}
                             </>
                         )}
                     </div>
