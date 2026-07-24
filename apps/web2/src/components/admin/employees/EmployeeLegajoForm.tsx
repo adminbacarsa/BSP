@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Loader2, MapPin, X } from 'lucide-react';
 import { geocodeAddress } from '@/lib/employees/geocodeAddress';
 import ExperienciaObjetivosPanel from '@/components/admin/employees/ExperienciaObjetivosPanel';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { countExperienciaObjetivos } from '@/lib/planificacion/experienciaObjetivos';
 
 type Agreement = {
@@ -230,13 +231,20 @@ export default function EmployeeLegajoForm({
                         </div>
                         <div>
                             <label className={labelClass}>Objetivo Preferido</label>
-                            <select className={selectClass} value={form.preferredObjectiveId || ''} onChange={e => setForm({ ...form, preferredObjectiveId: e.target.value })}>
-                                <option value="">Ninguno</option>
-                                {(form.preferredClientId
-                                    ? allObjectives.filter(o => o.clientId === form.preferredClientId)
-                                    : allObjectives
-                                ).map(obj => <option key={obj.id} value={obj.id}>{obj.name}</option>)}
-                            </select>
+                            <SearchableSelect
+                                className={selectClass}
+                                value={form.preferredObjectiveId || ''}
+                                onChange={v => setForm({ ...form, preferredObjectiveId: v })}
+                                placeholder="Ninguno"
+                                options={[
+                                    { value: '', label: 'Ninguno' },
+                                    ...[...(form.preferredClientId
+                                        ? allObjectives.filter(o => o.clientId === form.preferredClientId)
+                                        : allObjectives
+                                    )].sort((a, b) => a.name.localeCompare(b.name, 'es'))
+                                      .map(obj => ({ value: obj.id, label: obj.name })),
+                                ]}
+                            />
                         </div>
                         <div>
                             <label className={labelClass}>Inicio Ciclo Liquidación (Día)</label>
