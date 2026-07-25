@@ -21,7 +21,7 @@ import {
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDocsFromServer, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 
 type PlanificacionDotacionEntry = { positionName: string; shiftCode?: string };
 type PlanificacionDotacionMap = Record<string, PlanificacionDotacionEntry>;
@@ -3489,7 +3489,8 @@ export default function PlanificacionPage() {
         };
         loadUsers();
         const auth = getAuth();
-        onAuthStateChanged(auth, (user) => { if (user) { setOperatorEmail(user.email || ''); setOperatorName(user.displayName || user.email || "Usuario"); } else { setOperatorName("No Logueado"); } });
+        const unsubAuth = onAuthStateChanged(auth, (user) => { if (user) { setOperatorEmail(user.email || ''); setOperatorName(user.displayName || user.email || "Usuario"); } else { setOperatorName("No Logueado"); } });
+        return () => unsubAuth();
     }, []);
 
     const tenantClientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
@@ -3505,7 +3506,7 @@ export default function PlanificacionPage() {
         }
         const fetchSLA = async () => {
             try {
-                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+                const snap = await getDocsFromServer(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
                 const allDocs = filterSlasForPlanningTenant(
                     snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
                     empresaId,
@@ -3578,7 +3579,7 @@ export default function PlanificacionPage() {
         if (!selectedGrupo || !grupoUnifiedMode || !selectedClient) { setGrupoSlaMap({}); setGrupoTotalVendidas(0); return; }
         const fetchGroupSlas = async () => {
             try {
-                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
+                const snap = await getDocsFromServer(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
                 const allDocs = filterSlasForPlanningTenant(
                     snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })),
                     empresaId, scopeEmpresa, tenantClientIds,
@@ -3611,7 +3612,7 @@ export default function PlanificacionPage() {
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
-        getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa)).then(snap => {
+        getDocsFromServer(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa)).then(snap => {
             const m: Record<string, string> = {};
             snap.docs.forEach(d => {
                 if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;

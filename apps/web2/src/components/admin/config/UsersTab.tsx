@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole, Target, Check, Search } from 'lucide-react';
 import { db, functions } from '@/lib/firebase';
-import { collection, getDocs, query, orderBy, where, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { collection, getDocs, getDocsFromServer, query, orderBy, where, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
@@ -41,7 +41,7 @@ export default function UsersTab() {
     // Refresca solo los roles al abrir el modal (puede haber creado uno nuevo en RolesTab)
     useEffect(() => {
         if (!isModalOpen) return;
-        getDocs(collection(db, 'roles')).then(snap => {
+        getDocsFromServer(collection(db, 'roles')).then(snap => {
             setRolesList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         }).catch(() => {});
     }, [isModalOpen]);
@@ -50,8 +50,8 @@ export default function UsersTab() {
         setLoading(true);
         try {
             const [uSnap, rSnap] = await Promise.all([
-                getDocs(query(collection(db, 'system_users'), orderBy('lastName'))),
-                getDocs(collection(db, 'roles')),
+                getDocsFromServer(query(collection(db, 'system_users'), orderBy('lastName'))),
+                getDocsFromServer(collection(db, 'roles')),
             ]);
 
             const allUsers = uSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];

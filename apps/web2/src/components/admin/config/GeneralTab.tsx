@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { functions, db } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDocFromServer, setDoc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -44,7 +44,7 @@ export default function GeneralTab() {
     useEffect(() => {
         if (!empresaId) return;
         setLoadingCompany(true);
-        getDoc(doc(db, 'empresas', empresaId))
+        getDocFromServer(doc(db, 'empresas', empresaId))
             .then(snap => {
                 if (snap.exists()) {
                     const data = snap.data();
