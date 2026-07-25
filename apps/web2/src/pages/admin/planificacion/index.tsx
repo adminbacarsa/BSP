@@ -123,7 +123,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
-import { resolveObjectiveScheduleFlags } from '@/lib/planificacion/scheduleObjectiveFlags';
+import { resolveObjectiveScheduleFlags, shouldBypassFixedBandFloater } from '@/lib/planificacion/scheduleObjectiveFlags';
 import {
     resolveAutoPlanningBrain,
     PLANNING_COVERAGE_RULES,
@@ -7005,7 +7005,9 @@ export default function PlanificacionPage() {
                 allowCustom24hsBackup: objectiveScheduleFlags.allowCustom24hsBackup,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
-            const canFloater = !can6x1 && canUseFixedBandFloater(baseGenCtx);
+            const canFloater = !can6x1
+                && canUseFixedBandFloater(baseGenCtx)
+                && !shouldBypassFixedBandFloater(positionStructure);
             await bumpAutoV2Progress(40, can6x1
                 ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 6+1)…`
                 : canFloater

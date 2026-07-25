@@ -23,3 +23,8 @@ export function resolveObjectiveScheduleFlags(positions: V2PositionDef[]): {
         allowCustom24hsBackup: !isMixed,
     };
 }
+
+/** Mixto 24hs+custom: no usar fixedBandFloater (solo rota 24hs; custom queda MA/ME todos los días). */
+export function shouldBypassFixedBandFloater(positions: V2PositionDef[]): boolean {
+    return resolveObjectiveScheduleFlags(positions).schedulePhasedRotativeFirst;
+}

@@ -2366,6 +2366,45 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
     }
 
+    const assignCustomBackupOrSubstitute = (
+        empId: string,
+        pos: V2PositionDef,
+        dateStr: string,
+        dayLetter: string,
+        inCurrent: boolean,
+    ): boolean => {
+        if (runtime[empId].assignedDays.has(dateStr)) return false;
+        if (ctx.absences[empId]?.has(dateStr)) return false;
+        if (writeCustomCoverShift(empId, pos, dateStr, dayLetter, inCurrent, { strictRest: true })) return true;
+        if (ctx.allowCustom24hsBackup === false) return false;
+        if (primary24hsPosition) {
+            const p1Bands = effectiveShiftsForPositionDay(primary24hsPosition, dayLetter, ctx.autoCycles);
+            for (const sh of p1Bands) {
+                const code = String(sh.code ?? '').toUpperCase();
+                const sHrs = shiftHoursH(sh);
+                const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[code] || '07:00';
+                const sEnd = sh.endTime || undefined;
+                if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > hardMax) continue;
+                if (!passesAgreementRest(empId, dateStr, code, sStart, sHrs)) continue;
+                writeAssignment(empId, dateStr, pos.positionName, code, sh.name || code, sHrs, sStart, inCurrent, sEnd);
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const stripFrancoOnCustomActiveDay = (
+        empId: string, pos: V2PositionDef, dateStr: string,
+    ): boolean => {
+        const a = assignments.find(x => x.empId === empId && x.dateStr === dateStr);
+        if (!a || !FRANCO_BREAK_SET.has(String(a.code ?? '').toUpperCase())) return false;
+        runtime[empId].assignedDays.delete(dateStr);
+        const idx = assignments.indexOf(a);
+        if (idx >= 0) assignments.splice(idx, 1);
+        if (stats.totalAssignments > 0) stats.totalAssignments--;
+        return true;
+    };
+
     const useDemandDriven = shouldUseDemandDrivenScheduling(ctx);
     const cycleBaseOnly = ctx.cycleBaseOnly === true;
     // Rotativo ON → demand-driven + péndulo. Rotativo OFF → loop clásico banda fija (abajo).
@@ -2674,45 +2713,6 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
         }
     }
-
-    const assignCustomBackupOrSubstitute = (
-        empId: string,
-        pos: V2PositionDef,
-        dateStr: string,
-        dayLetter: string,
-        inCurrent: boolean,
-    ): boolean => {
-        if (runtime[empId].assignedDays.has(dateStr)) return false;
-        if (ctx.absences[empId]?.has(dateStr)) return false;
-        if (writeCustomCoverShift(empId, pos, dateStr, dayLetter, inCurrent, { strictRest: true })) return true;
-        if (ctx.allowCustom24hsBackup === false) return false;
-        if (primary24hsPosition) {
-            const p1Bands = effectiveShiftsForPositionDay(primary24hsPosition, dayLetter, ctx.autoCycles);
-            for (const sh of p1Bands) {
-                const code = String(sh.code ?? '').toUpperCase();
-                const sHrs = shiftHoursH(sh);
-                const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[code] || '07:00';
-                const sEnd = sh.endTime || undefined;
-                if (!customCoverEmps.has(empId) && cctTrancheUsed(empId, inCurrent) + sHrs > hardMax) continue;
-                if (!passesAgreementRest(empId, dateStr, code, sStart, sHrs)) continue;
-                writeAssignment(empId, dateStr, pos.positionName, code, sh.name || code, sHrs, sStart, inCurrent, sEnd);
-                return true;
-            }
-        }
-        return false;
-    };
-
-    const stripFrancoOnCustomActiveDay = (
-        empId: string, pos: V2PositionDef, dateStr: string,
-    ): boolean => {
-        const a = assignments.find(x => x.empId === empId && x.dateStr === dateStr);
-        if (!a || !FRANCO_BREAK_SET.has(String(a.code ?? '').toUpperCase())) return false;
-        runtime[empId].assignedDays.delete(dateStr);
-        const idx = assignments.indexOf(a);
-        if (idx >= 0) assignments.splice(idx, 1);
-        if (stats.totalAssignments > 0) stats.totalAssignments--;
-        return true;
-    };
 
     // Cobertura custom: primero dotación del puesto (MA/ME/RO); respaldo 24hs solo si falta gente.
     if (!deferCustomToFinal) {

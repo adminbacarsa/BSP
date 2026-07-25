@@ -43,7 +43,7 @@ import {
     buildPositionRequiredHeadcountMap,
     computePositionRequiredHeadcount,
 } from './objectiveHeadcount';
-import { is24hsPosition, resolveObjectiveScheduleFlags } from './scheduleObjectiveFlags';
+import { is24hsPosition, resolveObjectiveScheduleFlags, shouldBypassFixedBandFloater } from './scheduleObjectiveFlags';
 
 function buildLabDefaultPositionByEmp(
     positions: V2PositionDef[],
@@ -293,7 +293,8 @@ export function generateAutoLabSchedule(
     const ctx = buildAutoLabGenContext(caseDef, run, brain);
 
     try {
-        if (brain.strictSixTwo && canUseFixedBandFloater(ctx)) {
+        const bypassFloater = shouldBypassFixedBandFloater(run.positions);
+        if (brain.strictSixTwo && canUseFixedBandFloater(ctx) && !bypassFloater) {
             const piped = runStrictSixTwoPipeline({
                 ...ctx,
                 rotateShifts: false,
