@@ -6,7 +6,11 @@
     "predev": "node scripts/update-emulator-host.js",
     "dev": "next dev -p 3001 -H 0.0.0.0",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "eval:guard-capacity": "npx tsx scripts/eval-guard-capacity.ts",
+    "eval:custom-cover": "npx tsx scripts/eval-custom-cover-cycle.ts",
+    "eval:sla-active-days": "npx tsx scripts/eval-sla-active-days.ts",
+    "eval:franco-streak": "npx tsx scripts/eval-franco-streak-guard.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

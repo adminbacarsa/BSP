@@ -1,0 +1,80 @@
+{
+  "autoLabVersion": 1,
+  "exportedAt": "2026-07-25T21:20:04.976Z",
+  "case": {
+    "id": "case-real-service",
+    "order": 6,
+    "title": "Casa Matriz",
+    "subtitle": "BANCO DE CORDOBA · SLA real"
+  },
+  "period": {
+    "year": 2026,
+    "month": 7,
+    "daysInMonth": 31,
+    "fullMonthDays": 31
+  },
+  "vigencia": {
+    "serviceStartDate": "2026-07-01",
+    "serviceEndDate": "2026-07-31",
+    "excludedDates": []
+  },
+  "synthetic": {
+    "positions": [
+      {
+        "positionName": "Puesto 1",
+        "qty": 1,
+        "coverageType": "24hs",
+        "shifts": [
+          { "code": "M", "name": "Mañana", "hours": 8, "startTime": "07:00", "endTime": "15:00" },
+          { "code": "T", "name": "Tarde", "hours": 8, "startTime": "15:00", "endTime": "23:00" },
+          { "code": "N", "name": "Noche", "hours": 8, "startTime": "23:00", "endTime": "07:00" },
+          { "code": "D12", "name": "Diurno 12h", "hours": 12, "startTime": "07:00", "endTime": "19:00" },
+          { "code": "N12", "name": "Nocturno 12h", "hours": 12, "startTime": "19:00", "endTime": "07:00" }
+        ],
+        "activeDays": ["L", "M", "X", "J", "V", "S", "D"]
+      },
+      {
+        "positionName": "Museo",
+        "qty": 4,
+        "coverageType": "custom",
+        "shifts": [{ "code": "MA", "name": "mañana", "hours": 9, "startTime": "08:00", "endTime": "17:00", "days": ["V", "L", "M", "X", "J"] }],
+        "activeDays": ["L", "M", "X", "J", "V"],
+        "excludedDates": ["2026-07-23"]
+      },
+      {
+        "positionName": "DIRECTORIO",
+        "qty": 2,
+        "coverageType": "custom",
+        "shifts": [{ "code": "ME", "name": "m ex", "hours": 12, "startTime": "08:00", "endTime": "20:00", "days": ["V", "L", "M", "X", "J"] }],
+        "activeDays": ["L", "M", "X", "J", "V"],
+        "excludedDates": ["2026-07-23"]
+      }
+    ],
+    "employees": [
+      { "id": "31fJQz4VbMOHvVR3sjqZ", "nombre": "CRISTOLFO, MARCOS MARCELO" },
+      { "id": "3TKDn3l8uzBsXgWwCUDl", "nombre": "HELMANN, AGUSTIN" },
+      { "id": "A000M6D7O7eqKGHHKuaH", "nombre": "GAUNA, PEDRO LUCAS GABRIEL" },
+      { "id": "C4kf7AL58h8wZbALw8GQ", "nombre": "OLIVERA, MARIA DE LOS ANGELES" },
+      { "id": "NfxpVmsDGVWJnt3Ubfh4", "nombre": "ARNAUDO, LARA FIORELLA" },
+      { "id": "ZJpnoI9fOSZxSf0LBjih", "nombre": "LALLANA, FABIAN ALBERTO" },
+      { "id": "aLbv92wtXw1IJQmBS25I", "nombre": "GUERRERO, NELSON GINO" },
+      { "id": "fBJCouWu0Xd5W6AXYqir", "nombre": "ARNAUDO, GONZALO FERNANDO" },
+      { "id": "jDMDnPR1yqV7sPxZztJ5", "nombre": "LOPEZ, DARIO GERARDO" },
+      { "id": "qZrU9MG780Ff9YXwsMjq", "nombre": "FAROPPA, SERGIO FRANCISCO" }
+    ],
+    "slaVendidas": 2064,
+    "cycle": "6+2",
+    "rotationMode": "rotative",
+    "slotsPerDay": 9,
+    "peakConcurrent": 7,
+    "absences": []
+  },
+  "brain": {
+    "pickedCycle": "6+2",
+    "cycles": ["6+2"],
+    "rotateShifts": true,
+    "ajustarCrono": false,
+    "strictSixTwo": false,
+    "feasibility": { "ok": true, "reasons": [], "warnings": [] }
+  }
+}

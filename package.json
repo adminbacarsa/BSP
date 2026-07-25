@@ -49,6 +49,12 @@
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
     "eval:guard-capacity": "npx tsx apps/web2/scripts/eval-guard-capacity.ts",
+    "eval:custom-cover": "npx tsx apps/web2/scripts/eval-custom-cover-cycle.ts",
+    "eval:sla-active-days": "npx tsx apps/web2/scripts/eval-sla-active-days.ts",
+    "eval:franco-streak": "npx tsx apps/web2/scripts/eval-franco-streak-guard.ts",
+    "eval:objective-roster": "npx tsx apps/web2/scripts/eval-objective-roster.ts",
+    "eval:casa-matriz": "npx tsx apps/web2/scripts/eval-casa-matriz-replay.ts",
+    "eval:rotative-mtn": "npx tsx apps/web2/scripts/eval-rotative-mtn-cycle.ts",
     "eval:vplan": "node scripts/eval-vplan.mjs",
     "run:vplan:obrador": "node scripts/run-vplan-local.mjs --emulator",
     "test:vplan-emulator": "node scripts/test-vplan-emulator.mjs",
@@ -57,7 +63,9 @@
     "autoplan:real": "node scripts/run-autoplan-real.mjs",
     "seed:planning-demo": "node scripts/seed-planning-demo.mjs",
     "lab": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1",
-    "lab:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1 -Restart"
+    "lab:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1 -Restart",
+    "stop:lab": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-cosp-lab.ps1",
+    "stop:lab:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-cosp-lab.ps1 -All"
   },
   "keywords": [
     "firebase",

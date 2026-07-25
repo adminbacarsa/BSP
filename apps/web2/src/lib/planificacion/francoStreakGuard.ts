@@ -9,7 +9,7 @@
 import { addDaysStr, isWorkShift, workStreakStatsBackward } from './restBetweenShifts';
 import { SUVICO_POLICY } from './suvicoPolicy';
 
-const PLAIN_FRANCO_CODES = new Set(['F', 'FF']);
+const PLAIN_FRANCO_CODES = new Set(['F']);
 
 export type FrancoGuardAssignment = {
     empId: string;

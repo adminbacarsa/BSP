@@ -15,10 +15,10 @@ const DEFAULT_LONG_REST = SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS;
 
 /**
  * Códigos que ROMPEN la racha de trabajo consecutivo (francos reales y licencias).
- * RET (retén) NO está aquí: no es un franco — el empleado sigue disponible/comprometido.
- * En workStreakStatsBackward/Forward los turnos RET cuentan como 1 día de trabajo (no cortan la racha).
+ * RET (retén) no rompe ni suma: se saltea al contar días facturables consecutivos.
  */
 const STREAK_BREAK_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+const RET_CODE = 'RET';
 
 const NIGHT_BANDS = new Set(['N', 'N12']);
 const MORNING_BANDS = new Set(['M', 'D12']);
@@ -29,6 +29,12 @@ export const forbiddenEveningToMorningWithoutBreak = (prevCode: string, nextCode
     const p = String(prevCode || '').toUpperCase();
     const n = String(nextCode || '').toUpperCase();
     return EVENING_BANDS.has(p) && MORNING_BANDS.has(n);
+};
+
+export const forbiddenMorningToNightWithoutBreak = (prevCode: string, nextCode: string): boolean => {
+    const p = String(prevCode || '').toUpperCase();
+    const n = String(nextCode || '').toUpperCase();
+    return MORNING_BANDS.has(p) && NIGHT_BANDS.has(n);
 };
 
 /** N/N12 → M/D12 en días laborales consecutivos (sin F/FF/FP/FT entre medias). */
@@ -177,10 +183,10 @@ export const getShiftStartEndAbs = (dateStr: string, sh: any): { start: Date; en
 const hoursBetween = (a: Date, b: Date): number => (b.getTime() - a.getTime()) / 3600000;
 
 /**
- * Horas y cantidad de DÍAS consecutivos de TRABAJO REAL hacia atrás desde
+ * Horas y cantidad de DÍAS facturables consecutivos hacia atrás desde
  * `fromDateStr` (inclusive).
  *  - F / FF / FP / FT / licencias → rompen la racha.
- *  - RET (retén): NO rompe la racha — se saltea y se sigue leyendo.
+ *  - RET (retén): transparente — no suma ni corta; se sigue leyendo hacia atrás.
  *  - Turno real (M/T/N/D12/N12/etc) → cuenta como día y suma sus horas.
  *  - Día vacío (sin asignación) → rompe la racha.
  */
@@ -195,17 +201,14 @@ export const workStreakStatsBackward = (
     for (let i = 0; i < 40; i++) {
         const sh = getShift(empId, d);
         if (!sh || sh.isDeleted) break;
-        const code = String(sh.code || '').toUpperCase();
+        const code = String(sh.code || sh.type || '').toUpperCase();
         if (STREAK_BREAK_CODES.has(code)) break;
-        const h = shiftHours(sh);
-        if (h <= 0) {
-            // 0h pero no franco real (ej. RET): cuenta como día potencial (podría activarse)
-            // para que no se forme una brecha que, al activarse, supere el cL del ciclo.
-            // No suma horas efectivas (no dispara el descanso de 35h).
-            workDays += 1;
+        if (code === RET_CODE) {
             d = addDaysStr(d, -1);
             continue;
         }
+        const h = shiftHours(sh);
+        if (h <= 0) break;
         hours += h;
         workDays += 1;
         d = addDaysStr(d, -1);
@@ -234,15 +237,14 @@ export const workStreakStatsForward = (
     for (let i = 0; i < 40; i++) {
         const sh = getShift(empId, d);
         if (!sh || sh.isDeleted) break;
-        const code = String(sh.code || '').toUpperCase();
+        const code = String(sh.code || sh.type || '').toUpperCase();
         if (STREAK_BREAK_CODES.has(code)) break;
-        const h = shiftHours(sh);
-        if (h <= 0) {
-            // 0h pero no franco real (ej. RET): día potencial, igual que en backward.
-            workDays += 1;
+        if (code === RET_CODE) {
             d = addDaysStr(d, 1);
             continue;
         }
+        const h = shiftHours(sh);
+        if (h <= 0) break;
         hours += h;
         workDays += 1;
         d = addDaysStr(d, 1);

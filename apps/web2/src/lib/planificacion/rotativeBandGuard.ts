@@ -1,4 +1,4 @@
-import { addDaysStr, forbiddenEveningToMorningWithoutBreak, forbiddenNightToNonNightWithoutBreak } from './restBetweenShifts';
+import { addDaysStr, forbiddenEveningToMorningWithoutBreak, forbiddenMorningToNightWithoutBreak, forbiddenNightToNonNightWithoutBreak } from './restBetweenShifts';
 import type { V2Assignment } from './autoScheduleEngineV2';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT']);
@@ -26,7 +26,7 @@ export function pendulumMatchesApretarSlot(expected: string | null | undefined, 
     return false;
 }
 
-/** Bloquea N→T/M y T→M consecutivos sin franco intermedio (busca hacia atrás). */
+/** Bloquea N→T/M, T→M y M→N consecutivos sin franco intermedio (busca hacia atrás). */
 export function assignmentBreaksBandTransition(
     assignments: V2Assignment[],
     empId: string,
@@ -44,7 +44,8 @@ export function assignmentBreaksBandTransition(
         if (FRANCO_SET.has(c)) return false;
         if ((a.hours ?? 0) > 0) {
             return forbiddenNightToNonNightWithoutBreak(c, nextCode)
-                || forbiddenEveningToMorningWithoutBreak(c, nextCode);
+                || forbiddenEveningToMorningWithoutBreak(c, nextCode)
+                || forbiddenMorningToNightWithoutBreak(c, nextCode);
         }
         d = addDaysStr(d, -1);
     }
@@ -73,7 +74,8 @@ export function nextAssignmentBreaksBandTransition(
         if (FRANCO_SET.has(c)) return false;
         if ((a.hours ?? 0) > 0) {
             return forbiddenNightToNonNightWithoutBreak(newCode, c)
-                || forbiddenEveningToMorningWithoutBreak(newCode, c);
+                || forbiddenEveningToMorningWithoutBreak(newCode, c)
+                || forbiddenMorningToNightWithoutBreak(newCode, c);
         }
         d = addDaysStr(d, 1);
     }

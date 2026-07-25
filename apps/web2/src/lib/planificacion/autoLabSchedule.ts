@@ -255,12 +255,21 @@ function buildAutoLabGenContext(
     const objectiveId = `auto-lab-${caseDef.id}`;
     const cycleKey = brain.cycles[0] ?? brain.pickedCycle ?? '6+2';
     const positionHeadcount = buildPositionRequiredHeadcountMap(run.positions, cycleKey);
-    const defaultPositionByEmp = buildLabDefaultPositionByEmp(
+    const autoDefaultPositionByEmp = buildLabDefaultPositionByEmp(
         run.positions,
         run.employees,
         positionHeadcount,
         cycleKey,
     );
+    const defaultPositionByEmp: Record<string, string> = { ...autoDefaultPositionByEmp };
+    if (caseDef.defaultPositionByEmp) {
+        for (const [empId, posName] of Object.entries(caseDef.defaultPositionByEmp)) {
+            if (!run.employees.some((e) => e.id === empId)) continue;
+            if (!run.positions.some((p) => p.positionName === posName)) continue;
+            defaultPositionByEmp[empId] = posName;
+        }
+    }
+    const defaultShiftByEmp: Record<string, string> = { ...(caseDef.defaultShiftByEmp || {}) };
     const scheduleFlags = resolveObjectiveScheduleFlags(run.positions);
     return {
         positions: run.positions,
@@ -279,6 +288,7 @@ function buildAutoLabGenContext(
         autoCycles: brain.cycles.length > 0 ? brain.cycles : [brain.pickedCycle],
         objectiveId,
         defaultPositionByEmp,
+        defaultShiftByEmp: Object.keys(defaultShiftByEmp).length > 0 ? defaultShiftByEmp : undefined,
         budgetMode: 'cct',
         getDayLetter: getAutoLabDayLetter,
         getDateKey: getAutoLabDateKey,

@@ -31,6 +31,8 @@ import {
     guardCapacityConfigToRestCfg,
 } from './guardCapacityEvaluator';
 import type { AgreementRestConfig } from './restBetweenShifts';
+import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
+import { rankReplacementCandidates } from './coverageCandidateRank';
 
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9, RO: 10, MA: 9, ME: 12 };
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00', MA: '07:00', ME: '07:00' };

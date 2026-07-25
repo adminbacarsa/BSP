@@ -11,16 +11,9 @@ import {
     type V2PositionDef,
 } from './autoScheduleEngineV2';
 import { assignmentBreaksBandTransition } from './rotativeBandGuard';
+import { CYCLE_24_MTN } from './rotativeMtnCycle';
 
-/** Ciclo 24 días: M→T→N con 2F entre bandas (sin N→M directo). */
-export const CYCLE_24_MTN: readonly string[] = [
-    ...Array(6).fill('M'),
-    ...Array(2).fill('F'),
-    ...Array(6).fill('T'),
-    ...Array(2).fill('F'),
-    ...Array(6).fill('N'),
-    ...Array(2).fill('F'),
-];
+export { CYCLE_24_MTN, CYCLE_24_MTN_LEN } from './rotativeMtnCycle';
 
 const BILLABLE = new Set(['M', 'T', 'N', 'D12', 'N12']);
 const WORK_BANDS = new Set(['M', 'T', 'N']);

@@ -3,7 +3,7 @@
  *
  * Capas:
  *  1. Turno único (≤12h) + descanso interjornada (mín. 10h operativo SUVICO).
- *  2. Racha: ≥48h facturables o ≥6 días (trabajo + RET potencial) → 35h hasta el próximo turno.
+ *  2. Racha: ≥48h facturables o ≥6 días facturables consecutivos (RET transparente) → 35h hasta el próximo turno.
  *  3. Semana ISO: 48h normal · 56h extensión/contingencia · 60h techo operativo duro.
  *
  * RET = día comprometido sin horas; al evaluar cobertura se usa escenario pesimista si aplica.
@@ -275,10 +275,17 @@ export function evaluateGuardCanTakeShift(params: {
         ], { weeklyHoursAfter: weekAfter });
     }
 
-    const getShift = makeAssignmentGetShift(filtered, absences);
+    const startResolved = params.proposedStartTime || DEFAULT_START[code] || '07:00';
+    const getShiftBase = makeAssignmentGetShift(filtered, absences);
+    const getShift = (eid: string, ds: string): any | null => {
+        if (eid === empId && ds === targetDateStr) {
+            return { code, startTime: startResolved, hours: shiftHrs };
+        }
+        return getShiftBase(eid, ds);
+    };
     const streakBack = workStreakStatsBackward(empId, targetDateStr, getShift);
     const streakFwd = workStreakStatsForward(empId, targetDateStr, getShift);
-    const totalDays = streakBack.workDays + 1 + streakFwd.workDays;
+    const totalDays = streakBack.workDays + streakFwd.workDays;
 
     if (totalDays > cfg.maxConsecutiveWorkDays) {
         return buildVerdict(false, 'blocked_streak', [
@@ -289,7 +296,6 @@ export function evaluateGuardCanTakeShift(params: {
         });
     }
 
-    const startResolved = params.proposedStartTime || DEFAULT_START[code] || '07:00';
     const restCfg = guardCapacityConfigToRestCfg(cfg);
     const restViolation = checkRestBetweenShiftsDetail({
         empId,

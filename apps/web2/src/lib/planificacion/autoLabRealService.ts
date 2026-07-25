@@ -1,5 +1,5 @@
 import { getDocs } from 'firebase/firestore';
-import type { V2EmployeeDef, V2PositionDef } from './autoScheduleEngineV2';
+import type { V2EmployeeDef, V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import type { PlanningCatalogObjective } from '@/hooks/useObjectivePlanningCatalog';
 import type { ServiceSLA } from '@/services/slaService';
@@ -38,11 +38,20 @@ export interface AutoLabRealServiceBundle {
 function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
     const cov = String(row.coverageType || '').toLowerCase();
     const is24 = cov === '24hs' || cov === '24' || cov === '24h';
-    const shifts = (row.shifts || []).map((s) => ({
-        code: String(s.code || '').toUpperCase(),
-        name: String(s.name || s.code || ''),
-        hours: Number(s.hours) || 8,
-    }));
+    const shifts: V2ShiftDef[] = (row.shifts || []).map((s) => {
+        const mapped: V2ShiftDef = {
+            code: String(s.code || '').toUpperCase(),
+            name: String(s.name || s.code || ''),
+            hours: Number(s.hours) || 8,
+        };
+        if (s.startTime) mapped.startTime = String(s.startTime);
+        if (s.endTime) mapped.endTime = String(s.endTime);
+        if (Array.isArray(s.days) && s.days.length > 0) mapped.days = [...s.days];
+        if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
+            mapped.specificDates = [...s.specificDates];
+        }
+        return mapped;
+    });
     return {
         positionName: row.positionName,
         qty: Math.max(1, Number(row.qty) || 1),
@@ -151,6 +160,8 @@ export async function loadAutoLabRealServiceBundle(params: {
         migracionCompleta,
     );
 
+    const defaultPositionByEmp: Record<string, string> = {};
+    const defaultShiftByEmp: Record<string, string> = {};
     const dotacionIds = new Set<string>();
     const turnoOnlyIds = new Set<string>();
     const employees: V2EmployeeDef[] = [];
@@ -162,6 +173,17 @@ export async function loadAutoLabRealServiceBundle(params: {
             id: row.id,
             nombre: employeeDisplayName(row, row.id),
         });
+        const dot = row.planificacionDotacion as Record<
+            string,
+            { positionName?: string; shiftCode?: string }
+        > | undefined;
+        const cfg = dot?.[objective.objectiveId];
+        if (cfg?.positionName) {
+            defaultPositionByEmp[row.id] = String(cfg.positionName);
+        }
+        if (cfg?.shiftCode) {
+            defaultShiftByEmp[row.id] = String(cfg.shiftCode).toUpperCase();
+        }
         if (String(row.preferredObjectiveId || '') === objective.objectiveId
             || (row.planificacionDotacion && objective.objectiveId in (row.planificacionDotacion as object))) {
             dotacionIds.add(row.id);
@@ -185,6 +207,18 @@ export async function loadAutoLabRealServiceBundle(params: {
 
     if (employees.length < 2 && positions.some((p) => (p.qty || 1) > 1)) {
         warnings.push(`Solo ${employees.length} guardia(s) en dotación real; el motor puede agregar sintéticos para cerrar pax/horas.`);
+    }
+
+    const dotacionCount = Object.keys(defaultPositionByEmp).length;
+    if (dotacionCount > 0) {
+        warnings.push(
+            `Dotación por puesto desde legajos: ${dotacionCount} guardia(s) con planificacionDotacion.`,
+        );
+    } else {
+        warnings.push(
+            'Sin planificacionDotacion en legajos — el motor reparte guardias por orden de puesto (Puesto 1 → Museo → …). '
+            + 'Para igualar Planificación, asigná puesto en RRHH o en la grilla.',
+        );
     }
 
     const floorHeads = positions.reduce((s, p) => s + Math.max(1, Number(p.qty) || 1), 0);
@@ -262,6 +296,8 @@ export async function loadAutoLabRealServiceBundle(params: {
         serviceStartDate: serviceStart || undefined,
         serviceEndDate: serviceEnd || undefined,
         excludedDates,
+        defaultPositionByEmp: dotacionCount > 0 ? defaultPositionByEmp : undefined,
+        defaultShiftByEmp: Object.keys(defaultShiftByEmp).length > 0 ? defaultShiftByEmp : undefined,
         absencesByDate: absencesByDate.length > 0 ? absencesByDate : undefined,
     };
 

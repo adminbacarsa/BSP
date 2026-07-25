@@ -15,15 +15,14 @@ import {
     loadAutoLabRealServiceBundle,
     type AutoLabRealServiceBundle,
 } from '@/lib/planificacion/autoLabRealService';
+import { formatPositionActiveDaysLabel } from '@/lib/slaPlanningMatch';
 
 function RealPositionDiagram({ positions }: { positions: AutoLabRealServiceBundle['caseDef']['positions'] }) {
     return (
         <div className="space-y-3">
             {positions.map((pos) => {
                 const bands = (pos.shifts || []).map((s) => s.code).join(' · ') || '—';
-                const days = pos.activeDays?.length && pos.activeDays.length < 7
-                    ? pos.activeDays.join(' ')
-                    : 'L–D';
+                const days = formatPositionActiveDaysLabel(pos.activeDays);
                 return (
                     <div
                         key={pos.positionName}

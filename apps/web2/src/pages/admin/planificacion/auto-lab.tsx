@@ -26,6 +26,7 @@ import PlanningCoverageWisdomPanel from '@/components/planificacion/PlanningCove
 import AutoLabRealServicePanel from '@/components/planificacion/AutoLabRealServicePanel';
 import AutoLabRosterSurplusPanel from '@/components/planificacion/AutoLabRosterSurplusPanel';
 import { AUTO_LAB_REAL_CASE_ID, type AutoLabRealServiceBundle } from '@/lib/planificacion/autoLabRealService';
+import { formatPositionActiveDaysLabel } from '@/lib/slaPlanningMatch';
 import { generateAutoLabSchedule, verifyAutoLabCoverage } from '@/lib/planificacion/autoLabSchedule';
 import {
     buildAutoLabExportJson,
@@ -76,9 +77,7 @@ function PositionDiagram({ positions }: { positions: AutoLabCaseDefinition['posi
         <div className="space-y-3">
             {positions.map((pos) => {
                 const bands = (pos.shifts || []).map((s) => s.code).join(' · ') || '—';
-                const days = pos.activeDays?.length && pos.activeDays.length < 7
-                    ? pos.activeDays.join(' ')
-                    : 'L–D';
+                const days = formatPositionActiveDaysLabel(pos.activeDays);
                 return (
                     <div
                         key={pos.positionName}

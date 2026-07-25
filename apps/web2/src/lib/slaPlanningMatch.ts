@@ -1,5 +1,17 @@
 import { slaCoversCalendarMonth, toYyyyMmDd } from '@/lib/firestoreDates';
 import { filterSlaRowsByEmpresa } from '@/lib/multiempresa';
+import {
+  derivePlanningPositionActiveDays,
+  formatPositionActiveDaysLabel,
+  normalizePlanningShifts,
+  type PlanningPositionShiftRow,
+} from '@/lib/planningPositionDays';
+
+export {
+  derivePlanningPositionActiveDays,
+  formatPositionActiveDaysLabel,
+  type PlanningPositionShiftRow,
+} from '@/lib/planningPositionDays';
 
 export type SlaPlanningRow = {
   id?: string;
@@ -225,7 +237,7 @@ export const DEFAULT_PLANNING_SHIFTS = [
 
 export type PlanningPositionRow = {
   positionName: string;
-  shifts: Array<{ code: string; hours: number; [key: string]: unknown }>;
+  shifts: PlanningPositionShiftRow[];
   qty: number;
   activeDays: string[];
   coverageType: string;
@@ -279,17 +291,18 @@ export function buildPlanningPositionStructure(
       const shiftList = pos.allowedShiftTypes ?? pos.shifts;
       const hasShifts = Array.isArray(shiftList) && shiftList.length > 0;
       if (!hasShifts && !slaActive) continue;
+      const normalizedShifts = hasShifts
+        ? normalizePlanningShifts(shiftList)
+        : defaultShifts.map((s) => ({ ...s }));
       // Días excluidos: SLA-nivel aplica a todos; posición-nivel solo a este puesto
       const slaExcluded: string[] = Array.isArray((srv as any).excludedDates) ? (srv as any).excludedDates : [];
       const posExcluded: string[] = Array.isArray(pos.excludedDates) ? (pos.excludedDates as string[]) : [];
       const mergedExcluded = [...new Set([...slaExcluded, ...posExcluded])];
       structure.push({
         positionName: String(pos.name ?? pos.positionName ?? 'General'),
-        shifts: hasShifts
-          ? (shiftList as PlanningPositionRow['shifts'])
-          : defaultShifts,
+        shifts: normalizedShifts,
         qty: parsePlanningPositionQty(pos),
-        activeDays: (pos.activeDays as string[]) ?? ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+        activeDays: derivePlanningPositionActiveDays(pos.activeDays as string[] | undefined, normalizedShifts),
         coverageType: String(pos.coverageType ?? srv.coverageType ?? '24hs'),
         ...(pos.preferenciaGenero ? { preferenciaGenero: String(pos.preferenciaGenero) } : {}),
         ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),

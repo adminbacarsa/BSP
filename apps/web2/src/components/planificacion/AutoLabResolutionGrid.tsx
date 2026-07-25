@@ -414,8 +414,9 @@ export default function AutoLabResolutionGrid({
                             <td
                                 colSpan={2}
                                 className="sticky left-0 z-10 bg-rose-50 border border-rose-200 px-2 py-1.5 font-black text-rose-800 text-[9px]"
+                                title="Déficit de slots SLA vs asignaciones (0 = cobertura completa)"
                             >
-                                Huecos
+                                Huecos SLA
                             </td>
                             {displayDays.map((day) => {
                                 const ds = getAutoLabDateKey(day);
@@ -437,14 +438,20 @@ export default function AutoLabResolutionGrid({
                                         </td>
                                     );
                                 }
-                                const detail = gaps.map((g) => `${g.positionName} ${g.code}×${g.missing}`).join(', ');
+                                const detail = gaps.length > 0
+                                    ? gaps.map((g) => `${g.positionName} ${g.code}×${g.missing}`).join(', ')
+                                    : 'Cobertura SLA completa (0 huecos)';
                                 return (
                                     <td
                                         key={`gap-${ds}`}
-                                        className="border border-rose-200 px-0.5 py-1 text-center font-bold text-rose-700"
-                                        title={detail || 'OK'}
+                                        className={`border px-0.5 py-1 text-center font-bold text-[9px] ${
+                                            missing > 0
+                                                ? 'border-rose-200 text-rose-700'
+                                                : 'border-emerald-200 text-emerald-700'
+                                        }`}
+                                        title={detail}
                                     >
-                                        {missing > 0 ? missing : '·'}
+                                        {missing > 0 ? missing : '0'}
                                     </td>
                                 );
                             })}
@@ -458,6 +465,7 @@ export default function AutoLabResolutionGrid({
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-500" /> T</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-indigo-700" /> N</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-200" /> F</span>
+                <span className="inline-flex items-center gap-1" title="Franco en día sin servicio del puesto (ej. sáb/dom en L–V)"><span className="w-3 h-3 rounded bg-slate-200 border border-slate-400" /> FF</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-violet-100 border border-violet-300" /> RET</span>
                 <span className="inline-flex items-center gap-1"><CalendarRange size={10} /> Gris = fuera de vigencia</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-violet-100 border border-violet-300" /> Sin servicio (RET)</span>

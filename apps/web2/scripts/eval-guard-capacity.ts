@@ -76,7 +76,39 @@ console.log('---');
     assert(v.ok, 'RET inicial activable a T');
 }
 
-// Ejemplo D: D12 D12 M M M RET — tras 48h, activar RET→M debe fallar o ser riesgoso
+// Ejemplo D: M×6 + RET — no debe permitir 7º día facturable (ni activar RET ni M nuevo)
+{
+    const seq = buildSyntheticSequenceAssignments(
+        EMP,
+        START,
+        ['M', 'M', 'M', 'M', 'M', 'M', 'RET'],
+    );
+    const vRet = evaluateRetAvailableForCoverage({
+        empId: EMP,
+        targetDateStr: '2026-07-07',
+        proposedCode: 'M',
+        assignments: seq,
+        absences: EMPTY_ABS,
+        cfg: CFG,
+    });
+    assert(!vRet.ok, 'M×6 + RET: activar RET→M bloqueado (7 días facturables)');
+    const seqAfter = buildSyntheticSequenceAssignments(
+        EMP,
+        START,
+        ['M', 'M', 'M', 'M', 'M', 'M', 'RET', 'M'],
+    );
+    const vAfter = evaluateGuardCanTakeShift({
+        empId: EMP,
+        targetDateStr: '2026-07-08',
+        proposedCode: 'M',
+        assignments: seqAfter.slice(0, -1),
+        absences: EMPTY_ABS,
+        cfg: CFG,
+    });
+    assert(!vAfter.ok, 'M×6 + RET + 7º M bloqueado');
+}
+
+// Ejemplo E: D12 D12 M M M RET — tras 48h, activar RET→M debe fallar o ser riesgoso
 {
     const seq = buildSyntheticSequenceAssignments(
         EMP,

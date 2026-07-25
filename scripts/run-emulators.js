@@ -11,6 +11,46 @@ function logErr(...parts) {
   process.stderr.write(parts.join(' ') + '\n');
 }
 
+const LAB_PORTS = [
+  { port: 4400, label: 'Emulator Hub' },
+  { port: 4000, label: 'Emulator UI' },
+  { port: 8080, label: 'Firestore' },
+  { port: 9099, label: 'Auth' },
+  { port: 5001, label: 'Functions' },
+];
+
+function isPortListening(port) {
+  try {
+    if (process.platform === 'win32') {
+      const out = spawnSync('netstat', ['-ano'], { encoding: 'utf8' });
+      const re = new RegExp(`:${port}\\s+.*LISTENING`, 'i');
+      return re.test(out.stdout || '');
+    }
+    const out = spawnSync('sh', ['-c', `ss -ltn 2>/dev/null | grep -E ':${port} ' || netstat -ltn 2>/dev/null | grep -E ':${port} '`], {
+      encoding: 'utf8',
+    });
+    return Boolean((out.stdout || '').trim());
+  } catch {
+    return false;
+  }
+}
+
+function assertLabPortsFree() {
+  if (process.env.COSP_EMULATORS_FORCE === '1') return;
+  const busy = LAB_PORTS.filter(({ port }) => isPortListening(port));
+  if (busy.length === 0) return;
+  logErr('[emulators] ERROR: el lab ya está corriendo o quedaron procesos colgados.');
+  busy.forEach(({ port, label }) => logErr(`  · ${label} :${port} en uso`));
+  logErr('');
+  logErr('No abras una segunda instancia de npm run emulators.');
+  logErr('Opciones:');
+  logErr('  npm run lab              — detecta y usa lo que ya está activo');
+  logErr('  npm run lab:restart      — mata puertos lab y relanza todo');
+  logErr('  npm run stop:lab         — solo detiene emuladores + bridge :3010');
+  logErr('  COSP_EMULATORS_FORCE=1 npm run emulators  — forzar (no recomendado)');
+  process.exit(1);
+}
+
 function javaExe(home) {
   return path.join(home, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
 }
@@ -90,6 +130,8 @@ if (process.platform === 'win32') {
 
 const skipFunctions =
   process.argv.includes('--without-functions') || process.env.COSP_EMULATORS_NO_FUNCTIONS === '1';
+
+assertLabPortsFree();
 
 const functionsDir = path.join(projectRoot, 'apps', 'functions');
 

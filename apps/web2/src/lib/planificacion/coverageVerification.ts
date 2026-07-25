@@ -131,6 +131,7 @@ function buildDemandSlots(
         const dayLetter = ctx.getDayLetter(dateStr) || DAY_LETTERS[d.getDay()];
         ctx.positions.forEach((pos) => {
             if (pos.excludedDates?.includes(dateStr)) return;
+            if (!positionIsActiveOn(pos, dayLetter, dateStr)) return;
             const qty = Number(pos.qty) || 0;
             if (!qty) return;
             const modo12Day = isModo12Day(dateStr, ctx);

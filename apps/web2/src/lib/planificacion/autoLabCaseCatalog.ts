@@ -39,6 +39,10 @@ export interface AutoLabCaseDefinition {
     serviceEndDate?: string;
     /** Días sin servicio a nivel contrato (YYYY-MM-DD). */
     excludedDates?: string[];
+    /** Puesto fijo por guardia (desde planificacionDotacion o caso manual). */
+    defaultPositionByEmp?: Record<string, string>;
+    /** Banda fija por guardia (M/T/N…) cuando aplica. */
+    defaultShiftByEmp?: Record<string, string>;
 }
 
 const WEEKDAYS = ['L', 'M', 'X', 'J', 'V'] as const;
