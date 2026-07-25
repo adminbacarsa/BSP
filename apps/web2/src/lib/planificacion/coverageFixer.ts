@@ -24,17 +24,18 @@ import type {
     V2EngineContext,
     V2GenerateStats,
 } from './autoScheduleEngineV2';
-import { pickRepresentativeCycle, effectiveShiftsForPositionDay, isCustomCoverPosition } from './autoScheduleEngineV2';
-import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
-import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
-import { rankReplacementCandidates } from './coverageCandidateRank';
-import { SUVICO_POLICY } from './suvicoPolicy';
+import { effectiveShiftsForPositionDay, isCustomCoverPosition } from './autoScheduleEngineV2';
+import {
+    buildGuardCapacityConfig,
+    evaluateGuardCanTakeShift,
+    guardCapacityConfigToRestCfg,
+} from './guardCapacityEvaluator';
+import type { AgreementRestConfig } from './restBetweenShifts';
 
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9, RO: 10, MA: 9, ME: 12 };
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00', MA: '07:00', ME: '07:00' };
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
-const WEEK_HARD_CAP = 48; // CCT 422/05 — nunca superar 48h en una semana ISO
 
 function canSwapFromFranco(ctx: V2EngineContext): boolean {
     return ctx.allowFrancoWorkedRescue === true;
@@ -43,18 +44,6 @@ function canSwapFromFranco(ctx: V2EngineContext): boolean {
 function isSwapCandidateCode(code: string, ctx: V2EngineContext): boolean {
     if (code === 'RET') return true;
     return canSwapFromFranco(ctx) && FRANCO_CODES.has(code);
-}
-
-function isoWeekKey(dateStr: string): string {
-    const d = new Date(dateStr);
-    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-    const day = (t.getUTCDay() + 6) % 7;
-    t.setUTCDate(t.getUTCDate() - day + 3);
-    const ft = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
-    const wn = 1 + Math.round(
-        ((t.getTime() - ft.getTime()) / 86400000 - 3 + ((ft.getUTCDay() + 6) % 7)) / 7
-    );
-    return `${t.getUTCFullYear()}-W${String(wn).padStart(2, '0')}`;
 }
 
 function billableHoursByEmp(assignments: V2Assignment[]): Map<string, number> {
@@ -84,15 +73,15 @@ function sortGroupForReplacement(
     });
 }
 
-const FIX_REST_BASE: AgreementRestConfig = {
-    minRestBetweenShiftsHours: SUVICO_POLICY.REST.DAILY_MIN_HOURS,
-    longRestAfterWorkedHours: SUVICO_POLICY.REST.STREAK_HOURS_FOR_LONG_REST,
-    minLongRestHours: SUVICO_POLICY.REST.WEEKLY_MIN_REST_AFTER_STREAK_HOURS,
-};
+function capacityCfgForCtx(ctx: V2EngineContext) {
+    return buildGuardCapacityConfig(ctx.autoCycles || [], {
+        modo12: (ctx.modo12Days?.length ?? 0) > 0 || (ctx.apretarCronoDays?.length ?? 0) > 0,
+        contingency: (ctx.contingencyApretarDays?.length ?? 0) > 0,
+    });
+}
 
 function makeFixRestCfg(ctx: V2EngineContext): AgreementRestConfig {
-    const { cL } = pickRepresentativeCycle(ctx.autoCycles || []);
-    return { ...FIX_REST_BASE, maxConsecutiveWorkDays: cL };
+    return guardCapacityConfigToRestCfg(capacityCfgForCtx(ctx));
 }
 
 export interface FixerLogEntry {
@@ -171,28 +160,17 @@ function canTakeShift(
     const code = String(shiftCode || '').toUpperCase();
     if (ctx.absences[empId]?.has(dateStr)) return false;
 
-    // Tope 48h/semana CCT 422/05
-    const shiftHrs = SHIFT_HRS[code] || 8;
-    const targetWeek = isoWeekKey(dateStr);
-    let weekUsed = 0;
-    for (const a of assignments) {
-        if (a.empId !== empId) continue;
-        if (isoWeekKey(a.dateStr) !== targetWeek) continue;
-        const c = String(a.code || '').toUpperCase();
-        if (c === 'RET' || FRANCO_CODES.has(c) || ABSENCE_CODES.has(c)) continue;
-        weekUsed += Number(a.hours) || SHIFT_HRS[c] || 0;
-    }
-    if (weekUsed + shiftHrs > WEEK_HARD_CAP + 1e-6) return false;
-
-    const startResolved = DEFAULT_START[code] || '07:00';
-    const violation = checkRestBetweenShifts({
+    const capCfg = capacityCfgForCtx(ctx);
+    const verdict = evaluateGuardCanTakeShift({
         empId,
         targetDateStr: dateStr,
-        proposed: { code, startTime: startResolved, hours: shiftHrs },
-        getShift: makeGetShift(assignments, ctx.absences),
-        cfg,
+        proposedCode: code,
+        assignments,
+        absences: ctx.absences,
+        cfg: capCfg,
+        replaceExisting: true,
     });
-    return violation === null;
+    return verdict.ok;
 }
 
 /** Setea una celda como RET (capacidad ociosa válida, sin descanso requerido). */

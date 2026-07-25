@@ -1,6 +1,6 @@
 /**
  * Descansos entre turnos (SUVICO y convenios con campos opcionales).
- * - Mínimo entre turnos laborales: 12 h (configurable).
+ * - Mínimo entre turnos laborales: 10 h (configurable, `SUVICO_POLICY.REST.DAILY_MIN_HOURS`).
  * - Tras ≥48 h trabajadas en racha consecutiva (con descansos de 12 h entre medio):
  *   35 h desde el fin del último turno hasta el inicio del siguiente.
  * - El campo opcional `longRestAfterConsecutiveWorkDays` permite a otros convenios
@@ -321,12 +321,13 @@ export const getAgreementRestConfig = (emp: any, agreements: any[]): AgreementRe
     if (d !== undefined) custom.longRestAfterConsecutiveWorkDays = d;
     if (Object.keys(custom).length > 0) return custom;
     if (name.includes('suvico') || String(r?.name || '').toLowerCase().includes('suvico') || r.suvicoRestRules) {
-        // CCT 422/05 SUVICO: 12h entre turnos; 35h cuando se acumularon 48h de trabajo
-        // (con descansos de 12h entre medio). El motor compara HORAS, no días.
+        // CCT 422/05 SUVICO: 10h entre turnos; 35h cuando se acumularon 48h de trabajo
+        // (con descansos entre medio). También por 6 días consecutivos de racha.
         return {
             minRestBetweenShiftsHours: DEFAULT_MIN_REST,
             longRestAfterWorkedHours: DEFAULT_STREAK_THRESHOLD,
             minLongRestHours: DEFAULT_LONG_REST,
+            longRestAfterConsecutiveWorkDays: SUVICO_POLICY.REST.STREAK_SHIFTS_8H,
         };
     }
     return null;

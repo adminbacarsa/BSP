@@ -3,11 +3,15 @@
  * Prioriza quien ya conoce el objetivo y el puesto (titular > mismo grupo > objetivo).
  */
 
-import type { V2EngineContext } from './autoScheduleEngineV2';
+import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
 import type { ExperienciaObjetivosMap } from './experienciaObjetivos';
 import { computeExperienciaNivel } from './experienciaObjetivos';
 import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
 import { rankCoverersFromWisdom } from './planningCoverageWisdom';
+import {
+    buildGuardCapacityConfig,
+    rankGuardCoverageCandidates,
+} from './guardCapacityEvaluator';
 
 const NIVEL_SCORE: Record<string, number> = {
     TITULAR: 400,
@@ -28,6 +32,9 @@ export interface RankReplacementOptions {
     coverageWisdom?: PlanningCoverageWisdom | null;
     /** Banda a cubrir para ponderar sabiduría histórica. */
     wisdomBand?: string;
+    /** Banda a asignar — filtra por capacidad legal del guardia. */
+    shiftCode?: string;
+  assignments?: V2Assignment[];
 }
 
 function experienciaScore(
@@ -64,7 +71,21 @@ export function rankReplacementCandidates(
         billableHours,
         coverageWisdom,
         wisdomBand,
+        shiftCode,
+        assignments,
     } = options;
+
+    let pool = [...empIds].filter((id) => id !== absentEmpId);
+    if (shiftCode && dateStr && assignments) {
+        const capCfg = buildGuardCapacityConfig(ctx.autoCycles || [], {
+            modo12: (ctx.modo12Days?.length ?? 0) > 0,
+            contingency: (ctx.contingencyApretarDays?.length ?? 0) > 0,
+        });
+        const capacityOk = new Set(
+            rankGuardCoverageCandidates(pool, dateStr, shiftCode, assignments, ctx.absences, capCfg),
+        );
+        pool = pool.filter((id) => capacityOk.has(id));
+    }
 
     const wisdomRank = new Map<string, number>();
     if (coverageWisdom && wisdomBand) {
@@ -79,8 +100,7 @@ export function rankReplacementCandidates(
 
     const empById = new Map(ctx.employees.map((e) => [e.id, e]));
 
-    return [...empIds]
-        .filter((id) => id !== absentEmpId)
+    return pool
         .filter((id) => !dateStr || !ctx.absences[id]?.has(dateStr))
         .sort((a, b) => {
             const ea = empById.get(a);

@@ -13,3 +13,14 @@ export {
     workStreakHoursBackward,
     workStreakStatsBackward,
 } from './restBetweenShifts';
+export {
+    buildGuardCapacityConfig,
+    evaluateGuardCanTakeShift,
+    evaluateRetAvailableForCoverage,
+    guardCapacityRulesSummary,
+    rankGuardCoverageCandidates,
+    scanAssignmentsCapacityRisks,
+    type GuardCapacityConfig,
+    type GuardCapacityRisk,
+    type GuardCapacityVerdict,
+} from './guardCapacityEvaluator';

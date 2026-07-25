@@ -8,6 +8,11 @@ import { verifyScheduleCoverage, type CoverageVerificationReport } from './cover
 import { applyAbsenceCoverage, type CoverageGap } from './coverageEngine';
 import { applyAbsenceSplitCoverage, type AbsenceSplitAction } from './absenceSplitCoverage';
 import { ensureAbsenceCells, fillEmptyCellsWithRet, pickRetDesignee, consolidateRetToDesignee, applyServiceExcludedDays } from './absenceFrancoUtils';
+import {
+    buildGuardCapacityConfig,
+    scanAssignmentsCapacityRisks,
+    type GuardCapacityRisk,
+} from './guardCapacityEvaluator';
 import { fixScheduleIssues, type FixerLogEntry, type FixerResult } from './coverageFixer';
 import { planAbsenceCoverage, type AbsenceCoveragePlan } from './absenceCoveragePlanner';
 import {
@@ -37,6 +42,8 @@ export interface AutoLabScheduleOutcome {
     fixerSummary?: FixerResult['summary'];
     /** Dotación en exceso tras generar (incluye excessByPosition e idle). */
     rosterSurplus?: RosterSurplusReport;
+    /** Alertas de capacidad (racha, semana, RET activable). */
+    capacityRisks?: GuardCapacityRisk[];
 }
 
 import {
@@ -212,6 +219,18 @@ function postProcessAutoLabSchedule(
         modo8Plan: externalRet.modo8Plan,
     });
 
+    const capacityCfg = buildGuardCapacityConfig(ctx.autoCycles || [], {
+        modo12: (ctx.modo12Days?.length ?? 0) > 0,
+        contingency: (ctx.contingencyApretarDays?.length ?? 0) > 0,
+    });
+    const capacityRisks = scanAssignmentsCapacityRisks(
+        assignments,
+        ctx.absences,
+        ctx.employees.map((e) => e.id),
+        ctx.daysInMonth.map((d) => ctx.getDateKey(d)),
+        capacityCfg,
+    );
+
     return {
         generation: { ...generation, assignments },
         coverageReport,
@@ -222,6 +241,7 @@ function postProcessAutoLabSchedule(
         externalRetActions: externalRet.actions,
         fixerLog,
         fixerSummary,
+        capacityRisks,
     };
 }
 

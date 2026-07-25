@@ -10,8 +10,8 @@
 
 export const SUVICO_POLICY = {
     REST: {
-        /** Descanso mínimo entre fin de un turno e inicio del siguiente (interjornada). */
-        DAILY_MIN_HOURS: 8,
+        /** Descanso mínimo entre fin de un turno e inicio del siguiente (interjornada operativa). */
+        DAILY_MIN_HOURS: 10,
         /** Horas trabajadas en racha (con interjornadas de 12h entre medias) que disparan el descanso prolongado. */
         STREAK_HOURS_FOR_LONG_REST: 48,
         /** Equivalente operativo: 6 turnos × 8 h (M/T/N) o 4 turnos × 12 h (D12/N12). */
@@ -42,6 +42,8 @@ export const SUVICO_POLICY = {
         WEEK_BILLABLE_HOURS_DEFAULT: 48,
         /** Tope semanal con extensión 12h (contingencia: 4×8 + 2×12 = 56h). */
         MAX_WEEKLY_BILLABLE_HOURS_WITH_EXTENSION: 56,
+        /** Tope operativo absoluto semanal (solo con autorización explícita). */
+        MAX_WEEKLY_OPERATIONAL_HARD: 60,
         /** Puestos L–V u otros no 24×7 con jornadas largas estructurales (ej. 5×10h → 50h/semana). */
         WEEK_BILLABLE_HOURS_LIMITED_POSITION: 50,
         /** Sugerencias post-grilla: priorizar “gastar” RET entre quienes llevan menos horas facturables en el mes. */

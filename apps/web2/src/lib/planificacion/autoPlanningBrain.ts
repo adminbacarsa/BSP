@@ -35,6 +35,11 @@ import {
     type PlanningCoverageRule,
     type StaffingSnapshot,
 } from './planningCoveragePolicy';
+import {
+    buildGuardCapacityConfig,
+    guardCapacityRulesSummary,
+    type GuardCapacityConfig,
+} from './guardCapacityEvaluator';
 
 export { MODO12_ABSENCE_CODES as MODO12_AUTO_ABSENCE_CODES, PLANNING_COVERAGE_RULES };
 export type { Modo12DayCheck as ContingencyDayCheck, PlanningCoverageRule };
@@ -85,6 +90,9 @@ export interface AutoPlanningBrainResult {
     strictSixTwo: boolean;
     /** Ciclo alternativo viable que el usuario puede elegir manualmente (ej. '5+1'). */
     recommendedAlternative?: string;
+    /** Reglas de capacidad del guardia (descanso, racha, semana) para cobertura. */
+    capacityPolicy: GuardCapacityConfig;
+    capacityRulesSummary: string;
 }
 
 function is24hs(pos: V2PositionDef): boolean {
@@ -338,6 +346,13 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
         input.slaVendidas,
     );
 
+    const capacityPolicy = buildGuardCapacityConfig(cycles, {
+        modo12: modo12DaysEngine.length > 0,
+        contingency: contingency.ok && contingencyDaysManual.length > 0,
+    });
+    const capacityRulesSummary = guardCapacityRulesSummary(capacityPolicy);
+    warnings.push(`Capacidad guardias: ${capacityRulesSummary}`);
+
     return {
         pickedCycle: cycleKey,
         cycles,
@@ -358,5 +373,7 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
         diagnosis,
         strictSixTwo: diagnosis.strictSixTwo && !ajustarCrono,
         recommendedAlternative: picked.recommendedAlternative,
+        capacityPolicy,
+        capacityRulesSummary,
     };
 }

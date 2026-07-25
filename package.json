@@ -48,6 +48,7 @@
     "seed": "node scripts/seed-lab.js",
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
+    "eval:guard-capacity": "npx tsx apps/web2/scripts/eval-guard-capacity.ts",
     "eval:vplan": "node scripts/eval-vplan.mjs",
     "run:vplan:obrador": "node scripts/run-vplan-local.mjs --emulator",
     "test:vplan-emulator": "node scripts/test-vplan-emulator.mjs",

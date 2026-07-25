@@ -1072,6 +1072,15 @@ export default function AutoLabPage() {
                                             <p className="mt-1">{brain.diagnosis.resolution}</p>
                                         </div>
                                     )}
+
+                                    {brain.capacityRulesSummary && (
+                                        <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs text-violet-950">
+                                            <p className="font-black uppercase text-violet-800 text-[10px] mb-1">
+                                                Capacidad guardias (cobertura)
+                                            </p>
+                                            <p>{brain.capacityRulesSummary}</p>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="p-8 text-center text-sm text-slate-500">
@@ -1094,6 +1103,20 @@ export default function AutoLabPage() {
                             runResult={runResult}
                             scheduleOutcome={scheduleOutcome}
                         />
+                        {scheduleOutcome.capacityRisks && scheduleOutcome.capacityRisks.length > 0 && (
+                            <div className="rounded-2xl border border-violet-200 bg-violet-50/80 shadow-sm p-4">
+                                <p className="text-xs font-black uppercase text-violet-900 mb-2">
+                                    Alertas de capacidad ({scheduleOutcome.capacityRisks.length})
+                                </p>
+                                <ul className="space-y-1 max-h-40 overflow-y-auto text-[11px] text-violet-950">
+                                    {scheduleOutcome.capacityRisks.slice(0, 25).map((r, i) => (
+                                        <li key={`${r.empId}-${r.dateStr}-${i}`}>
+                                            {r.dateStr} · {r.empId.slice(0, 8)}… · {r.kind}: {r.message}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                         <AutoLabCoveragePanel
                             report={coverageReport}
                             employees={[
