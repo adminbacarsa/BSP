@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { shouldScopeQueriesToEmpresa } from '../assistant/assistantEmpresaScope';
+import { getBackupDb } from './backup.service';
 import {
   resolveBackupCaller,
 } from './backup-auth.util';
@@ -47,7 +48,7 @@ export async function assertRestoreRequestAllowed(
     throw new Error('mode debe ser merge o full');
   }
 
-  const db = admin.firestore();
+  const db = getBackupDb();
   let empresaId = String(claimedEmpresa ?? '').trim();
   const caller = await resolveBackupCaller(authUid, tokenRoleRaw);
   if (!caller.isPanelUser) {
@@ -118,7 +119,7 @@ export async function assertRestoreRequestAllowed(
 }
 
 export async function executeRestoreJob(jobId: string): Promise<void> {
-  const db = admin.firestore();
+  const db = getBackupDb();
   const jobRef = db.collection('restore_jobs').doc(jobId);
   const snap = await jobRef.get();
   if (!snap.exists) return;

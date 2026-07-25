@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { resolveBackupCaller } from './backup-auth.util';
+import { getBackupDb } from './backup.service';
 import {
   runEmpresaMigrate,
   deserializeIdMaps,
@@ -36,7 +37,7 @@ export async function assertMigrateEmpresaRequestAllowed(
     throw new Error('Solo superadmin puede copiar datos entre empresas.');
   }
 
-  const db = admin.firestore();
+  const db = getBackupDb();
   const [sourceSnap, targetSnap] = await Promise.all([
     db.collection('empresas').doc(sourceEmpresaId).get(),
     db.collection('empresas').doc(targetEmpresaId).get(),
@@ -53,7 +54,7 @@ export async function assertMigrateEmpresaRequestAllowed(
 }
 
 export async function executeEmpresaMigrateJob(jobId: string): Promise<void> {
-  const db = admin.firestore();
+  const db = getBackupDb();
   const jobRef = db.collection('empresa_migrate_jobs').doc(jobId);
   const snap = await jobRef.get();
   if (!snap.exists) return;

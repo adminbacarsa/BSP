@@ -2,6 +2,23 @@ import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { Readable } from 'stream';
 
+// En el emulador el canal gRPC del Admin SDK corta a los 60 s (DEADLINE_EXCEEDED).
+// preferRest:true reemplaza gRPC por HTTP/1.1 y evita ese límite.
+let _backupDb: FirebaseFirestore.Firestore | null = null;
+export function getBackupDb(): FirebaseFirestore.Firestore {
+  if (_backupDb) return _backupDb;
+  if (process.env.FUNCTIONS_EMULATOR === 'true') {
+    const appName = 'backup-rest';
+    const existing = admin.apps.find(a => a?.name === appName);
+    const app = existing ?? admin.initializeApp(admin.app().options, appName);
+    _backupDb = app.firestore();
+    _backupDb.settings({ preferRest: true });
+  } else {
+    _backupDb = admin.firestore();
+  }
+  return _backupDb;
+}
+
 // Colecciones de sistema que no deben incluirse en el backup
 const EXCLUDE_COLLECTIONS = new Set<string>([
   'system_backups',
@@ -100,7 +117,7 @@ async function resolveOrCreateDriveFolder(drive: any, parentId: string, folderNa
 }
 
 export async function runBackup(folderId: string, opts: BackupOptions = {}): Promise<BackupResult> {
-  const db = admin.firestore();
+  const db = getBackupDb();
   const empresaId = String(opts.empresaId ?? '').trim();
   const scopeEmpresa = opts.scopeEmpresa === true && !!empresaId;
   const data: Record<string, any[]> = {};
@@ -296,7 +313,7 @@ export interface SyncDriveBackupsResult {
  * archivo `driveFileId` ya no existe (borrado manualmente o movido a papelera).
  */
 export async function syncDriveBackups(opts: { empresaId?: string; scopeEmpresa?: boolean } = {}): Promise<SyncDriveBackupsResult> {
-  const db = admin.firestore();
+  const db = getBackupDb();
   const empresaId = String(opts.empresaId ?? '').trim();
   const scopeEmpresa = opts.scopeEmpresa === true && !!empresaId;
 
@@ -355,7 +372,7 @@ export async function deleteDriveBackup(
   docId: string,
   opts: { empresaId?: string; scopeEmpresa?: boolean; isSuper?: boolean } = {},
 ): Promise<{ deleted: boolean; driveDeleted: boolean }> {
-  const db = admin.firestore();
+  const db = getBackupDb();
   const ref = db.collection('system_backups').doc(docId);
   const docSnap = await ref.get();
   if (!docSnap.exists) return { deleted: false, driveDeleted: false };
@@ -392,7 +409,7 @@ export async function resolveDriveBackupFolderId(): Promise<string | null> {
   const fromEnv = String(process.env.DRIVE_BACKUP_FOLDER_ID ?? '').trim();
   if (fromEnv) return fromEnv;
   try {
-    const db = admin.firestore();
+    const db = getBackupDb();
     const snap = await db
       .collection('system_backups')
       .orderBy('createdAt', 'desc')

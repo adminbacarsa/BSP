@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldPath, FieldValue, Timestamp, GeoPoint } from 'firebase-admin/firestore';
 import { belongsToEmpresaView } from '../assistant/assistantEmpresaScope';
+import { getBackupDb } from './backup.service';
 
 export type RestoreMode = 'merge' | 'full';
 
@@ -530,7 +531,7 @@ export async function runRestoreFromPayload(
   partial: RestorePartialState = {},
 ): Promise<RestoreResult> {
   const t0 = Date.now();
-  const db = admin.firestore();
+  const db = getBackupDb();
 
   const meta = (payload._meta ?? {}) as Record<string, unknown>;
   const backupEmpresa = String(meta.empresaId ?? '').trim();
@@ -692,7 +693,7 @@ export async function runRestore(
   opts: RestoreOptions = {},
   partial: RestorePartialState = {},
 ): Promise<RestoreResult> {
-  const db = admin.firestore();
+  const db = getBackupDb();
 
   const setJob = (data: object) => {
     if (!jobId) return Promise.resolve();
@@ -730,7 +731,7 @@ export async function runRestoreFromStorage(
   opts: RestoreOptions = {},
   partial: RestorePartialState = {},
 ): Promise<RestoreResult> {
-  const db = admin.firestore();
+  const db = getBackupDb();
   const setJob = (data: object) => {
     if (!jobId) return Promise.resolve();
     return db.collection('restore_jobs').doc(jobId).set(data, { merge: true });

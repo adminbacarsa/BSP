@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { HttpsError } from 'firebase-functions/v2/https';
+import { getBackupDb } from './backup.service';
 
 export function normalizeBackupRole(role: unknown): string {
   return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
@@ -24,7 +25,7 @@ export async function resolveBackupCaller(
   let profileEmpresa = '';
   let sysRole = '';
 
-  const db = admin.firestore();
+  const db = getBackupDb();
   const sysUser = await db.collection('system_users').doc(uid).get();
   if (sysUser.exists) {
     sysRole = normalizeBackupRole(sysUser.data()?.role);

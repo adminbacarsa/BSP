@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { FieldPath, FieldValue, Timestamp, GeoPoint } from 'firebase-admin/firestore';
+import { getBackupDb } from './backup.service';
 import {
   allocateCloneDocId,
   deleteDocsWhereEmpresaId,
@@ -165,7 +166,7 @@ export async function runEmpresaMigrate(
   partial: EmpresaMigratePartialState = {},
 ): Promise<EmpresaMigrateResult> {
   const t0 = Date.now();
-  const db = admin.firestore();
+  const db = getBackupDb();
   const source = String(sourceEmpresaId ?? '').trim();
   const target = String(targetEmpresaId ?? '').trim();
 
