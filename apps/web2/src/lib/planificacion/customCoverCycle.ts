@@ -3,6 +3,26 @@ import { isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 
+/**
+ * Pax en servicio simultáneo del puesto custom (lo que pide el SLA por día).
+ */
+export function customCoverDailyPax(pos: V2PositionDef): number {
+    return Math.max(1, Number(pos.qty) || 1);
+}
+
+/**
+ * Guardias en plantilla del puesto custom.
+ * - L–V u horario acotado: qty (francos en días sin servicio).
+ * - 7 días/semana: ceil(qty × cicloSemanal / díasTrabajo) para que siempre haya qty en turno
+ *   con francos escalonados (ej. 4 pax MA → 5 guardias en 6+1 semanal).
+ */
+export function customCoverRequiredHeadcount(pos: V2PositionDef): number {
+    const qty = customCoverDailyPax(pos);
+    if (!customPositionOperatesAllWeek(pos)) return qty;
+    const { workDays, cycleLen } = customCoverWeeklyWorkRest(pos);
+    return Math.ceil((qty * cycleLen) / workDays);
+}
+
 /** Puesto opera los 7 días de la semana según activeDays del SLA. */
 export function customPositionOperatesAllWeek(pos: V2PositionDef): boolean {
     return ['L', 'M', 'X', 'J', 'V', 'S', 'D'].every((l) => positionIsActiveOn(pos, l));

@@ -1,5 +1,6 @@
 import type { V2PositionDef } from './autoScheduleEngineV2';
 import { isCustomCoverPosition } from './autoScheduleEngineV2';
+import { customCoverRequiredHeadcount } from './customCoverCycle';
 
 const CYCLE_MAP: Record<string, [number, number]> = {
     '6+2': [6, 2],
@@ -74,10 +75,10 @@ export const rotationPoolPerPax24hs = headcountPerPax24hs;
  * - Con 6+2: **4 guardias por pax** (3×8h + franco en rotación).
  * - 2 pax → **8 guardias** en un **pool común** de rotación (se pueden intercambiar entre bandas/pax).
  *
- * ## Puesto custom (MA, ME, horario fijo L–V u otro)
- * - `qty` = guardias en el **mismo turno en simultáneo**.
- * - **No aplica** esquema 6+2 ni otro ciclo CCT: solo días/horas del SLA (activeDays + turno fijo).
- * - Francos solo en días no operativos del puesto o por ausencia planificada.
+ * ## Puesto custom (MA, ME, horario fijo)
+ * - `qty` = pax en simultáneo cada día operativo (4 en Museo = 4 personas en MA a la vez).
+ * - **L–D (7 días):** plantilla = ceil(qty × 7 / díasTrabajoSemanal) — ej. 4 pax en 6+1 → **5 guardias**.
+ * - **L–V u horario acotado:** plantilla = qty (francos en días sin servicio del puesto).
  */
 export function computePositionRequiredHeadcount(
     pos: V2PositionDef,
@@ -86,7 +87,7 @@ export function computePositionRequiredHeadcount(
     const qty = Math.max(1, Number(pos.qty) || 1);
 
     if (isCustomCoverPosition(pos)) {
-        return qty;
+        return customCoverRequiredHeadcount(pos);
     }
 
     if (is24hsPosition(pos)) {

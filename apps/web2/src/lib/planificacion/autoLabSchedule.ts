@@ -43,6 +43,7 @@ import {
     buildPositionRequiredHeadcountMap,
     computePositionRequiredHeadcount,
 } from './objectiveHeadcount';
+import { is24hsPosition, resolveObjectiveScheduleFlags } from './scheduleObjectiveFlags';
 
 function buildLabDefaultPositionByEmp(
     positions: V2PositionDef[],
@@ -222,7 +223,9 @@ function postProcessAutoLabSchedule(
     };
 }
 
-export function buildAutoLabGenContext(
+export { is24hsPosition } from './scheduleObjectiveFlags';
+
+function buildAutoLabGenContext(
     caseDef: AutoLabCaseDefinition,
     run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'positions' | 'slaVendidas' | 'absences'>,
     brain: AutoPlanningBrainResult,
@@ -236,6 +239,7 @@ export function buildAutoLabGenContext(
         positionHeadcount,
         cycleKey,
     );
+    const scheduleFlags = resolveObjectiveScheduleFlags(run.positions);
     return {
         positions: run.positions,
         employees: run.employees.map((e) => ({
@@ -259,8 +263,9 @@ export function buildAutoLabGenContext(
         apretarCronoDays: brain.modo12DaysEngine,
         strictSixTwo: brain.strictSixTwo,
         noFlexSchemeEmployees: true,
-        allowCustom24hsBackup: false,
-        preserveRotativeIntegrity: run.positions.some(isCustomCoverPosition),
+        allowCustom24hsBackup: scheduleFlags.allowCustom24hsBackup,
+        schedulePhasedRotativeFirst: scheduleFlags.schedulePhasedRotativeFirst,
+        preserveRotativeIntegrity: scheduleFlags.preserveRotativeIntegrity,
         allowFrancoWorkedRescue: false,
         headcountByPax: true,
     };

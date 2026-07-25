@@ -4,6 +4,7 @@
  */
 
 import type { V2FeasibilityReport, V2PositionDef } from './autoScheduleEngineV2';
+import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
 
 export type PlanningBalanceKind = 'short' | 'exact' | 'surplus' | 'hours_short';
 
@@ -112,9 +113,7 @@ export function buildPlanningOperationalDiagnosis(params: {
     const { positions, feasibility, staffing, peopleAvailable, soldHours, pickedCycle } = params;
     const m = feasibility.metrics;
     const modo8 = computeModo8Slots(positions);
-    // Factor 6+2 solo aplica a puestos 24hs rotativoss; custom/L-V se cuentan directamente.
-    const [cycL6x2, cycF6x2] = CYCLE_MAP['6+2'];
-    const plantilla6x2 = Math.ceil(modo8.slots24hs * (cycL6x2 + cycF6x2) / cycL6x2) + modo8.slotsCustom;
+    const plantilla6x2 = computeObjectiveRequiredHeadcount(positions, '6+2');
     const servicio = staffing.servicioDiarioModo8;
     const poolFrancos = Math.max(0, plantilla6x2 - servicio);
 

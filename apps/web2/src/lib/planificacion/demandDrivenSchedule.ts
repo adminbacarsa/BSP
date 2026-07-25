@@ -346,8 +346,10 @@ export function seedDemandDrivenCycleFrancos(
     cycleWorkDays: Record<string, Set<string>>,
     assignments: V2Assignment[],
     runtime: DemandDrivenFillParams['runtime'],
+    skipEmpIds?: Set<string>,
 ): void {
     for (const emp of ctx.employees) {
+        if (skipEmpIds?.has(emp.id)) continue;
         const st = runtime[emp.id];
         for (const day of ctx.daysInMonth) {
             const dateStr = ctx.getDateKey(day);

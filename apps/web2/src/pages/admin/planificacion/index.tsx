@@ -123,6 +123,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
+import { resolveObjectiveScheduleFlags } from '@/lib/planificacion/scheduleObjectiveFlags';
 import {
     resolveAutoPlanningBrain,
     PLANNING_COVERAGE_RULES,
@@ -6954,6 +6955,8 @@ export default function PlanificacionPage() {
                 && prevMonthGenKey.year === prevMonthEndDate.getFullYear()
                 && prevMonthGenKey.month === prevMonthEndDate.getMonth();
 
+            const objectiveScheduleFlags = resolveObjectiveScheduleFlags(positionStructure);
+
             const baseGenCtx = {
                 positions: positionStructure,
                 employees: planningDotacionEmployees
@@ -6996,6 +6999,10 @@ export default function PlanificacionPage() {
                 authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
                 cctMaxBillableHours: planningRules.cctMaxBillableHours,
                 targetAvgHoursPerEmployee: planningRules.targetAvgHoursPerEmployee,
+                headcountByPax: objectiveScheduleFlags.headcountByPax,
+                schedulePhasedRotativeFirst: objectiveScheduleFlags.schedulePhasedRotativeFirst,
+                preserveRotativeIntegrity: objectiveScheduleFlags.preserveRotativeIntegrity,
+                allowCustom24hsBackup: objectiveScheduleFlags.allowCustom24hsBackup,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
             const canFloater = !can6x1 && canUseFixedBandFloater(baseGenCtx);
