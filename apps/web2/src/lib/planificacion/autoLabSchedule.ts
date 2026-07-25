@@ -7,7 +7,7 @@ import { canUseFixedBandFloater } from './fixedBandFloaterScheduleEngine';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
 import { applyAbsenceCoverage, type CoverageGap } from './coverageEngine';
 import { applyAbsenceSplitCoverage, type AbsenceSplitAction } from './absenceSplitCoverage';
-import { ensureAbsenceCells, fillEmptyCellsWithRet, pickRetDesignee, consolidateRetToDesignee } from './absenceFrancoUtils';
+import { ensureAbsenceCells, fillEmptyCellsWithRet, pickRetDesignee, consolidateRetToDesignee, applyServiceExcludedDays } from './absenceFrancoUtils';
 import { fixScheduleIssues, type FixerLogEntry, type FixerResult } from './coverageFixer';
 import { planAbsenceCoverage, type AbsenceCoveragePlan } from './absenceCoveragePlanner';
 import {
@@ -191,6 +191,8 @@ function postProcessAutoLabSchedule(
 
     assignments = consolidateRetToDesignee(assignments, retDesignee);
 
+    assignments = applyServiceExcludedDays(assignments, ctx);
+
     coverageReport = verifyScheduleCoverage(
         extendedCtx,
         assignments,
@@ -227,7 +229,7 @@ export { is24hsPosition } from './scheduleObjectiveFlags';
 
 function buildAutoLabGenContext(
     caseDef: AutoLabCaseDefinition,
-    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'positions' | 'slaVendidas' | 'absences'>,
+    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'calendarDaysInVigencia' | 'serviceExcludedDates' | 'positions' | 'slaVendidas' | 'absences'>,
     brain: AutoPlanningBrainResult,
 ): V2EngineContext {
     const objectiveId = `auto-lab-${caseDef.id}`;
@@ -247,6 +249,10 @@ function buildAutoLabGenContext(
             preferredObjectiveId: objectiveId,
         })),
         daysInMonth: run.daysInMonth,
+        calendarDaysInMonth: run.calendarDaysInVigencia,
+        serviceExcludedDates: run.serviceExcludedDates.length > 0
+            ? run.serviceExcludedDates
+            : caseDef.excludedDates,
         empMonthlyInitial: Object.fromEntries(run.employees.map((e) => [e.id, 0])),
         absences: run.absences,
         slaVendidas: run.slaVendidas,
@@ -273,7 +279,7 @@ function buildAutoLabGenContext(
 
 export function generateAutoLabSchedule(
     caseDef: AutoLabCaseDefinition,
-    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'positions' | 'slaVendidas' | 'absences'>,
+    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'calendarDaysInVigencia' | 'serviceExcludedDates' | 'positions' | 'slaVendidas' | 'absences'>,
 ): AutoLabScheduleOutcome {
     const { brain } = run;
 
@@ -412,7 +418,7 @@ export function shiftCodeCellClass(code: string): string {
 
 export function verifyAutoLabCoverage(
     caseDef: AutoLabCaseDefinition,
-    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'positions' | 'slaVendidas' | 'absences'>,
+    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'calendarDaysInVigencia' | 'serviceExcludedDates' | 'positions' | 'slaVendidas' | 'absences'>,
     scheduleOutcome: AutoLabScheduleOutcome,
 ): CoverageVerificationReport | null {
     if (scheduleOutcome.coverageReport) return scheduleOutcome.coverageReport;

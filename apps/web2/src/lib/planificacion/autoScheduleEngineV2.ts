@@ -235,8 +235,12 @@ export type V2BudgetMode = 'cct' | 'calendar';
 export interface V2EngineContext {
     positions: V2PositionDef[];
     employees: V2EmployeeDef[];
-    /** Días del mes objetivo. */
+    /** Días del mes objetivo (demanda SLA; sin fechas excluidas del contrato). */
     daysInMonth: Date[];
+    /** Días de vigencia en pantalla (incluye feriados/exclusiones para celdas RET). */
+    calendarDaysInMonth?: Date[];
+    /** Fechas YYYY-MM-DD sin servicio a nivel contrato (feriado puente, etc.). */
+    serviceExcludedDates?: string[];
     /** Horas ya acumuladas por empleado (cola CCT 26→fin del mes anterior). */
     empMonthlyInitial: Record<string, number>;
     /** Mapa de ausencias por empleado. */
@@ -659,6 +663,8 @@ function shiftHours(s: V2ShiftDef): number {
 }
 
 export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string, dateStr?: string): boolean {
+    if (dateStr && pos.excludedDates?.includes(dateStr)) return false;
+
     // Turnos de fechas específicas activan el puesto solo en esas fechas
     if (dateStr && (pos.shifts || []).some(
         (s) => !isFrancoCode(s.code) && Array.isArray(s.specificDates) && s.specificDates.length > 0 && s.specificDates.includes(dateStr)
@@ -3449,7 +3455,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const dateStr = ctx.getDateKey(day);
         const dayLetter = ctx.getDayLetter(dateStr);
         ctx.positions.forEach(pos => {
-            if (!positionIsActiveOn(pos, dayLetter)) return;
+            if (!positionIsActiveOn(pos, dayLetter, dateStr)) return;
             const qty = Math.max(1, Number(pos.qty) || 1);
             const group = positionGroups[pos.positionName] || [];
             const workers = group.filter(eid => cycleWorkDays[eid]?.has(dateStr)).length;

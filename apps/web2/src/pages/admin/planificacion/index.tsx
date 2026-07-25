@@ -122,6 +122,7 @@ import {
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
+import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
 import { resolveObjectiveScheduleFlags, shouldBypassFixedBandFloater } from '@/lib/planificacion/scheduleObjectiveFlags';
 import {
@@ -6957,6 +6958,10 @@ export default function PlanificacionPage() {
 
             const objectiveScheduleFlags = resolveObjectiveScheduleFlags(positionStructure);
 
+            const serviceExcludedDates = [...new Set(
+                (positionStructure as any[]).flatMap((p: any) => p.excludedDates || []),
+            )] as string[];
+
             const baseGenCtx = {
                 positions: positionStructure,
                 employees: planningDotacionEmployees
@@ -6969,6 +6974,8 @@ export default function PlanificacionPage() {
                         preferredObjectiveId: e.preferredObjectiveId,
                     })),
                 daysInMonth,
+                calendarDaysInMonth: daysInMonth,
+                serviceExcludedDates,
                 empMonthlyInitial,
                 absences,
                 slaVendidas,
@@ -7105,6 +7112,8 @@ export default function PlanificacionPage() {
             } else {
                 setAutoCoverageGaps([]);
             }
+
+            finalGenAssignments = applyServiceExcludedDays(finalGenAssignments, baseGenCtx);
 
             await bumpAutoV2Progress(58, 'Verificando cobertura…');
             // Volcamos a pendingChanges tras verificar; si SLA abierto = vista previa diagnóstica.

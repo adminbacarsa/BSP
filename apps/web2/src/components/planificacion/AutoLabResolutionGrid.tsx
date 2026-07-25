@@ -44,6 +44,11 @@ export default function AutoLabResolutionGrid({
         [runResult.daysInMonth],
     );
 
+    const excludedServiceDayKeys = useMemo(
+        () => new Set(runResult.serviceExcludedDates || []),
+        [runResult.serviceExcludedDates],
+    );
+
     const displayDays = useMemo(() => {
         const all = runResult.fullMonthDays;
         if (viewMode === 'month') return all;
@@ -281,14 +286,18 @@ export default function AutoLabResolutionGrid({
                             {displayDays.map((day) => {
                                 const ds = getAutoLabDateKey(day);
                                 const active = activeDayKeys.has(ds);
+                                const excludedService = excludedServiceDayKeys.has(ds);
+                                const outOfVigencia = !active && !excludedService;
                                 const holiday = active && isHolidayDate(ds);
                                 const { dd, wd } = formatGridDay(day);
                                 return (
                                     <th
                                         key={ds}
                                         className={`border border-slate-200 px-1 py-2 text-center font-black min-w-[36px] ${
-                                            !active
+                                            outOfVigencia
                                                 ? 'bg-slate-100 text-slate-400'
+                                                : excludedService
+                                                  ? 'bg-violet-50 text-violet-900'
                                                 : holiday
                                                   ? 'bg-amber-50 text-amber-900'
                                                   : 'bg-indigo-50 text-indigo-900'
@@ -371,7 +380,9 @@ export default function AutoLabResolutionGrid({
                                     {displayDays.map((day) => {
                                         const ds = getAutoLabDateKey(day);
                                         const active = activeDayKeys.has(ds);
-                                        if (!active) {
+                                        const excludedService = excludedServiceDayKeys.has(ds);
+                                        const outOfVigencia = !active && !excludedService;
+                                        if (outOfVigencia) {
                                             return (
                                                 <td
                                                     key={`${emp.id}-${ds}`}
@@ -386,7 +397,7 @@ export default function AutoLabResolutionGrid({
                                             ? `${primary.name || code} · ${primary.positionName}${cells.length > 1 ? ` (+${cells.length - 1})` : ''}`
                                             : 'Sin asignación';
                                         return (
-                                            <td key={`${emp.id}-${ds}`} className="border border-slate-200 p-0.5">
+                                            <td key={`${emp.id}-${ds}`} className={`border border-slate-200 p-0.5 ${excludedService ? 'bg-violet-50/40' : ''}`}>
                                                 <div
                                                     title={title}
                                                     className={`h-7 rounded-md border flex items-center justify-center font-black text-[9px] ${primary ? shiftCodeCellClass(code) : 'bg-white text-slate-300 border-dashed border-slate-200'}`}
@@ -409,10 +420,22 @@ export default function AutoLabResolutionGrid({
                             {displayDays.map((day) => {
                                 const ds = getAutoLabDateKey(day);
                                 const active = activeDayKeys.has(ds);
+                                const excludedService = excludedServiceDayKeys.has(ds);
+                                const outOfVigencia = !active && !excludedService;
                                 const gaps = uncoveredByDay[ds] ?? [];
                                 const missing = gaps.reduce((acc, g) => acc + (g.missing || 0), 0);
-                                if (!active) {
-                                    return <td key={`gap-${ds}`} className="border border-slate-200 bg-slate-50" />;
+                                if (outOfVigencia || excludedService) {
+                                    return (
+                                        <td
+                                            key={`gap-${ds}`}
+                                            className={`border border-slate-200 px-0.5 py-1 text-center text-[9px] ${
+                                                excludedService ? 'bg-violet-50 text-violet-600' : 'bg-slate-50'
+                                            }`}
+                                            title={excludedService ? 'Sin servicio (exclusión SLA)' : undefined}
+                                        >
+                                            {excludedService ? '—' : ''}
+                                        </td>
+                                    );
                                 }
                                 const detail = gaps.map((g) => `${g.positionName} ${g.code}×${g.missing}`).join(', ');
                                 return (
@@ -437,6 +460,7 @@ export default function AutoLabResolutionGrid({
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-200" /> F</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-violet-100 border border-violet-300" /> RET</span>
                 <span className="inline-flex items-center gap-1"><CalendarRange size={10} /> Gris = fuera de vigencia</span>
+                <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-violet-100 border border-violet-300" /> Sin servicio (RET)</span>
             </div>
         </div>
     );

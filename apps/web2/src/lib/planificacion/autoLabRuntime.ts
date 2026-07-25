@@ -267,6 +267,10 @@ export interface AutoLabRunResult {
     absences: V2AbsenceMap;
     slaVendidas: number;
     daysInMonth: Date[];
+    /** Días dentro de vigencia (incluye fechas excluidas del servicio). */
+    calendarDaysInVigencia: Date[];
+    /** Fechas sin servicio a nivel contrato. */
+    serviceExcludedDates: string[];
     fullMonthDays: Date[];
     slotsPerDay: number;
     peakConcurrent: number;
@@ -283,6 +287,16 @@ export function runAutoLabCase(
 ): AutoLabRunResult {
     const fullMonthDays = buildDaysInMonth(year, month);
     const hasVigencia = !!(caseDef.serviceStartDate && caseDef.serviceEndDate);
+    const serviceExcludedDates = caseDef.excludedDates?.length ? [...caseDef.excludedDates] : [];
+    const calendarDaysInVigencia = hasVigencia
+        ? getServiceDaysInMonth(
+            year,
+            month,
+            caseDef.serviceStartDate!,
+            caseDef.serviceEndDate!,
+            undefined,
+        )
+        : fullMonthDays;
     const daysInMonth = hasVigencia
         ? getServiceDaysInMonth(
             year,
@@ -391,6 +405,8 @@ export function runAutoLabCase(
         absences,
         slaVendidas,
         daysInMonth,
+        calendarDaysInVigencia,
+        serviceExcludedDates,
         fullMonthDays,
         slotsPerDay: slots.slotsPerDay,
         peakConcurrent: slots.peakConcurrent,

@@ -8,6 +8,7 @@ import { isCustomCoverPosition } from './autoScheduleEngineV2';
 import { isExternalRetEmpId } from './externalRetCoverage';
 import { isLabSyntheticEmpId } from './objectiveHeadcount';
 import { CYCLE_24_MTN } from './fixedBandFloaterScheduleEngine';
+import { isPlanningWorkShiftCode } from '@/lib/slaPlanningMatch';
 
 const WORK_BANDS = new Set(['M', 'T', 'N']);
 
@@ -304,4 +305,108 @@ export function fillEmptyCellsWithRet(
     }
 
     return consolidateRetToDesignee(result, retDesignee);
+}
+
+function isPositionExcludedOnDate(
+    pos: { excludedDates?: string[] } | null | undefined,
+    dateStr: string,
+    globalExcluded: Set<string>,
+): boolean {
+    if (globalExcluded.has(dateStr)) return true;
+    return !!pos?.excludedDates?.includes(dateStr);
+}
+
+function isEmployeeServiceOffOnDate(
+    empId: string,
+    dateStr: string,
+    ctx: V2EngineContext,
+    globalExcluded: Set<string>,
+): boolean {
+    const posName = ctx.defaultPositionByEmp?.[empId];
+    if (!posName) return globalExcluded.has(dateStr);
+    const pos = ctx.positions.find((p) => p.positionName === posName);
+    return isPositionExcludedOnDate(pos, dateStr, globalExcluded);
+}
+
+/**
+ * Días sin servicio (feriado puente / exclusión SLA): sin demanda de cobertura.
+ * El personal pasa a RET (stand-by para otro objetivo); francos y licencias se respetan.
+ */
+export function applyServiceExcludedDays(
+    assignments: V2Assignment[],
+    ctx: V2EngineContext,
+): V2Assignment[] {
+    const globalExcluded = new Set(ctx.serviceExcludedDates || []);
+    const hasPerPosExcluded = ctx.positions.some((p) => (p.excludedDates?.length ?? 0) > 0);
+    if (globalExcluded.size === 0 && !hasPerPosExcluded) return assignments;
+
+    const calendarDays = ctx.calendarDaysInMonth?.length
+        ? ctx.calendarDaysInMonth
+        : ctx.daysInMonth;
+    if (calendarDays.length === 0) return assignments;
+
+    const result = assignments.map((a) => ({ ...a }));
+    const byKey = new Map(result.map((a) => [`${a.empId}__${a.dateStr}`, a]));
+
+    for (const day of calendarDays) {
+        const dateStr = ctx.getDateKey(day);
+        const dayHasExclusion = globalExcluded.has(dateStr)
+            || ctx.positions.some((p) => p.excludedDates?.includes(dateStr));
+        if (!dayHasExclusion) continue;
+
+        for (const emp of ctx.employees) {
+            if (isExternalRetEmpId(emp.id)) continue;
+            if (!isEmployeeServiceOffOnDate(emp.id, dateStr, ctx, globalExcluded)) continue;
+
+            const absenceCode = ctx.absences[emp.id]?.get(dateStr);
+            const key = `${emp.id}__${dateStr}`;
+            const existing = byKey.get(key);
+
+            if (absenceCode) {
+                if (!existing) {
+                    const cell: V2Assignment = {
+                        empId: emp.id,
+                        dateStr,
+                        positionName: ctx.defaultPositionByEmp?.[emp.id] || '',
+                        code: absenceCode,
+                        name: absenceCode,
+                        hours: 0,
+                        startTime: '00:00',
+                        isFranco: false,
+                    };
+                    result.push(cell);
+                    byKey.set(key, cell);
+                }
+                continue;
+            }
+
+            if (existing) {
+                if (isPlanningWorkShiftCode(existing.code)) {
+                    existing.code = 'RET';
+                    existing.name = 'Retén';
+                    existing.hours = 0;
+                    existing.positionName = '';
+                    existing.isReten = true;
+                    existing.isFranco = false;
+                    delete existing.endTime;
+                }
+                continue;
+            }
+
+            const cell: V2Assignment = {
+                empId: emp.id,
+                dateStr,
+                positionName: '',
+                code: 'RET',
+                name: 'Retén',
+                hours: 0,
+                startTime: '00:00',
+                isReten: true,
+            };
+            result.push(cell);
+            byKey.set(key, cell);
+        }
+    }
+
+    return result;
 }
