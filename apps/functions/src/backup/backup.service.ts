@@ -4,15 +4,31 @@ import { Readable } from 'stream';
 
 // En el emulador el canal gRPC del Admin SDK corta a los 60 s (DEADLINE_EXCEEDED).
 // preferRest:true reemplaza gRPC por HTTP/1.1 y evita ese límite.
+// Usamos un app secundario con solo projectId (la credential del emulador
+// no es copiable desde admin.app().options — causaría "2 UNKNOWN").
 let _backupDb: FirebaseFirestore.Firestore | null = null;
 export function getBackupDb(): FirebaseFirestore.Firestore {
   if (_backupDb) return _backupDb;
   if (process.env.FUNCTIONS_EMULATOR === 'true') {
-    const appName = 'backup-rest';
-    const existing = admin.apps.find(a => a?.name === appName);
-    const app = existing ?? admin.initializeApp(admin.app().options, appName);
-    _backupDb = app.firestore();
-    _backupDb.settings({ preferRest: true });
+    try {
+      const appName = 'backup-rest';
+      const existing = admin.apps.find(a => a?.name === appName);
+      const projectId =
+        process.env.GCLOUD_PROJECT ||
+        process.env.FIREBASE_PROJECT ||
+        (admin.apps[0]?.options.projectId) ||
+        'comtroldata';
+      const app = existing ?? admin.initializeApp({ projectId }, appName);
+      const db = app.firestore();
+      try { db.settings({ preferRest: true }); } catch { /* ya configurado */ }
+      _backupDb = db;
+      return _backupDb;
+    } catch (e) {
+      console.warn('[backup] app secundario falló, usando primario con preferRest', e);
+      const db = admin.firestore();
+      try { db.settings({ preferRest: true }); } catch { /* ya configurado */ }
+      _backupDb = db;
+    }
   } else {
     _backupDb = admin.firestore();
   }

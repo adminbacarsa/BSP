@@ -13,11 +13,31 @@ function getBackupDb() {
     if (_backupDb)
         return _backupDb;
     if (process.env.FUNCTIONS_EMULATOR === 'true') {
-        const appName = 'backup-rest';
-        const existing = admin.apps.find(a => a?.name === appName);
-        const app = existing ?? admin.initializeApp(admin.app().options, appName);
-        _backupDb = app.firestore();
-        _backupDb.settings({ preferRest: true });
+        try {
+            const appName = 'backup-rest';
+            const existing = admin.apps.find(a => a?.name === appName);
+            const projectId = process.env.GCLOUD_PROJECT ||
+                process.env.FIREBASE_PROJECT ||
+                (admin.apps[0]?.options.projectId) ||
+                'comtroldata';
+            const app = existing ?? admin.initializeApp({ projectId }, appName);
+            const db = app.firestore();
+            try {
+                db.settings({ preferRest: true });
+            }
+            catch { }
+            _backupDb = db;
+            return _backupDb;
+        }
+        catch (e) {
+            console.warn('[backup] app secundario falló, usando primario con preferRest', e);
+            const db = admin.firestore();
+            try {
+                db.settings({ preferRest: true });
+            }
+            catch { }
+            _backupDb = db;
+        }
     }
     else {
         _backupDb = admin.firestore();
