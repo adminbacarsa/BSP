@@ -47,7 +47,15 @@ export const useEmpresa = () => useContext(EmpresaContext);
 export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => {
   const { empresaId: authEmpresaId, isSuperAdmin, allEmpresas } = useAuth();
   const canSwitchEmpresa = isSuperAdmin || allEmpresas;
-  const [empresaId, setEmpresaId] = useState(authEmpresaId || '');
+  const [empresaId, setEmpresaId] = useState<string>(() => {
+    // Leer localStorage en el initializer evita el render inicial con la empresa
+    // del auth ('bacarsa') cuando el superadmin tiene otra empresa guardada.
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY);
+      if (saved) return saved;
+    }
+    return authEmpresaId || '';
+  });
   const [empresa, setEmpresa] = useState<Empresa | null>(null);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [loadingEmpresa, setLoadingEmpresa] = useState(true);

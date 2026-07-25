@@ -118,6 +118,7 @@ import {
     abbrevPlanningPositionName,
     excludedPositionsCellLabel,
     excludedPositionsTooltip,
+    resolvePlanningMonthSlaHours,
 } from '@/lib/slaPlanningMatch';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
@@ -171,6 +172,8 @@ import {
     type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
+import { fetchCoverageWisdomHistory, DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS } from '@/lib/planificacion/fetchPlanningCoverageWisdomHistory';
+import type { PlanningCoverageWisdom } from '@/lib/planificacion/planningCoverageWisdom';
 import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificacion/planningPipeline';
 import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterScheduleEngine';
 import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
@@ -647,7 +650,7 @@ const rfzDocToShiftView = (rfz: any) => ({
 });
 
 export default function PlanificacionPage() {
-    const { empresaId, empresa } = useEmpresa();
+    const { empresaId, empresa, loadingEmpresa } = useEmpresa();
     const { rules: planningRules } = usePlanningRules(empresaId);
     const planningLimits = useMemo(
         () => planningHourLimits(planningRules),
@@ -683,6 +686,8 @@ export default function PlanificacionPage() {
     const [cronoFullscreen, setCronoFullscreen] = useState(false);
     const [statsBarCollapsed, setStatsBarCollapsed] = useState(false);
 
+    const [isDataSyncing, setIsDataSyncing] = useState(false);
+    const dataSyncRef = useRef<{ employees: boolean; clients: boolean }>({ employees: false, clients: false });
     const [employees, setEmployees] = useState<any[]>([]);
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
     const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
@@ -3564,7 +3569,11 @@ export default function PlanificacionPage() {
                 }
                 setHasActiveSLA(monthHasSla);
                 setPositionStructure(structure);
-                setSlaVendidas(monthHasSla ? (Number(srvForStructure?.totalMonthlyHours) || 0) : 0);
+                setSlaVendidas(
+                    monthHasSla && srvForStructure
+                        ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
+                        : 0,
+                );
             } catch (e) {
                 console.error("CRONO SLA ERROR:", e);
                 setPositionStructure([{ positionName: 'ERROR', shifts: [], qty: 1 }]);
@@ -3596,7 +3605,7 @@ export default function PlanificacionPage() {
                     const srvForStructure = srv ?? fallback;
                     const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
                     if (monthHasSla && srvForStructure) {
-                        totalVendidas += Number(srvForStructure.totalMonthlyHours) || 0;
+                        totalVendidas += resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth);
                     }
                     const { structure } = buildPlanningPositionStructure(srvForStructure, { monthHasSla, hasExactMatch: !!hasExactMatch });
                     result[objId] = structure.length > 0 ? structure : [{ positionName: 'General', shifts: DEFAULT_PLANNING_SHIFTS.map((s: any) => ({ ...s })), qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' }];
@@ -3614,6 +3623,13 @@ export default function PlanificacionPage() {
 
     // LISTENER DE NOVEDADES Y OTROS DATOS
     useEffect(() => {
+        // Activar indicador de sincronización hasta que clients y empleados lleguen del servidor
+        setIsDataSyncing(true);
+        dataSyncRef.current = { employees: false, clients: false };
+        const checkSynced = () => {
+            if (dataSyncRef.current.employees && dataSyncRef.current.clients) setIsDataSyncing(false);
+        };
+
         getDocsFromServer(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa)).then(snap => {
             const m: Record<string, string> = {};
             snap.docs.forEach(d => {
@@ -3626,12 +3642,14 @@ export default function PlanificacionPage() {
         const clientsQ = empresaCollectionQuery('clients', empresaId, scopeEmpresa);
         const empleadosQ = empresaCollectionQuery('empleados', empresaId, scopeEmpresa);
 
-        const unsubC = onSnapshot(clientsQ, snap => {
+        const unsubC = onSnapshot(clientsQ, { includeMetadataChanges: true }, snap => {
+            if (!snap.metadata.fromCache) { dataSyncRef.current.clients = true; checkSynced(); }
             const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
             setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta)));
         }, (e) => console.error('[plan] clients error:', e));
         const unsubAg = onSnapshot(collection(db, 'convenios_colectivos'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
-        const unsubE = onSnapshot(empleadosQ, snap => {
+        const unsubE = onSnapshot(empleadosQ, { includeMetadataChanges: true }, snap => {
+            if (!snap.metadata.fromCache) { dataSyncRef.current.employees = true; checkSynced(); }
             const map = (s: typeof snap) => s.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .map(d => {
@@ -6755,6 +6773,33 @@ export default function PlanificacionPage() {
             mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
             setAutoAbsencesMap(absences);
 
+            let coverageWisdom: PlanningCoverageWisdom | null = null;
+            if (empresaId && selectedObjective) {
+                await bumpAutoV2Progress(14, `Consultando historial operativo (${DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS} meses)…`);
+                const empNames: Record<string, string> = {};
+                planningDotacionEmployees.forEach((e: any) => {
+                    empNames[e.id] = e.nombre || e.name || e.id;
+                });
+                try {
+                    coverageWisdom = await fetchCoverageWisdomHistory({
+                        empresaId,
+                        objectiveId: selectedObjective,
+                        year: currentDate.getFullYear(),
+                        month: currentDate.getMonth() + 1,
+                        lookbackMonths: DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
+                        scopeEmpresa,
+                        migracionCompleta,
+                        employeeNames: empNames,
+                        rosterEmployeeIds: new Set(planningDotacionEmployees.map((e: any) => e.id)),
+                    });
+                    if (coverageWisdom.cellsAnalyzed > 0 || coverageWisdom.events.length > 0) {
+                        toast.info(coverageWisdom.summary, { duration: 6000 });
+                    }
+                } catch (wisdomErr) {
+                    console.warn('[auto] fetchCoverageWisdomHistory', wisdomErr);
+                }
+            }
+
             const autoModo12AbsDays = new Set<string>();
             for (const map of Object.values(absences)) {
                 if (!map) continue;
@@ -7010,6 +7055,7 @@ export default function PlanificacionPage() {
                 schedulePhasedRotativeFirst: objectiveScheduleFlags.schedulePhasedRotativeFirst,
                 preserveRotativeIntegrity: objectiveScheduleFlags.preserveRotativeIntegrity,
                 allowCustom24hsBackup: objectiveScheduleFlags.allowCustom24hsBackup,
+                coverageWisdom,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
             const canFloater = !can6x1
@@ -7177,6 +7223,8 @@ export default function PlanificacionPage() {
                 prevMonthLastShiftByEmp,
                 cctMaxBillableHours: planningRules.cctMaxBillableHours,
                 targetAvgHoursPerEmployee: planningRules.targetAvgHoursPerEmployee,
+                objectiveId: selectedObjective,
+                coverageWisdom,
             } as any;
             let finalAssignments = gen.assignments;
             let coverage = strictPipeline?.verification
@@ -8382,6 +8430,12 @@ export default function PlanificacionPage() {
     return (
         <DashboardLayout>
             <Head><title>Planificador</title></Head>
+            {(loadingEmpresa || isDataSyncing) && (
+                <div className="fixed top-4 right-16 z-[9998] flex items-center gap-1.5 bg-slate-800 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg pointer-events-none opacity-80">
+                    <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
+                    Actualizando
+                </div>
+            )}
             <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } .sla-excluded-day-col { background-image: repeating-linear-gradient(-45deg, transparent, transparent 4px, rgba(251, 113, 133, 0.07) 4px, rgba(251, 113, 133, 0.07) 8px); } .planning-grid-table { border-collapse: separate; border-spacing: 0; } .planning-grid-table thead th { box-shadow: 0 1px 0 rgba(148,163,184,0.35); } .planning-grid-table .planning-sticky-corner { position: sticky; left: 0; top: 0; z-index: 50; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
             <Toaster position="top-center" />
             {coverageTooltip && (
