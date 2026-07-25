@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getBackupDb = getBackupDb;
 exports.runBackup = runBackup;
 exports.syncDriveBackups = syncDriveBackups;
 exports.deleteDriveBackup = deleteDriveBackup;
@@ -7,6 +8,22 @@ exports.resolveDriveBackupFolderId = resolveDriveBackupFolderId;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const stream_1 = require("stream");
+let _backupDb = null;
+function getBackupDb() {
+    if (_backupDb)
+        return _backupDb;
+    if (process.env.FUNCTIONS_EMULATOR === 'true') {
+        const appName = 'backup-rest';
+        const existing = admin.apps.find(a => a?.name === appName);
+        const app = existing ?? admin.initializeApp(admin.app().options, appName);
+        _backupDb = app.firestore();
+        _backupDb.settings({ preferRest: true });
+    }
+    else {
+        _backupDb = admin.firestore();
+    }
+    return _backupDb;
+}
 const EXCLUDE_COLLECTIONS = new Set([
     'system_backups',
     'restore_jobs',
@@ -66,7 +83,7 @@ async function resolveOrCreateDriveFolder(drive, parentId, folderName) {
     return created.data.id;
 }
 async function runBackup(folderId, opts = {}) {
-    const db = admin.firestore();
+    const db = getBackupDb();
     const empresaId = String(opts.empresaId ?? '').trim();
     const scopeEmpresa = opts.scopeEmpresa === true && !!empresaId;
     const data = {};
@@ -228,7 +245,7 @@ async function runBackup(folderId, opts = {}) {
     };
 }
 async function syncDriveBackups(opts = {}) {
-    const db = admin.firestore();
+    const db = getBackupDb();
     const empresaId = String(opts.empresaId ?? '').trim();
     const scopeEmpresa = opts.scopeEmpresa === true && !!empresaId;
     const { google } = await Promise.resolve().then(() => require('googleapis'));
@@ -286,7 +303,7 @@ async function syncDriveBackups(opts = {}) {
     return { checked, removed, kept, removedIds };
 }
 async function deleteDriveBackup(docId, opts = {}) {
-    const db = admin.firestore();
+    const db = getBackupDb();
     const ref = db.collection('system_backups').doc(docId);
     const docSnap = await ref.get();
     if (!docSnap.exists)
@@ -322,7 +339,7 @@ async function resolveDriveBackupFolderId() {
     if (fromEnv)
         return fromEnv;
     try {
-        const db = admin.firestore();
+        const db = getBackupDb();
         const snap = await db
             .collection('system_backups')
             .orderBy('createdAt', 'desc')

@@ -7,6 +7,7 @@ exports.resolveBackupCaller = resolveBackupCaller;
 exports.assertBackupCallableAllowed = assertBackupCallableAllowed;
 const admin = require("firebase-admin");
 const https_1 = require("firebase-functions/v2/https");
+const backup_service_1 = require("./backup.service");
 function normalizeBackupRole(role) {
     return String(role ?? '').trim().toUpperCase().replace(/\s+/g, '_');
 }
@@ -23,7 +24,7 @@ async function resolveBackupCaller(uid, tokenRoleRaw) {
     let isSuper = isSuperAdminBackupRole(tokenRole);
     let profileEmpresa = '';
     let sysRole = '';
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     const sysUser = await db.collection('system_users').doc(uid).get();
     if (sysUser.exists) {
         sysRole = normalizeBackupRole(sysUser.data()?.role);

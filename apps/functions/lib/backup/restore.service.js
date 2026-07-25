@@ -14,6 +14,7 @@ exports.runRestoreFromStorage = runRestoreFromStorage;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const assistantEmpresaScope_1 = require("../assistant/assistantEmpresaScope");
+const backup_service_1 = require("./backup.service");
 function serializeIdMaps(idMaps) {
     const out = {};
     for (const [col, map] of Object.entries(idMaps)) {
@@ -416,7 +417,7 @@ async function deleteCollectionForRestore(db, colName, mode, opts, batchSize) {
 }
 async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, partial = {}) {
     const t0 = Date.now();
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     const meta = (payload._meta ?? {});
     const backupEmpresa = String(meta.empresaId ?? '').trim();
     const sessionEmpresa = String(opts.empresaId ?? '').trim();
@@ -527,7 +528,7 @@ async function runRestoreFromPayload(payload, fileName, mode, jobId, opts = {}, 
     }
 }
 async function runRestore(driveFileId, mode, jobId, opts = {}, partial = {}) {
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     const setJob = (data) => {
         if (!jobId)
             return Promise.resolve();
@@ -550,7 +551,7 @@ async function runRestore(driveFileId, mode, jobId, opts = {}, partial = {}) {
     return runRestoreFromPayload(payload, fileName, mode, jobId, opts, partial);
 }
 async function runRestoreFromStorage(storagePath, fileName, mode, jobId, opts = {}, partial = {}) {
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     const setJob = (data) => {
         if (!jobId)
             return Promise.resolve();

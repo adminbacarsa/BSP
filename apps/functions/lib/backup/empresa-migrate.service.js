@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deserializeIdMaps = exports.serializeIdMaps = void 0;
 exports.runEmpresaMigrate = runEmpresaMigrate;
-const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
+const backup_service_1 = require("./backup.service");
 const restore_service_1 = require("./restore.service");
 Object.defineProperty(exports, "serializeIdMaps", { enumerable: true, get: function () { return restore_service_1.serializeIdMaps; } });
 Object.defineProperty(exports, "deserializeIdMaps", { enumerable: true, get: function () { return restore_service_1.deserializeIdMaps; } });
@@ -123,7 +123,7 @@ async function writeMigratedCollection(db, colName, docs, targetEmpresaId, idMap
 }
 async function runEmpresaMigrate(sourceEmpresaId, targetEmpresaId, jobId, partial = {}) {
     const t0 = Date.now();
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     const source = String(sourceEmpresaId ?? '').trim();
     const target = String(targetEmpresaId ?? '').trim();
     if (!source || !target) {

@@ -2,9 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.assertMigrateEmpresaRequestAllowed = assertMigrateEmpresaRequestAllowed;
 exports.executeEmpresaMigrateJob = executeEmpresaMigrateJob;
-const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const backup_auth_util_1 = require("./backup-auth.util");
+const backup_service_1 = require("./backup.service");
 const empresa_migrate_service_1 = require("./empresa-migrate.service");
 async function assertMigrateEmpresaRequestAllowed(authUid, tokenRoleRaw, payload) {
     const sourceEmpresaId = String(payload.sourceEmpresaId ?? '').trim();
@@ -22,7 +22,7 @@ async function assertMigrateEmpresaRequestAllowed(authUid, tokenRoleRaw, payload
     if (!caller.isSuper) {
         throw new Error('Solo superadmin puede copiar datos entre empresas.');
     }
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     const [sourceSnap, targetSnap] = await Promise.all([
         db.collection('empresas').doc(sourceEmpresaId).get(),
         db.collection('empresas').doc(targetEmpresaId).get(),
@@ -37,7 +37,7 @@ async function assertMigrateEmpresaRequestAllowed(authUid, tokenRoleRaw, payload
     return { jobId, sourceEmpresaId, targetEmpresaId };
 }
 async function executeEmpresaMigrateJob(jobId) {
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     const jobRef = db.collection('empresa_migrate_jobs').doc(jobId);
     const snap = await jobRef.get();
     if (!snap.exists)

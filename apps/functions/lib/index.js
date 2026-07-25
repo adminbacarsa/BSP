@@ -2224,7 +2224,7 @@ exports.gestionarVacantes = functions
     }
     return null;
 });
-exports.triggerBackup = (0, https_1.onCall)({ timeoutSeconds: 3600, memory: '4GiB', region: 'us-central1' }, async (request) => {
+exports.triggerBackup = (0, https_1.onCall)({ timeoutSeconds: 3600, memory: '4GiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const folderId = await (0, backup_service_1.resolveDriveBackupFolderId)();
     if (!folderId)
@@ -2283,7 +2283,7 @@ exports.triggerBackup = (0, https_1.onCall)({ timeoutSeconds: 3600, memory: '4Gi
         throw new https_1.HttpsError('internal', msg);
     }
 });
-exports.syncBackups = (0, https_1.onCall)({ timeoutSeconds: 300, memory: '512MiB', region: 'us-central1' }, async (request) => {
+exports.syncBackups = (0, https_1.onCall)({ timeoutSeconds: 300, memory: '512MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
     const claimedEmpresa = String(request.data?.empresaId ?? '').trim();
@@ -2297,7 +2297,7 @@ exports.syncBackups = (0, https_1.onCall)({ timeoutSeconds: 300, memory: '512MiB
         throw new https_1.HttpsError('internal', e?.message || 'Error al sincronizar backups con Drive');
     }
 });
-exports.deleteBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '256MiB', region: 'us-central1' }, async (request) => {
+exports.deleteBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '256MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
     const docId = String(request.data?.docId ?? '').trim();
@@ -2321,7 +2321,7 @@ exports.deleteBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '256Mi
         throw new https_1.HttpsError('internal', e?.message || 'Error al borrar backup');
     }
 });
-exports.restoreBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '512MiB', region: 'us-central1' }, async (request) => {
+exports.restoreBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '512MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const payload = (request.data ?? {});
     try {
@@ -2363,7 +2363,7 @@ exports.restoreBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '512M
         throw new https_1.HttpsError('internal', msg);
     }
 });
-exports.processRestoreJob = (0, firestore_1.onDocumentWritten)({ document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 3600, memory: '4GiB' }, async (event) => {
+exports.processRestoreJob = (0, firestore_1.onDocumentWritten)({ document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 540, memory: '4GiB', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (event) => {
     const change = event.data;
     if (!change)
         return;
@@ -2471,7 +2471,7 @@ exports.migrateEmpresaData = (0, https_1.onCall)({ timeoutSeconds: 120, memory: 
         throw new https_1.HttpsError('internal', msg);
     }
 });
-exports.processEmpresaMigrateJob = (0, firestore_1.onDocumentWritten)({ document: 'empresa_migrate_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 3600, memory: '4GiB' }, async (event) => {
+exports.processEmpresaMigrateJob = (0, firestore_1.onDocumentWritten)({ document: 'empresa_migrate_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 540, memory: '4GiB' }, async (event) => {
     const change = event.data;
     if (!change)
         return;
@@ -2545,9 +2545,10 @@ exports.onAusenciaCreatedFromPortal = functions
 exports.scheduledBackup = (0, scheduler_1.onSchedule)({
     schedule: '0 * * * *',
     timeZone: 'America/Argentina/Buenos_Aires',
-    timeoutSeconds: 3600,
+    timeoutSeconds: 1800,
     memory: '4GiB',
     region: 'us-central1',
+    serviceAccount: 'comtroldata@appspot.gserviceaccount.com',
 }, async () => {
     const db = admin.firestore();
     let configHour = 3;

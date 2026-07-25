@@ -2,9 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.assertRestoreRequestAllowed = assertRestoreRequestAllowed;
 exports.executeRestoreJob = executeRestoreJob;
-const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const assistantEmpresaScope_1 = require("../assistant/assistantEmpresaScope");
+const backup_service_1 = require("./backup.service");
 const backup_auth_util_1 = require("./backup-auth.util");
 const restore_service_1 = require("./restore.service");
 async function assertRestoreRequestAllowed(authUid, tokenRoleRaw, payload) {
@@ -15,7 +15,7 @@ async function assertRestoreRequestAllowed(authUid, tokenRoleRaw, payload) {
     if (!['merge', 'full'].includes(mode)) {
         throw new Error('mode debe ser merge o full');
     }
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     let empresaId = String(claimedEmpresa ?? '').trim();
     const caller = await (0, backup_auth_util_1.resolveBackupCaller)(authUid, tokenRoleRaw);
     if (!caller.isPanelUser) {
@@ -76,7 +76,7 @@ async function assertRestoreRequestAllowed(authUid, tokenRoleRaw, payload) {
     return { jobId, restoreOpts, fileName };
 }
 async function executeRestoreJob(jobId) {
-    const db = admin.firestore();
+    const db = (0, backup_service_1.getBackupDb)();
     const jobRef = db.collection('restore_jobs').doc(jobId);
     const snap = await jobRef.get();
     if (!snap.exists)

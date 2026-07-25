@@ -1,3 +1,4 @@
+export declare function getBackupDb(): FirebaseFirestore.Firestore;
 export interface BackupOptions {
     empresaId?: string;
     scopeEmpresa?: boolean;
