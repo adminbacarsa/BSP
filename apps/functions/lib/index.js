@@ -2225,37 +2225,41 @@ exports.gestionarVacantes = functions
     return null;
 });
 exports.triggerBackup = (0, https_1.onCall)({ timeoutSeconds: 3600, memory: '4GiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
-    await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
-    const folderId = await (0, backup_service_1.resolveDriveBackupFolderId)();
-    if (!folderId)
-        throw new https_1.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
-    const db = admin.firestore();
-    const claimedEmpresa = String(request.data?.empresaId ?? '').trim();
-    const clientJobId = String(request.data?.jobId ?? '').trim();
-    let empresaId = claimedEmpresa;
-    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
-    if (!caller.isSuper) {
-        empresaId = caller.profileEmpresa || 'bacarsa';
-    }
-    else if (!empresaId) {
-        empresaId = caller.profileEmpresa;
-    }
-    const scopeEmpresa = !!empresaId;
-    const jobId = clientJobId || `backup_${Date.now()}`;
-    const jobRef = db.collection('backup_jobs').doc(jobId);
-    await jobRef.set({
-        status: 'running',
-        startedAt: admin.firestore.FieldValue.serverTimestamp(),
-        empresaId: empresaId || '',
-        source: 'triggerBackup',
-        totalCollections: 0,
-        collectionsProcessed: 0,
-        docsExported: 0,
-        currentCollection: '',
-        phase: 'collecting',
-    });
-    const startMs = Date.now();
+    let db = null;
+    let jobRef = null;
+    let empresaId = '';
+    let scopeEmpresa = false;
     try {
+        await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
+        const folderId = await (0, backup_service_1.resolveDriveBackupFolderId)();
+        if (!folderId)
+            throw new https_1.HttpsError('failed-precondition', 'Variable DRIVE_BACKUP_FOLDER_ID no configurada.');
+        db = (0, backup_service_1.getBackupDb)();
+        const claimedEmpresa = String(request.data?.empresaId ?? '').trim();
+        const clientJobId = String(request.data?.jobId ?? '').trim();
+        empresaId = claimedEmpresa;
+        const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
+        if (!caller.isSuper) {
+            empresaId = caller.profileEmpresa || 'bacarsa';
+        }
+        else if (!empresaId) {
+            empresaId = caller.profileEmpresa;
+        }
+        scopeEmpresa = !!empresaId;
+        const jobId = clientJobId || `backup_${Date.now()}`;
+        jobRef = db.collection('backup_jobs').doc(jobId);
+        await jobRef.set({
+            status: 'running',
+            startedAt: admin.firestore.FieldValue.serverTimestamp(),
+            empresaId: empresaId || '',
+            source: 'triggerBackup',
+            totalCollections: 0,
+            collectionsProcessed: 0,
+            docsExported: 0,
+            currentCollection: '',
+            phase: 'collecting',
+        });
+        const startMs = Date.now();
         const result = await (0, backup_service_1.runBackup)(folderId, { empresaId, scopeEmpresa, source: 'triggerBackup', jobRef });
         const durationMs = Date.now() - startMs;
         await jobRef.update({
@@ -2271,16 +2275,20 @@ exports.triggerBackup = (0, https_1.onCall)({ timeoutSeconds: 3600, memory: '4Gi
         return { jobId, ...result };
     }
     catch (e) {
-        const msg = e?.message || 'Error desconocido';
-        await jobRef.update({ status: 'error', error: msg.slice(0, 500), phase: 'error' }).catch(() => { });
-        await db.collection('system_backups').add({
-            status: 'error',
-            error: msg,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            ...(empresaId ? { empresaId } : {}),
-            ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
-        });
-        throw new https_1.HttpsError('internal', msg);
+        if (e instanceof https_1.HttpsError)
+            throw e;
+        const msg = e?.message || 'Error desconocido en triggerBackup';
+        if (jobRef && db) {
+            await jobRef.update({ status: 'error', error: msg.slice(0, 500), phase: 'error' }).catch(() => { });
+            await db.collection('system_backups').add({
+                status: 'error',
+                error: msg,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                ...(empresaId ? { empresaId } : {}),
+                ...(scopeEmpresa ? { scopeEmpresa: true } : {}),
+            }).catch(() => { });
+        }
+        throw new https_1.HttpsError('internal', msg.slice(0, 500));
     }
 });
 exports.syncBackups = (0, https_1.onCall)({ timeoutSeconds: 300, memory: '512MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {

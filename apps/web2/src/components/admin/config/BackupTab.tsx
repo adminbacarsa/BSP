@@ -321,7 +321,8 @@ export default function BackupTab() {
       ? query(collection(db, 'system_backups'), where('empresaId', '==', empresaId), limit(40))
       : query(collection(db, 'system_backups'), orderBy('createdAt', 'desc'), limit(40));
 
-    const unsub = onSnapshot(q, snap => {
+    const unsub = onSnapshot(q, { includeMetadataChanges: true }, snap => {
+      if (snap.metadata.fromCache) return; // Ignorar cache — mostrar loading hasta que llegue el servidor
       let rows = snap.docs.map(d => ({ id: d.id, ...d.data() } as BackupRecord));
       if (scopeEmpresa) {
         rows = rows.filter(b => backupVisibleInTab(b, empresaId, scopeEmpresa, isSuperAdmin));
