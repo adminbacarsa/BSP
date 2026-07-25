@@ -193,17 +193,6 @@ export const AUTO_LAB_CASES: AutoLabCaseDefinition[] = [
     },
 ];
 
-/** Próximo ítem (fuera del lab por ahora): servicios reales desde Firestore/SLA. */
-export const AUTO_LAB_PLANNED_CASES: Pick<AutoLabCaseDefinition, 'id' | 'title' | 'subtitle' | 'description'>[] = [
-    {
-        id: 'case-06-servicio-real',
-        title: 'Servicio real — SLA + turnos publicados',
-        subtitle: 'Cargar desde emulador/producción',
-        description:
-            'Conectar un objetivo real (servicios_sla + turnos del mes anterior) para validar el motor contra datos Bacar. Sabiduría de coberturas y ranking histórico — pendiente de integrar.',
-    },
-];
-
 export function getAutoLabCaseById(id: string): AutoLabCaseDefinition | undefined {
     return AUTO_LAB_CASES.find((c) => c.id === id);
 }

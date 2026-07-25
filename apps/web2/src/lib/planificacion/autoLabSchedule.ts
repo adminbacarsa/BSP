@@ -1,12 +1,13 @@
 import type { AutoPlanningBrainResult } from './autoPlanningBrain';
 import { generateScheduleV4 } from './autoScheduleEngineV4';
 import type { V2EngineContext, V2GenerateResult, V2PositionDef, V2EmployeeDef } from './autoScheduleEngineV2';
+import { isCustomCoverPosition } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import { canUseFixedBandFloater } from './fixedBandFloaterScheduleEngine';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
 import { applyAbsenceCoverage, type CoverageGap } from './coverageEngine';
 import { applyAbsenceSplitCoverage, type AbsenceSplitAction } from './absenceSplitCoverage';
-import { ensureAbsenceCells, fillEmptyCellsWithRet } from './absenceFrancoUtils';
+import { ensureAbsenceCells, fillEmptyCellsWithRet, pickRetDesignee, consolidateRetToDesignee } from './absenceFrancoUtils';
 import { fixScheduleIssues, type FixerLogEntry, type FixerResult } from './coverageFixer';
 import { planAbsenceCoverage, type AbsenceCoveragePlan } from './absenceCoveragePlanner';
 import {
@@ -18,6 +19,7 @@ import {
 import { runStrictSixTwoPipeline } from './planningPipeline';
 import type { AutoLabRunResult } from './autoLabRuntime';
 import { getAutoLabDateKey, getAutoLabDayLetter } from './autoLabRuntime';
+import { enrichRosterSurplusWithSchedule, type RosterSurplusReport } from './rosterSurplus';
 
 export type AutoLabSchedulePipeline = 'none' | 'v4' | 'fixedBandFloater';
 
@@ -33,29 +35,54 @@ export interface AutoLabScheduleOutcome {
     externalRetActions?: ExternalRetAction[];
     fixerLog?: FixerLogEntry[];
     fixerSummary?: FixerResult['summary'];
+    /** Dotación en exceso tras generar (incluye excessByPosition e idle). */
+    rosterSurplus?: RosterSurplusReport;
 }
+
+import {
+    buildPositionRequiredHeadcountMap,
+    computePositionRequiredHeadcount,
+} from './objectiveHeadcount';
 
 function buildLabDefaultPositionByEmp(
     positions: V2PositionDef[],
     employees: { id: string }[],
+    positionHeadcount?: Record<string, number>,
+    cycleKey: string = '6+2',
 ): Record<string, string> {
     const map: Record<string, string> = {};
+    const isPaddingLabEmp = (id: string) => id.startsWith('lab-pad-');
+
+    const headcountFor = (pos: V2PositionDef) => {
+        const fromMap = positionHeadcount?.[pos.positionName];
+        if (fromMap != null && fromMap > 0) return fromMap;
+        return computePositionRequiredHeadcount(pos, cycleKey);
+    };
+
     if (positions.length === 1) {
-        const name = positions[0].positionName;
-        for (const emp of employees) map[emp.id] = name;
+        const pos = positions[0];
+        const name = pos.positionName;
+        const headcount = headcountFor(pos);
+        let assigned = 0;
+        for (const emp of employees) {
+            if (isPaddingLabEmp(emp.id)) continue;
+            if (assigned >= headcount) break;
+            map[emp.id] = name;
+            assigned += 1;
+        }
         return map;
     }
+
     let idx = 0;
     for (const pos of positions) {
-        const qty = Math.max(1, Number(pos.qty) || 1);
-        for (let i = 0; i < qty && idx < employees.length; i++) {
-            map[employees[idx].id] = pos.positionName;
-            idx++;
-        }
-    }
-    for (const emp of employees) {
-        if (!map[emp.id] && positions[0]) {
-            map[emp.id] = positions[0].positionName;
+        const headcount = headcountFor(pos);
+        let assignedToPos = 0;
+        while (assignedToPos < headcount && idx < employees.length) {
+            const emp = employees[idx];
+            idx += 1;
+            if (isPaddingLabEmp(emp.id)) continue;
+            map[emp.id] = pos.positionName;
+            assignedToPos += 1;
         }
     }
     return map;
@@ -80,9 +107,13 @@ function postProcessAutoLabSchedule(
     }
 
     const openingSlotByEmp = generation.stats.openingSlotByEmp;
+    const retDesignee = pickRetDesignee(ctx, generation.stats, assignments);
 
     assignments = ensureAbsenceCells(assignments, ctx);
-    assignments = fillEmptyCellsWithRet(assignments, ctx, openingSlotByEmp);
+    assignments = fillEmptyCellsWithRet(assignments, ctx, openingSlotByEmp, {
+        retDesignateId: retDesignee,
+        stats: generation.stats,
+    });
 
     const modo8Plan = computeModo8ExternalRetPlan({
         ctx,
@@ -135,13 +166,29 @@ function postProcessAutoLabSchedule(
 
     const extendedCtx = extendCtxWithExternalRet(verifyCtx, externalRet.externalEmployees);
 
-    const fixer = fixScheduleIssues(
-        extendedCtx,
-        assignments,
-        generation.stats,
-        coverageReport,
-    );
-    assignments = fixer.assignments;
+    let fixerLog: FixerLogEntry[] = [];
+    let fixerSummary: AutoLabScheduleOutcome['fixerSummary'] = {
+        restViolationsFixed: 0,
+        restViolationsRemaining: 0,
+        licenseConflictsFixed: 0,
+        licenseConflictsRemaining: 0,
+        uncoveredFixed: 0,
+        uncoveredRemaining: 0,
+    };
+
+    if (ctx.preserveRotativeIntegrity !== true) {
+        const fixer = fixScheduleIssues(
+            extendedCtx,
+            assignments,
+            generation.stats,
+            coverageReport,
+        );
+        assignments = fixer.assignments;
+        fixerLog = fixer.log;
+        fixerSummary = fixer.summary;
+    }
+
+    assignments = consolidateRetToDesignee(assignments, retDesignee);
 
     coverageReport = verifyScheduleCoverage(
         extendedCtx,
@@ -170,8 +217,8 @@ function postProcessAutoLabSchedule(
         absenceCoveragePlan,
         externalRetEmployees: externalRet.externalEmployees,
         externalRetActions: externalRet.actions,
-        fixerLog: fixer.log,
-        fixerSummary: fixer.summary,
+        fixerLog,
+        fixerSummary,
     };
 }
 
@@ -181,7 +228,14 @@ export function buildAutoLabGenContext(
     brain: AutoPlanningBrainResult,
 ): V2EngineContext {
     const objectiveId = `auto-lab-${caseDef.id}`;
-    const defaultPositionByEmp = buildLabDefaultPositionByEmp(run.positions, run.employees);
+    const cycleKey = brain.cycles[0] ?? brain.pickedCycle ?? '6+2';
+    const positionHeadcount = buildPositionRequiredHeadcountMap(run.positions, cycleKey);
+    const defaultPositionByEmp = buildLabDefaultPositionByEmp(
+        run.positions,
+        run.employees,
+        positionHeadcount,
+        cycleKey,
+    );
     return {
         positions: run.positions,
         employees: run.employees.map((e) => ({
@@ -205,7 +259,10 @@ export function buildAutoLabGenContext(
         apretarCronoDays: brain.modo12DaysEngine,
         strictSixTwo: brain.strictSixTwo,
         noFlexSchemeEmployees: true,
+        allowCustom24hsBackup: false,
+        preserveRotativeIntegrity: run.positions.some(isCustomCoverPosition),
         allowFrancoWorkedRescue: false,
+        headcountByPax: true,
     };
 }
 
@@ -215,16 +272,8 @@ export function generateAutoLabSchedule(
 ): AutoLabScheduleOutcome {
     const { brain } = run;
 
-    if (!brain.feasibility.ok) {
-        const detail = brain.feasibility.reasons[0]
-            || brain.feasibility.warnings[0]
-            || 'El cerebro marcó NO VIABLE — no se genera cronograma.';
-        return {
-            pipeline: 'none',
-            generation: null,
-            error: detail,
-        };
-    }
+    // Igual que Planificación real: déficit de horas/dotación no bloquea la generación.
+    // El motor intenta cerrar; huecos residuales → RET externo en post-proceso.
     if (!brain.contingencyOk) {
         return {
             pipeline: 'none',
@@ -246,12 +295,24 @@ export function generateAutoLabSchedule(
                 demandDriven: false,
             });
             const post = postProcessAutoLabSchedule(ctx, 'fixedBandFloater', piped.generation);
-            return { pipeline: 'fixedBandFloater', ...post };
+            const rosterSurplus = enrichRosterSurplusWithSchedule(run.rosterSurplus, {
+                employees: run.employees,
+                stats: post.generation!.stats,
+                assignments: post.generation!.assignments,
+                ctx,
+            });
+            return { pipeline: 'fixedBandFloater', ...post, rosterSurplus };
         }
 
         const generation = generateScheduleV4(ctx);
         const post = postProcessAutoLabSchedule(ctx, 'v4', generation);
-        return { pipeline: 'v4', ...post };
+        const rosterSurplus = enrichRosterSurplusWithSchedule(run.rosterSurplus, {
+            employees: run.employees,
+            stats: post.generation!.stats,
+            assignments: post.generation!.assignments,
+            ctx,
+        });
+        return { pipeline: 'v4', ...post, rosterSurplus };
     } catch (err) {
         return {
             pipeline: 'none',

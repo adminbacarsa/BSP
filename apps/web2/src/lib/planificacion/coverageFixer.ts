@@ -24,14 +24,14 @@ import type {
     V2EngineContext,
     V2GenerateStats,
 } from './autoScheduleEngineV2';
-import { pickRepresentativeCycle, effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
+import { pickRepresentativeCycle, effectiveShiftsForPositionDay, isCustomCoverPosition } from './autoScheduleEngineV2';
 import { checkRestBetweenShifts, type AgreementRestConfig } from './restBetweenShifts';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
 import { rankReplacementCandidates } from './coverageCandidateRank';
 import { SUVICO_POLICY } from './suvicoPolicy';
 
-const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9, RO: 10 };
-const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00' };
+const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9, RO: 10, MA: 9, ME: 12 };
+const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00', MA: '07:00', ME: '07:00' };
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
 const WEEK_HARD_CAP = 48; // CCT 422/05 — nunca superar 48h en una semana ISO
@@ -259,6 +259,8 @@ function fixRestViolation(
     if (!mine) return 'skipped';
     const positionName = mine.positionName;
     if (!positionName) return 'skipped';
+    const pos = ctx.positions.find((p) => p.positionName === positionName);
+    if (pos && isCustomCoverPosition(pos)) return 'skipped';
 
     // 1. Buscar un compañero del grupo con RET/F ese día que pueda tomar el turno
     const group = siblings(positionName, stats);

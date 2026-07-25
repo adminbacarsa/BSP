@@ -21,6 +21,7 @@ import {
     type V2FeasibilityReport,
     type V2PositionDef,
 } from './autoScheduleEngineV2';
+import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
 import {
     buildPlanningOperationalDiagnosis,
     type PlanningOperationalDiagnosis,
@@ -135,8 +136,7 @@ export function computeDailyStaffingModel(
     const modo8 = computeDailyServiceSlots(positions, '8');
     const modo12 = computeDailyServiceSlots(positions, '12');
     const servicioDiarioModo8 = modo8.slotsPerDay;
-    // Factor solo aplica a puestos 24hs (rotativos); custom/L-V usan su propia dotación fija.
-    const plantillaTotal = Math.ceil(modo8.slots24hs * factor) + modo8.slotsCustom;
+    const plantillaTotal = computeObjectiveRequiredHeadcount(positions, cycleKey);
     const poolFrancos = Math.max(0, plantillaTotal - servicioDiarioModo8);
 
     return {

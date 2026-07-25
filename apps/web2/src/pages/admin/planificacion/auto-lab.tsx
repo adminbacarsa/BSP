@@ -23,6 +23,9 @@ import AutoLabServiceCalendar, { type AutoLabCalendarMode } from '@/components/p
 import AutoLabResolutionGrid from '@/components/planificacion/AutoLabResolutionGrid';
 import AutoLabCoveragePanel from '@/components/planificacion/AutoLabCoveragePanel';
 import PlanningCoverageWisdomPanel from '@/components/planificacion/PlanningCoverageWisdomPanel';
+import AutoLabRealServicePanel from '@/components/planificacion/AutoLabRealServicePanel';
+import AutoLabRosterSurplusPanel from '@/components/planificacion/AutoLabRosterSurplusPanel';
+import { AUTO_LAB_REAL_CASE_ID, type AutoLabRealServiceBundle } from '@/lib/planificacion/autoLabRealService';
 import { generateAutoLabSchedule, verifyAutoLabCoverage } from '@/lib/planificacion/autoLabSchedule';
 import {
     buildAutoLabExportJson,
@@ -44,6 +47,7 @@ import {
     Plus,
     RotateCw,
     SlidersHorizontal,
+    Target,
     Trash2,
     Users,
     XCircle,
@@ -556,15 +560,19 @@ export default function AutoLabPage() {
     const [excludedScope, setExcludedScope] = useState<'ALL' | string>('ALL');
     const [year, setYear] = useState(now.getFullYear());
     const [month, setMonth] = useState(now.getMonth() + 1);
+    const [realBundle, setRealBundle] = useState<AutoLabRealServiceBundle | null>(null);
+    const [realLoading, setRealLoading] = useState(false);
 
     const canPlan = canReadModule('PLANNING');
     const canAccess = canAccessAutoLab(isSuperAdmin, rolePermissions);
     const isCustomMode = selectedId === AUTO_LAB_CUSTOM_CASE_ID;
+    const isRealMode = selectedId === AUTO_LAB_REAL_CASE_ID;
 
     const activeCase = useMemo((): AutoLabCaseDefinition | null => {
+        if (isRealMode) return realBundle?.caseDef ?? null;
         if (isCustomMode) return buildCaseFromCustomDraft(customDraft);
         return AUTO_LAB_CASES.find((c) => c.id === selectedId) ?? AUTO_LAB_CASES[0] ?? null;
-    }, [isCustomMode, customDraft, selectedId]);
+    }, [isRealMode, realBundle, isCustomMode, customDraft, selectedId]);
 
     const estimatedCustomSla = useMemo(() => {
         if (!isCustomMode) return 0;
@@ -586,11 +594,16 @@ export default function AutoLabPage() {
     const runResult: AutoLabRunResult | null = useMemo(() => {
         if (!activeCase) return null;
         try {
-            return runAutoLabCase(activeCase, year, month);
+            return runAutoLabCase(activeCase, year, month, isRealMode && realBundle
+                ? {
+                    employees: realBundle.employees,
+                    objectiveIdForBrain: realBundle.objectiveId,
+                }
+                : undefined);
         } catch {
             return null;
         }
-    }, [activeCase, year, month]);
+    }, [activeCase, year, month, isRealMode, realBundle]);
 
     const scheduleOutcome = useMemo(() => {
         if (!runResult || !activeCase) return null;
@@ -671,7 +684,8 @@ export default function AutoLabPage() {
                                 </p>
                                 <h1 className="text-2xl font-black tracking-tight">Auto Lab</h1>
                                 <p className="text-sm text-indigo-100 mt-1 max-w-2xl">
-                                    Catálogo de casos o <strong>armá tu propio servicio</strong>. Corre el cerebro real sin Firestore.
+                                    Casos sintéticos, <strong>servicios reales</strong> de la plataforma, o armá tu propio servicio.
+                                    El motor resuelve en memoria — no escribe en Firestore.
                                 </p>
                             </div>
                         </div>
@@ -740,7 +754,7 @@ export default function AutoLabPage() {
                             </div>
                             <div className="p-2 space-y-1">
                                 {AUTO_LAB_CASES.map((c) => {
-                                    const active = !isCustomMode && c.id === activeCase?.id;
+                                    const active = !isCustomMode && !isRealMode && c.id === activeCase?.id;
                                     return (
                                         <button
                                             key={c.id}
@@ -764,6 +778,27 @@ export default function AutoLabPage() {
                                 })}
                                 <button
                                     type="button"
+                                    onClick={() => {
+                                        setSelectedId(AUTO_LAB_REAL_CASE_ID);
+                                        setRealBundle(null);
+                                    }}
+                                    className={`w-full text-left rounded-xl px-3 py-3 transition-colors border ${
+                                        isRealMode
+                                            ? 'bg-emerald-50 border-emerald-400 shadow-sm'
+                                            : 'hover:bg-emerald-50/50 border-dashed border-emerald-300'
+                                    }`}
+                                >
+                                    <p className="text-[10px] font-black text-emerald-800 uppercase flex items-center gap-1">
+                                        <Target size={12} />
+                                        Servicio real
+                                    </p>
+                                    <p className="text-sm font-bold text-slate-800 leading-tight mt-0.5">
+                                        Objetivo de la plataforma
+                                    </p>
+                                    <p className="text-[11px] text-slate-500 mt-1">SLA + dotación + motor completo</p>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => setSelectedId(AUTO_LAB_CUSTOM_CASE_ID)}
                                     className={`w-full text-left rounded-xl px-3 py-3 transition-colors border ${
                                         isCustomMode
@@ -785,7 +820,38 @@ export default function AutoLabPage() {
                     </div>
 
                     <div className="lg:col-span-5 space-y-4">
-                        {activeCase && (
+                        {isRealMode ? (
+                            <div className="rounded-2xl bg-white border border-emerald-200 shadow-sm p-5">
+                                <AutoLabRealServicePanel
+                                    year={year}
+                                    month={month}
+                                    bundle={realBundle}
+                                    loading={realLoading}
+                                    onBundleChange={setRealBundle}
+                                    onLoadingChange={setRealLoading}
+                                />
+                                {activeCase && (
+                                    <div className="mt-4 grid grid-cols-2 gap-2 text-xs border-t border-slate-100 pt-4">
+                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                            <p className="font-black uppercase text-slate-500 text-[10px]">Ciclo</p>
+                                            <p className="font-bold text-slate-800 mt-1">{activeCase.cycle}</p>
+                                        </div>
+                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                            <p className="font-black uppercase text-slate-500 text-[10px]">Rotación</p>
+                                            <p className="font-bold text-slate-800 mt-1">{rotationLabel(activeCase.rotationMode)}</p>
+                                        </div>
+                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                            <p className="font-black uppercase text-slate-500 text-[10px]">Dotación</p>
+                                            <p className="font-bold text-slate-800 mt-1">{activeCase.employeeCount} guardias reales</p>
+                                        </div>
+                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                            <p className="font-black uppercase text-slate-500 text-[10px]">SLA (hs)</p>
+                                            <p className="font-bold text-slate-800 mt-1">{runResult?.slaVendidas ?? '—'}</p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : activeCase ? (
                             <>
                                 <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
                                     {isCustomMode ? (
@@ -857,14 +923,14 @@ export default function AutoLabPage() {
                                         </div>
                                     </div>
                                 )}
-
-                                {isCustomMode && activeCase.positions.length > 0 && (
-                                    <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
-                                        <p className="text-xs font-black uppercase text-slate-600 mb-3">Vista previa SLA</p>
-                                        <PositionDiagram positions={activeCase.positions} />
-                                    </div>
-                                )}
                             </>
+                        ) : null}
+
+                        {isCustomMode && activeCase && activeCase.positions.length > 0 && (
+                            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
+                                <p className="text-xs font-black uppercase text-slate-600 mb-3">Vista previa SLA</p>
+                                <PositionDiagram positions={activeCase.positions} />
+                            </div>
                         )}
                     </div>
 
@@ -921,8 +987,16 @@ export default function AutoLabPage() {
                                             {runResult?.slaVendidas} h
                                         </p>
                                         <p>
-                                            <span className="font-bold text-slate-700">Sugerido con ciclo:</span>{' '}
-                                            {feasibility.metrics.peopleSuggestedWithCycle} guardias
+                                            <span className="font-bold text-slate-700">Plantilla por puestos:</span>{' '}
+                                            {feasibility.metrics.peopleNeededForTarget} guardias
+                                            {feasibility.metrics.peopleNeededByHoursEstimate != null
+                                                && feasibility.metrics.peopleNeededByHoursEstimate
+                                                    > feasibility.metrics.peopleNeededForTarget && (
+                                                <span className="text-slate-500">
+                                                    {' '}
+                                                    (SLA horas sugiere ~{feasibility.metrics.peopleNeededByHoursEstimate}, no aplica)
+                                                </span>
+                                            )}
                                         </p>
                                     </div>
 
@@ -931,6 +1005,37 @@ export default function AutoLabPage() {
                                             <strong>Modo 12 auto:</strong> {brain.modo12DaysAuto.join(', ')}
                                         </div>
                                     )}
+
+                                    {runResult && runResult.paddedEmployees.length > 0 && (
+                                        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-950">
+                                            <p className="font-black uppercase text-indigo-800 mb-2 flex items-center gap-1">
+                                                <Users size={12} />
+                                                Dotación completada automáticamente
+                                            </p>
+                                            <p className="mb-2">
+                                                {runResult.sourceEmployees.length} guardia(s) reales →{' '}
+                                                {runResult.employees.length} para planificar (+{runResult.paddedEmployees.length} sintético(s)).
+                                            </p>
+                                            <ul className="space-y-0.5 font-mono text-[11px]">
+                                                {runResult.paddedEmployees.map((e) => (
+                                                    <li key={e.id}>{e.nombre}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {runResult?.rosterSurplus?.hasSurplus && !scheduleOutcome && (
+                                        <AutoLabRosterSurplusPanel surplus={runResult.rosterSurplus} />
+                                    )}
+
+                                    {runResult?.rosterWarnings.map((w) => (
+                                        <div
+                                            key={w}
+                                            className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-950"
+                                        >
+                                            {w}
+                                        </div>
+                                    ))}
 
                                     {feasibility.reasons.length > 0 && (
                                         <div className="rounded-xl border border-red-200 bg-red-50 p-3">
@@ -979,6 +1084,12 @@ export default function AutoLabPage() {
 
                 {runResult && scheduleOutcome && (
                     <div className="space-y-4">
+                        {scheduleOutcome.rosterSurplus?.hasSurplus && (
+                            <AutoLabRosterSurplusPanel
+                                surplus={scheduleOutcome.rosterSurplus}
+                                afterSchedule
+                            />
+                        )}
                         <AutoLabResolutionGrid
                             runResult={runResult}
                             scheduleOutcome={scheduleOutcome}
@@ -996,7 +1107,11 @@ export default function AutoLabPage() {
                             fixerLog={scheduleOutcome.fixerLog}
                             fixerSummary={scheduleOutcome.fixerSummary}
                         />
-                        <PlanningCoverageWisdomPanel />
+                        <PlanningCoverageWisdomPanel
+                            defaultObjectiveId={realBundle?.objectiveId}
+                            labYear={year}
+                            labMonth={month}
+                        />
                     </div>
                 )}
             </div>

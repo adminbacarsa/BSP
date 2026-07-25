@@ -1,9 +1,15 @@
 import {
     computeDailyServiceSlots,
+    computeDailyStaffingModel,
     resolveAutoPlanningBrain,
     type AutoPlanningBrainResult,
 } from './autoPlanningBrain';
-import type { V2AbsenceMap, V2EmployeeDef } from './autoScheduleEngineV2';
+import {
+    checkFeasibility,
+    type V2AbsenceMap,
+    type V2EmployeeDef,
+    type V2PositionDef,
+} from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import type { AutoLabScheduleOutcome } from './autoLabSchedule';
 import { buildEmployeePositionMap } from './autoLabSchedule';
@@ -11,6 +17,15 @@ import {
     calculateSlaHoursForVigencia,
     getServiceDaysInMonth,
 } from './autoLabServicePeriod';
+import {
+    buildPositionRequiredHeadcountMap,
+    computeObjectiveRequiredHeadcount,
+    estimatePeopleFromContractHours,
+    computePositionRequiredHeadcount,
+    isLabPaddingEmpId,
+    isLabSyntheticEmpId,
+} from './objectiveHeadcount';
+import { buildRosterSurplusReport, type RosterSurplusReport } from './rosterSurplus';
 
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
@@ -40,6 +55,145 @@ export function buildSyntheticEmployees(count: number): V2EmployeeDef[] {
         id: `lab-emp-${String(i + 1).padStart(2, '0')}`,
         nombre: `Guardia ${String(i + 1).padStart(2, '0')}`,
     }));
+}
+
+function buildPaddingEmployees(
+    startLabel: number,
+    count: number,
+    occupiedIds: Set<string>,
+): V2EmployeeDef[] {
+    const out: V2EmployeeDef[] = [];
+    let n = startLabel;
+    while (out.length < count) {
+        const id = `lab-pad-${String(n).padStart(2, '0')}`;
+        n += 1;
+        if (occupiedIds.has(id)) continue;
+        occupiedIds.add(id);
+        out.push({
+            id,
+            nombre: `Guardia ${n - 1} (completar dotación)`,
+        });
+    }
+    return out;
+}
+
+/**
+ * Completa la dotación con guardias sintéticos cuando la viabilidad marca déficit de
+ * personas u horas. Auto-planificación: resolver, no solo alertar.
+ */
+export function padPlanningRosterForAutoSchedule(params: {
+    positions: V2PositionDef[];
+    employees: V2EmployeeDef[];
+    daysInMonth: Date[];
+    slaVendidas: number;
+    absences: V2AbsenceMap;
+    empMonthlyInitial: Record<string, number>;
+    cycleKey?: string;
+    getDateKey: (d: Date) => string;
+    getDayLetter: (dateStr: string) => string;
+    maxPad?: number;
+}): { employees: V2EmployeeDef[]; added: V2EmployeeDef[]; warnings: string[] } {
+    const maxPad = params.maxPad ?? 24;
+    const cycleKey = params.cycleKey ?? '6+2';
+    const warnings: string[] = [];
+    let roster = [...params.employees];
+    const occupiedIds = new Set(roster.map((e) => e.id));
+    const added: V2EmployeeDef[] = [];
+
+    const staffing = computeDailyStaffingModel(params.positions, cycleKey, params.slaVendidas);
+    const minByPlantilla = staffing.plantillaTotal;
+
+    const empMonthlyInitialBase = { ...params.empMonthlyInitial };
+    const preFeas = checkFeasibility({
+        positions: params.positions,
+        employees: roster,
+        daysInMonth: params.daysInMonth,
+        empMonthlyInitial: empMonthlyInitialBase,
+        absences: params.absences,
+        slaVendidas: params.slaVendidas,
+        autoCycles: [cycleKey],
+        objectiveId: 'roster-pad-check',
+        getDateKey: params.getDateKey,
+        getDayLetter: params.getDayLetter,
+        budgetMode: 'cct',
+        headcountByPax: true,
+    });
+    const m0 = preFeas.metrics;
+    const structuralRow = m0.cycleComparison?.find((c) => c.cycleKey === cycleKey);
+    const structuralPeak = structuralRow?.structuralPeakPeople ?? 0;
+    const perPositionHeads = computeObjectiveRequiredHeadcount(params.positions, cycleKey);
+    const realCount = params.employees.filter((e) => !isLabPaddingEmpId(e.id)).length;
+    /** Plantilla del objetivo (4+4+2=10). Solo legajos reales; sin inflar por horas SLA. */
+    const structuralTarget = perPositionHeads;
+    let need = Math.max(0, structuralTarget - realCount);
+
+    if (need > 0) {
+        const batch = buildPaddingEmployees(
+            roster.length + 1,
+            Math.min(need, maxPad),
+            occupiedIds,
+        );
+        if (batch.length > 0) {
+            added.push(...batch);
+            roster = [...roster, ...batch];
+        }
+    }
+
+    // Segunda pasada solo si aún falta gente estructural (no por déficit de horas CCT).
+    if (added.length > 0 && added.length < maxPad) {
+        const empMonthlyInitial: Record<string, number> = {};
+        for (const emp of roster) {
+            empMonthlyInitial[emp.id] = params.empMonthlyInitial[emp.id] ?? 0;
+        }
+        const feas = checkFeasibility({
+            positions: params.positions,
+            employees: roster,
+            daysInMonth: params.daysInMonth,
+            empMonthlyInitial,
+            absences: params.absences,
+            slaVendidas: params.slaVendidas,
+            autoCycles: [cycleKey],
+            objectiveId: 'roster-pad-check',
+            getDateKey: params.getDateKey,
+            getDayLetter: params.getDayLetter,
+            budgetMode: 'cct',
+            headcountByPax: true,
+        });
+        const structuralAfter = computeObjectiveRequiredHeadcount(params.positions, cycleKey);
+        const peopleGap = Math.max(0, structuralAfter - realCount - added.length);
+        if (peopleGap > 0) {
+            const batch = buildPaddingEmployees(
+                roster.length + 1,
+                Math.min(peopleGap, maxPad - added.length),
+                occupiedIds,
+            );
+            added.push(...batch);
+            roster = [...roster, ...batch];
+        }
+    }
+
+    const hrsPerPerson = structuralRow?.hrsPerPerson ?? 180;
+    const hoursHeadcountHint = m0.peopleNeededByHoursEstimate ?? estimatePeopleFromContractHours(params.slaVendidas);
+    if (
+        roster.length >= structuralTarget
+        && hoursHeadcountHint > structuralTarget
+    ) {
+        warnings.push(
+            `Dotación estructural completa (${roster.length}/${structuralTarget} guardias: plantilla ${cycleKey}). `
+            + `Las horas vendidas del SLA (~${hoursHeadcountHint} personas si se reparten a ~192h) no inflan la dotación: `
+            + `se planifica por pax de puestos.`,
+        );
+    }
+
+    if (added.length > 0) {
+        warnings.push(
+            `Auto-planificación: se agregaron ${added.length} guardia(s) sintética(s) `
+            + `(${params.employees.length} en dotación → ${roster.length}; objetivo estructural ${structuralTarget} con ${hrsPerPerson}h/guardia CCT ${cycleKey}). `
+            + `Son placeholders; no entran como titulares del puesto 24hs (máx. 4 en rotación 6+2).`,
+        );
+    }
+
+    return { employees: roster, added, warnings };
 }
 
 function positionActiveOnDay(pos: AutoLabCaseDefinition['positions'][number], dayLetter: string): boolean {
@@ -102,6 +256,13 @@ export interface AutoLabRunResult {
     month: number;
     brain: AutoPlanningBrainResult;
     employees: V2EmployeeDef[];
+    /** Guardias reales o sintéticos del caso, antes de completar dotación. */
+    sourceEmployees: V2EmployeeDef[];
+    /** Guardias agregados automáticamente para cerrar viabilidad. */
+    paddedEmployees: V2EmployeeDef[];
+    rosterWarnings: string[];
+    /** Análisis de dotación en exceso (reales, plantilla, puesto). */
+    rosterSurplus: RosterSurplusReport;
     positions: AutoLabCaseDefinition['positions'];
     absences: V2AbsenceMap;
     slaVendidas: number;
@@ -115,6 +276,10 @@ export function runAutoLabCase(
     caseDef: AutoLabCaseDefinition,
     year: number,
     month: number,
+    options?: {
+        employees?: V2EmployeeDef[];
+        objectiveIdForBrain?: string;
+    },
 ): AutoLabRunResult {
     const fullMonthDays = buildDaysInMonth(year, month);
     const hasVigencia = !!(caseDef.serviceStartDate && caseDef.serviceEndDate);
@@ -128,8 +293,10 @@ export function runAutoLabCase(
         )
         : fullMonthDays;
 
-    const employees = buildSyntheticEmployees(caseDef.employeeCount);
-    const absences = buildAbsencesForCase(caseDef, fullMonthDays, employees);
+    const sourceEmployees = options?.employees?.length
+        ? options.employees
+        : buildSyntheticEmployees(caseDef.employeeCount);
+    const absences = buildAbsencesForCase(caseDef, fullMonthDays, sourceEmployees);
 
     let slaVendidas: number;
     if (caseDef.slaVendidas != null) {
@@ -164,20 +331,50 @@ export function runAutoLabCase(
 
     const slots = computeDailyServiceSlots(caseDef.positions, '8');
 
+    const cycleKey = caseDef.cycleOverride ?? caseDef.cycle ?? '6+2';
+    const empMonthlyInitial = Object.fromEntries(sourceEmployees.map((e) => [e.id, 0]));
+    const padResult = padPlanningRosterForAutoSchedule({
+        positions: caseDef.positions,
+        employees: sourceEmployees,
+        daysInMonth,
+        slaVendidas,
+        absences,
+        empMonthlyInitial,
+        cycleKey,
+        getDateKey: getAutoLabDateKey,
+        getDayLetter: getAutoLabDayLetter,
+    });
+    const employees = padResult.employees;
+    const fullEmpMonthlyInitial = {
+        ...empMonthlyInitial,
+        ...Object.fromEntries(padResult.added.map((e) => [e.id, 0])),
+    };
+
     const brain = resolveAutoPlanningBrain({
         positions: caseDef.positions,
         employees,
         daysInMonth,
-        empMonthlyInitial: Object.fromEntries(employees.map((e) => [e.id, 0])),
+        empMonthlyInitial: fullEmpMonthlyInitial,
         absences,
         slaVendidas,
         budgetMode: 'cct',
-        objectiveId: `auto-lab-${caseDef.id}`,
+        objectiveId: options?.objectiveIdForBrain ?? `auto-lab-${caseDef.id}`,
         getDayLetter: getAutoLabDayLetter,
         getDateKey: getAutoLabDateKey,
         contingencyDaysManual,
         rotateShiftsOverride,
         cycleOverride: caseDef.cycleOverride,
+        headcountByPax: true,
+    });
+
+    const rosterSurplus = buildRosterSurplusReport({
+        positions: caseDef.positions,
+        sourceEmployees,
+        paddedEmployees: padResult.added,
+        employees,
+        feasibility: brain.feasibility,
+        cycleKey,
+        slaVendidas,
     });
 
     return {
@@ -186,6 +383,10 @@ export function runAutoLabCase(
         month,
         brain,
         employees,
+        sourceEmployees,
+        paddedEmployees: padResult.added,
+        rosterWarnings: padResult.warnings,
+        rosterSurplus,
         positions: caseDef.positions,
         absences,
         slaVendidas,
@@ -233,6 +434,10 @@ export function buildAutoLabExportJson(
         synthetic: {
             positions: result.positions,
             employees: result.employees.map((e) => ({ id: e.id, nombre: e.nombre })),
+            sourceEmployees: result.sourceEmployees.map((e) => ({ id: e.id, nombre: e.nombre })),
+            paddedEmployees: result.paddedEmployees.map((e) => ({ id: e.id, nombre: e.nombre })),
+            rosterWarnings: result.rosterWarnings,
+            rosterSurplus: result.rosterSurplus,
             slaVendidas: result.slaVendidas,
             cycle: caseDef.cycle,
             rotationMode: caseDef.rotationMode,

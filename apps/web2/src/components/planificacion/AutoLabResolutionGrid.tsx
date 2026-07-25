@@ -9,6 +9,7 @@ import {
     shortPositionLabel,
     type AutoLabScheduleOutcome,
 } from '@/lib/planificacion/autoLabSchedule';
+import { buildPositionRequiredHeadcountMap } from '@/lib/planificacion/objectiveHeadcount';
 import { getAutoLabDateKey } from '@/lib/planificacion/autoLabRuntime';
 import { isExternalRetEmpId, shortExternalRetLabel } from '@/lib/planificacion/externalRetCoverage';
 import { isHolidayDate } from '@/lib/planificacion/autoLabServicePeriod';
@@ -93,6 +94,11 @@ export default function AutoLabResolutionGrid({
         });
     }, [allEmployees, runResult.positions, empPositionMap]);
 
+    const cycleNeededByPos = useMemo(() => {
+        const cycleKey = runResult.brain?.pickedCycle ?? '6+2';
+        return buildPositionRequiredHeadcountMap(runResult.positions, cycleKey);
+    }, [runResult.brain, runResult.positions]);
+
     const positionSummary = useMemo(() => {
         return runResult.positions.map((pos) => {
             const ids = (stats?.positionGroups?.[pos.positionName]
@@ -100,17 +106,20 @@ export default function AutoLabResolutionGrid({
             const bands = [...new Set(
                 ids.map((id) => primaryShiftByEmp[id]).filter(Boolean) as string[],
             )];
+            const cycleNeeded = cycleNeededByPos[pos.positionName];
             return {
                 ...pos,
                 guardIds: ids,
                 bandHint: bands.length > 0 ? bands.join('/') : '—',
+                cycleNeeded,
+                overStaffed: cycleNeeded != null && ids.length > cycleNeeded,
             };
         });
-    }, [runResult.positions, stats?.positionGroups, sortedEmployees, empPositionMap, primaryShiftByEmp]);
+    }, [runResult.positions, stats?.positionGroups, sortedEmployees, empPositionMap, primaryShiftByEmp, cycleNeededByPos]);
 
     const groupedRows = useMemo(() => {
         const rows: Array<
-            | { type: 'header'; positionName: string; qty: number; guardCount: number; bandHint: string; external?: boolean }
+            | { type: 'header'; positionName: string; qty: number; guardCount: number; bandHint: string; cycleNeeded?: number; overStaffed?: boolean; external?: boolean }
             | { type: 'emp'; emp: V2EmployeeDef }
         > = [];
         let lastPos = '';
@@ -138,6 +147,8 @@ export default function AutoLabResolutionGrid({
                         qty: summary?.qty ?? 0,
                         guardCount: summary?.guardIds.length ?? 0,
                         bandHint: summary?.bandHint ?? '—',
+                        cycleNeeded: summary?.cycleNeeded,
+                        overStaffed: summary?.overStaffed,
                     });
                     lastPos = posName;
                 }
@@ -243,8 +254,15 @@ export default function AutoLabResolutionGrid({
                         <p className="font-black">{pos.positionName}</p>
                         <p className="mt-0.5 font-semibold opacity-90">
                             <Users size={10} className="inline mr-1 -mt-px" />
-                            {pos.guardIds.length} guardias · pax {pos.qty}
+                            {pos.guardIds.length} guardias
+                            {pos.cycleNeeded != null && (
+                                <> · nec. ciclo <strong>{pos.cycleNeeded}</strong></>
+                            )}
+                            {' · '}pax {pos.qty}
                             {pos.bandHint !== '—' && <> · banda {pos.bandHint}</>}
+                            {pos.overStaffed && (
+                                <span className="ml-1 text-amber-800 font-black">· SOBREDOTADO</span>
+                            )}
                         </p>
                     </div>
                 ))}
@@ -297,15 +315,21 @@ export default function AutoLabResolutionGrid({
                                             }`}
                                         >
                                             <span className={`inline-flex items-center gap-2 rounded-lg border px-2 py-0.5 ${
-                                                row.external
+                                                row.overStaffed
+                                                    ? 'bg-amber-100 text-amber-950 border-amber-400'
+                                                    : row.external
                                                     ? 'bg-violet-100 text-violet-900 border-violet-300'
                                                     : positionBadgeClass(row.positionName, runResult.positions)
                                             }`}>
                                                 {row.positionName}
                                                 <span className="font-semibold opacity-80">
                                                     · {row.guardCount} guardia{row.guardCount !== 1 ? 's' : ''}
+                                                    {row.cycleNeeded != null && (
+                                                        <> · nec. {row.cycleNeeded}</>
+                                                    )}
                                                     {row.qty > 0 && <> · pax {row.qty}</>}
                                                     {row.bandHint !== '—' && ` · ${row.bandHint}`}
+                                                    {row.overStaffed && ' · SOBREDOTADO'}
                                                 </span>
                                             </span>
                                         </td>

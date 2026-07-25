@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
     BookOpen,
     Building2,
+    CalendarDays,
     Copy,
+    ExternalLink,
     Loader2,
     RefreshCw,
     Search,
@@ -17,7 +20,9 @@ import {
     COVERAGE_STRATEGY_LABELS,
     extractPlanningCoverageWisdom,
     rankCoverersFromWisdom,
+    type PlanningAbsenceRecord,
     type PlanningCoverageWisdom,
+    type PlanningShiftCell,
 } from '@/lib/planificacion/planningCoverageWisdom';
 import {
     countCachedWisdomEntries,
@@ -51,6 +56,40 @@ const COVERAGE_LABELS: Record<string, string> = {
     custom: 'Personalizado',
 };
 
+const ABSENCE_GRID_CODES = new Set(['V', 'L', 'E', 'A', 'PG', 'AA']);
+
+type ScheduleSnapshot = {
+    cells: number;
+    employees: number;
+    days: number;
+    draftCount: number;
+    absenceInTurnos: number;
+    absencesRrhh: number;
+    byCode: Record<string, number>;
+};
+
+function buildScheduleSnapshot(
+    cells: PlanningShiftCell[],
+    absences: PlanningAbsenceRecord[],
+): ScheduleSnapshot {
+    const byCode: Record<string, number> = {};
+    let absenceInTurnos = 0;
+    for (const c of cells) {
+        const code = String(c.code || '').toUpperCase().trim() || '?';
+        byCode[code] = (byCode[code] || 0) + 1;
+        if (ABSENCE_GRID_CODES.has(code)) absenceInTurnos++;
+    }
+    return {
+        cells: cells.length,
+        employees: new Set(cells.map((c) => c.employeeId)).size,
+        days: new Set(cells.map((c) => c.dateStr)).size,
+        draftCount: cells.filter((c) => c.draft).length,
+        absenceInTurnos,
+        absencesRrhh: absences.length,
+        byCode,
+    };
+}
+
 export interface PlanningCoverageWisdomPanelProps {
     defaultObjectiveId?: string;
     labYear?: number;
@@ -82,6 +121,7 @@ export default function PlanningCoverageWisdomPanel({
     const [month, setMonth] = useState(prev.month);
     const [loading, setLoading] = useState(false);
     const [wisdom, setWisdom] = useState<PlanningCoverageWisdom | null>(null);
+    const [scheduleSnapshot, setScheduleSnapshot] = useState<ScheduleSnapshot | null>(null);
     const [cachedCount, setCachedCount] = useState(0);
 
     const selectedObjective = useMemo(() => {
@@ -110,6 +150,7 @@ export default function PlanningCoverageWisdomPanel({
     useEffect(() => {
         if (!selectedObjective) {
             setWisdom(null);
+            setScheduleSnapshot(null);
             return;
         }
         setWisdom(loadWisdomForObjective(selectedObjective.objectiveId));
@@ -170,6 +211,8 @@ export default function PlanningCoverageWisdomPanel({
                 month,
                 absences,
             });
+            const snapshot = buildScheduleSnapshot(cells, absences);
+            setScheduleSnapshot(snapshot);
             setWisdom(extracted);
             saveWisdomEntry(extracted);
             setCachedCount(countCachedWisdomEntries());
@@ -212,8 +255,9 @@ export default function PlanningCoverageWisdomPanel({
                         Sabiduría de coberturas
                     </h3>
                     <p className="text-xs text-indigo-800/80 mt-1 max-w-2xl">
-                        Catálogo permanente de objetivos de la plataforma con sus servicios SLA reales.
-                        Consultá la dotación vigente y extraé memoria de coberturas desde el cronograma (borrador o publicado).
+                        Lee el cronograma <strong>real</strong> de Firestore (no la grilla simulada de arriba).
+                        Busca <em>quién cubrió a quién</em> cuando hubo ausencias V/L/E — no muestra el crono completo.
+                        Para ver y editar la grilla: <strong>Planificación</strong>.
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2 text-[10px] font-bold">
@@ -338,8 +382,18 @@ export default function PlanningCoverageWisdomPanel({
                                     </label>
                                 </div>
                                 <p className="text-[11px] font-semibold text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                                    Lee turnos en <strong>borrador</strong> y publicados — no hace falta publicar el cronograma para extraer sabiduría.
+                                    Lee turnos en <strong>borrador</strong> y publicados. Extraer analiza ausencias y coberturas;
+                                    no abre la grilla del mes (eso está en Planificación).
                                 </p>
+                                {selectedObjective && (
+                                    <Link
+                                        href="/admin/planificacion"
+                                        className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 hover:text-indigo-900"
+                                    >
+                                        <ExternalLink size={12} />
+                                        Abrir Planificación para ver/editar el cronograma de {selectedObjective.objectiveName}
+                                    </Link>
+                                )}
                             </div>
 
                             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-sm space-y-3">
@@ -454,6 +508,62 @@ export default function PlanningCoverageWisdomPanel({
                     )}
                 </div>
             </div>
+
+            {scheduleSnapshot && selectedObjective && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+                    <p className="text-[10px] font-black uppercase text-slate-500 flex items-center gap-1">
+                        <CalendarDays size={12} />
+                        Cronograma leído de Firestore — {periodLabel}
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                        <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
+                            <p className="text-[10px] text-slate-500 font-bold">Celdas</p>
+                            <p className="font-black text-slate-800">{scheduleSnapshot.cells}</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
+                            <p className="text-[10px] text-slate-500 font-bold">Guardias</p>
+                            <p className="font-black text-slate-800">{scheduleSnapshot.employees}</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
+                            <p className="text-[10px] text-slate-500 font-bold">Días con turno</p>
+                            <p className="font-black text-slate-800">{scheduleSnapshot.days}</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
+                            <p className="text-[10px] text-slate-500 font-bold">Borrador</p>
+                            <p className="font-black text-slate-800">{scheduleSnapshot.draftCount}</p>
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(scheduleSnapshot.byCode)
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 12)
+                            .map(([code, n]) => (
+                                <span
+                                    key={code}
+                                    className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-900"
+                                >
+                                    {code}: {n}
+                                </span>
+                            ))}
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                        Ausencias en turnos (V/L/E…): <strong>{scheduleSnapshot.absenceInTurnos}</strong>
+                        {' · '}
+                        Ausencias RRHH en el mes: <strong>{scheduleSnapshot.absencesRrhh}</strong>.
+                        {scheduleSnapshot.absenceInTurnos === 0 && scheduleSnapshot.absencesRrhh === 0 ? (
+                            <>
+                                {' '}
+                                Sin ausencias registradas → <strong>0 coberturas es normal</strong> (no hubo nada que cubrir).
+                            </>
+                        ) : (
+                            <>
+                                {' '}
+                                Si hay ausencias pero 0 coberturas, falta el vínculo <code className="text-[10px]">coveredBy</code> o comentario &quot;Cubriendo a…&quot; en los turnos.
+                            </>
+                        )}
+                    </p>
+                </div>
+            )}
 
             {wisdom && selectedObjective && (
                 <div className="space-y-4 border-t border-indigo-100 pt-4">
