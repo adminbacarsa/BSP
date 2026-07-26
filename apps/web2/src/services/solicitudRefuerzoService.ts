@@ -1,7 +1,7 @@
-import { db } from '@/lib/firebase';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import {
   collection, addDoc, getDocs, doc, updateDoc,
-  query, where, orderBy, Timestamp, onSnapshot,
+  query, where, orderBy, Timestamp,
 } from 'firebase/firestore';
 
 export type SolicitudTipo   = 'REFUERZO_PUESTO' | 'AGREGADO_TURNO';
@@ -132,7 +132,7 @@ export const solicitudRefuerzoService = {
       where('empresaId', '==', empresaId),
       orderBy('solicitadoAt', 'desc'),
     );
-    return onSnapshot(
+    return onSnapshotFresh(
       q,
       snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))),
       err => { console.error('[solicitudRefuerzo] subscribeByEmpresa error:', err); onError?.(err); },
@@ -150,7 +150,7 @@ export const solicitudRefuerzoService = {
       where('objectiveId', 'in', objectiveIds.slice(0, 10)),
       orderBy('solicitadoAt', 'desc'),
     );
-    return onSnapshot(
+    return onSnapshotFresh(
       q,
       snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))),
       err => { console.error('[solicitudRefuerzo] subscribeByObjectiveIds error:', err); onError?.(err); },
@@ -167,7 +167,7 @@ export const solicitudRefuerzoService = {
       where('clientId', '==', clientId),
       orderBy('solicitadoAt', 'desc'),
     );
-    return onSnapshot(
+    return onSnapshotFresh(
       q,
       snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudRefuerzo))),
       err => { console.error('[solicitudRefuerzo] subscribeByClient error:', err); onError?.(err); },

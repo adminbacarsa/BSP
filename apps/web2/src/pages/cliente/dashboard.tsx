@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { db, auth } from '@/lib/firebase';
+import { db, auth, onSnapshotFresh } from '@/lib/firebase';
 import {
-  collection, query, where, orderBy, onSnapshot,
+  collection, query, where, orderBy,
   addDoc, deleteDoc, updateDoc, serverTimestamp, getDocs, getDoc, doc,
   Timestamp,
 } from 'firebase/firestore';
@@ -433,7 +433,7 @@ function AgendaTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clienteU
       where('fecha', '<', hasta),
       orderBy('fecha')
     );
-    return onSnapshot(q, snap => {
+    return onSnapshotFresh(q, snap => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as VisitaProgramada));
       docs.sort((a, b) => a.horaIngreso.localeCompare(b.horaIngreso));
       setVisitas(docs);
@@ -761,7 +761,7 @@ function GestionObjetivoScreen({
       where('objectiveId', '==', objetivo.id),
       where('type', 'in', ['ingreso', 'egreso'])
     );
-    return onSnapshot(q, snap => {
+    return onSnapshotFresh(q, snap => {
       setAccesosHoy(snap.docs.filter(d => {
         const t = d.data().createdAt;
         if (!t) return false;
@@ -790,7 +790,7 @@ function GestionObjetivoScreen({
       where('objectiveId', '==', objetivo.id),
       where('activo', '==', true)
     );
-    return onSnapshot(q, snap => {
+    return onSnapshotFresh(q, snap => {
       setPersonal(snap.docs.map(d => ({ id: d.id, ...d.data() } as PersonalAutorizado)));
     });
   }, [objetivo.id]);
@@ -805,7 +805,7 @@ function GestionObjetivoScreen({
       where('type', 'in', ['ingreso', 'egreso']),
       orderBy('createdAt', 'desc')
     );
-    return onSnapshot(q, snap => {
+    return onSnapshotFresh(q, snap => {
       const entries = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as AccesoEntry))
         .filter(e => {

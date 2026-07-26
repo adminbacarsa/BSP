@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, serverTimestamp, getDocs, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, query, where, addDoc, updateDoc, doc, serverTimestamp, getDocs, Timestamp } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 
@@ -31,7 +31,7 @@ export const useOperatorSession = () => {
       where('empresaId', '==', empresaId),
       where('status', '==', 'ACTIVO'),
     );
-    const unsub = onSnapshot(
+    const unsub = onSnapshotFresh(
       q,
       snap => {
         const now = new Date();

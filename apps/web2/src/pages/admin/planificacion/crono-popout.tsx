@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
     belongsToEmpresaView,
@@ -64,12 +64,12 @@ export default function CronoPopoutPage() {
         const ausenciasQ = empresaCollectionQuery('ausencias', empresaId, scopeEmpresa);
         const slaQ = empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa);
 
-        const unsubC = onSnapshot(clientsQ, (snap) => {
+        const unsubC = onSnapshotFresh(clientsQ, (snap) => {
             const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
             setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta)));
         });
 
-        const unsubE = onSnapshot(empleadosQ, (snap) => {
+        const unsubE = onSnapshotFresh(empleadosQ, (snap) => {
             setEmployees(
                 snap.docs
                     .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
@@ -85,7 +85,7 @@ export default function CronoPopoutPage() {
             );
         });
 
-        const unsubS = onSnapshot(turnosQ, (snap) => {
+        const unsubS = onSnapshotFresh(turnosQ, (snap) => {
             const map: Record<string, any> = {};
             snap.docs.forEach((d) => {
                 const data = d.data();
@@ -106,14 +106,14 @@ export default function CronoPopoutPage() {
             setShiftsMap(map);
         });
 
-        const unsubA = onSnapshot(ausenciasQ, (snap) => {
+        const unsubA = onSnapshotFresh(ausenciasQ, (snap) => {
             const docs = snap.docs
                 .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }));
             setAbsencesMap(buildAbsencesMapFromDocs(docs, cronoCompareDateKey));
         });
 
-        const unsubSla = onSnapshot(slaQ, (snap) => {
+        const unsubSla = onSnapshotFresh(slaQ, (snap) => {
             const m: Record<string, string> = {};
             snap.docs.forEach((d) => {
                 if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;

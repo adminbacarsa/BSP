@@ -1,6 +1,6 @@
-import { db } from '@/lib/firebase';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import {
-  addDoc, collection, doc, getDocs, onSnapshot, orderBy, query,
+  addDoc, collection, doc, getDocs, orderBy, query,
   serverTimestamp, Timestamp, updateDoc, where, limit,
 } from 'firebase/firestore';
 
@@ -113,7 +113,7 @@ export const supervisionFieldService = {
         orderBy('createdAt', 'desc'),
         limit(maxPerObjective),
       );
-      unsubs.push(onSnapshot(q, snap => {
+      unsubs.push(onSnapshotFresh(q, snap => {
         maps[idx].clear();
         snap.docs.forEach(d => maps[idx].set(d.id, { id: d.id, ...d.data() } as LibroGuardiaEntry));
         emit();
@@ -161,7 +161,7 @@ export const supervisionFieldService = {
           orderBy('createdAt', 'desc'),
           limit(100),
         );
-    return onSnapshot(q, snap => {
+    return onSnapshotFresh(q, snap => {
       onData(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupervisionVisita)));
     }, () => onData([]));
   },
@@ -198,7 +198,7 @@ export const supervisionFieldService = {
           orderBy('createdAt', 'desc'),
           limit(200),
         );
-    return onSnapshot(q, snap => {
+    return onSnapshotFresh(q, snap => {
       onData(snap.docs.map(d => ({ id: d.id, ...d.data() } as ObjetivoConsigna)));
     }, () => onData([]));
   },
@@ -239,7 +239,7 @@ export const supervisionFieldService = {
       const q = ids.length
         ? query(collection(db, CONSIGNA_LECTURAS), where('objectiveId', 'in', ids))
         : query(collection(db, CONSIGNA_LECTURAS), limit(500));
-      unsubs.push(onSnapshot(q, snap => {
+      unsubs.push(onSnapshotFresh(q, snap => {
         maps[idx].clear();
         snap.docs.forEach(d => maps[idx].set(d.id, { id: d.id, ...d.data() } as ConsignaLectura));
         emit();

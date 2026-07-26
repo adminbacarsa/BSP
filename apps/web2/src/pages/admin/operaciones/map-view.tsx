@@ -5,8 +5,8 @@ import dynamic from 'next/dynamic';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { Toaster, toast } from 'sonner';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, onSnapshot, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, waitForPendingWrites, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, waitForPendingWrites, getDocs } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
@@ -1042,7 +1042,7 @@ export default function TacticalMapView() {
         const q = scopeEmpresa
             ? query(collection(db, 'novedades'), where('empresaId', '==', empresaId), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200))
             : query(collection(db, 'novedades'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200));
-        const unsub = onSnapshot(q, snap => {
+        const unsub = onSnapshotFresh(q, snap => {
                 const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
                 docs.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
                 setEmpNovedades(docs);

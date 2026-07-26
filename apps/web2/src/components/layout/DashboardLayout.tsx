@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { auth, db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, writeBatch, doc, getDoc } from 'firebase/firestore';
+import { auth, db, onSnapshotFresh } from '@/lib/firebase';
+import { collection, query, where, writeBatch, doc, getDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
@@ -352,7 +352,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
       where('type', '==', 'REFUERZO_CLIENTE_PENDIENTE'),
       where('status', '==', 'pending'),
     );
-    const unsub = onSnapshot(q, snap => {
+    const unsub = onSnapshotFresh(q, snap => {
       setRfzPlanifCount(snap.size);
       setRfzPlanifIds(snap.docs.map(d => d.id));
     }, () => {});

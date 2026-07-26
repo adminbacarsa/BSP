@@ -5,10 +5,59 @@ import {
   getFirestore,
   memoryLocalCache,
   connectFirestoreEmulator,
+  onSnapshot as _onSnapshot,
   type Firestore,
+  type Query,
+  type DocumentReference,
+  type CollectionReference,
+  type QuerySnapshot,
+  type DocumentSnapshot,
+  type Unsubscribe,
+  type SnapshotListenOptions,
 } from 'firebase/firestore';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
+
+/**
+ * onSnapshot que ignora el primer snapshot si viene del cache local.
+ * Previene datos obsoletos al navegar entre páginas en la SPA.
+ * Úsalo en lugar de onSnapshot para cargas iniciales de página.
+ */
+export function onSnapshotFresh<T = any>(
+  ref: DocumentReference<T>,
+  callback: (snap: DocumentSnapshot<T>) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe;
+export function onSnapshotFresh<T = any>(
+  ref: Query<T> | CollectionReference<T>,
+  callback: (snap: QuerySnapshot<T>) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe;
+export function onSnapshotFresh<T = any>(
+  ref: DocumentReference<T>,
+  options: SnapshotListenOptions,
+  callback: (snap: DocumentSnapshot<T>) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe;
+export function onSnapshotFresh<T = any>(
+  ref: Query<T> | CollectionReference<T>,
+  options: SnapshotListenOptions,
+  callback: (snap: QuerySnapshot<T>) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe;
+export function onSnapshotFresh(ref: any, ...args: any[]): Unsubscribe {
+  const hasOptions = args[0] && typeof args[0] === 'object' && typeof args[0] !== 'function' && !('apply' in args[0]);
+  const [options, callback, onError] = hasOptions
+    ? [args[0] as SnapshotListenOptions, args[1], args[2]]
+    : [{} as SnapshotListenOptions, args[0], args[1]];
+
+  return _onSnapshot(
+    ref,
+    { ...options, includeMetadataChanges: true },
+    (snap: any) => { if (!snap.metadata?.fromCache) callback(snap); },
+    onError,
+  );
+}
 
 const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 

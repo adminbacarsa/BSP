@@ -5,10 +5,9 @@ import {
   where,
   orderBy,
   limit,
-  onSnapshot,
   Timestamp,
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
 import { Bot, Download, AlertCircle, CheckCircle2, HelpCircle } from 'lucide-react';
@@ -167,7 +166,7 @@ export default function AssistantLogTab() {
             limit(300),
           );
 
-    const unsub = onSnapshot(
+    const unsub = onSnapshotFresh(
       q,
       (snap) => {
         const list: AssistantLogRow[] = snap.docs.map((d) => {

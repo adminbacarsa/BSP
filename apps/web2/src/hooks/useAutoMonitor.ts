@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, getDoc, getDocs, limit, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, query, where, addDoc, updateDoc, doc, getDoc, getDocs, limit, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
@@ -56,7 +56,7 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       where('status', '==', 'InProgress')
     );
 
-    const unsub = onSnapshot(q, snap => {
+    const unsub = onSnapshotFresh(q, snap => {
       snap.docChanges().forEach(async change => {
         if (change.type !== 'modified' && change.type !== 'added') return;
         const data = change.doc.data();

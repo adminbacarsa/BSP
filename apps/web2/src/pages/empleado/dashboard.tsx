@@ -4,8 +4,8 @@ import { useRouter } from 'next/router';
 import AuthGuard from '@/components/auth/AuthGuard';
 import { Calendar, MapPin, Bell, FileText, CheckCircle, AlertTriangle, Navigation, BellRing, Sun, Sunset, Moon, ArrowLeftRight, Search, X, CreditCard } from 'lucide-react';
 import CredencialDigital from '@/components/empleado/CredencialDigital';
-import { app, db, functions, storage, auth } from '@/lib/firebase';
-import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, onSnapshot, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
+import { app, db, functions, storage, auth, onSnapshotFresh } from '@/lib/firebase';
+import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -609,7 +609,7 @@ export default function EmployeeDashboard() {
       setLoadingInbox(false);
     };
     const register = (key: string, q: any, fallback?: () => any) => {
-      const unsub = onSnapshot(
+      const unsub = onSnapshotFresh(
         q,
         (snap) => {
           inboxBucketsRef.current[key] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));

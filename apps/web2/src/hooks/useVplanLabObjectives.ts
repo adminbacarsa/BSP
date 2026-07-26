@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { onSnapshot } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { ensureFirebaseEmulatorsConnected } from '@/lib/firebase';
+import { ensureFirebaseEmulatorsConnected, onSnapshotFresh } from '@/lib/firebase';
 import {
   empresaScopedQuery,
   filterRowsByEmpresa,
@@ -43,7 +42,7 @@ export function useVplanLabObjectives(empresaId: string | undefined) {
     setLoading(true);
 
     const q = empresaScopedQuery('clients', tenantId, scopeEmpresa);
-    const unsub = onSnapshot(
+    const unsub = onSnapshotFresh(
       q,
       (snap) => {
         if (cancelled) return;

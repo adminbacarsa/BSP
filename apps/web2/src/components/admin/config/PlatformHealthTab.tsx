@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { collection, getDocs, limit, query, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
-import { functions, db } from '@/lib/firebase';
+import { collection, getDocs, limit, query, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { functions, db, onSnapshotFresh } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import {
   Activity, CheckCircle, XCircle, AlertCircle, Loader2,
@@ -123,7 +123,7 @@ function CredentialVault({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 
   useEffect(() => {
     if (!isSuperAdmin) return;
-    const unsub = onSnapshot(
+    const unsub = onSnapshotFresh(
       collection(db, 'platform_credentials'),
       snap => setCreds(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Credential, 'id'>) }))),
       () => {},

@@ -1,6 +1,6 @@
 
-import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, where, onSnapshot } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
+import { collection, addDoc, getDocs, doc, deleteDoc, updateDoc, query, orderBy, where } from 'firebase/firestore';
 import { empresaScopedQuery, deleteDocForEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 import { validateAbsenceDateRange, toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
 
@@ -88,7 +88,7 @@ export const absenceService = {
       where('empresaId', '==', empresaId),
       orderBy('startDate', 'desc'),
     );
-    return onSnapshot(q, snap => cb(
+    return onSnapshotFresh(q, snap => cb(
       snap.docs.map(d => {
         const data = d.data();
         return {
@@ -108,7 +108,7 @@ export const absenceService = {
       where('status', '==', 'Pendiente'),
       orderBy('startDate', 'desc'),
     );
-    return onSnapshot(q, snap => cb(
+    return onSnapshotFresh(q, snap => cb(
       snap.docs.map(d => {
         const data = d.data();
         return {

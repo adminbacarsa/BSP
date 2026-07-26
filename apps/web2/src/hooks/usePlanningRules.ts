@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { doc } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import {
   DEFAULT_PLANNING_RULES,
   mergePlanningRulesFromFirestore,
@@ -20,7 +20,7 @@ export function usePlanningRules(empresaId: string | null | undefined) {
 
     setLoading(true);
     const ref = doc(db, 'planning_rules', empresaId);
-    const unsub = onSnapshot(
+    const unsub = onSnapshotFresh(
       ref,
       (snap) => {
         setRules(mergePlanningRulesFromFirestore(snap.exists() ? (snap.data() as Partial<PlanningRulesConfig>) : null));

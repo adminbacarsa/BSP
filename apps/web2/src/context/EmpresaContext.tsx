@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { doc, onSnapshot, collection, setDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { doc, collection, setDoc } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useAuth } from './AuthContext';
 import { SUPERADMIN_EMPRESA_STORAGE_KEY } from '@/lib/multiempresa';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -85,7 +85,7 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
   useEffect(() => {
     if (!empresaId) return;
     setLoadingEmpresa(true);
-    const unsub = onSnapshot(
+    const unsub = onSnapshotFresh(
       doc(db, 'empresas', empresaId),
       snap => {
         const defaultName = empresaId === 'bacarsa' ? 'Bacar SA' : empresaId;
@@ -127,7 +127,7 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
   // Superadmin: carga todas las empresas para el selector
   useEffect(() => {
     if (!canSwitchEmpresa) return;
-    const unsub = onSnapshot(
+    const unsub = onSnapshotFresh(
       collection(db, 'empresas'),
       snap => setEmpresas(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Empresa, 'id'>) }))),
       () => {}

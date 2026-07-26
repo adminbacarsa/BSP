@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
-import { db, auth, storage } from '@/lib/firebase';
+import { db, auth, storage, onSnapshotFresh } from '@/lib/firebase';
 import {
-  collection, query, where, orderBy, onSnapshot,
+  collection, query, where, orderBy,
   addDoc, deleteDoc, serverTimestamp, getDocs, getDoc, doc, Timestamp, setDoc
 } from 'firebase/firestore';
 import { signInWithEmailAndPassword, onAuthStateChanged, signOut, User } from 'firebase/auth';
@@ -1579,7 +1579,7 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
       where('objectiveId', '==', objetivo.id),
       where('status', '==', 'ACTIVE'),
     );
-    const unsub = onSnapshot(q, snap => {
+    const unsub = onSnapshotFresh(q, snap => {
       const rows = snap.docs
         .map(d => ({ id: d.id, ...d.data() } as ObjetivoConsigna))
         .sort((a, b) => {
@@ -1603,7 +1603,7 @@ function LibroGuardia({ objetivo, turno, entries, totalHoy, empNombre, isAdmin, 
       where('objectiveId', '==', objetivo.id),
       where('userUid', '==', uid),
     );
-    const unsub = onSnapshot(q, snap => {
+    const unsub = onSnapshotFresh(q, snap => {
       setLecturas(snap.docs.map(d => ({ id: d.id, ...d.data() } as ConsignaLectura)));
     }, () => setLecturas([]));
     return unsub;
@@ -1811,7 +1811,7 @@ export default function ObjetivoPortal() {
     if (!objetivo) return;
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
     const q = query(collection(db, 'libro_guardia'), where('objectiveId', '==', objetivo.id), where('createdAt', '>=', Timestamp.fromDate(hoy)), orderBy('createdAt', 'desc'));
-    const unsub = onSnapshot(q, snap => { const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as LibroEntry)); setEntries(docs); setTotalHoy(docs.length); });
+    const unsub = onSnapshotFresh(q, snap => { const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as LibroEntry)); setEntries(docs); setTotalHoy(docs.length); });
     return () => unsub();
   }, [objetivo?.id]);
 

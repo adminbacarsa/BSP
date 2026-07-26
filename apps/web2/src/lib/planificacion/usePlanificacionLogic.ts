@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, onSnapshot, query, where, getDocs, writeBatch, serverTimestamp, Timestamp, doc } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
+import { collection, query, where, getDocs, writeBatch, serverTimestamp, Timestamp, doc } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { getDateKey } from './utils';
 import { stampEmpresaId } from '@/lib/multiempresa';
@@ -19,14 +19,14 @@ export function usePlanificacionLogic(
     const [isProcessing, setIsProcessing] = useState(false);
     const [positionStructure, setPositionStructure] = useState<any[]>([]);
     useEffect(() => {
-        const unsubE = onSnapshot(collection(db, 'empleados'), snap => setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data(), name: d.data().name || (d.data().firstName + ' ' + d.data().lastName) }))));
-        const unsubC = onSnapshot(collection(db, 'clients'), snap => setClients(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-        const unsubS = onSnapshot(collection(db, 'turnos'), snap => {
+        const unsubE = onSnapshotFresh(collection(db, 'empleados'), snap => setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data(), name: d.data().name || (d.data().firstName + ' ' + d.data().lastName) }))));
+        const unsubC = onSnapshotFresh(collection(db, 'clients'), snap => setClients(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+        const unsubS = onSnapshotFresh(collection(db, 'turnos'), snap => {
             const map: any = {};
             snap.docs.forEach(d => { if(d.data().startTime) map[`${d.data().employeeId}_${getDateKey(d.data().startTime)}`] = { id: d.id, ...d.data(), code: d.data().code || d.data().type }; });
             setShiftsMap(map);
         });
-        const unsubA = onSnapshot(collection(db, 'ausencias'), snap => {
+        const unsubA = onSnapshotFresh(collection(db, 'ausencias'), snap => {
             const map: any = {};
             snap.docs.forEach(d => { if(d.data().startDate) map[`${d.data().employeeId}_${d.data().startDate}`] = { id: d.id, ...d.data() }; });
             setAbsencesMap(map);

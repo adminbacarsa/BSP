@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, orderBy, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, query, where, orderBy, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { Bell, AlertTriangle, CheckCircle, ArrowRight, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -18,7 +18,7 @@ export const PlanningAlerts = () => {
             orderBy('createdAt', 'desc')
         );
 
-        const unsub = onSnapshot(q, (snap) => {
+        const unsub = onSnapshotFresh(q, (snap) => {
             setAlerts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         });
 

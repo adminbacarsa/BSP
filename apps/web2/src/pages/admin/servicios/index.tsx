@@ -3,10 +3,10 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
-import { db } from '@/lib/firebase';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
-import { collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, where, getDocs, writeBatch, doc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, writeBatch, doc, Timestamp } from 'firebase/firestore';
 import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
@@ -216,7 +216,7 @@ export default function ServiciosSLAPage() {
             ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
             : query(collection(db, 'servicios_sla'));
 
-        unsub = onSnapshot(q, (snapshot) => {
+        unsub = onSnapshotFresh(q, (snapshot) => {
             let adaptedData = snapshot.docs.map(doc => {
                 const data = doc.data();
                 return { 
@@ -256,7 +256,7 @@ export default function ServiciosSLAPage() {
   useEffect(() => {
     if (!empresaId) return;
     const q = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
-    const unsub = onSnapshot(q, snap => {
+    const unsub = onSnapshotFresh(q, snap => {
       const rows = snap.docs
         .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
         .map(d => ({ id: d.id, ...(d.data() as any) }))

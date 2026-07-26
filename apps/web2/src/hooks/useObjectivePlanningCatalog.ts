@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, query, where } from 'firebase/firestore';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { ensureFirebaseEmulatorsConnected } from '@/lib/firebase';
 import {
@@ -67,7 +67,7 @@ export function useObjectivePlanningCatalog(empresaId: string | undefined) {
         setLoading(true);
 
         const clientsQ = empresaScopedQuery('clients', tenantId, scopeEmpresa);
-        const unsubClients = onSnapshot(
+        const unsubClients = onSnapshotFresh(
             clientsQ,
             (snap) => {
                 if (cancelled) return;
@@ -97,7 +97,7 @@ export function useObjectivePlanningCatalog(empresaId: string | undefined) {
             ? query(collection(db, 'servicios_sla'), where('empresaId', '==', tenantId))
             : query(collection(db, 'servicios_sla'));
 
-        const unsubSlas = onSnapshot(
+        const unsubSlas = onSnapshotFresh(
             slasQ,
             (snap) => {
                 if (cancelled) return;

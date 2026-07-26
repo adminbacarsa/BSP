@@ -20,10 +20,10 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, onSnapshot, query, where, orderBy, limit, getDocs, waitForPendingWrites } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, query, where, orderBy, limit, getDocs, waitForPendingWrites } from 'firebase/firestore';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
-import { db } from '@/lib/firebase';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
@@ -2043,7 +2043,7 @@ export default function OperacionesPage() {
         const novedadesQ = scopeEmpresa
             ? query(collection(db, 'novedades'), where('empresaId', '==', empresaId), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200))
             : query(collection(db, 'novedades'), where('createdAt', '>=', since), orderBy('createdAt', 'desc'), limit(200));
-        const unsub = onSnapshot(
+        const unsub = onSnapshotFresh(
             novedadesQ,
             snap => {
                 const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -2070,7 +2070,7 @@ export default function OperacionesPage() {
         const ausQ = scopeAus
             ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId), where('status', '==', 'Autorizada'))
             : query(collection(db, 'ausencias'), where('status', '==', 'Autorizada'));
-        const unsub = onSnapshot(
+        const unsub = onSnapshotFresh(
             ausQ,
             snap => {
                 const docs = snap.docs

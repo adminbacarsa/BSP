@@ -8,11 +8,11 @@ import { employeeService, Employee } from '@/services/employeeService';
 import { absenceService, Absence } from '@/services/absenceService';
 import { holidayService, Holiday } from '@/services/holidayService';
 import { agreementService } from '@/services/agreementService';
-import { db } from '@/lib/firebase';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { geocodeAddress } from '@/lib/employees/geocodeAddress';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, onSnapshot, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, limit } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
 import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa, belongsToEmpresaView, deleteEmployeeForEmpresa, queryAndDeleteForEmpresa, stampEmpresaId, updateDocForEmpresa, TenantIsolationError } from '@/lib/multiempresa';
@@ -433,7 +433,7 @@ export default function EmployeesPage() {
   useEffect(() => { loadData(); loadClientsAndObjectives(); loadAbsences(); loadHolidays(); loadAgreements(); }, [empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    const unsub = onSnapshot(
+    const unsub = onSnapshotFresh(
       scopeEmpresa
         ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId), where('source', '==', 'EMPLEADO'), where('status', '==', 'Pendiente'), limit(50))
         : query(collection(db, 'ausencias'), where('source', '==', 'EMPLEADO'), where('status', '==', 'Pendiente'), limit(50)),

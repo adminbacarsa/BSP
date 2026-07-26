@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
-import { db } from '@/lib/firebase';
+import { db, onSnapshotFresh } from '@/lib/firebase';
 import { 
-    collection, query, where, getDocs, onSnapshot, 
-    addDoc, deleteDoc, doc, Timestamp, updateDoc 
+    collection, query, where, getDocs,
+    addDoc, deleteDoc, doc, Timestamp, updateDoc
 } from 'firebase/firestore';
 import { IPlannerEmployee, IPlannerShift, SHIFT_CODES } from '@/types/planificacion.types';
 import { toast } from 'sonner';
@@ -64,7 +64,7 @@ export const usePlanificacion = () => {
             where('startTime', '<=', Timestamp.fromDate(endOfMonth))
         );
 
-        const unsubscribe = onSnapshot(q, (snap) => {
+        const unsubscribe = onSnapshotFresh(q, (snap) => {
             const loadedShifts = snap.docs.map(d => ({
                 id: d.id,
                 ...d.data()

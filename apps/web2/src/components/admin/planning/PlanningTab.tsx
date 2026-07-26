@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { db, functions } from '@/lib/firebase';
-import { collection, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
+import { db, functions, onSnapshotFresh } from '@/lib/firebase';
+import { collection, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { 
     Calendar as CalendarIcon, ShieldAlert, Lock, Trash2, User, 
@@ -20,13 +20,13 @@ export default function PlanningTab() {
     // 1. CARGA EN TIEMPO REAL (CRÍTICO PARA VER EL VERDE AL INSTANTE)
     useEffect(() => {
         // Escuchamos empleados
-        const unsubEmp = onSnapshot(collection(db, 'employees'), (snap) => {
+        const unsubEmp = onSnapshotFresh(collection(db, 'employees'), (snap) => {
             setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         });
 
         // Escuchamos turnos
         const q = query(collection(db, 'turnos'));
-        const unsubShifts = onSnapshot(q, (snap) => {
+        const unsubShifts = onSnapshotFresh(q, (snap) => {
             const data = snap.docs.map(d => {
                 const s = d.data();
                 return {
