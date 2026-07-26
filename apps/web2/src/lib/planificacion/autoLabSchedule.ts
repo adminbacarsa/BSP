@@ -196,7 +196,7 @@ function postProcessAutoLabSchedule(
         fixerSummary = fixer.summary;
     }
 
-    assignments = consolidateRetToDesignee(assignments, retDesignee);
+    assignments = consolidateRetToDesignee(assignments, retDesignee, ctx);
 
     assignments = applyServiceExcludedDays(assignments, ctx);
 
@@ -304,6 +304,7 @@ function buildAutoLabGenContext(
         preserveRotativeIntegrity: scheduleFlags.preserveRotativeIntegrity,
         allowFrancoWorkedRescue: false,
         headcountByPax: true,
+        coverageWisdom: caseDef.coverageWisdom ?? null,
     };
 }
 

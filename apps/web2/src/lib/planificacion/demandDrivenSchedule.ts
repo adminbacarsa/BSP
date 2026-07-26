@@ -3,9 +3,11 @@
  */
 
 import { buildObjectiveCoverageDemand, isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool, type ObjectiveDayDemand } from './objectiveCoverageDemand';
+import { francoCodeForPositionDay, isPlannedCustomCoverRetAssignment, plannedCustomCoverRestCode } from './customCoverCycle';
 import {
     effectiveShiftsForPositionDay,
     hardMaxForCtx,
+    isCustomCoverPosition,
     positionIsActiveOn,
     type V2Assignment,
     type V2EngineContext,
@@ -1554,6 +1556,19 @@ function revertBillableCell(params: DemandDrivenFillParams, a: V2Assignment): vo
 }
 
 /**
+ * RET planificado en custom L–V (ej. sábado stand-by 7–8 h): no convertir a F.
+ */
+function isPlannedCustomCoverRet(a: V2Assignment, ctx: V2EngineContext): boolean {
+    const dayLetter = ctx.getDayLetter(a.dateStr);
+    return isPlannedCustomCoverRetAssignment(
+        a.empId,
+        dayLetter,
+        ctx.positions,
+        ctx.defaultPositionByEmp,
+    );
+}
+
+/**
  * AUTO base (sin ajustar crono / apretar): RET solo retDesignateSet.
  * Evita RET masivo por reglas opcionales mal aplicadas.
  */
@@ -1565,6 +1580,7 @@ export function stripUnauthorizedRetAssignments(
     for (const a of assignments) {
         if (String(a.code || '').toUpperCase() !== 'RET') continue;
         if (retDesignateSet.has(a.empId)) continue;
+        if (isPlannedCustomCoverRet(a, ctx)) continue;
         if (ctx.rotateShifts === false
             && (ctx.ajustarCrono === true || (ctx.contingencyApretarDays?.length ?? 0) > 0)) continue;
         if (ctx.ajustarCrono === true && ctx.rotateShifts !== false) continue;

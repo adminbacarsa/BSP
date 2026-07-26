@@ -63,7 +63,7 @@ import {
     resolveRotativeMtnCode,
     rotativeMtnIsWorkDay,
 } from './rotativeMtnCycle';
-import { buildCustomCycleWorkDays, customCoverDailyPax, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay } from './customCoverCycle';
+import { buildCustomCycleWorkDays, customCoverDailyPax, customCoverBandsForDay, customCoverSlotsRequiredOnDay, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay } from './customCoverCycle';
 import { fillCycleBaseRotativeAssignments } from './cycleBaseSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
@@ -404,6 +404,11 @@ export interface V2EngineContext {
     fixedBandOffsetPhase?: number;
     /** Escalonado global M/T/N (interno, bandas fijas). */
     fixedBandGlobalStaggerByEmp?: Record<string, number>;
+    /**
+     * Sabiduría histórica de coberturas (últimos N meses desde Firestore).
+     * Prioriza candidatos que ya cubrieron ausencias / puestos / 12h en el objetivo.
+     */
+    coverageWisdom?: import('./planningCoverageWisdom').PlanningCoverageWisdom | null;
 }
 
 export interface V2PositionDemand {
@@ -1249,10 +1254,11 @@ const DEFAULT_SHIFT_TIMES: Record<string, string> = { M: '06:00', T: '14:00', N:
 
 const STANDARD_BANDS = new Set(['M', 'T', 'N', 'D12', 'N12']);
 
-/** EN/RO/etc.: titular cubre L–V; puede superar 200h. */
+/** EN/RO/etc. o SLA custom (MA/ME/M/M2…): titular cubre días operativos; puede superar 200h. */
 export function isCustomCoverPosition(pos: V2PositionDef): boolean {
     const cov = String(pos.coverageType || '').toLowerCase();
     if (cov === '24hs' || cov === '24' || cov === '24h') return false;
+    if (cov === 'custom') return true;
     const working = (pos.shifts || []).filter(s => !FRANCO_SET.has(String(s.code ?? '').toUpperCase()));
     if (working.length === 0) return false;
     return working.every(s => !STANDARD_BANDS.has(String(s.code ?? '').toUpperCase()));
@@ -2336,15 +2342,41 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         dateStr: string,
         dayLetter: string,
         inCurrentCycle: boolean,
-        opts?: { strictRest?: boolean; ignoreCycleWorkDay?: boolean },
+        opts?: { strictRest?: boolean; ignoreCycleWorkDay?: boolean; shiftCode?: string },
     ): boolean => {
         if (runtime[empId].assignedDays.has(dateStr)) return false;
         if (ctx.absences[empId]?.has(dateStr)) return false;
         if (!opts?.ignoreCycleWorkDay && !cycleWorkDays[empId]?.has(dateStr)) return false;
         if (!positionIsActiveOn(pos, dayLetter)) return false;
-        const dayBands = effectiveShiftsForPositionDay(pos, dayLetter, ctx.autoCycles);
+        const dayBands = customCoverBandsForDay(pos, dayLetter, ctx.autoCycles, dateStr);
         if (dayBands.length === 0) return false;
-        const sh = dayBands[0];
+
+        const qty = customCoverDailyPax(pos);
+        const pickBand = (): V2ShiftDef | null => {
+            if (opts?.shiftCode) {
+                const forced = dayBands.find((b) => String(b.code || '').toUpperCase() === opts.shiftCode!.toUpperCase());
+                if (forced) return forced;
+            }
+            const fixed = (ctx.defaultShiftByEmp?.[empId] || empPrimaryShift[empId] || '').toUpperCase();
+            if (fixed) {
+                const sh = dayBands.find((b) => String(b.code || '').toUpperCase() === fixed);
+                if (sh) return sh;
+            }
+            for (const sh of dayBands) {
+                const code = String(sh.code ?? '').toUpperCase();
+                const filled = assignments.filter((a) =>
+                    a.dateStr === dateStr
+                    && a.positionName === pos.positionName
+                    && String(a.code || '').toUpperCase() === code
+                    && (a.hours ?? 0) > 0,
+                ).length;
+                if (filled < qty) return sh;
+            }
+            return dayBands[0];
+        };
+
+        const sh = pickBand();
+        if (!sh) return false;
         const sCode = String(sh.code ?? '').toUpperCase();
         const sHrs = shiftHoursH(sh);
         const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
@@ -2381,18 +2413,18 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     for (const pos of ctx.positions) {
         if (!isCustomCoverPosition(pos)) continue;
         const titular = customTitular[pos.positionName];
-        const qty = customCoverDailyPax(pos);
         const groupIds = positionGroups[pos.positionName] ?? [];
         for (const day of ctx.daysInMonth) {
             const dateStr = ctx.getDateKey(day);
             const dayLetter = ctx.getDayLetter(dateStr);
             if (!positionIsActiveOn(pos, dayLetter)) continue;
             const inCur = day.getDate() <= cutoffDay;
+            const daySlots = customCoverSlotsRequiredOnDay(pos, dayLetter, ctx.autoCycles, dateStr);
             let covered = assignments.filter(a =>
                 a.dateStr === dateStr && a.positionName === pos.positionName && a.hours > 0
                 && !FRANCO_SET.has(String(a.code ?? '').toUpperCase()),
             ).length;
-            while (covered < qty) {
+            while (covered < daySlots) {
                 if (!tryAssignCustomFromGroup(pos, dateStr, dayLetter, inCur, groupIds, titular)) break;
                 covered = assignments.filter(a =>
                     a.dateStr === dateStr && a.positionName === pos.positionName && a.hours > 0
@@ -2439,6 +2471,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         titular?: string,
         backupPool: string[] = [],
     ): void => {
+        const daySlots = customCoverSlotsRequiredOnDay(pos, dayLetter, ctx.autoCycles, dateStr);
         const qty = customCoverDailyPax(pos);
 
         if (titular && cycleWorkDays[titular]?.has(dateStr)) {
@@ -2455,10 +2488,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 dateStr,
                 positionName: '',
                 code: francoCode,
-                name: francoCode === 'FF' ? 'Franco feriado' : 'Franco',
+                name: francoCode === 'RET' ? 'Retén' : francoCode === 'FF' ? 'Franco feriado' : 'Franco',
                 hours: 0,
                 startTime: '00:00',
-                isFranco: true,
+                isFranco: francoCode === 'F' || francoCode === 'FF',
+                isReten: francoCode === 'RET',
             });
             runtime[eid].assignedDays.add(dateStr);
         }
@@ -2474,22 +2508,24 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
 
         let assigned = 0;
         for (const eid of orderedWork) {
-            if (assigned >= qty) break;
+            if (assigned >= daySlots) break;
             if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent)) assigned++;
         }
 
         for (const eid of workCandidates) {
             if (runtime[eid].assignedDays.has(dateStr)) continue;
             if (ctx.absences[eid]?.has(dateStr)) continue;
+            const restCode = francoCodeForPositionDay(pos, dayLetter);
             assignments.push({
                 empId: eid,
                 dateStr,
                 positionName: '',
-                code: 'F',
-                name: 'Franco',
+                code: restCode,
+                name: restCode === 'RET' ? 'Retén' : restCode === 'FF' ? 'Franco feriado' : 'Franco',
                 hours: 0,
                 startTime: '00:00',
-                isFranco: true,
+                isFranco: restCode === 'F' || restCode === 'FF',
+                isReten: restCode === 'RET',
             });
             runtime[eid].assignedDays.add(dateStr);
         }
@@ -2502,7 +2538,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         ).length;
 
         let covered = countCover();
-        while (covered < qty) {
+        while (covered < daySlots) {
             let filled = tryAssignCustomFromGroup(pos, dateStr, dayLetter, inCurrent, groupIds, titular);
             if (!filled) {
                 for (const eid of backupPool) {
@@ -2527,7 +2563,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             covered = countCover();
         }
 
-        while (covered > qty) {
+        while (covered > daySlots) {
             const billable = assignments.filter((a) =>
                 a.dateStr === dateStr
                 && a.positionName === pos.positionName
@@ -3180,18 +3216,36 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const customPos = customPosName
                 ? ctx.positions.find(p => p.positionName === customPosName && isCustomCoverPosition(p))
                 : null;
-            if (customPos && positionIsActiveOn(customPos, dayLetter)) {
+            if (customPos) {
+                if (!positionIsActiveOn(customPos, dayLetter)) {
+                    const restCode = francoCodeForPositionDay(customPos, dayLetter);
+                    assignments.push({
+                        empId: emp.id,
+                        dateStr,
+                        positionName: '',
+                        code: restCode,
+                        name: restCode === 'RET' ? 'Retén' : restCode === 'FF' ? 'Franco feriado' : 'Franco',
+                        hours: 0,
+                        startTime: '00:00',
+                        isFranco: restCode === 'F' || restCode === 'FF',
+                        isReten: restCode === 'RET',
+                    });
+                    st.assignedDays.add(dateStr);
+                    continue;
+                }
                 if (!cycleWorkDays[emp.id]?.has(dateStr)) {
                     if (!st.assignedDays.has(dateStr)) {
+                        const restCode = francoCodeForPositionDay(customPos, dayLetter);
                         assignments.push({
                             empId: emp.id,
                             dateStr,
                             positionName: '',
-                            code: 'F',
-                            name: 'Franco',
+                            code: restCode,
+                            name: restCode === 'RET' ? 'Retén' : restCode === 'FF' ? 'Franco feriado' : 'Franco',
                             hours: 0,
                             startTime: '00:00',
-                            isFranco: true,
+                            isFranco: restCode === 'F' || restCode === 'FF',
+                            isReten: restCode === 'RET',
                         });
                         st.assignedDays.add(dateStr);
                     }
@@ -3453,10 +3507,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     dateStr,
                     positionName: '',
                     code: francoCode,
-                    name: francoCode === 'FF' ? 'Franco feriado' : 'Franco',
+                    name: francoCode === 'RET' ? 'Retén' : francoCode === 'FF' ? 'Franco feriado' : 'Franco',
                     hours: 0,
                     startTime: '00:00',
-                    isFranco: true,
+                    isFranco: francoCode === 'F' || francoCode === 'FF',
+                    isReten: francoCode === 'RET',
                 });
                 st.assignedDays.add(dateStr);
             }

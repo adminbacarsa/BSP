@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COSP — Gantt Puesta en Marcha</title>
+  <style>
+    :root {
+      --indigo: #4f46e5;
+      --indigo-dark: #4338ca;
+      --emerald: #059669;
+      --slate-50: #f8fafc;
+      --slate-100: #f1f5f9;
+      --slate-200: #e2e8f0;
+      --slate-400: #94a3b8;
+      --slate-500: #64748b;
+      --slate-700: #334155;
+      --slate-800: #1e293b;
+      --rose: #e11d48;
+      --amber: #d97706;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--slate-100);
+      color: var(--slate-800);
+      line-height: 1.5;
+      padding: 24px;
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; font-weight: 900; margin-bottom: 4px; }
+    .subtitle { color: var(--slate-500); font-size: 0.9rem; margin-bottom: 16px; }
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center;
+    }
+    .btn {
+      border: 1px solid var(--slate-200); background: #fff; border-radius: 10px;
+      padding: 8px 14px; font-size: 0.75rem; font-weight: 800; cursor: pointer;
+      box-shadow: 0 1px 2px rgba(15,23,42,.05);
+    }
+    .btn:hover { background: var(--slate-50); }
+    .btn:disabled { opacity: 0.6; cursor: wait; }
+    .btn-primary { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .btn-primary:hover { background: var(--indigo-dark); }
+    .interactive-hint {
+      background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 12px;
+      padding: 10px 14px; font-size: 0.78rem; margin-bottom: 16px;
+    }
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px; margin-bottom: 24px;
+    }
+    .stat {
+      background: #fff; border: 1px solid var(--slate-200); border-radius: 16px;
+      padding: 16px 20px; box-shadow: 0 1px 3px rgba(15,23,42,.06);
+    }
+    .stat label { font-size: 0.65rem; font-weight: 800; text-transform: uppercase; color: var(--slate-400); }
+    .stat .val { font-size: 1.5rem; font-weight: 900; color: var(--indigo); margin: 4px 0; }
+    .stat .hint { font-size: 0.75rem; color: var(--slate-500); }
+    .card {
+      background: #fff; border: 1px solid var(--slate-200); border-radius: 16px;
+      padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(15,23,42,.06);
+    }
+    .card h2 { font-size: 1rem; font-weight: 900; margin-bottom: 0; }
+    .gantt-head {
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 10px; margin-bottom: 12px;
+    }
+    .gantt-sort {
+      display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: var(--slate-500);
+    }
+    .gantt-sort select {
+      border: 1px solid var(--slate-200); background: #fff; border-radius: 8px;
+      padding: 6px 10px; font-size: 0.72rem; font-weight: 700; color: var(--slate-800);
+      cursor: pointer;
+    }
+    .gantt-row .mod-label {
+      display: flex; gap: 6px; align-items: flex-start; padding-right: 8px;
+    }
+    .gantt-row .mod-label .label-text { flex: 1; min-width: 0; }
+    .row-grip {
+      cursor: default; color: var(--slate-300); font-size: 0.7rem; padding: 1px 2px;
+      line-height: 1.2; user-select: none; touch-action: none; flex-shrink: 0; letter-spacing: -2px;
+    }
+    .gantt.manual-sort .row-grip { cursor: grab; color: var(--slate-400); }
+    .gantt.manual-sort .row-grip:hover { color: var(--indigo); }
+    .gantt-row.row-dragging { opacity: 0.45; }
+    .gantt-row.row-drag-over { background: #eef2ff; border-radius: 8px; }
+    .gantt-wrap { overflow-x: auto; }
+    .gantt { min-width: 1400px; }
+    .gantt-months { display: grid; grid-template-columns: 160px 1fr; margin-bottom: 4px; }
+    .gantt-months .track { position: relative; height: 22px; border-bottom: 1px solid var(--slate-200); }
+    .gantt-months span {
+      position: absolute; font-size: 0.65rem; font-weight: 800;
+      color: var(--slate-500); text-transform: uppercase;
+    }
+    .gantt-row {
+      display: grid; grid-template-columns: 160px 1fr;
+      align-items: center; min-height: 40px; border-bottom: 1px solid var(--slate-100);
+    }
+    .gantt-row .mod-label { padding-right: 8px; }
+    .gantt-row .mod-label .name { font-size: 0.65rem; font-weight: 800; color: var(--slate-500); }
+    .gantt-row .mod-label .dates { font-size: 0.58rem; color: var(--slate-400); margin-top: 2px; }
+    .gantt-track {
+      position: relative; height: 30px;
+      background: repeating-linear-gradient(
+        90deg, transparent, transparent calc(100% / var(--weeks) - 1px),
+        var(--slate-100) calc(100% / var(--weeks) - 1px), var(--slate-100) calc(100% / var(--weeks))
+      );
+    }
+    .bar {
+      position: absolute; top: 4px; height: 22px; border-radius: 8px;
+      font-size: 0.58rem; font-weight: 800; display: flex; align-items: center;
+      border: 1px solid rgba(0,0,0,.12); cursor: grab; user-select: none; z-index: 1;
+      min-width: 24px; touch-action: none;
+    }
+    .bar.dragging, .bar.resizing { cursor: grabbing; z-index: 20; box-shadow: 0 4px 12px rgba(15,23,42,.2); }
+    .bar .bar-label {
+      flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+      padding: 0 10px; pointer-events: none;
+    }
+    .bar .handle {
+      position: absolute; top: 0; bottom: 0; width: 10px; cursor: ew-resize; z-index: 2;
+    }
+    .bar .handle-l { left: 0; border-radius: 8px 0 0 8px; }
+    .bar .handle-r { right: 0; border-radius: 0 8px 8px 0; }
+    .bar .handle:hover { background: rgba(255,255,255,.25); }
+    .bar.actual { background: var(--indigo); color: #fff; }
+    .bar.prepare { background: var(--slate-200); color: var(--slate-700); }
+    .bar.build { background: #c7d2fe; color: var(--indigo-dark); }
+    .bar.cct { background: var(--emerald); color: #fff; }
+    .bar.pilot { background: #a7f3d0; color: #065f46; }
+    .bar.go-live { background: var(--rose); color: #fff; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; font-size: 0.7rem; }
+    .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 4px; vertical-align: middle; }
+    .drag-tip {
+      position: fixed; z-index: 9999; pointer-events: none;
+      background: var(--slate-800); color: #fff; font-size: 0.72rem; font-weight: 700;
+      padding: 6px 10px; border-radius: 8px; display: none;
+      box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--slate-100); }
+    th { font-size: 0.65rem; text-transform: uppercase; color: var(--slate-400); font-weight: 800; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+    .wave { padding: 12px 0; border-bottom: 1px solid var(--slate-100); }
+    .wave:last-child { border: none; }
+    .wave strong { display: block; font-size: 0.85rem; }
+    .wave .meta { font-size: 0.75rem; color: var(--slate-500); }
+    .task {
+      border: 1px solid var(--slate-200); border-radius: 12px;
+      padding: 14px 16px; margin-bottom: 10px; background: var(--slate-50);
+    }
+    .task h3 { font-size: 0.8rem; font-weight: 900; color: var(--indigo); }
+    .task .title { font-size: 0.85rem; font-weight: 700; margin: 4px 0 8px; }
+    .pill {
+      display: inline-block; font-size: 0.6rem; font-weight: 800; text-transform: uppercase;
+      padding: 2px 8px; border-radius: 999px; margin-bottom: 8px;
+    }
+    .pill.actual { background: #e0e7ff; color: var(--indigo); }
+    .pill.prepare { background: var(--slate-200); color: var(--slate-700); }
+    .pill.build { background: #fef3c7; color: var(--amber); }
+    .pill.cct { background: #d1fae5; color: var(--emerald); }
+    .pill.pilot { background: #d1fae5; color: #065f46; }
+    .pill.go-live { background: #ffe4e6; color: var(--rose); }
+    .task p { font-size: 0.75rem; color: var(--slate-700); margin-bottom: 4px; }
+    .task ul { font-size: 0.72rem; color: var(--slate-500); margin: 6px 0 0 16px; }
+    .task .ventana { font-weight: 800; color: var(--indigo-dark); }
+    .pdf-footer {
+      font-size: 0.7rem; color: var(--slate-400); margin-top: 16px; text-align: left;
+      padding-top: 12px; border-top: 1px solid var(--slate-100);
+    }
+    .pdf-avoid-break {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+      -webkit-column-break-inside: avoid !important;
+    }
+    body.exporting-pdf {
+      display: flex;
+      justify-content: flex-start;
+      padding: 12px;
+      background: #fff;
+    }
+    body.exporting-pdf .no-print { display: none !important; }
+    body.exporting-pdf #pdfRoot {
+      width: 1580px !important;
+      max-width: 1580px !important;
+      text-align: left;
+    }
+    body.exporting-pdf #pdfRoot h1,
+    body.exporting-pdf #pdfRoot .subtitle,
+    body.exporting-pdf .card h2,
+    body.exporting-pdf .stat,
+    body.exporting-pdf .task,
+    body.exporting-pdf .wave,
+    body.exporting-pdf .pdf-footer { text-align: left; }
+    body.exporting-pdf .stats {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      gap: 12px;
+    }
+    body.exporting-pdf .stat { width: 210px; text-align: left; }
+    body.exporting-pdf .grid2 {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 20px;
+    }
+    body.exporting-pdf table th,
+    body.exporting-pdf table td { text-align: left; }
+    body.exporting-pdf ul {
+      padding-left: 1.1em;
+      padding-right: 0;
+      list-style-position: outside;
+      text-align: left;
+    }
+    body.exporting-pdf .legend {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      gap: 12px;
+    }
+    body.exporting-pdf .gantt-head { justify-content: flex-start; }
+    body.exporting-pdf .gantt-head h2 { width: 100%; text-align: left; }
+    body.exporting-pdf .gantt-row .row-grip { display: none !important; }
+    body.exporting-pdf .gantt-wrap { overflow: visible !important; }
+    body.exporting-pdf .gantt { min-width: 100% !important; width: 100% !important; }
+    body.exporting-pdf .row-grip,
+    body.exporting-pdf .bar .handle { visibility: hidden !important; }
+    body.exporting-pdf .bar { cursor: default !important; box-shadow: none !important; }
+    body.exporting-pdf .bar .bar-label { text-align: left; justify-content: flex-start; }
+    body.exporting-pdf p,
+    body.exporting-pdf li { orphans: 3; widows: 3; }
+    @media print {
+      @page { size: A3 landscape; margin: 8mm; }
+      body {
+        background: #fff; padding: 0;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        display: flex; justify-content: flex-start;
+      }
+      .no-print { display: none !important; }
+      #pdfRoot { max-width: none; text-align: left; width: 100%; }
+      #pdfRoot h1, #pdfRoot .subtitle, .card h2, .stat, .task, .wave, .pdf-footer { text-align: left; }
+      .stats { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px; }
+      .stat { width: 210px; text-align: left; }
+      .grid2 { display: flex; flex-direction: column; gap: 20px; }
+      table th, table td { text-align: left; }
+      ul { padding-left: 1.1em; padding-right: 0; list-style-position: outside; text-align: left; }
+      .legend { justify-content: flex-start; }
+      .gantt-head { justify-content: flex-start; }
+      .gantt-head h2 { width: 100%; text-align: left; }
+      .gantt-wrap { overflow: visible !important; }
+      .gantt { min-width: 100% !important; }
+      .row-grip, .bar .handle { display: none !important; }
+      .pdf-avoid-break,
+      .task,
+      .wave,
+      .stat,
+      .gantt-row,
+      #milestones tr,
+      thead,
+      tbody,
+      h1,
+      h2,
+      .legend {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+        -webkit-column-break-inside: avoid !important;
+      }
+      p, li { orphans: 3; widows: 3; }
+      .drag-tip { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap" id="pdfRoot">
+    <h1 class="pdf-avoid-break">COSP — Gantt de Puesta en Marcha</h1>
+    <p class="subtitle pdf-avoid-break" id="subtitle">
+      44 semanas · Inicio 07/07/2026 · Oleada 1 ~40 obj · Cobertura total 96 obj
+    </p>
+
+    <div class="interactive-hint no-print">
+      <strong>Interactivo:</strong> arrastrá una barra para moverla · tirá de los bordes para alargar o acortar ·
+      ordená filas por fecha o módulo con el selector del Gantt · en modo <em>Manual</em>, arrastrá ⋮⋮ en cada fila.
+    </div>
+
+    <div class="toolbar no-print">
+      <button type="button" class="btn" id="btnReset">Restaurar plan original</button>
+      <button type="button" class="btn btn-primary" id="btnExportPdf">Descargar PDF</button>
+      <button type="button" class="btn" id="btnExport">Copiar fechas (JSON)</button>
+      <span id="saveHint" style="font-size:0.72rem;color:var(--slate-500)">Cambios guardados en este navegador.</span>
+    </div>
+
+    <div class="stats">
+      <div class="stat pdf-avoid-break">
+        <label>Estado actual</label>
+        <div class="val">10 obj</div>
+        <div class="hint">4 clientes en piloto Planificación</div>
+      </div>
+      <div class="stat pdf-avoid-break">
+        <label>Universo</label>
+        <div class="val">96 obj</div>
+        <div class="hint">21 clientes por oleadas</div>
+      </div>
+      <div class="stat pdf-avoid-break">
+        <label>Validación CCT</label>
+        <div class="val">2 ciclos</div>
+        <div class="hint">~16 sem de operación real</div>
+      </div>
+      <div class="stat pdf-avoid-break">
+        <label>Go-live oleada 1</label>
+        <div class="val" id="statGoLive1">—</div>
+        <div class="hint" id="statGoLive1Hint">~40 objetivos</div>
+      </div>
+      <div class="stat pdf-avoid-break">
+        <label>Cobertura 96 obj</label>
+        <div class="val" id="statGoLive2">—</div>
+        <div class="hint" id="statGoLive2Hint">Oleada 2 · 21 clientes</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="gantt-head">
+        <h2>Gantt por módulo</h2>
+        <div class="gantt-sort no-print">
+          <label for="ganttSort">Orden filas:</label>
+          <select id="ganttSort" title="Cómo ordenar las filas del Gantt">
+            <option value="original">Plan original</option>
+            <option value="start">Fecha inicio ↑</option>
+            <option value="end">Fecha fin ↑</option>
+            <option value="module">Módulo A→Z</option>
+            <option value="manual">Manual (arrastrar fila)</option>
+          </select>
+        </div>
+      </div>
+      <div class="gantt-wrap">
+        <div class="gantt" id="gantt" style="--weeks:44"></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--indigo)"></i>En piloto</span>
+        <span><i style="background:var(--slate-200)"></i>Preparación</span>
+        <span><i style="background:#c7d2fe"></i>Construcción</span>
+        <span><i style="background:var(--emerald)"></i>Ciclo CCT</span>
+        <span><i style="background:#a7f3d0"></i>UAT</span>
+        <span><i style="background:var(--rose)"></i>Go-live</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Hitos con fecha</h2>
+      <table>
+        <thead><tr><th>Fecha</th><th>Hito</th></tr></thead>
+        <tbody id="milestones"></tbody>
+      </table>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h2>Oleadas y ciclos CCT</h2>
+        <div id="waves"></div>
+      </div>
+      <div class="card">
+        <h2>Supuestos críticos</h2>
+        <ul style="font-size:0.8rem;color:var(--slate-700);padding-left:18px;line-height:1.7">
+          <li class="pdf-avoid-break">Oleada 1 (~40 obj) valida CCT; oleada 2 escala el resto hasta 96 obj.</li>
+          <li class="pdf-avoid-break">No se acelera oleada 2 sin mesa de control estable de oleada 1.</li>
+          <li class="pdf-avoid-break">Supervisión va antes que RRHH.</li>
+          <li class="pdf-avoid-break">Liquidación y Prefactura requieren 2 ciclos reconciliables.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Detalle por entregable</h2>
+      <div id="tasks"></div>
+    </div>
+
+    <p class="pdf-footer" id="pdfFooter"></p>
+  </div>
+
+  <div class="drag-tip" id="dragTip"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script>
+    const STORAGE_KEY = "cosp-gantt-v2";
+    const SORT_KEY = "cosp-gantt-sort";
+    const ORDER_KEY = "cosp-gantt-order";
+    const TOTAL_WEEKS = 44;
+    const PLAN_START = new Date(2026, 6, 7);
+    const OBJ_OLEADA1 = 40;
+    const OBJ_OLEADA2 = 56;
+    const OBJ_TOTAL = 96;
+
+    const moduleLabels = {
+      TRANSVERSAL: "Transversal", PLANNING: "Planificación", OPERATIONS: "Operaciones",
+      SUPERVISION: "Supervisión", RRHH: "RRHH", LIQUIDACION: "API Liquidación", PREFACTURA: "Prefactura",
+    };
+    const statusLabels = {
+      actual: "En piloto", prepare: "Preparación", build: "Construcción",
+      cct: "Ciclo CCT", pilot: "UAT", "go-live": "Go-live",
+    };
+
+    /* Cada hito se calcula desde una barra del Gantt (taskId + inicio/fin + offset opcional) */
+    const milestoneDefs = [
+      { label: "Kick-off puesta en marcha", taskId: "t1", field: "start" },
+      { label: "Inicio Ciclo CCT 1", taskId: "t4", field: "start" },
+      { label: "Supervisión en campo (piloto)", taskId: "t5", field: "start" },
+      { label: "Inicio Ciclo CCT 2", taskId: "t7", field: "start" },
+      { label: "RRHH masivo (post ciclo 1)", taskId: "t8", field: "start" },
+      { label: "API Liquidación en prueba", taskId: "t9", field: "start" },
+      { label: "UAT integral oleada 1", taskId: "t11", field: "start" },
+      { label: "Go-live oleada 1 (~40 obj)", taskId: "t12", field: "start" },
+      { label: "Cierre mesa control oleada 1", taskId: "t13", field: "end" },
+      { label: "Inicio planificación oleada 2", taskId: "t14", field: "start" },
+      { label: "UAT oleada 2 (pre 96 obj)", taskId: "t16", field: "start" },
+      { label: "Go-live oleada 2 — 96 obj total", taskId: "t17", field: "start" },
+      { label: "Cierre programa 96 obj (mesa 30 días)", taskId: "t17", field: "start", offsetDays: 30 },
+    ];
+
+    /* Oleadas: fechas derivadas de tareas del Gantt */
+    const waveDefs = [
+      { title: "Piloto actual", scope: "4 clientes / 10 objetivos", startTask: "t2", endTask: "t3", goal: "Cerrar planificación piloto y abrir operaciones." },
+      { title: "Ciclo CCT 1", scope: "Piloto + oleada inicial", startTask: "t4", endTask: "t4", goal: "Validar reglas 6+2, bandas y cobertura." },
+      { title: "Supervisión + ampliación oleada 1", scope: "Campo móvil + ~40 objetivos", startTask: "t5", endTask: "t6", goal: "Supervisión antes de RRHH." },
+      { title: "Ciclo CCT 2", scope: "Oleada ampliada + supervisión", startTask: "t7", endTask: "t7", goal: "Segundo ciclo con trazabilidad de campo." },
+      { title: "RRHH + Admin", scope: "Legajos + Liquidación + Prefactura", startTask: "t8", endTask: "t10", goal: "Cierre administrativo sobre datos validados." },
+      { title: "Go-live oleada 1", scope: `~${OBJ_OLEADA1} objetivos`, startTask: "t12", endTask: "t12", goal: "Primera salida operativa masiva." },
+      { title: "Mesa control oleada 1", scope: "Estabilización post salida", startTask: "t13", endTask: "t13", goal: "30 días sin bloqueantes P1 antes de escalar." },
+      { title: "Oleada 2 — planificación y ops", scope: `~${OBJ_OLEADA2} objetivos restantes · 17 clientes`, startTask: "t14", endTask: "t15", goal: "Publicar y operar el universo pendiente." },
+      { title: "Go-live oleada 2 — cobertura total", scope: `${OBJ_TOTAL} objetivos · 21 clientes`, startTask: "t17", endTask: "t17", goal: "COSP en todo el parque instalado." },
+    ];
+
+    const defaultTasks = [
+      { id: "t1", module: "TRANSVERSAL", title: "Gobierno de puesta en marcha y calidad de datos", owner: "PM + Sistemas + referentes Bacar", startWeek: 1, endWeek: 4, status: "prepare",
+        deliverables: ["Matriz 21 clientes / 96 objetivos", "Responsables por rol", "Checklist datos mínimos"],
+        exit: "Oleadas 1 y 2 definidas; datos críticos validados para 96 objetivos." },
+      { id: "t2", module: "PLANNING", title: "Planificación: cerrar piloto (4 cli / 10 obj)", owner: "Planificación + Sistemas", startWeek: 1, endWeek: 6, status: "actual",
+        deliverables: ["Publicación estable piloto", "Reglas CCT 422/05", "Escalar a ~25 objetivos"],
+        exit: "Planificación publicada sin bloqueantes." },
+      { id: "t3", module: "OPERATIONS", title: "Operaciones: monitor diario + circuito ausencias", owner: "Operaciones + Sistemas", startWeek: 4, endWeek: 10, status: "build",
+        deliverables: ["Tablero PLAN/OPS", "Ausencia → vacante → cobertura", "RFZ/TURA operativos"],
+        exit: "Operaciones gestiona días reales en piloto." },
+      { id: "t4", module: "TRANSVERSAL", title: "Ciclo CCT 1 — validación 6+2 (8 semanas)", owner: "Planificación + Operaciones", startWeek: 6, endWeek: 13, status: "cct",
+        deliverables: ["Ciclo 6+2 completo", "Franco, permutas, bandas", "Acta conformidad"],
+        exit: "Ciclo 1 cerrado sin bloqueantes CCT." },
+      { id: "t5", module: "SUPERVISION", title: "Supervisión: móvil, visitas, consignas, libro", owner: "Supervisores + Sistemas", startWeek: 7, endWeek: 14, status: "build",
+        deliverables: ["Tablero móvil", "Libro de guardia y auditorías", "RFZ/TURA manual"],
+        exit: "Supervisores operan desde celular." },
+      { id: "t6", module: "PLANNING", title: "Planificación: ampliar oleada 1 → ~40 obj", owner: "Planificación + Sistemas", startWeek: 10, endWeek: 17, status: "build",
+        deliverables: ["Objetivos prioritarios", "Cobertura SLA", "IA solo donde ciclo 1 estable"],
+        exit: "Oleada 1 ampliada publicada mes a mes." },
+      { id: "t7", module: "TRANSVERSAL", title: "Ciclo CCT 2 — ampliado + supervisión", owner: "Planificación + Ops + Supervisión", startWeek: 14, endWeek: 22, status: "cct",
+        deliverables: ["2º ciclo 6+2", "Conciliación plan vs ops vs visitas", "Acta aceptación"],
+        exit: "Dos ciclos CCT completos; listo para RRHH y liquidación." },
+      { id: "t8", module: "RRHH", title: "RRHH: legajos, ausentismo, licencias", owner: "RRHH + Sistemas", startWeek: 16, endWeek: 22, status: "build",
+        deliverables: ["Legajos normalizados", "Licencias y certificados", "Impacto en planificación"],
+        exit: "RRHH integrado sin romper circuitos validados." },
+      { id: "t9", module: "LIQUIDACION", title: "API Liquidación: horas y presentismo", owner: "Sistemas + Administración", startWeek: 21, endWeek: 25, status: "build",
+        deliverables: ["Contrato API", "Reglas horas CCT", "Reconciliación 2 ciclos"],
+        exit: "Datos consistentes con reportes COSP." },
+      { id: "t10", module: "PREFACTURA", title: "Prefactura: SLA, refuerzos, desvíos", owner: "Administración + Comercial", startWeek: 22, endWeek: 26, status: "build",
+        deliverables: ["Base facturable SLA", "RFZ/TURA/adicionales", "Reporte mensual"],
+        exit: "Prefactura conciliada con Operaciones y Servicios." },
+      { id: "t11", module: "TRANSVERSAL", title: "UAT integral pre go-live", owner: "Usuarios clave + Sistemas", startWeek: 26, endWeek: 27, status: "pilot",
+        deliverables: ["Prueba punta a punta", "Manuales por rol", "Incidentes priorizados"],
+        exit: "Aprobación referentes de cada área." },
+      { id: "t12", module: "TRANSVERSAL", title: "Go-live oleada 1 (~40 obj)", owner: "Dirección + Sistemas", startWeek: 28, endWeek: 28, status: "go-live",
+        deliverables: [`Salida ~${OBJ_OLEADA1} obj`, "Handover a mesa de control", "Priorización clientes oleada 2"],
+        exit: "Oleada 1 estable; inicia expansión a 96 objetivos." },
+      { id: "t13", module: "TRANSVERSAL", title: "Mesa control oleada 1 (30 días)", owner: "Dirección + Operaciones + Sistemas", startWeek: 29, endWeek: 32, status: "pilot",
+        deliverables: ["Incidentes P1/P2 oleada 1", "Ajustes operativos y capacitación", "Go/no-go oleada 2"],
+        exit: "Operación oleada 1 estable; equipo listo para escalar." },
+      { id: "t14", module: "PLANNING", title: "Planificación oleada 2 → 96 obj (~56 restantes)", owner: "Planificación + Sistemas", startWeek: 31, endWeek: 38, status: "build",
+        deliverables: ["17 clientes / ~56 objetivos pendientes", "Publicación por tandas mensuales", "Reuso reglas CCT ya validadas"],
+        exit: "100% de los 96 objetivos publicados en planificación." },
+      { id: "t15", module: "OPERATIONS", title: "Ops + Supervisión escala oleada 2", owner: "Operaciones + Supervisión + Sistemas", startWeek: 35, endWeek: 41, status: "build",
+        deliverables: ["Monitor multi-oleada", "Supervisores por zona", "SLA, consignas y libro en objetivos nuevos"],
+        exit: "Operaciones y supervisión cubren todo el universo pendiente." },
+      { id: "t16", module: "TRANSVERSAL", title: "UAT oleada 2 pre salida total", owner: "Usuarios clave + Sistemas", startWeek: 40, endWeek: 41, status: "pilot",
+        deliverables: ["Smoke por cliente nuevo", "Muestra liquidación/prefactura", "Capacitación referentes por zona"],
+        exit: "Aprobación dirección para salida de los 96 objetivos." },
+      { id: "t17", module: "TRANSVERSAL", title: "Go-live oleada 2 + cierre 96 obj", owner: "Dirección + Sistemas", startWeek: 42, endWeek: 42, status: "go-live",
+        deliverables: [`Salida ~${OBJ_OLEADA2} obj restantes`, `${OBJ_TOTAL} objetivos en COSP`, "Mesa control final 30 días"],
+        exit: "Universo completo operando; programa de puesta en marcha cerrado." },
+    ];
+
+    let tasks = loadTasks();
+    let sortMode = loadSortMode();
+    let manualOrder = loadManualOrder();
+    let dragState = null;
+    let rowDragState = null;
+    const dragTip = document.getElementById("dragTip");
+
+    function defaultTaskIndex(id) {
+      return defaultTasks.findIndex(t => t.id === id);
+    }
+
+    function loadSortMode() {
+      try {
+        const v = localStorage.getItem(SORT_KEY);
+        if (v === "start" || v === "end" || v === "module" || v === "manual" || v === "original") return v;
+      } catch { /* ignore */ }
+      return "original";
+    }
+
+    function loadManualOrder() {
+      try {
+        const raw = localStorage.getItem(ORDER_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch { return []; }
+    }
+
+    function saveViewPrefs() {
+      localStorage.setItem(SORT_KEY, sortMode);
+      if (sortMode === "manual") {
+        localStorage.setItem(ORDER_KEY, JSON.stringify(manualOrder));
+      }
+    }
+
+    function getOrderedTasks() {
+      if (sortMode === "start") {
+        return [...tasks].sort((a, b) =>
+          a.startWeek - b.startWeek || a.endWeek - b.endWeek || defaultTaskIndex(a.id) - defaultTaskIndex(b.id));
+      }
+      if (sortMode === "end") {
+        return [...tasks].sort((a, b) =>
+          a.endWeek - b.endWeek || a.startWeek - b.startWeek || defaultTaskIndex(a.id) - defaultTaskIndex(b.id));
+      }
+      if (sortMode === "module") {
+        return [...tasks].sort((a, b) => {
+          const byModule = moduleLabels[a.module].localeCompare(moduleLabels[b.module], "es");
+          if (byModule !== 0) return byModule;
+          return a.startWeek - b.startWeek || defaultTaskIndex(a.id) - defaultTaskIndex(b.id);
+        });
+      }
+      if (sortMode === "manual") {
+        const ids = manualOrder.length === tasks.length
+          ? manualOrder
+          : defaultTasks.map(t => t.id);
+        return ids.map(id => tasks.find(t => t.id === id)).filter(Boolean);
+      }
+      return defaultTasks.map(dt => tasks.find(t => t.id === dt.id)).filter(Boolean);
+    }
+
+    function loadTasks() {
+      try {
+        const base = JSON.parse(JSON.stringify(defaultTasks));
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return base;
+        const saved = JSON.parse(raw);
+        if (!Array.isArray(saved)) return base;
+        saved.forEach(s => {
+          const t = base.find(x => x.id === s.id);
+          if (t && s.startWeek && s.endWeek) {
+            t.startWeek = s.startWeek;
+            t.endWeek = s.endWeek;
+          }
+        });
+        return base;
+      } catch { return JSON.parse(JSON.stringify(defaultTasks)); }
+    }
+
+    function saveTasks() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks.map(t => ({
+        id: t.id, startWeek: t.startWeek, endWeek: t.endWeek,
+      }))));
+    }
+
+    function fmtDateObj(d) {
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      return `${dd}/${mm}/${d.getFullYear()}`;
+    }
+
+    function weekDate(week) {
+      const d = new Date(PLAN_START);
+      d.setDate(d.getDate() + (week - 1) * 7);
+      return fmtDateObj(d);
+    }
+
+    function milestoneDate(def) {
+      const task = tasks.find(t => t.id === def.taskId);
+      if (!task) return "—";
+      if (def.offsetDays) {
+        const d = new Date(PLAN_START);
+        d.setDate(d.getDate() + (task.startWeek - 1) * 7 + def.offsetDays);
+        return fmtDateObj(d);
+      }
+      const week = def.field === "end" ? task.endWeek : task.startWeek;
+      return weekDate(week);
+    }
+
+    function renderWaves() {
+      const html = waveDefs.map(w => {
+        const startT = tasks.find(t => t.id === w.startTask);
+        const endT = tasks.find(t => t.id === w.endTask);
+        const weeks = startT && endT
+          ? (w.startTask === w.endTask
+            ? weekDate(startT.startWeek)
+            : `${weekDate(startT.startWeek)} – ${weekDate(endT.endWeek)}`)
+          : "—";
+        return `<div class="wave pdf-avoid-break"><strong>${w.title} · ${weeks}</strong>
+          <div class="meta">${w.scope}</div><div style="font-size:0.75rem">${w.goal}</div></div>`;
+      }).join("");
+      document.getElementById("waves").innerHTML = html;
+    }
+
+    function renderMilestones() {
+      const rows = milestoneDefs.map(m => {
+        const date = milestoneDate(m);
+        return `<tr class="pdf-avoid-break" data-milestone-task="${m.taskId}"><td><strong>${date}</strong></td><td>${m.label}</td></tr>`;
+      }).join("");
+      document.getElementById("milestones").innerHTML = rows;
+    }
+
+    function weekRange(a, b) {
+      return `${weekDate(a)} → ${weekDate(b)}`;
+    }
+
+    function weekCount(a, b) {
+      return b - a + 1;
+    }
+
+    function pixelToWeek(trackEl, clientX) {
+      const rect = trackEl.getBoundingClientRect();
+      const rel = Math.max(0, Math.min(rect.width, clientX - rect.left));
+      const week = Math.floor((rel / rect.width) * TOTAL_WEEKS) + 1;
+      return Math.max(1, Math.min(TOTAL_WEEKS, week));
+    }
+
+    function barStyle(t) {
+      const left = ((t.startWeek - 1) / TOTAL_WEEKS) * 100;
+      const width = ((t.endWeek - t.startWeek + 1) / TOTAL_WEEKS) * 100;
+      return `left:${left}%;width:${width}%`;
+    }
+
+    function showTip(x, y, text) {
+      dragTip.textContent = text;
+      dragTip.style.display = "block";
+      dragTip.style.left = `${x + 12}px`;
+      dragTip.style.top = `${y + 12}px`;
+    }
+
+    function hideTip() { dragTip.style.display = "none"; }
+
+    function updateGoLiveStat() {
+      const gl1 = tasks.find(t => t.id === "t12");
+      const gl2 = tasks.find(t => t.id === "t17");
+      if (gl1) {
+        const d1 = weekDate(gl1.startWeek);
+        document.getElementById("statGoLive1").textContent = d1.slice(0, 8);
+        document.getElementById("statGoLive1Hint").textContent = `Sem. ${gl1.startWeek} · ~${OBJ_OLEADA1} obj`;
+      }
+      if (gl2) {
+        const d2 = weekDate(gl2.startWeek);
+        document.getElementById("statGoLive2").textContent = d2.slice(0, 8);
+        document.getElementById("statGoLive2Hint").textContent = `Sem. ${gl2.startWeek} · +${OBJ_OLEADA2} obj`;
+      }
+      if (gl1 && gl2) {
+        document.getElementById("subtitle").innerHTML =
+          `${TOTAL_WEEKS} semanas · Inicio 07/07/2026 · Oleada 1: <strong>${weekDate(gl1.startWeek)}</strong> · 96 obj: <strong>${weekDate(gl2.startWeek)}</strong>`;
+      }
+    }
+
+    function renderGantt() {
+      const ganttEl = document.getElementById("gantt");
+      ganttEl.classList.toggle("manual-sort", sortMode === "manual");
+
+      const monthMarkers = [
+        { label: "Jul 26", week: 1 }, { label: "Ago", week: 5 }, { label: "Sep", week: 9 },
+        { label: "Oct", week: 14 }, { label: "Nov", week: 18 }, { label: "Dic", week: 22 },
+        { label: "Ene 27", week: 27 }, { label: "Feb", week: 31 }, { label: "Mar", week: 36 }, { label: "Abr", week: 41 },
+      ];
+      let html = '<div class="gantt-months"><div></div><div class="track">';
+      monthMarkers.forEach(m => {
+        html += `<span style="left:${((m.week - 1) / TOTAL_WEEKS) * 100}%">${m.label}</span>`;
+      });
+      html += '</div></div>';
+
+      getOrderedTasks().forEach(t => {
+        html += `<div class="gantt-row pdf-avoid-break" data-task-id="${t.id}">
+          <div class="mod-label">
+            <span class="row-grip" title="${sortMode === "manual" ? "Arrastrar para reordenar fila" : "Activá orden Manual para reordenar"}">⋮⋮</span>
+            <div class="label-text">
+              <div class="name">${moduleLabels[t.module]}</div>
+              <div class="dates" id="dates-${t.id}">${weekRange(t.startWeek, t.endWeek)} · ${weekCount(t.startWeek, t.endWeek)} sem</div>
+            </div>
+          </div>
+          <div class="gantt-track" data-track="${t.id}">
+            <div class="bar ${t.status}" data-id="${t.id}" style="${barStyle(t)}">
+              <div class="handle handle-l" data-handle="l"></div>
+              <span class="bar-label">${t.title}</span>
+              <div class="handle handle-r" data-handle="r"></div>
+            </div>
+          </div>
+        </div>`;
+      });
+      ganttEl.innerHTML = html;
+      bindBarEvents();
+      bindRowReorder();
+      updateGoLiveStat();
+    }
+
+    function renderTasksPanel() {
+      document.getElementById("tasks").innerHTML = getOrderedTasks().map(t => `
+        <div class="task pdf-avoid-break" id="panel-${t.id}">
+          <span class="pill ${t.status}">${statusLabels[t.status]}</span>
+          <h3>${moduleLabels[t.module]}</h3>
+          <div class="title">${t.title}</div>
+          <p><strong>Responsable:</strong> ${t.owner}</p>
+          <p><strong>Ventana:</strong> <span class="ventana" id="ventana-${t.id}">${weekRange(t.startWeek, t.endWeek)} (${weekCount(t.startWeek, t.endWeek)} sem)</span></p>
+          <p><strong>Criterio de salida:</strong> ${t.exit}</p>
+          <ul>${t.deliverables.map(d => `<li>${d}</li>`).join("")}</ul>
+        </div>`).join("");
+    }
+
+    function updateTaskUI(task) {
+      const bar = document.querySelector(`.bar[data-id="${task.id}"]`);
+      if (bar) bar.style.cssText = barStyle(task);
+      const datesEl = document.getElementById(`dates-${task.id}`);
+      if (datesEl) datesEl.textContent = `${weekRange(task.startWeek, task.endWeek)} · ${weekCount(task.startWeek, task.endWeek)} sem`;
+      const ventanaEl = document.getElementById(`ventana-${task.id}`);
+      if (ventanaEl) ventanaEl.textContent = `${weekRange(task.startWeek, task.endWeek)} (${weekCount(task.startWeek, task.endWeek)} sem)`;
+      updateGoLiveStat();
+      renderMilestones();
+      renderWaves();
+    }
+
+    function bindRowReorder() {
+      if (sortMode !== "manual") return;
+      document.querySelectorAll(".gantt-row .row-grip").forEach(grip => {
+        grip.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const row = grip.closest(".gantt-row");
+          if (!row) return;
+          rowDragState = { id: row.dataset.taskId, rowEl: row };
+          row.classList.add("row-dragging");
+          grip.setPointerCapture(e.pointerId);
+        });
+        grip.addEventListener("pointermove", onRowPointerMove);
+        grip.addEventListener("pointerup", onRowPointerUp);
+        grip.addEventListener("pointercancel", onRowPointerUp);
+      });
+    }
+
+    function onRowPointerMove(e) {
+      if (!rowDragState) return;
+      document.querySelectorAll(".gantt-row:not(.row-dragging)").forEach(r => r.classList.remove("row-drag-over"));
+      const target = [...document.querySelectorAll(".gantt-row:not(.row-dragging)")].find(r => {
+        const rect = r.getBoundingClientRect();
+        return e.clientY >= rect.top && e.clientY <= rect.bottom;
+      });
+      if (target) target.classList.add("row-drag-over");
+    }
+
+    function onRowPointerUp(e) {
+      if (!rowDragState) return;
+      rowDragState.rowEl.classList.remove("row-dragging");
+      document.querySelectorAll(".gantt-row").forEach(r => r.classList.remove("row-drag-over"));
+
+      const target = [...document.querySelectorAll(".gantt-row")].find(r => {
+        if (r === rowDragState.rowEl) return false;
+        const rect = r.getBoundingClientRect();
+        return e.clientY >= rect.top && e.clientY <= rect.bottom;
+      });
+
+      if (target && target.dataset.taskId !== rowDragState.id) {
+        const order = getOrderedTasks().map(t => t.id);
+        const fromIdx = order.indexOf(rowDragState.id);
+        const toIdx = order.indexOf(target.dataset.taskId);
+        if (fromIdx >= 0 && toIdx >= 0) {
+          order.splice(fromIdx, 1);
+          order.splice(toIdx, 0, rowDragState.id);
+          manualOrder = order;
+          saveViewPrefs();
+          renderGantt();
+          renderTasksPanel();
+        }
+      }
+      rowDragState = null;
+    }
+
+    function bindBarEvents() {
+      document.querySelectorAll(".bar").forEach(barEl => {
+        const handleL = barEl.querySelector(".handle-l");
+        const handleR = barEl.querySelector(".handle-r");
+        const trackEl = barEl.parentElement;
+
+        barEl.addEventListener("pointerdown", (e) => {
+          if (e.target.classList.contains("handle")) return;
+          e.preventDefault();
+          const id = barEl.dataset.id;
+          const task = tasks.find(t => t.id === id);
+          dragState = {
+            mode: "move", id, trackEl, barEl,
+            startX: e.clientX,
+            origStart: task.startWeek,
+            origEnd: task.endWeek,
+            duration: task.endWeek - task.startWeek + 1,
+          };
+          barEl.classList.add("dragging");
+          barEl.setPointerCapture(e.pointerId);
+        });
+
+        handleL.addEventListener("pointerdown", (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const id = barEl.dataset.id;
+          const task = tasks.find(t => t.id === id);
+          dragState = { mode: "resize-l", id, trackEl, barEl, origStart: task.startWeek, origEnd: task.endWeek };
+          barEl.classList.add("resizing");
+          handleL.setPointerCapture(e.pointerId);
+        });
+
+        handleR.addEventListener("pointerdown", (e) => {
+          e.preventDefault(); e.stopPropagation();
+          const id = barEl.dataset.id;
+          const task = tasks.find(t => t.id === id);
+          dragState = { mode: "resize-r", id, trackEl, barEl, origStart: task.startWeek, origEnd: task.endWeek };
+          barEl.classList.add("resizing");
+          handleR.setPointerCapture(e.pointerId);
+        });
+
+        barEl.addEventListener("pointermove", onPointerMove);
+        barEl.addEventListener("pointerup", onPointerUp);
+        barEl.addEventListener("pointercancel", onPointerUp);
+        handleL.addEventListener("pointermove", onPointerMove);
+        handleL.addEventListener("pointerup", onPointerUp);
+        handleR.addEventListener("pointermove", onPointerMove);
+        handleR.addEventListener("pointerup", onPointerUp);
+      });
+    }
+
+    function onPointerMove(e) {
+      if (!dragState) return;
+      const task = tasks.find(t => t.id === dragState.id);
+      if (!task) return;
+      const week = pixelToWeek(dragState.trackEl, e.clientX);
+
+      if (dragState.mode === "move") {
+        let newStart = week - Math.floor(dragState.duration / 2);
+        newStart = Math.max(1, Math.min(TOTAL_WEEKS - dragState.duration + 1, newStart));
+        if (newStart + dragState.duration - 1 > TOTAL_WEEKS) newStart = TOTAL_WEEKS - dragState.duration + 1;
+        task.startWeek = newStart;
+        task.endWeek = newStart + dragState.duration - 1;
+      } else if (dragState.mode === "resize-l") {
+        task.startWeek = Math.max(1, Math.min(week, task.endWeek));
+      } else if (dragState.mode === "resize-r") {
+        task.endWeek = Math.min(TOTAL_WEEKS, Math.max(week, task.startWeek));
+      }
+
+      updateTaskUI(task);
+      showTip(e.clientX, e.clientY, `${weekRange(task.startWeek, task.endWeek)} · ${weekCount(task.startWeek, task.endWeek)} sem`);
+    }
+
+    function onPointerUp() {
+      if (!dragState) return;
+      dragState.barEl.classList.remove("dragging", "resizing");
+      saveTasks();
+      dragState = null;
+      hideTip();
+      if (sortMode === "start" || sortMode === "end" || sortMode === "module") {
+        renderGantt();
+        renderTasksPanel();
+      }
+    }
+
+    document.getElementById("ganttSort").value = sortMode;
+    document.getElementById("ganttSort").addEventListener("change", (e) => {
+      const prevSort = sortMode;
+      sortMode = e.target.value;
+      if (sortMode === "manual") {
+        sortMode = prevSort;
+        manualOrder = getOrderedTasks().map(t => t.id);
+        sortMode = "manual";
+      }
+      saveViewPrefs();
+      renderGantt();
+      renderTasksPanel();
+    });
+
+    document.getElementById("btnReset").addEventListener("click", () => {
+      if (!confirm("¿Restaurar el plan original? Se pierden los cambios de fechas y orden.")) return;
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(SORT_KEY);
+      localStorage.removeItem(ORDER_KEY);
+      tasks = JSON.parse(JSON.stringify(defaultTasks));
+      sortMode = "original";
+      manualOrder = [];
+      document.getElementById("ganttSort").value = sortMode;
+      renderGantt();
+      renderTasksPanel();
+      renderMilestones();
+      renderWaves();
+    });
+
+    function updatePdfFooter() {
+      const now = new Date();
+      const hora = now.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+      document.getElementById("pdfFooter").textContent =
+        `Documento: ${fmtDateObj(now)} ${hora} · Grupo Bacar — COSP · Puesta en marcha`;
+    }
+
+    function preparePdfExport() {
+      document.querySelectorAll("#pdfRoot .card, #pdfRoot .task, #pdfRoot .wave, #pdfRoot .stat, #pdfRoot .gantt-row, #milestones tr")
+        .forEach(el => el.classList.add("pdf-avoid-break"));
+    }
+
+    async function exportPdf() {
+      const btn = document.getElementById("btnExportPdf");
+      const label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Generando PDF…";
+      updatePdfFooter();
+      preparePdfExport();
+      document.body.classList.add("exporting-pdf");
+
+      const filename = `COSP-Gantt-Puesta-Marcha-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const root = document.getElementById("pdfRoot");
+      const prevRootWidth = root.style.width;
+      const prevRootMax = root.style.maxWidth;
+
+      const PDF_WIDTH_PX = 1580;
+      root.style.width = `${PDF_WIDTH_PX}px`;
+      root.style.maxWidth = `${PDF_WIDTH_PX}px`;
+
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+      const opt = {
+        margin: [8, 10, 10, 10],
+        filename,
+        image: { type: "jpeg", quality: 0.94 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          scrollX: 0,
+          scrollY: 0,
+          width: PDF_WIDTH_PX,
+          windowWidth: PDF_WIDTH_PX,
+        },
+        jsPDF: { unit: "mm", format: [420, 297], orientation: "l" },
+        pagebreak: {
+          mode: ["avoid-all", "css", "legacy"],
+          avoid: [
+            ".pdf-avoid-break",
+            ".task",
+            ".wave",
+            ".stat",
+            ".gantt-row",
+            "tr",
+            "thead",
+            "tbody",
+            "h1",
+            "h2",
+            "ul",
+            "li",
+            "p",
+            ".legend",
+          ],
+        },
+      };
+
+      try {
+        if (typeof html2pdf === "undefined") {
+          throw new Error("html2pdf no cargó");
+        }
+        await html2pdf().set(opt).from(root).save();
+      } catch {
+        const usarPrint = confirm(
+          "No se pudo generar el PDF automáticamente.\n\n¿Abrir impresión apaisada (Guardar como PDF)?"
+        );
+        if (usarPrint) window.print();
+      } finally {
+        root.style.width = prevRootWidth;
+        root.style.maxWidth = prevRootMax;
+        document.body.classList.remove("exporting-pdf");
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    }
+
+    document.getElementById("btnExportPdf").addEventListener("click", exportPdf);
+
+    document.getElementById("btnExport").addEventListener("click", () => {
+      const exportData = {
+        generado: new Date().toISOString(),
+        hitos: milestoneDefs.map(m => ({ fecha: milestoneDate(m), hito: m.label, taskId: m.taskId })),
+        tareas: tasks.map(t => ({
+        modulo: moduleLabels[t.module],
+        titulo: t.title,
+        inicio: weekDate(t.startWeek),
+        fin: weekDate(t.endWeek),
+        semanas: weekCount(t.startWeek, t.endWeek),
+        startWeek: t.startWeek,
+        endWeek: t.endWeek,
+      })),
+      };
+      const json = JSON.stringify(exportData, null, 2);
+      navigator.clipboard.writeText(json).then(() => {
+        alert("Fechas copiadas al portapapeles (JSON).");
+      }).catch(() => {
+        prompt("Copiá este JSON:", json);
+      });
+    });
+
+    renderGantt();
+    renderTasksPanel();
+    renderMilestones();
+    renderWaves();
+    updatePdfFooter();
+  </script>
+</body>
+</html>

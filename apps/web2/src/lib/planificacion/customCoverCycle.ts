@@ -1,8 +1,19 @@
-import type { V2PositionDef } from './autoScheduleEngineV2';
-import { isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV2';
+import type { V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
+import { effectiveShiftsForPositionDay, isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV2';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const WEEKDAY_LETTERS = ['L', 'M', 'X', 'J', 'V'] as const;
+
+export type CustomRestCode = 'F' | 'FF' | 'RET';
+
+/** Jornada máxima entre turnos habilitados del puesto custom. */
+export function customCoverMaxShiftHours(pos: V2PositionDef): number {
+    const working = (pos.shifts || []).filter(
+        (s) => !FRANCO_CODES.has(String(s.code ?? '').toUpperCase()),
+    );
+    if (working.length === 0) return 8;
+    return working.reduce((m, s) => Math.max(m, Number(s.hours) || 8), 0);
+}
 
 /** Puesto custom que no opera sábado/domingo (ej. DIRECTORIO, Museo L–V). */
 export function isFixedWeekdayCustomPosition(pos: V2PositionDef): boolean {
@@ -22,17 +33,109 @@ export function fixedWeekdayCustomUsesModo12(pos: V2PositionDef): boolean {
     return hrs >= 11;
 }
 
-/** Franco de fin de semana cuando el puesto no opera ese día. */
-export function francoCodeForPositionDay(pos: V2PositionDef, dayLetter: string): 'F' | 'FF' {
-    if (!positionIsActiveOn(pos, dayLetter)) return 'FF';
-    return 'F';
+/**
+ * Descanso en días sin servicio del puesto custom L–V.
+ * - Sábado jornada 8h: RET (stand-by; si no es llamado, operaciones lo pasa a FF al cerrar el turno).
+ * - Domingo (y sábado >8h): F (franco planificado; si trabaja → FT).
+ * No se planifica FF en fin de semana: FF es conversión operativa post-RET.
+ */
+export function francoCodeForPositionDay(pos: V2PositionDef, dayLetter: string): CustomRestCode {
+    if (positionIsActiveOn(pos, dayLetter)) return 'F';
+    if (isFixedWeekdayCustomPosition(pos)) {
+        if (dayLetter === 'D') return 'F';
+        if (dayLetter === 'S' && customCoverMaxShiftHours(pos) <= 8) return 'RET';
+        return 'F';
+    }
+    return 'FF';
+}
+
+/** Puesto custom asignado al guardia (planificacionDotacion o defaultPositionByEmp). */
+export function resolveCustomCoverEmployeePosition(
+    empId: string,
+    positions: V2PositionDef[],
+    defaultPositionByEmp?: Record<string, string>,
+): V2PositionDef | null {
+    const posName = defaultPositionByEmp?.[empId];
+    if (!posName) return null;
+    const pos = positions.find((p) => p.positionName === posName && isCustomCoverPosition(p));
+    return pos ?? null;
+}
+
+/**
+ * Código de descanso planificado para custom en día sin servicio (ej. sábado RET, domingo F).
+ * null si el día es laboral del puesto o el guardia no es custom.
+ */
+export function plannedCustomCoverRestCode(
+    empId: string,
+    dayLetter: string,
+    positions: V2PositionDef[],
+    defaultPositionByEmp?: Record<string, string>,
+): CustomRestCode | null {
+    const pos = resolveCustomCoverEmployeePosition(empId, positions, defaultPositionByEmp);
+    if (!pos) return null;
+    if (positionIsActiveOn(pos, dayLetter)) return null;
+    return francoCodeForPositionDay(pos, dayLetter);
+}
+
+export function isPlannedCustomCoverRetAssignment(
+    empId: string,
+    dayLetter: string,
+    positions: V2PositionDef[],
+    defaultPositionByEmp?: Record<string, string>,
+): boolean {
+    return plannedCustomCoverRestCode(empId, dayLetter, positions, defaultPositionByEmp) === 'RET';
 }
 
 /**
  * Pax en servicio simultáneo del puesto custom (lo que pide el SLA por día).
+ * Con varias bandas (M + M2…), es qty × bandas en el mismo día operativo.
+ */
+export function customCoverSimultaneousPax(pos: V2PositionDef): number {
+    return customCoverDailyPax(pos) * customCoverDistinctBandCount(pos);
+}
+
+/**
+ * Pax por turno/banda (campo qty del SLA).
  */
 export function customCoverDailyPax(pos: V2PositionDef): number {
     return Math.max(1, Number(pos.qty) || 1);
+}
+
+/** Cantidad de bandas/turnos distintos habilitados en el puesto (ej. M + M2 → 2). */
+export function customCoverDistinctBandCount(pos: V2PositionDef): number {
+    const working = (pos.shifts || []).filter(
+        (s) => !FRANCO_CODES.has(String(s.code ?? '').toUpperCase()),
+    );
+    const codes = new Set(
+        working.map((s) => String(s.code ?? '').toUpperCase()).filter(Boolean),
+    );
+    return Math.max(1, codes.size);
+}
+
+/** Bandas activas del puesto custom en un día (respeta ciclo 8h vs 12h). */
+export function customCoverBandsForDay(
+    pos: V2PositionDef,
+    dayLetter: string,
+    autoCycles?: string[],
+    dateStr?: string,
+): V2ShiftDef[] {
+    if (!isCustomCoverPosition(pos)) return [];
+    return effectiveShiftsForPositionDay(pos, dayLetter, autoCycles, dateStr);
+}
+
+/**
+ * Slots SLA a cubrir en un día operativo: qty × cada banda activa (ej. P1 M + P1 M2 con pax 1 → 2).
+ */
+export function customCoverSlotsRequiredOnDay(
+    pos: V2PositionDef,
+    dayLetter: string,
+    autoCycles?: string[],
+    dateStr?: string,
+): number {
+    const qty = customCoverDailyPax(pos);
+    const bands = customCoverBandsForDay(pos, dayLetter, autoCycles, dateStr);
+    if (bands.length === 0) return 0;
+    return qty * bands.length;
 }
 
 /**
@@ -43,7 +146,10 @@ export function customCoverDailyPax(pos: V2PositionDef): number {
  */
 export function customCoverRequiredHeadcount(pos: V2PositionDef): number {
     const qty = customCoverDailyPax(pos);
-    if (!customPositionOperatesAllWeek(pos)) return qty;
+    const bandCount = customCoverDistinctBandCount(pos);
+    if (!customPositionOperatesAllWeek(pos)) {
+        return bandCount > 1 ? qty * bandCount : qty;
+    }
     const { workDays, cycleLen } = customCoverWeeklyWorkRest(pos);
     return Math.ceil((qty * cycleLen) / workDays);
 }
@@ -137,9 +243,21 @@ export function buildCustomCycleWorkDays(params: BuildCustomCycleWorkDaysParams)
     if (!isCustomCoverPosition(pos)) return set;
 
     if (!customPositionOperatesAllWeek(pos)) {
-        const qty = customCoverDailyPax(pos);
+        const simultaneousPax = customCoverSimultaneousPax(pos);
+        const bandCount = customCoverDistinctBandCount(pos);
         const headcount = groupMemberIds.length;
         const idxInGroup = Math.max(0, groupMemberIds.indexOf(empId));
+
+        // Multi-banda fija L–V (ej. Villa María: M + M2, 1 pax c/u): todos los guardias trabajan cada día hábil.
+        if (bandCount > 1 && headcount <= simultaneousPax) {
+            daysInMonth.forEach((day) => {
+                const dateStr = getDateKey(day);
+                const dayLetter = getDayLetter(dateStr);
+                if (positionIsActiveOn(pos, dayLetter)) set.add(dateStr);
+            });
+            return set;
+        }
+
         let operationalDayIndex = 0;
 
         daysInMonth.forEach((day) => {
@@ -147,7 +265,7 @@ export function buildCustomCycleWorkDays(params: BuildCustomCycleWorkDaysParams)
             const dayLetter = getDayLetter(dateStr);
             if (!positionIsActiveOn(pos, dayLetter)) return;
 
-            if (headcount <= qty) {
+            if (headcount <= simultaneousPax) {
                 set.add(dateStr);
                 return;
             }
@@ -155,7 +273,7 @@ export function buildCustomCycleWorkDays(params: BuildCustomCycleWorkDaysParams)
             const workers = pickBalancedCustomWorkers(
                 operationalDayIndex,
                 headcount,
-                qty,
+                simultaneousPax,
                 WEEKDAY_LETTERS.length,
                 WEEKDAY_LETTERS.length,
             );
@@ -169,7 +287,8 @@ export function buildCustomCycleWorkDays(params: BuildCustomCycleWorkDaysParams)
     const idxInGroup = Math.max(0, groupMemberIds.indexOf(empId));
     const headcount = groupMemberIds.length;
     const qty = customCoverDailyPax(pos);
-    const useBalancedRoster = headcount > qty;
+    const simultaneousPax = customCoverSimultaneousPax(pos);
+    const useBalancedRoster = headcount > simultaneousPax;
 
     daysInMonth.forEach((day, di) => {
         const dateStr = getDateKey(day);
@@ -178,7 +297,7 @@ export function buildCustomCycleWorkDays(params: BuildCustomCycleWorkDaysParams)
         const absDay = monthStartGlobalDayIndex + di;
 
         if (useBalancedRoster) {
-            const workers = pickBalancedCustomWorkers(absDay, headcount, qty, workDays, cycleLen);
+            const workers = pickBalancedCustomWorkers(absDay, headcount, simultaneousPax, workDays, cycleLen);
             if (workers.includes(idxInGroup)) set.add(dateStr);
             return;
         }

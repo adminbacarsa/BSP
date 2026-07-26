@@ -1,5 +1,7 @@
 import { slaCoversCalendarMonth, toYyyyMmDd } from '@/lib/firestoreDates';
 import { filterSlaRowsByEmpresa } from '@/lib/multiempresa';
+import { calculateSlaHoursForMonth } from '@/lib/servicios/slaHoursCalculator';
+import type { ServicePosition } from '@/services/slaService';
 import {
   derivePlanningPositionActiveDays,
   formatPositionActiveDaysLabel,
@@ -390,4 +392,37 @@ export function excludedPositionsCellLabel(names: string[]): string {
 export function excludedPositionsTooltip(names: string[], dateStr: string): string {
   if (!names.length) return '';
   return `Sin servicio SLA (${planningPositionExclusionLabel(dateStr)}):\n${names.map((n) => `• ${n}`).join('\n')}`;
+}
+
+/**
+ * Horas SLA vendidas del mes visible en planificación / Auto Lab.
+ * Prioriza desglose por puestos/días (como «SLA sim.» en Servicios); totalMonthlyHours solo como fallback.
+ */
+export function resolvePlanningMonthSlaHours(
+  srv: {
+    positions?: unknown;
+    startDate?: unknown;
+    endDate?: unknown;
+    excludedDates?: string[];
+    totalMonthlyHours?: unknown;
+  } | null | undefined,
+  year: number,
+  month: number,
+): number {
+  const positions = (Array.isArray(srv?.positions) ? srv.positions : []) as ServicePosition[];
+  const startDate = toYyyyMmDd(srv?.startDate);
+  const endDate = toYyyyMmDd(srv?.endDate);
+  if (positions.length > 0 && startDate && endDate) {
+    const row = calculateSlaHoursForMonth(
+      positions,
+      startDate,
+      endDate,
+      srv?.excludedDates,
+      year,
+      month,
+    );
+    const calculated = Math.round(row.total);
+    if (calculated > 0) return calculated;
+  }
+  return Math.round(Number(srv?.totalMonthlyHours) || 0);
 }

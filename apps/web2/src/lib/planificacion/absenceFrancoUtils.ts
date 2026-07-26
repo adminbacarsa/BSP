@@ -5,6 +5,7 @@
 
 import type { V2Assignment, V2EngineContext, V2GenerateStats } from './autoScheduleEngineV2';
 import { isCustomCoverPosition } from './autoScheduleEngineV2';
+import { isPlannedCustomCoverRetAssignment, plannedCustomCoverRestCode } from './customCoverCycle';
 import { isExternalRetEmpId } from './externalRetCoverage';
 import { isLabSyntheticEmpId } from './objectiveHeadcount';
 import { CYCLE_24_MTN } from './fixedBandFloaterScheduleEngine';
@@ -95,15 +96,28 @@ export function pickRetDesignee(
     return undefined;
 }
 
-/** RET solo en el designado; el resto pasa a Franco. */
+/** RET solo en el designado; el resto pasa a Franco (salvo RET planificado custom L–V, ej. sábado stand-by). */
 export function consolidateRetToDesignee(
     assignments: V2Assignment[],
     designeeId: string | undefined,
+    ctx?: Pick<V2EngineContext, 'positions' | 'defaultPositionByEmp' | 'getDayLetter'>,
 ): V2Assignment[] {
+    const preservePlannedCustomRet = (a: V2Assignment): boolean => {
+        if (!ctx) return false;
+        const dayLetter = ctx.getDayLetter(a.dateStr);
+        return isPlannedCustomCoverRetAssignment(
+            a.empId,
+            dayLetter,
+            ctx.positions,
+            ctx.defaultPositionByEmp,
+        );
+    };
+
     if (!designeeId) {
         return assignments.map((a) => {
             if (String(a.code || '').toUpperCase() !== 'RET') return a;
             if (isExternalRetEmpId(a.empId)) return a;
+            if (preservePlannedCustomRet(a)) return a;
             return {
                 ...a,
                 code: 'F',
@@ -120,6 +134,7 @@ export function consolidateRetToDesignee(
         if (String(a.code || '').toUpperCase() !== 'RET') return a;
         if (isExternalRetEmpId(a.empId)) return a;
         if (a.empId === designeeId) return a;
+        if (preservePlannedCustomRet(a)) return a;
         return {
             ...a,
             code: 'F',
@@ -274,15 +289,23 @@ export function fillEmptyCellsWithRet(
             }
 
             if (isCustomCoverEmployee(emp.id, ctx)) {
+                const dayLetter = ctx.getDayLetter(dateStr);
+                const restCode = plannedCustomCoverRestCode(
+                    emp.id,
+                    dayLetter,
+                    ctx.positions,
+                    ctx.defaultPositionByEmp,
+                ) ?? 'F';
                 result.push({
                     empId: emp.id,
                     dateStr,
                     positionName: ctx.defaultPositionByEmp?.[emp.id] || '',
-                    code: 'F',
-                    name: 'Franco',
+                    code: restCode,
+                    name: restCode === 'RET' ? 'Retén' : restCode === 'FF' ? 'Franco feriado' : 'Franco',
                     hours: 0,
                     startTime: '00:00',
-                    isFranco: true,
+                    isFranco: restCode === 'F' || restCode === 'FF',
+                    isReten: restCode === 'RET',
                 });
                 keys.add(k);
                 continue;
@@ -304,7 +327,7 @@ export function fillEmptyCellsWithRet(
         }
     }
 
-    return consolidateRetToDesignee(result, retDesignee);
+    return consolidateRetToDesignee(result, retDesignee, ctx);
 }
 
 function isPositionExcludedOnDate(

@@ -33,6 +33,7 @@ import {
 import type { AgreementRestConfig } from './restBetweenShifts';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
 import { rankReplacementCandidates } from './coverageCandidateRank';
+import { wisdomBandFromShiftCode } from './planningCoverageWisdom';
 
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9, RO: 10, MA: 9, ME: 12 };
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00', MA: '07:00', ME: '07:00' };
@@ -66,12 +67,17 @@ function sortGroupForReplacement(
     positionName: string,
     dateStr: string,
     hours: Map<string, number>,
+    shiftCode?: string,
 ): string[] {
+    const band = shiftCode ? wisdomBandFromShiftCode(shiftCode) : undefined;
     return rankReplacementCandidates(group, ctx, {
         positionName,
         dateStr,
         positionGroup: group,
         billableHours: hours,
+        coverageWisdom: ctx.coverageWisdom,
+        wisdomBand: band,
+        shiftCode,
     });
 }
 
@@ -245,7 +251,7 @@ function fixRestViolation(
     // 1. Buscar un compañero del grupo con RET/F ese día que pueda tomar el turno
     const group = siblings(positionName, stats);
     const hrsMap = billableHoursByEmp(assignments);
-    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap);
+    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap, shiftCode);
     for (const otherId of groupSorted) {
         if (otherId === empId) continue;
         const otherKey = `${otherId}__${dateStr}`;
@@ -359,7 +365,7 @@ function fixLicenseConflict(
     // Buscar reemplazo en el mismo grupo (RET/F)
     const group = siblings(positionName, stats);
     const hrsMap = billableHoursByEmp(assignments);
-    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap);
+    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap, shiftCode);
     for (const otherId of groupSorted) {
         if (otherId === empId) continue;
         const other = byKey.get(`${otherId}__${dateStr}`);
@@ -496,7 +502,7 @@ function fixUncoveredSlot(
     let filled = 0;
     const group = siblings(positionName, stats);
     const hrsMap = billableHoursByEmp(assignments);
-    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap);
+    const groupSorted = sortGroupForReplacement(group, ctx, positionName, dateStr, hrsMap, shiftCode);
 
     const tryFill = (otherId: string, prevCode: string): boolean => {
         if (!canTakeShift(otherId, dateStr, shiftCode, assignments, ctx, cfg)) return false;
@@ -551,7 +557,7 @@ function fixUncoveredSlot(
 
     if (filled < qtyMissing) {
         const objectivePool = ctx.employees.map((e) => e.id);
-        const extraSorted = sortGroupForReplacement(objectivePool, ctx, positionName, dateStr, hrsMap)
+        const extraSorted = sortGroupForReplacement(objectivePool, ctx, positionName, dateStr, hrsMap, shiftCode)
             .filter((id) => !group.includes(id));
         for (const otherId of extraSorted) {
             if (filled >= qtyMissing) break;

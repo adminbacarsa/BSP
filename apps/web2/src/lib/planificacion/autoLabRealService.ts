@@ -13,12 +13,18 @@ import {
     filterSlasForPlanningContext,
     pickSlaForPlanningMonth,
     planningMonthHasActiveSla,
+    resolvePlanningMonthSlaHours,
     type PlanningPositionRow,
 } from '@/lib/slaPlanningMatch';
-import { calculateSlaHoursForVigencia } from './autoLabServicePeriod';
-import { computeDailyStaffingModel } from './autoPlanningBrain';
+import { customCoverSimultaneousPax } from './customCoverCycle';
+import { isCustomCoverPosition } from './autoScheduleEngineV2';
+import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
 import { fetchPlanningMonthAbsences, fetchPlanningMonthShifts } from './loadPlanningMonthShifts';
-import type { PlanningAbsenceRecord } from './planningCoverageWisdom';
+import {
+    DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
+    fetchCoverageWisdomHistory,
+} from './fetchPlanningCoverageWisdomHistory';
+import type { PlanningAbsenceRecord, PlanningCoverageWisdom } from './planningCoverageWisdom';
 
 export const AUTO_LAB_REAL_CASE_ID = 'case-real-service';
 
@@ -33,6 +39,7 @@ export interface AutoLabRealServiceBundle {
     employeeSource: 'dotacion' | 'turnos' | 'mixed';
     slaLabel: string;
     absencesRrhh: PlanningAbsenceRecord[];
+    coverageWisdom?: PlanningCoverageWisdom | null;
 }
 
 function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
@@ -221,18 +228,23 @@ export async function loadAutoLabRealServiceBundle(params: {
         );
     }
 
-    const floorHeads = positions.reduce((s, p) => s + Math.max(1, Number(p.qty) || 1), 0);
-    const structuralHeads = computeDailyStaffingModel(positions, '6+2', 0).plantillaTotal;
+    const structuralHeads = computeObjectiveRequiredHeadcount(positions, '6+2');
+    const simultaneousNeed = positions.reduce((s, p) => {
+        if (isCustomCoverPosition(p)) return s + customCoverSimultaneousPax(p);
+        return s + Math.max(1, Number(p.qty) || 1);
+    }, 0);
     if (employees.length > structuralHeads) {
         warnings.push(
             `Dotación real (${employees.length}) supera los ${structuralHeads} guardias estructurales del objetivo `
-            + `(rotación 24hs + custom según qty). Sobran ${employees.length - structuralHeads}; el excedente va a RET/Franco.`,
+            + `(rotación 24hs + custom según bandas/qty). Sobran ${employees.length - structuralHeads}; el excedente va a RET/Franco.`,
         );
-    } else if (employees.length > floorHeads) {
+    } else if (
+        positions.some(isCustomCoverPosition)
+        && employees.length > simultaneousNeed
+    ) {
         warnings.push(
-            `Dotación real (${employees.length}) supera los ${floorHeads} puesto(s) en simultáneo del SLA `
-            + `(+${employees.length - floorHeads} legajo(s) de más). El motor los mezclará en rotación o RET/Franco; `
-            + `conviene sacarlos del objetivo si no son necesarios.`,
+            `Dotación real (${employees.length}) supera los ${simultaneousNeed} puesto(s)/banda(s) en simultáneo del SLA custom `
+            + `(+${employees.length - simultaneousNeed} legajo(s) de más). Revisá bandas (ej. M + M2) o quitá legajos del objetivo.`,
         );
     }
 
@@ -242,6 +254,29 @@ export async function loadAutoLabRealServiceBundle(params: {
         month,
         rosterEmployeeIds: new Set(employees.map((e) => e.id)),
     });
+
+    let coverageWisdom: PlanningCoverageWisdom | null = null;
+    try {
+        const empNames: Record<string, string> = {};
+        employees.forEach((e) => { empNames[e.id] = e.nombre || e.id; });
+        coverageWisdom = await fetchCoverageWisdomHistory({
+            empresaId,
+            objectiveId: objective.objectiveId,
+            year,
+            month,
+            lookbackMonths: DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
+            scopeEmpresa,
+            migracionCompleta,
+            employeeNames: empNames,
+            rosterEmployeeIds: new Set(employees.map((e) => e.id)),
+        });
+        if (coverageWisdom.cellsAnalyzed > 0 || coverageWisdom.events.length > 0) {
+            warnings.push(`Historial ${coverageWisdom.periodLabel}: ${coverageWisdom.summary}`);
+        }
+    } catch (wisdomErr) {
+        warnings.push('Sin historial de coberturas (error al leer turnos previos).');
+        console.warn('[autoLab] fetchCoverageWisdomHistory', wisdomErr);
+    }
 
     const absencesByDate = absencesRrhh.map((a) => ({
         empId: a.employeeId,
@@ -256,20 +291,15 @@ export async function loadAutoLabRealServiceBundle(params: {
         warnings.push(`${absenceInTurnos} celda(s) con código de ausencia en turnos — el motor las usará si están en absencesByDate al armar el caso.`);
     }
 
-    let slaVendidas: number;
-    if (srv.totalMonthlyHours && srv.totalMonthlyHours > 0) {
+    let slaVendidas = 0;
+    if (serviceStart && serviceEnd) {
+        slaVendidas = resolvePlanningMonthSlaHours(srv, year, month - 1);
+    }
+    if (slaVendidas <= 0 && srv.totalMonthlyHours && srv.totalMonthlyHours > 0) {
         slaVendidas = Math.round(srv.totalMonthlyHours);
-    } else if (serviceStart && serviceEnd) {
-        slaVendidas = calculateSlaHoursForVigencia(
-            positions,
-            serviceStart,
-            serviceEnd,
-            excludedDates,
-            year,
-            month,
+        warnings.push(
+            `SLA vendidas: sin desglose para ${year}-${String(month).padStart(2, '0')}; se usa totalMonthlyHours (${slaVendidas} h).`,
         );
-    } else {
-        slaVendidas = 0;
     }
 
     const caseDef: AutoLabCaseDefinition = {
@@ -291,7 +321,12 @@ export async function loadAutoLabRealServiceBundle(params: {
         employeeCount: employees.length,
         cycle: '6+2',
         rotationMode: 'rotative',
-        rotateShiftsOverride: true,
+        rotateShiftsOverride: positions.some((p) => {
+            const cov = String(p.coverageType || '').toLowerCase();
+            return cov === '24hs' || cov === '24' || cov === '24h';
+        })
+            ? true
+            : false,
         slaVendidas: slaVendidas > 0 ? slaVendidas : undefined,
         serviceStartDate: serviceStart || undefined,
         serviceEndDate: serviceEnd || undefined,
@@ -299,6 +334,7 @@ export async function loadAutoLabRealServiceBundle(params: {
         defaultPositionByEmp: dotacionCount > 0 ? defaultPositionByEmp : undefined,
         defaultShiftByEmp: Object.keys(defaultShiftByEmp).length > 0 ? defaultShiftByEmp : undefined,
         absencesByDate: absencesByDate.length > 0 ? absencesByDate : undefined,
+        coverageWisdom,
     };
 
     return {
@@ -312,5 +348,6 @@ export async function loadAutoLabRealServiceBundle(params: {
         employeeSource,
         slaLabel: `${serviceStart} → ${serviceEnd}`,
         absencesRrhh,
+        coverageWisdom,
     };
 }

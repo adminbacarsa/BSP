@@ -105,6 +105,7 @@ export function calculateSlaHoursForVigencia(
     serviceEnd: string,
     excludedDates: string[] | undefined,
     year: number,
+    /** Mes calendario 1-based (enero = 1), alineado a Auto Lab y `buildDaysInMonth`. */
     month: number,
 ): number {
     const servicePositions = v2PositionsToServicePositions(positions);
@@ -115,7 +116,7 @@ export function calculateSlaHoursForVigencia(
         serviceEnd,
         excludedDates,
         year,
-        month,
+        month - 1,
     );
     return Math.round(row.total);
 }

@@ -5,12 +5,17 @@
 import {
     buildCustomCycleWorkDays,
     customCoverDailyPax,
+    customCoverDistinctBandCount,
+    customCoverRequiredHeadcount,
+    customCoverSimultaneousPax,
+    customCoverSlotsRequiredOnDay,
     customCoverWeeklyWorkRest,
     customPositionOperatesAllWeek,
     fixedWeekdayCustomUsesModo12,
     francoCodeForPositionDay,
     pickBalancedCustomWorkers,
 } from '../src/lib/planificacion/customCoverCycle';
+import { isCustomCoverPosition } from '../src/lib/planificacion/autoScheduleEngineV2';
 import type { V2PositionDef } from '../src/lib/planificacion/autoScheduleEngineV2';
 
 function assert(cond: boolean, msg: string) {
@@ -48,7 +53,8 @@ const directorio7d: V2PositionDef = {
 
 assert(!customPositionOperatesAllWeek(directorioLv), 'DIRECTORIO L–V no opera 7 días');
 assert(fixedWeekdayCustomUsesModo12(directorioLv), 'DIRECTORIO L–V ME usa Modo 12');
-assert(francoCodeForPositionDay(directorioLv, 'S') === 'FF', 'Sábado → FF');
+assert(francoCodeForPositionDay(directorioLv, 'S') === 'F', 'DIRECTORIO 12h sábado → F (franco planificado)');
+assert(francoCodeForPositionDay(directorioLv, 'D') === 'F', 'DIRECTORIO domingo → F');
 assert(francoCodeForPositionDay(directorioLv, 'L') === 'F', 'Lunes laboral → F si franco');
 
 const dirGroup3 = ['faropp', 'g11', 'g12'];
@@ -117,6 +123,50 @@ for (let di = 0; di < 7; di++) {
 
 assert(customCoverDailyPax(directorioLv) === 2, 'DIRECTORIO pax 2');
 assert(customCoverDailyPax(museoLv) === 4, 'Museo pax 4');
+
+const villaMaria: V2PositionDef = {
+    positionName: 'Puesto 1',
+    qty: 1,
+    coverageType: 'custom',
+    shifts: [
+        { code: 'M2', name: 'M2', hours: 7, days: ['L', 'M', 'X', 'J', 'V'], startTime: '08:00', endTime: '15:00' },
+        { code: 'M', name: 'M', hours: 8, days: ['L', 'M', 'X', 'J', 'V'], startTime: '07:30', endTime: '15:30' },
+    ],
+    activeDays: ['L', 'M', 'X', 'J', 'V'],
+};
+
+assert(isCustomCoverPosition(villaMaria), 'Villa Maria es custom (coverageType custom)');
+assert(customCoverDistinctBandCount(villaMaria) === 2, 'Villa Maria 2 bandas M + M2');
+assert(customCoverRequiredHeadcount(villaMaria) === 2, 'Villa Maria plantilla 2 guardias');
+assert(customCoverSlotsRequiredOnDay(villaMaria, 'L', ['6+2']) === 2, 'Villa Maria 2 slots/día L-V');
+assert(customCoverSlotsRequiredOnDay(villaMaria, 'S', ['6+2']) === 0, 'Villa Maria sin slots sábado');
+assert(francoCodeForPositionDay(villaMaria, 'S') === 'RET', 'Villa Maria sábado 8h → RET');
+assert(francoCodeForPositionDay(villaMaria, 'D') === 'F', 'Villa Maria domingo → F (franco planificado)');
+assert(francoCodeForPositionDay(directorioLv, 'S') === 'F', 'DIRECTORIO 12h sábado → F');
+
+const vmGroup = ['ferrey', 'aceved'];
+const weekdayDatesLv = ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-06', '2026-07-07'];
+for (const empId of vmGroup) {
+    const set = buildCustomCycleWorkDays({
+        empId,
+        pos: villaMaria,
+        daysInMonth,
+        groupMemberIds: vmGroup,
+        monthStartGlobalDayIndex: 0,
+        getDateKey: (d) => `${d.getFullYear()}-07-${String(d.getDate()).padStart(2, '0')}`,
+        getDayLetter: (ds) => {
+            const d = Number(ds.split('-')[2]);
+            const map = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
+            return map[new Date(2026, 6, d).getDay()];
+        },
+    });
+    for (const ds of weekdayDatesLv) {
+        assert(set.has(ds), `${empId} trabaja día hábil ${ds} (M+M2 fijos)`);
+    }
+    assert(!set.has('2026-07-04'), `${empId} no trabaja sábado`);
+    assert(!set.has('2026-07-05'), `${empId} no trabaja domingo`);
+}
+assert(customCoverSimultaneousPax(villaMaria) === 2, 'Villa Maria 2 pax simultáneos');
 
 console.log('---');
 console.log('Custom cover cycle OK.');

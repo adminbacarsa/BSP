@@ -145,6 +145,9 @@ function tryAutoAssign(
         absentEmpId,
         positionName: posName,
         dateStr,
+        coverageWisdom: ctx.coverageWisdom,
+        wisdomBand: neededBand,
+        shiftCode: neededBand,
     });
 
     const assignExisting = (empId: string): boolean => {

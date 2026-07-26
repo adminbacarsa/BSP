@@ -7,7 +7,11 @@ import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
 import type { ExperienciaObjetivosMap } from './experienciaObjetivos';
 import { computeExperienciaNivel } from './experienciaObjetivos';
 import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
-import { rankCoverersFromWisdom } from './planningCoverageWisdom';
+import {
+    rankCoverersFromWisdom,
+    positionAffinityScore,
+    shift12hAffinityScore,
+} from './planningCoverageWisdom';
 import {
     buildGuardCapacityConfig,
     rankGuardCoverageCandidates,
@@ -69,11 +73,13 @@ export function rankReplacementCandidates(
         dateStr = '',
         positionGroup = [],
         billableHours,
-        coverageWisdom,
+        coverageWisdom: coverageWisdomOpt,
         wisdomBand,
         shiftCode,
         assignments,
     } = options;
+
+    const coverageWisdom = coverageWisdomOpt ?? ctx.coverageWisdom ?? null;
 
     let pool = [...empIds].filter((id) => id !== absentEmpId);
     if (shiftCode && dateStr && assignments) {
@@ -137,6 +143,17 @@ export function rankReplacementCandidates(
             const wisA = wisdomRank.get(a) ?? 0;
             const wisB = wisdomRank.get(b) ?? 0;
             if (wisA !== wisB) return wisB - wisA;
+
+            const posA = positionAffinityScore(a, positionName, coverageWisdom);
+            const posB = positionAffinityScore(b, positionName, coverageWisdom);
+            if (posA !== posB) return posB - posA;
+
+            const is12h = shiftCode && ['D12', 'N12'].includes(String(shiftCode).toUpperCase());
+            if (is12h) {
+                const h12A = shift12hAffinityScore(a, coverageWisdom);
+                const h12B = shift12hAffinityScore(b, coverageWisdom);
+                if (h12A !== h12B) return h12B - h12A;
+            }
 
             const ha = billableHours?.get(a) ?? 0;
             const hb = billableHours?.get(b) ?? 0;

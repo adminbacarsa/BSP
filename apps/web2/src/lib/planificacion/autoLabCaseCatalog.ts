@@ -1,3 +1,4 @@
+import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
 import type { V2PositionDef } from './autoScheduleEngineV2';
 
 export type AutoLabRotationMode = 'fixed' | 'rotative' | 'auto';
@@ -43,6 +44,8 @@ export interface AutoLabCaseDefinition {
     defaultPositionByEmp?: Record<string, string>;
     /** Banda fija por guardia (M/T/N…) cuando aplica. */
     defaultShiftByEmp?: Record<string, string>;
+    /** Sabiduría histórica de coberturas (servicio real / automatizar). */
+    coverageWisdom?: PlanningCoverageWisdom | null;
 }
 
 const WEEKDAYS = ['L', 'M', 'X', 'J', 'V'] as const;

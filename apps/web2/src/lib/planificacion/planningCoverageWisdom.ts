@@ -66,6 +66,18 @@ export interface CovererWisdomProfile {
     score: number;
 }
 
+export interface EmployeeWorkWisdomProfile {
+    empId: string;
+    nombre: string;
+    totalWorkDays: number;
+    byPosition: Record<string, number>;
+    byBand: Record<string, number>;
+    shift12hCount: number;
+    shift8hCount: number;
+    maxWorkStreak: number;
+    retDays: number;
+}
+
 export interface PlanningCoverageWisdom {
     objectiveId: string;
     year: number;
@@ -79,6 +91,11 @@ export interface PlanningCoverageWisdom {
     strategyCounts: Partial<Record<CoverageStrategyObserved, number>>;
     summary: string;
     extractedAt: string;
+    /** Meses YYYY-MM incluidos en el análisis histórico. */
+    monthsIncluded?: string[];
+    lookbackMonths?: number;
+    /** Hábitos de trabajo por legajo (puesto, 12h, rachas). */
+    employeeProfiles?: Record<string, EmployeeWorkWisdomProfile>;
 }
 
 const ABSENCE_CODES = new Set(['V', 'L', 'E', 'A', 'PG', 'AA']);
@@ -501,3 +518,262 @@ export const COVERAGE_STRATEGY_LABELS: Record<CoverageStrategyObserved, string> 
     manual: 'Asignación manual',
     unknown: 'Sin clasificar',
 };
+
+const SHIFT_12H_CODES = new Set(['D12', 'N12']);
+const SHIFT_8H_CODES = new Set(['M', 'T', 'N', 'FT', 'ESC', 'REF']);
+
+function addDaysToDateStr(dateStr: string, delta: number): string {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(y, m - 1, d + delta);
+    const yy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+}
+
+function computeMaxWorkStreak(dateCodes: Map<string, string>): number {
+    const dates = [...dateCodes.keys()].sort();
+    if (dates.length === 0) return 0;
+    let max = 0;
+    let streak = 0;
+    let prev: string | null = null;
+    for (const ds of dates) {
+        const code = normCode(dateCodes.get(ds) || '');
+        const isWork = WORK_BANDS.has(code) || code === 'RET';
+        if (!isWork) {
+            streak = 0;
+            prev = ds;
+            continue;
+        }
+        if (prev && addDaysToDateStr(prev, 1) === ds) streak++;
+        else streak = 1;
+        max = Math.max(max, streak);
+        prev = ds;
+    }
+    return max;
+}
+
+export function extractEmployeeWorkProfiles(
+    cells: PlanningShiftCell[],
+    objectiveId: string,
+): Record<string, EmployeeWorkWisdomProfile> {
+    const scoped = cells.filter((c) => c.objectiveId === objectiveId);
+    const byEmp = new Map<string, { nombre: string; dates: Map<string, string> }>();
+    const out: Record<string, EmployeeWorkWisdomProfile> = {};
+
+    for (const c of scoped) {
+        const code = normCode(c.code);
+        if (!code || ABSENCE_CODES.has(code)) continue;
+
+        let row = byEmp.get(c.employeeId);
+        if (!row) {
+            row = { nombre: c.employeeName || c.employeeId, dates: new Map() };
+            byEmp.set(c.employeeId, row);
+            out[c.employeeId] = {
+                empId: c.employeeId,
+                nombre: row.nombre,
+                totalWorkDays: 0,
+                byPosition: {},
+                byBand: {},
+                shift12hCount: 0,
+                shift8hCount: 0,
+                maxWorkStreak: 0,
+                retDays: 0,
+            };
+        }
+        if (c.employeeName) {
+            row.nombre = c.employeeName;
+            out[c.employeeId].nombre = c.employeeName;
+        }
+        row.dates.set(c.dateStr, code);
+
+        const prof = out[c.employeeId];
+        if (code === 'RET') {
+            prof.retDays++;
+            continue;
+        }
+        if (!WORK_BANDS.has(code) && !SHIFT_8H_CODES.has(code)) continue;
+
+        prof.totalWorkDays++;
+        const pos = c.positionName || '';
+        if (pos) prof.byPosition[pos] = (prof.byPosition[pos] || 0) + 1;
+        const band = bandFromCode(code);
+        prof.byBand[band] = (prof.byBand[band] || 0) + 1;
+        if (SHIFT_12H_CODES.has(code)) prof.shift12hCount++;
+        else if (SHIFT_8H_CODES.has(code)) prof.shift8hCount++;
+    }
+
+    for (const [empId, row] of byEmp.entries()) {
+        if (out[empId]) out[empId].maxWorkStreak = computeMaxWorkStreak(row.dates);
+    }
+    return out;
+}
+
+function mergeCovererProfiles(profiles: CovererWisdomProfile[]): CovererWisdomProfile[] {
+    const map = new Map<string, CovererWisdomProfile>();
+    for (const p of profiles) {
+        let acc = map.get(p.empId);
+        if (!acc) {
+            acc = {
+                empId: p.empId,
+                nombre: p.nombre,
+                totalCoverages: 0,
+                byBand: {},
+                byStrategy: {},
+                byAbsentCode: {},
+                score: 0,
+            };
+            map.set(p.empId, acc);
+        }
+        acc.totalCoverages += p.totalCoverages;
+        for (const [k, v] of Object.entries(p.byBand)) {
+            acc.byBand[k] = (acc.byBand[k] || 0) + v;
+        }
+        for (const [k, v] of Object.entries(p.byStrategy)) {
+            const key = k as CoverageStrategyObserved;
+            acc.byStrategy[key] = (acc.byStrategy[key] || 0) + (v || 0);
+        }
+        for (const [k, v] of Object.entries(p.byAbsentCode)) {
+            acc.byAbsentCode[k] = (acc.byAbsentCode[k] || 0) + v;
+        }
+        if (!acc.lastCoverDate || (p.lastCoverDate && p.lastCoverDate > acc.lastCoverDate)) {
+            acc.lastCoverDate = p.lastCoverDate;
+        }
+        if (p.nombre && p.nombre !== p.empId) acc.nombre = p.nombre;
+    }
+    const maxTotal = Math.max(1, ...[...map.values()].map((p) => p.totalCoverages));
+    return [...map.values()]
+        .map((p) => ({ ...p, score: Math.round((p.totalCoverages / maxTotal) * 100) }))
+        .sort((a, b) => b.totalCoverages - a.totalCoverages || a.nombre.localeCompare(b.nombre));
+}
+
+export function mergeCoverageWisdom(
+    monthly: PlanningCoverageWisdom[],
+    params: {
+        objectiveId: string;
+        targetYear: number;
+        targetMonth: number;
+        lookbackMonths: number;
+        allCells: PlanningShiftCell[];
+    },
+): PlanningCoverageWisdom {
+    const { objectiveId, targetYear, targetMonth, lookbackMonths, allCells } = params;
+    const monthsIncluded = monthly.map(
+        (m) => `${m.year}-${String(m.month).padStart(2, '0')}`,
+    );
+    const periodLabel = monthsIncluded.length > 0
+        ? `${monthsIncluded[0]} → ${monthsIncluded[monthsIncluded.length - 1]}`
+        : `${String(targetMonth).padStart(2, '0')}/${targetYear}`;
+
+    const eventKeys = new Set<string>();
+    const events: CoverageWisdomEvent[] = [];
+    for (const m of monthly) {
+        for (const ev of m.events) {
+            const key = `${ev.dateStr}__${ev.absentEmpId}__${ev.covererEmpId}__${ev.bandCovered}`;
+            if (eventKeys.has(key)) continue;
+            eventKeys.add(key);
+            events.push(ev);
+        }
+    }
+
+    const strategyCounts: Partial<Record<CoverageStrategyObserved, number>> = {};
+    for (const ev of events) {
+        strategyCounts[ev.strategy] = (strategyCounts[ev.strategy] || 0) + 1;
+    }
+
+    const coverers = mergeCovererProfiles(monthly.flatMap((m) => m.coverers));
+    const employeeProfiles = extractEmployeeWorkProfiles(allCells, objectiveId);
+
+    const daysAnalyzed = monthly.reduce((s, m) => s + m.daysAnalyzed, 0);
+    const cellsAnalyzed = allCells.filter((c) => c.objectiveId === objectiveId).length;
+    const absenceContextsFound = monthly.reduce((s, m) => s + m.absenceContextsFound, 0);
+
+    const top12 = Object.values(employeeProfiles)
+        .filter((p) => p.shift12hCount > 0)
+        .sort((a, b) => b.shift12hCount - a.shift12hCount)
+        .slice(0, 2)
+        .map((p) => `${p.nombre} (${p.shift12hCount}×12h)`)
+        .join(', ');
+
+    let summary: string;
+    if (events.length === 0 && Object.keys(employeeProfiles).length === 0) {
+        summary = `Sin historial operativo en los últimos ${lookbackMonths} mes(es) antes de ${String(targetMonth).padStart(2, '0')}/${targetYear}.`;
+    } else {
+        const topCover = coverers.slice(0, 2).map((c) => `${c.nombre} (${c.totalCoverages})`).join(', ');
+        const parts: string[] = [];
+        if (events.length > 0) parts.push(`${events.length} cobertura(s)`);
+        if (topCover) parts.push(`referentes: ${topCover}`);
+        if (top12) parts.push(`12h: ${top12}`);
+        summary = `Historial ${periodLabel}: ${parts.join(' · ')}.`;
+    }
+
+    return {
+        objectiveId,
+        year: targetYear,
+        month: targetMonth,
+        periodLabel,
+        daysAnalyzed,
+        cellsAnalyzed,
+        absenceContextsFound,
+        events,
+        coverers,
+        strategyCounts,
+        summary,
+        extractedAt: new Date().toISOString(),
+        monthsIncluded,
+        lookbackMonths,
+        employeeProfiles,
+    };
+}
+
+export function positionAffinityScore(
+    empId: string,
+    positionName: string,
+    wisdom: PlanningCoverageWisdom | null | undefined,
+): number {
+    if (!wisdom?.employeeProfiles || !positionName) return 0;
+    const p = wisdom.employeeProfiles[empId];
+    if (!p || p.totalWorkDays <= 0) return 0;
+    const posCount = p.byPosition[positionName] || 0;
+    return Math.round((posCount / p.totalWorkDays) * 70);
+}
+
+export function shift12hAffinityScore(
+    empId: string,
+    wisdom: PlanningCoverageWisdom | null | undefined,
+): number {
+    if (!wisdom?.employeeProfiles) return 0;
+    const p = wisdom.employeeProfiles[empId];
+    if (!p) return 0;
+    const total = p.shift12hCount + p.shift8hCount;
+    if (total <= 0) return 0;
+    return Math.round((p.shift12hCount / total) * 45);
+}
+
+export function previousCalendarMonth(year: number, month: number): { year: number; month: number } {
+    if (month <= 1) return { year: year - 1, month: 12 };
+    return { year, month: month - 1 };
+}
+
+export const DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS = 6;
+
+export function calendarMonthsBefore(
+    targetYear: number,
+    targetMonth: number,
+    count: number,
+): Array<{ year: number; month: number }> {
+    const out: Array<{ year: number; month: number }> = [];
+    let y = targetYear;
+    let m = targetMonth;
+    for (let i = 0; i < count; i++) {
+        const prev = previousCalendarMonth(y, m);
+        y = prev.year;
+        m = prev.month;
+        out.unshift({ year: y, month: m });
+    }
+    return out;
+}
+
+export function wisdomBandFromShiftCode(code: string): string {
+    return bandFromCode(code);
+}
