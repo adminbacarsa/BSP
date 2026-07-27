@@ -83,7 +83,7 @@ const nextConfig = {
   },
   transpilePackages: ['onnxruntime-web'],
   staticPageGenerationTimeout: 300,
-  webpack: (config) => {
+  webpack: (config, { dev }) => {
     // Soporte WASM para @imgly/background-removal
     config.experiments = { ...config.experiments, asyncWebAssembly: true, layers: true };
     // Fix import.meta en .mjs de onnxruntime-web
@@ -92,6 +92,11 @@ const nextConfig = {
       include: /node_modules/,
       type: 'javascript/auto',
     });
+    // En Windows, fs.watch a veces no detecta cambios hechos por herramientas externas.
+    // Polling garantiza que Next.js recompile siempre que cambie un archivo.
+    if (dev) {
+      config.watchOptions = { poll: 1000, aggregateTimeout: 300 };
+    }
     return config;
   }
 };
