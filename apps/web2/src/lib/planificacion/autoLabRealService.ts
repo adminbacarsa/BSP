@@ -1,6 +1,6 @@
 import { getDocs } from 'firebase/firestore';
 import type { V2EmployeeDef, V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
-import { is24hsRotationPosition } from './autoScheduleEngineV2';
+import { isCustomCoverPosition, is24hsRotationPosition } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import type { PlanningCatalogObjective } from '@/hooks/useObjectivePlanningCatalog';
 import type { ServiceSLA } from '@/services/slaService';
@@ -18,7 +18,6 @@ import {
     type PlanningPositionRow,
 } from '@/lib/slaPlanningMatch';
 import { customCoverSimultaneousPax } from './customCoverCycle';
-import { isCustomCoverPosition, is24hsRotationPosition } from './autoScheduleEngineV2';
 import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
 import { fetchPlanningMonthAbsences, fetchPlanningMonthShifts } from './loadPlanningMonthShifts';
 import {
