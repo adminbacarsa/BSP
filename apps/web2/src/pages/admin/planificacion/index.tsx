@@ -15,7 +15,7 @@ import {
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
     PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
-    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical
+    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle
 } from 'lucide-react';
 
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
@@ -670,6 +670,7 @@ export default function PlanificacionPage() {
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
+    const [showVolantes, setShowVolantes] = useState(false);
     const [nearbyKmRadius, setNearbyKmRadius] = useState(DOTACION_NEARBY_KM_DEFAULT);
     const [nearbyKmDraft, setNearbyKmDraft] = useState(String(DOTACION_NEARBY_KM_DEFAULT));
     const [isShowAllPending, startShowAllTransition] = useTransition();
@@ -1318,7 +1319,8 @@ export default function PlanificacionPage() {
                 list = list.filter(e =>
                     e.preferredObjectiveId === selectedObjective ||
                     slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
-                    activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id),
+                    activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id) ||
+                    (showVolantes && (e.volante || []).includes(selectedObjective)),
                 );
             }
         } else if (selectedObjective && forceShowAll) {
@@ -1333,7 +1335,7 @@ export default function PlanificacionPage() {
             });
         }
         return list;
-    }, [employees, selectedObjective, forceShowAll, slaIdToObjId, activeGuestIdsForObjective, pinnedExternalEmpIds, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective, selectedGrupo, grupoUnifiedMode]);
+    }, [employees, selectedObjective, forceShowAll, showVolantes, slaIdToObjId, activeGuestIdsForObjective, pinnedExternalEmpIds, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective, selectedGrupo, grupoUnifiedMode]);
 
     const employeeMonthStats = useMemo(() => {
         const stats: Record<string, { shiftCount: number; dominantBand: string | null }> = {};
@@ -3629,6 +3631,8 @@ export default function PlanificacionPage() {
         const checkSynced = () => {
             if (dataSyncRef.current.employees && dataSyncRef.current.clients) setIsDataSyncing(false);
         };
+        // Safety: si el servidor tarda más de 4s, mostrar los datos de cache igual
+        const syncTimeout = setTimeout(() => setIsDataSyncing(false), 4000);
 
         getDocsFromServer(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa)).then(snap => {
             const m: Record<string, string> = {};
@@ -3669,6 +3673,7 @@ export default function PlanificacionPage() {
                         restriccionesObjetivo: data.restriccionesObjetivo || [],
                         restriccionesCliente: data.restriccionesCliente || [],
                         conflictosEmpleados: data.conflictosEmpleados || [],
+                        volante: data.volante || [],
                     };
                 });
             setEmployees(map(snap));
@@ -3853,7 +3858,7 @@ export default function PlanificacionPage() {
             setHasUnread(alerts.length > 0);
         }, (e) => console.error('[plan] novedades error:', e));
         
-        return () => { unsubC(); unsubE(); unsubS(); unsubLogs(); unsubNotifs(); unsubA(); unsubAg(); unsubN(); };
+        return () => { clearTimeout(syncTimeout); unsubC(); unsubE(); unsubS(); unsubLogs(); unsubNotifs(); unsubA(); unsubAg(); unsubN(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [empresaId, migracionCompleta, scopeEmpresa]);
 
@@ -7999,6 +8004,7 @@ export default function PlanificacionPage() {
                                 (slaIdToObjId[emp.preferredObjectiveId] && selectedGrupo.objectiveIds.includes(slaIdToObjId[emp.preferredObjectiveId])))
                             : emp.preferredObjectiveId !== selectedObjective
                     );
+                    const isVolante = isGuest && selectedObjective && (emp.volante || []).includes(selectedObjective);
                     const homeObjectiveName = getObjectiveName(emp.preferredObjectiveId);
                     
                     return (
@@ -8045,7 +8051,8 @@ export default function PlanificacionPage() {
                                                     <div className="flex items-center gap-1 min-w-0 overflow-hidden">
                                                         <Grip size={8} className="shrink-0 text-slate-200 group-hover:text-slate-400 transition-colors mr-0.5" />
                                                         <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
-                                                        {isGuest && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> EXT</div>)}
+                                                        {isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Volante — base: ${homeObjectiveName}`}><Shuffle size={8} /> VOL</div>)}
+                                        {isGuest && !isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> EXT</div>)}
                                                         {selectedGrupo && grupoUnifiedMode && (() => {
                                                             const _native = selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId)
                                                                 ? emp.preferredObjectiveId
@@ -9346,6 +9353,17 @@ export default function PlanificacionPage() {
                                     </span>
                                 )}
 
+
+                                {/* VOLANTE — mostrar/ocultar guardias volante sin turno */}
+                                {selectedObjective && (
+                                    <button
+                                        onClick={() => setShowVolantes(p => !p)}
+                                        title={showVolantes ? 'Ocultar volantes sin turno' : 'Mostrar volantes disponibles para este objetivo'}
+                                        className={`px-2.5 py-2 rounded-xl border text-xs font-black uppercase flex items-center gap-1.5 transition-colors ${showVolantes ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-600'}`}
+                                    >
+                                        <Shuffle size={13}/> VOL
+                                    </button>
+                                )}
 
                                 {/* BUSCAR EXTERNO — activa la barra de búsqueda encima del grid */}
                                 {selectedObjective && (

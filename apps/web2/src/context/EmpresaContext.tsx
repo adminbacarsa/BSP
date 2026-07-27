@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { doc, collection, setDoc } from 'firebase/firestore';
+import { doc, collection, setDoc, onSnapshot } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useAuth } from './AuthContext';
 import { SUPERADMIN_EMPRESA_STORAGE_KEY } from '@/lib/multiempresa';
@@ -81,11 +81,14 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
     setEmpresaId(pick);
   }, [canSwitchEmpresa, empresaId, empresas]);
 
-  // Suscripción al documento de la empresa activa
+  // Suscripción al documento de la empresa activa.
+  // Usamos onSnapshot regular (no onSnapshotFresh) para que loadingEmpresa resuelva
+  // inmediatamente con datos de cache y no bloquee la UI mientras espera al servidor.
+  // El fix del F5 (empresa incorrecta) lo resuelve el lazy initializer del useState.
   useEffect(() => {
     if (!empresaId) return;
     setLoadingEmpresa(true);
-    const unsub = onSnapshotFresh(
+    const unsub = onSnapshot(
       doc(db, 'empresas', empresaId),
       snap => {
         const defaultName = empresaId === 'bacarsa' ? 'Bacar SA' : empresaId;
