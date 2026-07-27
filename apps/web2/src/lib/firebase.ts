@@ -110,6 +110,7 @@ function createFirestoreInstance(): Firestore {
   if (USE_EMULATOR) {
     try {
       return initializeFirestore(app, {
+        localCache: memoryLocalCache(),
         experimentalForceLongPolling: true,
       });
     } catch {

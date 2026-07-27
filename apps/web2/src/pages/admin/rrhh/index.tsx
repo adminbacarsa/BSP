@@ -25,7 +25,7 @@ import {
     PieChart as PieChartIcon, TrendingUp, Clock, Target, MapPin, ExternalLink,
     UserCheck, UserX, TrendingDown, Award, ChevronDown, Phone, Home, Loader2,
     Send, KeyRound, CheckCircle2, Mail, ShieldCheck as ShieldCheckIcon, RefreshCw,
-    BellRing, MessageCircle, ClipboardEdit, Eye, EyeOff
+    BellRing, MessageCircle, ClipboardEdit, Eye, EyeOff, Shuffle
 } from 'lucide-react';
 import CorreccionesTab from '@/components/admin/rrhh/CorreccionesTab';
 import AusenciasTab from '@/components/admin/rrhh/AusenciasTab';
@@ -284,12 +284,13 @@ export default function EmployeesPage() {
   const [importAsInactive, setImportAsInactive] = useState(false);
   const [importWithGeo, setImportWithGeo] = useState(false);
   
-  const [activeFormTab, setActiveFormTab] = useState<'PERSONAL' | 'LABORAL' | 'TALLES' | 'EXPERIENCIA' | 'RESTRICCIONES'>('PERSONAL');
-  const initialForm: any = { firstName: '', lastName: '', dni: '', fileNumber: '', phone: '', email: '', category: '', status: 'activo', laborAgreement: '', preferredClientId: '', preferredObjectiveId: '', genero: '', sizes: { shirt:'', pants:'', shoes:'' }, cuil: '', address: '', lat: null, lng: null, contractType: 'FullTime', periodType: 'Mensual', cycleStartDay: 26, maxHours: 200, restriccionesObjetivo: [], restriccionesCliente: [], conflictosEmpleados: [], experienciaObjetivos: {} };
+  const [activeFormTab, setActiveFormTab] = useState<'PERSONAL' | 'LABORAL' | 'TALLES' | 'EXPERIENCIA' | 'VOLANTE' | 'RESTRICCIONES'>('PERSONAL');
+  const initialForm: any = { firstName: '', lastName: '', dni: '', fileNumber: '', phone: '', email: '', category: '', status: 'activo', laborAgreement: '', preferredClientId: '', preferredObjectiveId: '', genero: '', sizes: { shirt:'', pants:'', shoes:'' }, cuil: '', address: '', lat: null, lng: null, contractType: 'FullTime', periodType: 'Mensual', cycleStartDay: 26, maxHours: 200, restriccionesObjetivo: [], restriccionesCliente: [], conflictosEmpleados: [], experienciaObjetivos: {}, volante: [] };
   const [form, setForm] = useState<any>(initialForm);
   const [newObjRestr, setNewObjRestr] = useState({ objectiveId: '', reason: '' });
   const [newClientRestr, setNewClientRestr] = useState({ clientId: '', reason: '' });
   const [newEmpConflict, setNewEmpConflict] = useState({ employeeId: '', reason: '' });
+  const [newVolanteObjId, setNewVolanteObjId] = useState('');
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
@@ -883,6 +884,7 @@ export default function EmployeesPage() {
           restriccionesCliente: form.restriccionesCliente || [],
           conflictosEmpleados: form.conflictosEmpleados || [],
           genero: form.genero || '',
+          volante: form.volante || [],
           empresaId,
       };
 
@@ -2595,7 +2597,7 @@ export default function EmployeesPage() {
 
             {activeTab === 'legajos' && view === 'form' && (
                 <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 shadow-sm p-8 animate-in slide-in-from-right-10 overflow-y-auto">
-                    <div className="flex justify-between items-center mb-8"><div className="flex items-center gap-4"><button onClick={() => setView('list')} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft/></button><h2 className="text-2xl font-black uppercase dark:text-white">{isEditing ? `Editar: ${form.lastName}` : 'Nuevo Legajo'}</h2></div><div className="flex flex-wrap gap-2">{(['PERSONAL', 'LABORAL', 'TALLES', 'EXPERIENCIA', 'RESTRICCIONES'] as const).map(tab => { const restrCount = (form.restriccionesObjetivo?.length || 0) + (form.restriccionesCliente?.length || 0) + (form.conflictosEmpleados?.length || 0); const expCount = countExperienciaObjetivos(form.experienciaObjetivos); const active = activeFormTab === tab; const tabClass = active ? (tab === 'RESTRICCIONES' ? 'bg-rose-600 text-white shadow-lg' : tab === 'EXPERIENCIA' ? 'bg-teal-600 text-white shadow-lg' : 'bg-indigo-600 text-white shadow-lg') : (tab === 'RESTRICCIONES' && restrCount > 0 ? 'bg-rose-100 text-rose-600' : tab === 'EXPERIENCIA' && expCount > 0 ? 'bg-teal-100 text-teal-700' : 'bg-slate-100 text-slate-400'); const label = tab === 'RESTRICCIONES' && restrCount > 0 ? `RESTRICCIONES (${restrCount})` : tab === 'EXPERIENCIA' && expCount > 0 ? `EXPERIENCIA (${expCount})` : tab; return (<button key={tab} onClick={() => setActiveFormTab(tab)} className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${tabClass}`}>{label}</button>); })}</div></div>
+                    <div className="flex justify-between items-center mb-8"><div className="flex items-center gap-4"><button onClick={() => setView('list')} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft/></button><h2 className="text-2xl font-black uppercase dark:text-white">{isEditing ? `Editar: ${form.lastName}` : 'Nuevo Legajo'}</h2></div><div className="flex flex-wrap gap-2">{(['PERSONAL', 'LABORAL', 'TALLES', 'EXPERIENCIA', 'VOLANTE', 'RESTRICCIONES'] as const).map(tab => { const restrCount = (form.restriccionesObjetivo?.length || 0) + (form.restriccionesCliente?.length || 0) + (form.conflictosEmpleados?.length || 0); const expCount = countExperienciaObjetivos(form.experienciaObjetivos); const volCount = (form.volante || []).length; const active = activeFormTab === tab; const tabClass = active ? (tab === 'RESTRICCIONES' ? 'bg-rose-600 text-white shadow-lg' : tab === 'EXPERIENCIA' ? 'bg-teal-600 text-white shadow-lg' : tab === 'VOLANTE' ? 'bg-violet-600 text-white shadow-lg' : 'bg-indigo-600 text-white shadow-lg') : (tab === 'RESTRICCIONES' && restrCount > 0 ? 'bg-rose-100 text-rose-600' : tab === 'EXPERIENCIA' && expCount > 0 ? 'bg-teal-100 text-teal-700' : tab === 'VOLANTE' && volCount > 0 ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-400'); const label = tab === 'RESTRICCIONES' && restrCount > 0 ? `RESTRICCIONES (${restrCount})` : tab === 'EXPERIENCIA' && expCount > 0 ? `EXPERIENCIA (${expCount})` : tab === 'VOLANTE' && volCount > 0 ? `VOLANTE (${volCount})` : tab; return (<button key={tab} onClick={() => setActiveFormTab(tab)} className={`px-4 py-2 rounded-lg text-xs font-black uppercase transition-all ${tabClass}`}>{label}</button>); })}</div></div>
                     <div className="max-w-4xl mx-auto space-y-8">
                         {activeFormTab === 'PERSONAL' && (<div className="grid grid-cols-2 gap-6"><div><label className={labelClass}>Nombre</label><input className={inputClass} value={form.firstName || ''} onChange={e => setForm({...form, firstName: e.target.value})} /></div><div><label className={labelClass}>Apellido</label><input className={inputClass} value={form.lastName || ''} onChange={e => setForm({...form, lastName: e.target.value})} /></div><div><label className={labelClass}>DNI</label><input className={inputClass} value={form.dni || ''} onChange={e => setForm({...form, dni: e.target.value})} /></div><div><label className={labelClass}>CUIL</label><input className={inputClass} value={form.cuil || ''} onChange={e => setForm({...form, cuil: e.target.value})} /></div><div><label className={labelClass}>Género</label><select className={selectClass} value={form.genero || ''} onChange={e => setForm({...form, genero: e.target.value})}><option value="">Sin especificar</option><option value="M">Masculino</option><option value="F">Femenino</option></select></div><div><label className={labelClass}>Email</label><input className={inputClass} value={form.email || ''} onChange={e => setForm({...form, email: e.target.value})} /></div><div><label className={labelClass}>Teléfono</label><input className={inputClass} value={form.phone || ''} onChange={e => setForm({...form, phone: e.target.value})} /></div>
                         {/* --- CAMPO DIRECCION Y GEOLOCALIZACION --- */}
@@ -2646,6 +2648,67 @@ export default function EmployeesPage() {
                             preferredObjectiveId={form.preferredObjectiveId}
                             allObjectives={allObjectives}
                           />
+                        )}
+                        {activeFormTab === 'VOLANTE' && (
+                          <div className="space-y-6">
+                            <div>
+                              <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white mb-1">Objetivos como volante</h3>
+                              <p className="text-[11px] text-slate-400 mb-4">Objetivos donde este guardia puede cubrir ausencias aunque no sea su objetivo base. El motor de cobertura lo considera como comodín.</p>
+                              <div className="flex gap-2 mb-3">
+                                <SearchableSelect
+                                  className="flex-1"
+                                  value={newVolanteObjId}
+                                  onChange={v => setNewVolanteObjId(v)}
+                                  placeholder="Agregar objetivo..."
+                                  options={[...allObjectives]
+                                    .filter(o => o.id !== form.preferredObjectiveId && !(form.volante || []).includes(o.id))
+                                    .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+                                    .map(o => ({ value: o.id, label: o.name }))}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!newVolanteObjId) return;
+                                    if ((form.volante || []).includes(newVolanteObjId)) return;
+                                    setForm({ ...form, volante: [...(form.volante || []), newVolanteObjId] });
+                                    setNewVolanteObjId('');
+                                  }}
+                                  className="px-4 py-2 bg-violet-600 text-white rounded-lg text-xs font-black hover:bg-violet-700 transition-colors flex items-center gap-1"
+                                >
+                                  <Plus size={14} /> Agregar
+                                </button>
+                              </div>
+                              {(form.volante || []).length === 0 ? (
+                                <p className="text-[11px] text-slate-400 italic">Sin objetivos volante asignados.</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  {(form.volante || []).map((objId: string) => {
+                                    const obj = allObjectives.find(o => o.id === objId);
+                                    const clientName = obj ? (obj as any).clientName || '' : '';
+                                    return (
+                                      <div key={objId} className="flex items-center justify-between p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-xl">
+                                        <div className="flex items-center gap-3">
+                                          <Shuffle size={14} className="text-violet-500" />
+                                          <div>
+                                            <p className="text-xs font-bold text-slate-800 dark:text-white">{obj?.name || objId}</p>
+                                            {clientName && <p className="text-[10px] text-slate-400">{clientName}</p>}
+                                          </div>
+                                          <span className="px-1.5 py-0.5 bg-violet-500 text-white text-[9px] font-black rounded uppercase">VOLANTE</span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => setForm({ ...form, volante: (form.volante || []).filter((id: string) => id !== objId) })}
+                                          className="text-slate-400 hover:text-rose-500 transition-colors"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         )}
                         {activeFormTab === 'RESTRICCIONES' && (
                           <div className="space-y-8">
