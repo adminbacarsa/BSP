@@ -28,7 +28,7 @@ const inputClass = 'w-full p-3 bg-white dark:bg-slate-800 border border-slate-20
 const selectClass = 'w-full p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-bold text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all appearance-none';
 const labelClass = 'text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 mb-1 block ml-1';
 
-const FORM_TABS = ['PERSONAL', 'LABORAL', 'TALLES', 'EXPERIENCIA', 'RESTRICCIONES'] as const;
+const FORM_TABS = ['PERSONAL', 'LABORAL', 'TALLES', 'EXPERIENCIA', 'VOLANTE', 'RESTRICCIONES'] as const;
 type FormTab = (typeof FORM_TABS)[number];
 
 export default function EmployeeLegajoForm({
@@ -52,6 +52,7 @@ export default function EmployeeLegajoForm({
     const [newObjRestr, setNewObjRestr] = useState({ objectiveId: '', reason: '' });
     const [newClientRestr, setNewClientRestr] = useState({ clientId: '', reason: '' });
     const [newEmpConflict, setNewEmpConflict] = useState({ employeeId: '', reason: '' });
+    const [newVolanteObjId, setNewVolanteObjId] = useState('');
 
     useEffect(() => {
         if (form.laborAgreement) {
@@ -67,6 +68,7 @@ export default function EmployeeLegajoForm({
         (form.restriccionesCliente?.length || 0) +
         (form.conflictosEmpleados?.length || 0);
     const experienciaCount = countExperienciaObjetivos(form.experienciaObjetivos);
+    const volanteCount = (form.volante || []).length;
 
     const handleGeocode = async () => {
         if (!form.address) return addToast('Ingrese una dirección primero', 'warning');
@@ -107,16 +109,19 @@ export default function EmployeeLegajoForm({
         if (active) {
             if (tab === 'RESTRICCIONES') return 'bg-rose-600 text-white shadow-lg';
             if (tab === 'EXPERIENCIA') return 'bg-teal-600 text-white shadow-lg';
+            if (tab === 'VOLANTE') return 'bg-violet-600 text-white shadow-lg';
             return 'bg-indigo-600 text-white shadow-lg';
         }
         if (tab === 'RESTRICCIONES' && restriccionesCount > 0) return 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-300';
         if (tab === 'EXPERIENCIA' && experienciaCount > 0) return 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300';
+        if (tab === 'VOLANTE' && volanteCount > 0) return 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300';
         return 'bg-slate-100 text-slate-400 dark:bg-slate-700 dark:text-slate-300';
     };
 
     const tabLabel = (tab: FormTab) => {
         if (tab === 'RESTRICCIONES' && restriccionesCount > 0) return `RESTRICCIONES (${restriccionesCount})`;
         if (tab === 'EXPERIENCIA' && experienciaCount > 0) return `EXPERIENCIA (${experienciaCount})`;
+        if (tab === 'VOLANTE' && volanteCount > 0) return `VOLANTE (${volanteCount})`;
         return tab;
     };
 
@@ -274,6 +279,79 @@ export default function EmployeeLegajoForm({
                         preferredObjectiveId={form.preferredObjectiveId}
                         allObjectives={allObjectives}
                     />
+                )}
+
+                {activeFormTab === 'VOLANTE' && (
+                    <div className="space-y-4">
+                        <div>
+                            <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white mb-1">Objetivos como volante</h3>
+                            <p className="text-[11px] text-slate-400 mb-4">
+                                El empleado puede trabajar en estos objetivos como comodín, cubriendo ausencias o francos. No es personal de plantilla pero puede recibir turnos.
+                            </p>
+                            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+                                <SearchableSelect
+                                    className={selectClass}
+                                    value={newVolanteObjId}
+                                    onChange={v => setNewVolanteObjId(v)}
+                                    placeholder="Seleccionar objetivo..."
+                                    options={[
+                                        { value: '', label: 'Seleccionar objetivo...' },
+                                        ...[...allObjectives]
+                                            .filter(o => o.id !== form.preferredObjectiveId && !(form.volante || []).includes(o.id))
+                                            .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+                                            .map(o => ({ value: o.id, label: o.name })),
+                                    ]}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (!newVolanteObjId) return;
+                                        if ((form.volante || []).includes(newVolanteObjId)) return;
+                                        setForm({ ...form, volante: [...(form.volante || []), newVolanteObjId] });
+                                        setNewVolanteObjId('');
+                                    }}
+                                    className="px-4 py-2 bg-violet-600 text-white rounded-xl font-black uppercase text-xs hover:bg-violet-700 whitespace-nowrap"
+                                >
+                                    + Agregar
+                                </button>
+                            </div>
+                            {(form.volante || []).length === 0 ? (
+                                <p className="text-[11px] text-slate-400 italic">Sin objetivos volante asignados.</p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {(form.volante || []).map((objId: string) => {
+                                        const obj = allObjectives.find(o => o.id === objId);
+                                        return (
+                                            <div key={objId} className="flex items-center gap-3 p-3 bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-xl">
+                                                <div className="flex-1">
+                                                    <p className="text-xs font-black text-violet-800 dark:text-violet-200 uppercase">
+                                                        {obj?.name || objId}
+                                                    </p>
+                                                    {obj?.clientId && (
+                                                        <p className="text-[10px] text-violet-500">
+                                                            {clients.find(c => c.id === obj.clientId)?.name ||
+                                                             clients.find(c => c.id === obj.clientId)?.razonSocial ||
+                                                             obj.clientId}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <span className="text-[9px] font-black uppercase bg-violet-200 dark:bg-violet-800 text-violet-700 dark:text-violet-200 px-2 py-0.5 rounded-full">
+                                                    VOLANTE
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setForm({ ...form, volante: (form.volante || []).filter((id: string) => id !== objId) })}
+                                                    className="p-1 hover:bg-violet-100 text-violet-400 rounded-lg"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                 )}
 
                 {activeFormTab === 'RESTRICCIONES' && (

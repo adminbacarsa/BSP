@@ -18,6 +18,7 @@ export interface Employee {
   laborAgreement?: string;
   preferredClientId?: string;
   preferredObjectiveId?: string;
+  volante?: string[];
   portalInvite?: { sent: boolean; sentAt?: any; email?: string };
 }
 

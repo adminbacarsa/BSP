@@ -24,6 +24,7 @@ export const initialLegajoForm = {
     restriccionesCliente: [] as any[],
     conflictosEmpleados: [] as any[],
     experienciaObjetivos: {} as Record<string, unknown>,
+    volante: [] as string[],
 };
 
 export function normalizeEmployeeStatus(status: unknown): string {
@@ -54,6 +55,7 @@ export function mapFirestoreToLegajoForm(id: string, data: Record<string, any>) 
         restriccionesCliente: data.restriccionesCliente || [],
         conflictosEmpleados: data.conflictosEmpleados || [],
         experienciaObjetivos: data.experienciaObjetivos || {},
+        volante: data.volante || [],
         preferredClientId: clientId,
         preferredObjectiveId,
         cycleStartDay: data.cycleStartDay ? Number(data.cycleStartDay) : 26,
@@ -89,6 +91,7 @@ export function buildEmployeeSavePayload(form: Record<string, any>, empresaId: s
         restriccionesObjetivo: form.restriccionesObjetivo || [],
         restriccionesCliente: form.restriccionesCliente || [],
         conflictosEmpleados: form.conflictosEmpleados || [],
+        volante: form.volante || [],
         genero: form.genero || '',
         empresaId,
     };
