@@ -10,11 +10,35 @@ import { isExternalRetEmpId } from './externalRetCoverage';
 import { isLabSyntheticEmpId } from './objectiveHeadcount';
 import { CYCLE_24_MTN } from './fixedBandFloaterScheduleEngine';
 import { isPlanningWorkShiftCode } from '@/lib/slaPlanningMatch';
+import {
+    enforceSurplusRetCycleOnAssignments,
+    isIdleSurplusEmployee,
+    resolveMonthStartGlobalDayIndex,
+    surplusStandbyCodeForDay,
+} from './surplusRetCycle';
 
 const WORK_BANDS = new Set(['M', 'T', 'N']);
 
-function isCustomCoverEmployee(empId: string, ctx: V2EngineContext): boolean {
-    const posName = ctx.defaultPositionByEmp?.[empId];
+function resolveEmployeePositionName(
+    empId: string,
+    ctx: V2EngineContext,
+    stats?: Pick<V2GenerateStats, 'positionGroups'>,
+): string | undefined {
+    const groups = stats?.positionGroups;
+    if (groups) {
+        for (const [posName, empIds] of Object.entries(groups)) {
+            if (empIds.includes(empId)) return posName;
+        }
+    }
+    return ctx.defaultPositionByEmp?.[empId];
+}
+
+function isCustomCoverEmployee(
+    empId: string,
+    ctx: V2EngineContext,
+    stats?: Pick<V2GenerateStats, 'positionGroups'>,
+): boolean {
+    const posName = resolveEmployeePositionName(empId, ctx, stats);
     if (!posName) return false;
     const pos = ctx.positions.find((p) => p.positionName === posName);
     return !!pos && isCustomCoverPosition(pos);
@@ -96,12 +120,18 @@ export function pickRetDesignee(
     return undefined;
 }
 
-/** RET solo en el designado; el resto pasa a Franco (salvo RET planificado custom L–V, ej. sábado stand-by). */
+/** RET solo en el pool de sobrantes; el resto pasa a Franco (salvo RET planificado custom L–V). */
 export function consolidateRetToDesignee(
     assignments: V2Assignment[],
     designeeId: string | undefined,
     ctx?: Pick<V2EngineContext, 'positions' | 'defaultPositionByEmp' | 'getDayLetter'>,
+    allowedRetEmpIds?: string[],
 ): V2Assignment[] {
+    const allowed = new Set(
+        allowedRetEmpIds?.length
+            ? allowedRetEmpIds
+            : (designeeId ? [designeeId] : []),
+    );
     const preservePlannedCustomRet = (a: V2Assignment): boolean => {
         if (!ctx) return false;
         const dayLetter = ctx.getDayLetter(a.dateStr);
@@ -113,7 +143,7 @@ export function consolidateRetToDesignee(
         );
     };
 
-    if (!designeeId) {
+    if (allowed.size === 0) {
         return assignments.map((a) => {
             if (String(a.code || '').toUpperCase() !== 'RET') return a;
             if (isExternalRetEmpId(a.empId)) return a;
@@ -133,7 +163,7 @@ export function consolidateRetToDesignee(
     return assignments.map((a) => {
         if (String(a.code || '').toUpperCase() !== 'RET') return a;
         if (isExternalRetEmpId(a.empId)) return a;
-        if (a.empId === designeeId) return a;
+        if (allowed.has(a.empId)) return a;
         if (preservePlannedCustomRet(a)) return a;
         return {
             ...a,
@@ -148,18 +178,33 @@ export function consolidateRetToDesignee(
     });
 }
 
+type ExpectedBandCtx = Pick<V2EngineContext, 'monthStartGlobalDayIndex' | 'daysInMonth'>;
+
 export function expectedBandForEmployee(
     empId: string,
     dateStr: string,
-    openingSlotByEmp: Record<string, number>,
+    openingSlotByEmp: Record<string, number> | undefined,
     daysInMonth: Date[],
     getDateKey: (d: Date) => string,
+    monthStartOrCtx?: number | ExpectedBandCtx,
 ): string | null {
+    if (!openingSlotByEmp) return null;
     const opening = openingSlotByEmp[empId];
     if (opening === undefined) return null;
     const di = daysInMonth.findIndex((d) => getDateKey(d) === dateStr);
     if (di < 0) return null;
-    return String(CYCLE_24_MTN[(opening + di) % 24] || '').toUpperCase();
+    let monthStart: number;
+    if (typeof monthStartOrCtx === 'number') {
+        monthStart = monthStartOrCtx;
+    } else if (monthStartOrCtx) {
+        monthStart = resolveMonthStartGlobalDayIndex(monthStartOrCtx);
+    } else {
+        const d0 = daysInMonth[0];
+        if (!d0) return null;
+        const ANCHOR = new Date(2020, 0, 1);
+        monthStart = Math.round((d0.getTime() - ANCHOR.getTime()) / 86_400_000);
+    }
+    return String(CYCLE_24_MTN[(opening + monthStart + di) % 24] || '').toUpperCase();
 }
 
 export function isWorkBandCode(code: string | null | undefined): boolean {
@@ -180,6 +225,7 @@ export function absenceRequiresCoverage(
         openingSlotByEmp,
         ctx.daysInMonth,
         ctx.getDateKey,
+        ctx,
     );
     if (!band) return true;
     return isWorkBandCode(band);
@@ -193,7 +239,7 @@ export function ensureAbsenceCells(
     const result = [...assignments];
     const keys = new Set(result.map((a) => `${a.empId}__${a.dateStr}`));
 
-    for (const [empId, dateMap] of Object.entries(ctx.absences)) {
+    for (const [empId, dateMap] of Object.entries(ctx.absences ?? {})) {
         for (const [dateStr, code] of dateMap.entries()) {
             const k = `${empId}__${dateStr}`;
             if (keys.has(k)) {
@@ -243,6 +289,7 @@ export function fillEmptyCellsWithRet(
     const retDesignee = options?.retDesignateId ?? pickRetDesignee(ctx, options?.stats, result);
 
     for (const emp of ctx.employees) {
+        if (isExternalRetEmpId(emp.id)) continue;
         for (const day of ctx.daysInMonth) {
             const dateStr = ctx.getDateKey(day);
             const k = `${emp.id}__${dateStr}`;
@@ -271,6 +318,7 @@ export function fillEmptyCellsWithRet(
                     openingSlotByEmp,
                     ctx.daysInMonth,
                     ctx.getDateKey,
+                    ctx,
                 );
                 if (band === 'F') {
                     result.push({
@@ -288,18 +336,22 @@ export function fillEmptyCellsWithRet(
                 }
             }
 
-            if (isCustomCoverEmployee(emp.id, ctx)) {
+            if (isCustomCoverEmployee(emp.id, ctx, options?.stats)) {
                 const dayLetter = ctx.getDayLetter(dateStr);
+                const motorPos = resolveEmployeePositionName(emp.id, ctx, options?.stats);
+                const positionByEmp = motorPos
+                    ? { ...(ctx.defaultPositionByEmp || {}), [emp.id]: motorPos }
+                    : ctx.defaultPositionByEmp;
                 const restCode = plannedCustomCoverRestCode(
                     emp.id,
                     dayLetter,
                     ctx.positions,
-                    ctx.defaultPositionByEmp,
+                    positionByEmp,
                 ) ?? 'F';
                 result.push({
                     empId: emp.id,
                     dateStr,
-                    positionName: ctx.defaultPositionByEmp?.[emp.id] || '',
+                    positionName: motorPos || ctx.defaultPositionByEmp?.[emp.id] || '',
                     code: restCode,
                     name: restCode === 'RET' ? 'Retén' : restCode === 'FF' ? 'Franco feriado' : 'Franco',
                     hours: 0,
@@ -311,23 +363,48 @@ export function fillEmptyCellsWithRet(
                 continue;
             }
 
-            const useRet = !!retDesignee && emp.id === retDesignee;
+            const retPool = new Set([
+                ...(options?.stats?.retDesignateEmpIds ?? []),
+                ...(options?.retDesignateId ? [options.retDesignateId] : []),
+            ]);
+            const useRetPool = retPool.has(emp.id);
+            const standbyCode = useRetPool && (
+                isIdleSurplusEmployee(emp.id, options?.stats?.idleEmployeeIds)
+                || isLabSyntheticEmpId(emp.id)
+            )
+                ? surplusStandbyCodeForDay(ctx, emp.id, dateStr)
+                : (useRetPool ? 'RET' : 'F');
             result.push({
                 empId: emp.id,
                 dateStr,
                 positionName: '',
-                code: useRet ? 'RET' : 'F',
-                name: useRet ? 'Retén' : 'Franco',
+                code: standbyCode,
+                name: standbyCode === 'RET' ? 'Retén' : 'Franco',
                 hours: 0,
                 startTime: '00:00',
-                isFranco: !useRet,
-                isReten: useRet,
+                isFranco: standbyCode === 'F',
+                isReten: standbyCode === 'RET',
             });
             keys.add(k);
         }
     }
 
-    return consolidateRetToDesignee(result, retDesignee, ctx);
+    enforceSurplusRetCycleOnAssignments(
+        result,
+        ctx,
+        retDesignee,
+        [
+            ...(options?.stats?.idleEmployeeIds ?? []),
+            ...(options?.stats?.retDesignateEmpIds ?? []),
+        ],
+    );
+
+    return consolidateRetToDesignee(
+        result,
+        retDesignee,
+        ctx,
+        options?.stats?.retDesignateEmpIds,
+    );
 }
 
 function isPositionExcludedOnDate(
@@ -344,8 +421,9 @@ function isEmployeeServiceOffOnDate(
     dateStr: string,
     ctx: V2EngineContext,
     globalExcluded: Set<string>,
+    stats?: Pick<V2GenerateStats, 'positionGroups'>,
 ): boolean {
-    const posName = ctx.defaultPositionByEmp?.[empId];
+    const posName = resolveEmployeePositionName(empId, ctx, stats);
     if (!posName) return globalExcluded.has(dateStr);
     const pos = ctx.positions.find((p) => p.positionName === posName);
     return isPositionExcludedOnDate(pos, dateStr, globalExcluded);

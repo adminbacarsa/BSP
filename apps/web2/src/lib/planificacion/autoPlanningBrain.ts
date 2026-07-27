@@ -29,6 +29,7 @@ import {
 import {
     MODO12_ABSENCE_CODES,
     PLANNING_COVERAGE_RULES,
+    filterModo12DaysWhenSurplusRetAvailable,
     validateAbsenceModo12Days,
     validateContingencyCoverage,
     type Modo12DayCheck,
@@ -270,11 +271,20 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
         });
         return absCount <= maxExpectedWork;
     });
-    const modo12DaysAuto = deriveModo12DaysFromAbsences(
+    const modo12DaysRaw = deriveModo12DaysFromAbsences(
         input.absences,
         modo12EmpIds,
         monthDateStrs,
     );
+    const surplusModo12 = filterModo12DaysWhenSurplusRetAvailable({
+        modo12DaysAuto: modo12DaysRaw,
+        absences: input.absences,
+        employeeIds,
+        plantillaTotal: staffingPrelim.plantillaTotal,
+        peopleAvailable: input.employees.length,
+    });
+    const modo12DaysAuto = surplusModo12.modo12Days;
+    warnings.push(...surplusModo12.messages);
     const contingencyDaysManual = [...(input.contingencyDaysManual ?? [])].sort();
 
     const contingency = validateContingencyCoverage({

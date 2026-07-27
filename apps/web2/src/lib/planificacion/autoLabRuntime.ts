@@ -187,9 +187,8 @@ export function padPlanningRosterForAutoSchedule(params: {
 
     if (added.length > 0) {
         warnings.push(
-            `Auto-planificación: se agregaron ${added.length} guardia(s) sintética(s) `
-            + `(${params.employees.length} en dotación → ${roster.length}; objetivo estructural ${structuralTarget} con ${hrsPerPerson}h/guardia CCT ${cycleKey}). `
-            + `Son placeholders; no entran como titulares del puesto 24hs (máx. 4 en rotación 6+2).`,
+            `Auto-planificación: se agregaron ${added.length} guardia(s) sintética(s) RET/sin turno `
+            + `(${params.employees.length} legajos → ${roster.length}; plantilla ${structuralTarget}, ciclo ${cycleKey}).`,
         );
     }
 
@@ -254,6 +253,8 @@ export interface AutoLabRunResult {
     caseId: string;
     year: number;
     month: number;
+    /** Objetivo Firestore / lab — debe alinear con preferredObjectiveId de guardias. */
+    objectiveId: string;
     brain: AutoPlanningBrainResult;
     employees: V2EmployeeDef[];
     /** Guardias reales o sintéticos del caso, antes de completar dotación. */
@@ -391,10 +392,13 @@ export function runAutoLabCase(
         slaVendidas,
     });
 
+    const objectiveId = options?.objectiveIdForBrain ?? `auto-lab-${caseDef.id}`;
+
     return {
         caseId: caseDef.id,
         year,
         month,
+        objectiveId,
         brain,
         employees,
         sourceEmployees,
@@ -422,7 +426,12 @@ export function buildAutoLabExportJson(
     const gen = scheduleOutcome?.generation;
     const positionGroups = gen?.stats.positionGroups;
     const empPositionMap = gen
-        ? buildEmployeePositionMap(result.employees, gen.assignments, positionGroups)
+        ? buildEmployeePositionMap(
+            result.employees,
+            gen.assignments,
+            positionGroups,
+            gen.stats.idleEmployeeIds,
+        )
         : {};
 
     return {
@@ -453,7 +462,7 @@ export function buildAutoLabExportJson(
             sourceEmployees: result.sourceEmployees.map((e) => ({ id: e.id, nombre: e.nombre })),
             paddedEmployees: result.paddedEmployees.map((e) => ({ id: e.id, nombre: e.nombre })),
             rosterWarnings: result.rosterWarnings,
-            rosterSurplus: result.rosterSurplus,
+            rosterSurplus: scheduleOutcome?.rosterSurplus ?? result.rosterSurplus,
             slaVendidas: result.slaVendidas,
             cycle: caseDef.cycle,
             rotationMode: caseDef.rotationMode,

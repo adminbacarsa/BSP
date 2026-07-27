@@ -2,6 +2,7 @@ import type { V2EmployeeDef, V2FeasibilityReport, V2GenerateStats, V2PositionDef
 import { computeDailyStaffingModel } from './autoPlanningBrain';
 import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
 import { pickRetDesignee } from './absenceFrancoUtils';
+import { buildSurplusEmployeePool } from './surplusAbsentSubstitution';
 import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
 
 export interface RosterSurplusPositionExcess {
@@ -118,23 +119,35 @@ export function buildRosterSurplusReport(params: {
     if (surplusVsPlantilla > 0) {
         warnings.push(
             `Dotación en exceso: el objetivo necesita ${objectiveHeadcount} guardia(s) `
-            + `(4 rotación Puesto 24hs + custom Museo/Directorio según qty) y hay ${totalCount} `
-            + `(+${surplusVsPlantilla}). El sobrante va a RET stand-by (1) o Franco.`,
+            + `y hay ${totalCount} (+${surplusVsPlantilla}). `
+            + `El excedente (${surplusVsPlantilla}) queda en RET/Franco sin turnos facturables.`,
         );
     }
 
-    if (paddedCount > 0 && sourceCount >= objectiveHeadcount) {
+    const deficitVsPlantilla = Math.max(0, objectiveHeadcount - sourceCount);
+    if (deficitVsPlantilla > 0 && paddedCount === 0) {
         warnings.push(
-            `Se agregaron ${paddedCount} guardia(s) sintético(s) para cerrar horas SLA (${slaVendidas}h), `
-            + `pero la dotación real (${sourceCount}) ya cubría la plantilla estructural (${staffing.plantillaTotal}). `
-            + `Revisá si el SLA vendido está inflado o si hay guardias de más en el objetivo.`,
+            `DÉFICIT DOTACIÓN: faltan ${deficitVsPlantilla} legajo(s) real(es) `
+            + `(${sourceCount}/${objectiveHeadcount}). Agregá guardias al objetivo o dejá que el motor sume sintéticos RET.`,
         );
+    }
+
+    if (paddedCount > 0) {
+        warnings.push(
+            `Auto-completar dotación: ${paddedCount} guardia(s) sintético(s) agregado(s) `
+            + `(RET/sin turno) para cubrir déficit estructural (${sourceCount} → ${totalCount} / ${objectiveHeadcount} requeridos).`,
+        );
+        if (sourceCount >= objectiveHeadcount) {
+            warnings.push(
+                `Nota: la dotación real (${sourceCount}) ya cubría la plantilla; revisá si el SLA vendido está inflado.`,
+            );
+        }
     }
 
     if (idleFromFeas > 0 && !stats) {
         warnings.push(
             `Capacidad ociosa estimada: ~${idleFromFeas} guardia(s) de más respecto a las ${peopleNeededFinal} `
-            + `necesarias para ciclo ${cycleKey} y horas objetivo. Quedarán en Franco (1 como máximo en RET).`,
+            + `necesarias para ciclo ${cycleKey}. Quedarán en RET/Franco.`,
         );
     }
 
@@ -149,15 +162,15 @@ export function buildRosterSurplusReport(params: {
     if (stats && idleEmployeeIds.length > 0) {
         const names = idleEmployeeIds.map((id) => employeeName(employees, id)).join(', ');
         warnings.push(
-            `Tras generar el crono, ${idleEmployeeIds.length} guardia(s) quedaron sin turnos facturables: ${names}. `
-            + `Conviene sacarlos del objetivo o reasignarlos a otro servicio.`,
+            `${idleEmployeeIds.length} guardia(s) sobrante(s) en RET/Franco (sin turnos facturables): ${names}.`,
         );
     }
 
-    if (retDesigneeId) {
-        const nombre = employeeName(employees, retDesigneeId);
+    const retIds = stats?.retDesignateEmpIds ?? (retDesigneeId ? [retDesigneeId] : []);
+    if (retIds.length > 0) {
+        const names = retIds.map((id) => employeeName(employees, id)).join(', ');
         warnings.push(
-            `Guardia RET designado (stand-by único): ${nombre}. El resto del excedente debe quedar en Franco, no en RET esparcido.`,
+            `Pool RET stand-by (${retIds.length}): ${names}.`,
         );
     }
 
@@ -212,18 +225,33 @@ export function enrichRosterSurplusWithSchedule(
         if (!warnings.includes(msg)) warnings.push(msg);
     }
 
-    const idleEmployeeIds = stats.idleEmployeeIds?.length ? [...stats.idleEmployeeIds] : base.idleEmployeeIds;
+    const idleEmployeeIds = stats.idleEmployeeIds?.length
+        ? stats.idleEmployeeIds
+        : buildSurplusEmployeePool(
+            stats,
+            employees.map((e) => e.id),
+            ctx.positions,
+            ctx.autoCycles?.[0] ?? '6+2',
+            base.plantillaTotal,
+            {
+                defaultShiftByEmp: ctx.defaultShiftByEmp,
+                defaultPositionByEmp: ctx.defaultPositionByEmp,
+                absences: ctx.absences,
+            },
+        );
     if (idleEmployeeIds.length > 0) {
         const names = idleEmployeeIds.map((id) => employeeName(employees, id)).join(', ');
-        const msg = `Tras generar el crono, ${idleEmployeeIds.length} guardia(s) quedaron sin turnos facturables: ${names}. Conviene sacarlos del objetivo o reasignarlos a otro servicio.`;
-        if (!warnings.some((w) => w.includes('sin turnos facturables'))) warnings.push(msg);
+        const msg = `${idleEmployeeIds.length} guardia(s) sobrante(s) en RET/Franco (sin turnos facturables): ${names}.`;
+        if (!warnings.some((w) => w.includes('sobrante(s) en RET/Franco'))) warnings.push(msg);
     }
 
-    const retDesigneeId = pickRetDesignee(ctx, stats, assignments);
+    const retIds = stats.retDesignateEmpIds ?? [];
+    const retDesigneeId = retIds[0] ?? pickRetDesignee(ctx, stats, assignments);
     const retDesigneeNombre = retDesigneeId ? employeeName(employees, retDesigneeId) : undefined;
-    if (retDesigneeId && retDesigneeNombre) {
-        const msg = `Guardia RET designado (stand-by único): ${retDesigneeNombre}. El resto del excedente debe quedar en Franco, no en RET esparcido.`;
-        if (!warnings.some((w) => w.includes('RET designado'))) warnings.push(msg);
+    if (retIds.length > 0) {
+        const names = retIds.map((id) => employeeName(employees, id)).join(', ');
+        const msg = `Pool RET stand-by (${retIds.length}): ${names}.`;
+        if (!warnings.some((w) => w.includes('Pool RET stand-by'))) warnings.push(msg);
     }
 
     const hasSurplus = base.hasSurplus

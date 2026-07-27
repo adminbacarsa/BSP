@@ -723,6 +723,7 @@ export function normalize24hsPositionCalendars(positions: V2PositionDef[]): V2Po
         });
         return {
             ...pos,
+            coverageType: '24hs',
             activeDays: [...FULL_WEEK_DAY_LETTERS],
             shifts,
         };
@@ -795,8 +796,7 @@ export function effectiveShiftsForPositionDay(
 }
 
 function is24hsCoverage(pos: V2PositionDef): boolean {
-    const t = String(pos.coverageType || '24hs').toLowerCase();
-    return t === '24hs' || t === '24' || t === '24h';
+    return is24hsRotationPosition(pos);
 }
 
 /** Horas de cobertura “meta” ese día para el puesto (alineado al pie: 24h×pax en 24hs). */
@@ -1314,14 +1314,34 @@ const DEFAULT_SHIFT_TIMES: Record<string, string> = { M: '06:00', T: '14:00', N:
 
 const STANDARD_BANDS = new Set(['M', 'T', 'N', 'D12', 'N12']);
 
+function hasMtnRotationBands(pos: V2PositionDef): boolean {
+    const working = (pos.shifts || []).filter(
+        (s) => !FRANCO_SET.has(String(s.code ?? '').toUpperCase()),
+    );
+    if (working.length === 0) return false;
+    const codes = new Set(working.map((s) => String(s.code ?? '').toUpperCase()));
+    return codes.has('M') && codes.has('T') && codes.has('N');
+}
+
 /** EN/RO/etc. o SLA custom (MA/ME/M/M2…): titular cubre días operativos; puede superar 200h. */
 export function isCustomCoverPosition(pos: V2PositionDef): boolean {
+    if (hasMtnRotationBands(pos)) return false;
     const cov = String(pos.coverageType || '').toLowerCase();
     if (cov === '24hs' || cov === '24' || cov === '24h') return false;
     if (cov === 'custom') return true;
     const working = (pos.shifts || []).filter(s => !FRANCO_SET.has(String(s.code ?? '').toUpperCase()));
     if (working.length === 0) return false;
     return working.every(s => !STANDARD_BANDS.has(String(s.code ?? '').toUpperCase()));
+}
+
+/**
+ * Puesto rotativo 24/7 (M+T+N). Infiere desde bandas cuando el SLA no trae coverageType 24hs
+ * (caso frecuente en Firestore: Puesto 1/2/3 con M/T/N pero activeDays L–V).
+ */
+export function is24hsRotationPosition(pos: V2PositionDef): boolean {
+    const cov = String(pos.coverageType || '').toLowerCase();
+    if (cov === '24hs' || cov === '24' || cov === '24h') return true;
+    return hasMtnRotationBands(pos);
 }
 
 function findPrimary24hsPosition(positions: V2PositionDef[]): V2PositionDef | undefined {

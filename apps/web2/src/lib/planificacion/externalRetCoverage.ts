@@ -11,6 +11,7 @@ import {
     isWorkBandCode,
 } from './absenceFrancoUtils';
 import { MODO12_ABSENCE_CODES } from './planningCoveragePolicy';
+import { isModo12Day } from './objectiveCoverageDemand';
 import { SUVICO_POLICY } from './suvicoPolicy';
 
 export const EXTERNAL_RET_ID_PREFIX = 'lab-ret-ext';
@@ -95,13 +96,94 @@ export interface ExternalRetResult {
     modo8Plan: Modo8ExternalRetPlan;
 }
 
+function countBandAtPosition(
+    assignments: V2Assignment[],
+    dateStr: string,
+    positionName: string,
+    band: string,
+): number {
+    const b = band.toUpperCase();
+    return assignments.filter((a) =>
+        a.dateStr === dateStr
+        && a.positionName === positionName
+        && String(a.code || '').toUpperCase() === b
+        && (a.hours ?? 0) > 0
+        && !isExternalRetEmpId(a.empId),
+    ).length;
+}
+
+/** Guardia sobrante en RET ese día, disponible para activación puntual (no en ausencia). */
+function pickIdleSurplusRetForBand(
+    ctx: V2EngineContext,
+    assignments: V2Assignment[],
+    dateStr: string,
+    usedOnDay: Set<string>,
+): string | null {
+    const pool = ctx.idleSurplusEmpIds ?? [];
+    for (const empId of pool) {
+        if (usedOnDay.has(empId)) continue;
+        if (ctx.absences?.[empId]?.has(dateStr)) continue;
+        const cell = assignments.find((a) => a.empId === empId && a.dateStr === dateStr);
+        const code = String(cell?.code || '').toUpperCase();
+        if (code !== 'RET') continue;
+        return empId;
+    }
+    return null;
+}
+
+/**
+ * Activa guardias sobrantes (pool RET del objetivo) para cerrar bandas faltantes
+ * en todos los puestos, antes de recurrir a RET externo.
+ */
+export function activateIdleSurplusRetForGaps(
+    assignments: V2Assignment[],
+    ctx: V2EngineContext,
+    actions: ExternalRetAction[],
+): void {
+    const pool = ctx.idleSurplusEmpIds ?? [];
+    if (pool.length === 0) return;
+
+    const usedByDay = new Map<string, Set<string>>();
+
+    for (const day of ctx.daysInMonth) {
+        const dateStr = ctx.getDateKey(day);
+        const modo12 = isModo12Day(dateStr, ctx);
+        const bands = modo12 ? (['D12', 'N12'] as const) : (['M', 'T', 'N'] as const);
+        const usedOnDay = usedByDay.get(dateStr) ?? new Set<string>();
+        usedByDay.set(dateStr, usedOnDay);
+
+        for (const pos of ctx.positions) {
+            const positionName = pos.positionName;
+            const pax = Math.max(1, Number(pos.qty) || 1);
+            for (const band of bands) {
+                const have = countBandAtPosition(assignments, dateStr, positionName, band);
+                if (have >= pax) continue;
+
+                const surplus = pickIdleSurplusRetForBand(ctx, assignments, dateStr, usedOnDay);
+                if (!surplus) break;
+
+                assignWorkShift(assignments, surplus, dateStr, band, positionName);
+                usedOnDay.add(surplus);
+                actions.push({
+                    dateStr,
+                    empId: surplus,
+                    band,
+                    positionName,
+                    reason: 'surplus_ret:activacion',
+                    modo: modo12 ? 'modo12' : 'modo8_internal',
+                });
+            }
+        }
+    }
+}
+
 function positionPax(ctx: V2EngineContext, positionName: string): number {
     const pos = ctx.positions.find((p) => p.positionName === positionName);
     return Math.max(1, Number(pos?.qty) || 1);
 }
 
 function empBelongsToPosition(ctx: V2EngineContext, empId: string, positionName: string): boolean {
-    const assigned = ctx.defaultPositionByEmp?.[empId];
+    const assigned = ctx.defaultPositionByEmp?.[empId] ?? ctx.rosterSeedByEmp?.[empId];
     if (assigned) return assigned === positionName;
     return ctx.positions.length === 1 && ctx.positions[0]?.positionName === positionName;
 }
@@ -118,13 +200,14 @@ function analyzeModo8Capacity(
     const internalRetEmpIds: string[] = [];
     const absentIds = new Set<string>();
 
-    for (const [empId, dateMap] of Object.entries(ctx.absences)) {
+    for (const [empId, dateMap] of Object.entries(ctx.absences ?? {})) {
         if (dateMap.has(dateStr)) absentIds.add(empId);
     }
 
     for (const emp of ctx.employees) {
         if (isExternalRetEmpId(emp.id) || absentIds.has(emp.id)) continue;
-        if (!empBelongsToPosition(ctx, emp.id, positionName)) continue;
+        const isSurplusStandby = ctx.idleSurplusEmpIds?.includes(emp.id);
+        if (!empBelongsToPosition(ctx, emp.id, positionName) && !isSurplusStandby) continue;
 
         const cell = assignments.find((a) => a.empId === emp.id && a.dateStr === dateStr);
         const code = String(cell?.code || '').toUpperCase();
@@ -150,6 +233,7 @@ function analyzeModo8Capacity(
                 openingSlotByEmp,
                 ctx.daysInMonth,
                 ctx.getDateKey,
+                ctx,
             );
             if (band === 'F') continue;
             if (isWorkBandCode(band) && WORK_CODES_8.has(band!)) {
@@ -195,7 +279,7 @@ export function computeModo8ExternalRetPlan(params: {
     const externalBandsPerDay = new Map<string, number>();
     const absenceDates = new Set<string>();
 
-    for (const [, dateMap] of Object.entries(ctx.absences)) {
+    for (const [, dateMap] of Object.entries(ctx.absences ?? {})) {
         for (const [dateStr, code] of dateMap.entries()) {
             if (MODO12_ABSENCE_CODES.has(String(code || '').toUpperCase())) {
                 absenceDates.add(dateStr);
@@ -207,7 +291,7 @@ export function computeModo8ExternalRetPlan(params: {
         for (const pos of ctx.positions) {
             const positionName = pos.positionName;
             const absentEmpIds: string[] = [];
-            for (const [empId, dateMap] of Object.entries(ctx.absences)) {
+            for (const [empId, dateMap] of Object.entries(ctx.absences ?? {})) {
                 const code = dateMap.get(dateStr);
                 if (code && MODO12_ABSENCE_CODES.has(String(code).toUpperCase())) {
                     if (
@@ -230,7 +314,15 @@ export function computeModo8ExternalRetPlan(params: {
 
             if (missing.length === 0) continue;
 
-            const deployable = internalRetEmpIds.length + poolSize;
+            const surplusStandby = (ctx.idleSurplusEmpIds ?? []).filter(
+                (id) => !absentEmpIds.includes(id) && !ctx.absences?.[id]?.has(dateStr),
+            );
+            const internalCapacity: string[] = [...internalRetEmpIds];
+            for (const id of surplusStandby) {
+                if (!internalCapacity.includes(id)) internalCapacity.push(id);
+            }
+
+            const deployable = internalCapacity.length + poolSize;
             if (missing.length > deployable) continue;
 
             const internalRetAssignments: Array<{ empId: string; band: string }> = [];
@@ -238,8 +330,8 @@ export function computeModo8ExternalRetPlan(params: {
 
             for (let i = 0; i < missing.length; i++) {
                 const band = missing[i];
-                if (i < internalRetEmpIds.length) {
-                    internalRetAssignments.push({ empId: internalRetEmpIds[i], band });
+                if (i < internalCapacity.length) {
+                    internalRetAssignments.push({ empId: internalCapacity[i], band });
                 } else {
                     bandsForExternal.push(band);
                 }
@@ -286,6 +378,7 @@ function revertInternalToStandby(
             openingSlotByEmp,
             ctx.daysInMonth,
             ctx.getDateKey,
+            ctx,
         );
         if (band === 'F') {
             cell.code = 'F';
@@ -399,33 +492,11 @@ function pickExternalForDay(
 
 export function fillExternalRetStandby(
     assignments: V2Assignment[],
-    ctx: V2EngineContext,
-    externalEmployees: V2EmployeeDef[],
+    _ctx: V2EngineContext,
+    _externalEmployees: V2EmployeeDef[],
 ): V2Assignment[] {
-    const result = [...assignments];
-    const keys = new Set(result.map((a) => `${a.empId}__${a.dateStr}`));
-
-    for (const emp of externalEmployees) {
-        for (const day of ctx.daysInMonth) {
-            const dateStr = ctx.getDateKey(day);
-            const k = `${emp.id}__${dateStr}`;
-            if (keys.has(k)) continue;
-            result.push({
-                empId: emp.id,
-                dateStr,
-                positionName: '',
-                code: 'RET',
-                name: 'Retén',
-                hours: 0,
-                startTime: '00:00',
-                isReten: true,
-                isFranco: false,
-            });
-            keys.add(k);
-        }
-    }
-
-    return result;
+    // RET externo: solo turnos M/T/N puntuales ya asignados; sin relleno mensual stand-by.
+    return assignments;
 }
 
 function applyModo8Coverage(
@@ -490,6 +561,24 @@ function applyModo12ExternalRet(
         const usedOnDay = new Set<string>();
 
         for (const band of bands) {
+            const covered = countBandAtPosition(result, day.dateStr, positionName, band) > 0;
+            if (covered) continue;
+
+            const surplus = pickIdleSurplusRetForBand(ctx, result, day.dateStr, usedOnDay);
+            if (surplus) {
+                assignWorkShift(result, surplus, day.dateStr, band, positionName);
+                usedOnDay.add(surplus);
+                actions.push({
+                    dateStr: day.dateStr,
+                    empId: surplus,
+                    band,
+                    positionName,
+                    reason: 'surplus_ret:modo12',
+                    modo: 'modo12',
+                });
+                continue;
+            }
+
             const internal = result.find(
                 (a) =>
                     a.dateStr === day.dateStr
@@ -536,10 +625,15 @@ export function applyExternalRetCoverage(params: {
             (d) => NEEDS_EXTERNAL_MODO12.has(d.strategy) && !modo8Plan.skipModo12Days.has(d.dateStr),
         );
 
-    const externalCount = Math.max(
-        modo8Plan.externalPoolSize,
-        needsModo12External ? 1 : 0,
+    const bandsForExternalTotal = modo8Plan.modo8Days.reduce(
+        (n, d) => n + d.bandsForExternal.length,
+        0,
     );
+    const surplusAvailable = (ctx.idleSurplusEmpIds?.length ?? 0) > 0;
+    const needsModo12ExternalEffective = needsModo12External && !surplusAvailable;
+    const externalCount = bandsForExternalTotal > 0 || needsModo12ExternalEffective
+        ? Math.max(modo8Plan.externalPoolSize, needsModo12ExternalEffective ? 1 : 0)
+        : 0;
 
     if (modo8Plan.modo8Days.length === 0 && externalCount === 0) {
         return {
@@ -556,7 +650,11 @@ export function applyExternalRetCoverage(params: {
 
     applyModo8Coverage(result, modo8Plan, externalEmployees, actions);
 
-    if (plan && needsModo12External) {
+    if ((ctx.idleSurplusEmpIds?.length ?? 0) === 0) {
+        activateIdleSurplusRetForGaps(result, ctx, actions);
+    }
+
+    if (plan && needsModo12ExternalEffective) {
         applyModo12ExternalRet(
             result,
             plan,
@@ -603,5 +701,64 @@ export function extendCtxWithExternalRet(
             ...externalEmployees.map((e) => ({ id: e.id, nombre: e.nombre })),
         ],
         allowFrancoWorkedRescue: false,
+    };
+}
+
+/**
+ * Paso ② de política: RET externo solo para huecos residuales tras agotar excedente interno.
+ */
+export function applyResidualExternalRetForGaps(params: {
+    assignments: V2Assignment[];
+    ctx: V2EngineContext;
+    underGaps: import('./coveragePolicyBalance').CoverageSlotImbalance[];
+    surplusPool: string[];
+}): ExternalRetResult {
+    const result = params.assignments.map((a) => ({ ...a }));
+    const actions: ExternalRetAction[] = [];
+    const externalEmployees: V2EmployeeDef[] = [];
+    let extIdx = 0;
+
+    const sorted = [...params.underGaps].sort((a, b) => {
+        if (a.dateStr !== b.dateStr) return a.dateStr.localeCompare(b.dateStr);
+        return a.shiftCode.localeCompare(b.shiftCode);
+    });
+
+    for (const gap of sorted) {
+        const need = Math.abs(gap.delta);
+        if (need <= 0) continue;
+
+        for (let i = 0; i < need; i++) {
+            let external = externalEmployees[extIdx];
+            if (!external) {
+                const built = buildExternalRetEmployees(extIdx + 1);
+                external = built[extIdx];
+                externalEmployees.push(external);
+            }
+            extIdx += 1;
+            const band = gap.shiftCode.toUpperCase();
+            assignWorkShift(result, external.id, gap.dateStr, band, gap.positionName);
+            actions.push({
+                dateStr: gap.dateStr,
+                empId: external.id,
+                band,
+                positionName: gap.positionName,
+                reason: 'residual_gap:excedente_agotado',
+                modo: 'modo8',
+            });
+        }
+    }
+
+    const filled = fillExternalRetStandby(result, params.ctx, externalEmployees);
+
+    return {
+        assignments: filled,
+        externalEmployees,
+        actions,
+        modo8Plan: {
+            modo8Days: [],
+            skipModo12Days: new Set(),
+            externalPoolSize: externalEmployees.length,
+            externalBandsPerDay: new Map(),
+        },
     };
 }

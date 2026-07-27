@@ -87,7 +87,7 @@ const fixedMuseo = resolveObjectivePositionRoster({
     sortedEmps,
     positionNeed,
     defaultPos: { g1: 'Museo' },
-    userLockedPos: {},
+    userLockedPos: { g1: 'Museo' },
     empMeta,
     perPositionMonthHours: { 'Puesto 1': 744, Museo: 180, DIRECTORIO: 120 },
     hardMax: 200,
@@ -119,5 +119,53 @@ const only24 = resolveObjectivePositionRoster({
 
 assert(!only24.phasedByKind, 'solo 24hs no fuerza phased');
 assert(only24.positionGroups['Puesto 1'].length === 4, 'solo 24hs asigna 4');
+
+// Obrador: rosterSeed custom-first NO debe bloquear phased 24hs→custom
+const obradorCustomFirst: V2PositionDef[] = [
+    {
+        positionName: 'Puesto Encargada',
+        qty: 1,
+        coverageType: 'custom',
+        activeDays: ['L', 'M', 'X', 'J', 'V'],
+        shifts: [{ code: 'EN', name: 'Encargada', hours: 9, days: ['L', 'M', 'X', 'J', 'V'] }],
+    },
+    {
+        positionName: 'Puesto 3',
+        qty: 1,
+        coverageType: '24hs',
+        shifts: [
+            { code: 'M', name: 'Mañana', hours: 8 },
+            { code: 'T', name: 'Tarde', hours: 8 },
+            { code: 'N', name: 'Noche', hours: 8 },
+        ],
+    },
+];
+const obradorNeed = { 'Puesto Encargada': 2, 'Puesto 3': 4 };
+const obradorEmps = Array.from({ length: 6 }, (_, i) => ({ id: `o${i + 1}` }));
+const obradorMeta = Object.fromEntries(obradorEmps.map((e) => [e.id, { priorityScore: 0 }]));
+const obradorSeed = { o1: 'Puesto Encargada', o2: 'Puesto Encargada' };
+const obradorRoster = resolveObjectivePositionRoster({
+    positions: obradorCustomFirst,
+    sortedEmps: obradorEmps,
+    positionNeed: obradorNeed,
+    defaultPos: obradorSeed,
+    userLockedPos: {},
+    empMeta: obradorMeta,
+    perPositionMonthHours: { 'Puesto Encargada': 180, 'Puesto 3': 744 },
+    hardMax: 200,
+    overcapFactor: 1.05,
+});
+assert(
+    obradorRoster.positionGroups['Puesto 3'].length === 4,
+    'rosterSeed custom-first no bloquea cupo 24hs (4 guardias)',
+);
+assert(
+    obradorRoster.positionGroups['Puesto 3'].includes('o1'),
+    'o1 con seed Encargada va a 24hs en phased (no bloqueado por seed)',
+);
+assert(
+    !obradorRoster.positionGroups['Puesto Encargada'].includes('o1'),
+    'o1 con solo rosterSeed no queda titular custom',
+);
 
 console.log('eval-objective-roster: OK');

@@ -1,5 +1,6 @@
 import { getDocs } from 'firebase/firestore';
 import type { V2EmployeeDef, V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
+import { is24hsRotationPosition } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import type { PlanningCatalogObjective } from '@/hooks/useObjectivePlanningCatalog';
 import type { ServiceSLA } from '@/services/slaService';
@@ -17,14 +18,19 @@ import {
     type PlanningPositionRow,
 } from '@/lib/slaPlanningMatch';
 import { customCoverSimultaneousPax } from './customCoverCycle';
-import { isCustomCoverPosition } from './autoScheduleEngineV2';
+import { isCustomCoverPosition, is24hsRotationPosition } from './autoScheduleEngineV2';
 import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
 import { fetchPlanningMonthAbsences, fetchPlanningMonthShifts } from './loadPlanningMonthShifts';
 import {
     DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
     fetchCoverageWisdomHistory,
 } from './fetchPlanningCoverageWisdomHistory';
-import type { PlanningAbsenceRecord, PlanningCoverageWisdom } from './planningCoverageWisdom';
+import {
+    validatePlannerDotacionAgainstSla,
+    dotacionValidationSummaryEs,
+} from './plannerDotacionValidator';
+import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
+import { computeObjectiveHeadcountBalance } from './rosterHeadcountBalance';
 
 export const AUTO_LAB_REAL_CASE_ID = 'case-real-service';
 
@@ -43,8 +49,6 @@ export interface AutoLabRealServiceBundle {
 }
 
 function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
-    const cov = String(row.coverageType || '').toLowerCase();
-    const is24 = cov === '24hs' || cov === '24' || cov === '24h';
     const shifts: V2ShiftDef[] = (row.shifts || []).map((s) => {
         const mapped: V2ShiftDef = {
             code: String(s.code || '').toUpperCase(),
@@ -59,10 +63,10 @@ function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
         }
         return mapped;
     });
-    return {
+    const provisional: V2PositionDef = {
         positionName: row.positionName,
         qty: Math.max(1, Number(row.qty) || 1),
-        coverageType: is24 ? '24hs' : 'custom',
+        coverageType: String(row.coverageType || ''),
         shifts: shifts.length > 0 ? shifts : [
             { code: 'M', name: 'Mañana', hours: 8 },
             { code: 'T', name: 'Tarde', hours: 8 },
@@ -70,6 +74,14 @@ function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
         ],
         activeDays: row.activeDays?.length ? [...row.activeDays] : ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
         excludedDates: row.excludedDates?.length ? [...row.excludedDates] : undefined,
+    };
+    const is24 = is24hsRotationPosition(provisional);
+    return {
+        ...provisional,
+        coverageType: is24 ? '24hs' : 'custom',
+        activeDays: is24
+            ? ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+            : provisional.activeDays,
     };
 }
 
@@ -179,6 +191,10 @@ export async function loadAutoLabRealServiceBundle(params: {
         employees.push({
             id: row.id,
             nombre: employeeDisplayName(row, row.id),
+            preferredObjectiveId: String(row.preferredObjectiveId || objective.objectiveId),
+            volante: Array.isArray(row.volante)
+                ? (row.volante as string[]).map(String)
+                : undefined,
         });
         const dot = row.planificacionDotacion as Record<
             string,
@@ -199,6 +215,22 @@ export async function loadAutoLabRealServiceBundle(params: {
         }
     }
 
+    for (const row of empRows) {
+        if (!isActiveEmployee(row)) continue;
+        const volanteList = Array.isArray(row.volante) ? (row.volante as string[]).map(String) : [];
+        if (!volanteList.includes(objective.objectiveId)) continue;
+        if (employees.some((e) => e.id === row.id)) continue;
+        employees.push({
+            id: row.id,
+            nombre: employeeDisplayName(row, row.id),
+            preferredObjectiveId: String(row.preferredObjectiveId || ''),
+            volante: volanteList,
+        });
+        warnings.push(
+            `Volante ${employeeDisplayName(row, row.id)} agregado para cobertura custom/RET en este objetivo.`,
+        );
+    }
+
     let employeeSource: AutoLabRealServiceBundle['employeeSource'] = 'dotacion';
     if (employees.length === 0) {
         throw new Error(
@@ -217,10 +249,17 @@ export async function loadAutoLabRealServiceBundle(params: {
     }
 
     const dotacionCount = Object.keys(defaultPositionByEmp).length;
+    const dotacionValidation = validatePlannerDotacionAgainstSla({
+        positions,
+        employees,
+        defaultPositionByEmp: dotacionCount > 0 ? defaultPositionByEmp : undefined,
+        cycleKey: '6+2',
+    });
     if (dotacionCount > 0) {
-        warnings.push(
-            `Dotación por puesto desde legajos: ${dotacionCount} guardia(s) con planificacionDotacion.`,
-        );
+        warnings.push(`Dotación por puesto desde legajos: ${dotacionCount} guardia(s) con planificacionDotacion.`);
+        warnings.push(dotacionValidationSummaryEs(dotacionValidation));
+        warnings.push(...dotacionValidation.errors);
+        warnings.push(...dotacionValidation.warnings);
     } else {
         warnings.push(
             'Sin planificacionDotacion en legajos — el motor reparte guardias por orden de puesto (Puesto 1 → Museo → …). '
@@ -229,6 +268,12 @@ export async function loadAutoLabRealServiceBundle(params: {
     }
 
     const structuralHeads = computeObjectiveRequiredHeadcount(positions, '6+2');
+    const headcountBalance = computeObjectiveHeadcountBalance({
+        positions,
+        employees,
+        cycleKey: '6+2',
+    });
+    warnings.push(...headcountBalance.messages);
     const simultaneousNeed = positions.reduce((s, p) => {
         if (isCustomCoverPosition(p)) return s + customCoverSimultaneousPax(p);
         return s + Math.max(1, Number(p.qty) || 1);
@@ -321,12 +366,12 @@ export async function loadAutoLabRealServiceBundle(params: {
         employeeCount: employees.length,
         cycle: '6+2',
         rotationMode: 'rotative',
-        rotateShiftsOverride: positions.some((p) => {
-            const cov = String(p.coverageType || '').toLowerCase();
-            return cov === '24hs' || cov === '24' || cov === '24h';
-        })
-            ? true
-            : false,
+        rotateShiftsOverride: (() => {
+            const has24 = positions.some(is24hsRotationPosition);
+            if (!has24) return false;
+            // Objetivo con 24hs: motor ciclo 24d (fixedBandFloater), no péndulo demand-driven.
+            return false;
+        })(),
         slaVendidas: slaVendidas > 0 ? slaVendidas : undefined,
         serviceStartDate: serviceStart || undefined,
         serviceEndDate: serviceEnd || undefined,

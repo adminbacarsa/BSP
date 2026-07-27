@@ -1,9 +1,8 @@
 import type { V2PositionDef } from './autoScheduleEngineV2';
-import { isCustomCoverPosition } from './autoScheduleEngineV2';
+import { isCustomCoverPosition, is24hsRotationPosition } from './autoScheduleEngineV2';
 
 export function is24hsPosition(pos: V2PositionDef): boolean {
-    const cov = String(pos.coverageType || '').toLowerCase();
-    return cov === '24hs' || cov === '24' || cov === '24h';
+    return is24hsRotationPosition(pos);
 }
 
 /** Flags de motor para objetivos con puestos custom (MA/ME) y/o mixtos 24hs+custom. */
@@ -19,12 +18,13 @@ export function resolveObjectiveScheduleFlags(positions: V2PositionDef[]): {
     return {
         headcountByPax: hasCustom,
         schedulePhasedRotativeFirst: isMixed,
-        preserveRotativeIntegrity: hasCustom && !isMixed,
+        /** Protege ciclo 24d / bandas fijas: el fixer y gap-fill del pool no deben mezclar M/T/N. */
+        preserveRotativeIntegrity: has24hs,
         allowCustom24hsBackup: !isMixed,
     };
 }
 
-/** Mixto 24hs+custom: no usar fixedBandFloater (solo rota 24hs; custom queda MA/ME todos los días). */
-export function shouldBypassFixedBandFloater(positions: V2PositionDef[]): boolean {
-    return resolveObjectiveScheduleFlags(positions).schedulePhasedRotativeFirst;
+/** El ciclo 24d + flotante ya programa custom L–V en el mismo pipeline; no forzar V4 demand-driven. */
+export function shouldBypassFixedBandFloater(_positions: V2PositionDef[]): boolean {
+    return false;
 }

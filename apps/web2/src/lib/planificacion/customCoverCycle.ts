@@ -61,6 +61,21 @@ export function resolveCustomCoverEmployeePosition(
     return pos ?? null;
 }
 
+/** Guardia titular de un puesto custom (MA/ME/RO/M fijo L–V), según grupos del motor. */
+export function employeeAssignedToCustomCover(
+    empId: string,
+    positions: V2PositionDef[],
+    positionGroups?: Record<string, string[]>,
+): boolean {
+    if (!positionGroups) return false;
+    for (const [posName, ids] of Object.entries(positionGroups)) {
+        if (!ids.includes(empId)) continue;
+        const pos = positions.find((p) => p.positionName === posName);
+        return !!pos && isCustomCoverPosition(pos);
+    }
+    return false;
+}
+
 /**
  * Código de descanso planificado para custom en día sin servicio (ej. sábado RET, domingo F).
  * null si el día es laboral del puesto o el guardia no es custom.

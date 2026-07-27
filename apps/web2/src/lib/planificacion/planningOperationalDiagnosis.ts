@@ -180,8 +180,8 @@ export function buildPlanningOperationalDiagnosis(params: {
             + 'esquema 6+1/5+1 puntual, o revisar horas vendidas / ausencias.';
     } else if (balance === 'surplus') {
         resolution =
-            `${headcountDelta} guardia(s) por encima de plantilla 6+2. Designar 1 RET y resto F en días laborables; `
-            + 'no repartir turnos extra que rompan ~180h/guardia.';
+            `${headcountDelta} guardia(s) por encima de plantilla 6+2. Excedente en RET (días laborables) y Franco (descanso); `
+            + 'sin turnos facturables ni reparto extra que rompa ~180h/guardia.';
     } else {
         resolution =
             'Revisar viabilidad y esquema antes de generar. Preferir 6+2 si la capacidad horaria lo permite.';

@@ -1,0 +1,132 @@
+/**
+ * Smoke: H. San Roque — 4 puestos 24hs × 4 guardias = 16 plantilla, 19 legajos → 3 RET.
+ */
+import {
+    generateScheduleV2,
+    type V2EmployeeDef,
+    type V2EngineContext,
+    type V2PositionDef,
+} from '../src/lib/planificacion/autoScheduleEngineV2';
+
+const M_T_N: V2PositionDef['shifts'] = [
+    { code: 'M', name: 'Mañana', hours: 8, startTime: '07:00', endTime: '15:00' },
+    { code: 'T', name: 'Tarde', hours: 8, startTime: '15:00', endTime: '23:00' },
+    { code: 'N', name: 'Noche', hours: 8, startTime: '23:00', endTime: '07:00' },
+    { code: 'D12', name: 'Diurno 12h', hours: 12, startTime: '07:00', endTime: '19:00' },
+    { code: 'N12', name: 'Nocturno 12h', hours: 12, startTime: '19:00', endTime: '07:00' },
+];
+
+const positions: V2PositionDef[] = [
+    'Puesto Rondin',
+    'Puesto Playa',
+    'Puesto Hall Central',
+    'Puesto Salud Mnetal',
+].map((name) => ({
+    positionName: name,
+    qty: 1,
+    coverageType: '24hs' as const,
+    shifts: M_T_N,
+    activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+}));
+
+const employeeIds = [
+    '0KozY27p1igVpCEi3dYI', '1CQAtbfRTj9VOZhki3Xf', '2h1CYgDiuInpBx0cPglf',
+    '7M4nUy7XDhsfxHB3g7Hz', 'B4dLwkFxERlo3Zxvxbi9', 'EUOkq4RVYfsY5ZAZ1OUq',
+    'MdAhlJ6ACqnBa25dEoRh', 'RVD9nTqF5c4mrfMhDxow', 'U2krcGQjvKc6F6ZQC89A',
+    'Z4IyHVJfjBfn0HY3Zg3L', 'Z9w2MhRdifBl8U82nomq', 'cBmM3olST7Pa5MgsUMIr',
+    'cwo2Fizijo9ao6slIb64', 'kGTOnyRcEaT6j2HRciA3', 'kUqKPpQiwmdLiWc9A5Gn',
+    'lphLITYtzSGrRSxrjh7F', 'nrrs1aBu7cdAZPY00KXp', 'nwNgdtwbkzNQPBC5yg1o',
+    'nykgmzvH0qBHDbPpCuqM',
+];
+
+const employees: V2EmployeeDef[] = employeeIds.map((id, i) => ({
+    id,
+    nombre: `Guardia ${i + 1}`,
+}));
+
+const daysInMonth: Date[] = [];
+for (let d = 1; d <= 31; d++) {
+    daysInMonth.push(new Date(2026, 6, d));
+}
+
+const getDateKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+const getDayLetter = (dateStr: string) => DAY_LETTERS[new Date(`${dateStr}T12:00:00`).getDay()];
+
+const rosterSeed: Record<string, string> = {};
+let idx = 0;
+for (const pos of positions) {
+    for (let i = 0; i < 4 && idx < employees.length; i++) {
+        rosterSeed[employees[idx].id] = pos.positionName;
+        idx += 1;
+    }
+}
+
+const absences: V2EngineContext['absences'] = {};
+for (const empId of ['7M4nUy7XDhsfxHB3g7Hz']) {
+    absences[empId] = new Map();
+    for (let d = 8; d <= 21; d++) {
+        absences[empId].set(`2026-07-${String(d).padStart(2, '0')}`, 'V');
+    }
+}
+for (const empId of ['MdAhlJ6ACqnBa25dEoRh']) {
+    absences[empId] = new Map();
+    for (let d = 12; d <= 18; d++) {
+        absences[empId].set(`2026-07-${String(d).padStart(2, '0')}`, 'V');
+    }
+}
+
+const ctx: V2EngineContext = {
+    positions,
+    employees,
+    daysInMonth,
+    empMonthlyInitial: Object.fromEntries(employees.map((e) => [e.id, 0])),
+    absences,
+    slaVendidas: 2976,
+    autoCycles: ['6+2'],
+    rosterSeedByEmp: rosterSeed,
+    budgetMode: 'cct',
+    getDayLetter,
+    getDateKey,
+    rotateShifts: true,
+    modo12Days: Array.from({ length: 14 }, (_, i) => `2026-07-${String(8 + i).padStart(2, '0')}`),
+    headcountByPax: true,
+};
+
+const result = generateScheduleV2(ctx);
+const { stats } = result;
+
+let failed = false;
+const assert = (cond: boolean, msg: string) => {
+    if (!cond) {
+        console.error(`FAIL: ${msg}`);
+        failed = true;
+    } else {
+        console.log(`OK: ${msg}`);
+    }
+};
+
+const groupSizes = Object.entries(stats.positionGroups || {}).map(([k, v]) => `${k}=${v.length}`);
+assert(groupSizes.every((s) => s.endsWith('=4')), `4 guardias por puesto (${groupSizes.join(', ')})`);
+
+const idle = stats.idleEmployeeIds || [];
+assert(idle.length === 3, `3 guardias ociosos/RET (got ${idle.length}: ${idle.join(', ')})`);
+
+const billableCodes = new Set(['M', 'T', 'N', 'D12', 'N12']);
+for (const empId of idle) {
+    const billable = result.assignments.filter(
+        (a) => a.empId === empId && billableCodes.has(String(a.code || '').toUpperCase()),
+    );
+    assert(billable.length === 0, `ocioso ${empId} sin turnos facturables`);
+}
+
+const assignedTotal = Object.values(stats.positionGroups || {}).reduce((s, g) => s + g.length, 0);
+assert(assignedTotal === 16, `16 titulares en plantilla (got ${assignedTotal})`);
+
+if (failed) {
+    console.error('\n=== eval:san-roque-headcount FAILED ===');
+    process.exit(1);
+}
+console.log('\n=== eval:san-roque-headcount PASS ===');

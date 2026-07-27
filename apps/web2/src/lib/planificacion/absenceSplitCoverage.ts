@@ -355,14 +355,20 @@ export function applyAbsenceSplitCoverage(
 
     const effectiveModo12Days = resolveEffectiveModo12Days(ctx, openingSlotByEmp);
     const skipModo12 = options?.skipModo12Days ?? new Set<string>();
+    const surplusPool = ctx.idleSurplusEmpIds ?? [];
+    const modo12Explicit = (ctx.modo12Days?.length ?? 0) > 0;
+    /** Con excedente RET y sin Modo 12 del cerebro → no promover D12/N12 por cada V/L/E. */
+    const allowAbsenceD12Split = surplusPool.length === 0 || modo12Explicit;
 
     const daysToProcess = new Set<string>();
     for (const d of effectiveModo12Days) {
         if (!skipModo12.has(d)) daysToProcess.add(d);
     }
-    for (const key of absenceDaysByPos.keys()) {
-        const dateStr = key.split('__')[0];
-        if (!skipModo12.has(dateStr)) daysToProcess.add(dateStr);
+    if (allowAbsenceD12Split) {
+        for (const key of absenceDaysByPos.keys()) {
+            const dateStr = key.split('__')[0];
+            if (!skipModo12.has(dateStr)) daysToProcess.add(dateStr);
+        }
     }
 
     const effectiveModo12Filtered = [...effectiveModo12Days]

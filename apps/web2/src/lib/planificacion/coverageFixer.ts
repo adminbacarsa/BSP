@@ -37,6 +37,10 @@ import { wisdomBandFromShiftCode } from './planningCoverageWisdom';
 
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9, RO: 10, MA: 9, ME: 12 };
 const DEFAULT_START: Record<string, string> = { M: '06:00', T: '14:00', N: '22:00', D12: '07:00', N12: '19:00', MA: '07:00', ME: '07:00' };
+
+function isSurplusStandbyEmp(ctx: V2EngineContext, empId: string): boolean {
+    return (ctx.idleSurplusEmpIds ?? []).includes(empId);
+}
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
 
@@ -536,6 +540,7 @@ function fixUncoveredSlot(
 
     for (const otherId of groupSorted) {
         if (filled >= qtyMissing) break;
+        if (isSurplusStandbyEmp(ctx, otherId)) continue;
         const other = byKey.get(`${otherId}__${dateStr}`);
         if (!other) {
             tryFill(otherId, 'ST');

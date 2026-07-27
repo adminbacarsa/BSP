@@ -97,6 +97,7 @@ function pickReinforcementPosition(
             const monthH = perPositionMonthHours[pos.positionName] ?? 0;
             const need = effectivePositionGroupNeed(pos, positionNeed, monthH, hardMax);
             const have = positionGroups[pos.positionName]?.length ?? 0;
+            if (have >= need) continue;
             const ratio = have / Math.max(1, need);
             if (ratio < overcapFactor && ratio < minRatio) {
                 minRatio = ratio;
@@ -129,7 +130,7 @@ export function resolveObjectivePositionRoster(
         sortedEmps,
         positionNeed,
         defaultPos,
-        userLockedPos: _userLockedPos,
+        userLockedPos,
         empMeta: _empMeta,
         perPositionMonthHours,
         hardMax,
@@ -148,9 +149,11 @@ export function resolveObjectivePositionRoster(
         if (wasVirtual) virtualAssignmentCount++;
     };
 
-    // 1a — puesto fijo desde UI / planificacionDotacion
+    // 1a — puesto fijo EXPLÍCITO (planificacionDotacion / defaultPositionByEmp del usuario).
+    // El rosterSeed del Auto Lab (defaultPos sin userLockedPos) NO bloquea: en mixtos
+    // custom+24hs debe poder cerrar 24hs antes que custom aunque el seed liste custom primero.
     for (const emp of sortedEmps) {
-        const fixed = defaultPos[emp.id];
+        const fixed = userLockedPos[emp.id];
         if (!fixed || positionGroups[fixed] === undefined) continue;
         assign(emp.id, fixed, false);
     }
@@ -169,7 +172,7 @@ export function resolveObjectivePositionRoster(
                 empAssignedTo[emp.id] = null;
                 continue;
             }
-            assign(emp.id, target, !defaultPos[emp.id]);
+            assign(emp.id, target, !userLockedPos[emp.id]);
         }
     };
 
@@ -202,11 +205,11 @@ export function resolveObjectivePositionRoster(
                 ? effectivePositionGroupNeed(pos, positionNeed, monthH, hardMax)
                 : (positionNeed[target] || 1);
             const have = positionGroups[target].length;
-            if (isLabSyntheticEmpId(emp.id) && have >= need) {
+            if (have >= need) {
                 empAssignedTo[emp.id] = null;
                 continue;
             }
-            assign(emp.id, target, !defaultPos[emp.id]);
+            assign(emp.id, target, !userLockedPos[emp.id]);
         } else {
             empAssignedTo[emp.id] = null;
         }

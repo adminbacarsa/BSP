@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import type { V2EmployeeDef } from '@/lib/planificacion/autoScheduleEngineV2';
+import { isCustomCoverPosition } from '@/lib/planificacion/autoScheduleEngineV2';
 import type { AutoLabRunResult } from '@/lib/planificacion/autoLabRuntime';
 import {
     buildAssignmentIndex,
     buildEmployeePositionMap,
+    is24hsPosition,
     positionBadgeClass,
     shiftCodeCellClass,
     shortPositionLabel,
@@ -16,6 +18,79 @@ import { isHolidayDate } from '@/lib/planificacion/autoLabServicePeriod';
 import { AlertTriangle, CalendarRange, CheckCircle2, Grid3x3, Users } from 'lucide-react';
 
 const WD_SHORT_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'] as const;
+const WORK_BANDS = new Set(['M', 'T', 'N', 'D12', 'N12']);
+const ABSENCE_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG']);
+
+function isWorkBandCode(code: string): boolean {
+    return WORK_BANDS.has(String(code || '').toUpperCase());
+}
+
+type DayAssignmentCell = {
+    code?: string;
+    name?: string;
+    positionName?: string;
+    hours?: number;
+};
+
+function resolveDayCellDisplay(
+    cells: DayAssignmentCell[],
+    homePos: string,
+    sparsePool = false,
+): { primary?: DayAssignmentCell; displayCode: string; title: string } {
+    if (cells.length === 0) {
+        return {
+            displayCode: '—',
+            title: sparsePool ? 'Sin uso en este objetivo (puede tener turno en otro)' : 'Sin asignación',
+        };
+    }
+
+    const absence = cells.find((c) => ABSENCE_CODES.has(String(c.code || '').toUpperCase()));
+    if (absence) {
+        return {
+            primary: absence,
+            displayCode: String(absence.code).toUpperCase(),
+            title: `Ausencia ${absence.code}`,
+        };
+    }
+
+    const billable = cells.find(
+        (c) => isWorkBandCode(String(c.code)) && (Number(c.hours) || 0) > 0,
+    );
+    if (billable) {
+        const atOther = billable.positionName && homePos && billable.positionName !== homePos;
+        return {
+            primary: billable,
+            displayCode: String(billable.code).toUpperCase(),
+            title: atOther
+                ? `Cubre ${billable.positionName} · ${billable.code}`
+                : `${billable.name || billable.code} · ${billable.positionName || homePos}`,
+        };
+    }
+
+    if (sparsePool) {
+        const franco = cells.find((c) => String(c.code || '').toUpperCase() === 'F');
+        if (franco) {
+            return {
+                primary: franco,
+                displayCode: 'F',
+                title: 'Franco por racha CCT en este objetivo',
+            };
+        }
+        return {
+            displayCode: '—',
+            title: 'Sin uso en este objetivo (puede tener turno en otro)',
+        };
+    }
+
+    const primary = cells[0];
+    return {
+        primary,
+        displayCode: primary?.code || '—',
+        title: primary
+            ? `${primary.name || primary.code} · ${primary.positionName ?? homePos}`
+            : 'Sin asignación',
+    };
+}
 
 function formatGridDay(day: Date): { dd: string; wd: string } {
     return {
@@ -31,6 +106,23 @@ interface AutoLabResolutionGridProps {
 
 function shortEmpLabel(emp: V2EmployeeDef): string {
     return shortExternalRetLabel(emp);
+}
+
+function positionCoverageKind(
+    positionName: string,
+    positions: AutoLabRunResult['positions'],
+): '24hs' | 'custom' | null {
+    const meta = positions.find((p) => p.positionName === positionName);
+    if (!meta) return null;
+    if (is24hsPosition(meta)) return '24hs';
+    if (isCustomCoverPosition(meta)) return 'custom';
+    return null;
+}
+
+function positionCoverageBadge(kind: '24hs' | 'custom' | null): string {
+    if (kind === '24hs') return 'bg-indigo-100 text-indigo-900 border-indigo-300';
+    if (kind === 'custom') return 'bg-amber-100 text-amber-950 border-amber-300';
+    return '';
 }
 
 export default function AutoLabResolutionGrid({
@@ -77,91 +169,126 @@ export default function AutoLabResolutionGrid({
             allEmployees,
             scheduleOutcome.generation.assignments,
             stats?.positionGroups,
+            stats?.idleEmployeeIds,
         );
-    }, [scheduleOutcome.generation, allEmployees, stats?.positionGroups]);
+    }, [scheduleOutcome.generation, allEmployees, stats?.positionGroups, stats?.idleEmployeeIds]);
 
     const primaryShiftByEmp = stats?.primaryShiftByEmp ?? {};
-
-    const sortedEmployees = useMemo(() => {
-        const posOrder = runResult.positions.map((p) => p.positionName);
-        return [...allEmployees].sort((a, b) => {
-            const extA = isExternalRetEmpId(a.id);
-            const extB = isExternalRetEmpId(b.id);
-            if (extA !== extB) return extA ? 1 : -1;
-            const pa = empPositionMap[a.id] ?? '';
-            const pb = empPositionMap[b.id] ?? '';
-            const ia = posOrder.indexOf(pa);
-            const ib = posOrder.indexOf(pb);
-            if (ia !== ib) return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
-            const na = Number((a.nombre || '').match(/(\d+)/)?.[1] ?? 0);
-            const nb = Number((b.nombre || '').match(/(\d+)/)?.[1] ?? 0);
-            return na - nb;
-        });
-    }, [allEmployees, runResult.positions, empPositionMap]);
 
     const cycleNeededByPos = useMemo(() => {
         const cycleKey = runResult.brain?.pickedCycle ?? '6+2';
         return buildPositionRequiredHeadcountMap(runResult.positions, cycleKey);
     }, [runResult.brain, runResult.positions]);
 
+    const idleEmployeeIdSet = useMemo(
+        () => new Set(stats?.idleEmployeeIds ?? []),
+        [stats?.idleEmployeeIds],
+    );
+
     const positionSummary = useMemo(() => {
         return runResult.positions.map((pos) => {
-            const ids = (stats?.positionGroups?.[pos.positionName]
-                ?? sortedEmployees.filter((e) => empPositionMap[e.id] === pos.positionName).map((e) => e.id));
+            const ids = stats?.positionGroups?.[pos.positionName] ?? [];
+            const titularIds = ids.filter((id) => !idleEmployeeIdSet.has(id));
             const bands = [...new Set(
-                ids.map((id) => primaryShiftByEmp[id]).filter(Boolean) as string[],
+                titularIds.map((id) => primaryShiftByEmp[id]).filter(Boolean) as string[],
             )];
             const cycleNeeded = cycleNeededByPos[pos.positionName];
             return {
                 ...pos,
                 guardIds: ids,
+                titularGuardIds: titularIds,
                 bandHint: bands.length > 0 ? bands.join('/') : '—',
                 cycleNeeded,
-                overStaffed: cycleNeeded != null && ids.length > cycleNeeded,
+                overStaffed: cycleNeeded != null && titularIds.length > cycleNeeded,
             };
         });
-    }, [runResult.positions, stats?.positionGroups, sortedEmployees, empPositionMap, primaryShiftByEmp, cycleNeededByPos]);
+    }, [runResult.positions, stats?.positionGroups, primaryShiftByEmp, cycleNeededByPos, idleEmployeeIdSet]);
 
-    const groupedRows = useMemo(() => {
-        const rows: Array<
-            | { type: 'header'; positionName: string; qty: number; guardCount: number; bandHint: string; cycleNeeded?: number; overStaffed?: boolean; external?: boolean }
-            | { type: 'emp'; emp: V2EmployeeDef }
-        > = [];
-        let lastPos = '';
-        let externalHeaderAdded = false;
-        for (const emp of sortedEmployees) {
-            const isExt = isExternalRetEmpId(emp.id);
-            if (isExt && !externalHeaderAdded) {
-                rows.push({
-                    type: 'header',
-                    positionName: 'RET externo (otro objetivo)',
-                    qty: 0,
-                    guardCount: sortedEmployees.filter((e) => isExternalRetEmpId(e.id)).length,
-                    bandHint: 'stand-by',
-                    external: true,
-                });
-                externalHeaderAdded = true;
+    type GridRow =
+        | { type: 'header'; positionName: string; qty: number; guardCount: number; bandHint: string; cycleNeeded?: number; overStaffed?: boolean; external?: boolean; surplus?: boolean }
+        | { type: 'emp'; emp: V2EmployeeDef; homePosition: string; isSurplus?: boolean };
+
+    const groupedRows = useMemo((): GridRow[] => {
+        const rows: GridRow[] = [];
+        const inRoster = new Set<string>();
+
+        for (const summary of positionSummary) {
+            const emps = summary.titularGuardIds
+                .map((id) => allEmployees.find((e) => e.id === id))
+                .filter((e): e is V2EmployeeDef => !!e && !isExternalRetEmpId(e.id));
+            if (emps.length === 0) continue;
+            emps.forEach((e) => inRoster.add(e.id));
+            rows.push({
+                type: 'header',
+                positionName: summary.positionName,
+                qty: summary.qty,
+                guardCount: emps.length,
+                bandHint: summary.bandHint,
+                cycleNeeded: summary.cycleNeeded,
+                overStaffed: summary.overStaffed,
+            });
+            for (const emp of emps) {
+                rows.push({ type: 'emp', emp, homePosition: summary.positionName });
             }
-            if (!isExt) {
-                const posName = empPositionMap[emp.id] ?? 'Sin puesto';
-                if (posName !== lastPos) {
-                    const summary = positionSummary.find((p) => p.positionName === posName);
-                    rows.push({
-                        type: 'header',
-                        positionName: posName,
-                        qty: summary?.qty ?? 0,
-                        guardCount: summary?.guardIds.length ?? 0,
-                        bandHint: summary?.bandHint ?? '—',
-                        cycleNeeded: summary?.cycleNeeded,
-                        overStaffed: summary?.overStaffed,
-                    });
-                    lastPos = posName;
-                }
-            }
-            rows.push({ type: 'emp', emp });
         }
+
+        const surplusEmps = (stats?.idleEmployeeIds ?? [])
+            .map((id) => allEmployees.find((e) => e.id === id))
+            .filter((e): e is V2EmployeeDef => !!e && !isExternalRetEmpId(e.id));
+        if (surplusEmps.length > 0) {
+            surplusEmps.forEach((e) => inRoster.add(e.id));
+            rows.push({
+                type: 'header',
+                positionName: 'Excedente (cobertura / RET)',
+                qty: 0,
+                guardCount: surplusEmps.length,
+                bandHint: 'M/T/N puntual · sin RET de relleno',
+                overStaffed: false,
+                surplus: true,
+            });
+            for (const emp of surplusEmps) {
+                rows.push({
+                    type: 'emp',
+                    emp,
+                    homePosition: empPositionMap[emp.id] ?? '',
+                    isSurplus: true,
+                });
+            }
+        }
+
+        const unassigned = allEmployees.filter(
+            (e) => !isExternalRetEmpId(e.id) && !inRoster.has(e.id),
+        );
+        if (unassigned.length > 0) {
+            rows.push({
+                type: 'header',
+                positionName: 'Sin puesto asignado',
+                qty: 0,
+                guardCount: unassigned.length,
+                bandHint: '—',
+            });
+            for (const emp of unassigned) {
+                rows.push({ type: 'emp', emp, homePosition: empPositionMap[emp.id] ?? '' });
+            }
+        }
+
+        const external = allEmployees.filter((e) => isExternalRetEmpId(e.id));
+        if (external.length > 0) {
+            rows.push({
+                type: 'header',
+                positionName: 'RET externo (otro objetivo)',
+                qty: 0,
+                guardCount: external.length,
+                bandHint: 'stand-by',
+                external: true,
+            });
+            for (const emp of external) {
+                rows.push({ type: 'emp', emp, homePosition: '' });
+            }
+        }
+
         return rows;
-    }, [sortedEmployees, empPositionMap, positionSummary]);
+    }, [positionSummary, allEmployees, stats?.idleEmployeeIds, empPositionMap]);
 
     if (scheduleOutcome.error && !scheduleOutcome.generation) {
         return (
@@ -199,7 +326,7 @@ export default function AutoLabResolutionGrid({
                             {' · '}
                             {scheduleOutcome.generation.assignments.length} asignaciones
                             {' · '}
-                            agrupado por puesto
+                            1 fila por guardia
                         </p>
                     </div>
                 </div>
@@ -259,7 +386,19 @@ export default function AutoLabResolutionGrid({
                         <p className="font-black">{pos.positionName}</p>
                         <p className="mt-0.5 font-semibold opacity-90">
                             <Users size={10} className="inline mr-1 -mt-px" />
-                            {pos.guardIds.length} guardias
+                            {pos.titularGuardIds.length} titulares
+                            {pos.guardIds.length > pos.titularGuardIds.length && (
+                                <> · +{pos.guardIds.length - pos.titularGuardIds.length} exced.</>
+                            )}
+                            {(() => {
+                                const kind = positionCoverageKind(pos.positionName, runResult.positions);
+                                if (!kind) return null;
+                                return (
+                                    <span className={`ml-1 rounded border px-1 py-px text-[8px] font-black uppercase ${positionCoverageBadge(kind)}`}>
+                                        {kind === '24hs' ? 'M/T/N' : 'custom'}
+                                    </span>
+                                );
+                            })()}
                             {pos.cycleNeeded != null && (
                                 <> · nec. ciclo <strong>{pos.cycleNeeded}</strong></>
                             )}
@@ -313,24 +452,39 @@ export default function AutoLabResolutionGrid({
                     <tbody>
                         {groupedRows.map((row) => {
                             if (row.type === 'header') {
+                                const covKind = positionCoverageKind(row.positionName, runResult.positions);
+                                const headerBg = row.external
+                                    ? 'bg-violet-50/90'
+                                    : row.surplus
+                                    ? 'bg-amber-50/90'
+                                    : 'bg-slate-50/90';
                                 return (
-                                    <tr key={`hdr-${row.positionName}`} className={row.external ? 'bg-violet-50/90' : 'bg-slate-50/90'}>
+                                    <tr key={`hdr-${row.positionName}`} className={headerBg}>
                                         <td
                                             colSpan={colSpan}
                                             className={`border px-3 py-1.5 text-[10px] font-black ${
                                                 row.external
                                                     ? 'border-violet-200 text-violet-900'
+                                                    : row.surplus
+                                                    ? 'border-amber-200 text-amber-950'
                                                     : 'border-slate-200 text-slate-700'
                                             }`}
                                         >
                                             <span className={`inline-flex items-center gap-2 rounded-lg border px-2 py-0.5 ${
-                                                row.overStaffed
+                                                row.surplus
+                                                    ? 'bg-amber-100 text-amber-950 border-amber-300'
+                                                    : row.overStaffed
                                                     ? 'bg-amber-100 text-amber-950 border-amber-400'
                                                     : row.external
                                                     ? 'bg-violet-100 text-violet-900 border-violet-300'
                                                     : positionBadgeClass(row.positionName, runResult.positions)
                                             }`}>
                                                 {row.positionName}
+                                                {covKind && (
+                                                    <span className={`rounded border px-1 py-px text-[8px] font-black uppercase ${positionCoverageBadge(covKind)}`}>
+                                                        {covKind === '24hs' ? 'rotación M/T/N' : 'custom L–V'}
+                                                    </span>
+                                                )}
                                                 <span className="font-semibold opacity-80">
                                                     · {row.guardCount} guardia{row.guardCount !== 1 ? 's' : ''}
                                                     {row.cycleNeeded != null && (
@@ -347,33 +501,36 @@ export default function AutoLabResolutionGrid({
                             }
 
                             const emp = row.emp;
+                            const isSurplus = row.isSurplus === true;
                             const isExt = isExternalRetEmpId(emp.id);
-                            const posName = empPositionMap[emp.id] ?? '—';
-                            const posShort = posName !== '—'
-                                ? shortPositionLabel(posName, runResult.positions)
+                            const homePos = row.homePosition || empPositionMap[emp.id] || '—';
+                            const posShort = homePos !== '—'
+                                ? shortPositionLabel(homePos, runResult.positions)
                                 : '—';
                             const band = primaryShiftByEmp[emp.id];
 
                             return (
-                                <tr key={emp.id} className={isExt ? 'bg-violet-50/30' : undefined}>
+                                <tr key={emp.id} className={isExt ? 'bg-violet-50/30' : isSurplus ? 'bg-amber-50/25' : undefined}>
                                     <td className={`sticky left-0 z-10 border border-slate-200 px-2 py-1.5 text-center ${
-                                        isExt ? 'bg-violet-50' : 'bg-white'
+                                        isExt ? 'bg-violet-50' : isSurplus ? 'bg-amber-50/50' : 'bg-white'
                                     }`}>
                                         <span
-                                            title={posName}
+                                            title={isSurplus ? `Ancla: ${homePos}` : homePos}
                                             className={`inline-block rounded-md border px-1.5 py-0.5 text-[9px] font-black ${
                                                 isExt
                                                     ? 'bg-violet-100 text-violet-900 border-violet-300'
-                                                    : positionBadgeClass(posName, runResult.positions)
+                                                    : isSurplus
+                                                    ? 'bg-amber-100 text-amber-950 border-amber-300'
+                                                    : positionBadgeClass(homePos, runResult.positions)
                                             }`}
                                         >
-                                            {isExt ? 'EXT' : posShort}
+                                            {isExt ? 'EXT' : isSurplus ? 'EXC' : posShort}
                                         </span>
                                     </td>
                                     <td className={`sticky left-[52px] z-10 border border-slate-200 px-2 py-1.5 font-bold whitespace-nowrap ${
-                                        isExt ? 'bg-violet-50 text-violet-900' : 'bg-white text-slate-800'
+                                        isExt ? 'bg-violet-50 text-violet-900' : isSurplus ? 'bg-amber-50/50 text-amber-950' : 'bg-white text-slate-800'
                                     }`}>
-                                        <span title={`${emp.nombre || emp.id}${band ? ` · banda ${band}` : ''}`}>
+                                        <span title={`${emp.nombre || emp.id}${band ? ` · banda ${band}` : ''}${isSurplus ? ` · excedente (${homePos})` : ''}`}>
                                             {shortEmpLabel(emp)}
                                         </span>
                                     </td>
@@ -391,18 +548,24 @@ export default function AutoLabResolutionGrid({
                                             );
                                         }
                                         const cells = assignmentIndex.get(emp.id)?.get(ds) ?? [];
-                                        const primary = cells[0];
-                                        const code = primary?.code || '—';
-                                        const title = primary
-                                            ? `${primary.name || code} · ${primary.positionName}${cells.length > 1 ? ` (+${cells.length - 1})` : ''}`
-                                            : 'Sin asignación';
+                                        const sparsePool = isSurplus || isExt;
+                                        const { primary, displayCode, title } = resolveDayCellDisplay(
+                                            cells,
+                                            homePos,
+                                            sparsePool,
+                                        );
+
                                         return (
                                             <td key={`${emp.id}-${ds}`} className={`border border-slate-200 p-0.5 ${excludedService ? 'bg-violet-50/40' : ''}`}>
                                                 <div
                                                     title={title}
-                                                    className={`h-7 rounded-md border flex items-center justify-center font-black text-[9px] ${primary ? shiftCodeCellClass(code) : 'bg-white text-slate-300 border-dashed border-slate-200'}`}
+                                                    className={`h-7 rounded-md border flex items-center justify-center font-black text-[9px] leading-none ${
+                                                        primary
+                                                            ? shiftCodeCellClass(displayCode)
+                                                            : 'bg-white text-slate-300 border-dashed border-slate-200'
+                                                    }`}
                                                 >
-                                                    {code}
+                                                    <span>{displayCode}</span>
                                                 </div>
                                             </td>
                                         );
@@ -467,6 +630,8 @@ export default function AutoLabResolutionGrid({
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-200" /> F</span>
                 <span className="inline-flex items-center gap-1" title="Franco en día sin servicio del puesto (ej. sáb/dom en L–V)"><span className="w-3 h-3 rounded bg-slate-200 border border-slate-400" /> FF</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-violet-100 border border-violet-300" /> RET</span>
+                <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-300 text-[7px] px-0.5">EXC</span> Excedente (solo días de cobertura)</span>
+                <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded border border-dashed border-slate-300 text-[7px] px-0.5">—</span> Sin turno en este objetivo</span>
                 <span className="inline-flex items-center gap-1"><CalendarRange size={10} /> Gris = fuera de vigencia</span>
                 <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-violet-100 border border-violet-300" /> Sin servicio (RET)</span>
             </div>

@@ -54,22 +54,38 @@ export const ABSENCE_COVERAGE_PRIORITY_STEPS = [
     },
     {
         step: 3,
-        key: 'extension_12h',
-        label: 'Extensión 12h / contingencia',
-        detail: 'D12+N12 cuando no alcanza plantilla + RET externo. Tope 56h/sem y 200h/mes.',
+        key: 'ret_interno_excedente',
+        label: 'RET stand-by del excedente (Modo 8)',
+        detail: 'Si hay guardias de más vs plantilla: cubren el turno del ausente (M/T/N) sin entrar a la rotación ni pasar a 12h.',
         auto: true,
         extraCost: false,
     },
     {
         step: 4,
-        key: 'ret_interno',
-        label: 'RET / libre del objetivo',
-        detail: 'Stand-by o guardia sin turno ese día en la misma dotación.',
+        key: 'extension_12h',
+        label: 'Extensión 12h / contingencia',
+        detail: 'D12+N12 solo si no alcanza plantilla + RET stand-by + RET externo. Tope 56h/sem y 200h/mes.',
         auto: true,
         extraCost: false,
     },
     {
         step: 5,
+        key: 'ret_externo_modo8',
+        label: 'RET externo + Modo 8',
+        detail: 'Un RET de otro objetivo cubre la banda faltante (8h). Sin contingencia D12/N12.',
+        auto: true,
+        extraCost: false,
+    },
+    {
+        step: 6,
+        key: 'ret_interno',
+        label: 'RET / libre del objetivo (titular)',
+        detail: 'Titular en stand-by ese día en la misma dotación.',
+        auto: true,
+        extraCost: false,
+    },
+    {
+        step: 7,
         key: 'ft',
         label: 'Franco trabajado (FT)',
         detail: 'Último recurso: persona en F ese día. Solo manual — costo doble CCT. Nunca automático.',
@@ -79,8 +95,8 @@ export const ABSENCE_COVERAGE_PRIORITY_STEPS = [
 ] as const;
 
 export const ABSENCE_COVERAGE_PRIORITY_SUMMARY =
-    '① Modo 8 plantilla → ② RET externo + Modo 8 (8h, sin contingencia) → ③ Extensión 12h (≤56h/sem) → '
-    + '④ RET/libre plantilla → ⑤ FT manual (último recurso, costo doble)';
+    '① Modo 8 plantilla → ② RET externo + Modo 8 (8h) → ③ RET stand-by excedente cubre ausente (sin rotación) '
+    + '→ ④ Extensión 12h solo si no alcanza → ⑤ FT manual (último recurso, costo doble)';
 
 /** Texto operativo compartido por cerebro Auto y UI del wizard. */
 export const PLANNING_COVERAGE_RULES: PlanningCoverageRule[] = [
@@ -146,6 +162,52 @@ function countAbsenceOnDate(
         if (!codes || codes.has(up)) n++;
     }
     return n;
+}
+
+/**
+ * Si hay excedente vs plantilla, no activar Modo 12 mientras las ausencias V/L/E
+ * del día no superen la cantidad de RET stand-by disponibles.
+ */
+export function filterModo12DaysWhenSurplusRetAvailable(params: {
+    modo12DaysAuto: string[];
+    absences: V2AbsenceMap;
+    employeeIds: string[];
+    plantillaTotal: number;
+    peopleAvailable: number;
+}): { modo12Days: string[]; messages: string[] } {
+    const {
+        modo12DaysAuto,
+        absences,
+        employeeIds,
+        plantillaTotal,
+        peopleAvailable,
+    } = params;
+    const messages: string[] = [];
+    const surplus = Math.max(0, peopleAvailable - plantillaTotal);
+
+    if (surplus <= 0 || modo12DaysAuto.length === 0) {
+        return { modo12Days: modo12DaysAuto, messages };
+    }
+
+    const filtered = modo12DaysAuto.filter((dateStr) => {
+        const absentVle = countAbsenceOnDate(
+            absences,
+            employeeIds,
+            dateStr,
+            MODO12_ABSENCE_CODES,
+        );
+        return absentVle > surplus;
+    });
+
+    const skipped = modo12DaysAuto.length - filtered.length;
+    if (skipped > 0) {
+        messages.push(
+            `Excedente ${surplus} guardia(s) vs plantilla ${plantillaTotal}: `
+            + `${skipped} día(s) con V/L/E se cubren con RET stand-by en Modo 8 (M/T/N), sin extensión 12h.`,
+        );
+    }
+
+    return { modo12Days: filtered, messages };
 }
 
 /**

@@ -5,6 +5,7 @@
 
 import {
     positionIsActiveOn,
+    is24hsRotationPosition,
     type V2Assignment,
     type V2EngineContext,
     type V2GenerateResult,
@@ -90,8 +91,7 @@ const COLD_START_OPENINGS = [4, 10, 16, 22];
 const FLOATER_COLD_START_OPENINGS = [0, 8, 16];
 
 function is24hs(pos: V2PositionDef): boolean {
-    const cov = String(pos.coverageType || '').toLowerCase();
-    return cov === '24hs' || cov === '24' || cov === '24h';
+    return is24hsRotationPosition(pos);
 }
 
 const BANDS_8H = new Set(['M', 'T', 'N']);
@@ -159,7 +159,11 @@ function shiftMeta(pos: V2PositionDef, code: string): Pick<V2Assignment, 'name' 
 function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     const positionGroups: Record<string, string[]> = {};
     ctx.positions.forEach(p => { positionGroups[p.positionName] = []; });
-    const defaultPos = ctx.defaultPositionByEmp || {};
+    const defaultPos = {
+        ...(ctx.rosterSeedByEmp || {}),
+        ...(ctx.defaultPositionByEmp || {}),
+    };
+    const hasExplicitDotacion = Object.keys(defaultPos).length > 0;
 
     const unassigned: string[] = [];
     for (const emp of ctx.employees) {
@@ -187,6 +191,17 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
                 });
                 positionGroups[leastFull.positionName].push(empId);
             }
+        }
+    }
+
+    const empById = new Map(ctx.employees.map((e) => [e.id, e]));
+    if (hasExplicitDotacion) {
+        for (const posName of Object.keys(positionGroups)) {
+            positionGroups[posName].sort((a, b) => {
+                const na = empById.get(a)?.nombre ?? a;
+                const nb = empById.get(b)?.nombre ?? b;
+                return na.localeCompare(nb, 'es');
+            });
         }
     }
 
@@ -690,6 +705,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
     }
 
     const primaryShiftByEmp: Record<string, string | null> = {};
+    const retFloaterEmpIds: string[] = [];
 
     const cutoffDay = ctx.cctCutoffDay && ctx.cctCutoffDay >= 1 && ctx.cctCutoffDay <= 31
         ? ctx.cctCutoffDay
@@ -746,9 +762,11 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
 
-        // isRetFloater: índice ≥ 4 dentro del subgrupo (no en el grupo completo del puesto)
-        const subGroup = empSubgroup.get(emp.id) ?? [];
-        const isRetFloater = subGroup.indexOf(emp.id) >= 4;
+        const posGroup = positionGroups[posName] ?? [];
+        const needHeads = neededCountFor24hPos(pos);
+        const rankInPos = posGroup.indexOf(emp.id);
+        const isRetFloater = rankInPos >= needHeads && rankInPos >= 0;
+        if (isRetFloater) retFloaterEmpIds.push(emp.id);
 
         ctx.daysInMonth.forEach((day, di) => {
             const dateStr = ctx.getDateKey(day);
@@ -1010,6 +1028,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             strandedEmployeeIds: strandedIds.length > 0 ? strandedIds : undefined,
             relocatedEmployeeIds: relocatedIds.length > 0 ? relocatedIds : undefined,
             primaryShiftByEmp,
+            retFloaterEmpIds: retFloaterEmpIds.length > 0 ? retFloaterEmpIds : undefined,
             slaDeficitRemaining,
             slaHoursClosed: slaDeficitRemaining <= 0.5,
             fixedBandSchemeByEmp: Object.fromEntries(

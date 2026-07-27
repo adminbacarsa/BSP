@@ -1,7 +1,7 @@
 import type { AutoPlanningBrainResult } from './autoPlanningBrain';
 import { generateScheduleV4 } from './autoScheduleEngineV4';
-import type { V2EngineContext, V2GenerateResult, V2PositionDef, V2EmployeeDef } from './autoScheduleEngineV2';
-import { isCustomCoverPosition } from './autoScheduleEngineV2';
+import type { V2EngineContext, V2GenerateResult, V2GenerateStats, V2PositionDef, V2EmployeeDef } from './autoScheduleEngineV2';
+import { isCustomCoverPosition, normalize24hsPositionCalendars } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import { canUseFixedBandFloater } from './fixedBandFloaterScheduleEngine';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
@@ -17,14 +17,31 @@ import { fixScheduleIssues, type FixerLogEntry, type FixerResult } from './cover
 import { planAbsenceCoverage, type AbsenceCoveragePlan } from './absenceCoveragePlanner';
 import {
     applyExternalRetCoverage,
+    applyResidualExternalRetForGaps,
     computeModo8ExternalRetPlan,
     extendCtxWithExternalRet,
     type ExternalRetAction,
 } from './externalRetCoverage';
+import { applySurplusRetAbsentSubstitution, buildSurplusEmployeePool } from './surplusAbsentSubstitution';
+import { resolveOpeningSlotByEmpForPostProcess } from './openingSlotResolver';
+import { finalizeAutoLabSurplusSchedule, recomputeScheduleStatsFromAssignments } from './autoLabSurplusFinalize';
+import { resolveMonthStartGlobalDayIndex } from './surplusRetCycle';
 import { runStrictSixTwoPipeline } from './planningPipeline';
 import type { AutoLabRunResult } from './autoLabRuntime';
 import { getAutoLabDateKey, getAutoLabDayLetter } from './autoLabRuntime';
 import { enrichRosterSurplusWithSchedule, type RosterSurplusReport } from './rosterSurplus';
+import {
+    analyzeCoveragePolicyBalance,
+    fillCoverageGapsFromSurplusPool,
+    repairCoverageOverstaffFromSurplus,
+    buildUncoveredSlotsByDayFromBalance,
+    uncoveredSlotCountFromBalance,
+    type CoveragePolicyBalanceReport,
+    type CoverageBalanceRepairAction,
+    type CoverageGapFillAction,
+} from './coveragePolicyBalance';
+import { fillCustomGapsFromVolantes, type VolanteCoverageAction } from './volanteCustomCoverage';
+import type { SurplusAbsentSubstitutionAction } from './surplusAbsentSubstitution';
 
 export type AutoLabSchedulePipeline = 'none' | 'v4' | 'fixedBandFloater';
 
@@ -35,6 +52,7 @@ export interface AutoLabScheduleOutcome {
     coverageReport?: CoverageVerificationReport | null;
     absenceCoverageGaps?: CoverageGap[];
     absenceSplitActions?: AbsenceSplitAction[];
+    surplusSubstitutionActions?: import('./surplusAbsentSubstitution').SurplusAbsentSubstitutionAction[];
     absenceCoveragePlan?: AbsenceCoveragePlan;
     externalRetEmployees?: V2EmployeeDef[];
     externalRetActions?: ExternalRetAction[];
@@ -44,6 +62,10 @@ export interface AutoLabScheduleOutcome {
     rosterSurplus?: RosterSurplusReport;
     /** Alertas de capacidad (racha, semana, RET activable). */
     capacityRisks?: GuardCapacityRisk[];
+    /** Equilibrio día×puesto×banda (falta / sobrecobertura). */
+    coveragePolicyBalance?: CoveragePolicyBalanceReport;
+    coverageBalanceRepairs?: CoverageBalanceRepairAction[];
+    coverageGapFillActions?: CoverageGapFillAction[];
 }
 
 import {
@@ -96,15 +118,65 @@ function buildLabDefaultPositionByEmp(
     return map;
 }
 
+function buildMotorPositionByEmp(
+    stats: Pick<V2GenerateStats, 'positionGroups'>,
+): Record<string, string> {
+    const map: Record<string, string> = {};
+    for (const [posName, empIds] of Object.entries(stats.positionGroups || {})) {
+        for (const empId of empIds) map[empId] = posName;
+    }
+    return map;
+}
+
 function postProcessAutoLabSchedule(
-    ctx: V2EngineContext,
+    baseCtx: V2EngineContext,
     pipeline: AutoLabSchedulePipeline,
     generation: V2GenerateResult,
-): Pick<AutoLabScheduleOutcome, 'generation' | 'coverageReport' | 'absenceCoverageGaps' | 'absenceSplitActions' | 'absenceCoveragePlan' | 'externalRetEmployees' | 'externalRetActions' | 'fixerLog' | 'fixerSummary'> {
+    plantillaTotal?: number,
+): Pick<AutoLabScheduleOutcome, 'generation' | 'coverageReport' | 'absenceCoverageGaps' | 'absenceSplitActions' | 'surplusSubstitutionActions' | 'absenceCoveragePlan' | 'externalRetEmployees' | 'externalRetActions' | 'fixerLog' | 'fixerSummary' | 'coveragePolicyBalance' | 'coverageBalanceRepairs' | 'coverageGapFillActions'> {
+    const ctx: V2EngineContext = {
+        ...baseCtx,
+        positions: normalize24hsPositionCalendars(baseCtx.positions),
+        defaultPositionByEmp: {
+            ...(baseCtx.defaultPositionByEmp || {}),
+            ...buildMotorPositionByEmp(generation.stats),
+        },
+    };
+
     let assignments = generation.assignments.map((a) => ({ ...a }));
     let absenceCoverageGaps: CoverageGap[] = [];
 
-    if (pipeline === 'fixedBandFloater' && generation.stats.openingSlotByEmp) {
+    const openingSlotByEmpEarly = resolveOpeningSlotByEmpForPostProcess({
+        stats: generation.stats,
+        assignments,
+        daysInMonth: ctx.daysInMonth,
+        getDateKey: ctx.getDateKey,
+        employeeIds: ctx.employees.map((e) => e.id),
+        positions: ctx.positions,
+        monthStartGlobalDayIndex: resolveMonthStartGlobalDayIndex(ctx),
+    }) ?? generation.stats.openingSlotByEmp;
+
+    const surplusPoolOptions = {
+        defaultShiftByEmp: ctx.defaultShiftByEmp,
+        defaultPositionByEmp: ctx.defaultPositionByEmp,
+        absences: ctx.absences,
+    };
+    const surplusPoolEarly = buildSurplusEmployeePool(
+        generation.stats,
+        ctx.employees.map((e) => e.id),
+        ctx.positions,
+        ctx.autoCycles?.[0] ?? '6+2',
+        plantillaTotal,
+        surplusPoolOptions,
+    );
+    const surplusStandbyMode = surplusPoolEarly.length > 0
+        && (ctx.modo12Days?.length ?? 0) === 0;
+
+    if (
+        pipeline === 'fixedBandFloater'
+        && generation.stats.openingSlotByEmp
+        && !surplusStandbyMode
+    ) {
         const cov = applyAbsenceCoverage(
             assignments,
             ctx,
@@ -114,31 +186,51 @@ function postProcessAutoLabSchedule(
         absenceCoverageGaps = cov.gaps;
     }
 
-    const openingSlotByEmp = generation.stats.openingSlotByEmp;
+    const openingSlotByEmp = openingSlotByEmpEarly;
     const retDesignee = pickRetDesignee(ctx, generation.stats, assignments);
+    const classicRotationPipeline = pipeline === 'fixedBandFloater';
+
+    const statsWithSurplus = surplusPoolEarly.length > 0
+        ? {
+            ...generation.stats,
+            idleEmployeeIds: surplusPoolEarly,
+            retDesignateEmpIds: surplusPoolEarly,
+        }
+        : generation.stats;
 
     assignments = ensureAbsenceCells(assignments, ctx);
     assignments = fillEmptyCellsWithRet(assignments, ctx, openingSlotByEmp, {
         retDesignateId: retDesignee,
-        stats: generation.stats,
+        stats: statsWithSurplus,
     });
+
+    const surplusSubActions: SurplusAbsentSubstitutionAction[] = [];
+
+    const surplusPool = surplusPoolEarly;
+    const ctxWithSurplus: V2EngineContext = { ...ctx, idleSurplusEmpIds: surplusPool };
 
     const modo8Plan = computeModo8ExternalRetPlan({
-        ctx,
+        ctx: ctxWithSurplus,
         assignments,
         openingSlotByEmp,
     });
 
-    const split = applyAbsenceSplitCoverage(
-        assignments,
-        ctx,
-        openingSlotByEmp,
-        { skipModo12Days: modo8Plan.skipModo12Days },
-    );
+    const split = surplusStandbyMode
+        ? {
+            assignments,
+            actions: [] as import('./absenceSplitCoverage').AbsenceSplitAction[],
+            effectiveModo12Days: [] as string[],
+        }
+        : applyAbsenceSplitCoverage(
+            assignments,
+            ctxWithSurplus,
+            openingSlotByEmp,
+            { skipModo12Days: modo8Plan.skipModo12Days },
+        );
     assignments = split.assignments;
 
     const verifyCtx: V2EngineContext = {
-        ...ctx,
+        ...ctxWithSurplus,
         modo12Days: split.effectiveModo12Days,
         apretarCronoDays: split.effectiveModo12Days,
         allowFrancoWorkedRescue: false,
@@ -163,14 +255,22 @@ function postProcessAutoLabSchedule(
         modo8Plan,
     });
 
-    const externalRet = applyExternalRetCoverage({
-        assignments,
-        ctx: verifyCtx,
-        modo8Plan,
-        plan: preliminaryPlan,
-        openingSlotByEmp,
-    });
+    const externalRet = surplusStandbyMode
+        ? {
+            assignments,
+            externalEmployees: [] as V2EmployeeDef[],
+            actions: [] as ExternalRetAction[],
+        }
+        : applyExternalRetCoverage({
+            assignments,
+            ctx: verifyCtx,
+            modo8Plan,
+            plan: preliminaryPlan,
+            openingSlotByEmp,
+        });
     assignments = externalRet.assignments;
+    let externalRetEmployees = [...externalRet.externalEmployees];
+    let externalRetActions = [...externalRet.actions];
 
     const extendedCtx = extendCtxWithExternalRet(verifyCtx, externalRet.externalEmployees);
 
@@ -184,7 +284,7 @@ function postProcessAutoLabSchedule(
         uncoveredRemaining: 0,
     };
 
-    if (ctx.preserveRotativeIntegrity !== true) {
+    if (ctx.preserveRotativeIntegrity !== true && !surplusStandbyMode) {
         const fixer = fixScheduleIssues(
             extendedCtx,
             assignments,
@@ -196,9 +296,217 @@ function postProcessAutoLabSchedule(
         fixerSummary = fixer.summary;
     }
 
-    assignments = consolidateRetToDesignee(assignments, retDesignee, ctx);
+    assignments = consolidateRetToDesignee(
+        assignments,
+        retDesignee,
+        ctx,
+        surplusPool.length > 0 ? surplusPool : generation.stats.retDesignateEmpIds,
+    );
+
+    if (surplusPool.length > 0) {
+        assignments = fillEmptyCellsWithRet(assignments, ctx, openingSlotByEmp, {
+            retDesignateId: retDesignee,
+            stats: statsWithSurplus,
+        });
+    }
+
+    let coverageBalanceRepairs: CoverageBalanceRepairAction[] = [];
+    let coverageGapFillActions: CoverageGapFillAction[] = [];
+    let volanteCoverageActions: VolanteCoverageAction[] = [];
+    let usedVolanteByDay = new Map<string, Set<string>>();
+
+    const volantePre = fillCustomGapsFromVolantes({
+        assignments,
+        ctx,
+        stats: statsWithSurplus,
+        usedVolanteByDay,
+    });
+    assignments = volantePre.assignments;
+    volanteCoverageActions.push(...volantePre.actions);
+    usedVolanteByDay = volantePre.usedVolanteByDay;
+
+    if (surplusPool.length > 0 && !classicRotationPipeline) {
+        const repaired = repairCoverageOverstaffFromSurplus({
+            assignments,
+            ctx,
+            surplusPool,
+            substitutionActions: surplusSubActions,
+        });
+        assignments = repaired.assignments;
+        coverageBalanceRepairs = repaired.actions;
+
+        const positionOrder = ctx.positions.map((p) => p.positionName);
+        let usedSurplusByDay = new Map<string, Set<string>>();
+
+        for (const posName of positionOrder) {
+            const posOnlyGroups: Record<string, string[]> = {
+                [posName]: statsWithSurplus.positionGroups?.[posName] ?? [],
+            };
+
+            const subPos = applySurplusRetAbsentSubstitution({
+                assignments,
+                ctx,
+                stats: statsWithSurplus,
+                openingSlotByEmp,
+                positionFilter: posName,
+                usedSurplusByDay,
+                positionOrder,
+            });
+            assignments = subPos.assignments;
+            usedSurplusByDay = subPos.usedSurplusByDay;
+            surplusSubActions.push(...subPos.actions);
+
+            const volantePos = fillCustomGapsFromVolantes({
+                assignments,
+                ctx,
+                stats: statsWithSurplus,
+                positionFilter: posName,
+                usedVolanteByDay,
+            });
+            assignments = volantePos.assignments;
+            volanteCoverageActions.push(...volantePos.actions);
+            usedVolanteByDay = volantePos.usedVolanteByDay;
+
+            const slaPos = fillCoverageGapsFromSurplusPool({
+                assignments,
+                ctx,
+                surplusPool,
+                stats: statsWithSurplus,
+                positionFilter: posName,
+            });
+            assignments = slaPos.assignments;
+            coverageGapFillActions.push(...slaPos.actions);
+            for (const g of slaPos.actions) {
+                surplusSubActions.push({
+                    dateStr: g.dateStr,
+                    absentEmpId: '',
+                    surplusEmpId: g.empId,
+                    positionName: g.positionName,
+                    band: g.band,
+                });
+            }
+
+            const repairPos = repairCoverageOverstaffFromSurplus({
+                assignments,
+                ctx,
+                surplusPool,
+                substitutionActions: surplusSubActions,
+            });
+            assignments = repairPos.assignments;
+            coverageBalanceRepairs.push(...repairPos.actions);
+        }
+
+        const globalSub = applySurplusRetAbsentSubstitution({
+            assignments,
+            ctx,
+            stats: statsWithSurplus,
+            openingSlotByEmp,
+            usedSurplusByDay,
+            positionOrder,
+        });
+        assignments = globalSub.assignments;
+        surplusSubActions.push(...globalSub.actions);
+
+        const volanteGlobal = fillCustomGapsFromVolantes({
+            assignments,
+            ctx,
+            stats: statsWithSurplus,
+            usedVolanteByDay,
+        });
+        assignments = volanteGlobal.assignments;
+        volanteCoverageActions.push(...volanteGlobal.actions);
+        usedVolanteByDay = volanteGlobal.usedVolanteByDay;
+
+        const globalGaps = fillCoverageGapsFromSurplusPool({
+            assignments,
+            ctx,
+            surplusPool,
+            stats: statsWithSurplus,
+        });
+        assignments = globalGaps.assignments;
+        coverageGapFillActions.push(...globalGaps.actions);
+        for (const g of globalGaps.actions) {
+            surplusSubActions.push({
+                dateStr: g.dateStr,
+                absentEmpId: '',
+                surplusEmpId: g.empId,
+                positionName: g.positionName,
+                band: g.band,
+            });
+        }
+    }
+
+    assignments = finalizeAutoLabSurplusSchedule({
+        assignments,
+        ctx,
+        surplusPool,
+        substitutionActions: surplusSubActions,
+        openingSlotByEmp,
+        positionGroups: statsWithSurplus.positionGroups,
+    });
+
+    let coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
+
+    if (!coveragePolicyBalance.ok && coveragePolicyBalance.underSlotCount > 0 && surplusPool.length > 0) {
+        if (surplusStandbyMode) {
+            const lastSub = applySurplusRetAbsentSubstitution({
+                assignments,
+                ctx,
+                stats: statsWithSurplus,
+                openingSlotByEmp,
+            });
+            assignments = lastSub.assignments;
+            surplusSubActions.push(...lastSub.actions);
+
+            const lastGap = fillCoverageGapsFromSurplusPool({
+                assignments,
+                ctx,
+                surplusPool,
+                stats: statsWithSurplus,
+            });
+            assignments = lastGap.assignments;
+            coverageGapFillActions.push(...lastGap.actions);
+
+            assignments = finalizeAutoLabSurplusSchedule({
+                assignments,
+                ctx,
+                surplusPool,
+                substitutionActions: surplusSubActions,
+                openingSlotByEmp,
+                positionGroups: statsWithSurplus.positionGroups,
+            });
+
+            const repairLate = repairCoverageOverstaffFromSurplus({
+                assignments,
+                ctx,
+                surplusPool,
+                substitutionActions: surplusSubActions,
+            });
+            assignments = repairLate.assignments;
+            coverageBalanceRepairs.push(...repairLate.actions);
+
+            coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
+        } else {
+            const residualExt = applyResidualExternalRetForGaps({
+                assignments,
+                ctx,
+                underGaps: coveragePolicyBalance.underCoverage,
+                surplusPool,
+            });
+            if (residualExt.externalEmployees.length > 0) {
+                assignments = residualExt.assignments;
+                externalRetEmployees.push(...residualExt.externalEmployees);
+                externalRetActions.push(...residualExt.actions);
+                coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
+            }
+        }
+    }
 
     assignments = applyServiceExcludedDays(assignments, ctx);
+
+    coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
+    const uncoveredSlotsByDay = buildUncoveredSlotsByDayFromBalance(coveragePolicyBalance);
+    const uncoveredSlots = uncoveredSlotCountFromBalance(coveragePolicyBalance);
 
     coverageReport = verifyScheduleCoverage(
         extendedCtx,
@@ -231,51 +539,77 @@ function postProcessAutoLabSchedule(
         capacityCfg,
     );
 
+    const recomputed = recomputeScheduleStatsFromAssignments(
+        assignments,
+        generation.stats,
+        ctx.employees.map((e) => e.id),
+    );
+
     return {
-        generation: { ...generation, assignments },
+        generation: {
+            ...generation,
+            assignments,
+            stats: {
+                ...generation.stats,
+                ...recomputed,
+                idleEmployeeIds: surplusPool.length > 0
+                    ? surplusPool
+                    : generation.stats.idleEmployeeIds,
+                uncoveredSlotsByDay,
+                uncoveredSlots,
+                slaHoursClosed: coveragePolicyBalance.ok,
+            },
+        },
         coverageReport,
         absenceCoverageGaps,
         absenceSplitActions: split.actions,
+        surplusSubstitutionActions: surplusSubActions,
         absenceCoveragePlan,
-        externalRetEmployees: externalRet.externalEmployees,
-        externalRetActions: externalRet.actions,
+        externalRetEmployees,
+        externalRetActions,
         fixerLog,
         fixerSummary,
         capacityRisks,
+        coveragePolicyBalance,
+        coverageBalanceRepairs,
+        coverageGapFillActions,
     };
 }
 
 export { is24hsPosition } from './scheduleObjectiveFlags';
 
-function buildAutoLabGenContext(
+export function buildAutoLabGenContext(
     caseDef: AutoLabCaseDefinition,
     run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'calendarDaysInVigencia' | 'serviceExcludedDates' | 'positions' | 'slaVendidas' | 'absences'>,
     brain: AutoPlanningBrainResult,
 ): V2EngineContext {
-    const objectiveId = `auto-lab-${caseDef.id}`;
+    const objectiveId = run.objectiveId;
     const cycleKey = brain.cycles[0] ?? brain.pickedCycle ?? '6+2';
     const positionHeadcount = buildPositionRequiredHeadcountMap(run.positions, cycleKey);
-    const autoDefaultPositionByEmp = buildLabDefaultPositionByEmp(
-        run.positions,
-        run.employees,
-        positionHeadcount,
-        cycleKey,
-    );
-    const defaultPositionByEmp: Record<string, string> = { ...autoDefaultPositionByEmp };
-    if (caseDef.defaultPositionByEmp) {
-        for (const [empId, posName] of Object.entries(caseDef.defaultPositionByEmp)) {
-            if (!run.employees.some((e) => e.id === empId)) continue;
-            if (!run.positions.some((p) => p.positionName === posName)) continue;
-            defaultPositionByEmp[empId] = posName;
-        }
-    }
+    const rosterSeedByEmp = caseDef.defaultPositionByEmp
+        ? undefined
+        : buildLabDefaultPositionByEmp(
+            run.positions,
+            run.employees,
+            positionHeadcount,
+            cycleKey,
+        );
+    const defaultPositionByEmp: Record<string, string> = {
+        ...(rosterSeedByEmp || {}),
+        ...(caseDef.defaultPositionByEmp || {}),
+    };
     const defaultShiftByEmp: Record<string, string> = { ...(caseDef.defaultShiftByEmp || {}) };
     const scheduleFlags = resolveObjectiveScheduleFlags(run.positions);
+    const monthStartGlobalDayIndex = resolveMonthStartGlobalDayIndex({
+        daysInMonth: run.daysInMonth,
+    } as V2EngineContext);
     return {
-        positions: run.positions,
+        positions: normalize24hsPositionCalendars(run.positions),
         employees: run.employees.map((e) => ({
             ...e,
-            preferredObjectiveId: objectiveId,
+            preferredObjectiveId: e.preferredObjectiveId?.trim()
+                ? e.preferredObjectiveId
+                : run.objectiveId,
         })),
         daysInMonth: run.daysInMonth,
         calendarDaysInMonth: run.calendarDaysInVigencia,
@@ -286,8 +620,9 @@ function buildAutoLabGenContext(
         absences: run.absences,
         slaVendidas: run.slaVendidas,
         autoCycles: brain.cycles.length > 0 ? brain.cycles : [brain.pickedCycle],
-        objectiveId,
-        defaultPositionByEmp,
+        objectiveId: run.objectiveId,
+        defaultPositionByEmp: Object.keys(defaultPositionByEmp).length > 0 ? defaultPositionByEmp : undefined,
+        rosterSeedByEmp,
         defaultShiftByEmp: Object.keys(defaultShiftByEmp).length > 0 ? defaultShiftByEmp : undefined,
         budgetMode: 'cct',
         getDayLetter: getAutoLabDayLetter,
@@ -305,14 +640,16 @@ function buildAutoLabGenContext(
         allowFrancoWorkedRescue: false,
         headcountByPax: true,
         coverageWisdom: caseDef.coverageWisdom ?? null,
+        monthStartGlobalDayIndex,
     };
 }
 
 export function generateAutoLabSchedule(
     caseDef: AutoLabCaseDefinition,
-    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'calendarDaysInVigencia' | 'serviceExcludedDates' | 'positions' | 'slaVendidas' | 'absences'>,
+    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'calendarDaysInVigencia' | 'serviceExcludedDates' | 'positions' | 'slaVendidas' | 'absences' | 'rosterSurplus'>,
 ): AutoLabScheduleOutcome {
     const { brain } = run;
+    const plantillaTotal = brain.staffing?.plantillaTotal ?? run.rosterSurplus?.plantillaTotal;
 
     // Igual que Planificación real: déficit de horas/dotación no bloquea la generación.
     // El motor intenta cerrar; huecos residuales → RET externo en post-proceso.
@@ -331,13 +668,14 @@ export function generateAutoLabSchedule(
 
     try {
         const bypassFloater = shouldBypassFixedBandFloater(run.positions);
-        if (brain.strictSixTwo && canUseFixedBandFloater(ctx) && !bypassFloater) {
+        const useFixedBandFloater = canUseFixedBandFloater(ctx) && !bypassFloater;
+        if (useFixedBandFloater) {
             const piped = runStrictSixTwoPipeline({
                 ...ctx,
                 rotateShifts: false,
                 demandDriven: false,
             });
-            const post = postProcessAutoLabSchedule(ctx, 'fixedBandFloater', piped.generation);
+            const post = postProcessAutoLabSchedule(ctx, 'fixedBandFloater', piped.generation, plantillaTotal);
             const rosterSurplus = enrichRosterSurplusWithSchedule(run.rosterSurplus, {
                 employees: run.employees,
                 stats: post.generation!.stats,
@@ -348,7 +686,7 @@ export function generateAutoLabSchedule(
         }
 
         const generation = generateScheduleV4(ctx);
-        const post = postProcessAutoLabSchedule(ctx, 'v4', generation);
+        const post = postProcessAutoLabSchedule(ctx, 'v4', generation, plantillaTotal);
         const rosterSurplus = enrichRosterSurplusWithSchedule(run.rosterSurplus, {
             employees: run.employees,
             stats: post.generation!.stats,
@@ -378,13 +716,15 @@ export function buildAssignmentIndex(
     return byEmp;
 }
 
-/** Puesto principal por guardia (motor positionGroups o mayoría en asignaciones). */
+/** Puesto principal por guardia (motor positionGroups; sin inferir puesto para ociosos). */
 export function buildEmployeePositionMap(
     employees: { id: string }[],
     assignments: V2GenerateResult['assignments'],
     positionGroups?: Record<string, string[]>,
+    idleEmployeeIds?: string[],
 ): Record<string, string> {
     const map: Record<string, string> = {};
+    const idleSet = new Set(idleEmployeeIds ?? []);
 
     if (positionGroups) {
         for (const [posName, ids] of Object.entries(positionGroups)) {
@@ -399,7 +739,7 @@ export function buildEmployeePositionMap(
         counts[a.empId][a.positionName] = (counts[a.empId][a.positionName] || 0) + 1;
     }
     for (const emp of employees) {
-        if (map[emp.id]) continue;
+        if (map[emp.id] || idleSet.has(emp.id)) continue;
         const tallies = counts[emp.id];
         if (!tallies) continue;
         const top = Object.entries(tallies).sort(([, a], [, b]) => b - a)[0];
