@@ -14,12 +14,25 @@ export default function Document() {
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
 
         {/* Service Worker — solo en producción para no cachear durante desarrollo */}
-        {process.env.NODE_ENV === 'production' && (
+        {process.env.NODE_ENV === 'production' ? (
           <script dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
                 window.addEventListener('load', function() {
                   navigator.serviceWorker.register('/sw.js').catch(function() {});
+                });
+              }
+            `
+          }} />
+        ) : (
+          <script dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function(regs) {
+                  regs.forEach(function(r) { r.unregister(); });
+                });
+                caches.keys().then(function(keys) {
+                  keys.forEach(function(k) { caches.delete(k); });
                 });
               }
             `

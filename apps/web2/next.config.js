@@ -95,7 +95,11 @@ const nextConfig = {
     // En Windows, fs.watch a veces no detecta cambios hechos por herramientas externas.
     // Polling garantiza que Next.js recompile siempre que cambie un archivo.
     if (dev) {
-      config.watchOptions = { poll: 1000, aggregateTimeout: 300 };
+      config.watchOptions = {
+        poll: 1000,
+        aggregateTimeout: 300,
+        ignored: ['**/node_modules/**', '**/.next/**', '**/out/**'],
+      };
     }
     return config;
   }
