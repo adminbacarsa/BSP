@@ -26,12 +26,13 @@ export type CoverageGap = {
     coveredBy: string | null;
     coveredByName?: string;
     /**
-     * sin_turno / ret / esc = cubierto automáticamente (no rompe ciclo 6+2)
-     * ft_required = sin candidatos ST/RET/ESC; se muestran candidatos FT para decisión manual
+     * sin_turno / ret / esc = cubierto automáticamente por personal del objetivo
+     * volante_st / volante_ret = cubierto por guardia volante (sin turno / desde RET)
+     * ft_required = sin candidatos; se muestran candidatos FT para decisión manual
      * uncovered = sin ningún candidato
      * manual = asignado manualmente desde el wizard
      */
-    coverageType: 'sin_turno' | 'ret' | 'esc' | 'ft_required' | 'uncovered' | 'manual';
+    coverageType: 'sin_turno' | 'ret' | 'esc' | 'volante_st' | 'volante_ret' | 'ft_required' | 'uncovered' | 'manual';
     /** Candidatos F/FF disponibles ese día (para mostrar en panel, NO se asignan automáticamente) */
     ftCandidates?: { empId: string; code: string }[];
 };
@@ -62,6 +63,18 @@ export function applyAbsenceCoverage(
             .filter(e => !ctx.objectiveId || e.preferredObjectiveId === ctx.objectiveId)
             .map(e => e.id),
     );
+
+    // Volantes: empleados cuyo campo volante[] incluye este objetivo pero no son del objetivo
+    const volanteEmpIds = ctx.objectiveId
+        ? new Set(
+            ctx.employees
+                .filter(e =>
+                    e.preferredObjectiveId !== ctx.objectiveId &&
+                    (e.volante || []).includes(ctx.objectiveId),
+                )
+                .map(e => e.id),
+        )
+        : new Set<string>();
 
     const empToPosition: Record<string, string> = {};
     if (ctx.defaultPositionByEmp) {
@@ -96,13 +109,13 @@ export function applyAbsenceCoverage(
             // Día franco del ausente dentro del período de licencia → sin brecha (comportamiento normal CCT)
             if (!WORK_BANDS.has(neededBand)) continue;
 
-            // Intentar asignación automática: ST → RET → ESC (FT NO se asigna automáticamente)
-            const assigned = tryAutoAssign(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, neededBand, posName, ctx);
+            // Intentar asignación automática: ST → RET → VOL_ST → VOL_RET → ESC (FT NO se asigna automáticamente)
+            const assigned = tryAutoAssign(result, aIdx, objectiveEmpIds, volanteEmpIds, absentEmpId, dateStr, neededBand, posName, ctx);
 
             if (assigned) {
                 gaps.push({ absentEmpId, dateStr, band: neededBand, positionName: posName, coveredBy: assigned.empId, coverageType: assigned.type });
             } else {
-                // Sin candidatos ST/RET/ESC → listar candidatos FT para decisión manual
+                // Sin candidatos → listar candidatos FT para decisión manual
                 const ftCandidates = getFtCandidates(result, aIdx, objectiveEmpIds, absentEmpId, dateStr, ctx);
                 gaps.push({
                     absentEmpId,
@@ -125,13 +138,14 @@ export function applyAbsenceCoverage(
 }
 
 /**
- * Asignación automática: ST → RET → ESC.
+ * Asignación automática: ST → RET → VOL_ST → VOL_RET → ESC.
  * FT queda excluido — rompe el ciclo 6+2 y requiere decisión del supervisor.
  */
 function tryAutoAssign(
     result: V2Assignment[],
     aIdx: Map<string, number>,
     objectiveEmpIds: Set<string>,
+    volanteEmpIds: Set<string>,
     absentEmpId: string,
     dateStr: string,
     neededBand: string,
@@ -140,15 +154,17 @@ function tryAutoAssign(
 ): { empId: string; type: CoverageGap['coverageType'] } | null {
     const meta = shiftMetaForBand(neededBand);
 
-    const groupIds = [...objectiveEmpIds];
-    const ranked = rankReplacementCandidates(groupIds, ctx, {
+    const rankOpts = {
         absentEmpId,
         positionName: posName,
         dateStr,
         coverageWisdom: ctx.coverageWisdom,
         wisdomBand: neededBand,
         shiftCode: neededBand,
-    });
+    };
+
+    const groupIds = [...objectiveEmpIds];
+    const ranked = rankReplacementCandidates(groupIds, ctx, rankOpts);
 
     const assignExisting = (empId: string): boolean => {
         const ai = aIdx.get(`${empId}__${dateStr}`);
@@ -175,13 +191,31 @@ function tryAutoAssign(
         }
     }
 
-    // 2. RET libre
+    // 2. RET libre (personal del objetivo en stand-by)
     const retIds = findAllByCode(result, aIdx, ranked, dateStr, ['RET']);
     for (const retId of retIds) {
         if (assignExisting(retId)) return { empId: retId, type: 'ret' };
     }
 
-    // 3. ESC libre
+    // 3. Volante sin turno (conoce el objetivo, libre ese día)
+    if (volanteEmpIds.size > 0) {
+        const volanteRanked = rankReplacementCandidates([...volanteEmpIds], ctx, rankOpts);
+        for (const empId of volanteRanked) {
+            if (!aIdx.has(`${empId}__${dateStr}`)) {
+                result.push({ empId, dateStr, positionName: posName, code: neededBand, name: meta.name, hours: meta.hours, startTime: meta.startTime, endTime: meta.endTime, isFranco: false });
+                aIdx.set(`${empId}__${dateStr}`, result.length - 1);
+                return { empId, type: 'volante_st' };
+            }
+        }
+
+        // 4. Volante en RET (en stand-by en su objetivo base, disponible como comodín)
+        const volanteRetIds = findAllByCode(result, aIdx, volanteRanked, dateStr, ['RET']);
+        for (const retId of volanteRetIds) {
+            if (assignExisting(retId)) return { empId: retId, type: 'volante_ret' };
+        }
+    }
+
+    // 5. ESC libre (del objetivo, en escuela)
     const escIds = findAllByCode(result, aIdx, ranked, dateStr, ['ESC']);
     for (const escId of escIds) {
         if (assignExisting(escId)) return { empId: escId, type: 'esc' };
