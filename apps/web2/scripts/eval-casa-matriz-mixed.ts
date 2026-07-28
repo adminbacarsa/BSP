@@ -98,6 +98,28 @@ async function main() {
         && (Number(a.hours) || 0) > 0 && ['M', 'T', 'N'].includes(String(a.code).toUpperCase()),
     );
 
+    const weekdays = run.daysInMonth.map((d) => {
+        const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }).filter((ds) => ['L', 'M', 'X', 'J', 'V'].includes(getDayLetter(ds)) && ds !== '2026-07-23');
+
+    const finalAssignments = outcome.generation?.assignments ?? [];
+    const finalStats = outcome.generation?.stats;
+    const museoGroup = new Set(finalStats?.positionGroups?.['Museo'] ?? []);
+    const directorioGroup = new Set(finalStats?.positionGroups?.['DIRECTORIO'] ?? []);
+
+    const museoMA = finalAssignments.filter((a) =>
+        museoGroup.has(a.empId) && weekdays.includes(a.dateStr)
+        && String(a.code).toUpperCase() === 'MA' && (Number(a.hours) || 0) > 0,
+    );
+    const directorioME = finalAssignments.filter((a) =>
+        directorioGroup.has(a.empId) && weekdays.includes(a.dateStr)
+        && String(a.code).toUpperCase() === 'ME' && (Number(a.hours) || 0) > 0,
+    );
+
+    const expectedMuseoCells = museoGroup.size * weekdays.length;
+    const expectedDirectorioCells = directorioGroup.size * weekdays.length;
+
     const emp0Engine = weekendDays.map((ds) => {
         const a = engine.assignments.find((x) => x.empId === 'emp0' && x.dateStr === ds);
         return `${ds}:${a?.code ?? '-'}@${a?.positionName ?? ''}`;
@@ -110,8 +132,12 @@ async function main() {
     console.log('emp0 final finde:', emp0Final.join(' | '));
 
     console.log('=== eval:casa-matriz-mixed ===');
+    console.log('Pipeline:', outcome.pipeline);
     console.log('Motor uncovered:', engine.stats.uncoveredSlots);
     console.log('Post uncovered:', outcome.generation?.stats.uncoveredSlots);
+    console.log('Idle post:', finalStats?.idleEmployeeIds?.length ?? 0, finalStats?.idleEmployeeIds?.join(', ') ?? '');
+    console.log('Museo MA:', museoMA.length, '/', expectedMuseoCells);
+    console.log('DIRECTORIO ME:', directorioME.length, '/', expectedDirectorioCells);
     console.log('Puesto 1 grupo:', [...p1Group].join(', '));
     console.log('F finde P1 titulares (motor):', p1WeekendF.length);
     console.log('Turnos finde P1 titulares (motor):', p1WeekendWork.length);
@@ -128,6 +154,10 @@ async function main() {
     assert(p1BillableWeekend.length > 0, 'Puesto 1 24hs trabaja fines de semana');
     assert(allWeekendF.length < p1Group.size, 'no todos los titulares 24hs tienen F en todos los findes');
     assert(p1BillableWeekend.length >= p1WeekendSlots * 0.5, `cobertura P1 finde razonable (${p1BillableWeekend.length}/${p1WeekendSlots})`);
+    assert(outcome.pipeline === 'fixedBandFloater', 'pipeline fixedBandFloater');
+    assert((finalStats?.idleEmployeeIds?.length ?? 0) === 0, 'sin falsos excedentes (custom titulares)');
+    assert(museoMA.length >= expectedMuseoCells, `Museo MA L-V (${museoMA.length}/${expectedMuseoCells})`);
+    assert(directorioME.length >= expectedDirectorioCells, `DIRECTORIO ME L-V (${directorioME.length}/${expectedDirectorioCells})`);
 
     if (failed) { console.error('=== FAIL ==='); process.exit(1); }
     console.log('=== eval:casa-matriz-mixed PASS ===');

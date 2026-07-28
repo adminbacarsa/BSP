@@ -1,7 +1,7 @@
 import type { AutoPlanningBrainResult } from './autoPlanningBrain';
 import { generateScheduleV4 } from './autoScheduleEngineV4';
 import type { V2EngineContext, V2GenerateResult, V2GenerateStats, V2PositionDef, V2EmployeeDef } from './autoScheduleEngineV2';
-import { isCustomCoverPosition, normalize24hsPositionCalendars } from './autoScheduleEngineV2';
+import { isCustomCoverPosition, is24hsRotationPosition, normalize24hsPositionCalendars } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import { canUseFixedBandFloater } from './fixedBandFloaterScheduleEngine';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
@@ -44,6 +44,34 @@ import { fillCustomGapsFromVolantes, type VolanteCoverageAction } from './volant
 import type { SurplusAbsentSubstitutionAction } from './surplusAbsentSubstitution';
 
 export type AutoLabSchedulePipeline = 'none' | 'v4' | 'fixedBandFloater';
+
+/** Excedente solo en custom (EN/RO): no desactivar parches RET del ciclo 24d. */
+function surplusPoolIsCustomTitularOnly(pool: string[], ctx: V2EngineContext): boolean {
+    if (pool.length === 0) return false;
+    const posByEmp = {
+        ...(ctx.rosterSeedByEmp || {}),
+        ...(ctx.defaultPositionByEmp || {}),
+    };
+    return pool.every((empId) => {
+        const posName = posByEmp[empId];
+        const pos = ctx.positions.find((p) => p.positionName === posName);
+        return !!pos && isCustomCoverPosition(pos);
+    });
+}
+
+/** Ausencia V/L/E en titular 24hs → el excedente puede cubrir sin romper el ciclo global. */
+function has24hsAbsenceCoverageNeed(ctx: V2EngineContext): boolean {
+    for (const [empId, dateMap] of Object.entries(ctx.absences ?? {})) {
+        const posName = ctx.defaultPositionByEmp?.[empId];
+        const pos = posName ? ctx.positions.find((p) => p.positionName === posName) : undefined;
+        if (!pos || !is24hsRotationPosition(pos)) continue;
+        for (const code of dateMap.values()) {
+            const c = String(code || '').toUpperCase();
+            if (c === 'V' || c === 'L' || c === 'E') return true;
+        }
+    }
+    return false;
+}
 
 export interface AutoLabScheduleOutcome {
     pipeline: AutoLabSchedulePipeline;
@@ -169,13 +197,17 @@ function postProcessAutoLabSchedule(
         plantillaTotal,
         surplusPoolOptions,
     );
+    const classicRotationPipeline = pipeline === 'fixedBandFloater';
+    const absenceOn24hs = has24hsAbsenceCoverageNeed(ctx);
+    const runSurplusGapPipeline = surplusPoolEarly.length > 0
+        && (!classicRotationPipeline || absenceOn24hs);
     const surplusStandbyMode = surplusPoolEarly.length > 0
-        && (ctx.modo12Days?.length ?? 0) === 0;
+        && (ctx.modo12Days?.length ?? 0) === 0
+        && !surplusPoolIsCustomTitularOnly(surplusPoolEarly, ctx);
 
     if (
         pipeline === 'fixedBandFloater'
         && generation.stats.openingSlotByEmp
-        && !surplusStandbyMode
     ) {
         const cov = applyAbsenceCoverage(
             assignments,
@@ -188,7 +220,6 @@ function postProcessAutoLabSchedule(
 
     const openingSlotByEmp = openingSlotByEmpEarly;
     const retDesignee = pickRetDesignee(ctx, generation.stats, assignments);
-    const classicRotationPipeline = pipeline === 'fixedBandFloater';
 
     const statsWithSurplus = surplusPoolEarly.length > 0
         ? {
@@ -229,10 +260,13 @@ function postProcessAutoLabSchedule(
         );
     assignments = split.assignments;
 
+    /** Demanda D12+N12 solo si el cerebro lo pidió (no por V/L/E cubiertos en Modo 8). */
+    const modo12DaysForCoverage = [...(ctx.modo12Days ?? [])];
+
     const verifyCtx: V2EngineContext = {
         ...ctxWithSurplus,
-        modo12Days: split.effectiveModo12Days,
-        apretarCronoDays: split.effectiveModo12Days,
+        modo12Days: modo12DaysForCoverage,
+        apretarCronoDays: modo12DaysForCoverage,
         allowFrancoWorkedRescue: false,
     };
 
@@ -325,7 +359,7 @@ function postProcessAutoLabSchedule(
     volanteCoverageActions.push(...volantePre.actions);
     usedVolanteByDay = volantePre.usedVolanteByDay;
 
-    if (surplusPool.length > 0 && !classicRotationPipeline) {
+    if (runSurplusGapPipeline) {
         const repaired = repairCoverageOverstaffFromSurplus({
             assignments,
             ctx,
@@ -335,7 +369,9 @@ function postProcessAutoLabSchedule(
         assignments = repaired.assignments;
         coverageBalanceRepairs = repaired.actions;
 
-        const positionOrder = ctx.positions.map((p) => p.positionName);
+        const positionOrder = ctx.positions
+            .filter((p) => !classicRotationPipeline || is24hsRotationPosition(p))
+            .map((p) => p.positionName);
         let usedSurplusByDay = new Map<string, Set<string>>();
 
         for (const posName of positionOrder) {
@@ -486,7 +522,37 @@ function postProcessAutoLabSchedule(
             coverageBalanceRepairs.push(...repairLate.actions);
 
             coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
-        } else {
+        } else if (absenceOn24hs) {
+            const lastSub = applySurplusRetAbsentSubstitution({
+                assignments,
+                ctx,
+                stats: statsWithSurplus,
+                openingSlotByEmp,
+            });
+            assignments = lastSub.assignments;
+            surplusSubActions.push(...lastSub.actions);
+
+            const lastGap = fillCoverageGapsFromSurplusPool({
+                assignments,
+                ctx,
+                surplusPool,
+                stats: statsWithSurplus,
+            });
+            assignments = lastGap.assignments;
+            coverageGapFillActions.push(...lastGap.actions);
+
+            assignments = finalizeAutoLabSurplusSchedule({
+                assignments,
+                ctx,
+                surplusPool,
+                substitutionActions: surplusSubActions,
+                openingSlotByEmp,
+                positionGroups: statsWithSurplus.positionGroups,
+            });
+
+            coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
+        }
+        if (!coveragePolicyBalance.ok && coveragePolicyBalance.underSlotCount > 0) {
             const residualExt = applyResidualExternalRetForGaps({
                 assignments,
                 ctx,
@@ -504,12 +570,20 @@ function postProcessAutoLabSchedule(
 
     assignments = applyServiceExcludedDays(assignments, ctx);
 
-    coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
+    const coverageCtx: V2EngineContext = {
+        ...extendedCtx,
+        modo12Days: modo12DaysForCoverage,
+        apretarCronoDays: modo12DaysForCoverage,
+    };
+
+    coveragePolicyBalance = analyzeCoveragePolicyBalance(coverageCtx, assignments, {
+        inferModo12TCoverage: true,
+    });
     const uncoveredSlotsByDay = buildUncoveredSlotsByDayFromBalance(coveragePolicyBalance);
     const uncoveredSlots = uncoveredSlotCountFromBalance(coveragePolicyBalance);
 
     coverageReport = verifyScheduleCoverage(
-        extendedCtx,
+        coverageCtx,
         assignments,
         generation.stats,
         { inferModo12TCoverage: true },

@@ -53,6 +53,53 @@ export function formatPositionActiveDaysLabel(activeDays?: string[]): string {
   return days.join(' ');
 }
 
+const DEFAULT_PLANNING_SHIFT_META: Record<string, { name: string; startTime: string; endTime: string; hours: number }> = {
+  M: { name: 'Mañana', startTime: '07:00', endTime: '15:00', hours: 8 },
+  T: { name: 'Tarde', startTime: '15:00', endTime: '23:00', hours: 8 },
+  N: { name: 'Noche', startTime: '23:00', endTime: '07:00', hours: 8 },
+  D12: { name: 'Diurno 12h', startTime: '07:00', endTime: '19:00', hours: 12 },
+  N12: { name: 'Nocturno 12h', startTime: '19:00', endTime: '07:00', hours: 12 },
+};
+
+function parseClockToHours(t: string): number | null {
+  const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return +m[1] + +m[2] / 60;
+}
+
+/** Horas de un turno según SLA (hours explícito o duración start–end). */
+export function resolvePlanningShiftHours(shift: PlanningPositionShiftRow): number {
+  const stored = Number(shift.hours);
+  if (stored > 0) return stored;
+  if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+    const s = parseClockToHours(shift.startTime);
+    const e = parseClockToHours(shift.endTime);
+    if (s !== null && e !== null) {
+      let dur = e - s;
+      if (dur <= 0) dur += 24;
+      if (dur > 0 && dur <= 24) return Math.round(dur * 10) / 10;
+    }
+  }
+  return DEFAULT_PLANNING_SHIFT_META[String(shift.code || '').toUpperCase()]?.hours ?? 8;
+}
+
+/** Rango horario legible (ej. 08:00–20:00). */
+export function formatPlanningShiftScheduleLabel(shift: PlanningPositionShiftRow): string {
+  if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+    return `${shift.startTime}–${shift.endTime}`;
+  }
+  const def = DEFAULT_PLANNING_SHIFT_META[String(shift.code || '').toUpperCase()];
+  if (def) return `${def.startTime}–${def.endTime}`;
+  return '—';
+}
+
+export function resolvePlanningShiftName(shift: PlanningPositionShiftRow): string {
+  const code = String(shift.code || '').toUpperCase();
+  const name = String(shift.name || '').trim();
+  if (name && name.toUpperCase() !== code) return name;
+  return DEFAULT_PLANNING_SHIFT_META[code]?.name || code;
+}
+
 export function normalizePlanningShifts(shiftList: unknown): PlanningPositionShiftRow[] {
   if (!Array.isArray(shiftList)) return [];
   return shiftList.map((raw) => {

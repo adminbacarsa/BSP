@@ -4,12 +4,12 @@
 
 import type { V2Assignment, V2EngineContext, V2GenerateStats } from './autoScheduleEngineV2';
 import { pickRepresentativeCycle, positionIsActiveOn, is24hsRotationPosition } from './autoScheduleEngineV2';
-import { employeeAssignedToCustomCover } from './customCoverCycle';
+import { isCustomCoverTitular } from './customCoverCycle';
 import type { SurplusAbsentSubstitutionAction } from './surplusAbsentSubstitution';
 import { isExternalRetEmpId } from './externalRetCoverage';
 import { expectedBandForEmployee, isWorkBandCode } from './absenceFrancoUtils';
 
-const BILLABLE_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'EN', 'RO']);
+const BILLABLE_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'EN', 'RO', 'MA', 'ME']);
 const ABSENCE_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG']);
 
 const SHIFT_META: Record<string, { name: string; hours: number; startTime: string }> = {
@@ -141,16 +141,30 @@ export function buildSubstitutionAllowance(
     return keys;
 }
 
+function protectCustomTitularAssignment(
+    a: V2Assignment,
+    positions?: V2PositionDef[],
+    positionGroups?: Record<string, string[]>,
+): boolean {
+    if (!positions?.length) return false;
+    if (isCustomCoverTitular(a.empId, positions, positionGroups)) return true;
+    const code = String(a.code || '').toUpperCase();
+    return BILLABLE_CODES.has(code) && code !== 'M' && code !== 'T' && code !== 'N' && code !== 'D12' && code !== 'N12';
+}
+
 /** Quita turnos facturables del pool excedente salvo celdas de sustitución puntual (M/T/N). */
 export function enforceSurplusPoolStandbyPolicy(
     assignments: V2Assignment[],
     surplusPool: string[],
     allowedBillableKeys: Set<string>,
+    positions?: V2PositionDef[],
+    positionGroups?: Record<string, string[]>,
 ): void {
     const pool = new Set(surplusPool);
     for (let i = assignments.length - 1; i >= 0; i--) {
         const a = assignments[i];
         if (!pool.has(a.empId)) continue;
+        if (protectCustomTitularAssignment(a, positions, positionGroups)) continue;
         const code = String(a.code || '').toUpperCase();
         if (!BILLABLE_CODES.has(code)) continue;
         const key = `${a.empId}__${a.dateStr}`;
@@ -167,11 +181,14 @@ export function stripSurplusStandbyAssignments(
     assignments: V2Assignment[],
     surplusPool: string[],
     allowedBillableKeys: Set<string>,
+    positions?: V2PositionDef[],
+    positionGroups?: Record<string, string[]>,
 ): void {
     const pool = new Set(surplusPool);
     for (let i = assignments.length - 1; i >= 0; i--) {
         const a = assignments[i];
         if (!pool.has(a.empId)) continue;
+        if (protectCustomTitularAssignment(a, positions, positionGroups)) continue;
         const code = String(a.code || '').toUpperCase();
         if (ABSENCE_CODES.has(code)) continue;
         const key = `${a.empId}__${a.dateStr}`;
@@ -368,8 +385,20 @@ export function finalizeAutoLabSurplusSchedule(params: {
         );
     }
     demoteModo12ExtensionsWhenSurplusStandby(result, params.surplusPool, allowance);
-    enforceSurplusPoolStandbyPolicy(result, params.surplusPool, allowance);
-    stripSurplusStandbyAssignments(result, params.surplusPool, allowance);
+    enforceSurplusPoolStandbyPolicy(
+        result,
+        params.surplusPool,
+        allowance,
+        params.ctx.positions,
+        params.positionGroups,
+    );
+    stripSurplusStandbyAssignments(
+        result,
+        params.surplusPool,
+        allowance,
+        params.ctx.positions,
+        params.positionGroups,
+    );
     applySurplusRachaFrancos(result, params.ctx, params.surplusPool, allowance);
     ensureFullMonthCells(result, params.ctx, params.surplusPool, params.openingSlotByEmp);
     return result;

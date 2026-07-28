@@ -4,6 +4,7 @@
  */
 
 import type { V2Assignment, V2EngineContext, V2GenerateStats, V2PositionDef } from './autoScheduleEngineV2';
+import { isCustomCoverTitular } from './customCoverCycle';
 import { computePositionRequiredHeadcount } from './objectiveHeadcount';
 import { MODO12_ABSENCE_CODES } from './planningCoveragePolicy';
 import {
@@ -164,9 +165,9 @@ export function buildSurplusEmployeePool(
     const candidates = new Set<string>();
 
     for (const id of stats.idleEmployeeIds ?? []) {
-        if (stats.openingSlotByEmp?.[id] === undefined) {
-            candidates.add(id);
-        }
+        if (stats.openingSlotByEmp?.[id] !== undefined) continue;
+        if (positions && isCustomCoverTitular(id, positions, stats.positionGroups)) continue;
+        candidates.add(id);
     }
     for (const id of stats.strandedEmployeeIds ?? []) {
         candidates.add(id);

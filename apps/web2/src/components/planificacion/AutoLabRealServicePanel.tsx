@@ -15,40 +15,32 @@ import {
     loadAutoLabRealServiceBundle,
     type AutoLabRealServiceBundle,
 } from '@/lib/planificacion/autoLabRealService';
-import { formatPositionActiveDaysLabel } from '@/lib/slaPlanningMatch';
+import AutoLabPositionDiagram from '@/components/planificacion/AutoLabPositionDiagram';
 
-function RealPositionDiagram({ positions }: { positions: AutoLabRealServiceBundle['caseDef']['positions'] }) {
+function RealPositionDiagram({
+    positions,
+    year,
+    month,
+    serviceStart,
+    serviceEnd,
+    excludedDates,
+}: {
+    positions: AutoLabRealServiceBundle['caseDef']['positions'];
+    year: number;
+    month: number;
+    serviceStart?: string;
+    serviceEnd?: string;
+    excludedDates?: string[];
+}) {
+    const slaContext = serviceStart && serviceEnd
+        ? { year, month, serviceStart, serviceEnd, excludedDates }
+        : undefined;
     return (
-        <div className="space-y-3">
-            {positions.map((pos) => {
-                const bands = (pos.shifts || []).map((s) => s.code).join(' · ') || '—';
-                const days = formatPositionActiveDaysLabel(pos.activeDays);
-                return (
-                    <div
-                        key={pos.positionName}
-                        className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 shadow-sm"
-                    >
-                        <div className="flex items-start justify-between gap-2">
-                            <p className="font-black text-slate-800 text-sm">{pos.positionName}</p>
-                            <span className="text-[10px] font-black uppercase tracking-wide bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                                ×{Math.max(1, Number(pos.qty) || 1)}
-                            </span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                            <span className="rounded-lg bg-white border border-emerald-200 px-2 py-1 font-mono text-indigo-800">
-                                {bands}
-                            </span>
-                            <span className="rounded-lg bg-white border border-emerald-200 px-2 py-1 text-slate-600">
-                                {String(pos.coverageType || 'custom')}
-                            </span>
-                            <span className="rounded-lg bg-white border border-emerald-200 px-2 py-1 text-slate-600">
-                                {days}
-                            </span>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
+        <AutoLabPositionDiagram
+            positions={positions}
+            variant="real"
+            slaContext={slaContext}
+        />
     );
 }
 
@@ -200,7 +192,14 @@ export default function AutoLabRealServicePanel({
                         </div>
                     </div>
 
-                    <RealPositionDiagram positions={bundle.caseDef.positions} />
+                    <RealPositionDiagram
+                        positions={bundle.caseDef.positions}
+                        year={year}
+                        month={month}
+                        serviceStart={bundle.caseDef.serviceStartDate}
+                        serviceEnd={bundle.caseDef.serviceEndDate}
+                        excludedDates={bundle.caseDef.excludedDates}
+                    />
 
                     <div className="grid grid-cols-2 gap-2 text-xs">
                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">

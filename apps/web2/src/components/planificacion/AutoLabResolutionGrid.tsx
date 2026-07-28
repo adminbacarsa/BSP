@@ -15,7 +15,7 @@ import { buildPositionRequiredHeadcountMap } from '@/lib/planificacion/objective
 import { getAutoLabDateKey } from '@/lib/planificacion/autoLabRuntime';
 import { isExternalRetEmpId, shortExternalRetLabel } from '@/lib/planificacion/externalRetCoverage';
 import { isHolidayDate } from '@/lib/planificacion/autoLabServicePeriod';
-import { AlertTriangle, CalendarRange, CheckCircle2, Grid3x3, Users } from 'lucide-react';
+import { AlertTriangle, CalendarRange, CheckCircle2, Clock, Grid3x3, Users } from 'lucide-react';
 
 const WD_SHORT_ES = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'] as const;
 const WORK_BANDS = new Set(['M', 'T', 'N', 'D12', 'N12']);
@@ -97,6 +97,22 @@ function formatGridDay(day: Date): { dd: string; wd: string } {
         dd: String(day.getDate()).padStart(2, '0'),
         wd: WD_SHORT_ES[day.getDay()] ?? '',
     };
+}
+
+function sumBillableHoursFromCells(cells: DayAssignmentCell[]): number {
+    return cells.reduce((sum, c) => {
+        const code = String(c.code || '').toUpperCase();
+        const h = Number(c.hours) || 0;
+        if (h <= 0 || ABSENCE_CODES.has(code) || code === 'F' || code === 'RET') return sum;
+        return sum + h;
+    }, 0);
+}
+
+function hoursCellClass(hours: number): string {
+    if (hours <= 0) return 'text-slate-400';
+    if (hours >= 192) return 'text-amber-700 font-black';
+    if (hours >= 176) return 'text-amber-600 font-bold';
+    return 'text-indigo-800 font-bold';
 }
 
 interface AutoLabResolutionGridProps {
@@ -185,6 +201,38 @@ export default function AutoLabResolutionGrid({
         [stats?.idleEmployeeIds],
     );
 
+    const employeeHours = useMemo(() => {
+        const map: Record<string, number> = { ...(stats?.employeeMonthlyHours ?? {}) };
+        if (!assignmentIndex) return map;
+        for (const emp of allEmployees) {
+            const fromStats = map[emp.id];
+            if (fromStats != null && fromStats > 0) continue;
+            const byDay = assignmentIndex.get(emp.id);
+            if (!byDay) {
+                map[emp.id] = fromStats ?? 0;
+                continue;
+            }
+            let total = 0;
+            for (const cells of byDay.values()) {
+                total += sumBillableHoursFromCells(cells);
+            }
+            map[emp.id] = total;
+        }
+        return map;
+    }, [stats?.employeeMonthlyHours, assignmentIndex, allEmployees]);
+
+    const teamHoursSummary = useMemo(() => {
+        const rosterIds = runResult.employees.map((e) => e.id);
+        const values = rosterIds.map((id) => Math.round(employeeHours[id] ?? 0));
+        const total = values.reduce((s, h) => s + h, 0);
+        const count = rosterIds.length;
+        const avg = count > 0 ? Math.round((total / count) * 10) / 10 : 0;
+        const working = values.filter((h) => h > 0);
+        const min = working.length > 0 ? Math.min(...working) : 0;
+        const max = working.length > 0 ? Math.max(...working) : 0;
+        return { total, avg, count, min, max, workingCount: working.length };
+    }, [runResult.employees, employeeHours]);
+
     const positionSummary = useMemo(() => {
         return runResult.positions.map((pos) => {
             const ids = stats?.positionGroups?.[pos.positionName] ?? [];
@@ -203,6 +251,46 @@ export default function AutoLabResolutionGrid({
             };
         });
     }, [runResult.positions, stats?.positionGroups, primaryShiftByEmp, cycleNeededByPos, idleEmployeeIdSet]);
+
+    const hoursSubtotalByHeader = useMemo(() => {
+        const map = new Map<string, number>();
+        for (const summary of positionSummary) {
+            const sub = summary.titularGuardIds.reduce(
+                (s, id) => s + (employeeHours[id] ?? 0),
+                0,
+            );
+            map.set(summary.positionName, Math.round(sub));
+        }
+        const surplusIds = stats?.idleEmployeeIds ?? [];
+        if (surplusIds.length > 0) {
+            map.set(
+                '__surplus__',
+                Math.round(surplusIds.reduce((s, id) => s + (employeeHours[id] ?? 0), 0)),
+            );
+        }
+        const external = allEmployees.filter((e) => isExternalRetEmpId(e.id));
+        if (external.length > 0) {
+            map.set(
+                '__external__',
+                Math.round(external.reduce((s, e) => s + (employeeHours[e.id] ?? 0), 0)),
+            );
+        }
+        const rostered = new Set<string>();
+        for (const summary of positionSummary) {
+            summary.titularGuardIds.forEach((id) => rostered.add(id));
+        }
+        surplusIds.forEach((id) => rostered.add(id));
+        const unassigned = allEmployees.filter(
+            (e) => !isExternalRetEmpId(e.id) && !rostered.has(e.id),
+        );
+        if (unassigned.length > 0) {
+            map.set(
+                '__unassigned__',
+                Math.round(unassigned.reduce((s, e) => s + (employeeHours[e.id] ?? 0), 0)),
+            );
+        }
+        return map;
+    }, [positionSummary, employeeHours, stats?.idleEmployeeIds, allEmployees]);
 
     type GridRow =
         | { type: 'header'; positionName: string; qty: number; guardCount: number; bandHint: string; cycleNeeded?: number; overStaffed?: boolean; external?: boolean; surplus?: boolean }
@@ -290,6 +378,13 @@ export default function AutoLabResolutionGrid({
         return rows;
     }, [positionSummary, allEmployees, stats?.idleEmployeeIds, empPositionMap]);
 
+    const headerHoursKey = (row: Extract<GridRow, { type: 'header' }>): string => {
+        if (row.surplus) return '__surplus__';
+        if (row.external) return '__external__';
+        if (row.positionName === 'Sin puesto asignado') return '__unassigned__';
+        return row.positionName;
+    };
+
     if (scheduleOutcome.error && !scheduleOutcome.generation) {
         return (
             <div className="rounded-2xl bg-white border border-amber-200 shadow-sm p-6">
@@ -310,7 +405,7 @@ export default function AutoLabResolutionGrid({
         );
     }
 
-    const colSpan = displayDays.length + 2;
+    const stickyHsLeft = 'left-[104px]';
 
     return (
         <div className="rounded-2xl bg-white border border-slate-200 shadow-sm overflow-hidden">
@@ -360,6 +455,14 @@ export default function AutoLabResolutionGrid({
                 <span className="inline-flex items-center gap-1 font-bold text-slate-700">
                     <CheckCircle2 size={12} className="text-emerald-600" />
                     {Math.round(stats?.totalBillableHours ?? 0)} h facturables
+                </span>
+                <span className="text-slate-500">·</span>
+                <span className="inline-flex items-center gap-1 font-bold text-indigo-800">
+                    <Clock size={12} />
+                    Prom. {teamHoursSummary.avg} h/guardia
+                    <span className="font-semibold text-slate-500">
+                        ({teamHoursSummary.min}–{teamHoursSummary.max} h · {teamHoursSummary.workingCount}/{teamHoursSummary.count} con turnos)
+                    </span>
                 </span>
                 <span className="text-slate-500">·</span>
                 <span className="font-bold text-slate-700">SLA {runResult.slaVendidas} h</span>
@@ -422,6 +525,13 @@ export default function AutoLabResolutionGrid({
                             <th className="sticky left-[52px] z-20 bg-white border border-slate-200 px-2 py-2 text-left font-black text-slate-600 min-w-[52px]">
                                 Guardia
                             </th>
+                            <th
+                                className={`sticky ${stickyHsLeft} z-20 bg-white border border-slate-200 px-1.5 py-2 text-center font-black text-slate-600 min-w-[44px]`}
+                                title="Horas facturables del mes (sin F, RET ni ausencias)"
+                            >
+                                <Clock size={10} className="inline -mt-px" />
+                                <span className="block text-[8px]">Hs</span>
+                            </th>
                             {displayDays.map((day) => {
                                 const ds = getAutoLabDateKey(day);
                                 const active = activeDayKeys.has(ds);
@@ -458,16 +568,17 @@ export default function AutoLabResolutionGrid({
                                     : row.surplus
                                     ? 'bg-amber-50/90'
                                     : 'bg-slate-50/90';
+                                const groupHours = hoursSubtotalByHeader.get(headerHoursKey(row));
                                 return (
                                     <tr key={`hdr-${row.positionName}`} className={headerBg}>
                                         <td
-                                            colSpan={colSpan}
-                                            className={`border px-3 py-1.5 text-[10px] font-black ${
+                                            colSpan={2}
+                                            className={`sticky left-0 z-10 border px-3 py-1.5 text-[10px] font-black ${
                                                 row.external
-                                                    ? 'border-violet-200 text-violet-900'
+                                                    ? 'border-violet-200 text-violet-900 bg-violet-50/90'
                                                     : row.surplus
-                                                    ? 'border-amber-200 text-amber-950'
-                                                    : 'border-slate-200 text-slate-700'
+                                                    ? 'border-amber-200 text-amber-950 bg-amber-50/90'
+                                                    : 'border-slate-200 text-slate-700 bg-slate-50/90'
                                             }`}
                                         >
                                             <span className={`inline-flex items-center gap-2 rounded-lg border px-2 py-0.5 ${
@@ -496,6 +607,28 @@ export default function AutoLabResolutionGrid({
                                                 </span>
                                             </span>
                                         </td>
+                                        <td
+                                            className={`sticky ${stickyHsLeft} z-10 border px-1.5 py-1.5 text-center text-[10px] font-black ${
+                                                row.external
+                                                    ? 'border-violet-200 text-violet-800 bg-violet-50/90'
+                                                    : row.surplus
+                                                    ? 'border-amber-200 text-amber-900 bg-amber-50/90'
+                                                    : 'border-slate-200 text-indigo-800 bg-slate-50/90'
+                                            }`}
+                                            title="Subtotal horas del grupo"
+                                        >
+                                            {groupHours != null ? `${groupHours} h` : '—'}
+                                        </td>
+                                        <td
+                                            colSpan={displayDays.length}
+                                            className={`border ${
+                                                row.external
+                                                    ? 'border-violet-200 bg-violet-50/90'
+                                                    : row.surplus
+                                                    ? 'border-amber-200 bg-amber-50/90'
+                                                    : 'border-slate-200 bg-slate-50/90'
+                                            }`}
+                                        />
                                     </tr>
                                 );
                             }
@@ -508,6 +641,7 @@ export default function AutoLabResolutionGrid({
                                 ? shortPositionLabel(homePos, runResult.positions)
                                 : '—';
                             const band = primaryShiftByEmp[emp.id];
+                            const monthHours = Math.round(employeeHours[emp.id] ?? 0);
 
                             return (
                                 <tr key={emp.id} className={isExt ? 'bg-violet-50/30' : isSurplus ? 'bg-amber-50/25' : undefined}>
@@ -533,6 +667,18 @@ export default function AutoLabResolutionGrid({
                                         <span title={`${emp.nombre || emp.id}${band ? ` · banda ${band}` : ''}${isSurplus ? ` · excedente (${homePos})` : ''}`}>
                                             {shortEmpLabel(emp)}
                                         </span>
+                                    </td>
+                                    <td
+                                        className={`sticky ${stickyHsLeft} z-10 border border-slate-200 px-1.5 py-1.5 text-center text-[10px] whitespace-nowrap ${
+                                            isExt
+                                                ? 'bg-violet-50'
+                                                : isSurplus
+                                                ? 'bg-amber-50/50'
+                                                : 'bg-white'
+                                        } ${hoursCellClass(monthHours)}`}
+                                        title={`${monthHours} h facturables en el mes`}
+                                    >
+                                        {monthHours > 0 ? monthHours : '—'}
                                     </td>
                                     {displayDays.map((day) => {
                                         const ds = getAutoLabDateKey(day);
@@ -580,6 +726,12 @@ export default function AutoLabResolutionGrid({
                                 title="Déficit de slots SLA vs asignaciones (0 = cobertura completa)"
                             >
                                 Huecos SLA
+                            </td>
+                            <td
+                                className={`sticky ${stickyHsLeft} z-10 bg-rose-50 border border-rose-200 px-1.5 py-1.5 text-center font-black text-indigo-800 text-[9px]`}
+                                title={`Promedio equipo: ${teamHoursSummary.avg} h/guardia`}
+                            >
+                                Ø{teamHoursSummary.avg}
                             </td>
                             {displayDays.map((day) => {
                                 const ds = getAutoLabDateKey(day);

@@ -26,7 +26,7 @@ import PlanningCoverageWisdomPanel from '@/components/planificacion/PlanningCove
 import AutoLabRealServicePanel from '@/components/planificacion/AutoLabRealServicePanel';
 import AutoLabRosterSurplusPanel from '@/components/planificacion/AutoLabRosterSurplusPanel';
 import { AUTO_LAB_REAL_CASE_ID, type AutoLabRealServiceBundle } from '@/lib/planificacion/autoLabRealService';
-import { formatPositionActiveDaysLabel } from '@/lib/slaPlanningMatch';
+import AutoLabPositionDiagram from '@/components/planificacion/AutoLabPositionDiagram';
 import { generateAutoLabSchedule, verifyAutoLabCoverage } from '@/lib/planificacion/autoLabSchedule';
 import {
     buildAutoLabExportJson,
@@ -72,39 +72,25 @@ function rotationLabel(mode: AutoLabCaseDefinition['rotationMode']): string {
     return 'Auto (cerebro decide)';
 }
 
-function PositionDiagram({ positions }: { positions: AutoLabCaseDefinition['positions'] }) {
-    return (
-        <div className="space-y-3">
-            {positions.map((pos) => {
-                const bands = (pos.shifts || []).map((s) => s.code).join(' · ') || '—';
-                const days = formatPositionActiveDaysLabel(pos.activeDays);
-                return (
-                    <div
-                        key={pos.positionName}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm"
-                    >
-                        <div className="flex items-start justify-between gap-2">
-                            <p className="font-black text-slate-800 text-sm">{pos.positionName}</p>
-                            <span className="text-[10px] font-black uppercase tracking-wide bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
-                                ×{Math.max(1, Number(pos.qty) || 1)}
-                            </span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                            <span className="rounded-lg bg-white border border-slate-200 px-2 py-1 font-mono text-indigo-800">
-                                {bands}
-                            </span>
-                            <span className="rounded-lg bg-white border border-slate-200 px-2 py-1 text-slate-600">
-                                {String(pos.coverageType || 'custom')}
-                            </span>
-                            <span className="rounded-lg bg-white border border-slate-200 px-2 py-1 text-slate-600">
-                                {days}
-                            </span>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
+function PositionDiagram({
+    positions,
+    year,
+    month,
+    serviceStart,
+    serviceEnd,
+    excludedDates,
+}: {
+    positions: AutoLabCaseDefinition['positions'];
+    year: number;
+    month: number;
+    serviceStart?: string;
+    serviceEnd?: string;
+    excludedDates?: string[];
+}) {
+    const slaContext = serviceStart && serviceEnd
+        ? { year, month, serviceStart, serviceEnd, excludedDates }
+        : undefined;
+    return <AutoLabPositionDiagram positions={positions} slaContext={slaContext} />;
 }
 
 function FeasibilityBadge({ ok }: { ok: boolean }) {
@@ -874,7 +860,14 @@ export default function AutoLabPage() {
                                                     <p className="text-sm text-slate-600 mt-1">{activeCase.description}</p>
                                                 </div>
                                             </div>
-                                            <PositionDiagram positions={activeCase.positions} />
+                                            <PositionDiagram
+                                                positions={activeCase.positions}
+                                                year={year}
+                                                month={month}
+                                                serviceStart={activeCase.serviceStartDate}
+                                                serviceEnd={activeCase.serviceEndDate}
+                                                excludedDates={activeCase.excludedDates}
+                                            />
                                         </>
                                     )}
 
@@ -928,7 +921,14 @@ export default function AutoLabPage() {
                         {isCustomMode && activeCase && activeCase.positions.length > 0 && (
                             <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
                                 <p className="text-xs font-black uppercase text-slate-600 mb-3">Vista previa SLA</p>
-                                <PositionDiagram positions={activeCase.positions} />
+                                <PositionDiagram
+                                    positions={activeCase.positions}
+                                    year={year}
+                                    month={month}
+                                    serviceStart={activeCase.serviceStartDate}
+                                    serviceEnd={activeCase.serviceEndDate}
+                                    excludedDates={activeCase.excludedDates}
+                                />
                             </div>
                         )}
                     </div>

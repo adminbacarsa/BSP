@@ -6,7 +6,7 @@
  */
 
 import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
-import { pickRepresentativeCycle } from './autoScheduleEngineV2';
+import { is24hsRotationPosition, isCustomCoverPosition, pickRepresentativeCycle } from './autoScheduleEngineV2';
 import { absenceRequiresCoverage } from './absenceFrancoUtils';
 import { countMissingBands8h } from './externalRetCoverage';
 import { tryApplyHybridPaxContingency, type HybridContingencyAction } from './hybridContingencyCoverage';
@@ -357,6 +357,7 @@ export function applyAbsenceSplitCoverage(
     const skipModo12 = options?.skipModo12Days ?? new Set<string>();
     const surplusPool = ctx.idleSurplusEmpIds ?? [];
     const modo12Explicit = (ctx.modo12Days?.length ?? 0) > 0;
+    const brainModo12Days = new Set(getModo12Days(ctx));
     /** Con excedente RET y sin Modo 12 del cerebro → no promover D12/N12 por cada V/L/E. */
     const allowAbsenceD12Split = surplusPool.length === 0 || modo12Explicit;
 
@@ -377,6 +378,9 @@ export function applyAbsenceSplitCoverage(
 
     for (const pos of ctx.positions) {
         const posName = pos.positionName;
+        if (isCustomCoverPosition(pos)) continue;
+        if (!is24hsRotationPosition(pos)) continue;
+
         for (const dateStr of daysToProcess) {
             const dayPosKey = `${dateStr}__${posName}`;
             if (handledKeys.has(dayPosKey)) continue;
@@ -385,6 +389,8 @@ export function applyAbsenceSplitCoverage(
             const workAbsentMap = filterWorkDayAbsences(absentMap, dateStr, openingSlotByEmp, ctx);
             const isM12 = effectiveModo12Filtered.includes(dateStr);
             if (!isM12 && workAbsentMap.size === 0) continue;
+            // Ausencia en otro puesto no fuerza D12/N12 aquí salvo día Modo 12 explícito del cerebro
+            if (workAbsentMap.size === 0 && !brainModo12Days.has(dateStr)) continue;
 
             const pax = Math.max(1, Number(pos.qty) || 1);
             const missing8h = countMissingBands8h(

@@ -10,7 +10,7 @@
  */
 
 import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
-import { effectiveShiftsForPositionDay, positionIsActiveOn } from './autoScheduleEngineV2';
+import { effectiveShiftsForPositionDay, isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV2';
 import { isModo12Day } from './objectiveCoverageDemand';
 import type { SurplusAbsentSubstitutionAction } from './surplusAbsentSubstitution';
 
@@ -102,7 +102,7 @@ function buildDemandSlots(ctx: V2EngineContext): CoverageSlotKey[] {
             if (!positionIsActiveOn(pos, dayLetter, dateStr)) return;
             const qty = Number(pos.qty) || 0;
             if (!qty) return;
-            const modo12Day = isModo12Day(dateStr, ctx);
+            const modo12Day = !isCustomCoverPosition(pos) && isModo12Day(dateStr, ctx);
             let eff = modo12Day
                 ? (pos.shifts || []).filter((sh) => {
                     const code = String(sh.code || '').toUpperCase();

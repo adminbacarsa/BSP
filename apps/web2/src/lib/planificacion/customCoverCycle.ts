@@ -76,6 +76,24 @@ export function employeeAssignedToCustomCover(
     return false;
 }
 
+/** Titular efectivo custom (dentro de qty); el 2.º+ del grupo es excedente, no titular. */
+export function isCustomCoverTitular(
+    empId: string,
+    positions: V2PositionDef[],
+    positionGroups?: Record<string, string[]>,
+): boolean {
+    if (!positionGroups) return false;
+    for (const [posName, ids] of Object.entries(positionGroups)) {
+        const rank = ids.indexOf(empId);
+        if (rank < 0) continue;
+        const pos = positions.find((p) => p.positionName === posName);
+        if (!pos || !isCustomCoverPosition(pos)) continue;
+        const cap = Math.max(1, Number(pos.qty) || 1);
+        return rank < cap;
+    }
+    return false;
+}
+
 /**
  * Código de descanso planificado para custom en día sin servicio (ej. sábado RET, domingo F).
  * null si el día es laboral del puesto o el guardia no es custom.

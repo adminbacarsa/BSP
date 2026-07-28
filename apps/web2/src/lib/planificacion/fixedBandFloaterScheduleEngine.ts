@@ -6,12 +6,14 @@
 import {
     positionIsActiveOn,
     is24hsRotationPosition,
+    isCustomCoverPosition,
     type V2Assignment,
     type V2EngineContext,
     type V2GenerateResult,
     type V2PositionDef,
 } from './autoScheduleEngineV2';
 import { assignmentBreaksBandTransition } from './rotativeBandGuard';
+import { isCustomCoverTitular } from './customCoverCycle';
 import { CYCLE_24_MTN } from './rotativeMtnCycle';
 
 export { CYCLE_24_MTN, CYCLE_24_MTN_LEN } from './rotativeMtnCycle';
@@ -729,6 +731,10 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             if (!pos) continue;
             // Empleados 24hs sin opening = extras descartados por buildSubgroupsFor24hs → idle
             if (is24hs(pos)) continue;
+            // Solo titulares custom (qty); excedentes no programan M/M1 L–V fijo
+            if (isCustomCoverPosition(pos) && !isCustomCoverTitular(emp.id, ctx.positions, positionGroups)) {
+                continue;
+            }
             primaryShiftByEmp[emp.id] = null;
             ctx.daysInMonth.forEach(day => {
                 const dateStr = ctx.getDateKey(day);
@@ -1024,7 +1030,12 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             employeeCycleHours,
             employeesOver200: [],
             positionGroups,
-            idleEmployeeIds: ctx.employees.filter(e => openingSlotByEmp[e.id] === undefined).map(e => e.id),
+            idleEmployeeIds: ctx.employees.filter((e) => {
+                if (openingSlotByEmp[e.id] !== undefined) return false;
+                const posName = empToPosition[e.id];
+                const pos = posName ? ctx.positions.find((p) => p.positionName === posName) : undefined;
+                return !pos || !isCustomCoverPosition(pos);
+            }).map((e) => e.id),
             strandedEmployeeIds: strandedIds.length > 0 ? strandedIds : undefined,
             relocatedEmployeeIds: relocatedIds.length > 0 ? relocatedIds : undefined,
             primaryShiftByEmp,

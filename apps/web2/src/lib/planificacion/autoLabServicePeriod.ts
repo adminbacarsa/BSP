@@ -55,8 +55,8 @@ export function v2PositionToServicePosition(pos: V2PositionDef, id: string): Ser
             return {
                 code,
                 name: s.name || code,
-                startTime: times.start,
-                endTime: times.end,
+                startTime: s.startTime || times.start,
+                endTime: s.endTime || times.end,
                 hours: Number(s.hours) || 8,
             };
         }),
@@ -112,6 +112,26 @@ export function calculateSlaHoursForVigencia(
     if (servicePositions.length === 0) return 0;
     const row = calculateSlaHoursForMonth(
         servicePositions,
+        serviceStart,
+        serviceEnd,
+        excludedDates,
+        year,
+        month - 1,
+    );
+    return Math.round(row.total);
+}
+
+export function calculatePositionSlaHoursForMonth(
+    pos: V2PositionDef,
+    serviceStart: string,
+    serviceEnd: string,
+    excludedDates: string[] | undefined,
+    year: number,
+    month: number,
+): number {
+    const servicePosition = v2PositionToServicePosition(pos, 'lab-pos-single');
+    const row = calculateSlaHoursForMonth(
+        [servicePosition],
         serviceStart,
         serviceEnd,
         excludedDates,

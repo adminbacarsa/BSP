@@ -16,7 +16,7 @@ import type {
     V2EngineContext,
     V2GenerateStats,
 } from './autoScheduleEngineV2';
-import { effectiveShiftsForPositionDay, pickRepresentativeCycle, positionIsActiveOn } from './autoScheduleEngineV2';
+import { effectiveShiftsForPositionDay, isCustomCoverPosition, pickRepresentativeCycle, positionIsActiveOn } from './autoScheduleEngineV2';
 import { isModo12Day } from './objectiveCoverageDemand';
 import { checkRestBetweenShiftsDetail, resolveWorkShiftStartTime, type AgreementRestConfig } from './restBetweenShifts';
 import { SUVICO_POLICY } from './suvicoPolicy';
@@ -134,7 +134,7 @@ function buildDemandSlots(
             if (!positionIsActiveOn(pos, dayLetter, dateStr)) return;
             const qty = Number(pos.qty) || 0;
             if (!qty) return;
-            const modo12Day = isModo12Day(dateStr, ctx);
+            const modo12Day = !isCustomCoverPosition(pos) && isModo12Day(dateStr, ctx);
             let eff = modo12Day
                 ? (pos.shifts || [])
                     .filter((sh) => {
