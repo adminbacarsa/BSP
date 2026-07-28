@@ -94,6 +94,12 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    // En modo emulador todo va a localhost — la conectividad a internet no aplica.
+    if (process.env.NEXT_PUBLIC_USE_EMULATOR === 'true') {
+      setIsOnline(true);
+      return;
+    }
+
     // Verificación real: navigator.onLine solo detecta red, no internet
     const checkRealConnectivity = async () => {
       if (!navigator.onLine) { setIsOnline(false); return; }
