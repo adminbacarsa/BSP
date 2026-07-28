@@ -72,13 +72,14 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
     }
   }, [authEmpresaId, canSwitchEmpresa]);
 
-  // Superadmin sin empresa seleccionada → auto-seleccionar la primera de la lista
+  // Superadmin sin empresa seleccionada → auto-seleccionar la primera de la lista y persistir
   useEffect(() => {
     if (!canSwitchEmpresa || empresaId || empresas.length === 0) return;
     const saved =
       typeof localStorage !== 'undefined' ? localStorage.getItem(SUPERADMIN_EMPRESA_STORAGE_KEY) : null;
     const pick = saved && empresas.some(e => e.id === saved) ? saved : empresas[0].id;
     setEmpresaId(pick);
+    try { localStorage.setItem(SUPERADMIN_EMPRESA_STORAGE_KEY, pick); } catch { /* ignore */ }
   }, [canSwitchEmpresa, empresaId, empresas]);
 
   // Suscripción al documento de la empresa activa.

@@ -134,7 +134,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setAssignedClientId(null);
             setAllEmpresas(false);
             const isSuper = isSuperAdminRoleId(tokenRole);
-            setEmpresaId(isSuper ? '' : 'bacarsa');
+            setEmpresaId('bacarsa');
             if (isSuper) {
               setRolePermissions(fullSuperAdminPermissions());
             } else if (tokenRole) {
