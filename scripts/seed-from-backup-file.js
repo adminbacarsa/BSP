@@ -43,6 +43,10 @@ const EMPRESA_SCOPED_COLS = new Set([
   'planificaciones_historial', 'contracts', 'quotes',
 ]);
 
+// Colecciones cuyo doc ID es el empresaId (no tienen campo empresaId en el doc)
+// Se importan por doc ID en lugar de filtrar por campo.
+const DOC_ID_IS_EMPRESA = new Set(['planning_rules']);
+
 // Colecciones pesadas que no se necesitan para desarrollo
 const DEV_SKIP_COLS = new Set(['audit_logs', 'user_notifications', 'assistant_interaction_logs', 'historial_operaciones']);
 
@@ -234,7 +238,11 @@ async function seedFirestore(collections, empId, isFull, isDev) {
         filtered = docs.filter(d => d._id === empId);
       } else if (EMPRESA_SCOPED_COLS.has(col)) {
         filtered = docs.filter(d => docMatchesEmpresa(d, empId));
+      } else if (DOC_ID_IS_EMPRESA.has(col)) {
+        // El doc ID es el empresaId (ej: planning_rules/bacarsa)
+        filtered = docs.filter(d => d._id === empId);
       } else {
+        console.log(`  ${col.padEnd(28)} [ignorada — no está en EMPRESA_SCOPED_COLS]`);
         continue;
       }
       if (filtered.length === 0) continue;

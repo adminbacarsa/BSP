@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Edit3, Trash2, Save, Shield, Check, X } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocsFromServer, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { SYSTEM_MODULES, PERMISSION_ACTIONS } from '@/config/modules';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -42,7 +42,7 @@ export default function RolesTab() {
         !r.empresaId || normId(r.empresaId) === normId(empresaId);
 
     const loadRoles = async () => {
-        const snap = await getDocsFromServer(collection(db, 'roles'));
+        const snap = await getDocs(collection(db, 'roles'));
         const all = snap.docs.map(d => ({ id: d.id, ...d.data() })) as IRole[];
         setRoles(all.filter(matchesEmpresa));
     };
