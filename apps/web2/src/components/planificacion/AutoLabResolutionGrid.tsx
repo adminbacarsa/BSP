@@ -221,6 +221,11 @@ export default function AutoLabResolutionGrid({
         return map;
     }, [stats?.employeeMonthlyHours, assignmentIndex, allEmployees]);
 
+    const employeeRetCount = useMemo(
+        () => stats?.employeeRetCount ?? {},
+        [stats?.employeeRetCount],
+    );
+
     const teamHoursSummary = useMemo(() => {
         const rosterIds = runResult.employees.map((e) => e.id);
         const values = rosterIds.map((id) => Math.round(employeeHours[id] ?? 0));
@@ -527,7 +532,7 @@ export default function AutoLabResolutionGrid({
                             </th>
                             <th
                                 className={`sticky ${stickyHsLeft} z-20 bg-white border border-slate-200 px-1.5 py-2 text-center font-black text-slate-600 min-w-[44px]`}
-                                title="Horas facturables del mes (sin F, RET ni ausencias)"
+                                title="Horas facturables del mes (RET stand-by no suma salvo turno asignado)"
                             >
                                 <Clock size={10} className="inline -mt-px" />
                                 <span className="block text-[8px]">Hs</span>
@@ -642,6 +647,7 @@ export default function AutoLabResolutionGrid({
                                 : '—';
                             const band = primaryShiftByEmp[emp.id];
                             const monthHours = Math.round(employeeHours[emp.id] ?? 0);
+                            const retCount = employeeRetCount[emp.id] ?? 0;
 
                             return (
                                 <tr key={emp.id} className={isExt ? 'bg-violet-50/30' : isSurplus ? 'bg-amber-50/25' : undefined}>
@@ -676,7 +682,11 @@ export default function AutoLabResolutionGrid({
                                                 ? 'bg-amber-50/50'
                                                 : 'bg-white'
                                         } ${hoursCellClass(monthHours)}`}
-                                        title={`${monthHours} h facturables en el mes`}
+                                        title={
+                                            retCount > 0
+                                                ? `${monthHours} h facturables · ${retCount} RET stand-by (no suman horas salvo asignación)`
+                                                : `${monthHours} h facturables en el mes`
+                                        }
                                     >
                                         {monthHours > 0 ? monthHours : '—'}
                                     </td>

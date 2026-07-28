@@ -1,5 +1,6 @@
-import type { V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
+import type { V2Assignment, V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
 import { effectiveShiftsForPositionDay, isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV2';
+import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const WEEKDAY_LETTERS = ['L', 'M', 'X', 'J', 'V'] as const;
@@ -239,6 +240,12 @@ export function pickBalancedCustomWorkers(
 
     const day = ((absDayIndex % cycleLen) + cycleLen) % cycleLen;
 
+    if (headcount === 3 && qty === 2 && workDays === 6 && cycleLen === 7) {
+        const triplePairs: number[][] = [[0, 1], [0, 2], [1, 2]];
+        const idx = ((absDayIndex % triplePairs.length) + triplePairs.length) % triplePairs.length;
+        return triplePairs[idx] ?? triplePairs[0];
+    }
+
     if (headcount === 3 && qty === 2 && workDays === 5 && cycleLen === 7) {
         const weeklyPairs: number[][] = [
             [0, 1], [0, 2], [1, 2], [0, 1], [1, 2], [0, 2], [1, 2],
@@ -341,4 +348,184 @@ export function buildCustomCycleWorkDays(params: BuildCustomCycleWorkDaysParams)
     });
 
     return set;
+}
+
+/** Objetivo CCT aproximado para top-up RET en perfil L–D / 9h / 3 guardias / pax 2. */
+export const BALANCED_LD_NINE_HOUR_RET_TOPUP_TARGET = 200;
+
+/**
+ * Perfil: custom L–D, una banda M/T ~9h (ciclo 6+1), pax 2, plantilla 3 con rotación 2+1.
+ * No aplica a otros custom (L–V, 12h, multi-banda, pax distinto, etc.).
+ */
+export function isBalancedLdNineHourRetTopUpProfile(
+    pos: V2PositionDef,
+    groupHeadcount: number,
+): boolean {
+    if (!isCustomCoverPosition(pos)) return false;
+    if (!customPositionOperatesAllWeek(pos)) return false;
+    if (customCoverDailyPax(pos) !== 2) return false;
+    if (customCoverDistinctBandCount(pos) !== 1) return false;
+    if (groupHeadcount !== 3) return false;
+    const { workDays, cycleLen } = customCoverWeeklyWorkRest(pos);
+    if (workDays !== 6 || cycleLen !== 7) return false;
+    const working = (pos.shifts || []).filter(
+        (s) => !FRANCO_CODES.has(String(s.code ?? '').toUpperCase()),
+    );
+    const hrs = Number(working[0]?.hours) || 8;
+    return hrs >= 8 && hrs < 11;
+}
+
+function billableHoursForEmp(assignments: V2Assignment[], empId: string): number {
+    let total = 0;
+    for (const a of assignments) {
+        if (a.empId !== empId) continue;
+        const h = Number(a.hours) || 0;
+        if (h <= 0) continue;
+        const code = String(a.code ?? '').toUpperCase();
+        if (FRANCO_CODES.has(code) || code === 'RET') continue;
+        total += h;
+    }
+    return total;
+}
+
+function francoCandidatesForEmp(
+    assignments: V2Assignment[],
+    empId: string,
+    orderedDateStrs?: string[],
+): V2Assignment[] {
+    const francos = assignments.filter((a) => {
+        if (a.empId !== empId) return false;
+        const code = String(a.code ?? '').toUpperCase();
+        if (code !== 'F') return false;
+        if ((Number(a.hours) || 0) > 0) return false;
+        const hasBillable = assignments.some((x) =>
+            x.empId === empId
+            && x.dateStr === a.dateStr
+            && (Number(x.hours) || 0) > 0,
+        );
+        return !hasBillable;
+    });
+    if (!orderedDateStrs?.length) {
+        return francos.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+    }
+    const order = new Map(orderedDateStrs.map((d, i) => [d, i]));
+    return francos.sort((a, b) => {
+        const ia = order.get(a.dateStr) ?? 9999;
+        const ib = order.get(b.dateStr) ?? 9999;
+        return ia - ib;
+    });
+}
+
+function retTopUpCountForBillable(billable: number, availableF: number): number {
+    if (availableF <= 0) return 0;
+    if (billable >= BALANCED_LD_NINE_HOUR_RET_TOPUP_TARGET) return 0;
+    const deficit = BALANCED_LD_NINE_HOUR_RET_TOPUP_TARGET - billable;
+    const byDeficit = Math.floor(deficit / RET_STANDBY_REFERENCE_HOURS);
+    const maxPerEmp = billable < 185 ? 2 : 1;
+    return Math.min(Math.max(0, byDeficit), maxPerEmp, availableF);
+}
+
+function pickFrancoAssignmentsForRet(
+    candidates: V2Assignment[],
+    retNeeded: number,
+): V2Assignment[] {
+    if (retNeeded <= 0 || candidates.length === 0) return [];
+    if (retNeeded === 1) return [candidates[0]];
+    if (candidates.length === 1) return [candidates[0]];
+    const mid = Math.floor(candidates.length / 2);
+    return [candidates[0], candidates[mid]];
+}
+
+export interface BalancedLdNineHourRetTopUpParams {
+    assignments: V2Assignment[];
+    positions: V2PositionDef[];
+    positionGroups: Record<string, string[]>;
+    orderedDateStrs?: string[];
+}
+
+export interface BalancedLdNineHourRetTopUpResult {
+    appliedPositions: string[];
+    convertedByEmp: Record<string, number>;
+}
+
+/**
+ * Convierte F planificados → RET stand-by (0h; no suma a liquidación salvo activación operativa).
+ * Solo en puestos que cumplen `isBalancedLdNineHourRetTopUpProfile`.
+ */
+export function applyBalancedLdNineHourRetCctTopUp(
+    params: BalancedLdNineHourRetTopUpParams,
+): BalancedLdNineHourRetTopUpResult {
+    const { assignments, positions, positionGroups, orderedDateStrs } = params;
+    const appliedPositions: string[] = [];
+    const convertedByEmp: Record<string, number> = {};
+
+    for (const pos of positions) {
+        const groupIds = positionGroups[pos.positionName] ?? [];
+        if (!isBalancedLdNineHourRetTopUpProfile(pos, groupIds.length)) continue;
+
+        let positionConverted = 0;
+        for (const empId of groupIds) {
+            const billable = billableHoursForEmp(assignments, empId);
+            const candidates = francoCandidatesForEmp(assignments, empId, orderedDateStrs);
+            const existingBalancedRet = assignments.filter((a) =>
+                a.empId === empId && a.balancedLdCctRet === true,
+            ).length;
+            const retNeeded = retTopUpCountForBillable(billable, candidates.length) - existingBalancedRet;
+            if (retNeeded <= 0) continue;
+
+            const alreadyRetDates = new Set(
+                assignments
+                    .filter((a) => a.empId === empId && String(a.code).toUpperCase() === 'RET')
+                    .map((a) => a.dateStr),
+            );
+            const openCandidates = candidates.filter((a) => !alreadyRetDates.has(a.dateStr));
+            const toConvert = pickFrancoAssignmentsForRet(openCandidates, retNeeded);
+            for (const a of toConvert) {
+                a.code = 'RET';
+                a.name = 'Retén';
+                a.hours = 0;
+                a.startTime = '00:00';
+                a.isFranco = false;
+                a.isReten = true;
+                a.balancedLdCctRet = true;
+                a.positionName = '';
+                convertedByEmp[empId] = (convertedByEmp[empId] || 0) + 1;
+                positionConverted++;
+            }
+        }
+
+        if (positionConverted > 0) {
+            appliedPositions.push(pos.positionName);
+        }
+    }
+
+    return { appliedPositions, convertedByEmp };
+}
+
+/** Recalcula contadores RET stand-by desde assignments finales. */
+export function recomputeRetPotentialStats(
+    assignments: Array<Pick<V2Assignment, 'empId' | 'code'>>,
+): {
+    employeeRetCount: Record<string, number>;
+    employeeRetHoursPotential: Record<string, number>;
+    totalRetCount: number;
+    totalRetHoursPotential: number;
+} {
+    const employeeRetCount: Record<string, number> = {};
+    for (const a of assignments) {
+        if (String(a.code || '').toUpperCase() !== 'RET' || !a.empId) continue;
+        employeeRetCount[a.empId] = (employeeRetCount[a.empId] || 0) + 1;
+    }
+    const employeeRetHoursPotential: Record<string, number> = {};
+    let totalRetCount = 0;
+    for (const [empId, count] of Object.entries(employeeRetCount)) {
+        employeeRetHoursPotential[empId] = count * RET_STANDBY_REFERENCE_HOURS;
+        totalRetCount += count;
+    }
+    return {
+        employeeRetCount,
+        employeeRetHoursPotential,
+        totalRetCount,
+        totalRetHoursPotential: totalRetCount * RET_STANDBY_REFERENCE_HOURS,
+    };
 }

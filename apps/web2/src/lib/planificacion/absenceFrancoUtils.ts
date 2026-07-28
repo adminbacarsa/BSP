@@ -147,6 +147,7 @@ export function consolidateRetToDesignee(
         return assignments.map((a) => {
             if (String(a.code || '').toUpperCase() !== 'RET') return a;
             if (isExternalRetEmpId(a.empId)) return a;
+            if (a.balancedLdCctRet === true) return a;
             if (preservePlannedCustomRet(a)) return a;
             return {
                 ...a,
@@ -163,6 +164,7 @@ export function consolidateRetToDesignee(
     return assignments.map((a) => {
         if (String(a.code || '').toUpperCase() !== 'RET') return a;
         if (isExternalRetEmpId(a.empId)) return a;
+        if (a.balancedLdCctRet === true) return a;
         if (allowed.has(a.empId)) return a;
         if (preservePlannedCustomRet(a)) return a;
         return {

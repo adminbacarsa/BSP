@@ -63,7 +63,7 @@ import {
     resolveRotativeMtnCode,
     rotativeMtnIsWorkDay,
 } from './rotativeMtnCycle';
-import { buildCustomCycleWorkDays, customCoverDailyPax, customCoverBandsForDay, customCoverSlotsRequiredOnDay, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay } from './customCoverCycle';
+import { applyBalancedLdNineHourRetCctTopUp, buildCustomCycleWorkDays, customCoverDailyPax, customCoverBandsForDay, customCoverSlotsRequiredOnDay, customCoverSimultaneousPax, customCoverWeeklyWorkRest, customPositionOperatesAllWeek, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay, pickBalancedCustomWorkers } from './customCoverCycle';
 import { fillCycleBaseRotativeAssignments } from './cycleBaseSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
@@ -1203,6 +1203,8 @@ export interface V2Assignment {
     endTime?: string;
     isFranco?: boolean;
     isReten?: boolean;
+    /** RET CCT top-up en perfil custom L–D / 9h / 3 guardias / pax 2 (no consolidar a un solo designee). */
+    balancedLdCctRet?: boolean;
 }
 
 export interface V2GenerateStats {
@@ -1284,6 +1286,10 @@ export interface V2GenerateStats {
     /** Días con demanda D12+N12 aplicada en esta generación. */
     apretarCronoDays?: string[];
     flexSchemeRescues?: number;
+    /** Puestos custom L–D / 9h / 3 guardias / pax 2 donde se aplicó top-up RET CCT. */
+    balancedLdRetTopUpPositions?: string[];
+    /** RET CCT top-up por empleado (conversión F→RET en perfil balanceado L–D 9h). */
+    balancedLdRetTopUpByEmp?: Record<string, number>;
 }
 
 export interface CapOverflowSlot {
@@ -2751,6 +2757,30 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 }
             }
             if (!filled) {
+                const simultaneousPax = customCoverSimultaneousPax(pos);
+                const useBalancedFill = customPositionOperatesAllWeek(pos) && groupIds.length > simultaneousPax;
+                if (useBalancedFill) {
+                    const di = ctx.daysInMonth.findIndex((d) => ctx.getDateKey(d) === dateStr);
+                    const absDay = monthStartGlobalDayIndex + (di >= 0 ? di : 0);
+                    const { workDays, cycleLen } = customCoverWeeklyWorkRest(pos);
+                    const workerIdxs = pickBalancedCustomWorkers(
+                        absDay,
+                        groupIds.length,
+                        simultaneousPax,
+                        workDays,
+                        cycleLen,
+                    );
+                    for (const wi of workerIdxs) {
+                        const eid = groupIds[wi];
+                        if (!eid || runtime[eid].assignedDays.has(dateStr)) continue;
+                        if (ctx.absences[eid]?.has(dateStr)) continue;
+                        if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent)) {
+                            filled = true;
+                        }
+                    }
+                }
+            }
+            if (!filled) {
                 for (const eid of sortByFewerHours(groupIds, inCurrent)) {
                     if (runtime[eid].assignedDays.has(dateStr)) continue;
                     if (ctx.absences[eid]?.has(dateStr)) continue;
@@ -3785,6 +3815,17 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     }
 
     stripIdleEmployeeBillableAssignments(assignments, empAssignedTo, cycleWorkDays, stats);
+
+    const retTopUp = applyBalancedLdNineHourRetCctTopUp({
+        assignments,
+        positions: ctx.positions,
+        positionGroups,
+        orderedDateStrs: ctx.daysInMonth.map((d) => ctx.getDateKey(d)),
+    });
+    if (retTopUp.appliedPositions.length > 0) {
+        stats.balancedLdRetTopUpPositions = retTopUp.appliedPositions;
+        stats.balancedLdRetTopUpByEmp = retTopUp.convertedByEmp;
+    }
 
     // Empleados que pasaron 200h en el ciclo actual (no debería pasar pero auditamos)
     for (const emp of ctx.employees) {

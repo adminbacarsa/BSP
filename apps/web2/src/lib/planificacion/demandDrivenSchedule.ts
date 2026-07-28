@@ -1597,6 +1597,7 @@ export function stripUnauthorizedRetAssignments(
         if (String(a.code || '').toUpperCase() !== 'RET') continue;
         if (retDesignateSet.has(a.empId)) continue;
         if (isPlannedCustomCoverRet(a, ctx)) continue;
+        if (a.balancedLdCctRet === true) continue;
         if (ctx.rotateShifts === false
             && (ctx.ajustarCrono === true || (ctx.contingencyApretarDays?.length ?? 0) > 0)) continue;
         if (ctx.ajustarCrono === true && ctx.rotateShifts !== false) continue;

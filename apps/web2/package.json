@@ -14,6 +14,7 @@
     "eval:mixed-custom-floater": "npx tsx scripts/eval-mixed-custom-floater.ts",
     "eval:casa-matriz-mixed": "npx tsx scripts/eval-casa-matriz-mixed.ts",
     "eval:edificio-corporativo": "npx tsx scripts/eval-edificio-corporativo.ts",
+    "eval:manzana-historica": "npx tsx scripts/eval-manzana-historica.ts",
     "eval:case-01-oficina": "npx tsx scripts/eval-case-01-oficina.ts",
     "eval:obrador-postprocess": "npx tsx scripts/eval-obrador-postprocess.ts",
     "eval:obrador-sla-infer": "npx tsx scripts/eval-obrador-sla-infer.ts",

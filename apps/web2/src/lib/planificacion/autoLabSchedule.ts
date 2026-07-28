@@ -25,6 +25,7 @@ import {
 import { applySurplusRetAbsentSubstitution, buildSurplusEmployeePool } from './surplusAbsentSubstitution';
 import { resolveOpeningSlotByEmpForPostProcess } from './openingSlotResolver';
 import { finalizeAutoLabSurplusSchedule, recomputeScheduleStatsFromAssignments } from './autoLabSurplusFinalize';
+import { applyBalancedLdNineHourRetCctTopUp, recomputeRetPotentialStats } from './customCoverCycle';
 import { resolveMonthStartGlobalDayIndex } from './surplusRetCycle';
 import { runStrictSixTwoPipeline } from './planningPipeline';
 import type { AutoLabRunResult } from './autoLabRuntime';
@@ -570,6 +571,14 @@ function postProcessAutoLabSchedule(
 
     assignments = applyServiceExcludedDays(assignments, ctx);
 
+    const retTopUp = applyBalancedLdNineHourRetCctTopUp({
+        assignments,
+        positions: ctx.positions,
+        positionGroups: statsWithSurplus.positionGroups ?? generation.stats.positionGroups ?? {},
+        orderedDateStrs: ctx.daysInMonth.map((d) => ctx.getDateKey(d)),
+    });
+    const retStats = recomputeRetPotentialStats(assignments);
+
     const coverageCtx: V2EngineContext = {
         ...extendedCtx,
         modo12Days: modo12DaysForCoverage,
@@ -626,6 +635,16 @@ function postProcessAutoLabSchedule(
             stats: {
                 ...generation.stats,
                 ...recomputed,
+                ...(retTopUp.appliedPositions.length > 0
+                    ? {
+                        balancedLdRetTopUpPositions: retTopUp.appliedPositions,
+                        balancedLdRetTopUpByEmp: retTopUp.convertedByEmp,
+                    }
+                    : {}),
+                employeeRetCount: retStats.employeeRetCount,
+                employeeRetHoursPotential: retStats.employeeRetHoursPotential,
+                totalRetCount: retStats.totalRetCount,
+                totalRetHoursPotential: retStats.totalRetHoursPotential,
                 idleEmployeeIds: surplusPool.length > 0
                     ? surplusPool
                     : generation.stats.idleEmployeeIds,
