@@ -11,7 +11,7 @@ const { execSync, execFile, spawn } = require('child_process');
 const path = require('path');
 const { pipeline } = require('stream/promises');
 
-let _importProgress = { active: false, done: 0, total: 0, col: '', error: null };
+let _importProgress = { active: false, done: 0, total: 0, col: '', phase: '', error: null };
 
 const PORT = 3010;
 const IMPORT_TIMEOUT_MS = 15 * 60 * 1000;
@@ -58,10 +58,10 @@ async function importBackupFile(req, res) {
     const scriptPath = path.join(__dirname, 'seed-from-backup-file.js');
     const args = [scriptPath, tmpPath];
     if (mode === 'full') args.push('--full');
-    else args.push('--empresa', empresaId);
+    else { args.push('--empresa', empresaId); args.push('--clear-all'); }
     if (devMode) args.push('--dev');
 
-    _importProgress = { active: true, done: 0, total: 0, col: '', error: null };
+    _importProgress = { active: true, done: 0, total: 0, col: '', phase: 'Preparando...', error: null };
     const output = await new Promise((resolve, reject) => {
       const childEnv = {
         ...process.env,
@@ -87,7 +87,10 @@ async function importBackupFile(req, res) {
             _importProgress.done = parseInt(m[1], 10);
             _importProgress.total = parseInt(m[2], 10);
             _importProgress.col = m[3].trim();
+            _importProgress.phase = '';
           }
+          const s = line.match(/^STATUS:(.+)$/);
+          if (s) { _importProgress.phase = s[1].trim(); }
         }
       });
       child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });

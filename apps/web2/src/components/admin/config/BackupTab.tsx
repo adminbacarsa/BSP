@@ -275,9 +275,13 @@ export default function BackupTab() {
         if (!r) return; // error de red, reintentar
         if (r.status === 404) { active = false; if (intervalId) window.clearInterval(intervalId); return; } // bridge viejo
         if (!r.ok) return;
-        const d = await r.json() as { active: boolean; done: number; total: number; col: string };
-        if (d.active && d.total > 0) {
-          setProgress({ done: d.done, total: d.total, phase: `Importando ${d.col}…` });
+        const d = await r.json() as { active: boolean; done: number; total: number; col: string; phase: string };
+        if (d.active) {
+          if (d.total > 0) {
+            setProgress({ done: d.done, total: d.total, phase: `Importando ${d.col}…` });
+          } else if (d.phase) {
+            setProgress(prev => ({ done: 0, total: 0, phase: d.phase }));
+          }
         }
       } catch { /* ignorar */ }
     };

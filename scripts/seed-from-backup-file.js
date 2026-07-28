@@ -49,6 +49,7 @@ const DEV_SKIP_COLS = new Set(['audit_logs', 'user_notifications', 'assistant_in
 const args = process.argv.slice(2);
 const fullMode = args.includes('--full');
 const devMode = args.includes('--dev');
+const clearAll = args.includes('--clear-all'); // limpia todo vía REST antes de importar empresa
 const empresaIdx = args.indexOf('--empresa');
 const empresaId = empresaIdx >= 0 ? String(args[empresaIdx + 1] || '').trim() : 'bacarsa';
 const fileArg = args.find(a => !a.startsWith('--') && a !== empresaId);
@@ -112,6 +113,7 @@ async function deleteCollectionWhereEmpresa(colName, empId) {
 /** Limpia Firestore completo usando la REST API del emulador (instantáneo).
  *  Si el endpoint retorna 500 (bug conocido del emulador), borra colección por colección como fallback. */
 async function clearEmulatorFull() {
+  process.stdout.write('\nSTATUS:Preparando emulador (limpiando datos)...\n');
   process.stdout.write('Limpiando Firestore completo (REST API)... ');
   const ok = await new Promise((resolve) => {
     const req = http.request({
@@ -123,6 +125,7 @@ async function clearEmulatorFull() {
       res.resume();
       resolve(res.statusCode === 200 || res.statusCode === 204);
     });
+    req.setTimeout(20000, () => { req.destroy(); resolve(false); });
     req.on('error', () => resolve(false));
     req.end();
   });
@@ -166,6 +169,7 @@ async function seedAuthFromSystemUsers(systemUsers) {
     console.log('Auth: sin system_users en backup');
     return 0;
   }
+  process.stdout.write('\nSTATUS:Sincronizando usuarios Auth...\n');
   let created = 0;
   for (const u of systemUsers) {
     const email = String(u.email ?? '').trim();
@@ -185,9 +189,17 @@ async function seedAuthFromSystemUsers(systemUsers) {
     } catch (e) {
       if (e.code === 'auth/uid-already-exists' || e.code === 'auth/email-already-exists') {
         try {
-          await auth.updateUser(uid, { email, password: DEFAULT_PASSWORD });
+          // Si el email ya existe con OTRO uid (caso seed vs backup), buscar el uid real
+          let targetUid = uid;
+          if (e.code === 'auth/email-already-exists') {
+            try {
+              const existing = await auth.getUserByEmail(email);
+              targetUid = existing.uid;
+            } catch { /* mantener uid del backup */ }
+          }
+          await auth.updateUser(targetUid, { email, password: DEFAULT_PASSWORD });
           const role = String(u.role ?? 'ADMIN').trim();
-          if (role) await auth.setCustomUserClaims(uid, { role });
+          if (role) await auth.setCustomUserClaims(targetUid, { role });
         } catch { /* omit */ }
       } else {
         console.warn(`  WARN Auth ${email}: ${e.message}`);
@@ -259,7 +271,7 @@ async function run() {
 
   console.log(`Backup: ${meta.exportedAt || '?'} — ${meta.totalDocs || '?'} docs — alcance import: ${scope}${devNote}\n`);
 
-  if (isFull) {
+  if (isFull || clearAll) {
     await clearEmulatorFull();
   } else {
     await clearEmpresa(empresaId);
