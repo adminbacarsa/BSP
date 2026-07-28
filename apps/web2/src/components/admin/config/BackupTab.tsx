@@ -266,13 +266,14 @@ export default function BackupTab() {
     if (!loadingLocal) return;
     const id = window.setInterval(async () => {
       try {
-        const r = await fetch(`${BRIDGE_URL}/import-progress`, { signal: AbortSignal.timeout(3000) });
-        if (!r.ok) return;
+        const r = await fetch(`${BRIDGE_URL}/import-progress`, { signal: AbortSignal.timeout(3000) })
+          .catch(() => null); // silenciar error de red en consola
+        if (!r || !r.ok) return;
         const d = await r.json() as { active: boolean; done: number; total: number; col: string };
         if (d.active && d.total > 0) {
           setProgress({ done: d.done, total: d.total, phase: `Importando ${d.col}…` });
         }
-      } catch { /* bridge aún procesando, ignorar */ }
+      } catch { /* ignorar */ }
     }, 2000);
     return () => window.clearInterval(id);
   }, [loadingLocal]);
