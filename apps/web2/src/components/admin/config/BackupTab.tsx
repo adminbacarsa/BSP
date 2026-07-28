@@ -264,18 +264,25 @@ export default function BackupTab() {
   // Polling de progreso al bridge durante import local
   useEffect(() => {
     if (!loadingLocal) return;
-    const id = window.setInterval(async () => {
+    let active = true;
+    let intervalId: ReturnType<typeof window.setInterval> | null = null;
+    const poll = async () => {
+      if (!active) return;
       try {
         const r = await fetch(`${BRIDGE_URL}/import-progress`, { signal: AbortSignal.timeout(3000) })
-          .catch(() => null); // silenciar error de red en consola
-        if (!r || !r.ok) return;
+          .catch(() => null);
+        if (!active) return;
+        if (!r) return; // error de red, reintentar
+        if (r.status === 404) { active = false; if (intervalId) window.clearInterval(intervalId); return; } // bridge viejo
+        if (!r.ok) return;
         const d = await r.json() as { active: boolean; done: number; total: number; col: string };
         if (d.active && d.total > 0) {
           setProgress({ done: d.done, total: d.total, phase: `Importando ${d.col}…` });
         }
       } catch { /* ignorar */ }
-    }, 2000);
-    return () => window.clearInterval(id);
+    };
+    intervalId = window.setInterval(poll, 2000);
+    return () => { active = false; if (intervalId) window.clearInterval(intervalId); };
   }, [loadingLocal]);
 
   // Suscripción a backup job activo (persiste aunque se salga de la página)
