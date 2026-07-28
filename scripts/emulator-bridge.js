@@ -7,9 +7,11 @@
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
-const { execSync, execFile } = require('child_process');
+const { execSync, execFile, spawn } = require('child_process');
 const path = require('path');
 const { pipeline } = require('stream/promises');
+
+let _importProgress = { active: false, done: 0, total: 0, col: '', error: null };
 
 const PORT = 3010;
 const IMPORT_TIMEOUT_MS = 15 * 60 * 1000;
@@ -59,24 +61,47 @@ async function importBackupFile(req, res) {
     else args.push('--empresa', empresaId);
     if (devMode) args.push('--dev');
 
+    _importProgress = { active: true, done: 0, total: 0, col: '', error: null };
     const output = await new Promise((resolve, reject) => {
-      execFile(
-        process.execPath,
-        args,
-        {
-          timeout: IMPORT_TIMEOUT_MS,
-          maxBuffer: 4 * 1024 * 1024,
-          env: {
-            ...process.env,
-            FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
-            FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099',
-          },
-        },
-        (err, stdout, stderr) => {
-          if (err) reject(new Error(stderr || err.message || 'Error al importar'));
-          else resolve(`${stdout}\n${stderr}`.trim());
-        },
-      );
+      const childEnv = {
+        ...process.env,
+        FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+        FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099',
+      };
+      const child = spawn(process.execPath, args, { env: childEnv });
+      let stdout = '', stderr = '', stdoutBuf = '';
+      const killTimer = setTimeout(() => {
+        child.kill();
+        reject(new Error(`Timeout: el import tardó más de ${IMPORT_TIMEOUT_MS / 60000} min`));
+      }, IMPORT_TIMEOUT_MS);
+
+      child.stdout.on('data', (chunk) => {
+        const text = chunk.toString();
+        stdout += text;
+        stdoutBuf += text;
+        const lines = stdoutBuf.split('\n');
+        stdoutBuf = lines.pop() ?? '';
+        for (const line of lines) {
+          const m = line.match(/^PROGRESS:(\d+):(\d+):(.*)$/);
+          if (m) {
+            _importProgress.done = parseInt(m[1], 10);
+            _importProgress.total = parseInt(m[2], 10);
+            _importProgress.col = m[3].trim();
+          }
+        }
+      });
+      child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      child.on('close', (code) => {
+        clearTimeout(killTimer);
+        _importProgress.active = false;
+        if (code !== 0) reject(new Error(stderr.trim() || `Exit code ${code}`));
+        else resolve(`${stdout}\n${stderr}`.trim());
+      });
+      child.on('error', (err) => {
+        clearTimeout(killTimer);
+        _importProgress.active = false;
+        reject(err);
+      });
     });
 
     const writtenMatch = output.match(/([\d.,]+)\s+documentos importados/i);
@@ -91,6 +116,7 @@ async function importBackupFile(req, res) {
     res.writeHead(500);
     res.end(JSON.stringify({ error: e.message.slice(0, 2000) }));
   } finally {
+    _importProgress.active = false;
     try { fs.unlinkSync(tmpPath); } catch { /* omit */ }
   }
 }
@@ -234,6 +260,12 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && url === '/health') {
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, port: PORT }));
+    return;
+  }
+
+  if (req.method === 'GET' && url === '/import-progress') {
+    res.writeHead(200);
+    res.end(JSON.stringify(_importProgress));
     return;
   }
 

@@ -117,13 +117,7 @@ function createFirestoreInstance(): Firestore {
       return getFirestore(app);
     }
   }
-  try {
-    return initializeFirestore(app, {
-      localCache: memoryLocalCache(),
-    });
-  } catch {
-    return getFirestore(app);
-  }
+  return getFirestore(app);
 }
 
 /**

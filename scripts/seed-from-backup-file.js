@@ -66,6 +66,7 @@ if (!fs.existsSync(filePath)) {
 
 if (!getApps().length) initializeApp({ projectId: PROJECT_ID });
 const db = getFirestore();
+try { db.settings({ preferRest: true }); } catch { /* ya inicializado */ }
 const auth = getAuth();
 
 function docMatchesEmpresa(doc, empId) {
@@ -198,6 +199,15 @@ async function seedAuthFromSystemUsers(systemUsers) {
 }
 
 async function seedFirestore(collections, empId, isFull, isDev) {
+  // Pre-calcular total para reportar progreso real
+  let grandTotal = 0;
+  for (const [col, docs] of Object.entries(collections)) {
+    if (!Array.isArray(docs) || docs.length === 0) continue;
+    if (isDev && DEV_SKIP_COLS.has(col)) continue;
+    if (!isFull && col !== 'empresas' && !EMPRESA_SCOPED_COLS.has(col)) continue;
+    grandTotal += docs.length;
+  }
+
   let written = 0;
   for (const [col, docs] of Object.entries(collections)) {
     if (!Array.isArray(docs) || docs.length === 0) continue;
@@ -227,8 +237,10 @@ async function seedFirestore(collections, empId, isFull, isDev) {
         batch.set(db.collection(col).doc(_id), deserialize(fields), { merge: false });
       });
       await batch.commit();
+      written += Math.min(BATCH_SIZE, filtered.length - i);
+      process.stdout.write(`\nPROGRESS:${written}:${grandTotal}:${col}`);
     }
-    written += filtered.length;
+    process.stdout.write('\n');
     console.log('OK');
   }
   return written;

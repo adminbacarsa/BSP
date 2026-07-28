@@ -261,6 +261,22 @@ export default function BackupTab() {
     return () => window.clearInterval(id);
   }, [loadingLocal]);
 
+  // Polling de progreso al bridge durante import local
+  useEffect(() => {
+    if (!loadingLocal) return;
+    const id = window.setInterval(async () => {
+      try {
+        const r = await fetch(`${BRIDGE_URL}/import-progress`, { signal: AbortSignal.timeout(3000) });
+        if (!r.ok) return;
+        const d = await r.json() as { active: boolean; done: number; total: number; col: string };
+        if (d.active && d.total > 0) {
+          setProgress({ done: d.done, total: d.total, phase: `Importando ${d.col}…` });
+        }
+      } catch { /* bridge aún procesando, ignorar */ }
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [loadingLocal]);
+
   // Suscripción a backup job activo (persiste aunque se salga de la página)
   const subscribeToBackupJob = (jobId: string) => {
     if (backupJobUnsubRef.current) backupJobUnsubRef.current();
