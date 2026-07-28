@@ -18,9 +18,12 @@ import {
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
+const _USE_EMULATOR_FOR_SNAPSHOT = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
+
 /**
  * onSnapshot que ignora el primer snapshot si viene del cache local.
  * Previene datos obsoletos al navegar entre páginas en la SPA.
+ * En emulador no filtra: memoryLocalCache hace que fromCache=true sea dato fresco de sesión.
  * Úsalo en lugar de onSnapshot para cargas iniciales de página.
  */
 export function onSnapshotFresh<T = any>(
@@ -50,6 +53,12 @@ export function onSnapshotFresh(ref: any, ...args: any[]): Unsubscribe {
   const [options, callback, onError] = hasOptions
     ? [args[0] as SnapshotListenOptions, args[1], args[2]]
     : [{} as SnapshotListenOptions, args[0], args[1]];
+
+  // En emulador usamos memoryLocalCache(): fromCache=true significa datos
+  // frescos de la sesión actual (no IndexedDB obsoleto). No filtrar.
+  if (_USE_EMULATOR_FOR_SNAPSHOT) {
+    return _onSnapshot(ref, options, callback, onError);
+  }
 
   return _onSnapshot(
     ref,
