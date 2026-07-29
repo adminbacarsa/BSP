@@ -720,12 +720,8 @@ function computeServiceRuleChanges(
                     const ec = String(e.code || e.type || '').toUpperCase();
                     const ep = e.positionName || '';
                     if (ep === action.positionName && ec === String(action.shiftCode || '').toUpperCase()) {
-                        additions[`${emp.id}_${dateStr}`] = {
-                            code: 'F', type: 'F', name: 'Franco', hours: 0,
-                            startTime: '00:00', endTime: '00:00',
-                            isTemp: true, isFranco: true, positionName: '',
-                            objectiveId: e.objectiveId ?? objectiveId,
-                        };
+                        // Borrar el turno del plan (sin generar vacante)
+                        additions[`${emp.id}_${dateStr}`] = { isDeleted: true };
                     }
                 }
             } else if (action.type === 'ASSIGN') {
