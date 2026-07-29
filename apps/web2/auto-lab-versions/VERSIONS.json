@@ -16,8 +16,8 @@
     {
       "version": "1.1",
       "date": "2026-07-29",
-      "gitCommit": "b2c1d7dd162dff6cf62b9aabd9861b3ec3130d49",
-      "label": "RET rotativo sabado/domingo custom L-V <=8h (1 guardia alterna semanal, 2 pax intercalados)",
+      "gitCommit": "3bd5f39a6dc17a46eeb77d92114da16ff5ebb9e5",
+      "label": "RET rotativo sabado/domingo custom L-V <=8h (1 guardia alterna semanal, 2 pax intercalados); iso week sin date-fns",
       "fileCount": 54,
       "recommendedEvals": [
         "eval:manzana-historica",
