@@ -826,6 +826,7 @@ export default function PlanificacionPage() {
     const [hasActiveSLA, setHasActiveSLA] = useState<boolean>(true);
     const [slaPlanningHint, setSlaPlanningHint] = useState('');
     const [activeSlaPositionAssignments, setActiveSlaPositionAssignments] = useState<import('@/services/slaService').PositionAssignment[] | null>(null);
+    const [activeSlaServiceRules, setActiveSlaServiceRules] = useState<import("@/services/slaService").ServiceRule[] | null>(null);
 
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -2638,6 +2639,27 @@ export default function PlanificacionPage() {
             }
         }
 
+        // Condiciones: bloquear codigos por reglas RESTRICT que disparan en este dia
+        if (activeSlaServiceRules?.length && selectedCell?.empId) {
+            for (const rule of activeSlaServiceRules) {
+                if (!rule.triggers.length) continue;
+                const fires = rule.triggers.every(t => {
+                    const k = `${t.employeeId}_${dateStr}`;
+                    const a = pendingChanges[k] ?? shiftsMap[k];
+                    return a && !a.isDeleted && String(a.code || a.type || '').toUpperCase() === String(t.shiftCode || '').toUpperCase();
+                });
+                if (!fires) continue;
+                for (const action of rule.actions) {
+                    if (action.type === 'RESTRICT' && action.employeeId === selectedCell.empId && action.allowedCode) {
+                        uniqueSLAShifts.forEach((s: any) => {
+                            const code = String(s.code || '').toUpperCase();
+                            if (isWorking(code) && code !== String(action.allowedCode || '').toUpperCase()) disabled.add(code);
+                        });
+                    }
+                }
+            }
+        }
+
         // Shift-level: bloquear cada turno que tenga days[] y no incluya el día actual
         uniqueSLAShifts.forEach((s: any) => {
             const code = String(s.code || '').toUpperCase();
@@ -2729,7 +2751,7 @@ export default function PlanificacionPage() {
             }
         });
         return disabled;
-    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId, resolveEffectiveShiftObjectiveId, activeSlaPositionAssignments]);
+    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId, resolveEffectiveShiftObjectiveId, activeSlaPositionAssignments, activeSlaServiceRules]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
@@ -3644,6 +3666,7 @@ export default function PlanificacionPage() {
                 setHasActiveSLA(monthHasSla);
                 setPositionStructure(structure);
                 setActiveSlaPositionAssignments(srvForStructure?.positionAssignments ?? null);
+                setActiveSlaServiceRules(srvForStructure?.serviceRules ?? null);
                 setSlaVendidas(
                     monthHasSla && srvForStructure
                         ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
@@ -7153,6 +7176,7 @@ export default function PlanificacionPage() {
                     for (const a of pa) { if (a.slots?.length) m[a.employeeId] = a.slots; }
                     return Object.keys(m).length ? m : undefined;
                 })(),
+                serviceRules: activeSlaServiceRules ?? undefined,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
             const canFloater = !can6x1

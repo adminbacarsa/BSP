@@ -394,6 +394,7 @@ export async function loadAutoLabRealServiceBundle(params: {
         absencesByDate: absencesByDate.length > 0 ? absencesByDate : undefined,
         coverageWisdom,
         positionAssignmentsByEmp: buildPositionAssignmentsByEmp(srv.positionAssignments),
+        serviceRules: srv.serviceRules?.length ? srv.serviceRules : undefined,
     };
 
     return {

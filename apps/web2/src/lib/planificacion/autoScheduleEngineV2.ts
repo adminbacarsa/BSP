@@ -443,6 +443,8 @@ export interface V2EngineContext {
      * Ausencia de entrada = sin restricción (comportamiento original).
      */
     positionAssignmentsByEmp?: Record<string, Array<{ positionName: string; shiftCodes: string[] }>>;
+    /** Reglas IF→THEN aplicadas como post-procesamiento por dia. */
+    serviceRules?: import('@/services/slaService').ServiceRule[];
 }
 
 export interface V2PositionDemand {
@@ -4040,7 +4042,59 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     );
 
     const expandedAssignments = expandSplitShiftAssignments(assignments, engineCtx.positions);
-    return { feasibility, assignments: expandedAssignments, stats, capOverflowSlots, coverageViolations };
+    const finalAssignments = applyServiceRulesPostProcess(engineCtx, expandedAssignments as Array<{ empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown }>);
+    return { feasibility, assignments: finalAssignments as typeof expandedAssignments, stats, capOverflowSlots, coverageViolations };
+}
+
+function applyServiceRulesPostProcess(
+    ctx: Pick<V2EngineContext, 'serviceRules'>,
+    assignments: Array<{ empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown }>,
+): typeof assignments {
+    if (!ctx.serviceRules?.length) return assignments;
+    let result = assignments.slice();
+    const byDate = new Map<string, typeof assignments>();
+    for (const a of result) {
+        if (!byDate.has(a.dateStr)) byDate.set(a.dateStr, []);
+        byDate.get(a.dateStr)!.push(a);
+    }
+    for (const [dateStr, dayAsgn] of byDate.entries()) {
+        for (const rule of ctx.serviceRules!) {
+            if (!rule.triggers.length) continue;
+            const fires = rule.triggers.every(t => {
+                const empA = dayAsgn.find(a => a.empId === t.employeeId);
+                return empA != null && String(empA.code || '').toUpperCase() === String(t.shiftCode || '').toUpperCase();
+            });
+            if (!fires) continue;
+            for (const action of rule.actions) {
+                if (action.type === 'EXCLUDE') {
+                    result = result.filter(a =>
+                        !(a.dateStr === dateStr &&
+                          a.positionName === action.positionName &&
+                          String(a.code || '').toUpperCase() === String(action.shiftCode || '').toUpperCase())
+                    );
+                } else if (action.type === 'MOVE') {
+                    const toMove = result.find(a =>
+                        a.dateStr === dateStr &&
+                        a.positionName === action.positionName &&
+                        String(a.code || '').toUpperCase() === String(action.shiftCode || '').toUpperCase()
+                    );
+                    if (toMove) {
+                        const idx = result.indexOf(toMove);
+                        if (idx >= 0) result[idx] = { ...result[idx], positionName: action.toPositionName ?? result[idx].positionName, code: action.toShiftCode ?? result[idx].code };
+                    }
+                } else if (action.type === 'RESTRICT') {
+                    if (action.employeeId && action.allowedCode) {
+                        const empA = result.find(a => a.dateStr === dateStr && a.empId === action.employeeId);
+                        if (empA && String(empA.code || '').toUpperCase() !== String(action.allowedCode || '').toUpperCase()) {
+                            const idx = result.indexOf(empA);
+                            if (idx >= 0) result[idx] = { ...result[idx], code: action.allowedCode };
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return result;
 }
 
 function appendPlannerDotacionToFeasibility(

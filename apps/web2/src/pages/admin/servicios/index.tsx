@@ -1,14 +1,14 @@
 ﻿import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
-import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment } from '@/services/slaService';
+import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
 import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, writeBatch, doc, Timestamp } from 'firebase/firestore';
 import {
-  Shield, Calendar, Users, Plus, Trash2, Edit2, Copy,
+  Shield, Calendar, Users, Plus, Trash2, Edit2, Copy, Zap,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
   Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck
@@ -168,6 +168,8 @@ export default function ServiciosSLAPage() {
   const [coverageEmps, setCoverageEmps] = useState<any[]>([]);
   const [coverageEditEmpId, setCoverageEditEmpId] = useState<string | null>(null);
   const [coverageEditSlots, setCoverageEditSlots] = useState<Array<{ positionName: string; shiftCodes: string[] }>>([]);
+  const [editingRule, setEditingRule] = useState<ServiceRule | null>(null);
+  const [editingRuleIsNew, setEditingRuleIsNew] = useState(false);
 
   // --- EFECTOS ---
   
@@ -767,7 +769,62 @@ export default function ServiciosSLAPage() {
       setCoverageEditSlots([...coverageEditSlots, { positionName, shiftCodes: [] }]);
     }
   };
-  const toggleCoverageShiftCode = (positionName: string, code: string) => {
+  
+  const RULE_TRIGGER_CODES = ['F','FF','FP','FT','M','T','N','D12','N12','RET','ESC','REF','V','L','E','A','AA','PG'];
+
+  function getPositionCodes(posName: string, positions: ServicePosition[]): string[] {
+    const pos = positions.find(p => p.name === posName);
+    if (!pos?.allowedShiftTypes?.length) return ['M','T','N','D12','N12','RET','ESC','REF'];
+    return pos.allowedShiftTypes.map((sv: ShiftVariant) => sv.code);
+  }
+
+  function startNewRule() {
+    const r: ServiceRule = { id: 'rule_' + Date.now(), name: '', triggers: [{ employeeId: '', employeeName: '', shiftCode: 'F' }], actions: [{ type: 'EXCLUDE' as RuleActionType, positionName: '', shiftCode: '' }] };
+    setEditingRule(r);
+    setEditingRuleIsNew(true);
+  }
+  function cancelEditRule() { setEditingRule(null); setEditingRuleIsNew(false); }
+  function saveRule() {
+    if (!editingRule) return;
+    const curr = form.serviceRules || [];
+    const updated = curr.some((r: ServiceRule) => r.id === editingRule.id)
+      ? curr.map((r: ServiceRule) => r.id === editingRule.id ? editingRule : r)
+      : [...curr, editingRule];
+    setForm({ ...form, serviceRules: updated });
+    setEditingRule(null); setEditingRuleIsNew(false);
+  }
+  function deleteRule(id: string) {
+    setForm({ ...form, serviceRules: (form.serviceRules || []).filter((r: ServiceRule) => r.id !== id) });
+    if (editingRule?.id === id) { setEditingRule(null); setEditingRuleIsNew(false); }
+  }
+  function updTrigger(idx: number, field: string, val: string) {
+    if (!editingRule) return;
+    const triggers = editingRule.triggers.map((t, i) => {
+      if (i !== idx) return t;
+      const next: any = { ...t, [field]: val };
+      if (field === 'employeeId') {
+        const emp = coverageEmps.find((e: any) => e.id === val);
+        next.employeeName = emp ? (emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim()) : '';
+      }
+      return next;
+    });
+    setEditingRule({ ...editingRule, triggers });
+  }
+  function updAction(idx: number, field: string, val: string) {
+    if (!editingRule) return;
+    const actions = editingRule.actions.map((a: RuleAction, i: number) => {
+      if (i !== idx) return a;
+      const next: any = { ...a, [field]: val };
+      if (field === 'employeeId') {
+        const emp = coverageEmps.find((e: any) => e.id === val);
+        next.employeeName = emp ? (emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim()) : '';
+      }
+      return next as RuleAction;
+    });
+    setEditingRule({ ...editingRule, actions });
+  }
+
+const toggleCoverageShiftCode = (positionName: string, code: string) => {
     setCoverageEditSlots(coverageEditSlots.map(s => {
       if (s.positionName !== positionName) return s;
       const codes = s.shiftCodes.includes(code) ? s.shiftCodes.filter(c => c !== code) : [...s.shiftCodes, code];
@@ -2259,6 +2316,258 @@ export default function ServiciosSLAPage() {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+
+
+            {/* ── Condiciones ── */}
+            <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2">
+                  <Zap size={16} className="text-violet-500"/> Condiciones
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (form.serviceRules !== undefined) {
+                      setForm({ ...form, serviceRules: undefined as any });
+                      setEditingRule(null);
+                    } else {
+                      setForm({ ...form, serviceRules: [] });
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-colors ${form.serviceRules !== undefined ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-300 dark:border-slate-600 hover:bg-slate-50'}`}
+                >
+                  {form.serviceRules !== undefined ? 'Activadas' : 'Activar condiciones'}
+                </button>
+              </div>
+              {form.serviceRules === undefined ? (
+                <p className="text-[10px] text-slate-400">
+                  Activá las condiciones para definir reglas IF→THEN: cuando un empleado tiene cierto código asignado, el planificador puede excluir puestos, mover guardias o restringir bandas automáticamente.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {(form.serviceRules || []).map((rule: ServiceRule) => {
+                    const isEditingThis = editingRule?.id === rule.id && !editingRuleIsNew;
+                    const ruleIdx = (form.serviceRules || []).indexOf(rule);
+                    return (
+                      <div key={rule.id} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 overflow-hidden">
+                        {!isEditingThis && (
+                          <div className="flex items-start gap-3 px-4 py-2.5">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{rule.name || ('Regla ' + (ruleIdx + 1))}</p>
+                              <p className="text-[9px] text-slate-400 mt-0.5 truncate">
+                                SI {rule.triggers.map(t => (t.employeeName || t.employeeId) + ' = ' + t.shiftCode).join(' Y ')}
+                                {' → '}{rule.actions.length} acción{rule.actions.length !== 1 ? 'es' : ''}
+                              </p>
+                            </div>
+                            <button onClick={() => { setEditingRule(JSON.parse(JSON.stringify(rule))); setEditingRuleIsNew(false); }} className="p-1.5 rounded-lg text-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/30 transition-colors shrink-0"><Edit2 size={12}/></button>
+                            <button onClick={() => deleteRule(rule.id)} className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 transition-colors shrink-0"><X size={12}/></button>
+                          </div>
+                        )}
+                        {isEditingThis && editingRule && (
+                          
+                        <div className="px-4 py-3 space-y-4 bg-slate-50 dark:bg-slate-900/30">
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Nombre</p>
+                            <input value={editingRule.name || ''} onChange={e => setEditingRule({ ...editingRule, name: e.target.value })} placeholder="Ej: Sosa Franco - excluir puestos" className="w-full text-xs bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-violet-400" />
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-2">SI (todas deben cumplirse):</p>
+                            {editingRule.triggers.map((t, ti) => (
+                              <div key={ti} className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                <select value={t.employeeId} onChange={e => updTrigger(ti, 'employeeId', e.target.value)} className="flex-1 min-w-0 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  <option value="">— empleado —</option>
+                                  {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                                </select>
+                                <span className="text-[9px] text-slate-400 shrink-0">tiene código</span>
+                                <select value={t.shiftCode} onChange={e => updTrigger(ti, 'shiftCode', e.target.value)} className="w-24 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  {RULE_TRIGGER_CODES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                {editingRule.triggers.length > 1 && (
+                                  <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: editingRule.triggers.filter((_: any, i: number) => i !== ti) })} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                                )}
+                              </div>
+                            ))}
+                            <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: [...editingRule.triggers, { employeeId: '', employeeName: '', shiftCode: 'F' }] })} className="flex items-center gap-1 text-[9px] font-black text-violet-500 hover:text-violet-700 mt-1"><Plus size={9}/> Agregar condición</button>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-2">ENTONCES (acciones):</p>
+                            {editingRule.actions.map((act: RuleAction, ai: number) => (
+                              <div key={ai} className="flex items-start gap-2 mb-2 p-2 bg-white dark:bg-slate-800 rounded-lg border dark:border-slate-700 flex-wrap">
+                                <select value={act.type} onChange={e => updAction(ai, 'type', e.target.value)} className="w-36 text-[9px] font-black bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5 shrink-0">
+                                  <option value="EXCLUDE">Excluir puesto</option>
+                                  <option value="MOVE">Mover guardia</option>
+                                  <option value="RESTRICT">Restringir empleado</option>
+                                </select>
+                                {act.type === 'EXCLUDE' && (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-[9px] text-slate-400">puesto</span>
+                                    <select value={act.positionName || ''} onChange={e => updAction(ai, 'positionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">— puesto —</option>
+                                      {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                    </select>
+                                    <span className="text-[9px] text-slate-400">banda</span>
+                                    <select value={act.shiftCode || ''} onChange={e => updAction(ai, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {getPositionCodes(act.positionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                                {act.type === 'MOVE' && (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-[9px] text-slate-400">de puesto</span>
+                                    <select value={act.positionName || ''} onChange={e => updAction(ai, 'positionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                    </select>
+                                    <select value={act.shiftCode || ''} onChange={e => updAction(ai, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {getPositionCodes(act.positionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <span className="text-[9px] text-violet-500 font-black">→</span>
+                                    <select value={act.toPositionName || ''} onChange={e => updAction(ai, 'toPositionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                    </select>
+                                    <select value={act.toShiftCode || ''} onChange={e => updAction(ai, 'toShiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {getPositionCodes(act.toPositionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                                {act.type === 'RESTRICT' && (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <select value={act.employeeId || ''} onChange={e => updAction(ai, 'employeeId', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">— empleado —</option>
+                                      {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                                    </select>
+                                    <span className="text-[9px] text-slate-400">solo código</span>
+                                    <select value={act.allowedCode || ''} onChange={e => updAction(ai, 'allowedCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {['M','T','N','D12','N12','RET','ESC','REF'].map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                                <button type="button" onClick={() => setEditingRule({ ...editingRule, actions: editingRule.actions.filter((_: any, i: number) => i !== ai) })} className="ml-auto p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                              </div>
+                            ))}
+                            <button type="button" onClick={() => setEditingRule({ ...editingRule, actions: [...editingRule.actions, { type: 'EXCLUDE' as RuleActionType, positionName: '', shiftCode: '' }] })} className="flex items-center gap-1 text-[9px] font-black text-violet-500 hover:text-violet-700 mt-1"><Plus size={9}/> Agregar acción</button>
+                          </div>
+                          <div className="flex gap-2 pt-2 border-t dark:border-slate-700">
+                            <button type="button" onClick={saveRule} className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors"><Save size={11}/> Guardar</button>
+                            <button type="button" onClick={cancelEditRule} className="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">Cancelar</button>
+                            <button type="button" onClick={() => deleteRule(editingRule.id)} className="ml-auto flex items-center gap-1 text-[10px] font-black text-rose-500 hover:bg-rose-50 px-3 py-1.5 rounded-xl transition-colors"><Trash2 size={10}/> Eliminar</button>
+                          </div>
+                        </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {editingRuleIsNew && editingRule && (
+                    <div className="bg-white dark:bg-slate-800 rounded-xl border-2 border-violet-300 dark:border-violet-700 overflow-hidden">
+                      
+                        <div className="px-4 py-3 space-y-4 bg-slate-50 dark:bg-slate-900/30">
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Nombre</p>
+                            <input value={editingRule.name || ''} onChange={e => setEditingRule({ ...editingRule, name: e.target.value })} placeholder="Ej: Sosa Franco - excluir puestos" className="w-full text-xs bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-violet-400" />
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-2">SI (todas deben cumplirse):</p>
+                            {editingRule.triggers.map((t, ti) => (
+                              <div key={ti} className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                <select value={t.employeeId} onChange={e => updTrigger(ti, 'employeeId', e.target.value)} className="flex-1 min-w-0 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  <option value="">— empleado —</option>
+                                  {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                                </select>
+                                <span className="text-[9px] text-slate-400 shrink-0">tiene código</span>
+                                <select value={t.shiftCode} onChange={e => updTrigger(ti, 'shiftCode', e.target.value)} className="w-24 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  {RULE_TRIGGER_CODES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                                {editingRule.triggers.length > 1 && (
+                                  <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: editingRule.triggers.filter((_: any, i: number) => i !== ti) })} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                                )}
+                              </div>
+                            ))}
+                            <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: [...editingRule.triggers, { employeeId: '', employeeName: '', shiftCode: 'F' }] })} className="flex items-center gap-1 text-[9px] font-black text-violet-500 hover:text-violet-700 mt-1"><Plus size={9}/> Agregar condición</button>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-2">ENTONCES (acciones):</p>
+                            {editingRule.actions.map((act: RuleAction, ai: number) => (
+                              <div key={ai} className="flex items-start gap-2 mb-2 p-2 bg-white dark:bg-slate-800 rounded-lg border dark:border-slate-700 flex-wrap">
+                                <select value={act.type} onChange={e => updAction(ai, 'type', e.target.value)} className="w-36 text-[9px] font-black bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5 shrink-0">
+                                  <option value="EXCLUDE">Excluir puesto</option>
+                                  <option value="MOVE">Mover guardia</option>
+                                  <option value="RESTRICT">Restringir empleado</option>
+                                </select>
+                                {act.type === 'EXCLUDE' && (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-[9px] text-slate-400">puesto</span>
+                                    <select value={act.positionName || ''} onChange={e => updAction(ai, 'positionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">— puesto —</option>
+                                      {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                    </select>
+                                    <span className="text-[9px] text-slate-400">banda</span>
+                                    <select value={act.shiftCode || ''} onChange={e => updAction(ai, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {getPositionCodes(act.positionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                                {act.type === 'MOVE' && (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-[9px] text-slate-400">de puesto</span>
+                                    <select value={act.positionName || ''} onChange={e => updAction(ai, 'positionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                    </select>
+                                    <select value={act.shiftCode || ''} onChange={e => updAction(ai, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {getPositionCodes(act.positionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <span className="text-[9px] text-violet-500 font-black">→</span>
+                                    <select value={act.toPositionName || ''} onChange={e => updAction(ai, 'toPositionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                    </select>
+                                    <select value={act.toShiftCode || ''} onChange={e => updAction(ai, 'toShiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {getPositionCodes(act.toPositionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                                {act.type === 'RESTRICT' && (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <select value={act.employeeId || ''} onChange={e => updAction(ai, 'employeeId', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">— empleado —</option>
+                                      {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                                    </select>
+                                    <span className="text-[9px] text-slate-400">solo código</span>
+                                    <select value={act.allowedCode || ''} onChange={e => updAction(ai, 'allowedCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="">—</option>
+                                      {['M','T','N','D12','N12','RET','ESC','REF'].map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                                <button type="button" onClick={() => setEditingRule({ ...editingRule, actions: editingRule.actions.filter((_: any, i: number) => i !== ai) })} className="ml-auto p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                              </div>
+                            ))}
+                            <button type="button" onClick={() => setEditingRule({ ...editingRule, actions: [...editingRule.actions, { type: 'EXCLUDE' as RuleActionType, positionName: '', shiftCode: '' }] })} className="flex items-center gap-1 text-[9px] font-black text-violet-500 hover:text-violet-700 mt-1"><Plus size={9}/> Agregar acción</button>
+                          </div>
+                          <div className="flex gap-2 pt-2 border-t dark:border-slate-700">
+                            <button type="button" onClick={saveRule} className="flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors"><Save size={11}/> Guardar</button>
+                            <button type="button" onClick={cancelEditRule} className="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">Cancelar</button>
+                            
+                          </div>
+                        </div>
+                    </div>
+                  )}
+                  {!editingRuleIsNew && (
+                    <button type="button" onClick={startNewRule} className="flex items-center gap-2 text-[10px] font-black text-violet-600 hover:text-violet-700 px-2 py-1.5 rounded-xl hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors">
+                      <Plus size={11}/> Nueva condición
+                    </button>
+                  )}
                 </div>
               )}
             </div>

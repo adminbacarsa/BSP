@@ -47,6 +47,32 @@ export interface PositionAssignment {
   slots: Array<{ positionName: string; shiftCodes: string[] }>;
 }
 
+export interface RuleTrigger {
+  employeeId: string;
+  employeeName: string;
+  shiftCode: string;
+}
+
+export type RuleActionType = 'EXCLUDE' | 'MOVE' | 'RESTRICT';
+
+export interface RuleAction {
+  type: RuleActionType;
+  positionName?: string;
+  shiftCode?: string;
+  toPositionName?: string;
+  toShiftCode?: string;
+  employeeId?: string;
+  employeeName?: string;
+  allowedCode?: string;
+}
+
+export interface ServiceRule {
+  id: string;
+  name?: string;
+  triggers: RuleTrigger[];
+  actions: RuleAction[];
+}
+
 // Definición de Contrato de Servicio (SLA)
 export interface ServiceSLA {
   id?: string;
@@ -64,6 +90,8 @@ export interface ServiceSLA {
   horarioVersiones?: HorarioVersion[];
   /** Restricciones de cobertura por empleado: en qué puestos y bandas puede trabajar. Ausencia = sin restricción. */
   positionAssignments?: PositionAssignment[];
+  /** Reglas IF→THEN: condiciones que el planificador aplica automáticamente. */
+  serviceRules?: ServiceRule[];
 }
 
 /**
