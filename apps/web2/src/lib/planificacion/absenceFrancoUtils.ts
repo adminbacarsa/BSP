@@ -411,6 +411,7 @@ export function fillEmptyCellsWithRet(
         retDesignee,
         ctx,
         options?.stats?.retDesignateEmpIds,
+        options?.stats?.positionGroups,
     );
 }
 

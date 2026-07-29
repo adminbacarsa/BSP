@@ -1574,7 +1574,11 @@ function revertBillableCell(params: DemandDrivenFillParams, a: V2Assignment): vo
 /**
  * RET planificado en custom L–V (ej. sábado stand-by 7–8 h): no convertir a F.
  */
-function isPlannedCustomCoverRet(a: V2Assignment, ctx: V2EngineContext): boolean {
+function isPlannedCustomCoverRet(
+    a: V2Assignment,
+    ctx: V2EngineContext,
+    positionGroups?: Record<string, string[]>,
+): boolean {
     const dayLetter = ctx.getDayLetter(a.dateStr);
     return isPlannedCustomCoverRetAssignment(
         a.empId,
@@ -1582,6 +1586,7 @@ function isPlannedCustomCoverRet(a: V2Assignment, ctx: V2EngineContext): boolean
         ctx.positions,
         ctx.defaultPositionByEmp,
         a.dateStr,
+        positionGroups,
     );
 }
 
@@ -1593,11 +1598,12 @@ export function stripUnauthorizedRetAssignments(
     assignments: V2Assignment[],
     ctx: V2EngineContext,
     retDesignateSet: Set<string>,
+    positionGroups?: Record<string, string[]>,
 ): void {
     for (const a of assignments) {
         if (String(a.code || '').toUpperCase() !== 'RET') continue;
         if (retDesignateSet.has(a.empId)) continue;
-        if (isPlannedCustomCoverRet(a, ctx)) continue;
+        if (isPlannedCustomCoverRet(a, ctx, positionGroups)) continue;
         if (a.balancedLdCctRet === true) continue;
         if (ctx.rotateShifts === false
             && (ctx.ajustarCrono === true || (ctx.contingencyApretarDays?.length ?? 0) > 0)) continue;

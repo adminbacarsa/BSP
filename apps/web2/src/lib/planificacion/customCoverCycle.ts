@@ -77,16 +77,56 @@ export function customWeekendRetOnSaturday(
     return (rank + weekFlip) % 2 === 0;
 }
 
+/** Contexto del objetivo para intercalar RET fin de semana entre puestos custom L–V ≤8h. */
+export interface CustomWeekendPoolScope {
+    positions: V2PositionDef[];
+    positionGroups: Record<string, string[]>;
+}
+
+/**
+ * Pool ordenado de guardias que comparten rotación RET sábado/domingo.
+ * Agrupa todos los titulares de puestos custom L–V ≤8h del mismo objetivo
+ * (ej. Puesto Mañana + Puesto Tarde con qty 1 cada uno).
+ */
+export function buildCustomWeekendInterleavePool(
+    positions: V2PositionDef[],
+    positionGroups?: Record<string, string[]>,
+): string[] {
+    if (!positionGroups) return [];
+    const pool: string[] = [];
+    const seen = new Set<string>();
+    const weekendCustom = [...positions]
+        .filter((p) => isFixedWeekdayCustomEightHourOrLess(p))
+        .sort((a, b) => a.positionName.localeCompare(b.positionName, 'es'));
+    for (const pos of weekendCustom) {
+        for (const id of positionGroups[pos.positionName] ?? []) {
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            pool.push(id);
+        }
+    }
+    return pool;
+}
+
 export function buildCustomWeekendRestOptions(
     pos: V2PositionDef,
     empId: string,
     dateStr: string,
     groupMemberIds?: string[],
+    poolScope?: CustomWeekendPoolScope,
 ): CustomWeekendRestOptions | undefined {
     if (!isFixedWeekdayCustomEightHourOrLess(pos)) return undefined;
-    const qty = customCoverDailyPax(pos);
-    const fromGroup = (groupMemberIds ?? []).filter((id) => id).slice(0, qty);
-    const titularIds = fromGroup.length > 0 ? fromGroup : [empId];
+    const crossPool = poolScope
+        ? buildCustomWeekendInterleavePool(poolScope.positions, poolScope.positionGroups)
+        : [];
+    let titularIds: string[];
+    if (crossPool.length >= 2) {
+        titularIds = crossPool;
+    } else {
+        const qty = customCoverDailyPax(pos);
+        const fromGroup = (groupMemberIds ?? []).filter((id) => id).slice(0, qty);
+        titularIds = fromGroup.length > 0 ? fromGroup : crossPool.length === 1 ? crossPool : [empId];
+    }
     return { empId, dateStr, titularIds };
 }
 
@@ -193,6 +233,9 @@ export function plannedCustomCoverRestCode(
             empId,
             dateStr,
             positionGroups?.[pos.positionName],
+            positions && positionGroups
+                ? { positions, positionGroups }
+                : undefined,
         )
         : undefined;
     return francoCodeForPositionDay(pos, dayLetter, weekendRest);

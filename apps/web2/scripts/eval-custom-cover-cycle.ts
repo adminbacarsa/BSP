@@ -4,6 +4,8 @@
  */
 import {
     buildCustomCycleWorkDays,
+    buildCustomWeekendInterleavePool,
+    buildCustomWeekendRestOptions,
     customCoverDailyPax,
     customCoverDistinctBandCount,
     customCoverRequiredHeadcount,
@@ -167,6 +169,60 @@ for (const empId of vmGroup) {
     assert(!set.has('2026-07-05'), `${empId} no trabaja domingo`);
 }
 assert(customCoverSimultaneousPax(villaMaria) === 2, 'Villa Maria 2 pax simultáneos');
+
+const puestoManana: V2PositionDef = {
+    positionName: 'Puesto Mañana',
+    qty: 1,
+    coverageType: 'custom',
+    shifts: [{ code: 'M', name: 'Mañana', hours: 8, days: ['L', 'M', 'X', 'J', 'V'] }],
+    activeDays: ['L', 'M', 'X', 'J', 'V'],
+};
+const puestoTarde: V2PositionDef = {
+    positionName: 'Puesto Tarde',
+    qty: 1,
+    coverageType: 'custom',
+    shifts: [{ code: 'T', name: 'Tarde', hours: 8, days: ['L', 'M', 'X', 'J', 'V'] }],
+    activeDays: ['L', 'M', 'X', 'J', 'V'],
+};
+const mtPositions = [puestoManana, puestoTarde];
+const mtGroups = { 'Puesto Mañana': ['g01'], 'Puesto Tarde': ['g02'] };
+const mtPool = buildCustomWeekendInterleavePool(mtPositions, mtGroups);
+assert(mtPool.length === 2 && mtPool[0] === 'g01' && mtPool[1] === 'g02', 'pool M+T: 2 guardias en orden de puesto');
+const mtScope = { positions: mtPositions, positionGroups: mtGroups };
+const mtSat = '2026-07-04';
+const g01Sat = francoCodeForPositionDay(
+    puestoManana,
+    'S',
+    buildCustomWeekendRestOptions(puestoManana, 'g01', mtSat, undefined, mtScope),
+);
+const g02Sat = francoCodeForPositionDay(
+    puestoTarde,
+    'S',
+    buildCustomWeekendRestOptions(puestoTarde, 'g02', mtSat, undefined, mtScope),
+);
+const g01Sun = francoCodeForPositionDay(
+    puestoManana,
+    'D',
+    buildCustomWeekendRestOptions(puestoManana, 'g01', mtSat, undefined, mtScope),
+);
+const g02Sun = francoCodeForPositionDay(
+    puestoTarde,
+    'D',
+    buildCustomWeekendRestOptions(puestoTarde, 'g02', mtSat, undefined, mtScope),
+);
+assert(
+    (g01Sat === 'RET' && g02Sat === 'F' && g01Sun === 'F' && g02Sun === 'RET')
+    || (g01Sat === 'F' && g02Sat === 'RET' && g01Sun === 'RET' && g02Sun === 'F'),
+    `M+T fin de semana intercalado (g01 ${g01Sat}/${g01Sun}, g02 ${g02Sat}/${g02Sun})`,
+);
+assert(
+    (g01Sat === 'RET') !== (g02Sat === 'RET'),
+    'sábado: un guardia RET y el otro F',
+);
+assert(
+    (g01Sun === 'RET') !== (g02Sun === 'RET'),
+    'domingo: un guardia RET y el otro F',
+);
 
 console.log('---');
 console.log('Custom cover cycle OK.');
