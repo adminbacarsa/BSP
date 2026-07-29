@@ -619,6 +619,43 @@ const posAsEngineDef = (pos: any) => ({
 const isPosActiveOnDay = (pos: any, dayLetter: string): boolean =>
     positionIsActiveOn(posAsEngineDef(pos), dayLetter);
 
+const PLANNING_REST_SHIFT_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC']);
+
+/** Horas SLA del día según bandas activas (respeta shift.days, ej. RE L–S + DO solo domingo). */
+function dailyCoverageHoursTargetForPos(pos: any, dayLetter: string, cycles?: string[]): number {
+    const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
+    if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') return 24;
+    const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles);
+    if (eff.length > 0) {
+        return eff.reduce((acc, s) => acc + (Number(s.hours) || 8), 0);
+    }
+    const dayShifts = (pos?.shifts || []).filter((s: any) => {
+        if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
+        return true;
+    });
+    const sum = dayShifts.reduce((acc: number, s: any) => acc + (Number(s.hours) || 8), 0);
+    return sum > 0 ? sum : 8;
+}
+
+function filterShiftsForPlanningDay(
+    shifts: any[],
+    pos: any,
+    dayLetter: string,
+    dateStr: string | undefined,
+    cycles?: string[],
+): any[] {
+    if (!shifts?.length) return [];
+    const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
+    const effCodes = new Set(eff.map((s) => String(s.code || '').toUpperCase()));
+    return shifts.filter((s: any) => {
+        const code = String(s.code || '').toUpperCase();
+        if (PLANNING_REST_SHIFT_CODES.has(code)) return true;
+        if (effCodes.size > 0) return effCodes.has(code);
+        if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
+        return true;
+    });
+}
+
 const isPosExcludedOnDate = (pos: any, dateStr: string): boolean =>
     isPlanningPositionExcludedOnDate(pos, dateStr);
 
@@ -788,6 +825,7 @@ export default function PlanificacionPage() {
     const [activePosition, setActivePosition] = useState<string | null>(null);
     const [hasActiveSLA, setHasActiveSLA] = useState<boolean>(true);
     const [slaPlanningHint, setSlaPlanningHint] = useState('');
+    const [activeSlaPositionAssignments, setActiveSlaPositionAssignments] = useState<import('@/services/slaService').PositionAssignment[] | null>(null);
 
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -2078,6 +2116,22 @@ export default function PlanificacionPage() {
         return pos ? pos.shifts : [];
     }, [effectivePosStructure, activePosition]);
 
+    /** Turnos visibles en el modal del día: solo bandas activas ese día + F/RET/REF/ESC. */
+    const modalDayShifts = useMemo(() => {
+        if (!selectedCell?.dateStr || !uniqueSLAShifts.length) return uniqueSLAShifts;
+        const posName = activePosition || effectivePosStructure[0]?.positionName || 'General';
+        const pos = effectivePosStructure.find((p: any) => p.positionName === posName);
+        if (!pos) return uniqueSLAShifts;
+        const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
+        return filterShiftsForPlanningDay(
+            uniqueSLAShifts,
+            pos,
+            getDayLetter(selectedCell.dateStr),
+            selectedCell.dateStr,
+            cycles,
+        );
+    }, [uniqueSLAShifts, selectedCell?.dateStr, activePosition, effectivePosStructure, autoCycles]);
+
     const genderRestrictedPositionsCount = useMemo(
         () => positionStructure.filter((p: any) => getPreferenciaGeneroUi(p.preferenciaGenero)).length,
         [positionStructure],
@@ -2755,30 +2809,24 @@ export default function PlanificacionPage() {
         const posConfig = structure.find((p: any) => p.positionName === positionName) || structure[0] || { qty: 1, shifts: [], coverageType: '24hs' };
         const pax = Number(posConfig.qty) > 0 ? Number(posConfig.qty) : 1;
         const coverageType = posConfig.coverageType || 'custom';
+        const dayLetter = getDayLetter(dateStr);
+        const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
 
-        // 🛑 SLA INTELLIGENCE: Determinación de Meta
+        // Meta diaria: 24hs = 24h/pax; custom = solo bandas activas ese día (shift.days).
         let dailyHoursTarget = 24;
-
-        if (coverageType === '24hs') {
-            // Si es 24hs, la meta es estricta: 24h * pax, sin importar la suma de variantes
-            dailyHoursTarget = 24;
-        } else {
-            // Si es custom, sumamos los turnos configurados
-            if (posConfig.shifts && Array.isArray(posConfig.shifts) && posConfig.shifts.length > 0) {
-                const shiftsSum = posConfig.shifts.reduce((acc: number, s: any) => acc + (Number(s.hours) || 8), 0);
-                dailyHoursTarget = shiftsSum > 0 ? shiftsSum : 8;
-            } else {
-                dailyHoursTarget = 8; // Fallback
-            }
+        if (coverageType !== '24hs') {
+            dailyHoursTarget = dailyCoverageHoursTargetForPos(posConfig, dayLetter, cycles);
         }
 
-        // Verificación de Días Activos y exclusiones SLA
-        const dayLetter = getDayLetter(dateStr);
         const isDayActive = isPosActiveOnDay(posConfig, dayLetter);
         const isDayExcluded = isPosExcludedOnDate(posConfig, dateStr);
         
-        // Meta Final
         const target = isDayActive && !isDayExcluded ? (pax * dailyHoursTarget) : 0;
+
+        const validWorkCodes = new Set(
+            effectiveShiftsForPositionDay(posAsEngineDef(posConfig), dayLetter, cycles, dateStr)
+                .map((s) => String(s.code || '').toUpperCase()),
+        );
 
         let current = 0;
         const dominant = structure.reduce((prev: any, current: any) => (prev.qty > current.qty) ? prev : current, structure[0] || { qty: 1, positionName: 'General' });
@@ -2797,6 +2845,8 @@ export default function PlanificacionPage() {
             if (String(effectiveObjId || '') !== String(covObjId)) return;
             let shiftPos = shift.positionName || dominant?.positionName || 'General';
             if (shiftPos === positionName && !OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) {
+                const code = String(shift.code || '').toUpperCase();
+                if (validWorkCodes.size > 0 && isPlanningWorkShiftCode(code) && !validWorkCodes.has(code)) return;
                 current += calcShiftHours(shift, slaCodeHoursHint);
             }
         });
@@ -3572,6 +3622,7 @@ export default function PlanificacionPage() {
                 }
                 setHasActiveSLA(monthHasSla);
                 setPositionStructure(structure);
+                setActiveSlaPositionAssignments(srvForStructure?.positionAssignments ?? null);
                 setSlaVendidas(
                     monthHasSla && srvForStructure
                         ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
@@ -7074,6 +7125,13 @@ export default function PlanificacionPage() {
                 preserveRotativeIntegrity: objectiveScheduleFlags.preserveRotativeIntegrity,
                 allowCustom24hsBackup: objectiveScheduleFlags.allowCustom24hsBackup,
                 coverageWisdom,
+                positionAssignmentsByEmp: (() => {
+                    const pa = activeSlaPositionAssignments;
+                    if (!pa?.length) return undefined;
+                    const m: Record<string, Array<{ positionName: string; shiftCodes: string[] }>> = {};
+                    for (const a of pa) { if (a.slots?.length) m[a.employeeId] = a.slots; }
+                    return Object.keys(m).length ? m : undefined;
+                })(),
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
             const canFloater = !can6x1
@@ -10910,7 +10968,7 @@ export default function PlanificacionPage() {
                                                     const excludedToday = isPosExcludedOnDate(p, selectedCell.dateStr);
                                                     return (
                                                     <option key={p.positionName} value={p.positionName} disabled={excludedToday}>
-                                                        {p.positionName}{preferenciaGeneroOptionSuffix(p.preferenciaGenero)}{excludedToday ? ' — EXCLUIDO este día' : ''} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday ? (p.coverageType === '24hs' ? 24 : (p.shifts?.reduce((acc:number,s:any)=>acc+(Number(s.hours)||8),0)||0)) : 0)}h)
+                                                        {p.positionName}{preferenciaGeneroOptionSuffix(p.preferenciaGenero)}{excludedToday ? ' — EXCLUIDO este día' : ''} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday ? (String(p.coverageType || '').toLowerCase() === '24hs' ? 24 : dailyCoverageHoursTargetForPos(p, getDayLetter(selectedCell.dateStr), autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles)) : 0)}h)
                                                     </option>
                                                     );
                                                 })}
@@ -11012,7 +11070,7 @@ export default function PlanificacionPage() {
                                                         </div>
                                                     </div>
                                                     <div className={`grid grid-cols-3 gap-2 mb-4 ${isServiceLocked || isExcludedDay ? 'opacity-50 pointer-events-none' : ''}`}>
-                                                        {uniqueSLAShifts.map((s: any) => {
+                                                        {modalDayShifts.map((s: any) => {
                                                             const isBlocked = shiftButtonDisabledMap.has(String(s.code).toUpperCase());
                                                             const disabledByCoverage = coverageFull;
                                                             const disabled = isServiceLocked || isBlocked || disabledByCoverage || isExcludedDay;
