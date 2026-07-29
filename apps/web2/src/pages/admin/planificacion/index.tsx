@@ -715,6 +715,7 @@ export default function PlanificacionPage() {
     });
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
     const [shiftTooltip, setShiftTooltip] = useState<{ label: string | null; pos: string | null; range: string | null; x: number; y: number; restHours?: number | null } | null>(null);
+    const [secondBlockMap, setSecondBlockMap] = useState<Record<string, { startTime: any; endTime: any }>>({});
     const [coverageTooltip, setCoverageTooltip] = useState<{
         dateStr: string;
         gaps: { positionName: string; code: string; missing: number; detail?: string }[];
@@ -3684,6 +3685,7 @@ export default function PlanificacionPage() {
             const map: any = {};
             const allIds: Record<string, string[]> = {};
             const turaM: Record<string, any> = {};
+            const secondBlocksMap: Record<string, { startTime: any; endTime: any }> = {};
             const rfzVacs: any[] = [];
             const rfzAll: any[] = [];
             snap.docs.forEach(d => {
@@ -3711,8 +3713,11 @@ export default function PlanificacionPage() {
                     // Rastrear TODOS los doc IDs para esta clave (incluye bloques de turno cortado)
                     if (!allIds[key]) allIds[key] = [];
                     allIds[key].push(d.id);
-                    // Bloques secundarios de turno cortado: se eliminan junto al primario pero no se muestran en grilla
-                    if (data.isSecondBlock) return;
+                    // Bloques secundarios de turno cortado: guardar horario para tooltip, no mostrar en grilla
+                    if (data.isSecondBlock) {
+                        secondBlocksMap[key] = { startTime: data.startTime, endTime: data.endTime };
+                        return;
+                    }
                     // shiftsMap solo guarda el último (comportamiento original)
                     map[key] = {
                         id: d.id, ...data, code: data.code || data.type, objectiveId: data.objectiveId,
@@ -3742,6 +3747,7 @@ export default function PlanificacionPage() {
             setShiftsMap(map);
             setAllShiftIds(allIds);
             setTuraMap(turaM);
+            setSecondBlockMap(secondBlocksMap);
             setRfzVacantes(rfzVacs);
             setRfzTodos(rfzAll);
         }, (e) => { console.error('[plan] turnos error:', e); toast.error(`Error cargando turnos: ${e.code || e.message}`); });
@@ -8211,8 +8217,16 @@ export default function PlanificacionPage() {
                                         const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
                                             ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
                                             : null;
+                                        const _b2 = _cellShift?.shiftGroupId
+                                            ? (pendingChanges[`${key}_B2`] || secondBlockMap[key] || null)
+                                            : null;
+                                        const _b2Range = (_b2?.startTime && _b2?.endTime)
+                                            ? `${formatTime(_b2.startTime)} - ${formatTime(_b2.endTime)}`
+                                            : null;
                                         const cellRange = cellCode
-                                            ? (_cellActualRange || SHIFT_RANGES[cellCode] || null)
+                                            ? ((_cellActualRange && _b2Range)
+                                                ? `${_cellActualRange} + ${_b2Range}`
+                                                : (_cellActualRange || SHIFT_RANGES[cellCode] || null))
                                             : null;
                                         const excludedOnDay = excludedPositionsByDate[cellDateStr];
                                         const isExclusionCol = !!excludedOnDay?.length;
