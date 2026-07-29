@@ -2617,6 +2617,27 @@ export default function PlanificacionPage() {
             return disabled;
         }
 
+        // Cobertura de dotacion: filtrar codigos permitidos para este empleado en este puesto
+        if (activeSlaPositionAssignments?.length && selectedCell?.empId) {
+            const empAssignment = activeSlaPositionAssignments.find((a) => a.employeeId === selectedCell.empId);
+            if (empAssignment) {
+                const posSlot = empAssignment.slots?.find((s) => s.positionName === posName);
+                if (!posSlot) {
+                    uniqueSLAShifts.forEach((s) => {
+                        const code = String(s.code || '').toUpperCase();
+                        if (isWorking(code)) disabled.add(code);
+                    });
+                    return disabled;
+                }
+                if (posSlot.shiftCodes?.length > 0) {
+                    uniqueSLAShifts.forEach((s) => {
+                        const code = String(s.code || '').toUpperCase();
+                        if (isWorking(code) && !posSlot.shiftCodes.includes(code)) disabled.add(code);
+                    });
+                }
+            }
+        }
+
         // Shift-level: bloquear cada turno que tenga days[] y no incluya el día actual
         uniqueSLAShifts.forEach((s: any) => {
             const code = String(s.code || '').toUpperCase();
@@ -2708,7 +2729,7 @@ export default function PlanificacionPage() {
             }
         });
         return disabled;
-    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId, resolveEffectiveShiftObjectiveId]);
+    }, [selectedCell?.dateStr, selectedCell?.empId, selectedObjective, activePosition, effectivePosStructure, positionStructure, displayedEmployees, pendingChanges, shiftsMap, uniqueSLAShifts, autoCycles, selectedGrupo, grupoUnifiedMode, slaIdToObjId, cellPlanningObjectiveId, resolveEffectiveShiftObjectiveId, activeSlaPositionAssignments]);
 
     // 🛑 RESTAURADO: swapCandidates
     const swapCandidates = useMemo(() => { 
