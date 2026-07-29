@@ -1,0 +1,17 @@
+{
+  "current": "1.0",
+  "versions": [
+    {
+      "version": "1.0",
+      "date": "2026-07-29",
+      "gitCommit": "ea0ffedcc791fa9a8d9f4bb0c34169941b13d32c",
+      "label": "Baseline: rotacion 3/2 L-D 9h, RET stand-by, custom L-V sabados RET, grilla Hs, versionado v1.0",
+      "fileCount": 54,
+      "recommendedEvals": [
+        "eval:manzana-historica",
+        "eval:edificio-corporativo",
+        "eval:casa-matriz-mixed"
+      ]
+    }
+  ]
+}

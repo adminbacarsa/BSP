@@ -29,7 +29,10 @@
     "eval:surplus-absence-modo8": "npx tsx scripts/eval-surplus-absence-modo8.ts",
     "eval:sla-active-days": "npx tsx scripts/eval-sla-active-days.ts",
     "eval:franco-streak": "npx tsx scripts/eval-franco-streak-guard.ts",
-    "eval:coverage-wisdom": "npx tsx scripts/eval-coverage-wisdom.ts"
+    "eval:coverage-wisdom": "npx tsx scripts/eval-coverage-wisdom.ts",
+    "auto-lab:snapshot": "node scripts/snapshot-auto-lab-version.js",
+    "auto-lab:restore": "node scripts/restore-auto-lab-version.js",
+    "auto-lab:versions": "node scripts/list-auto-lab-versions.js"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
