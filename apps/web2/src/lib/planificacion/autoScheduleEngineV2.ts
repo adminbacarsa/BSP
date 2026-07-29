@@ -4083,9 +4083,14 @@ function applyServiceRulesPostProcess(
                         if (idx >= 0) result[idx] = { ...result[idx], positionName: action.toPositionName ?? result[idx].positionName, code: action.toShiftCode ?? result[idx].code };
                     }
                 } else if (action.type === 'RESTRICT') {
+                    // Solo aplica si el empleado no tiene turno de trabajo real ya asignado
+                    // (no sobrescribir M/T/N existentes, solo redirigir RET/stand-by o sin asignacion)
+                    const WORK_CODES_RESTRICT = ['M','T','N','D12','N12','ESC','REF'];
                     if (action.employeeId && action.allowedCode) {
                         const empA = result.find(a => a.dateStr === dateStr && a.empId === action.employeeId);
-                        if (empA && String(empA.code || '').toUpperCase() !== String(action.allowedCode || '').toUpperCase()) {
+                        const curCode = String(empA?.code || '').toUpperCase();
+                        const isRealWork = WORK_CODES_RESTRICT.includes(curCode) && curCode !== String(action.allowedCode || '').toUpperCase();
+                        if (empA && !isRealWork) {
                             const idx = result.indexOf(empA);
                             if (idx >= 0) result[idx] = { ...result[idx], code: action.allowedCode };
                         }

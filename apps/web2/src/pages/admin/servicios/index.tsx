@@ -770,7 +770,17 @@ export default function ServiciosSLAPage() {
     }
   };
   
-  const RULE_TRIGGER_CODES = ['F','FF','FP','FT','M','T','N','D12','N12','RET','ESC','REF','V','L','E','A','AA','PG'];
+  const RULE_ABSENCE_CODES = ['F','FF','FP','FT','V','L','E','A','AA','PG'];
+  const allServiceWorkCodes: string[] = (() => {
+    const codes = new Set<string>();
+    for (const pos of form.positions) {
+      for (const sv of (pos.allowedShiftTypes || [])) {
+        if (sv.code) codes.add(sv.code);
+      }
+    }
+    return codes.size > 0 ? Array.from(codes) : ['M','T','N','D12','N12','RET','ESC','REF'];
+  })();
+  const RULE_TRIGGER_CODES = [...RULE_ABSENCE_CODES, ...allServiceWorkCodes];
 
   function getPositionCodes(posName: string, positions: ServicePosition[]): string[] {
     const pos = positions.find(p => p.name === posName);
@@ -2447,7 +2457,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <span className="text-[9px] text-slate-400">solo código</span>
                                     <select value={act.allowedCode || ''} onChange={e => updAction(ai, 'allowedCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
                                       <option value="">—</option>
-                                      {['M','T','N','D12','N12','RET','ESC','REF'].map(c => <option key={c} value={c}>{c}</option>)}
+                                      {allServiceWorkCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  </div>
+                                )}
                                 {act.type === 'ASSIGN' && (
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <select value={act.employeeId || ''} onChange={e => updAction(ai, 'employeeId', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
@@ -2463,9 +2476,6 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <select value={act.shiftCode || ''} onChange={e => updAction(ai, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
                                       <option value="">—</option>
                                       {getPositionCodes(act.positionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
-                                    </select>
-                                  </div>
-                                )}
                                     </select>
                                   </div>
                                 )}
@@ -2566,7 +2576,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <span className="text-[9px] text-slate-400">solo código</span>
                                     <select value={act.allowedCode || ''} onChange={e => updAction(ai, 'allowedCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
                                       <option value="">—</option>
-                                      {['M','T','N','D12','N12','RET','ESC','REF'].map(c => <option key={c} value={c}>{c}</option>)}
+                                      {allServiceWorkCodes.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                  </div>
+                                )}
                                 {act.type === 'ASSIGN' && (
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <select value={act.employeeId || ''} onChange={e => updAction(ai, 'employeeId', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
@@ -2582,9 +2595,6 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <select value={act.shiftCode || ''} onChange={e => updAction(ai, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
                                       <option value="">—</option>
                                       {getPositionCodes(act.positionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
-                                    </select>
-                                  </div>
-                                )}
                                     </select>
                                   </div>
                                 )}
