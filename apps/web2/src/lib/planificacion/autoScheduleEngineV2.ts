@@ -4101,6 +4101,8 @@ function applyServiceRulesPostProcess(
                         if (empA) {
                             const idx = result.indexOf(empA);
                             if (idx >= 0) result[idx] = { ...result[idx], positionName: action.positionName, code: action.shiftCode };
+                        } else {
+                            result.push({ empId: action.employeeId, dateStr, positionName: action.positionName, code: action.shiftCode, name: action.shiftCode, hours: 8, startTime: '00:00' });
                         }
                     }
                 }

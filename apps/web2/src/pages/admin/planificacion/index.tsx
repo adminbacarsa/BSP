@@ -686,6 +686,65 @@ const rfzDocToShiftView = (rfz: any) => ({
     employeeName: rfz.employeeName,
 });
 
+function computeServiceRuleChanges(
+    dateStr: string,
+    rules: import('@/services/slaService').ServiceRule[],
+    pendingChanges: Record<string, any>,
+    shiftsMap: Record<string, any>,
+    employees: any[],
+    objectiveId: string,
+): Record<string, any> {
+    const additions: Record<string, any> = {};
+    const getEntry = (empId: string) => {
+        const k = `${empId}_${dateStr}`;
+        const p = pendingChanges[k];
+        if (p) return p.isDeleted ? null : p;
+        return shiftsMap[k] ?? null;
+    };
+    const getCode = (empId: string): string | null => {
+        const e = getEntry(empId);
+        if (!e) return null;
+        return String(e.code || e.type || '').toUpperCase() || null;
+    };
+    for (const rule of rules) {
+        if (!rule.triggers.length) continue;
+        const fires = rule.triggers.every((t: import('@/services/slaService').RuleTrigger) =>
+            getCode(t.employeeId) === String(t.shiftCode || '').toUpperCase()
+        );
+        if (!fires) continue;
+        for (const action of rule.actions) {
+            if (action.type === 'EXCLUDE') {
+                for (const emp of employees) {
+                    const e = getEntry(emp.id);
+                    if (!e) continue;
+                    const ec = String(e.code || e.type || '').toUpperCase();
+                    const ep = e.positionName || '';
+                    if (ep === action.positionName && ec === String(action.shiftCode || '').toUpperCase()) {
+                        additions[`${emp.id}_${dateStr}`] = {
+                            code: 'F', type: 'F', name: 'Franco', hours: 0,
+                            startTime: '00:00', endTime: '00:00',
+                            isTemp: true, isFranco: true, positionName: '',
+                            objectiveId: e.objectiveId ?? objectiveId,
+                        };
+                    }
+                }
+            } else if (action.type === 'ASSIGN') {
+                if (action.employeeId && action.positionName && action.shiftCode) {
+                    const e = getEntry(action.employeeId);
+                    additions[`${action.employeeId}_${dateStr}`] = {
+                        ...(e || {}),
+                        code: action.shiftCode, type: action.shiftCode, name: action.shiftCode,
+                        hours: 8, startTime: '00:00', endTime: '00:00',
+                        positionName: action.positionName, isTemp: true, isFranco: false,
+                        objectiveId: e?.objectiveId ?? objectiveId,
+                    };
+                }
+            }
+        }
+    }
+    return additions;
+}
+
 export default function PlanificacionPage() {
     const { empresaId, empresa, loadingEmpresa } = useEmpresa();
     const { rules: planningRules } = usePlanningRules(empresaId);
@@ -6065,6 +6124,14 @@ export default function PlanificacionPage() {
             positionName: config.positionName || activePosition || 'General',
             objectiveId: config.objectiveId || (selectedGrupo && grupoUnifiedMode && cellPlanningObjectiveId) || resolveObjectiveForEmp(selectedCell.empId),
         };
+        // Aplicar condiciones EXCLUDE/ASSIGN en tiempo real tras cambio manual
+        if (activeSlaServiceRules?.length) {
+            const _ruleAdditions = computeServiceRuleChanges(
+                selectedCell.dateStr, activeSlaServiceRules, newChanges,
+                shiftsMap, dotacionBaseEmployees, selectedObjective,
+            );
+            Object.assign(newChanges, _ruleAdditions);
+        }
         commitPendingChanges(newChanges);
         // Toast de alerta si el nuevo turno rompe el descanso mínimo de 12h
         const _rc = String(config.code || '').toUpperCase();
