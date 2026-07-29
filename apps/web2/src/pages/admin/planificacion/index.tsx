@@ -3708,9 +3708,11 @@ export default function PlanificacionPage() {
                 if (data.startTime?.seconds) {
                     const dateKey = getDateKey(data.startTime);
                     const key = `${data.employeeId}_${dateKey}`;
-                    // Rastrear TODOS los doc IDs para esta clave (puede haber duplicados en Firestore)
+                    // Rastrear TODOS los doc IDs para esta clave (incluye bloques de turno cortado)
                     if (!allIds[key]) allIds[key] = [];
                     allIds[key].push(d.id);
+                    // Bloques secundarios de turno cortado: se eliminan junto al primario pero no se muestran en grilla
+                    if (data.isSecondBlock) return;
                     // shiftsMap solo guarda el último (comportamiento original)
                     map[key] = {
                         id: d.id, ...data, code: data.code || data.type, objectiveId: data.objectiveId,
@@ -4724,7 +4726,10 @@ export default function PlanificacionPage() {
 
             try {
                 for (const [key, change] of Object.entries(jobPending)) {
-                    const [empId, dateStr] = key.split('_');
+                    // key puede ser "empId_YYYY-MM-DD" o "empId_YYYY-MM-DD_B2" para bloques secundarios
+                    const parts = key.split('_');
+                    const empId = parts[0];
+                    const dateStr = parts[1]; // YYYY-MM-DD
                     const existing = jobShiftsMap[key];
                     const empObj = employeesById[empId];
                     const empName = empObj ? empObj.name : 'Desconocido';
@@ -4848,6 +4853,8 @@ export default function PlanificacionPage() {
                         if (change.isExtended && typeof change.adjustedEndTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedEndTime)) {
                             turnoPayload.extensionEndTime = change.adjustedEndTime;
                         }
+                        if (change.shiftGroupId) turnoPayload.shiftGroupId = change.shiftGroupId;
+                        if (change.isSecondBlock) turnoPayload.isSecondBlock = true;
 
                         batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
                         bumpBatchOp();
@@ -7172,10 +7179,12 @@ export default function PlanificacionPage() {
             let written = 0;
             let skipped = 0;
             for (const a of finalGenAssignments) {
-                const key = `${a.empId}_${a.dateStr}`;
+                const primaryKey = `${a.empId}_${a.dateStr}`;
+                const key = a.isSecondBlock ? `${primaryKey}_B2` : primaryKey;
                 // No se bloquean días pasados en auto-generación: el borrador planifica el mes completo.
                 // isDateLocked aplica solo a edición manual, no al motor automático.
-                if (!autoOverwrite && (pendingChanges[key] || shiftsMap[key])) { skipped++; continue; }
+                // Para bloques secundarios, verificar también si el primario fue omitido.
+                if (!autoOverwrite && (pendingChanges[primaryKey] || shiftsMap[primaryKey])) { skipped++; continue; }
                 newChanges[key] = {
                     isTemp: true,
                     employeeId: a.empId,
@@ -7187,8 +7196,10 @@ export default function PlanificacionPage() {
                     startTime: a.startTime,
                     ...(a.endTime ? { endTime: a.endTime } : {}),
                     ...(a.isFranco ? { isFranco: true } : {}),
+                    ...(a.shiftGroupId ? { shiftGroupId: a.shiftGroupId } : {}),
+                    ...(a.isSecondBlock ? { isSecondBlock: true } : {}),
                 };
-                written++;
+                if (!a.isSecondBlock) written++;
             }
 
             // Si hay slots que solo podrían cubrirse superando las 200h → guardar para panel de autorización
@@ -7288,7 +7299,8 @@ export default function PlanificacionPage() {
                 coverage = fixResult.report;
 
                 for (const a of fixResult.assignments) {
-                    const key = `${a.empId}_${a.dateStr}`;
+                    const primaryKey = `${a.empId}_${a.dateStr}`;
+                    const key = a.isSecondBlock ? `${primaryKey}_B2` : primaryKey;
                     const existing = newChanges[key];
                     if (existing && !existing.isDeleted
                         && !NON_BILLABLE_FIX.has(String(existing.code || '').toUpperCase())
@@ -7305,6 +7317,8 @@ export default function PlanificacionPage() {
                         ...(a.endTime ? { endTime: a.endTime } : {}),
                         ...(a.isFranco ? { isFranco: true } : {}),
                         ...(a.isReten ? { isReten: true } : {}),
+                        ...(a.shiftGroupId ? { shiftGroupId: a.shiftGroupId } : {}),
+                        ...(a.isSecondBlock ? { isSecondBlock: true } : {}),
                     };
                 }
                 // No volcar a grilla hasta confirmar SLA cerrado (ver más abajo).

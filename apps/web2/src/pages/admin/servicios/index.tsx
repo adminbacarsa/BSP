@@ -138,9 +138,11 @@ export default function ServiciosSLAPage() {
   });
 
   const [newCustomShift, setNewCustomShift] = useState<{
-      name: string; start: string; end: string; code: string; days: string[]; specificDates: string[]
+      name: string; start: string; end: string; code: string; days: string[]; specificDates: string[];
+      hasBlock2: boolean; block2Start: string; block2End: string;
   }>({
-      name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: []
+      name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: [],
+      hasBlock2: false, block2Start: '18:00', block2End: '22:00',
   });
   const [customShiftDateMode, setCustomShiftDateMode] = useState<'weekdays' | 'dates'>('weekdays');
   const [pendingDate, setPendingDate] = useState('');
@@ -465,12 +467,19 @@ export default function ServiciosSLAPage() {
 
   const addCustomShift = () => {
       if (!newCustomShift.name) return;
-      const hours = calculateShiftHours(newCustomShift.start, newCustomShift.end);
+      const { hasBlock2, block2Start, block2End } = newCustomShift;
+      const hours = hasBlock2
+          ? calculateShiftHours(newCustomShift.start, newCustomShift.end) + calculateShiftHours(block2Start, block2End)
+          : calculateShiftHours(newCustomShift.start, newCustomShift.end);
       const code = newCustomShift.code || newCustomShift.name.substring(0, 2).toUpperCase();
 
       const newVariant: ShiftVariant = {
           code, name: newCustomShift.name, startTime: newCustomShift.start, endTime: newCustomShift.end,
           hours, isCustom: true,
+          ...(hasBlock2 ? { blocks: [
+              { startTime: newCustomShift.start, endTime: newCustomShift.end },
+              { startTime: block2Start, endTime: block2End },
+          ] } : {}),
           ...(customShiftDateMode === 'dates'
               ? { specificDates: newCustomShift.specificDates }
               : { days: newCustomShift.days }),
@@ -493,12 +502,18 @@ export default function ServiciosSLAPage() {
   const startEditShift = (v: ShiftVariant) => {
       const hasSpecificDates = Array.isArray(v.specificDates) && v.specificDates.length > 0;
       setCustomShiftDateMode(hasSpecificDates ? 'dates' : 'weekdays');
-      setNewCustomShift({ name: v.name, start: v.startTime, end: v.endTime, code: v.code, days: v.days || [], specificDates: v.specificDates || [] });
+      const hasBlock2 = Array.isArray(v.blocks) && v.blocks.length >= 2;
+      setNewCustomShift({
+          name: v.name, start: v.startTime, end: v.endTime, code: v.code,
+          days: v.days || [], specificDates: v.specificDates || [],
+          hasBlock2, block2Start: hasBlock2 ? v.blocks![1].startTime : '18:00',
+          block2End: hasBlock2 ? v.blocks![1].endTime : '22:00',
+      });
       setEditingShiftCode(v.code);
   };
 
   const cancelEditShift = () => {
-      setNewCustomShift({ name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: [] });
+      setNewCustomShift({ name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: [], hasBlock2: false, block2Start: '18:00', block2End: '22:00' });
       setCustomShiftDateMode('weekdays');
       setPendingDate('');
       setEditingShiftCode(null);
@@ -2399,9 +2414,27 @@ export default function ServiciosSLAPage() {
                             <div className={`space-y-2 rounded-xl p-3 transition-colors ${editingShiftCode ? 'bg-indigo-50 border border-indigo-200' : ''}`}>
                                 <div className="flex gap-2 items-end">
                                     <div className="flex-1"><span className="text-[9px] text-slate-400">Nombre</span><input className="w-full p-2 text-xs font-bold rounded-lg border" placeholder="Ej: Puerta Bar" value={newCustomShift.name} onChange={e => setNewCustomShift({...newCustomShift, name: e.target.value})}/></div>
-                                    <div className="w-20"><span className="text-[9px] text-slate-400">Inicio</span><input type="time" className="w-full p-2 text-xs font-bold rounded-lg border text-center" value={newCustomShift.start} onChange={e => setNewCustomShift({...newCustomShift, start: e.target.value})}/></div>
-                                    <div className="w-20"><span className="text-[9px] text-slate-400">Fin</span><input type="time" className="w-full p-2 text-xs font-bold rounded-lg border text-center" value={newCustomShift.end} onChange={e => setNewCustomShift({...newCustomShift, end: e.target.value})}/></div>
+                                    <div className="w-20"><span className="text-[9px] text-slate-400">{newCustomShift.hasBlock2 ? 'B1 inicio' : 'Inicio'}</span><input type="time" className="w-full p-2 text-xs font-bold rounded-lg border text-center" value={newCustomShift.start} onChange={e => setNewCustomShift({...newCustomShift, start: e.target.value})}/></div>
+                                    <div className="w-20"><span className="text-[9px] text-slate-400">{newCustomShift.hasBlock2 ? 'B1 fin' : 'Fin'}</span><input type="time" className="w-full p-2 text-xs font-bold rounded-lg border text-center" value={newCustomShift.end} onChange={e => setNewCustomShift({...newCustomShift, end: e.target.value})}/></div>
                                 </div>
+                                {/* Turno cortado — segundo bloque */}
+                                <div className="flex items-center gap-2">
+                                    <button type="button" onClick={() => setNewCustomShift(prev => ({ ...prev, hasBlock2: !prev.hasBlock2 }))} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black border transition-colors ${newCustomShift.hasBlock2 ? 'bg-amber-100 border-amber-400 text-amber-700' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
+                                        ✂ {newCustomShift.hasBlock2 ? 'Turno cortado activo' : 'Agregar turno cortado'}
+                                    </button>
+                                    {newCustomShift.hasBlock2 && (
+                                        <span className="text-[9px] text-amber-600 font-bold">
+                                            {calculateShiftHours(newCustomShift.start, newCustomShift.end) + calculateShiftHours(newCustomShift.block2Start, newCustomShift.block2End)}h total
+                                        </span>
+                                    )}
+                                </div>
+                                {newCustomShift.hasBlock2 && (
+                                    <div className="flex gap-2 items-end bg-amber-50 border border-amber-200 rounded-lg p-2">
+                                        <span className="text-[9px] font-black text-amber-600 self-end pb-1.5">Bloque 2</span>
+                                        <div className="w-20"><span className="text-[9px] text-slate-400">Inicio</span><input type="time" className="w-full p-2 text-xs font-bold rounded-lg border border-amber-300 text-center" value={newCustomShift.block2Start} onChange={e => setNewCustomShift({...newCustomShift, block2Start: e.target.value})}/></div>
+                                        <div className="w-20"><span className="text-[9px] text-slate-400">Fin</span><input type="time" className="w-full p-2 text-xs font-bold rounded-lg border border-amber-300 text-center" value={newCustomShift.block2End} onChange={e => setNewCustomShift({...newCustomShift, block2End: e.target.value})}/></div>
+                                    </div>
+                                )}
                                 <div>
                                     {/* Toggle: Días de semana / Fechas específicas */}
                                     <div className="flex gap-1 mb-2">
@@ -2495,8 +2528,11 @@ export default function ServiciosSLAPage() {
                                     />
                                     <div className="flex-1 min-w-0">
                                         <p className="text-[11px] font-black text-slate-700 dark:text-white uppercase leading-none">{v.name}</p>
-                                        <div className="flex items-center gap-2 mt-0.5">
-                                            <p className="text-[9px] text-slate-400 font-mono">{v.startTime} – {v.endTime} · {v.hours}h</p>
+                                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                            {v.blocks && v.blocks.length >= 2
+                                                ? <p className="text-[9px] text-amber-600 font-mono font-black">✂ {v.blocks[0].startTime}–{v.blocks[0].endTime} + {v.blocks[1].startTime}–{v.blocks[1].endTime} · {v.hours}h</p>
+                                                : <p className="text-[9px] text-slate-400 font-mono">{v.startTime} – {v.endTime} · {v.hours}h</p>
+                                            }
                                             {v.days && v.days.length > 0 && <p className="text-[9px] font-black text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 rounded">{v.days.join('')}</p>}
                                             {v.specificDates && v.specificDates.length > 0 && <p className="text-[9px] font-black text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 rounded">{v.specificDates.length} fecha{v.specificDates.length !== 1 ? 's' : ''}</p>}
                                         </div>

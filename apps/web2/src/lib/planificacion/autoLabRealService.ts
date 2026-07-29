@@ -56,6 +56,9 @@ function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
         };
         if (s.startTime) mapped.startTime = String(s.startTime);
         if (s.endTime) mapped.endTime = String(s.endTime);
+        if (Array.isArray((s as any).blocks) && (s as any).blocks.length >= 2) {
+            mapped.blocks = (s as any).blocks.map((b: any) => ({ startTime: String(b.startTime), endTime: String(b.endTime) }));
+        }
         if (Array.isArray(s.days) && s.days.length > 0) mapped.days = [...s.days];
         if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
             mapped.specificDates = [...s.specificDates];

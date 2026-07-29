@@ -227,6 +227,8 @@ export interface V2ShiftDef {
     endTime?: string;
     days?: string[]; // letras de día activas L M X J V S D
     specificDates?: string[]; // YYYY-MM-DD: fechas puntuales (refuerzos), no recurrentes
+    // Turno cortado: dos bloques separados en el día. El motor genera dos V2Assignment por empleado.
+    blocks?: Array<{ startTime: string; endTime: string }>;
 }
 
 export interface V2PositionDef {
@@ -693,6 +695,20 @@ function shiftHours(s: V2ShiftDef): number {
     const code = String(s.code || '').toUpperCase();
     const h = Number(s.hours);
     if (Number.isFinite(h) && h > 0) return h;
+    // Turno cortado: sumar los bloques
+    if (Array.isArray(s.blocks) && s.blocks.length >= 2) {
+        let total = 0;
+        for (const b of s.blocks) {
+            const bs = parseShiftHourFloat(b.startTime);
+            const be = parseShiftHourFloat(b.endTime);
+            if (bs !== null && be !== null) {
+                let dur = be - bs;
+                if (dur <= 0) dur += 24;
+                total += dur;
+            }
+        }
+        if (total > 0) return total;
+    }
     const start = parseShiftHourFloat(s.startTime);
     const end = parseShiftHourFloat(s.endTime);
     if (start !== null && end !== null) {
@@ -701,6 +717,55 @@ function shiftHours(s: V2ShiftDef): number {
         if (dur > 0 && dur <= 24) return dur;
     }
     return SHIFT_HRS_DEFAULT[code] ?? 8;
+}
+
+function calcBlockHours(block: { startTime: string; endTime: string }): number {
+    const s = parseShiftHourFloat(block.startTime);
+    const e = parseShiftHourFloat(block.endTime);
+    if (s !== null && e !== null) {
+        let dur = e - s;
+        if (dur <= 0) dur += 24;
+        return dur;
+    }
+    return 0;
+}
+
+/**
+ * Expande asignaciones de turno cortado en dos V2Assignment independientes (uno por bloque).
+ * El bloque primario mantiene la key normal; el secundario lleva isSecondBlock=true.
+ * Ambos comparten shiftGroupId para que operaciones pueda vincularlos.
+ */
+export function expandSplitShiftAssignments(
+    assignments: V2Assignment[],
+    positions: V2PositionDef[],
+): V2Assignment[] {
+    const posMap = new Map(positions.map(p => [p.positionName, p]));
+    const result: V2Assignment[] = [];
+    for (const a of assignments) {
+        const pos = posMap.get(a.positionName);
+        const shiftDef = pos?.shifts?.find(s => s.code === a.code);
+        if (shiftDef?.blocks && shiftDef.blocks.length >= 2) {
+            const groupId = `${a.empId}_${a.dateStr}_${a.code}`;
+            result.push({
+                ...a,
+                startTime: shiftDef.blocks[0].startTime,
+                endTime: shiftDef.blocks[0].endTime,
+                hours: calcBlockHours(shiftDef.blocks[0]),
+                shiftGroupId: groupId,
+            });
+            result.push({
+                ...a,
+                startTime: shiftDef.blocks[1].startTime,
+                endTime: shiftDef.blocks[1].endTime,
+                hours: calcBlockHours(shiftDef.blocks[1]),
+                shiftGroupId: groupId,
+                isSecondBlock: true,
+            });
+        } else {
+            result.push(a);
+        }
+    }
+    return result;
 }
 
 const FULL_WEEK_DAY_LETTERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
@@ -1205,6 +1270,10 @@ export interface V2Assignment {
     isReten?: boolean;
     /** RET CCT top-up en perfil custom L–D / 9h / 3 guardias / pax 2 (no consolidar a un solo designee). */
     balancedLdCctRet?: boolean;
+    // Turno cortado: ID común a ambos bloques del mismo turno
+    shiftGroupId?: string;
+    // Turno cortado: true en el segundo bloque (oculto en grilla, visible en operaciones)
+    isSecondBlock?: boolean;
 }
 
 export interface V2GenerateStats {
@@ -2692,7 +2761,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const francoCode = francoCodeForPositionDay(
                 pos,
                 dayLetter,
-                buildCustomWeekendRestOptions(pos, eid, dateStr, groupIds),
+                buildCustomWeekendRestOptions(pos, eid, dateStr, groupIds, { positions: ctx.positions, positionGroups }),
             );
             assignments.push({
                 empId: eid,
@@ -2729,7 +2798,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             const restCode = francoCodeForPositionDay(
                 pos,
                 dayLetter,
-                buildCustomWeekendRestOptions(pos, eid, dateStr, groupIds),
+                buildCustomWeekendRestOptions(pos, eid, dateStr, groupIds, { positions: ctx.positions, positionGroups }),
             );
             assignments.push({
                 empId: eid,
@@ -3468,6 +3537,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                             emp.id,
                             dateStr,
                             positionGroups[customPos.positionName],
+                            { positions: ctx.positions, positionGroups },
                         ),
                     );
                     assignments.push({
@@ -3494,6 +3564,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                                 emp.id,
                                 dateStr,
                                 positionGroups[customPos.positionName],
+                                { positions: ctx.positions, positionGroups },
                             ),
                         );
                         assignments.push({
@@ -3697,7 +3768,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
         }
         recomputeUncoveredStats(gapFillFinal, dayDemandsFromFill);
-        stripUnauthorizedRetAssignments(assignments, ctx, retDesignateSet);
+        stripUnauthorizedRetAssignments(assignments, ctx, retDesignateSet, positionGroups);
     };
 
     // Fase final: custom MA/ME/RO (tras 24hs en mixtos; único paso en solo-custom).
@@ -3769,6 +3840,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                             emp.id,
                             dateStr,
                             positionGroups[assignedPos.positionName],
+                            { positions: ctx.positions, positionGroups },
                         ),
                     )
                     : 'F';
@@ -3788,7 +3860,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
     }
 
-    stripUnauthorizedRetAssignments(assignments, ctx, retDesignateSet);
+    stripUnauthorizedRetAssignments(assignments, ctx, retDesignateSet, positionGroups);
     stripIdleEmployeeBillableAssignments(assignments, empAssignedTo, cycleWorkDays, stats);
 
     const francoGuard = enforceFrancoStreakRules({
@@ -3952,7 +4024,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         stats.wisdomRosterAlignment,
     );
 
-    return { feasibility, assignments, stats, capOverflowSlots, coverageViolations };
+    const expandedAssignments = expandSplitShiftAssignments(assignments, engineCtx.positions);
+    return { feasibility, assignments: expandedAssignments, stats, capOverflowSlots, coverageViolations };
 }
 
 function appendPlannerDotacionToFeasibility(
