@@ -46,6 +46,8 @@ export interface AutoLabCaseDefinition {
     defaultShiftByEmp?: Record<string, string>;
     /** Sabiduría histórica de coberturas (servicio real / automatizar). */
     coverageWisdom?: PlanningCoverageWisdom | null;
+    /** Restricciones de cobertura: empId → [{positionName, shiftCodes}]. Ausencia = sin restricción. */
+    positionAssignmentsByEmp?: Record<string, Array<{ positionName: string; shiftCodes: string[] }>>;
 }
 
 const WEEKDAYS = ['L', 'M', 'X', 'J', 'V'] as const;

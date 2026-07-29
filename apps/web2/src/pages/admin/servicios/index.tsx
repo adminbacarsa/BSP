@@ -1,7 +1,7 @@
-import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
-import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion } from '@/services/slaService';
+import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -11,7 +11,7 @@ import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
-  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List
+  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck
 } from 'lucide-react';
 import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSchemeModal';
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
@@ -164,6 +164,11 @@ export default function ServiciosSLAPage() {
   // Código del turno que se está editando (null = modo "agregar nuevo")
   const [editingShiftCode, setEditingShiftCode] = useState<string | null>(null);
 
+  // Cobertura de dotación
+  const [coverageEmps, setCoverageEmps] = useState<any[]>([]);
+  const [coverageEditEmpId, setCoverageEditEmpId] = useState<string | null>(null);
+  const [coverageEditSlots, setCoverageEditSlots] = useState<Array<{ positionName: string; shiftCodes: string[] }>>([]);
+
   // --- EFECTOS ---
   
   useEffect(() => {
@@ -194,6 +199,20 @@ export default function ServiciosSLAPage() {
     setView('list');
     setIsEditing(false);
   }, [empresaId]);
+
+  // Empleados del objetivo activo (para la sección Cobertura)
+  useEffect(() => {
+    if (!form.objectiveId || view !== 'form') { setCoverageEmps([]); return; }
+    getDocs(query(collection(db, 'empleados'), where('preferredObjectiveId', '==', form.objectiveId)))
+      .then(snap => {
+        const rows = snap.docs
+          .map(d => ({ id: d.id, ...(d.data() as any) }))
+          .filter((e: any) => e.status !== 'inactivo')
+          .sort((a: any, b: any) => (a.name || a.firstName || '').localeCompare(b.name || b.firstName || '', 'es'));
+        setCoverageEmps(rows);
+      })
+      .catch(() => setCoverageEmps([]));
+  }, [form.objectiveId, view]);
 
   // ✅ Colección servicios_sla — sin orderBy(clientName): excluye docs legacy sin ese campo
   useEffect(() => {
@@ -713,6 +732,47 @@ export default function ServiciosSLAPage() {
   const removePosition = (id: string) => {
       const updatedPositions = form.positions.filter(p => p.id !== id);
       setForm({ ...form, positions: updatedPositions });
+  };
+
+  // ── Cobertura de dotación ──────────────────────────────────────────────
+  const startEditCoverage = (empId: string) => {
+    const existing = (form.positionAssignments || []).find(a => a.employeeId === empId);
+    setCoverageEditSlots(existing?.slots ? existing.slots.map(s => ({ ...s, shiftCodes: [...s.shiftCodes] })) : []);
+    setCoverageEditEmpId(empId);
+  };
+  const cancelEditCoverage = () => { setCoverageEditEmpId(null); setCoverageEditSlots([]); };
+  const saveCoverage = (empId: string, empName: string) => {
+    const cleanSlots = coverageEditSlots.filter(s => s.positionName);
+    const existing = form.positionAssignments || [];
+    let updated: PositionAssignment[];
+    if (cleanSlots.length === 0) {
+      updated = existing.filter(a => a.employeeId !== empId);
+    } else {
+      const entry: PositionAssignment = { employeeId: empId, employeeName: empName, slots: cleanSlots };
+      const idx = existing.findIndex(a => a.employeeId === empId);
+      updated = idx >= 0 ? existing.map((a, i) => i === idx ? entry : a) : [...existing, entry];
+    }
+    setForm({ ...form, positionAssignments: updated });
+    cancelEditCoverage();
+  };
+  const removeCoverage = (empId: string) => {
+    setForm({ ...form, positionAssignments: (form.positionAssignments || []).filter(a => a.employeeId !== empId) });
+    if (coverageEditEmpId === empId) cancelEditCoverage();
+  };
+  const toggleCoveragePosition = (positionName: string) => {
+    const exists = coverageEditSlots.find(s => s.positionName === positionName);
+    if (exists) {
+      setCoverageEditSlots(coverageEditSlots.filter(s => s.positionName !== positionName));
+    } else {
+      setCoverageEditSlots([...coverageEditSlots, { positionName, shiftCodes: [] }]);
+    }
+  };
+  const toggleCoverageShiftCode = (positionName: string, code: string) => {
+    setCoverageEditSlots(coverageEditSlots.map(s => {
+      if (s.positionName !== positionName) return s;
+      const codes = s.shiftCodes.includes(code) ? s.shiftCodes.filter(c => c !== code) : [...s.shiftCodes, code];
+      return { ...s, shiftCodes: codes };
+    }));
   };
 
   const handleSave = async () => {
@@ -2087,6 +2147,122 @@ export default function ServiciosSLAPage() {
                   </div>
                </div>
             </div>
+
+            {/* ── Cobertura de dotación ── */}
+            <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2">
+                  <UserCheck size={16} className="text-indigo-500"/> Cobertura de Dotación
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (form.positionAssignments !== undefined) {
+                      setForm({ ...form, positionAssignments: undefined as any });
+                    } else {
+                      setForm({ ...form, positionAssignments: [] });
+                    }
+                    setCoverageEditEmpId(null);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-colors ${form.positionAssignments !== undefined ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-300 dark:border-slate-600 hover:bg-slate-50'}`}
+                >
+                  {form.positionAssignments !== undefined ? 'Activada' : 'Activar cobertura'}
+                </button>
+              </div>
+              {form.positionAssignments === undefined ? (
+                <p className="text-[10px] text-slate-400">
+                  Activá la cobertura para definir en qué puestos y bandas puede trabajar cada guardia de la dotación. El motor de planificación respetará estas restricciones.
+                </p>
+              ) : form.positions.length === 0 ? (
+                <p className="text-[10px] text-slate-400">Definí al menos un puesto para configurar restricciones de cobertura.</p>
+              ) : coverageEmps.length === 0 ? (
+                <p className="text-[10px] text-slate-400">No hay guardias con este objetivo como preferido en RRHH. Asignalos desde el módulo RRHH y volvé a esta sección.</p>
+              ) : (
+                <div className="space-y-2">
+                  {coverageEmps.map((emp: any) => {
+                    const empName = emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim() || emp.id;
+                    const assignment = (form.positionAssignments || []).find((a: PositionAssignment) => a.employeeId === emp.id);
+                    const isEditingEmp = coverageEditEmpId === emp.id;
+                    return (
+                      <div key={emp.id} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 overflow-hidden">
+                        <div className="flex items-center gap-3 px-4 py-2.5">
+                          <span className="text-xs font-black text-slate-700 dark:text-slate-200 flex-1 min-w-0 truncate">{empName}</span>
+                          {!isEditingEmp && (
+                            <>
+                              <div className="flex flex-wrap gap-1">
+                                {assignment?.slots?.length ? assignment.slots.map((s: any) => (
+                                  <span key={s.positionName} className="text-[9px] font-black bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700 px-2 py-0.5 rounded-lg">
+                                    {s.positionName}{s.shiftCodes.length > 0 ? ` · ${s.shiftCodes.join(', ')}` : ''}
+                                  </span>
+                                )) : (
+                                  <span className="text-[9px] text-slate-400 italic">Sin restricciones</span>
+                                )}
+                              </div>
+                              <button onClick={() => startEditCoverage(emp.id)} className="p-1.5 rounded-lg text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors shrink-0"><Edit2 size={12}/></button>
+                              {assignment && <button onClick={() => removeCoverage(emp.id)} className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 transition-colors shrink-0"><X size={12}/></button>}
+                            </>
+                          )}
+                        </div>
+                        {isEditingEmp && (
+                          <div className="border-t dark:border-slate-700 px-4 py-3 space-y-3 bg-slate-50 dark:bg-slate-900/30">
+                            <p className="text-[10px] font-black uppercase text-slate-400">Puestos permitidos para {empName}:</p>
+                            {form.positions.map((pos: ServicePosition) => {
+                              const slot = coverageEditSlots.find(s => s.positionName === pos.name);
+                              const active = !!slot;
+                              return (
+                                <div key={pos.id} className="space-y-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleCoveragePosition(pos.name)}
+                                    className={`flex items-center gap-2 text-xs font-bold transition-colors ${active ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-400'}`}
+                                  >
+                                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${active ? 'border-indigo-500 bg-indigo-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                                      {active && <CheckCircle size={10} className="text-white"/>}
+                                    </div>
+                                    {pos.name}
+                                  </button>
+                                  {active && pos.allowedShiftTypes.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 ml-6">
+                                      {pos.allowedShiftTypes.map((sv: ShiftVariant) => (
+                                        <button
+                                          key={sv.code}
+                                          type="button"
+                                          onClick={() => toggleCoverageShiftCode(pos.name, sv.code)}
+                                          className={`text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${slot!.shiftCodes.includes(sv.code) ? 'bg-indigo-600 text-white border-indigo-600' : slot!.shiftCodes.length === 0 ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 border-indigo-300 dark:border-indigo-700' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}
+                                        >
+                                          {sv.code}
+                                        </button>
+                                      ))}
+                                      {slot!.shiftCodes.length === 0 && (
+                                        <span className="text-[9px] text-slate-400 italic self-center">Todas las bandas</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <div className="flex gap-2 pt-2 border-t dark:border-slate-700">
+                              <button
+                                type="button"
+                                onClick={() => saveCoverage(emp.id, empName)}
+                                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors"
+                              >
+                                <Save size={11}/> Guardar
+                              </button>
+                              <button type="button" onClick={cancelEditCoverage} className="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">Cancelar</button>
+                              {assignment && (
+                                <button type="button" onClick={() => removeCoverage(emp.id)} className="ml-auto flex items-center gap-1 text-[10px] font-black text-rose-500 hover:bg-rose-50 px-3 py-1.5 rounded-xl transition-colors"><Trash2 size={10}/> Quitar restricción</button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             {/* ── Historial de horarios (solo al editar un contrato existente) ── */}
             {isEditing && form.id && (
               <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">

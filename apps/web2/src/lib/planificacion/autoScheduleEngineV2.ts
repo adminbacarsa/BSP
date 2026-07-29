@@ -437,6 +437,12 @@ export interface V2EngineContext {
      * Prioriza candidatos que ya cubrieron ausencias / puestos / 12h en el objetivo.
      */
     coverageWisdom?: import('./planningCoverageWisdom').PlanningCoverageWisdom | null;
+    /**
+     * Restricciones de cobertura por empleado: empId → [{positionName, shiftCodes}].
+     * Si un empId tiene entrada, solo puede trabajar en los puestos/bandas especificados.
+     * Ausencia de entrada = sin restricción (comportamiento original).
+     */
+    positionAssignmentsByEmp?: Record<string, Array<{ positionName: string; shiftCodes: string[] }>>;
 }
 
 export interface V2PositionDemand {
@@ -3125,6 +3131,15 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     if (assignmentBreaksBandTransition(assignments, empId, dateStr, assignCode)) continue;
                     if (nextAssignmentBreaksBandTransition(assignments, empId, dateStr, assignCode)) continue;
                     if (!passesAgreementRest(empId, dateStr, assignCode, assignStart, assignHrs)) continue;
+                    // Restricción de cobertura: si el empleado tiene asignaciones definidas, verificar puesto y banda
+                    if (ctx.positionAssignmentsByEmp) {
+                        const empSlots = ctx.positionAssignmentsByEmp[empId];
+                        if (empSlots) {
+                            const posSlot = empSlots.find(s => s.positionName === pos.positionName);
+                            if (!posSlot) continue;
+                            if (posSlot.shiftCodes.length > 0 && !posSlot.shiftCodes.includes(assignCode)) continue;
+                        }
+                    }
                     writeAssignment(empId, dateStr, pos.positionName, assignCode, sh.name || assignCode, assignHrs, assignStart, inCurrentCycle, assignEnd);
                     if (extensionMode && assignCode === 'D12') extD12Assigns.push(assignments[assignments.length - 1]);
                     if (extensionMode && assignCode === 'N12') extN12Assigns.push(assignments[assignments.length - 1]);

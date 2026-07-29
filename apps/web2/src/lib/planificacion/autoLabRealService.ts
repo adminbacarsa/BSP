@@ -33,6 +33,17 @@ import { computeObjectiveHeadcountBalance } from './rosterHeadcountBalance';
 
 export const AUTO_LAB_REAL_CASE_ID = 'case-real-service';
 
+function buildPositionAssignmentsByEmp(
+    assignments?: import('@/services/slaService').PositionAssignment[],
+): Record<string, Array<{ positionName: string; shiftCodes: string[] }>> | undefined {
+    if (!assignments?.length) return undefined;
+    const result: Record<string, Array<{ positionName: string; shiftCodes: string[] }>> = {};
+    for (const a of assignments) {
+        if (a.slots?.length) result[a.employeeId] = a.slots;
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+}
+
 export interface AutoLabRealServiceBundle {
     caseDef: AutoLabCaseDefinition;
     employees: V2EmployeeDef[];
@@ -382,6 +393,7 @@ export async function loadAutoLabRealServiceBundle(params: {
         defaultShiftByEmp: Object.keys(defaultShiftByEmp).length > 0 ? defaultShiftByEmp : undefined,
         absencesByDate: absencesByDate.length > 0 ? absencesByDate : undefined,
         coverageWisdom,
+        positionAssignmentsByEmp: buildPositionAssignmentsByEmp(srv.positionAssignments),
     };
 
     return {

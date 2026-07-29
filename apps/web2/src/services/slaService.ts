@@ -39,6 +39,14 @@ export interface HorarioVersion {
   bandas: Record<string, { startTime: string; endTime: string; hours: number }>;
 }
 
+// Restricción de cobertura por empleado dentro de un SLA
+export interface PositionAssignment {
+  employeeId: string;
+  employeeName: string;
+  /** Puestos y bandas permitidos. Si shiftCodes está vacío, permite todas las bandas del puesto. */
+  slots: Array<{ positionName: string; shiftCodes: string[] }>;
+}
+
 // Definición de Contrato de Servicio (SLA)
 export interface ServiceSLA {
   id?: string;
@@ -54,6 +62,8 @@ export interface ServiceSLA {
   excludedDates?: string[];  // YYYY-MM-DD: días sin servicio dentro del período del contrato
   /** Historial de cambios de horario. Cada entrada reemplaza el horario de bandas desde su fecha. */
   horarioVersiones?: HorarioVersion[];
+  /** Restricciones de cobertura por empleado: en qué puestos y bandas puede trabajar. Ausencia = sin restricción. */
+  positionAssignments?: PositionAssignment[];
 }
 
 /**
