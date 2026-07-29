@@ -10663,9 +10663,12 @@ export default function PlanificacionPage() {
                                                 <span className="text-3xl font-black">{code || '—'}</span>
                                                 <div className="flex-1 min-w-0">
                                                     <p className="font-black text-base leading-tight">{shift.type || shift.name || (isFrancoShift ? 'Franco' : code)}</p>
-                                                    {!isFrancoShift && (
-                                                        <p className="text-xs font-bold opacity-70">{plannedStart} – {plannedEnd} · {hours > 0 ? `${hours}h` : ''}</p>
-                                                    )}
+                                                    {!isFrancoShift && (() => {
+                                                        const _mb2 = shift.shiftGroupId ? (pendingChanges[key + '_B2'] || secondBlockMap[key] || null) : null;
+                                                        const _mb2s = _mb2?.startTime ? formatTime(_mb2.startTime) : null;
+                                                        const _mb2e = _mb2?.endTime ? formatTime(_mb2.endTime) : null;
+                                                        return <p className="text-xs font-bold opacity-70">{plannedStart} – {plannedEnd}{_mb2s && _mb2e ? ` + ${_mb2s} – ${_mb2e}` : ''} · {hours > 0 ? `${hours}h` : ''}</p>;
+                                                    })()}
                                                     {isFrancoShift && <p className="text-xs font-bold opacity-70">Día libre</p>}
                                                 </div>
                                                 {hasDraft && (
