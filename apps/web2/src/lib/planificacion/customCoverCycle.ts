@@ -1,7 +1,6 @@
 import type { V2Assignment, V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
 import { effectiveShiftsForPositionDay, isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV2';
 import { RET_STANDBY_REFERENCE_HOURS } from './constants';
-import { getISOWeek } from 'date-fns';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const WEEKDAY_LETTERS = ['L', 'M', 'X', 'J', 'V'] as const;
@@ -50,6 +49,16 @@ export function isFixedWeekdayCustomEightHourOrLess(pos: V2PositionDef): boolean
     return isFixedWeekdayCustomPosition(pos) && customCoverMaxShiftHours(pos) <= 8;
 }
 
+/** Semana ISO (1–53) para alternar RET sábado/domingo sin date-fns en el bundle SSR. */
+function isoWeekNumber(dateStr: string): number {
+    const d = new Date(`${dateStr}T12:00:00`);
+    const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const day = utc.getUTCDay() || 7;
+    utc.setUTCDate(utc.getUTCDate() + 4 - day);
+    const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+    return Math.ceil((((utc.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
+}
+
 /**
  * true → RET el sábado y F el domingo; false → F sábado y RET domingo.
  * - 1 titular: alterna por semana ISO (par=sábado, impar=domingo).
@@ -60,7 +69,7 @@ export function customWeekendRetOnSaturday(
     dateStr: string,
     titularIds: string[],
 ): boolean {
-    const weekFlip = getISOWeek(new Date(`${dateStr}T12:00:00`)) % 2;
+    const weekFlip = isoWeekNumber(dateStr) % 2;
     const rank = Math.max(0, titularIds.indexOf(empId));
     if (titularIds.length <= 1) {
         return weekFlip === 0;
