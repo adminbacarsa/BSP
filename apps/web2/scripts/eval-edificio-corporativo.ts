@@ -104,11 +104,29 @@ async function main() {
         a.empId === surplusId && ['N12', 'D12'].includes(String(a.code).toUpperCase()),
     ) : [];
 
-    const pos24 = positions.filter((p) => is24hsRotationPosition(p));
     const weekendDays = run.daysInMonth.map((d) => {
         const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), day = String(d.getDate()).padStart(2, '0');
         return `${y}-${m}-${day}`;
     }).filter((ds) => ['S', 'D'].includes(getDayLetter(ds)));
+    const saturdays = weekendDays.filter((ds) => getDayLetter(ds) === 'S');
+    const sundays = weekendDays.filter((ds) => getDayLetter(ds) === 'D');
+
+    const titularRec1SatRet = assignments.filter((a) =>
+        a.empId === titularRec1 && saturdays.includes(a.dateStr)
+        && String(a.code).toUpperCase() === 'RET',
+    );
+    const titularRec1SunF = assignments.filter((a) =>
+        a.empId === titularRec1 && sundays.includes(a.dateStr)
+        && String(a.code).toUpperCase() === 'F',
+    );
+    const bunkerGroup = stats?.positionGroups?.['Bunker'] ?? [];
+    const bunkerTitular = bunkerGroup[0];
+    const bunkerSatF = bunkerTitular ? assignments.filter((a) =>
+        a.empId === bunkerTitular && saturdays.includes(a.dateStr)
+        && String(a.code).toUpperCase() === 'F',
+    ) : [];
+
+    const pos24 = positions.filter((p) => is24hsRotationPosition(p));
 
     const controlGroup = new Set(stats?.positionGroups?.['Control y Vigilancia'] ?? []);
     const controlWeekendBillable = assignments.filter((a) =>
@@ -147,6 +165,9 @@ async function main() {
 
     assert(outcome.pipeline === 'fixedBandFloater', 'pipeline floater');
     assert(titularRec1M.length >= weekdays.length, `PAULI/titular M L-V (${titularRec1M.length}/${weekdays.length})`);
+    assert(titularRec1SatRet.length === saturdays.length, `Recepcion 1 sábados RET (${titularRec1SatRet.length}/${saturdays.length})`);
+    assert(titularRec1SunF.length === sundays.length, `Recepcion 1 domingos F (${titularRec1SunF.length}/${sundays.length})`);
+    assert(bunkerSatF.length === saturdays.length, `Bunker 10h sábados F (${bunkerSatF.length}/${saturdays.length})`);
     assert(surplusRec1M.length === 0, `excedente sin turnos en Recepcion 1 (${surplusRec1M.length})`);
     assert(surplusN12.length === 0, `excedente sin N12/D12 (${surplusN12.length})`);
     assert(controlWeekendBillable.length >= controlWeekendDemand * 0.85, `Control 24hs finde (${controlWeekendBillable.length}/${controlWeekendDemand})`);

@@ -13,7 +13,7 @@ import {
     type V2PositionDef,
 } from './autoScheduleEngineV2';
 import { assignmentBreaksBandTransition } from './rotativeBandGuard';
-import { isCustomCoverTitular } from './customCoverCycle';
+import { isCustomCoverTitular, francoCodeForPositionDay } from './customCoverCycle';
 import { CYCLE_24_MTN } from './rotativeMtnCycle';
 
 export { CYCLE_24_MTN, CYCLE_24_MTN_LEN } from './rotativeMtnCycle';
@@ -758,7 +758,18 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                     if (inCurrent) employeeCycleHours.current[emp.id] = (employeeCycleHours.current[emp.id] || 0) + meta.hours;
                     else employeeCycleHours.next[emp.id] = (employeeCycleHours.next[emp.id] || 0) + meta.hours;
                 } else {
-                    assignments.push({ empId: emp.id, dateStr, positionName: '', code: 'F', name: 'Franco', hours: 0, startTime: '00:00', isFranco: true });
+                    const restCode = francoCodeForPositionDay(pos, dayLetter);
+                    assignments.push({
+                        empId: emp.id,
+                        dateStr,
+                        positionName: '',
+                        code: restCode,
+                        name: restCode === 'RET' ? 'Retén' : restCode === 'FF' ? 'Franco feriado' : 'Franco',
+                        hours: 0,
+                        startTime: '00:00',
+                        isFranco: restCode === 'F' || restCode === 'FF',
+                        isReten: restCode === 'RET',
+                    });
                 }
             });
             continue;
