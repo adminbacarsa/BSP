@@ -4090,6 +4090,14 @@ function applyServiceRulesPostProcess(
                             if (idx >= 0) result[idx] = { ...result[idx], code: action.allowedCode };
                         }
                     }
+                } else if (action.type === 'ASSIGN') {
+                    if (action.employeeId && action.positionName && action.shiftCode) {
+                        const empA = result.find(a => a.dateStr === dateStr && a.empId === action.employeeId);
+                        if (empA) {
+                            const idx = result.indexOf(empA);
+                            if (idx >= 0) result[idx] = { ...result[idx], positionName: action.positionName, code: action.shiftCode };
+                        }
+                    }
                 }
             }
         }

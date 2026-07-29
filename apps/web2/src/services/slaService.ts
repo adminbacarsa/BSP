@@ -53,7 +53,7 @@ export interface RuleTrigger {
   shiftCode: string;
 }
 
-export type RuleActionType = 'EXCLUDE' | 'MOVE' | 'RESTRICT';
+export type RuleActionType = 'EXCLUDE' | 'MOVE' | 'RESTRICT' | 'ASSIGN';
 
 export interface RuleAction {
   type: RuleActionType;
