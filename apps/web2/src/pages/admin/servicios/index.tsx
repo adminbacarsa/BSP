@@ -468,7 +468,8 @@ export default function ServiciosSLAPage() {
   const addCustomShift = () => {
       if (!newCustomShift.name) return;
       const { hasBlock2, block2Start, block2End } = newCustomShift;
-      const hours = hasBlock2
+      const splitActive = hasBlock2 && !!block2Start && !!block2End;
+      const hours = splitActive
           ? calculateShiftHours(newCustomShift.start, newCustomShift.end) + calculateShiftHours(block2Start, block2End)
           : calculateShiftHours(newCustomShift.start, newCustomShift.end);
       const code = newCustomShift.code || newCustomShift.name.substring(0, 2).toUpperCase();
@@ -476,9 +477,9 @@ export default function ServiciosSLAPage() {
       const newVariant: ShiftVariant = {
           code, name: newCustomShift.name, startTime: newCustomShift.start, endTime: newCustomShift.end,
           hours, isCustom: true,
-          ...(hasBlock2 ? { blocks: [
+          ...(splitActive ? { blocks: [
               { startTime: newCustomShift.start, endTime: newCustomShift.end },
-              { startTime: block2Start, endTime: block2End },
+              { startTime: block2Start!, endTime: block2End! },
           ] } : {}),
           ...(customShiftDateMode === 'dates'
               ? { specificDates: newCustomShift.specificDates }
@@ -2422,7 +2423,7 @@ export default function ServiciosSLAPage() {
                                     <button type="button" onClick={() => setNewCustomShift(prev => ({ ...prev, hasBlock2: !prev.hasBlock2 }))} className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black border transition-colors ${newCustomShift.hasBlock2 ? 'bg-amber-100 border-amber-400 text-amber-700' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
                                         ✂ {newCustomShift.hasBlock2 ? 'Turno cortado activo' : 'Agregar turno cortado'}
                                     </button>
-                                    {newCustomShift.hasBlock2 && (
+                                    {newCustomShift.hasBlock2 && newCustomShift.block2Start && newCustomShift.block2End && (
                                         <span className="text-[9px] text-amber-600 font-bold">
                                             {calculateShiftHours(newCustomShift.start, newCustomShift.end) + calculateShiftHours(newCustomShift.block2Start, newCustomShift.block2End)}h total
                                         </span>
