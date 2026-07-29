@@ -1581,6 +1581,7 @@ function isPlannedCustomCoverRet(a: V2Assignment, ctx: V2EngineContext): boolean
         dayLetter,
         ctx.positions,
         ctx.defaultPositionByEmp,
+        a.dateStr,
     );
 }
 

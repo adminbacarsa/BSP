@@ -63,7 +63,7 @@ import {
     resolveRotativeMtnCode,
     rotativeMtnIsWorkDay,
 } from './rotativeMtnCycle';
-import { applyBalancedLdNineHourRetCctTopUp, buildCustomCycleWorkDays, customCoverDailyPax, customCoverBandsForDay, customCoverSlotsRequiredOnDay, customCoverSimultaneousPax, customCoverWeeklyWorkRest, customPositionOperatesAllWeek, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay, pickBalancedCustomWorkers } from './customCoverCycle';
+import { applyBalancedLdNineHourRetCctTopUp, buildCustomCycleWorkDays, buildCustomWeekendRestOptions, customCoverDailyPax, customCoverBandsForDay, customCoverSlotsRequiredOnDay, customCoverSimultaneousPax, customCoverWeeklyWorkRest, customPositionOperatesAllWeek, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay, pickBalancedCustomWorkers } from './customCoverCycle';
 import { fillCycleBaseRotativeAssignments } from './cycleBaseSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
@@ -2689,7 +2689,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             if (runtime[eid].assignedDays.has(dateStr)) continue;
             if (cycleWorkDays[eid]?.has(dateStr)) continue;
             if (ctx.absences[eid]?.has(dateStr)) continue;
-            const francoCode = francoCodeForPositionDay(pos, dayLetter);
+            const francoCode = francoCodeForPositionDay(
+                pos,
+                dayLetter,
+                buildCustomWeekendRestOptions(pos, eid, dateStr, groupIds),
+            );
             assignments.push({
                 empId: eid,
                 dateStr,
@@ -2722,7 +2726,11 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         for (const eid of workCandidates) {
             if (runtime[eid].assignedDays.has(dateStr)) continue;
             if (ctx.absences[eid]?.has(dateStr)) continue;
-            const restCode = francoCodeForPositionDay(pos, dayLetter);
+            const restCode = francoCodeForPositionDay(
+                pos,
+                dayLetter,
+                buildCustomWeekendRestOptions(pos, eid, dateStr, groupIds),
+            );
             assignments.push({
                 empId: eid,
                 dateStr,
@@ -3452,7 +3460,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 : null;
             if (customPos) {
                 if (!positionIsActiveOn(customPos, dayLetter)) {
-                    const restCode = francoCodeForPositionDay(customPos, dayLetter);
+                    const restCode = francoCodeForPositionDay(
+                        customPos,
+                        dayLetter,
+                        buildCustomWeekendRestOptions(
+                            customPos,
+                            emp.id,
+                            dateStr,
+                            positionGroups[customPos.positionName],
+                        ),
+                    );
                     assignments.push({
                         empId: emp.id,
                         dateStr,
@@ -3469,7 +3486,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 }
                 if (!cycleWorkDays[emp.id]?.has(dateStr)) {
                     if (!st.assignedDays.has(dateStr)) {
-                        const restCode = francoCodeForPositionDay(customPos, dayLetter);
+                        const restCode = francoCodeForPositionDay(
+                            customPos,
+                            dayLetter,
+                            buildCustomWeekendRestOptions(
+                                customPos,
+                                emp.id,
+                                dateStr,
+                                positionGroups[customPos.positionName],
+                            ),
+                        );
                         assignments.push({
                             empId: emp.id,
                             dateStr,
@@ -3735,7 +3761,16 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 if (ctx.absences[emp.id]?.has(dateStr)) continue;
                 const dayLetter = ctx.getDayLetter(dateStr);
                 const francoCode = assignedPos
-                    ? francoCodeForPositionDay(assignedPos, dayLetter)
+                    ? francoCodeForPositionDay(
+                        assignedPos,
+                        dayLetter,
+                        buildCustomWeekendRestOptions(
+                            assignedPos,
+                            emp.id,
+                            dateStr,
+                            positionGroups[assignedPos.positionName],
+                        ),
+                    )
                     : 'F';
                 assignments.push({
                     empId: emp.id,

@@ -126,6 +126,7 @@ export function consolidateRetToDesignee(
     designeeId: string | undefined,
     ctx?: Pick<V2EngineContext, 'positions' | 'defaultPositionByEmp' | 'getDayLetter'>,
     allowedRetEmpIds?: string[],
+    positionGroups?: Record<string, string[]>,
 ): V2Assignment[] {
     const allowed = new Set(
         allowedRetEmpIds?.length
@@ -140,6 +141,8 @@ export function consolidateRetToDesignee(
             dayLetter,
             ctx.positions,
             ctx.defaultPositionByEmp,
+            a.dateStr,
+            positionGroups,
         );
     };
 
@@ -349,6 +352,8 @@ export function fillEmptyCellsWithRet(
                     dayLetter,
                     ctx.positions,
                     positionByEmp,
+                    dateStr,
+                    options?.stats?.positionGroups,
                 ) ?? 'F';
                 result.push({
                     empId: emp.id,

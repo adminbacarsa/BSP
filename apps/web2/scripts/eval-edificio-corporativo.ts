@@ -115,9 +115,9 @@ async function main() {
         a.empId === titularRec1 && saturdays.includes(a.dateStr)
         && String(a.code).toUpperCase() === 'RET',
     );
-    const titularRec1SunF = assignments.filter((a) =>
+    const titularRec1SunRet = assignments.filter((a) =>
         a.empId === titularRec1 && sundays.includes(a.dateStr)
-        && String(a.code).toUpperCase() === 'F',
+        && String(a.code).toUpperCase() === 'RET',
     );
     const bunkerGroup = stats?.positionGroups?.['Bunker'] ?? [];
     const bunkerTitular = bunkerGroup[0];
@@ -165,8 +165,12 @@ async function main() {
 
     assert(outcome.pipeline === 'fixedBandFloater', 'pipeline floater');
     assert(titularRec1M.length >= weekdays.length, `PAULI/titular M L-V (${titularRec1M.length}/${weekdays.length})`);
-    assert(titularRec1SatRet.length === saturdays.length, `Recepcion 1 sábados RET (${titularRec1SatRet.length}/${saturdays.length})`);
-    assert(titularRec1SunF.length === sundays.length, `Recepcion 1 domingos F (${titularRec1SunF.length}/${sundays.length})`);
+    assert(titularRec1SatRet.length >= 1, `Recepcion 1 sábados RET (${titularRec1SatRet.length})`);
+    assert(titularRec1SunRet.length >= 1, `Recepcion 1 domingos RET rotativo (${titularRec1SunRet.length})`);
+    assert(
+        titularRec1SatRet.length + titularRec1SunRet.length >= saturdays.length,
+        'RET repartido entre sábados y domingos del mes',
+    );
     assert(bunkerSatF.length === saturdays.length, `Bunker 10h sábados F (${bunkerSatF.length}/${saturdays.length})`);
     assert(surplusRec1M.length === 0, `excedente sin turnos en Recepcion 1 (${surplusRec1M.length})`);
     assert(surplusN12.length === 0, `excedente sin N12/D12 (${surplusN12.length})`);

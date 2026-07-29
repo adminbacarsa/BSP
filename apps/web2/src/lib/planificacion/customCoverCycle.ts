@@ -1,11 +1,20 @@
 import type { V2Assignment, V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
 import { effectiveShiftsForPositionDay, isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV2';
 import { RET_STANDBY_REFERENCE_HOURS } from './constants';
+import { getISOWeek } from 'date-fns';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const WEEKDAY_LETTERS = ['L', 'M', 'X', 'J', 'V'] as const;
 
 export type CustomRestCode = 'F' | 'FF' | 'RET';
+
+/** Contexto para RET rotativo sábado/domingo en custom L–V ≤8h. */
+export interface CustomWeekendRestOptions {
+    empId: string;
+    dateStr: string;
+    /** Titulares del puesto (orden del grupo, hasta qty). */
+    titularIds?: string[];
+}
 
 /** Jornada máxima entre turnos habilitados del puesto custom. */
 export function customCoverMaxShiftHours(pos: V2PositionDef): number {
@@ -35,16 +44,75 @@ export function fixedWeekdayCustomUsesModo12(pos: V2PositionDef): boolean {
 }
 
 /**
+ * Custom L–V con jornada ≤8h: aplica RET rotativo fin de semana.
+ */
+export function isFixedWeekdayCustomEightHourOrLess(pos: V2PositionDef): boolean {
+    return isFixedWeekdayCustomPosition(pos) && customCoverMaxShiftHours(pos) <= 8;
+}
+
+/**
+ * true → RET el sábado y F el domingo; false → F sábado y RET domingo.
+ * - 1 titular: alterna por semana ISO (par=sábado, impar=domingo).
+ * - 2+ titulares: intercalados (uno RET sáb, otro RET dom) e invierten cada semana.
+ */
+export function customWeekendRetOnSaturday(
+    empId: string,
+    dateStr: string,
+    titularIds: string[],
+): boolean {
+    const weekFlip = getISOWeek(new Date(`${dateStr}T12:00:00`)) % 2;
+    const rank = Math.max(0, titularIds.indexOf(empId));
+    if (titularIds.length <= 1) {
+        return weekFlip === 0;
+    }
+    return (rank + weekFlip) % 2 === 0;
+}
+
+export function buildCustomWeekendRestOptions(
+    pos: V2PositionDef,
+    empId: string,
+    dateStr: string,
+    groupMemberIds?: string[],
+): CustomWeekendRestOptions | undefined {
+    if (!isFixedWeekdayCustomEightHourOrLess(pos)) return undefined;
+    const qty = customCoverDailyPax(pos);
+    const fromGroup = (groupMemberIds ?? []).filter((id) => id).slice(0, qty);
+    const titularIds = fromGroup.length > 0 ? fromGroup : [empId];
+    return { empId, dateStr, titularIds };
+}
+
+/**
  * Descanso en días sin servicio del puesto custom L–V.
- * - Sábado jornada 8h: RET (stand-by; si no es llamado, operaciones lo pasa a FF al cerrar el turno).
- * - Domingo (y sábado >8h): F (franco planificado; si trabaja → FT).
+ * - ≤8h: RET rotativo sábado/domingo (mejor oferta stand-by).
+ * - >8h (10h, 12h…): F sábado y domingo.
  * No se planifica FF en fin de semana: FF es conversión operativa post-RET.
  */
-export function francoCodeForPositionDay(pos: V2PositionDef, dayLetter: string): CustomRestCode {
+export function francoCodeForPositionDay(
+    pos: V2PositionDef,
+    dayLetter: string,
+    weekendRest?: CustomWeekendRestOptions,
+): CustomRestCode {
     if (positionIsActiveOn(pos, dayLetter)) return 'F';
     if (isFixedWeekdayCustomPosition(pos)) {
-        if (dayLetter === 'D') return 'F';
-        if (dayLetter === 'S' && customCoverMaxShiftHours(pos) <= 8) return 'RET';
+        if (customCoverMaxShiftHours(pos) > 8) {
+            return 'F';
+        }
+        if (dayLetter === 'S' || dayLetter === 'D') {
+            if (weekendRest?.empId && weekendRest.dateStr) {
+                const titularIds = weekendRest.titularIds?.length
+                    ? weekendRest.titularIds
+                    : [weekendRest.empId];
+                const retOnSaturday = customWeekendRetOnSaturday(
+                    weekendRest.empId,
+                    weekendRest.dateStr,
+                    titularIds,
+                );
+                if (dayLetter === 'S') return retOnSaturday ? 'RET' : 'F';
+                return retOnSaturday ? 'F' : 'RET';
+            }
+            if (dayLetter === 'S') return 'RET';
+            return 'F';
+        }
         return 'F';
     }
     return 'FF';
@@ -104,11 +172,21 @@ export function plannedCustomCoverRestCode(
     dayLetter: string,
     positions: V2PositionDef[],
     defaultPositionByEmp?: Record<string, string>,
+    dateStr?: string,
+    positionGroups?: Record<string, string[]>,
 ): CustomRestCode | null {
     const pos = resolveCustomCoverEmployeePosition(empId, positions, defaultPositionByEmp);
     if (!pos) return null;
     if (positionIsActiveOn(pos, dayLetter)) return null;
-    return francoCodeForPositionDay(pos, dayLetter);
+    const weekendRest = dateStr
+        ? buildCustomWeekendRestOptions(
+            pos,
+            empId,
+            dateStr,
+            positionGroups?.[pos.positionName],
+        )
+        : undefined;
+    return francoCodeForPositionDay(pos, dayLetter, weekendRest);
 }
 
 export function isPlannedCustomCoverRetAssignment(
@@ -116,8 +194,17 @@ export function isPlannedCustomCoverRetAssignment(
     dayLetter: string,
     positions: V2PositionDef[],
     defaultPositionByEmp?: Record<string, string>,
+    dateStr?: string,
+    positionGroups?: Record<string, string[]>,
 ): boolean {
-    return plannedCustomCoverRestCode(empId, dayLetter, positions, defaultPositionByEmp) === 'RET';
+    return plannedCustomCoverRestCode(
+        empId,
+        dayLetter,
+        positions,
+        defaultPositionByEmp,
+        dateStr,
+        positionGroups,
+    ) === 'RET';
 }
 
 /**

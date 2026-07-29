@@ -336,6 +336,7 @@ function postProcessAutoLabSchedule(
         retDesignee,
         ctx,
         surplusPool.length > 0 ? surplusPool : generation.stats.retDesignateEmpIds,
+        statsWithSurplus.positionGroups,
     );
 
     if (surplusPool.length > 0) {

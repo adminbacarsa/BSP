@@ -13,7 +13,7 @@ import {
     type V2PositionDef,
 } from './autoScheduleEngineV2';
 import { assignmentBreaksBandTransition } from './rotativeBandGuard';
-import { isCustomCoverTitular, francoCodeForPositionDay } from './customCoverCycle';
+import { isCustomCoverTitular, francoCodeForPositionDay, buildCustomWeekendRestOptions } from './customCoverCycle';
 import { CYCLE_24_MTN } from './rotativeMtnCycle';
 
 export { CYCLE_24_MTN, CYCLE_24_MTN_LEN } from './rotativeMtnCycle';
@@ -758,7 +758,13 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                     if (inCurrent) employeeCycleHours.current[emp.id] = (employeeCycleHours.current[emp.id] || 0) + meta.hours;
                     else employeeCycleHours.next[emp.id] = (employeeCycleHours.next[emp.id] || 0) + meta.hours;
                 } else {
-                    const restCode = francoCodeForPositionDay(pos, dayLetter);
+                    const titularIds = (positionGroups[pos.positionName] ?? [])
+                        .slice(0, Math.max(1, Number(pos.qty) || 1));
+                    const restCode = francoCodeForPositionDay(
+                        pos,
+                        dayLetter,
+                        buildCustomWeekendRestOptions(pos, emp.id, dateStr, titularIds),
+                    );
                     assignments.push({
                         empId: emp.id,
                         dateStr,
