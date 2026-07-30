@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getObjectiveForShift, getCheckInTiming } from '@cosp/portal-core';
+import { getObjectiveForShift, getCheckInTiming, resolveCheckInUiStatus } from '@cosp/portal-core';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { useEmployeeShifts } from '../src/hooks/useEmployeeShifts';
 import { useObjectivesMap } from '../src/hooks/useObjectivesMap';
@@ -12,6 +12,7 @@ import { heroShift, pickTodayShiftAny } from '../src/lib/shifts';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
 import { formatHeroTimeRange, HeroShiftPanel } from '../src/components/ui/HeroShiftPanel';
+import { CheckInStatusBanner } from '../src/components/ui/CheckInStatusBanner';
 import { colors, radius } from '../src/theme/tokens';
 
 function heroHeadline(todayAny: ReturnType<typeof pickTodayShiftAny>, hasNext: boolean): string {
@@ -25,7 +26,7 @@ export default function HomeScreen() {
   const { user, employee, empDocId, portalFeatures, signOut } = usePortalAuth();
   const { shifts, loading, error } = useEmployeeShifts(empDocId);
   const { objectivesMap } = useObjectivesMap();
-  const { pendingCount, busyShiftId, requestCheckInForShift, notifyLateArrival } = useCheckIn();
+  const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival } = useCheckIn();
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
 
   const displayName = useMemo(() => {
@@ -48,6 +49,9 @@ export default function HomeScreen() {
     !!mainShift &&
     (mainShift.isPresent || rawStatus === 'PRESENT' || rawStatus === 'InProgress');
   const hasPendingRequest = !!mainShift?.checkInRequestedAt && !isConfirmed;
+  const checkInStatusView = resolveCheckInUiStatus(mainShift, timing, {
+    offlinePendingForShift: !!mainShift && pendingShiftIds.includes(mainShift.id),
+  });
   const canCheckIn =
     portalFeatures.checkIn &&
     !!mainShift &&
@@ -120,21 +124,11 @@ export default function HomeScreen() {
               empresaNombre={empresaNombre || 'Grupo Bacar'}
               statusSlot={
                 <>
-                  {isConfirmed ? (
-                    <View style={styles.presentBox}>
-                      <Text style={styles.presentText}>✓ Presente registrado</Text>
-                    </View>
-                  ) : null}
-                  {hasPendingRequest ? (
-                    <Text style={styles.pendingLine}>Solicitud de presente en revisión</Text>
-                  ) : null}
-                  {pendingCount > 0 ? (
+                  <CheckInStatusBanner view={checkInStatusView} />
+                  {pendingCount > 0 && !pendingShiftIds.includes(mainShift?.id ?? '') ? (
                     <Text style={styles.pendingLine}>
-                      {pendingCount} fichada(s) pendientes de sincronizar
+                      {pendingCount} fichada(s) pendientes de sincronizar (otros turnos)
                     </Text>
-                  ) : null}
-                  {timing?.tooEarly ? (
-                    <Text style={styles.hintLine}>Podés fichar desde 15 min antes del inicio</Text>
                   ) : null}
                 </>
               }
@@ -200,17 +194,7 @@ const styles = StyleSheet.create({
   welcomeMeta: { fontSize: 14, color: colors.slate500, fontWeight: '600' },
   loader: { marginVertical: 40 },
   error: { color: colors.amber600 },
-  presentBox: {
-    marginTop: 12,
-    padding: 14,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(16,185,129,0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(52,211,153,0.35)',
-  },
-  presentText: { color: colors.emerald200, fontWeight: '800', fontSize: 14 },
   pendingLine: { color: '#fcd34d', fontSize: 12, fontWeight: '700', marginTop: 8 },
-  hintLine: { color: colors.indigo200, fontSize: 12, marginTop: 6, opacity: 0.9 },
   heroActions: { gap: 10, marginTop: 16 },
   quickGrid: { gap: 14 },
   quickCard: { gap: 8 },

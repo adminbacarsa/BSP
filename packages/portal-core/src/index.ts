@@ -18,3 +18,17 @@ export {
   validateCheckInDistance,
 } from './checkIn/portalCheckIn';
 export type { PendingCheckInItem, PortalCheckInCoords, CheckInTiming } from './checkIn/portalCheckIn';
+export {
+  resolveCheckInUiStatus,
+  isShiftPresent,
+  isCheckInRequestRejected,
+} from './checkIn/checkInUiStatus';
+export type { CheckInUiStatus, CheckInUiStatusView } from './checkIn/checkInUiStatus';
+export {
+  ABSENCE_TYPE_OPTIONS,
+  absenceSubmitToastMessage,
+  classifyAbsenceForEmployee,
+  dateKeyLocal,
+  filterAbsenceTypesForFeatures,
+} from './absences/employeeAbsence';
+export type { AbsenceType, AbsenceCase, ClassifiedAbsence } from './absences/employeeAbsence';

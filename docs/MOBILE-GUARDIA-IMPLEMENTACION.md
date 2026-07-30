@@ -23,17 +23,17 @@
 |------|--------|--------|--------|----------|------------|
 | **F0** | Fundación | `EN_CURSO` | 12 | 8/12 | — |
 | **F1** | Auth, activación y turnos | `EN_CURSO` | 14 | 11/14 | — |
-| **F2** | Fichada con GPS | `PENDIENTE` | 10 | 0/10 | — |
-| **F3** | Ausencias, licencias y push | `PENDIENTE` | 12 | 0/12 | — |
+| **F2** | Fichada con GPS | `EN_CURSO` | 10 | 8/10 | — |
+| **F3** | Ausencias, licencias y push | `EN_CURSO` | 12 | 3/12 | — |
 | **F4** | Permutas de turno | `PENDIENTE` | 8 | 0/8 | — |
 | **F5** | Credencial digital y UX | `PENDIENTE` | 10 | 0/10 | — |
 | **F6** | Beta cerrada y hardening | `PENDIENTE` | 10 | 0/10 | — |
 | **F7** | Publicación en stores | `PENDIENTE` | 12 | 0/12 | — |
 | | **TOTAL** | | **88** | **19/88** | |
 
-**Fase activa recomendada:** F1 (probar login guardia + turnos en dispositivo)  
+**Fase activa recomendada:** F3 (adjuntos certificado + push)  
 **Última actualización:** 2026-07-30  
-**Última tarea completada:** F1-12 (parcial F1-14 pendiente prueba manual)
+**Última tarea completada:** F3-01 / F3-02 (novedad móvil)
 
 ---
 
@@ -45,7 +45,7 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **F0-03** | Registrar app Android en Firebase Console | F0 |
+| **F3-03** | Adjunto certificado (cámara) | `expo-image-picker` → Storage | F3 |
 
 ### Bloqueantes actuales
 
@@ -76,7 +76,8 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
-2026-07-30 | F2 | Fichada GPS, cola offline, UI hero; PasswordField con ojo en login/activar
+2026-07-30 | F3-01/02 | Pantalla /novedad — ausencias y licencias (Firestore ausencias, classifyAbsence)
+2026-07-30 | F2-05 | CheckInStatusBanner + resolveCheckInUiStatus en portal-core
 2026-07-30 | F1-14 | seed-empleado crea turno demo del día (Planta Bacar Lab) para app móvil
 2026-07-30 | F1-01..F1-13 | Login, activación, deviceId, home/agenda turnos (onSnapshot), portalFeatures, logout
 2026-07-30 | F0-10 | Smoke test validado en dispositivo/web (Metro monorepo aislado)
@@ -208,7 +209,7 @@ npm run dev:mobile
 | F2-02 | Obtener coordenadas | `getCurrentPosition` con timeout y error UX | ✅ Hecha | 2026-07-30 |
 | F2-03 | Validación distancia objetivo | Misma lógica radio + `allowRemoteCheckIn` que web | ✅ Hecha | 2026-07-30 |
 | F2-04 | Integrar `requestCheckIn` | Callable con shiftId, lat, lng, deviceId | ✅ Hecha | 2026-07-30 |
-| F2-05 | Estados UI fichada | Pendiente / confirmado / tarde / rechazado | 🔄 En curso | 2026-07-30 |
+| F2-05 | Estados UI fichada | Pendiente / confirmado / tarde / rechazado | ✅ Hecha | 2026-07-30 |
 | F2-06 | Cola offline en portal-core | Portar `PENDING_CHECKINS_KEY` a AsyncStorage | ✅ Hecha | 2026-07-30 |
 | F2-07 | Sync automático al reconectar | Reintento fichadas pendientes en background | ✅ Hecha | 2026-07-30 |
 | F2-08 | Refactor web (opcional) | Web usa `portal-core` para fichada si conviene | ⬜ Pendiente | — |
@@ -235,11 +236,11 @@ npm run dev:mobile
 
 | ID | Tarea | Criterio de aceptación | Estado | Fecha |
 |----|-------|------------------------|--------|-------|
-| F3-01 | Formulario reportar ausencia | Mismos campos que web → colección `ausencias` | ⬜ Pendiente | — |
-| F3-02 | Formulario solicitar licencia | Flujo separado o unificado según web | ⬜ Pendiente | — |
+| F3-01 | Formulario reportar ausencia | Mismos campos que web → colección `ausencias` | ✅ Hecha | 2026-07-30 |
+| F3-02 | Formulario solicitar licencia | Flujo separado o unificado según web | ✅ Hecha | 2026-07-30 |
 | F3-03 | Adjunto certificado (cámara) | `expo-image-picker` → Storage | ⬜ Pendiente | — |
 | F3-04 | Adjunto certificado (galería) | `expo-document-picker` como alternativa | ⬜ Pendiente | — |
-| F3-05 | `notificarLlegadaTarde` | Botón y confirmación; estado en UI | ⬜ Pendiente | — |
+| F3-05 | `notificarLlegadaTarde` | Botón y confirmación; estado en UI | ✅ Hecha | 2026-07-30 |
 | F3-06 | Configurar APNs en Firebase | Key/cert Apple para push iOS | ⬜ Pendiente | — |
 | F3-07 | `expo-notifications` + FCM | Permisos push; token al login | ⬜ Pendiente | — |
 | F3-08 | Registrar token en backend | Compatible con `deleteMyTokens` existente | ⬜ Pendiente | — |

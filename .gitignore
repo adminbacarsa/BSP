@@ -92,3 +92,7 @@ Thumbs.db
 apps/nvr-agent/sdk/
 
 apps/web2/out/
+
+# Residuos locales Expo (comandos mal pegados)
+apps/mobile-guardia/cd
+apps/mobile-guardia/npx

@@ -1,21 +1,25 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
+import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
 import { colors, radius } from '../src/theme/tokens';
 
 const ROADMAP = [
-  { title: 'Fichada GPS + offline', status: 'Activo', done: true },
-  { title: 'Llegada tarde', status: 'En inicio', done: true },
-  { title: 'Ausencias y licencias', status: 'Próximo', done: false },
-  { title: 'Notificaciones push', status: 'F3 · build EAS', done: false },
+  { title: 'Fichada GPS + offline', status: 'Listo', done: true },
+  { title: 'Llegada tarde', status: 'Listo', done: true },
+  { title: 'Ausencias y licencias', status: 'Formulario activo', done: true },
+  { title: 'Adjunto certificado', status: 'F3-03', done: false },
+  { title: 'Notificaciones push', status: 'F3 · EAS', done: false },
   { title: 'Permutas', status: 'F4', done: false },
   { title: 'Credencial digital', status: 'F5', done: false },
 ];
 
 export default function MasScreen() {
+  const router = useRouter();
   const { portalFeatures } = usePortalAuth();
+  const canNovedad = portalFeatures.reportAbsence || portalFeatures.requestLicense;
 
   return (
     <>
@@ -25,6 +29,14 @@ export default function MasScreen() {
           <Text style={styles.intro}>
             Misma lógica que el portal web del empleado. Los módulos deshabilitados por RRHH no aparecen.
           </Text>
+
+          {canNovedad ? (
+            <CommandCard title="Novedades RRHH">
+              <Text style={styles.cardSub}>Ausencias, licencias y avisos con la misma clasificación que el portal web.</Text>
+              <CommandButton label="Solicitar novedad" onPress={() => router.push('/novedad')} />
+            </CommandCard>
+          ) : null}
+
           <CommandCard title="Tu empresa">
             <View style={styles.flagGrid}>
               <Flag label="Fichada GPS" on={portalFeatures.checkIn} />
@@ -59,6 +71,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.slate50 },
   container: { padding: 20, gap: 14 },
   intro: { color: colors.slate500, fontSize: 14, lineHeight: 21 },
+  cardSub: { fontSize: 13, color: colors.slate500, marginBottom: 4 },
   flagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   flag: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.pill, borderWidth: 1 },
   flagOn: { backgroundColor: '#d1fae5', borderColor: '#6ee7b7' },

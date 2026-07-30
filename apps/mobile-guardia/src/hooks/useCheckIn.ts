@@ -25,11 +25,13 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
 
 export function useCheckIn() {
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingShiftIds, setPendingShiftIds] = useState<string[]>([]);
   const [busyShiftId, setBusyShiftId] = useState<string | null>(null);
 
   const refreshPendingCount = useCallback(async () => {
     const list = await loadPendingCheckins();
     setPendingCount(list.length);
+    setPendingShiftIds(list.map((item) => item.shiftId));
   }, []);
 
   const invokeCheckIn = useCallback(async (payload: ReturnType<typeof buildCheckInPayload>) => {
@@ -134,6 +136,7 @@ export function useCheckIn() {
 
   return {
     pendingCount,
+    pendingShiftIds,
     busyShiftId,
     requestCheckInForShift,
     notifyLateArrival,
