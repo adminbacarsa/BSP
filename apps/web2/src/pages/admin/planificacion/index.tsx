@@ -772,7 +772,12 @@ function applyRotationsForMonth(
                             }
                         }
                     }
+                    // No rellenar fechas anteriores a la semana de referencia
+                    const _rrGate = rotation.referenceWeekStart
+                        ? getWeekStartForDate(rotation.referenceWeekStart, rotation.weekStartDay ?? 1)
+                        : null;
                     for (const dateStr of allDates) {
+                        if (_rrGate && dateStr < _rrGate) continue;
                         const dayLetter = getDayLetter(dateStr);
                         const _rrOff = getRoundRobinOffset(rotation, dateStr, _rrN, _rrInferredRef);
                         if (_rrOff === null) continue;
