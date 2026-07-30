@@ -4139,6 +4139,22 @@ function applyRotationsPostProcess(
     return result;
 }
 
+/** Post-proceso de particularidades SLA (turno cortado, condiciones, rotaciones). Usar en pipelines que no pasan por el cierre de generateScheduleV2. */
+export function applySlaContractPostProcess(
+    ctx: Pick<V2EngineContext, 'positions' | 'serviceRules' | 'serviceRotations'>,
+    assignments: V2Assignment[],
+): V2Assignment[] {
+    type AssignRow = { empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown };
+    let result = expandSplitShiftAssignments(assignments, ctx.positions);
+    if ((ctx.serviceRules?.length ?? 0) > 0) {
+        result = applyServiceRulesPostProcess(ctx, result as AssignRow[]) as V2Assignment[];
+    }
+    if ((ctx.serviceRotations?.length ?? 0) > 0) {
+        result = applyRotationsPostProcess(ctx, result as AssignRow[]) as V2Assignment[];
+    }
+    return result;
+}
+
 function appendPlannerDotacionToFeasibility(
     feasibility: V2FeasibilityReport,
     validation: PlannerDotacionValidationReport | undefined,

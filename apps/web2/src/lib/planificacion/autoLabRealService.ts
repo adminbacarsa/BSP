@@ -257,6 +257,18 @@ export async function loadAutoLabRealServiceBundle(params: {
         employeeSource = 'mixed';
     }
 
+    if (srv.positionAssignments?.length) {
+        warnings.push(
+            `Cobertura de dotación (SLA): ${srv.positionAssignments.length} guardia(s) con puestos/bandas permitidos.`,
+        );
+    }
+    if (srv.serviceRules?.length) {
+        warnings.push(`Condiciones SLA: ${srv.serviceRules.length} regla(s) activas en este contrato.`);
+    }
+    if (srv.serviceRotations?.length) {
+        warnings.push(`Rotaciones SLA: ${srv.serviceRotations.length} ciclo(s) activos en este contrato.`);
+    }
+
     if (employees.length < 2 && positions.some((p) => (p.qty || 1) > 1)) {
         warnings.push(`Solo ${employees.length} guardia(s) en dotación real; el motor puede agregar sintéticos para cerrar pax/horas.`);
     }
@@ -395,6 +407,7 @@ export async function loadAutoLabRealServiceBundle(params: {
         coverageWisdom,
         positionAssignmentsByEmp: buildPositionAssignmentsByEmp(srv.positionAssignments),
         serviceRules: srv.serviceRules?.length ? srv.serviceRules : undefined,
+        serviceRotations: srv.serviceRotations?.length ? srv.serviceRotations : undefined,
     };
 
     return {

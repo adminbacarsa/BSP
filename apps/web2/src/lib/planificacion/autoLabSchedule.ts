@@ -1,6 +1,7 @@
 import type { AutoPlanningBrainResult } from './autoPlanningBrain';
 import { generateScheduleV4 } from './autoScheduleEngineV4';
 import type { V2EngineContext, V2GenerateResult, V2GenerateStats, V2PositionDef, V2EmployeeDef } from './autoScheduleEngineV2';
+import { applySlaContractPostProcess } from './autoScheduleEngineV2';
 import { isCustomCoverPosition, is24hsRotationPosition, normalize24hsPositionCalendars } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import { canUseFixedBandFloater } from './fixedBandFloaterScheduleEngine';
@@ -173,6 +174,12 @@ function postProcessAutoLabSchedule(
     };
 
     let assignments = generation.assignments.map((a) => ({ ...a }));
+
+    // Floater/6+1 no pasan por el post-proceso SLA de generateScheduleV2; V4 ya lo aplicó.
+    if (pipeline !== 'v4') {
+        assignments = applySlaContractPostProcess(ctx, assignments);
+    }
+
     let absenceCoverageGaps: CoverageGap[] = [];
 
     const openingSlotByEmpEarly = resolveOpeningSlotByEmpForPostProcess({
@@ -735,6 +742,11 @@ export function buildAutoLabGenContext(
         headcountByPax: true,
         coverageWisdom: caseDef.coverageWisdom ?? null,
         monthStartGlobalDayIndex,
+        ...(caseDef.positionAssignmentsByEmp
+            ? { positionAssignmentsByEmp: caseDef.positionAssignmentsByEmp }
+            : {}),
+        ...(caseDef.serviceRules?.length ? { serviceRules: caseDef.serviceRules } : {}),
+        ...(caseDef.serviceRotations?.length ? { serviceRotations: caseDef.serviceRotations } : {}),
     };
 }
 

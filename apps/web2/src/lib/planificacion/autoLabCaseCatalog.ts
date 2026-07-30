@@ -48,6 +48,10 @@ export interface AutoLabCaseDefinition {
     coverageWisdom?: PlanningCoverageWisdom | null;
     /** Restricciones de cobertura: empId → [{positionName, shiftCodes}]. Ausencia = sin restricción. */
     positionAssignmentsByEmp?: Record<string, Array<{ positionName: string; shiftCodes: string[] }>>;
+    /** Condiciones IF→THEN del SLA (solo si el contrato las define). */
+    serviceRules?: import('@/services/slaService').ServiceRule[];
+    /** Rotaciones periódicas del SLA (solo si el contrato las define). */
+    serviceRotations?: import('@/services/slaService').ServiceRotation[];
 }
 
 const WEEKDAYS = ['L', 'M', 'X', 'J', 'V'] as const;
