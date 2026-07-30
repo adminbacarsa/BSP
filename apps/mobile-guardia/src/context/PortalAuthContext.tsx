@@ -19,7 +19,7 @@ import {
   type PortalFeatures,
   type EmpleadoPortal,
 } from '@cosp/portal-types';
-import { resolveEmpDocId } from '@cosp/portal-core';
+import { resolveEmpDocIdWithRetry } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 import { getOrCreateDeviceId, getStoredDeviceId } from '../lib/deviceId';
 
@@ -32,6 +32,8 @@ function normalizeRoleKey(role: string): string {
 type PortalAuthContextValue = {
   user: User | null;
   initializing: boolean;
+  employeeProfileLoading: boolean;
+  employeeProfileReady: boolean;
   empDocId: string | null;
   employee: EmpleadoPortal | null;
   portalFeatures: PortalFeatures;
@@ -51,7 +53,7 @@ async function isEmployeeUser(user: User, db: ReturnType<typeof getPortalFirebas
     return true;
   }
   try {
-    const empId = await resolveEmpDocId(db, user);
+    const empId = await resolveEmpDocIdWithRetry(db, user, 2);
     return empId !== null;
   } catch {
     return false;
@@ -85,7 +87,7 @@ export function mapPortalAuthError(err: unknown, emulatorMode: boolean): string 
 }
 
 async function verifyDeviceForUser(user: User, db: ReturnType<typeof getPortalFirebase>['db']): Promise<boolean> {
-  const empDocId = await resolveEmpDocId(db, user);
+  const empDocId = await resolveEmpDocIdWithRetry(db, user, 2);
   if (empDocId) {
     const empSnap = await getDoc(doc(db, 'empleados', empDocId));
     if (empSnap.exists() && empSnap.data()?.bypassDeviceCheck === true) {
@@ -112,6 +114,8 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const { auth, db } = getPortalFirebase();
   const [user, setUser] = useState<User | null>(null);
   const [initializing, setInitializing] = useState(true);
+  const [employeeProfileLoading, setEmployeeProfileLoading] = useState(false);
+  const [employeeProfileReady, setEmployeeProfileReady] = useState(false);
   const [empDocId, setEmpDocId] = useState<string | null>(null);
   const [employee, setEmployee] = useState<EmpleadoPortal | null>(null);
   const [portalFeatures, setPortalFeatures] = useState<PortalFeatures>(DEFAULT_PORTAL_FEATURES);
@@ -119,34 +123,40 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
 
   const loadEmployee = useCallback(
     async (currentUser: User) => {
-      const id = await resolveEmpDocId(db, currentUser);
-      setEmpDocId(id);
-      if (!id) {
-        setEmployee(null);
-        setPortalFeatures(DEFAULT_PORTAL_FEATURES);
-        return;
-      }
-      const snap = await getDoc(doc(db, 'empleados', id));
-      if (!snap.exists()) {
-        setEmployee(null);
-        return;
-      }
-      const data = snap.data();
-      setEmployee({
-        id,
-        uid: data.uid,
-        email: data.email,
-        firstName: data.firstName || data.nombre,
-        lastName: data.lastName || data.apellido,
-        fileNumber: data.fileNumber || data.legajo,
-        empresaId: data.empresaId,
-        deviceId: data.deviceId ?? null,
-      });
-      const pf = data.portalFeatures;
-      if (pf && typeof pf === 'object') {
-        setPortalFeatures((prev) => ({ ...prev, ...pf }));
-      } else {
-        setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+      setEmployeeProfileLoading(true);
+      try {
+        const id = await resolveEmpDocIdWithRetry(db, currentUser, 3);
+        setEmpDocId(id);
+        if (!id) {
+          setEmployee(null);
+          setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+          return;
+        }
+        const snap = await getDoc(doc(db, 'empleados', id));
+        if (!snap.exists()) {
+          setEmployee(null);
+          return;
+        }
+        const data = snap.data();
+        setEmployee({
+          id,
+          uid: data.uid,
+          email: data.email,
+          firstName: data.firstName || data.nombre,
+          lastName: data.lastName || data.apellido,
+          fileNumber: data.fileNumber || data.legajo,
+          empresaId: data.empresaId,
+          deviceId: data.deviceId ?? null,
+        });
+        const pf = data.portalFeatures;
+        if (pf && typeof pf === 'object') {
+          setPortalFeatures((prev) => ({ ...prev, ...pf }));
+        } else {
+          setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+        }
+      } finally {
+        setEmployeeProfileLoading(false);
+        setEmployeeProfileReady(true);
       }
     },
     [db],
@@ -158,6 +168,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       if (!nextUser) {
         setEmpDocId(null);
         setEmployee(null);
+        setEmployeeProfileReady(false);
         setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         setDeviceVerified(null);
         setInitializing(false);
@@ -181,6 +192,11 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         const role = normalizeRoleKey(String(token?.claims?.role ?? ''));
         const type = normalizeRoleKey(String(token?.claims?.type ?? ''));
         if (EMPLOYEE_ROLES.includes(role) || EMPLOYEE_ROLES.includes(type)) {
+          try {
+            await loadEmployee(nextUser);
+          } catch {
+            /* Firestore intermitente en móvil */
+          }
           setDeviceVerified(null);
         } else {
           await firebaseSignOut(auth);
@@ -222,6 +238,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setEmpDocId(null);
     setEmployee(null);
+    setEmployeeProfileReady(false);
     setDeviceVerified(null);
   }, [auth]);
 
@@ -236,6 +253,8 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       initializing,
+      employeeProfileLoading,
+      employeeProfileReady,
       empDocId,
       employee,
       portalFeatures,
@@ -244,7 +263,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       signOut,
       refreshEmployee,
     }),
-    [user, initializing, empDocId, employee, portalFeatures, deviceVerified, signIn, signOut, refreshEmployee],
+    [user, initializing, employeeProfileLoading, employeeProfileReady, empDocId, employee, portalFeatures, deviceVerified, signIn, signOut, refreshEmployee],
   );
 
   return <PortalAuthContext.Provider value={value}>{children}</PortalAuthContext.Provider>;

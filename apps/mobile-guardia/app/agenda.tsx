@@ -36,8 +36,8 @@ function ShiftRow({ item }: { item: Shift }) {
 }
 
 export default function AgendaScreen() {
-  const { empDocId, portalFeatures } = usePortalAuth();
-  const { shifts, loading, error } = useEmployeeShifts(empDocId);
+  const { empDocId, portalFeatures, user } = usePortalAuth();
+  const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
 
   if (!portalFeatures.viewSchedule) {
     return (

@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getObjectiveForShift, getCheckInTiming, resolveCheckInUiStatus } from '@cosp/portal-core';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
@@ -23,12 +24,23 @@ function heroHeadline(todayAny: ReturnType<typeof pickTodayShiftAny>, hasNext: b
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user, employee, empDocId, portalFeatures, signOut } = usePortalAuth();
-  const { shifts, loading, error } = useEmployeeShifts(empDocId);
+  const { user, employee, empDocId, portalFeatures, signOut, refreshEmployee, employeeProfileLoading, employeeProfileReady } =
+    usePortalAuth();
+  const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { objectivesMap } = useObjectivesMap();
   const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival } = useCheckIn();
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
 
+  const profileMissing = employeeProfileReady && !employee && !empDocId && !!user;
+  const profileStale = employeeProfileReady && !employee && !!empDocId && !!user;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (user && !employee && !employeeProfileLoading) {
+        void refreshEmployee();
+      }
+    }, [user, employee, employeeProfileLoading, refreshEmployee]),
+  );
   const displayName = useMemo(() => {
     if (employee?.lastName || employee?.firstName) {
       return `${employee.lastName || ''}${employee.lastName && employee.firstName ? ', ' : ''}${employee.firstName || ''}`.trim();
@@ -106,6 +118,22 @@ export default function HomeScreen() {
             <Text style={styles.welcomeName}>{displayName}</Text>
             {employee?.fileNumber ? (
               <Text style={styles.welcomeMeta}>Legajo {employee.fileNumber}</Text>
+            ) : employeeProfileLoading ? (
+              <Text style={styles.welcomeMeta}>Cargando legajo…</Text>
+            ) : profileStale ? (
+              <View style={styles.profileWarnBox}>
+                <Text style={styles.welcomeWarn}>
+                  No se pudo leer el legajo (red lenta). Tocá reintentar.
+                </Text>
+                <CommandButton label="Reintentar legajo" variant="ghost" onPress={() => refreshEmployee()} />
+              </View>
+            ) : profileMissing ? (
+              <View style={styles.profileWarnBox}>
+                <Text style={styles.welcomeWarn}>
+                  Sin legajo en Firestore. En la PC: npm run emulators y npm run seed. Luego cerrá sesión y entrá con
+                  guardia@bacarsa.com.ar
+                </Text>
+              </View>
             ) : null}
           </View>
 
@@ -114,6 +142,14 @@ export default function HomeScreen() {
           ) : error ? (
             <CommandCard title="Cronograma">
               <Text style={styles.error}>{error}</Text>
+            </CommandCard>
+          ) : shifts.length === 0 && !loading ? (
+            <CommandCard title="Cronograma">
+              <Text style={styles.emptyShifts}>
+                No hay turnos este mes para tu usuario. Si recién configuraste el lab, ejecutá{' '}
+                <Text style={styles.emptyBold}>npm run seed</Text> en la PC (emuladores activos) y reiniciá sesión.
+              </Text>
+              <CommandButton label="Reintentar carga" variant="secondary" onPress={() => refreshEmployee()} />
             </CommandCard>
           ) : (
             <HeroShiftPanel
@@ -192,8 +228,12 @@ const styles = StyleSheet.create({
   },
   welcomeName: { fontSize: 26, fontWeight: '900', color: colors.slate950 },
   welcomeMeta: { fontSize: 14, color: colors.slate500, fontWeight: '600' },
+  welcomeWarn: { fontSize: 12, color: colors.amber600, fontWeight: '600', lineHeight: 18 },
+  profileWarnBox: { marginTop: 6, gap: 8 },
   loader: { marginVertical: 40 },
   error: { color: colors.amber600 },
+  emptyShifts: { color: colors.slate600, fontSize: 14, lineHeight: 22 },
+  emptyBold: { fontWeight: '800', color: colors.indigo700 },
   pendingLine: { color: '#fcd34d', fontSize: 12, fontWeight: '700', marginTop: 8 },
   heroActions: { gap: 10, marginTop: 16 },
   quickGrid: { gap: 14 },

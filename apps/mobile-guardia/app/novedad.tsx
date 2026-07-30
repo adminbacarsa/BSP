@@ -36,7 +36,7 @@ function todayKey(): string {
 export default function NovedadScreen() {
   const router = useRouter();
   const { user, employee, empDocId, portalFeatures, initializing } = usePortalAuth();
-  const { shifts } = useEmployeeShifts(empDocId);
+  const { shifts } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { db } = getPortalFirebase();
 
   const typeOptions = useMemo(
