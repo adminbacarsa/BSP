@@ -1,4 +1,4 @@
-# COSP Lab — una ventana: emuladores + seed + Next dev (+ Cursor opcional).
+﻿# COSP Lab — una ventana: emuladores + seed + Next dev (+ Cursor opcional).
 # Uso:
 #   powershell -ExecutionPolicy Bypass -File scripts\start-cosp-lab.ps1
 #   npm run lab
