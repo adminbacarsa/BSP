@@ -90,6 +90,7 @@ export interface RotationEntry {
   employeeName: string;
   positionName: string;
   shiftCode: string;
+  cycleAnchorDate?: string; // YYYY-MM-DD — fecha de un franco conocido (para ciclo automático)
 }
 
 export interface RotationPeriod {
@@ -104,6 +105,8 @@ export interface ServiceRotation {
   cycleMode?: 'round_robin';
   referenceWeekStart?: string; // YYYY-MM-DD — lunes de la Semana A (para tipo WEEKLY)
   weekStartDay?: number;       // 1=Lun (default), 2=Mar, …7=Dom
+  cycleWorkDays?: number;      // días de trabajo en el ciclo (ej. 5 para 5+1)
+  cycleOffDays?: number;       // días de franco en el ciclo (ej. 1 para 5+1, 2 para 6+2)
   periods: RotationPeriod[];
 }
 

@@ -868,6 +868,35 @@ function applyRotationsForMonth(
                             };
                         }
                     }
+                    // Francos automáticos por ciclo de trabajo (cycleWorkDays + cycleOffDays)
+                    if (rotation.cycleWorkDays && rotation.cycleOffDays) {
+                        const _cycLen = rotation.cycleWorkDays + rotation.cycleOffDays;
+                        for (let _ci = 0; _ci < _rrN; _ci++) {
+                            const _cEmp = _rrE[_ci];
+                            if (!_cEmp.cycleAnchorDate) continue;
+                            const _anchorMs = new Date(_cEmp.cycleAnchorDate + 'T00:00:00').getTime();
+                            for (const _cDate of allDates) {
+                                if (_rrGate && _cDate < _rrGate) continue;
+                                const _cKey = `${_cEmp.employeeId}_${_cDate}`;
+                                const _cPend = pendingChanges[_cKey];
+                                if (_cPend && !_cPend.isDeleted) continue;
+                                const _cMs = new Date(_cDate + 'T00:00:00').getTime();
+                                const _cDays = Math.round((_cMs - _anchorMs) / 86400000);
+                                const _cPos = ((_cDays % _cycLen) + _cycLen) % _cycLen;
+                                if (_cPos < rotation.cycleOffDays) {
+                                    additions[_cKey] = {
+                                        empId: _cEmp.employeeId,
+                                        dateStr: _cDate,
+                                        code: 'F',
+                                        positionName: '',
+                                        hours: 0,
+                                        startTime: '00:00',
+                                        isDeleted: false,
+                                    };
+                                }
+                            }
+                        }
+                    }
                 }
             }
             continue;

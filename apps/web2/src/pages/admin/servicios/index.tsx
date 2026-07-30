@@ -2775,6 +2775,17 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <p className="text-[9px] text-slate-400 mt-0.5">Lunes donde emp[0] usa su código base. Puede ser del mes anterior.</p>
                                 </div>
                               )}
+                              {editingRotation.cycleMode === 'round_robin' && (
+                                <div>
+                                  <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Ciclo</p>
+                                  <div className="flex items-center gap-1.5">
+                                    <input type="number" min="1" max="7" value={editingRotation.cycleWorkDays ?? ''} onChange={e => setEditingRotation({ ...editingRotation, cycleWorkDays: e.target.value ? parseInt(e.target.value) : undefined })} placeholder="días" className="w-14 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5 text-center" />
+                                    <span className="text-[9px] text-slate-400">+</span>
+                                    <input type="number" min="1" max="7" value={editingRotation.cycleOffDays ?? ''} onChange={e => setEditingRotation({ ...editingRotation, cycleOffDays: e.target.value ? parseInt(e.target.value) : undefined })} placeholder="F" className="w-10 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5 text-center" />
+                                  </div>
+                                  <p className="text-[9px] text-slate-400 mt-0.5">Días trabajo + días franco. Ej: 5+1 coloca F automático al planificar.</p>
+                                </div>
+                              )}
                             </div>
                             {editingRotation.cycleMode === 'round_robin' ? (
                           <div>
@@ -2794,6 +2805,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <option value="">— banda —</option>
                                   {getPositionCodes(entry.positionName, form.positions).map((cc: string) => <option key={cc} value={cc}>{cc}</option>)}
                                 </select>
+                                {editingRotation.cycleWorkDays && (
+                                  <input type="date" title="Último franco conocido (ancla del ciclo)" value={entry.cycleAnchorDate || ''} onChange={e => updRREntry(eidx, 'cycleAnchorDate', e.target.value)} className="w-28 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                )}
                                 <button type="button" onClick={() => removeRREntry(eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
                               </div>
                             ))}
@@ -2923,6 +2937,17 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <p className="text-[9px] text-slate-400 mt-0.5">Lunes donde emp[0] usa su código base. Puede ser del mes anterior.</p>
                             </div>
                           )}
+                          {editingRotation.cycleMode === 'round_robin' && (
+                            <div>
+                              <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Ciclo</p>
+                              <div className="flex items-center gap-1.5">
+                                <input type="number" min="1" max="7" value={editingRotation.cycleWorkDays ?? ''} onChange={e => setEditingRotation({ ...editingRotation, cycleWorkDays: e.target.value ? parseInt(e.target.value) : undefined })} placeholder="días" className="w-14 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5 text-center" />
+                                <span className="text-[9px] text-slate-400">+</span>
+                                <input type="number" min="1" max="7" value={editingRotation.cycleOffDays ?? ''} onChange={e => setEditingRotation({ ...editingRotation, cycleOffDays: e.target.value ? parseInt(e.target.value) : undefined })} placeholder="F" className="w-10 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5 text-center" />
+                              </div>
+                              <p className="text-[9px] text-slate-400 mt-0.5">Días trabajo + días franco. Ej: 5+1 coloca F automático al planificar.</p>
+                            </div>
+                          )}
                         </div>
                         {editingRotation.cycleMode === 'round_robin' ? (
                   <div>
@@ -2942,6 +2967,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                           <option value="">— banda —</option>
                           {getPositionCodes(entry.positionName, form.positions).map((cc: string) => <option key={cc} value={cc}>{cc}</option>)}
                         </select>
+                        {editingRotation.cycleWorkDays && (
+                          <input type="date" title="Último franco conocido (ancla del ciclo)" value={entry.cycleAnchorDate || ''} onChange={e => updRREntry(eidx, 'cycleAnchorDate', e.target.value)} className="w-28 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                        )}
                         <button type="button" onClick={() => removeRREntry(eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
                       </div>
                     ))}
