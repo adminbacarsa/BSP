@@ -813,7 +813,7 @@ export default function ServiciosSLAPage() {
     if (editingRule?.id === id) { setEditingRule(null); setEditingRuleIsNew(false); }
   }
   function startNewRotation() {
-    setEditingRotation({ id: Date.now().toString(), name: '', periods: [], weekStartDay: 1 });
+    setEditingRotation({ id: Date.now().toString(), name: '', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: [] }], weekStartDay: 1 });
     setEditingRotationIsNew(true);
   }
   function cancelEditRotation() { setEditingRotation(null); setEditingRotationIsNew(false); }
@@ -2760,7 +2760,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <div>
                                 <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Modo</p>
                                 <div className="flex rounded-lg overflow-hidden border dark:border-slate-600">
-                                  <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={editingRotation.cycleMode !== 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Fijo</button>
+                                  <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={editingRotation.cycleMode !== 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por período</button>
                                   <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'round_robin', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota sem. a sem.</button>
                                 </div>
                               </div>
@@ -2903,7 +2903,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                           <div>
                             <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Modo</p>
                             <div className="flex rounded-lg overflow-hidden border dark:border-slate-600">
-                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={editingRotation.cycleMode !== 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Fijo</button>
+                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={editingRotation.cycleMode !== 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por período</button>
                               <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'round_robin', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota sem. a sem.</button>
                             </div>
                           </div>
