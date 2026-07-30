@@ -2767,7 +2767,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
                                 <div>
                                   <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana de ref. (sem. 0)</p>
-                                  <input type="date" value={editingRotation.referenceWeekStart || ''} onChange={e => setEditingRotation({ ...editingRotation, referenceWeekStart: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                  <div className="flex items-center gap-1">
+                                    <button type="button" title="Semana anterior" disabled={!editingRotation.referenceWeekStart} onClick={() => { const d = new Date((editingRotation.referenceWeekStart || '') + 'T00:00:00'); d.setDate(d.getDate() - 7); setEditingRotation({ ...editingRotation, referenceWeekStart: d.toISOString().split('T')[0] }); }} className="text-[10px] px-1.5 py-1 rounded border dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-500 hover:bg-slate-100 disabled:opacity-40">←</button>
+                                    <input type="date" value={editingRotation.referenceWeekStart || ''} onChange={e => setEditingRotation({ ...editingRotation, referenceWeekStart: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                    <button type="button" title="Semana siguiente" disabled={!editingRotation.referenceWeekStart} onClick={() => { const d = new Date((editingRotation.referenceWeekStart || '') + 'T00:00:00'); d.setDate(d.getDate() + 7); setEditingRotation({ ...editingRotation, referenceWeekStart: d.toISOString().split('T')[0] }); }} className="text-[10px] px-1.5 py-1 rounded border dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-500 hover:bg-slate-100 disabled:opacity-40">→</button>
+                                  </div>
+                                  <p className="text-[9px] text-slate-400 mt-0.5">Lunes donde emp[0] usa su código base. Puede ser del mes anterior.</p>
                                 </div>
                               )}
                             </div>
@@ -2910,7 +2915,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                           {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
                             <div>
                               <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana de ref. (sem. 0)</p>
-                              <input type="date" value={editingRotation.referenceWeekStart || ''} onChange={e => setEditingRotation({ ...editingRotation, referenceWeekStart: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                              <div className="flex items-center gap-1">
+                                <button type="button" title="Semana anterior" disabled={!editingRotation.referenceWeekStart} onClick={() => { const d = new Date((editingRotation.referenceWeekStart || '') + 'T00:00:00'); d.setDate(d.getDate() - 7); setEditingRotation({ ...editingRotation, referenceWeekStart: d.toISOString().split('T')[0] }); }} className="text-[10px] px-1.5 py-1 rounded border dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-500 hover:bg-slate-100 disabled:opacity-40">←</button>
+                                <input type="date" value={editingRotation.referenceWeekStart || ''} onChange={e => setEditingRotation({ ...editingRotation, referenceWeekStart: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                <button type="button" title="Semana siguiente" disabled={!editingRotation.referenceWeekStart} onClick={() => { const d = new Date((editingRotation.referenceWeekStart || '') + 'T00:00:00'); d.setDate(d.getDate() + 7); setEditingRotation({ ...editingRotation, referenceWeekStart: d.toISOString().split('T')[0] }); }} className="text-[10px] px-1.5 py-1 rounded border dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-500 hover:bg-slate-100 disabled:opacity-40">→</button>
+                              </div>
+                              <p className="text-[9px] text-slate-400 mt-0.5">Lunes donde emp[0] usa su código base. Puede ser del mes anterior.</p>
                             </div>
                           )}
                         </div>
