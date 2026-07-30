@@ -41,9 +41,17 @@ function createFirestore(app: FirebaseApp, useEmulator: boolean): Firestore {
   return getFirestore(app);
 }
 
-export function createPortalFirebase(config: PortalCoreConfig): PortalFirebase {
+export type PortalFirebaseOptions = {
+  /** React Native: usar initializeAuth + AsyncStorage en lugar de getAuth() */
+  resolveAuth?: (app: FirebaseApp) => Auth;
+};
+
+export function createPortalFirebase(
+  config: PortalCoreConfig,
+  options?: PortalFirebaseOptions,
+): PortalFirebase {
   const app = getApps().length ? getApp() : initializeApp(config.firebase);
-  const auth = getAuth(app);
+  const auth = options?.resolveAuth ? options.resolveAuth(app) : getAuth(app);
   const db = createFirestore(app, config.useEmulator);
   const functions = getFunctions(app, config.functionsRegion ?? 'us-central1');
   const storage = getStorage(app);

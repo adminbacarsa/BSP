@@ -1386,11 +1386,12 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
 // =========================================================
 
 export const activateAndSetPassword = functions.https.onCall(async (data, _context) => {
-  const { token, password, deviceId, deviceInfo } = data as {
+  const { token, password, deviceId, deviceInfo, platform } = data as {
     token: string;
     password: string;
     deviceId?: string;
     deviceInfo?: Record<string, string>;
+    platform?: 'web' | 'ios' | 'android';
   };
 
   if (!token) throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
@@ -1429,6 +1430,13 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
   // 2. Marcar token como usado
   await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
 
+  const resolvedPlatform =
+    platform === 'ios' || platform === 'android' || platform === 'web'
+      ? platform
+      : deviceInfo?.platform === 'ios' || deviceInfo?.platform === 'android'
+        ? deviceInfo.platform
+        : 'web';
+
   // 3. Registrar dispositivo verificado
   await db.collection('device_tokens').doc(uid).set({
     uid,
@@ -1438,6 +1446,7 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
     activatedAt: admin.firestore.FieldValue.serverTimestamp(),
     deviceInfo: deviceInfo || {},
     deviceId: deviceId || null,
+    platform: resolvedPlatform,
   });
 
   return { email, employeeId };

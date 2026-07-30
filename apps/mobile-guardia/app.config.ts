@@ -1,5 +1,7 @@
 import type { ExpoConfig } from 'expo/config';
 
+const useEmulator = process.env.EXPO_PUBLIC_USE_EMULATOR === 'true';
+
 const config: ExpoConfig = {
   name: 'COSP Guardia',
   slug: 'cosp-guardia',
@@ -11,19 +13,36 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.grupobacar.cosp.guardia',
+    infoPlist: {
+      NSLocationWhenInUseUsageDescription:
+        'COSP Guardia usa tu ubicación para validar la fichada en el puesto de trabajo.',
+    },
   },
   android: {
     package: 'com.grupobacar.cosp.guardia',
+    permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION'],
+    ...(useEmulator ? { usesCleartextTraffic: true } : {}),
     adaptiveIcon: {
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundColor: '#312e81',
     },
-    predictiveBackGestureEnabled: false,
   },
   web: {
     favicon: './assets/favicon.png',
   },
-  plugins: ['expo-router'],
+  plugins: [
+    'expo-router',
+    'expo-asset',
+    'expo-font',
+    'expo-secure-store',
+    [
+      'expo-location',
+      {
+        locationWhenInUsePermission:
+          'COSP Guardia necesita tu ubicación para validar que estás en el puesto al marcar presente.',
+      },
+    ],
+  ],
   experiments: {
     typedRoutes: true,
   },

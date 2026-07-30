@@ -1,11 +1,7 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true,
-    "paths": {
-      "@cosp/portal-core": ["../../packages/portal-core/src/index.ts"],
-      "@cosp/portal-types": ["../../packages/portal-types/src/index.ts"]
-    }
+    "strict": true
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"]
 }

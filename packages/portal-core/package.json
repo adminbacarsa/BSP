@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@cosp/portal-types": "file:../portal-types",
-    "cronoapp": "file:../..",
     "firebase": "^12.8.0"
   }
 }

@@ -1,18 +1,24 @@
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { PortalAuthProvider } from '../src/context/PortalAuthContext';
+import { colors } from '../src/theme/tokens';
 
 export default function RootLayout() {
   return (
-    <>
-      <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerStyle: { backgroundColor: '#312e81' },
-          headerTintColor: '#fff',
-          headerTitleStyle: { fontWeight: '700' },
-          contentStyle: { backgroundColor: '#f8fafc' },
-        }}
-      />
-    </>
+    <SafeAreaProvider>
+      <PortalAuthProvider>
+        <StatusBar style="light" />
+        <Stack
+          screenOptions={{
+            headerStyle: { backgroundColor: colors.indigo900 },
+            headerTintColor: colors.white,
+            headerTitleStyle: { fontWeight: '800', fontSize: 17 },
+            headerShadowVisible: true,
+            contentStyle: { backgroundColor: colors.slate50 },
+          }}
+        />
+      </PortalAuthProvider>
+    </SafeAreaProvider>
   );
 }

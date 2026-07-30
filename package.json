@@ -81,8 +81,7 @@
   "author": "Vale - Senior Tech Lead",
   "license": "ISC",
   "workspaces": [
-    "packages/*",
-    "apps/mobile-guardia"
+    "packages/*"
   ],
   "devDependencies": {
     "firebase-tools": "^15.0.0",

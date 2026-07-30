@@ -102,8 +102,10 @@ export type ActivateAndSetPasswordResponse = {
 
 export type RequestCheckInRequest = {
   shiftId: string;
-  latitude: number;
-  longitude: number;
+  coords: { lat: number; lng: number } | null;
+  offline?: boolean;
+  recordedAt?: string;
+  idempotencyKey?: string;
   deviceId?: string;
   platform?: PortalPlatform;
 };

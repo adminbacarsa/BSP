@@ -8,7 +8,7 @@ process.env.FIRESTORE_EMULATOR_HOST = 'localhost:8080';
 process.env.FIREBASE_AUTH_EMULATOR_HOST = 'localhost:9099';
 
 const { initializeApp, getApps } = require('firebase-admin/app');
-const { getFirestore }           = require('firebase-admin/firestore');
+const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const { getAuth }                = require('firebase-admin/auth');
 
 if (!getApps().length) initializeApp({ projectId: 'comtroldata' });
@@ -18,6 +18,51 @@ const auth = getAuth();
 
 const EMAIL    = 'guardia@bacarsa.com.ar';
 const PASSWORD = 'guardia1234';
+const EMPRESA_ID = 'bacarsa';
+const LAB_CLIENT_ID = 'client_lab_guardia';
+const LAB_OBJECTIVE_ID = 'obj_lab_guardia';
+
+async function seedTurnoHoyGuardia(empDocId) {
+  const now = new Date();
+  const start = new Date(now.getTime() - 60 * 60 * 1000);
+  const end = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+
+  await db.collection('clients').doc(LAB_CLIENT_ID).set({
+    name: 'Cliente Lab Portal',
+    empresaId: EMPRESA_ID,
+    active: true,
+    objetivos: [{
+      id: LAB_OBJECTIVE_ID,
+      name: 'Planta Bacar Lab',
+      active: true,
+      lat: -31.42,
+      lng: -64.18,
+    }],
+  }, { merge: true });
+
+  const shiftDocId = `seed_shift_${empDocId}_hoy`;
+  await db.collection('turnos').doc(shiftDocId).set({
+    employeeId: empDocId,
+    employeeName: 'Pérez, Juan',
+    empresaId: EMPRESA_ID,
+    clientId: LAB_CLIENT_ID,
+    clientName: 'Cliente Lab Portal',
+    objectiveId: LAB_OBJECTIVE_ID,
+    objectiveName: 'Planta Bacar Lab',
+    positionName: 'Puesto Principal',
+    code: 'M',
+    status: 'Assigned',
+    startTime: Timestamp.fromDate(start),
+    endTime: Timestamp.fromDate(end),
+    isPresent: false,
+    isCompleted: false,
+    isAbsent: false,
+    isFranco: false,
+    createdAt: Timestamp.now(),
+  }, { merge: true });
+
+  console.log(`✓ turnos/${shiftDocId} → turno demo (hoy, en curso)`);
+}
 
 async function run() {
   console.log('\n🌱 Seed emulador — usuario empleado\n');
@@ -54,8 +99,9 @@ async function run() {
     status:     'active',
     startDate:  '2023-03-01',
     laborAgreement: 'SUVICO',
-    empresaId:  'bacarsa',
+    empresaId:  EMPRESA_ID,
     portalInvite: { sent: true },
+    bypassDeviceCheck: true,
   };
 
   // Buscar si ya existe un doc con ese uid para reutilizar el mismo ID
@@ -73,11 +119,14 @@ async function run() {
     console.log(`✓ empleados/${empDocId} → creado`);
   }
 
+  await seedTurnoHoyGuardia(empDocId);
+
   console.log(`\n✅ Usuario empleado listo:`);
   console.log(`   Email:    ${EMAIL}`);
   console.log(`   Password: ${PASSWORD}`);
   console.log(`   Nombre:   Juan Pérez`);
   console.log(`   Legajo:   LEG-0042`);
+  console.log(`   Turno:    Planta Bacar Lab (hoy, ventana en curso para app móvil)`);
   console.log(`   URL:      http://localhost:3000/empleado/dashboard\n`);
   process.exit(0);
 }
