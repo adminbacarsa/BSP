@@ -1,5 +1,9 @@
 {
-  "description": "Archivos incluidos en cada snapshot de Auto Lab. Agregar rutas relativas a apps/web2.",
+  "version": "1.2",
+  "createdAt": "2026-07-30T17:26:00.752Z",
+  "gitCommit": "867b7827e04a02258767a6d282047a888097ea65",
+  "notes": "Baseline pre-SLA opcional: titularIds floater, turno cortado UI, catalogo SLA multiempresa, servicio real estable",
+  "fileCount": 57,
   "files": [
     "src/pages/admin/planificacion/auto-lab.tsx",
     "src/components/planificacion/AutoLabCoveragePanel.tsx",

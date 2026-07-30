@@ -1,5 +1,5 @@
 {
-  "current": "1.1",
+  "current": "1.2",
   "versions": [
     {
       "version": "1.0",
@@ -19,6 +19,18 @@
       "gitCommit": "3bd5f39a6dc17a46eeb77d92114da16ff5ebb9e5",
       "label": "RET rotativo sabado/domingo custom L-V <=8h (1 guardia alterna semanal, 2 pax intercalados); iso week sin date-fns",
       "fileCount": 54,
+      "recommendedEvals": [
+        "eval:manzana-historica",
+        "eval:edificio-corporativo",
+        "eval:casa-matriz-mixed"
+      ]
+    },
+    {
+      "version": "1.2",
+      "date": "2026-07-30",
+      "gitCommit": "867b7827e04a02258767a6d282047a888097ea65",
+      "label": "Baseline pre-SLA opcional: titularIds floater, turno cortado UI, catalogo SLA multiempresa, servicio real estable",
+      "fileCount": 57,
       "recommendedEvals": [
         "eval:manzana-historica",
         "eval:edificio-corporativo",
