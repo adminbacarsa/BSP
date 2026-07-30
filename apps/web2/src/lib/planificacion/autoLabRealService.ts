@@ -33,6 +33,13 @@ import { computeObjectiveHeadcountBalance } from './rosterHeadcountBalance';
 
 export const AUTO_LAB_REAL_CASE_ID = 'case-real-service';
 
+function explicitCoverageTypeFromRow(raw: string | undefined): '24hs' | 'custom' | null {
+    const cov = String(raw || '').toLowerCase().trim();
+    if (cov === '24hs' || cov === '24' || cov === '24h') return '24hs';
+    if (cov === 'custom') return 'custom';
+    return null;
+}
+
 function buildPositionAssignmentsByEmp(
     assignments?: import('@/services/slaService').PositionAssignment[],
 ): Record<string, Array<{ positionName: string; shiftCodes: string[] }>> | undefined {
@@ -135,7 +142,11 @@ function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
     const provisional: V2PositionDef = {
         positionName: row.positionName,
         qty: Math.max(1, Number(row.qty) || 1),
-        coverageType: String(row.coverageType || ''),
+        coverageType: String(row.coverageType || '').toLowerCase() === 'custom'
+            ? 'custom'
+            : String(row.coverageType || '').toLowerCase().match(/^24(hs?)?$/)
+                ? '24hs'
+                : String(row.coverageType || ''),
         shifts: shifts.length > 0 ? shifts : [
             { code: 'M', name: 'Mañana', hours: 8 },
             { code: 'T', name: 'Tarde', hours: 8 },
@@ -147,7 +158,7 @@ function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
     const is24 = is24hsRotationPosition(provisional);
     return {
         ...provisional,
-        coverageType: is24 ? '24hs' : 'custom',
+        coverageType: explicitCoverageTypeFromRow(row.coverageType) ?? (is24 ? '24hs' : 'custom'),
         activeDays: is24
             ? ['L', 'M', 'X', 'J', 'V', 'S', 'D']
             : provisional.activeDays,

@@ -15,12 +15,14 @@
 
 import {
     checkFeasibility,
+    is24hsRotationPosition,
     pickOptimalAutoCycles,
     type V2AbsenceMap,
     type V2EngineContext,
     type V2FeasibilityReport,
     type V2PositionDef,
 } from './autoScheduleEngineV2';
+import { customCoverSlotsRequiredOnDay } from './customCoverCycle';
 import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
 import {
     buildPlanningOperationalDiagnosis,
@@ -97,8 +99,22 @@ export interface AutoPlanningBrainResult {
 }
 
 function is24hs(pos: V2PositionDef): boolean {
-    const cov = String(pos.coverageType || '').toLowerCase();
-    return cov === '24hs' || cov === '24' || cov === '24h';
+    return is24hsRotationPosition(pos);
+}
+
+const PLANNING_WEEKDAY_LETTERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
+
+function customPeakSlotsOnTypicalDay(pos: V2PositionDef): number {
+    let peak = 0;
+    for (const dayLetter of PLANNING_WEEKDAY_LETTERS) {
+        peak = Math.max(peak, customCoverSlotsRequiredOnDay(pos, dayLetter, undefined, undefined));
+    }
+    if (peak > 0) return peak;
+    const qty = Math.max(1, Number(pos.qty) || 1);
+    const bands = (pos.shifts || []).filter(
+        (s) => !['F', 'FF', 'FP', 'FT'].includes(String(s.code || '').toUpperCase()),
+    ).length;
+    return qty * Math.max(1, bands || 1);
 }
 
 /** Slots de servicio en un día tipo (suma puestos activos 7d). */
@@ -123,8 +139,7 @@ export function computeDailyServiceSlots(
             peakConcurrent += qty;
             structuralMonthHours += s * 30 * shiftH;
         } else {
-            const bands = (pos.shifts || []).length || 1;
-            const s = qty * bands;
+            const s = customPeakSlotsOnTypicalDay(pos);
             slotsPerDay += s;
             slotsCustom += s;
             peakConcurrent += s;

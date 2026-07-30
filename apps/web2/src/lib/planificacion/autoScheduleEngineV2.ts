@@ -1408,32 +1408,40 @@ function hasMtnRotationBands(pos: V2PositionDef): boolean {
     return codes.has('M') && codes.has('T') && codes.has('N');
 }
 
-/** EN/RO/etc. o SLA custom (MA/ME/M/M2…): titular cubre días operativos; puede superar 200h. */
+function explicitCoverageType(pos: V2PositionDef): '24hs' | 'custom' | null {
+    const cov = String(pos.coverageType || '').toLowerCase().trim();
+    if (cov === '24hs' || cov === '24' || cov === '24h') return '24hs';
+    if (cov === 'custom') return 'custom';
+    return null;
+}
+
+/**
+ * Fuente de verdad: tipo elegido en Servicios (24 hs vs personalizado).
+ * M+T+N en un puesto **personalizado** son turnos específicos (cupos del día), no rotación 24 hs.
+ */
 export function isCustomCoverPosition(pos: V2PositionDef): boolean {
+    const explicit = explicitCoverageType(pos);
+    if (explicit === 'custom') return true;
+    if (explicit === '24hs') return false;
     if (hasMtnRotationBands(pos)) return false;
-    const cov = String(pos.coverageType || '').toLowerCase();
-    if (cov === '24hs' || cov === '24' || cov === '24h') return false;
-    if (cov === 'custom') return true;
     const working = (pos.shifts || []).filter(s => !FRANCO_SET.has(String(s.code ?? '').toUpperCase()));
     if (working.length === 0) return false;
     return working.every(s => !STANDARD_BANDS.has(String(s.code ?? '').toUpperCase()));
 }
 
 /**
- * Puesto rotativo 24/7 (M+T+N). Infiere desde bandas cuando el SLA no trae coverageType 24hs
- * (caso frecuente en Firestore: Puesto 1/2/3 con M/T/N pero activeDays L–V).
+ * Puesto rotativo 24/7 (tipo **24 HORAS** en Servicios).
+ * Sin coverageType en datos viejos: se infiere M+T+N como rotativo (legacy).
  */
 export function is24hsRotationPosition(pos: V2PositionDef): boolean {
-    const cov = String(pos.coverageType || '').toLowerCase();
-    if (cov === '24hs' || cov === '24' || cov === '24h') return true;
+    const explicit = explicitCoverageType(pos);
+    if (explicit === '24hs') return true;
+    if (explicit === 'custom') return false;
     return hasMtnRotationBands(pos);
 }
 
 function findPrimary24hsPosition(positions: V2PositionDef[]): V2PositionDef | undefined {
-    return positions.find(p => {
-        const cov = String(p.coverageType || '').toLowerCase();
-        return !isCustomCoverPosition(p) && (cov === '24hs' || cov === '24' || cov === '24h');
-    });
+    return positions.find((p) => is24hsRotationPosition(p));
 }
 
 interface EmpRuntimeState {
