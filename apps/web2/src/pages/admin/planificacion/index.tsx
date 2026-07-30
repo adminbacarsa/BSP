@@ -10034,7 +10034,12 @@ export default function PlanificacionPage() {
                                                                 {abbrevPlanningPositionName(posName, 8)}
                                                             </span>
                                                         ) : panelStructure.length > 1 ? (
-                                                            panelStructure.map((p: any) => {
+                                                            panelStructure.filter((p: any) => {
+                                                                if (!activeSlaPositionAssignments?.length) return true;
+                                                                const _pa = activeSlaPositionAssignments.find((a: any) => a.employeeId === emp.id);
+                                                                if (!_pa?.slots?.length) return true;
+                                                                return _pa.slots.some((sl: any) => sl.positionName === p.positionName);
+                                                            }).map((p: any) => {
                                                                 const selected = filterPos === p.positionName;
                                                                 return (
                                                                     <button
