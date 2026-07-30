@@ -213,7 +213,7 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
-import { rotationPeriodApplies, getAllDatesInMonth, getRoundRobinOffset } from '@/lib/planificacion/rotationUtils';
+import { rotationPeriodApplies, getAllDatesInMonth, getRoundRobinOffset, getWeekStartForDate } from '@/lib/planificacion/rotationUtils';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT']);
 
@@ -760,9 +760,21 @@ function applyRotationsForMonth(
                 const _rrE = _rrP.entries.filter((e: any) => e.employeeId && e.shiftCode);
                 const _rrN = _rrE.length;
                 if (_rrN >= 2) {
+                    // Inferir semana de referencia desde pendingChanges: si el empleado en índice i
+                    // tiene su código de sem.0 asignado, esa semana ES la sem.0.
+                    let _rrInferredRef: string | undefined = rotation.referenceWeekStart;
+                    outer: for (const _rrd of allDates) {
+                        for (let _ri2 = 0; _ri2 < _rrN; _ri2++) {
+                            const _p2 = pendingChanges[`${_rrE[_ri2].employeeId}_${_rrd}`];
+                            if (_p2 && !_p2.isDeleted && _p2.code === _rrE[_ri2].shiftCode) {
+                                _rrInferredRef = getWeekStartForDate(_rrd, rotation.weekStartDay ?? 1);
+                                break outer;
+                            }
+                        }
+                    }
                     for (const dateStr of allDates) {
                         const dayLetter = getDayLetter(dateStr);
-                        const _rrOff = getRoundRobinOffset(rotation, dateStr, _rrN);
+                        const _rrOff = getRoundRobinOffset(rotation, dateStr, _rrN, _rrInferredRef);
                         if (_rrOff === null) continue;
                         for (let _ri = 0; _ri < _rrN; _ri++) {
                             const _rrEmp = _rrE[_ri];

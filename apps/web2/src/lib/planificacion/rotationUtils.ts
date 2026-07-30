@@ -1,6 +1,6 @@
 import type { ServiceRotation, RotationPeriod, RotationEntry } from '@/services/slaService';
 
-function getWeekStartForDate(dateStr: string, weekStartDay = 1): string {
+export function getWeekStartForDate(dateStr: string, weekStartDay = 1): string {
     const date = new Date(dateStr + 'T00:00:00');
     const dow = date.getDay() === 0 ? 7 : date.getDay(); // 1=Mon…7=Sun
     const daysBack = ((dow - weekStartDay) + 7) % 7;
@@ -70,9 +70,11 @@ export function getRoundRobinOffset(
     rotation: ServiceRotation,
     dateStr: string,
     N: number,
+    referenceOverride?: string,
 ): number | null {
-    if (!rotation.referenceWeekStart) return null;
-    const diff = getWeekDiff(rotation.referenceWeekStart, dateStr, rotation.weekStartDay ?? 1);
+    const ref = referenceOverride ?? rotation.referenceWeekStart;
+    if (!ref) return null;
+    const diff = getWeekDiff(ref, dateStr, rotation.weekStartDay ?? 1);
     return ((diff % N) + N) % N;
 }
 
