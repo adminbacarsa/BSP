@@ -776,27 +776,69 @@ function applyRotationsForMonth(
                     const _rrGate = rotation.referenceWeekStart
                         ? getWeekStartForDate(rotation.referenceWeekStart, rotation.weekStartDay ?? 1)
                         : null;
+                    // Pre-computar asignación de slots a nivel SEMANA (no por fecha individual)
+                    // para que la rotación sea consistente en toda la semana aunque el usuario
+                    // haya asignado manualmente en un día que no es lunes.
+                    const _rrWeekGroups = new Map<string, string[]>();
+                    for (const _d of allDates) {
+                        const _ws = getWeekStartForDate(_d, rotation.weekStartDay ?? 1);
+                        if (!_rrWeekGroups.has(_ws)) _rrWeekGroups.set(_ws, []);
+                        _rrWeekGroups.get(_ws)!.push(_d);
+                    }
+                    // weekSlotMap: weekStart → Map<empIdx → slotIdx>
+                    const _rrWeekSlotMap = new Map<string, Map<number, number>>();
+                    for (const [_ws, _wDates] of _rrWeekGroups) {
+                        if (_rrGate && _ws < _rrGate) continue;
+                        const _wOff = getRoundRobinOffset(rotation, _wDates[0], _rrN, _rrInferredRef);
+                        if (_wOff === null) continue;
+                        const _empToSlot = new Map<number, number>();
+                        const _wClaimed = new Set<number>();
+                        // Pasada 1: empleados con código "override" (distinto al natural) reclaman slot
+                        for (let _ri2 = 0; _ri2 < _rrN; _ri2++) {
+                            const _natS = (_ri2 + _wOff) % _rrN;
+                            for (const _wd of _wDates) {
+                                const _p = pendingChanges[`${_rrE[_ri2].employeeId}_${_wd}`];
+                                if (_p && !_p.isDeleted) {
+                                    const _si = _rrE.findIndex((e: any) => e.shiftCode === _p.code);
+                                    if (_si >= 0 && _si !== _natS && !_empToSlot.has(_ri2)) {
+                                        _empToSlot.set(_ri2, _si);
+                                        _wClaimed.add(_si);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // Pasada 2: empleados sin override toman su slot natural o el primero libre
+                        const _wAvail: number[] = [];
+                        for (let _s = 0; _s < _rrN; _s++) {
+                            const _si2 = (_wOff + _s) % _rrN;
+                            if (!_wClaimed.has(_si2)) _wAvail.push(_si2);
+                        }
+                        let _wAIdx = 0;
+                        for (let _ri2 = 0; _ri2 < _rrN; _ri2++) {
+                            if (_empToSlot.has(_ri2)) continue;
+                            const _natS2 = (_ri2 + _wOff) % _rrN;
+                            if (!_wClaimed.has(_natS2)) {
+                                _empToSlot.set(_ri2, _natS2);
+                                _wClaimed.add(_natS2);
+                            } else {
+                                while (_wAIdx < _wAvail.length && _wClaimed.has(_wAvail[_wAIdx])) _wAIdx++;
+                                if (_wAIdx < _wAvail.length) {
+                                    _empToSlot.set(_ri2, _wAvail[_wAIdx]);
+                                    _wClaimed.add(_wAvail[_wAIdx]);
+                                    _wAIdx++;
+                                }
+                            }
+                        }
+                        _rrWeekSlotMap.set(_ws, _empToSlot);
+                    }
+                    // Aplicar asignaciones semanales a cada fecha
                     for (const dateStr of allDates) {
                         if (_rrGate && dateStr < _rrGate) continue;
                         const dayLetter = getDayLetter(dateStr);
-                        const _rrOff = getRoundRobinOffset(rotation, dateStr, _rrN, _rrInferredRef);
-                        if (_rrOff === null) continue;
-                        // Pasada 1: detectar qué slots ya están tomados por asignaciones manuales
-                        const _slotClaimed = new Map();
-                        for (let _ri2 = 0; _ri2 < _rrN; _ri2++) {
-                            const _p2 = pendingChanges[`${_rrE[_ri2].employeeId}_${dateStr}`];
-                            if (_p2 && !_p2.isDeleted) {
-                                const _si = _rrE.findIndex((e: any) => e.shiftCode === _p2.code);
-                                if (_si >= 0) _slotClaimed.set(_si, _rrE[_ri2].employeeId);
-                            }
-                        }
-                        // Slots disponibles en orden de rotación
-                        const _availSlots: number[] = [];
-                        for (let _s = 0; _s < _rrN; _s++) {
-                            const _si2 = (_rrOff + _s) % _rrN;
-                            if (!_slotClaimed.has(_si2)) _availSlots.push(_si2);
-                        }
-                        // Pasada 2: asignar empleados libres a slots disponibles
+                        const _ws2 = getWeekStartForDate(dateStr, rotation.weekStartDay ?? 1);
+                        const _empToSlot2 = _rrWeekSlotMap.get(_ws2);
+                        if (!_empToSlot2) continue;
                         for (let _ri = 0; _ri < _rrN; _ri++) {
                             const _rrEmp = _rrE[_ri];
                             const _key = `${_rrEmp.employeeId}_${dateStr}`;
@@ -805,19 +847,9 @@ function applyRotationsForMonth(
                             const _rrIsFr = (s: any) => s && !s.isDeleted && ['F','FF','FP','FT'].includes(s.code);
                             if (_rrIsFr(_rrPend) || (!_rrPend && _rrIsFr(_rrFS))) continue;
                             if (_rrPend && !_rrPend.isDeleted) continue;
-                            // Intentar slot natural; si está ocupado, tomar el primero libre
-                            const _nat = (_ri + _rrOff) % _rrN;
-                            let _slot: number | undefined;
-                            if (!_slotClaimed.has(_nat)) {
-                                _slot = _nat;
-                                _slotClaimed.set(_nat, _rrEmp.employeeId);
-                            } else {
-                                const _next = _availSlots.find((_s2: number) => !_slotClaimed.has(_s2));
-                                if (_next === undefined) continue;
-                                _slot = _next;
-                                _slotClaimed.set(_slot, _rrEmp.employeeId);
-                            }
-                            const _rrRot = _rrE[_slot];
+                            const _slotIdx = _empToSlot2.get(_ri);
+                            if (_slotIdx === undefined) continue;
+                            const _rrRot = _rrE[_slotIdx];
                             if (positionStructure?.length && _rrRot.positionName) {
                                 const _posCfg = positionStructure.find((p: any) => p.positionName === _rrRot.positionName);
                                 if (_posCfg) {
