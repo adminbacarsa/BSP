@@ -758,6 +758,10 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                     if (inCurrent) employeeCycleHours.current[emp.id] = (employeeCycleHours.current[emp.id] || 0) + meta.hours;
                     else employeeCycleHours.next[emp.id] = (employeeCycleHours.next[emp.id] || 0) + meta.hours;
                 } else {
+                    const titularIds = (positionGroups[pos.positionName] ?? []).slice(
+                        0,
+                        Math.max(1, Number(pos.qty) || 1),
+                    );
                     const restCode = francoCodeForPositionDay(
                         pos,
                         dayLetter,

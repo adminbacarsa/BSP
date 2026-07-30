@@ -65,7 +65,15 @@ function addCalendarDays(ymd: string, delta: number): string {
   return `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
 }
 
-function shiftScheduleLabel(shift: Record<string, any>, code: string): string {
+function shiftScheduleLabel(
+  shift: Record<string, any>,
+  code: string,
+  slaBlocks?: Array<{ startTime: string; endTime: string }> | null,
+): string {
+  const blocks = slaBlocks ?? shift.blocks;
+  if (Array.isArray(blocks) && blocks.length >= 2) {
+    return blocks.map((b) => `${b.startTime}–${b.endTime}`).join(' + ');
+  }
   if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
     return `${shift.startTime}–${shift.endTime}`;
   }
@@ -92,6 +100,7 @@ export function resolveTitularVacancyWorkShift(
   shiftsMap: Record<string, any>,
   pendingChanges: Record<string, any>,
   getTypicalShift?: (empId: string) => Record<string, any> | null,
+  getSlaBlocks?: (positionName: string, code: string) => Array<{ startTime: string; endTime: string }> | null,
 ): TitularVacancyWorkShift | null {
   const toResult = (
     shift: Record<string, any>,
@@ -99,11 +108,13 @@ export function resolveTitularVacancyWorkShift(
     sourceLabel: string,
   ): TitularVacancyWorkShift => {
     const code = String(shift.code).toUpperCase();
+    const positionName = String(shift.positionName || 'General');
+    const slaBlocks = getSlaBlocks?.(positionName, code) ?? null;
     return {
       code,
       bandLabel: VACANCY_BAND_LABELS[code] || code,
-      positionName: String(shift.positionName || 'General'),
-      scheduleLabel: shiftScheduleLabel(shift, code),
+      positionName,
+      scheduleLabel: shiftScheduleLabel(shift, code, slaBlocks),
       hours: Number(shift.hours) || (code === 'D12' || code === 'N12' ? 12 : 8),
       source,
       sourceLabel,

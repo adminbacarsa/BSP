@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, query, where } from 'firebase/firestore';
+import { collection, query } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { ensureFirebaseEmulatorsConnected } from '@/lib/firebase';
@@ -93,9 +93,8 @@ export function useObjectivePlanningCatalog(empresaId: string | undefined) {
             },
         );
 
-        const slasQ = scopeEmpresa
-            ? query(collection(db, 'servicios_sla'), where('empresaId', '==', tenantId))
-            : query(collection(db, 'servicios_sla'));
+        // Incluye SLA legacy sin empresaId pero con clientId de la empresa (filterSlaRowsByEmpresa).
+        const slasQ = query(collection(db, 'servicios_sla'));
 
         const unsubSlas = onSnapshotFresh(
             slasQ,

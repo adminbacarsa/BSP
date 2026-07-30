@@ -1,11 +1,14 @@
 export const ALL_WEEK_DAY_LETTERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 
+export type PlanningShiftTimeBlock = { startTime: string; endTime: string };
+
 export type PlanningPositionShiftRow = {
   code: string;
   hours: number;
   name?: string;
   startTime?: string;
   endTime?: string;
+  blocks?: PlanningShiftTimeBlock[];
   days?: string[];
   specificDates?: string[];
   [key: string]: unknown;
@@ -112,6 +115,15 @@ export function normalizePlanningShifts(shiftList: unknown): PlanningPositionShi
     };
     if (s.startTime != null) row.startTime = String(s.startTime);
     if (s.endTime != null) row.endTime = String(s.endTime);
+    if (Array.isArray(s.blocks) && s.blocks.length >= 2) {
+      row.blocks = s.blocks.map((b) => {
+        const block = b as Record<string, unknown>;
+        return {
+          startTime: String(block.startTime ?? ''),
+          endTime: String(block.endTime ?? ''),
+        };
+      });
+    }
     const days = normalizeDayLetters(s.days);
     if (days.length > 0) row.days = days;
     if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
