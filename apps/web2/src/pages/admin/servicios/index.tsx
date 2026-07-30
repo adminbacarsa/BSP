@@ -1,7 +1,7 @@
 ﻿import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
-import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType } from '@/services/slaService';
+import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -170,6 +170,11 @@ export default function ServiciosSLAPage() {
   const [coverageEditSlots, setCoverageEditSlots] = useState<Array<{ positionName: string; shiftCodes: string[] }>>([]);
   const [editingRule, setEditingRule] = useState<ServiceRule | null>(null);
   const [editingRuleIsNew, setEditingRuleIsNew] = useState(false);
+  const [coverageOpen, setCoverageOpen] = useState(true);
+  const [condicionesOpen, setCondicionesOpen] = useState(true);
+  const [rotacionesOpen, setRotacionesOpen] = useState(true);
+  const [editingRotation, setEditingRotation] = useState<ServiceRotation | null>(null);
+  const [editingRotationIsNew, setEditingRotationIsNew] = useState(false);
 
   // --- EFECTOS ---
   
@@ -806,6 +811,52 @@ export default function ServiciosSLAPage() {
   function deleteRule(id: string) {
     setForm({ ...form, serviceRules: (form.serviceRules || []).filter((r: ServiceRule) => r.id !== id) });
     if (editingRule?.id === id) { setEditingRule(null); setEditingRuleIsNew(false); }
+  }
+  function startNewRotation() {
+    setEditingRotation({ id: Date.now().toString(), name: '', periods: [], weekStartDay: 1 });
+    setEditingRotationIsNew(true);
+  }
+  function cancelEditRotation() { setEditingRotation(null); setEditingRotationIsNew(false); }
+  function saveRotation() {
+    if (!editingRotation) return;
+    const curr = form.serviceRotations || [];
+    const updated = curr.some((r: ServiceRotation) => r.id === editingRotation.id)
+      ? curr.map((r: ServiceRotation) => r.id === editingRotation.id ? editingRotation : r)
+      : [...curr, editingRotation];
+    setForm({ ...form, serviceRotations: updated });
+    setEditingRotation(null); setEditingRotationIsNew(false);
+  }
+  function deleteRotation(id: string) {
+    setForm({ ...form, serviceRotations: (form.serviceRotations || []).filter((r: ServiceRotation) => r.id !== id) });
+    if (editingRotation?.id === id) { setEditingRotation(null); setEditingRotationIsNew(false); }
+  }
+  function updRotPeriod(pidx: number, updP: RotationPeriod) {
+    if (!editingRotation) return;
+    setEditingRotation({ ...editingRotation, periods: editingRotation.periods.map((p: RotationPeriod, i: number) => i === pidx ? updP : p) });
+  }
+  function addRotEntry(pidx: number) {
+    if (!editingRotation) return;
+    const p = editingRotation.periods[pidx];
+    updRotPeriod(pidx, { ...p, entries: [...p.entries, { employeeId: '', employeeName: '', positionName: '', shiftCode: '' }] });
+  }
+  function removeRotEntry(pidx: number, eidx: number) {
+    if (!editingRotation) return;
+    const p = editingRotation.periods[pidx];
+    updRotPeriod(pidx, { ...p, entries: p.entries.filter((_: any, i: number) => i !== eidx) });
+  }
+  function updRotEntry(pidx: number, eidx: number, field: string, val: string) {
+    if (!editingRotation) return;
+    const p = editingRotation.periods[pidx];
+    const entries = p.entries.map((e: RotationEntry, i: number) => {
+      if (i !== eidx) return e;
+      const next: any = { ...e, [field]: val };
+      if (field === 'employeeId') {
+        const emp = coverageEmps.find((em: any) => em.id === val);
+        next.employeeName = emp ? (emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim()) : '';
+      }
+      return next;
+    });
+    updRotPeriod(pidx, { ...p, entries });
   }
   function updTrigger(idx: number, field: string, val: string) {
     if (!editingRule) return;
@@ -2218,9 +2269,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             {/* ── Cobertura de dotación ── */}
             <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2">
+                <button type="button" onClick={() => setCoverageOpen(o => !o)} className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2 hover:text-indigo-600 transition-colors">
                   <UserCheck size={16} className="text-indigo-500"/> Cobertura de Dotación
-                </h3>
+                  <ChevronDown size={14} className={`text-slate-400 ml-1 transition-transform duration-200 ${coverageOpen ? 'rotate-180' : ''}`}/>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -2236,7 +2288,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   {form.positionAssignments !== undefined ? 'Activada' : 'Activar cobertura'}
                 </button>
               </div>
-              {form.positionAssignments === undefined ? (
+              {coverageOpen && (form.positionAssignments === undefined ? (
                 <p className="text-[10px] text-slate-400">
                   Activá la cobertura para definir en qué puestos y bandas puede trabajar cada guardia de la dotación. El motor de planificación respetará estas restricciones.
                 </p>
@@ -2327,16 +2379,17 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                     );
                   })}
                 </div>
-              )}
+              ))}
             </div>
 
 
             {/* ── Condiciones ── */}
             <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2">
+                <button type="button" onClick={() => setCondicionesOpen(o => !o)} className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2 hover:text-violet-600 transition-colors">
                   <Zap size={16} className="text-violet-500"/> Condiciones
-                </h3>
+                  <ChevronDown size={14} className={`text-slate-400 ml-1 transition-transform duration-200 ${condicionesOpen ? 'rotate-180' : ''}`}/>
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -2352,7 +2405,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   {form.serviceRules !== undefined ? 'Activadas' : 'Activar condiciones'}
                 </button>
               </div>
-              {form.serviceRules === undefined ? (
+              {condicionesOpen && (form.serviceRules === undefined ? (
                 <p className="text-[10px] text-slate-400">
                   Activá las condiciones para definir reglas IF→THEN: cuando un empleado tiene cierto código asignado, el planificador puede excluir puestos, mover guardias o restringir bandas automáticamente.
                 </p>
@@ -2617,7 +2670,278 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                     </button>
                   )}
                 </div>
-              )}
+              ))}
+            </div>
+
+            {/* ── Rotaciones ── */}
+            <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
+              <div className="flex items-center justify-between mb-3">
+                <button type="button" onClick={() => setRotacionesOpen(o => !o)} className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2 hover:text-teal-600 transition-colors">
+                  <RotateCw size={16} className="text-teal-500"/> Rotaciones
+                  <ChevronDown size={14} className={`text-slate-400 ml-1 transition-transform duration-200 ${rotacionesOpen ? 'rotate-180' : ''}`}/>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (form.serviceRotations !== undefined) {
+                      setForm({ ...form, serviceRotations: undefined as any });
+                      setEditingRotation(null);
+                    } else {
+                      setForm({ ...form, serviceRotations: [] });
+                    }
+                  }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-[10px] font-black border transition-colors ${form.serviceRotations !== undefined ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-800 text-slate-500 border-slate-300 dark:border-slate-600 hover:bg-slate-50'}`}
+                >
+                  {form.serviceRotations !== undefined ? 'Activadas' : 'Activar rotaciones'}
+                </button>
+              </div>
+              {rotacionesOpen && (form.serviceRotations === undefined ? (
+                <p className="text-[10px] text-slate-400">
+                  Activá las rotaciones para definir ciclos periódicos donde los empleados rotan entre puestos y bandas automáticamente (semanal, quincenal, por día de la semana, etc.).
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {(form.serviceRotations || []).map((rot: ServiceRotation, rotIdx: number) => {
+                    const isEditingThis = editingRotation?.id === rot.id && !editingRotationIsNew;
+                    return (
+                      <div key={rot.id} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 overflow-hidden">
+                        {!isEditingThis && (
+                          <div className="flex items-start gap-3 px-4 py-2.5">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{rot.name || ('Rotación ' + (rotIdx + 1))}</p>
+                              <p className="text-[9px] text-slate-400 mt-0.5 truncate">
+                                {rot.periods.length} período{rot.periods.length !== 1 ? 's' : ''}{rot.periods.length > 0 ? ' · ' + rot.periods.map((p: RotationPeriod) => p.label || p.trigger.type).join(' / ') : ''}
+                              </p>
+                            </div>
+                            <button onClick={() => { setEditingRotation(JSON.parse(JSON.stringify(rot))); setEditingRotationIsNew(false); }} className="p-1.5 rounded-lg text-teal-500 hover:bg-teal-50 dark:hover:bg-teal-900/30 transition-colors shrink-0"><Edit2 size={12}/></button>
+                            <button onClick={() => deleteRotation(rot.id)} className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-50 transition-colors shrink-0"><X size={12}/></button>
+                          </div>
+                        )}
+                        {isEditingThis && editingRotation && (
+                          <div className="px-4 py-3 space-y-4 bg-slate-50 dark:bg-slate-900/30">
+                            <div className="flex gap-3 flex-wrap">
+                              <div className="flex-1 min-w-40">
+                                <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Nombre</p>
+                                <input value={editingRotation.name || ''} onChange={e => setEditingRotation({ ...editingRotation, name: e.target.value })} placeholder="Ej: Rotación semanal Control/S3" className="w-full text-xs bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-teal-400" />
+                              </div>
+                              <div>
+                                <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Inicio semana</p>
+                                <select value={editingRotation.weekStartDay ?? 1} onChange={e => setEditingRotation({ ...editingRotation, weekStartDay: Number(e.target.value) })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((d, i) => <option key={i+1} value={i+1}>{d}</option>)}
+                                </select>
+                              </div>
+                              {editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY') && (
+                                <div>
+                                  <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana A (referencia)</p>
+                                  <input type="date" value={editingRotation.referenceWeekStart || ''} onChange={e => setEditingRotation({ ...editingRotation, referenceWeekStart: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Períodos:</p>
+                              {editingRotation.periods.map((period: RotationPeriod, pidx: number) => (
+                                <div key={pidx} className="mb-3 p-3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700">
+                                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                    <input value={period.label} onChange={e => updRotPeriod(pidx, { ...period, label: e.target.value })} placeholder="Ej: Semana A" className="flex-1 min-w-24 text-[10px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                    <select value={period.trigger.type} onChange={e => updRotPeriod(pidx, { ...period, trigger: { type: e.target.value as any } })} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                      <option value="WEEKLY">Ciclo semanal</option>
+                                      <option value="DAY_OF_WEEK">Día de la semana</option>
+                                      <option value="DATE_RANGE">Rango de fechas</option>
+                                      <option value="FORTNIGHT">Quincena</option>
+                                      <option value="WEEK_OF_MONTH">Semana del mes</option>
+                                    </select>
+                                    <button type="button" onClick={() => setEditingRotation({ ...editingRotation, periods: editingRotation.periods.filter((_: any, i: number) => i !== pidx) })} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                                  </div>
+                                  {period.trigger.type === 'DAY_OF_WEEK' && (
+                                    <div className="flex flex-wrap gap-1 mb-2">
+                                      {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((d, i) => {
+                                        const dayNum = i + 1;
+                                        const active = (period.trigger.days || []).includes(dayNum);
+                                        return (
+                                          <button key={dayNum} type="button" onClick={() => {
+                                            const days = active ? (period.trigger.days || []).filter((x: number) => x !== dayNum) : [...(period.trigger.days || []), dayNum];
+                                            updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, days } });
+                                          }} className={`text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${active ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}>{d}</button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  {period.trigger.type === 'DATE_RANGE' && (
+                                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                      <input type="date" value={period.trigger.fromDate || ''} onChange={e => updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, fromDate: e.target.value } })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                      <span className="text-[9px] text-slate-400">→</span>
+                                      <input type="date" value={period.trigger.toDate || ''} onChange={e => updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, toDate: e.target.value } })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                    </div>
+                                  )}
+                                  {period.trigger.type === 'FORTNIGHT' && (
+                                    <div className="flex gap-2 mb-2">
+                                      {(['FIRST','SECOND'] as Array<'FIRST'|'SECOND'>).map(h => (
+                                        <button key={h} type="button" onClick={() => updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, half: h } })} className={`text-[9px] font-black px-3 py-1 rounded-lg border transition-colors ${period.trigger.half === h ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}>{h === 'FIRST' ? '1ra quincena' : '2da quincena'}</button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {period.trigger.type === 'WEEK_OF_MONTH' && (
+                                    <div className="flex flex-wrap gap-1 mb-2">
+                                      {[1,2,3,4].map(wn => {
+                                        const active = (period.trigger.weekNumbers || []).includes(wn);
+                                        return (
+                                          <button key={wn} type="button" onClick={() => {
+                                            const weekNumbers = active ? (period.trigger.weekNumbers || []).filter((x: number) => x !== wn) : [...(period.trigger.weekNumbers || []), wn];
+                                            updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, weekNumbers } });
+                                          }} className={`text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${active ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}>Sem {wn}</button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Asignaciones:</p>
+                                  {period.entries.map((entry: RotationEntry, eidx: number) => (
+                                    <div key={eidx} className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                      <select value={entry.employeeId} onChange={e => updRotEntry(pidx, eidx, 'employeeId', e.target.value)} className="flex-1 min-w-0 text-[10px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                        <option value="">— empleado —</option>
+                                        {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                                      </select>
+                                      <span className="text-[9px] text-slate-400">→</span>
+                                      <select value={entry.positionName} onChange={e => updRotEntry(pidx, eidx, 'positionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                        <option value="">— puesto —</option>
+                                        {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                      </select>
+                                      <select value={entry.shiftCode} onChange={e => updRotEntry(pidx, eidx, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                        <option value="">— banda —</option>
+                                        {getPositionCodes(entry.positionName, form.positions).map((cc: string) => <option key={cc} value={cc}>{cc}</option>)}
+                                      </select>
+                                      <button type="button" onClick={() => removeRotEntry(pidx, eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                                    </div>
+                                  ))}
+                                  <button type="button" onClick={() => addRotEntry(pidx)} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar empleado</button>
+                                </div>
+                              ))}
+                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, periods: [...editingRotation.periods, { label: '', trigger: { type: 'WEEKLY' as any }, entries: [] }] })} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar período</button>
+                            </div>
+                            <div className="flex gap-2 pt-2 border-t dark:border-slate-700">
+                              <button type="button" onClick={saveRotation} className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors"><Save size={11}/> Guardar</button>
+                              <button type="button" onClick={cancelEditRotation} className="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">Cancelar</button>
+                              <button type="button" onClick={() => deleteRotation(editingRotation.id)} className="ml-auto flex items-center gap-1 text-[10px] font-black text-rose-500 hover:bg-rose-50 px-3 py-1.5 rounded-xl transition-colors"><Trash2 size={10}/> Eliminar</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {editingRotationIsNew && editingRotation && (
+                    <div className="bg-white dark:bg-slate-800 rounded-xl border-2 border-teal-300 dark:border-teal-700 overflow-hidden">
+                      <div className="px-4 py-3 space-y-4 bg-slate-50 dark:bg-slate-900/30">
+                        <div className="flex gap-3 flex-wrap">
+                          <div className="flex-1 min-w-40">
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Nombre</p>
+                            <input value={editingRotation.name || ''} onChange={e => setEditingRotation({ ...editingRotation, name: e.target.value })} placeholder="Ej: Rotación semanal Control/S3" className="w-full text-xs bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-teal-400" />
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Inicio semana</p>
+                            <select value={editingRotation.weekStartDay ?? 1} onChange={e => setEditingRotation({ ...editingRotation, weekStartDay: Number(e.target.value) })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                              {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((d, i) => <option key={i+1} value={i+1}>{d}</option>)}
+                            </select>
+                          </div>
+                          {editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY') && (
+                            <div>
+                              <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana A (referencia)</p>
+                              <input type="date" value={editingRotation.referenceWeekStart || ''} onChange={e => setEditingRotation({ ...editingRotation, referenceWeekStart: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Períodos:</p>
+                          {editingRotation.periods.map((period: RotationPeriod, pidx: number) => (
+                            <div key={pidx} className="mb-3 p-3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700">
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                <input value={period.label} onChange={e => updRotPeriod(pidx, { ...period, label: e.target.value })} placeholder="Ej: Semana A" className="flex-1 min-w-24 text-[10px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                <select value={period.trigger.type} onChange={e => updRotPeriod(pidx, { ...period, trigger: { type: e.target.value as any } })} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  <option value="WEEKLY">Ciclo semanal</option>
+                                  <option value="DAY_OF_WEEK">Día de la semana</option>
+                                  <option value="DATE_RANGE">Rango de fechas</option>
+                                  <option value="FORTNIGHT">Quincena</option>
+                                  <option value="WEEK_OF_MONTH">Semana del mes</option>
+                                </select>
+                                <button type="button" onClick={() => setEditingRotation({ ...editingRotation, periods: editingRotation.periods.filter((_: any, i: number) => i !== pidx) })} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                              </div>
+                              {period.trigger.type === 'DAY_OF_WEEK' && (
+                                <div className="flex flex-wrap gap-1 mb-2">
+                                  {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((d, i) => {
+                                    const dayNum = i + 1;
+                                    const active = (period.trigger.days || []).includes(dayNum);
+                                    return (
+                                      <button key={dayNum} type="button" onClick={() => {
+                                        const days = active ? (period.trigger.days || []).filter((x: number) => x !== dayNum) : [...(period.trigger.days || []), dayNum];
+                                        updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, days } });
+                                      }} className={`text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${active ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}>{d}</button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {period.trigger.type === 'DATE_RANGE' && (
+                                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                  <input type="date" value={period.trigger.fromDate || ''} onChange={e => updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, fromDate: e.target.value } })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                  <span className="text-[9px] text-slate-400">→</span>
+                                  <input type="date" value={period.trigger.toDate || ''} onChange={e => updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, toDate: e.target.value } })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                </div>
+                              )}
+                              {period.trigger.type === 'FORTNIGHT' && (
+                                <div className="flex gap-2 mb-2">
+                                  {(['FIRST','SECOND'] as Array<'FIRST'|'SECOND'>).map(h => (
+                                    <button key={h} type="button" onClick={() => updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, half: h } })} className={`text-[9px] font-black px-3 py-1 rounded-lg border transition-colors ${period.trigger.half === h ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}>{h === 'FIRST' ? '1ra quincena' : '2da quincena'}</button>
+                                  ))}
+                                </div>
+                              )}
+                              {period.trigger.type === 'WEEK_OF_MONTH' && (
+                                <div className="flex flex-wrap gap-1 mb-2">
+                                  {[1,2,3,4].map(wn => {
+                                    const active = (period.trigger.weekNumbers || []).includes(wn);
+                                    return (
+                                      <button key={wn} type="button" onClick={() => {
+                                        const weekNumbers = active ? (period.trigger.weekNumbers || []).filter((x: number) => x !== wn) : [...(period.trigger.weekNumbers || []), wn];
+                                        updRotPeriod(pidx, { ...period, trigger: { ...period.trigger, weekNumbers } });
+                                      }} className={`text-[9px] font-black px-2 py-1 rounded-lg border transition-colors ${active ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-700 text-slate-400 border-slate-200 dark:border-slate-600'}`}>Sem {wn}</button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Asignaciones:</p>
+                              {period.entries.map((entry: RotationEntry, eidx: number) => (
+                                <div key={eidx} className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                  <select value={entry.employeeId} onChange={e => updRotEntry(pidx, eidx, 'employeeId', e.target.value)} className="flex-1 min-w-0 text-[10px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                    <option value="">— empleado —</option>
+                                    {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                                  </select>
+                                  <span className="text-[9px] text-slate-400">→</span>
+                                  <select value={entry.positionName} onChange={e => updRotEntry(pidx, eidx, 'positionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                    <option value="">— puesto —</option>
+                                    {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                  </select>
+                                  <select value={entry.shiftCode} onChange={e => updRotEntry(pidx, eidx, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                    <option value="">— banda —</option>
+                                    {getPositionCodes(entry.positionName, form.positions).map((cc: string) => <option key={cc} value={cc}>{cc}</option>)}
+                                  </select>
+                                  <button type="button" onClick={() => removeRotEntry(pidx, eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                                </div>
+                              ))}
+                              <button type="button" onClick={() => addRotEntry(pidx)} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar empleado</button>
+                            </div>
+                          ))}
+                          <button type="button" onClick={() => setEditingRotation({ ...editingRotation, periods: [...editingRotation.periods, { label: '', trigger: { type: 'WEEKLY' as any }, entries: [] }] })} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar período</button>
+                        </div>
+                        <div className="flex gap-2 pt-2 border-t dark:border-slate-700">
+                          <button type="button" onClick={saveRotation} className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors"><Save size={11}/> Guardar</button>
+                          <button type="button" onClick={cancelEditRotation} className="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">Cancelar</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {!editingRotationIsNew && (
+                    <button type="button" onClick={startNewRotation} className="flex items-center gap-2 text-[10px] font-black text-teal-600 hover:text-teal-700 px-2 py-1.5 rounded-xl hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors">
+                      <Plus size={11}/> Nueva rotación
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* ── Historial de horarios (solo al editar un contrato existente) ── */}

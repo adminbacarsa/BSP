@@ -80,6 +80,7 @@ import {
     resolveObjectivePositionRoster,
 } from './objectiveRosterResolver';
 import { stripIdleEmployeeBillableAssignments } from './surplusRetCycle';
+import { getRotationEntriesForDate } from './rotationUtils';
 import { buildSurplusRetEmployeeSet, enforceObjectiveRosterCaps } from './rosterHeadcountBalance';
 import {
     hasExplicitPlannerDotacion,
@@ -445,6 +446,7 @@ export interface V2EngineContext {
     positionAssignmentsByEmp?: Record<string, Array<{ positionName: string; shiftCodes: string[] }>>;
     /** Reglas IF→THEN aplicadas como post-procesamiento por dia. */
     serviceRules?: import('@/services/slaService').ServiceRule[];
+    serviceRotations?: import('@/services/slaService').ServiceRotation[];
 }
 
 export interface V2PositionDemand {
@@ -4042,7 +4044,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     );
 
     const expandedAssignments = expandSplitShiftAssignments(assignments, engineCtx.positions);
-    const finalAssignments = applyServiceRulesPostProcess(engineCtx, expandedAssignments as Array<{ empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown }>);
+    const rulesApplied = applyServiceRulesPostProcess(engineCtx, expandedAssignments as Array<{ empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown }>);
+    const finalAssignments = applyRotationsPostProcess(engineCtx, rulesApplied);
     return { feasibility, assignments: finalAssignments as typeof expandedAssignments, stats, capOverflowSlots, coverageViolations };
 }
 
@@ -4105,6 +4108,30 @@ function applyServiceRulesPostProcess(
                             result.push({ empId: action.employeeId, dateStr, positionName: action.positionName, code: action.shiftCode, name: action.shiftCode, hours: 8, startTime: '00:00' });
                         }
                     }
+                }
+            }
+        }
+    }
+    return result;
+}
+
+function applyRotationsPostProcess(
+    ctx: Pick<V2EngineContext, 'serviceRotations'>,
+    assignments: Array<{ empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown }>,
+): typeof assignments {
+    if (!ctx.serviceRotations?.length) return assignments;
+    let result = assignments.slice();
+    const allDates = [...new Set(result.map((a: any) => a.dateStr as string))];
+    for (const dateStr of allDates) {
+        for (const rotation of ctx.serviceRotations!) {
+            const entries = getRotationEntriesForDate(rotation, dateStr);
+            for (const entry of entries as any[]) {
+                const empA = result.find((a: any) => a.dateStr === dateStr && a.empId === entry.employeeId);
+                if (empA) {
+                    const idx = result.indexOf(empA);
+                    if (idx >= 0) result[idx] = { ...result[idx], positionName: entry.positionName, code: entry.shiftCode };
+                } else {
+                    result.push({ empId: entry.employeeId, dateStr, positionName: entry.positionName, code: entry.shiftCode, name: entry.shiftCode, hours: 8, startTime: '00:00' });
                 }
             }
         }

@@ -212,6 +212,7 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
+import { rotationPeriodApplies, getAllDatesInMonth } from '@/lib/planificacion/rotationUtils';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT']);
 
@@ -741,6 +742,41 @@ function computeServiceRuleChanges(
     return additions;
 }
 
+function applyRotationsForMonth(
+    rotations: import('@/services/slaService').ServiceRotation[],
+    pendingChanges: Record<string, any>,
+    shiftsMap: Record<string, any>,
+    year: number,
+    month: number,
+): Record<string, any> {
+    const additions: Record<string, any> = {};
+    const allDates = getAllDatesInMonth(year, month);
+    for (const rotation of rotations) {
+        for (const period of rotation.periods) {
+            for (const dateStr of allDates) {
+                if (!rotationPeriodApplies(period, dateStr, rotation)) continue;
+                for (const entry of period.entries) {
+                    if (!entry.employeeId || !entry.shiftCode) continue;
+                    const key = `${entry.employeeId}_${dateStr}`;
+                    const existing = pendingChanges[key] ?? shiftsMap[key];
+                    if (!existing || existing.isDeleted) {
+                        additions[key] = {
+                            empId: entry.employeeId,
+                            dateStr,
+                            code: entry.shiftCode,
+                            positionName: entry.positionName || '',
+                            hours: 8,
+                            startTime: '00:00',
+                            isDeleted: false,
+                        };
+                    }
+                }
+            }
+        }
+    }
+    return additions;
+}
+
 export default function PlanificacionPage() {
     const { empresaId, empresa, loadingEmpresa } = useEmpresa();
     const { rules: planningRules } = usePlanningRules(empresaId);
@@ -882,6 +918,7 @@ export default function PlanificacionPage() {
     const [slaPlanningHint, setSlaPlanningHint] = useState('');
     const [activeSlaPositionAssignments, setActiveSlaPositionAssignments] = useState<import('@/services/slaService').PositionAssignment[] | null>(null);
     const [activeSlaServiceRules, setActiveSlaServiceRules] = useState<import("@/services/slaService").ServiceRule[] | null>(null);
+    const [activeSlaServiceRotations, setActiveSlaServiceRotations] = useState<import('@/services/slaService').ServiceRotation[] | null>(null);
 
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -3722,6 +3759,7 @@ export default function PlanificacionPage() {
                 setPositionStructure(structure);
                 setActiveSlaPositionAssignments(srvForStructure?.positionAssignments ?? null);
                 setActiveSlaServiceRules(srvForStructure?.serviceRules ?? null);
+                setActiveSlaServiceRotations(srvForStructure?.serviceRotations ?? null);
                 setSlaVendidas(
                     monthHasSla && srvForStructure
                         ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
@@ -6128,6 +6166,13 @@ export default function PlanificacionPage() {
             );
             Object.assign(newChanges, _ruleAdditions);
         }
+        if (activeSlaServiceRotations?.length) {
+            const _rotAdditions = applyRotationsForMonth(
+                activeSlaServiceRotations, newChanges, shiftsMap,
+                currentDate.getFullYear(), currentDate.getMonth(),
+            );
+            Object.assign(newChanges, _rotAdditions);
+        }
         commitPendingChanges(newChanges);
         // Toast de alerta si el nuevo turno rompe el descanso mínimo de 12h
         const _rc = String(config.code || '').toUpperCase();
@@ -7240,6 +7285,7 @@ export default function PlanificacionPage() {
                     return Object.keys(m).length ? m : undefined;
                 })(),
                 serviceRules: activeSlaServiceRules ?? undefined,
+                serviceRotations: activeSlaServiceRotations ?? undefined,
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
             const canFloater = !can6x1

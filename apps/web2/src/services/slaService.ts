@@ -73,6 +73,39 @@ export interface ServiceRule {
   actions: RuleAction[];
 }
 
+export type RotationTriggerType = 'WEEKLY' | 'DAY_OF_WEEK' | 'DATE_RANGE' | 'FORTNIGHT' | 'WEEK_OF_MONTH';
+
+export interface RotationTrigger {
+  type: RotationTriggerType;
+  periodIndex?: number;       // WEEKLY: 0=Semana A, 1=Semana B, etc.
+  days?: number[];            // DAY_OF_WEEK: 1=Lun…7=Dom
+  fromDate?: string;          // DATE_RANGE: YYYY-MM-DD
+  toDate?: string;            // DATE_RANGE: YYYY-MM-DD
+  half?: 'FIRST' | 'SECOND'; // FORTNIGHT
+  weekNumbers?: number[];     // WEEK_OF_MONTH: [1,2,3,4]
+}
+
+export interface RotationEntry {
+  employeeId: string;
+  employeeName: string;
+  positionName: string;
+  shiftCode: string;
+}
+
+export interface RotationPeriod {
+  label: string;
+  trigger: RotationTrigger;
+  entries: RotationEntry[];
+}
+
+export interface ServiceRotation {
+  id: string;
+  name?: string;
+  referenceWeekStart?: string; // YYYY-MM-DD — lunes de la Semana A (para tipo WEEKLY)
+  weekStartDay?: number;       // 1=Lun (default), 2=Mar, …7=Dom
+  periods: RotationPeriod[];
+}
+
 // Definición de Contrato de Servicio (SLA)
 export interface ServiceSLA {
   id?: string;
@@ -92,6 +125,8 @@ export interface ServiceSLA {
   positionAssignments?: PositionAssignment[];
   /** Reglas IF→THEN: condiciones que el planificador aplica automáticamente. */
   serviceRules?: ServiceRule[];
+  /** Rotaciones periódicas por puesto/banda entre empleados. */
+  serviceRotations?: ServiceRotation[];
 }
 
 /**
