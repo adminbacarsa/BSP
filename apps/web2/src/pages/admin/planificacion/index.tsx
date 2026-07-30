@@ -162,6 +162,7 @@ import {
     describeVacancySplitPlan,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
+import { resolveCellSecondBlock, slaBlocksForPositionShift } from '@/lib/planificacion/splitShiftDisplay';
 import {
     listExtensionCandidates,
     listEarlyStartCandidates,
@@ -2557,6 +2558,25 @@ export default function PlanificacionPage() {
         displayedEmployees, pendingChanges, shiftsMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
         activeSlaPositionAssignments,
     ]);
+
+    /** Puestos visibles en la barra bulk según positionAssignments de los empleados seleccionados. null = mostrar todos. */
+    const bulkBarVisiblePositionNames = useMemo((): Set<string> | null => {
+        if (!activeSlaPositionAssignments?.length) return null;
+        if (!selection.start || !selection.end) return null;
+        const minR = Math.min(selection.start.r, selection.end.r);
+        const maxR = Math.max(selection.start.r, selection.end.r);
+        const visible = new Set<string>();
+        for (let r = minR; r <= maxR; r++) {
+            const emp = displayedEmployees[r];
+            if (!emp) continue;
+            const pa = activeSlaPositionAssignments.find((a: any) => a.employeeId === emp.id);
+            if (!pa?.slots?.length) return null;
+            for (const slot of pa.slots) {
+                if (slot.positionName) visible.add(slot.positionName);
+            }
+        }
+        return visible.size > 0 ? visible : null;
+    }, [activeSlaPositionAssignments, selection.start, selection.end, displayedEmployees]);
 
     /**
      * Mono-objetivo: multiselección con 2+ guardias → panel por colaborador
@@ -8467,9 +8487,14 @@ export default function PlanificacionPage() {
                                         const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
                                             ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
                                             : null;
-                                        const _b2 = _cellShift?.shiftGroupId
-                                            ? (pendingChanges[`${key}_B2`] || secondBlockMap[key] || null)
-                                            : null;
+                                        const _b2 = resolveCellSecondBlock(
+                                            key,
+                                            pendingChanges,
+                                            secondBlockMap,
+                                            cellPosName,
+                                            cellCode,
+                                            positionStructure,
+                                        );
                                         const _b2Range = (_b2?.startTime && _b2?.endTime)
                                             ? `${formatTime(_b2.startTime)} - ${formatTime(_b2.endTime)}`
                                             : null;
@@ -8812,7 +8837,12 @@ export default function PlanificacionPage() {
                         <p className="text-[8px] font-bold normal-case text-slate-400 mt-0.5 tracking-normal">REF/ESC excluyen del auto y dotación · ♂/♀ = puesto con género definido</p>
                     </div>
                     <div className="overflow-y-auto overscroll-contain custom-scrollbar flex-1 min-h-0">
-                    {positionStructure.map(p => {
+                    {positionStructure.filter((p: any) => {
+                        if (!activeSlaPositionAssignments?.length) return true;
+                        const _pa = activeSlaPositionAssignments.find((a: any) => a.employeeId === empPosPicker.empId);
+                        if (!_pa?.slots?.length) return true;
+                        return _pa.slots.some((sl: any) => sl.positionName === p.positionName);
+                    }).map(p => {
                         const codes = [...new Set((p.shifts || []).map((s:any) => String(s.code || '').toUpperCase()).filter(Boolean))];
                         const isSelPos = getEmpDefaultPos(empPosPicker.empId) === p.positionName;
                         const selShift = getEmpDefaultShift(empPosPicker.empId);
@@ -9878,7 +9908,7 @@ export default function PlanificacionPage() {
                                 <div className="flex items-center gap-1.5 px-2 py-2 border-b border-slate-700/80">
                                     <span className="w-[148px] shrink-0 text-[9px] font-black text-indigo-300 uppercase tracking-wider">A todos</span>
                                     <div className="w-[88px] shrink-0 flex flex-wrap gap-0.5">
-                                        {bulkPerEmpMode && selectedGrupo && bulkEffectiveStructure.map((p: any) => {
+                                        {bulkPerEmpMode && selectedGrupo && bulkEffectiveStructure.filter((p: any) => !bulkBarVisiblePositionNames || bulkBarVisiblePositionNames.has(p.positionName)).map((p: any) => {
                                             const selected = bulkBarPosition === p.positionName;
                                             return (
                                                 <button
@@ -10107,7 +10137,7 @@ export default function PlanificacionPage() {
                                 {bulkMonoPositionInfo.showPositionButtons && (
                                     <>
                                         <span className="text-[8px] font-black text-indigo-300 uppercase tracking-wider px-0.5">Puesto</span>
-                                        {bulkEffectiveStructure.map((p: any) => {
+                                        {bulkEffectiveStructure.filter((p: any) => !bulkBarVisiblePositionNames || bulkBarVisiblePositionNames.has(p.positionName)).map((p: any) => {
                                             const selected = bulkBarPosition === p.positionName;
                                             return (
                                                 <button
@@ -10915,7 +10945,14 @@ export default function PlanificacionPage() {
                                                 <div className="flex-1 min-w-0">
                                                     <p className="font-black text-base leading-tight">{shift.type || shift.name || (isFrancoShift ? 'Franco' : code)}</p>
                                                     {!isFrancoShift && (() => {
-                                                        const _mb2 = shift.shiftGroupId ? (pendingChanges[key + '_B2'] || secondBlockMap[key] || null) : null;
+                                                        const _mb2 = resolveCellSecondBlock(
+                                                            key,
+                                                            pendingChanges,
+                                                            secondBlockMap,
+                                                            shift.positionName,
+                                                            code,
+                                                            positionStructure,
+                                                        );
                                                         const _mb2s = _mb2?.startTime ? formatTime(_mb2.startTime) : null;
                                                         const _mb2e = _mb2?.endTime ? formatTime(_mb2.endTime) : null;
                                                         return <p className="text-xs font-bold opacity-70">{plannedStart} – {plannedEnd}{_mb2s && _mb2e ? ` + ${_mb2s} – ${_mb2e}` : ''} · {hours > 0 ? `${hours}h` : ''}</p>;
@@ -11672,6 +11709,7 @@ export default function PlanificacionPage() {
                         shiftsMap,
                         pendingChanges,
                         getTypicalShiftForTitular,
+                        (positionName, code) => slaBlocksForPositionShift(positionStructure, positionName, code),
                     );
                     const openDayCoveragePicker = (d: string) => {
                         const existing = vacancyDayCoverages[d] ?? resolveVacancyDayCoverage(d, {}, selectedReplacement);
