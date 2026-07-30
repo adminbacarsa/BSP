@@ -34,10 +34,9 @@ export function rotationPeriodApplies(
         case 'WEEKLY': {
             if (!rotation.referenceWeekStart) return false;
             const diff = getWeekDiff(rotation.referenceWeekStart, dateStr, rotation.weekStartDay ?? 1);
-            if (diff < 0) return false;
             const weeklyPeriods = rotation.periods.filter(p => p.trigger.type === 'WEEKLY');
             const total = weeklyPeriods.length || 1;
-            const idx = diff % total;
+            const idx = ((diff % total) + total) % total;
             return idx === (t.periodIndex ?? 0);
         }
         case 'DAY_OF_WEEK': {

@@ -749,6 +749,7 @@ function applyRotationsForMonth(
     shiftsMap: Record<string, any>,
     year: number,
     month: number,
+    positionStructure?: any[],
 ): Record<string, any> {
     const additions: Record<string, any> = {};
     const allDates = getAllDatesInMonth(year, month);
@@ -756,11 +757,19 @@ function applyRotationsForMonth(
         for (const period of rotation.periods) {
             for (const dateStr of allDates) {
                 if (!rotationPeriodApplies(period, dateStr, rotation)) continue;
+                const dayLetter = getDayLetter(dateStr);
                 for (const entry of period.entries) {
                     if (!entry.employeeId || !entry.shiftCode) continue;
+                    if (positionStructure?.length && entry.positionName) {
+                        const posCfg = positionStructure.find((p: any) => p.positionName === entry.positionName);
+                        if (posCfg) {
+                            if (!isPosActiveOnDay(posCfg, dayLetter)) continue;
+                            if (isPosExcludedOnDate(posCfg, dateStr)) continue;
+                        }
+                    }
                     const key = `${entry.employeeId}_${dateStr}`;
-                    const existing = pendingChanges[key] ?? shiftsMap[key];
-                    if (!existing || existing.isDeleted) {
+                    const activePending = pendingChanges[key];
+                    if (!activePending || activePending.isDeleted) {
                         additions[key] = {
                             empId: entry.employeeId,
                             dateStr,
@@ -6228,6 +6237,7 @@ export default function PlanificacionPage() {
             const _rotAdditions = applyRotationsForMonth(
                 activeSlaServiceRotations, newChanges, shiftsMap,
                 currentDate.getFullYear(), currentDate.getMonth(),
+                positionStructure,
             );
             Object.assign(newChanges, _rotAdditions);
         }
