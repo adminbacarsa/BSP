@@ -2,6 +2,7 @@ import type { AutoPlanningBrainResult } from './autoPlanningBrain';
 import { generateScheduleV4 } from './autoScheduleEngineV4';
 import type { V2EngineContext, V2GenerateResult, V2GenerateStats, V2PositionDef, V2EmployeeDef } from './autoScheduleEngineV2';
 import { applySlaContractPostProcess } from './autoScheduleEngineV2';
+import { findPositionAssignmentViolations } from './positionAssignmentPolicy';
 import { isCustomCoverPosition, is24hsRotationPosition, normalize24hsPositionCalendars } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import { canUseFixedBandFloater } from './fixedBandFloaterScheduleEngine';
@@ -96,6 +97,8 @@ export interface AutoLabScheduleOutcome {
     coveragePolicyBalance?: CoveragePolicyBalanceReport;
     coverageBalanceRepairs?: CoverageBalanceRepairAction[];
     coverageGapFillActions?: CoverageGapFillAction[];
+    /** Celdas facturables que no respetan positionAssignments del SLA. */
+    positionAssignmentViolations?: import('./positionAssignmentPolicy').PositionAssignmentViolation[];
 }
 
 import {
@@ -636,6 +639,8 @@ function postProcessAutoLabSchedule(
         ctx.employees.map((e) => e.id),
     );
 
+    const positionAssignmentViolations = findPositionAssignmentViolations(ctx, assignments);
+
     return {
         generation: {
             ...generation,
@@ -674,6 +679,7 @@ function postProcessAutoLabSchedule(
         coveragePolicyBalance,
         coverageBalanceRepairs,
         coverageGapFillActions,
+        positionAssignmentViolations,
     };
 }
 

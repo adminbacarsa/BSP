@@ -457,6 +457,25 @@ export default function AutoLabResolutionGrid({
             </div>
 
             <div className="px-5 py-3 border-b border-slate-100 bg-slate-50 flex flex-wrap gap-3 text-xs">
+                {(scheduleOutcome.positionAssignmentViolations?.length ?? 0) > 0 && (
+                    <div className="w-full rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-950">
+                        <p className="font-black text-[10px] uppercase flex items-center gap-1.5">
+                            <AlertTriangle size={12} />
+                            Cobertura de dotación (SLA)
+                        </p>
+                        <p className="mt-1 text-[11px]">
+                            {scheduleOutcome.positionAssignmentViolations!.length} celda(s) facturable(s) fuera de
+                            puesto/banda permitidos para el legajo (p. ej. parches de excedente o ausencias).
+                        </p>
+                        <ul className="mt-1.5 space-y-0.5 font-mono text-[10px] text-rose-900/90">
+                            {scheduleOutcome.positionAssignmentViolations!.slice(0, 6).map((v) => (
+                                <li key={`${v.empId}-${v.dateStr}-${v.code}`}>
+                                    {v.dateStr} · {v.empId.slice(0, 8)}… · {v.positionName}/{v.code}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
                 <span className="inline-flex items-center gap-1 font-bold text-slate-700">
                     <CheckCircle2 size={12} className="text-emerald-600" />
                     {Math.round(stats?.totalBillableHours ?? 0)} h facturables

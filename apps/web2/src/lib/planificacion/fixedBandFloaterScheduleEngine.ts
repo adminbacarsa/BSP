@@ -7,11 +7,17 @@ import {
     positionIsActiveOn,
     is24hsRotationPosition,
     isCustomCoverPosition,
+    effectiveShiftsForPositionDay,
     type V2Assignment,
     type V2EngineContext,
     type V2GenerateResult,
     type V2PositionDef,
 } from './autoScheduleEngineV2';
+import {
+    allowedPositionNamesForEmp,
+    empCanCoverPositionShift,
+    empHasPositionAssignmentRestriction,
+} from './positionAssignmentPolicy';
 import { assignmentBreaksBandTransition } from './rotativeBandGuard';
 import { isCustomCoverTitular, francoCodeForPositionDay, buildCustomWeekendRestOptions } from './customCoverCycle';
 import { CYCLE_24_MTN } from './rotativeMtnCycle';
@@ -167,12 +173,29 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     };
     const hasExplicitDotacion = Object.keys(defaultPos).length > 0;
 
+    const resolveFixedPosition = (empId: string): string | undefined => {
+        const allowed = allowedPositionNamesForEmp(ctx, empId);
+        const fromDefault = defaultPos[empId];
+        if (fromDefault && positionGroups[fromDefault] !== undefined) {
+            if (!allowed || allowed.includes(fromDefault)) return fromDefault;
+        }
+        if (allowed?.length === 1 && positionGroups[allowed[0]!] !== undefined) {
+            return allowed[0];
+        }
+        if (allowed && allowed.length > 1) {
+            const pick = allowed.find((n) => positionGroups[n] !== undefined);
+            if (pick) return pick;
+        }
+        if (fromDefault && empHasPositionAssignmentRestriction(ctx, empId)) return undefined;
+        return fromDefault && positionGroups[fromDefault] !== undefined ? fromDefault : undefined;
+    };
+
     const unassigned: string[] = [];
     for (const emp of ctx.employees) {
         // EXT / huéspedes → idle siempre.
         if (ctx.objectiveId && emp.preferredObjectiveId !== ctx.objectiveId) continue;
-        const fixed = defaultPos[emp.id];
-        if (fixed && positionGroups[fixed] !== undefined) {
+        const fixed = resolveFixedPosition(emp.id);
+        if (fixed) {
             positionGroups[fixed].push(emp.id);
         } else {
             unassigned.push(emp.id);
@@ -183,9 +206,14 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     // positionCapacity() garantiza que puestos custom (EN, RO) reciban qty empleados
     // y puestos 24hs reciban qty×4; el fill-ratio balancea automáticamente.
     if (unassigned.length > 0) {
-        const targets = ctx.positions.filter(p => positionGroups[p.positionName] !== undefined);
-        if (targets.length > 0) {
+        const allTargets = ctx.positions.filter(p => positionGroups[p.positionName] !== undefined);
+        if (allTargets.length > 0) {
             for (const empId of unassigned) {
+                const allowed = allowedPositionNamesForEmp(ctx, empId);
+                const targets = allowed
+                    ? allTargets.filter((p) => allowed.includes(p.positionName))
+                    : allTargets;
+                if (targets.length === 0) continue;
                 const leastFull = targets.reduce((best, p) => {
                     const ratioP = positionGroups[p.positionName].length / positionCapacity(p);
                     const ratioB = positionGroups[best.positionName].length / positionCapacity(best);
@@ -265,11 +293,15 @@ function rebalance24hPositionGroups(
         // Nunca mover a quien tiene puesto asignado Y turno en ese puesto (prevMonthLastShiftByEmp
         // o prevMonthOpeningSlotByEmp definidos = tiene ciclo activo, no mover si hay alternativa).
         const srcGroup = groups[surName];
-        const noActiveRotationIdx = srcGroup.findIndex(id =>
-            !ctx.prevMonthLastShiftByEmp?.[id] &&
-            ctx.prevMonthOpeningSlotByEmp?.[id] === undefined,
+        const canMoveToDef = (id: string) => empCanCoverPositionShift(ctx, id, defName);
+        let pickIdx = srcGroup.findIndex(
+            (id) => canMoveToDef(id) && !ctx.prevMonthLastShiftByEmp?.[id]
+                && ctx.prevMonthOpeningSlotByEmp?.[id] === undefined,
         );
-        const pickIdx = noActiveRotationIdx >= 0 ? noActiveRotationIdx : srcGroup.length - 1;
+        if (pickIdx < 0) {
+            pickIdx = srcGroup.findIndex((id) => canMoveToDef(id));
+        }
+        if (pickIdx < 0) break;
         const movedId = srcGroup.splice(pickIdx, 1)[0];
         (groups[defName] = groups[defName] || []).push(movedId);
         relocatedIds.push(movedId);
@@ -741,7 +773,20 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                 if (ctx.absences[emp.id]?.has(dateStr)) return;
                 const dayLetter = ctx.getDayLetter(dateStr);
                 if (positionIsActiveOn(pos, dayLetter)) {
-                    const shiftCode = String(pos.shifts?.[0]?.code || 'M').toUpperCase();
+                    const dayShifts = effectiveShiftsForPositionDay(
+                        pos,
+                        dayLetter,
+                        ctx.autoCycles,
+                        dateStr,
+                    ).filter((sh) => empCanCoverPositionShift(
+                        ctx,
+                        emp.id,
+                        posName,
+                        String(sh.code || ''),
+                    ));
+                    if (dayShifts.length === 0) return;
+                    const sh = dayShifts[0]!;
+                    const shiftCode = String(sh.code || 'M').toUpperCase();
                     const meta = shiftMeta(pos, shiftCode);
                     assignments.push({
                         empId: emp.id,
@@ -823,8 +868,12 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                 }
             }
             const isExcludedDay = !isRetFloater && WORK_BANDS.has(rawCodeFinal) && !!pos.excludedDates?.includes(dateStr);
-            const code = isExcludedDay ? 'RET' : (isRetFloater && WORK_BANDS.has(rawCodeFinal)) ? 'RET' : rawCodeFinal;
-            if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(rawCodeFinal)) ? rawCodeFinal : null;
+            let workCode = rawCodeFinal;
+            if (WORK_BANDS.has(workCode) && !empCanCoverPositionShift(ctx, emp.id, posName, workCode)) {
+                workCode = 'RET';
+            }
+            const code = isExcludedDay ? 'RET' : (isRetFloater && WORK_BANDS.has(workCode)) ? 'RET' : workCode;
+            if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(workCode)) ? workCode : null;
 
             const meta = shiftMeta(pos, isExcludedDay ? rawCode : code);
             const isFranco = code === 'F';
@@ -897,6 +946,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         const posName = empToPosition[a.empId] ?? '';
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
+        if (!empCanCoverPositionShift(ctx, a.empId, posName, naturalCode)) continue;
         const meta = shiftMeta(pos, naturalCode);
         assignments[i] = {
             empId: a.empId,

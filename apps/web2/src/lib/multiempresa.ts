@@ -844,9 +844,10 @@ export function slaBelongsToEmpresa(
   if (!scopeEmpresa) return true;
   const id = String(empresaId ?? '').trim();
   const emp = String(row.empresaId ?? '').trim();
-  if (emp) return tenantEmpresaIdsMatch(emp, id);
   const cid = String(row.clientId ?? '').trim();
-  return !!cid && clientIds.has(cid);
+  if (cid && clientIds.has(cid)) return true;
+  if (emp) return tenantEmpresaIdsMatch(emp, id);
+  return false;
 }
 
 export function filterSlaRowsByEmpresa<T extends { empresaId?: unknown; clientId?: unknown }>(

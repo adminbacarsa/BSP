@@ -44,6 +44,61 @@ function buildPositionAssignmentsByEmp(
     return Object.keys(result).length > 0 ? result : undefined;
 }
 
+export type AutoLabSlaOptionalFeatureState = 'off' | 'active' | 'on_empty';
+
+export interface AutoLabSlaContractSummary {
+    coberturaDotacion: AutoLabSlaOptionalFeatureState;
+    coberturaGuardiasConfigurados: number;
+    condiciones: AutoLabSlaOptionalFeatureState;
+    condicionesCount: number;
+    rotaciones: AutoLabSlaOptionalFeatureState;
+    rotacionesCount: number;
+}
+
+function resolveOptionalSlaFeature<T>(
+    field: T[] | undefined,
+): { state: AutoLabSlaOptionalFeatureState; count: number } {
+    if (field === undefined) return { state: 'off', count: 0 };
+    if (field.length === 0) return { state: 'on_empty', count: 0 };
+    return { state: 'active', count: field.length };
+}
+
+function buildSlaContractSummary(srv: ServiceSLA): AutoLabSlaContractSummary {
+    const coberturaGuardias = (srv.positionAssignments ?? []).filter((a) => (a.slots?.length ?? 0) > 0).length;
+    let coberturaDotacion: AutoLabSlaOptionalFeatureState = 'off';
+    if (srv.positionAssignments !== undefined) {
+        coberturaDotacion = coberturaGuardias > 0 ? 'active' : 'on_empty';
+    }
+    const rules = resolveOptionalSlaFeature(srv.serviceRules);
+    const rotations = resolveOptionalSlaFeature(srv.serviceRotations);
+    return {
+        coberturaDotacion,
+        coberturaGuardiasConfigurados: coberturaGuardias,
+        condiciones: rules.state,
+        condicionesCount: rules.count,
+        rotaciones: rotations.state,
+        rotacionesCount: rotations.count,
+    };
+}
+
+function pushSlaContractWarnings(summary: AutoLabSlaContractSummary, warnings: string[]): void {
+    if (summary.coberturaDotacion === 'off') {
+        warnings.push(
+            'Cobertura de dotación no activada en el SLA (Servicios → Activar cobertura). El motor no restringe puestos/bandas por legajo.',
+        );
+    } else if (summary.coberturaDotacion === 'on_empty') {
+        warnings.push(
+            'Cobertura de dotación activada pero sin guardias configurados — todos los legajos quedan sin restricción de puesto/banda.',
+        );
+    }
+    if (summary.condiciones === 'on_empty') {
+        warnings.push('Condiciones SLA activadas pero sin reglas cargadas.');
+    }
+    if (summary.rotaciones === 'on_empty') {
+        warnings.push('Rotaciones SLA activadas pero sin ciclos cargados.');
+    }
+}
+
 export interface AutoLabRealServiceBundle {
     caseDef: AutoLabCaseDefinition;
     employees: V2EmployeeDef[];
@@ -56,6 +111,7 @@ export interface AutoLabRealServiceBundle {
     slaLabel: string;
     absencesRrhh: PlanningAbsenceRecord[];
     coverageWisdom?: PlanningCoverageWisdom | null;
+    slaContract: AutoLabSlaContractSummary;
 }
 
 function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
@@ -262,6 +318,8 @@ export async function loadAutoLabRealServiceBundle(params: {
             `Cobertura de dotación (SLA): ${srv.positionAssignments.length} guardia(s) con puestos/bandas permitidos.`,
         );
     }
+    const slaContract = buildSlaContractSummary(srv);
+    pushSlaContractWarnings(slaContract, warnings);
     if (srv.serviceRules?.length) {
         warnings.push(`Condiciones SLA: ${srv.serviceRules.length} regla(s) activas en este contrato.`);
     }
@@ -422,5 +480,6 @@ export async function loadAutoLabRealServiceBundle(params: {
         slaLabel: `${serviceStart} → ${serviceEnd}`,
         absencesRrhh,
         coverageWisdom,
+        slaContract,
     };
 }

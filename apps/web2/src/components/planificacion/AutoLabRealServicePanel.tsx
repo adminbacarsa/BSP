@@ -14,6 +14,7 @@ import {
     AUTO_LAB_REAL_CASE_ID,
     loadAutoLabRealServiceBundle,
     type AutoLabRealServiceBundle,
+    type AutoLabSlaOptionalFeatureState,
 } from '@/lib/planificacion/autoLabRealService';
 import AutoLabPositionDiagram from '@/components/planificacion/AutoLabPositionDiagram';
 
@@ -44,6 +45,18 @@ function RealPositionDiagram({
     );
 }
 
+function slaFeatureBadgeClass(state: AutoLabSlaOptionalFeatureState): string {
+    if (state === 'active') return 'bg-indigo-50 text-indigo-900 border-indigo-200';
+    if (state === 'on_empty') return 'bg-amber-50 text-amber-950 border-amber-200';
+    return 'bg-slate-100 text-slate-600 border-slate-200';
+}
+
+function slaFeatureLabel(state: AutoLabSlaOptionalFeatureState): string {
+    if (state === 'active') return 'Activa';
+    if (state === 'on_empty') return 'Sin datos';
+    return 'Off';
+}
+
 export interface AutoLabRealServicePanelProps {
     year: number;
     month: number;
@@ -62,7 +75,7 @@ export default function AutoLabRealServicePanel({
     onLoadingChange,
 }: AutoLabRealServicePanelProps) {
     const { empresaId, empresa } = useEmpresa();
-    const { objectives, clients, getSlasForObjective, loading: loadingCatalog } =
+    const { objectives, clients, getSlasForObjective, loading: loadingCatalog, slas, objectivesWithSla, tenantClientCount } =
         useObjectivePlanningCatalog(empresaId);
     const [search, setSearch] = useState('');
     const [selectedKey, setSelectedKey] = useState('');
@@ -121,7 +134,26 @@ export default function AutoLabRealServicePanel({
                     Elegí un objetivo de la plataforma. El motor genera la grilla igual que en casos 1–5
                     (cerebro + cobertura + panel de resolución). <strong>No escribe en Firestore.</strong>
                 </p>
+                {!loadingCatalog && empresaId && (
+                    <p className="text-[10px] text-emerald-800/90 mt-2 font-bold">
+                        Empresa <span className="font-mono">{empresaId}</span>
+                        {' · '}
+                        {objectives.length} objetivo(s)
+                        {' · '}
+                        {slas.length} SLA del tenant
+                        {' · '}
+                        {objectivesWithSla} con contrato vinculado
+                    </p>
+                )}
             </div>
+
+            {!loadingCatalog && objectives.length > 0 && slas.length > 0 && objectivesWithSla === 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                    Hay {slas.length} SLA en el tenant pero ninguno coincide con cliente/objetivo del CRM.
+                    Revisá que el SLA tenga el mismo <span className="font-mono">clientId</span> y{' '}
+                    <span className="font-mono">objectiveId</span> que el objetivo en Servicios/CRM.
+                </div>
+            )}
 
             <label className="block relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -139,6 +171,26 @@ export default function AutoLabRealServicePanel({
                     <p className="p-4 text-xs text-slate-500 flex items-center gap-2">
                         <Loader2 size={14} className="animate-spin" />
                         Cargando objetivos…
+                    </p>
+                ) : filteredObjectives.length === 0 ? (
+                    <p className="p-4 text-xs text-slate-500 space-y-1">
+                        <span className="block">
+                            Sin objetivos para Auto Lab en <span className="font-mono">{empresaId}</span>.
+                        </span>
+                        <span className="block text-slate-400">
+                            Clientes del tenant: {tenantClientCount} · SLA visibles: {slas.length}
+                        </span>
+                        {slas.length > 0 ? (
+                            <span className="block text-amber-800">
+                                Hay SLA pero falta vincularlos: revisá <span className="font-mono">clientId</span> y{' '}
+                                <span className="font-mono">objectiveId</span> en Servicios, o agregá objetivos en CRM.
+                            </span>
+                        ) : (
+                            <span className="block">
+                                Sin clientes con <span className="font-mono">empresaId</span> de esta empresa ni SLA del
+                                tenant. En emulador: <span className="font-mono">node scripts/seed-empresa-prueba.js</span>
+                            </span>
+                        )}
                     </p>
                 ) : (
                     <ul className="divide-y divide-slate-100">
@@ -161,6 +213,7 @@ export default function AutoLabRealServicePanel({
                                             <Building2 size={10} />
                                             {obj.clientName}
                                             {slaCount > 0 ? ` · ${slaCount} SLA` : ' · sin SLA'}
+                                            {obj.fromSlaOnly ? ' · ref. SLA' : ''}
                                         </p>
                                     </button>
                                 </li>
@@ -189,6 +242,33 @@ export default function AutoLabRealServicePanel({
                             <p className="text-xs text-slate-600">{bundle.clientName}</p>
                             <p className="text-[10px] text-slate-400 font-mono">{bundle.objectiveId}</p>
                             <p className="text-[11px] text-emerald-800 mt-1">SLA: {bundle.slaLabel}</p>
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                                <span
+                                    className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border ${slaFeatureBadgeClass(bundle.slaContract.coberturaDotacion)}`}
+                                    title="Quién puede cubrir qué puesto/banda"
+                                >
+                                    Cobertura · {slaFeatureLabel(bundle.slaContract.coberturaDotacion)}
+                                    {bundle.slaContract.coberturaGuardiasConfigurados > 0
+                                        ? ` (${bundle.slaContract.coberturaGuardiasConfigurados})`
+                                        : ''}
+                                </span>
+                                <span
+                                    className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border ${slaFeatureBadgeClass(bundle.slaContract.condiciones)}`}
+                                >
+                                    Condiciones · {slaFeatureLabel(bundle.slaContract.condiciones)}
+                                    {bundle.slaContract.condicionesCount > 0
+                                        ? ` (${bundle.slaContract.condicionesCount})`
+                                        : ''}
+                                </span>
+                                <span
+                                    className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border ${slaFeatureBadgeClass(bundle.slaContract.rotaciones)}`}
+                                >
+                                    Rotaciones · {slaFeatureLabel(bundle.slaContract.rotaciones)}
+                                    {bundle.slaContract.rotacionesCount > 0
+                                        ? ` (${bundle.slaContract.rotacionesCount})`
+                                        : ''}
+                                </span>
+                            </div>
                         </div>
                     </div>
 

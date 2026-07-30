@@ -472,6 +472,18 @@ export function buildAutoLabExportJson(
                 Array.from(byDate.entries()).map(([dateStr, code]) => ({ empId, dateStr, code })),
             ),
         },
+        slaContract: caseDef.positionAssignmentsByEmp
+            || (caseDef.serviceRules?.length ?? 0) > 0
+            || (caseDef.serviceRotations?.length ?? 0) > 0
+            || (scheduleOutcome?.positionAssignmentViolations?.length ?? 0) > 0
+            ? {
+                hasPositionAssignments: !!caseDef.positionAssignmentsByEmp,
+                positionAssignmentEmpCount: Object.keys(caseDef.positionAssignmentsByEmp ?? {}).length,
+                serviceRulesCount: caseDef.serviceRules?.length ?? 0,
+                serviceRotationsCount: caseDef.serviceRotations?.length ?? 0,
+                positionAssignmentViolationCount: scheduleOutcome?.positionAssignmentViolations?.length ?? 0,
+            }
+            : undefined,
         brain: {
             pickedCycle: brain.pickedCycle,
             cycles: brain.cycles,
