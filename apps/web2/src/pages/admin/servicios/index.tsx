@@ -858,6 +858,33 @@ export default function ServiciosSLAPage() {
     });
     updRotPeriod(pidx, { ...p, entries });
   }
+
+  function addRREntry() {
+    if (!editingRotation) return;
+    const _p0 = editingRotation.periods[0] || { label: '', trigger: { type: 'WEEKLY' as any }, entries: [] };
+    setEditingRotation({ ...editingRotation, periods: [{ ..._p0, entries: [..._p0.entries, { employeeId: '', employeeName: '', positionName: '', shiftCode: '' }] }] });
+  }
+  function removeRREntry(eidx: number) {
+    if (!editingRotation) return;
+    const _p0 = editingRotation.periods[0];
+    if (!_p0) return;
+    setEditingRotation({ ...editingRotation, periods: [{ ..._p0, entries: _p0.entries.filter((_: any, i: number) => i !== eidx) }] });
+  }
+  function updRREntry(eidx: number, field: string, val: string) {
+    if (!editingRotation) return;
+    const _p0 = editingRotation.periods[0];
+    if (!_p0) return;
+    const _e = _p0.entries.map((e: RotationEntry, i: number) => {
+      if (i !== eidx) return e;
+      const next: any = { ...e, [field]: val };
+      if (field === 'employeeId') {
+        const emp = coverageEmps.find((em: any) => em.id === val);
+        next.employeeName = emp ? (emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim()) : '';
+      }
+      return next;
+    });
+    setEditingRotation({ ...editingRotation, periods: [{ ..._p0, entries: _e }] });
+  }
   function updTrigger(idx: number, field: string, val: string) {
     if (!editingRule) return;
     const triggers = editingRule.triggers.map((t, i) => {
@@ -2730,16 +2757,47 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((d, i) => <option key={i+1} value={i+1}>{d}</option>)}
                                 </select>
                               </div>
-                              {editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY') && (
+                              <div>
+                                <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Modo</p>
+                                <div className="flex rounded-lg overflow-hidden border dark:border-slate-600">
+                                  <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={editingRotation.cycleMode !== 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Fijo</button>
+                                  <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'round_robin', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota sem. a sem.</button>
+                                </div>
+                              </div>
+                              {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
                                 <div>
-                                  <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana A (referencia)</p>
+                                  <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana de ref. (sem. 0)</p>
                                   <input type="date" value={editingRotation.referenceWeekStart || ''} onChange={e => setEditingRotation({ ...editingRotation, referenceWeekStart: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
                                 </div>
                               )}
                             </div>
-                            <div>
-                              <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Períodos:</p>
-                              {editingRotation.periods.map((period: RotationPeriod, pidx: number) => (
+                            {editingRotation.cycleMode === 'round_robin' ? (
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Asignaciones (rotan en orden):</p>
+                            {(editingRotation.periods[0]?.entries || []).map((entry: RotationEntry, eidx: number) => (
+                              <div key={eidx} className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                <select value={entry.employeeId} onChange={e => updRREntry(eidx, 'employeeId', e.target.value)} className="flex-1 min-w-0 text-[10px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  <option value="">— empleado —</option>
+                                  {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                                </select>
+                                <span className="text-[9px] text-slate-400">→</span>
+                                <select value={entry.positionName} onChange={e => updRREntry(eidx, 'positionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  <option value="">— puesto —</option>
+                                  {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                </select>
+                                <select value={entry.shiftCode} onChange={e => updRREntry(eidx, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                  <option value="">— banda —</option>
+                                  {getPositionCodes(entry.positionName, form.positions).map((cc: string) => <option key={cc} value={cc}>{cc}</option>)}
+                                </select>
+                                <button type="button" onClick={() => removeRREntry(eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                              </div>
+                            ))}
+                            <button type="button" onClick={addRREntry} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar empleado</button>
+                          </div>
+                        ) : (
+                        <div>
+                          <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Períodos:</p>
+                          {editingRotation.periods.map((period: RotationPeriod, pidx: number) => (
                                 <div key={pidx} className="mb-3 p-3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700">
                                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                                     <input value={period.label} onChange={e => updRotPeriod(pidx, { ...period, label: e.target.value })} placeholder="Ej: Semana A" className="flex-1 min-w-24 text-[10px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
@@ -2817,6 +2875,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               ))}
                               <button type="button" onClick={() => setEditingRotation({ ...editingRotation, periods: [...editingRotation.periods, { label: '', trigger: { type: 'WEEKLY' as any }, entries: [] }] })} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar período</button>
                             </div>
+                            )}
                             <div className="flex gap-2 pt-2 border-t dark:border-slate-700">
                               <button type="button" onClick={saveRotation} className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors"><Save size={11}/> Guardar</button>
                               <button type="button" onClick={cancelEditRotation} className="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">Cancelar</button>
@@ -2841,16 +2900,47 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((d, i) => <option key={i+1} value={i+1}>{d}</option>)}
                             </select>
                           </div>
-                          {editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY') && (
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Modo</p>
+                            <div className="flex rounded-lg overflow-hidden border dark:border-slate-600">
+                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={editingRotation.cycleMode !== 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Fijo</button>
+                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'round_robin', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota sem. a sem.</button>
+                            </div>
+                          </div>
+                          {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
                             <div>
-                              <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana A (referencia)</p>
+                              <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana de ref. (sem. 0)</p>
                               <input type="date" value={editingRotation.referenceWeekStart || ''} onChange={e => setEditingRotation({ ...editingRotation, referenceWeekStart: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
                             </div>
                           )}
                         </div>
-                        <div>
-                          <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Períodos:</p>
-                          {editingRotation.periods.map((period: RotationPeriod, pidx: number) => (
+                        {editingRotation.cycleMode === 'round_robin' ? (
+                  <div>
+                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Asignaciones (rotan en orden):</p>
+                    {(editingRotation.periods[0]?.entries || []).map((entry: RotationEntry, eidx: number) => (
+                      <div key={eidx} className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                        <select value={entry.employeeId} onChange={e => updRREntry(eidx, 'employeeId', e.target.value)} className="flex-1 min-w-0 text-[10px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                          <option value="">— empleado —</option>
+                          {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                        </select>
+                        <span className="text-[9px] text-slate-400">→</span>
+                        <select value={entry.positionName} onChange={e => updRREntry(eidx, 'positionName', e.target.value)} className="text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                          <option value="">— puesto —</option>
+                          {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                        </select>
+                        <select value={entry.shiftCode} onChange={e => updRREntry(eidx, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                          <option value="">— banda —</option>
+                          {getPositionCodes(entry.positionName, form.positions).map((cc: string) => <option key={cc} value={cc}>{cc}</option>)}
+                        </select>
+                        <button type="button" onClick={() => removeRREntry(eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={addRREntry} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar empleado</button>
+                  </div>
+                ) : (
+                <div>
+                  <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Períodos:</p>
+                  {editingRotation.periods.map((period: RotationPeriod, pidx: number) => (
                             <div key={pidx} className="mb-3 p-3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700">
                               <div className="flex items-center gap-2 mb-2 flex-wrap">
                                 <input value={period.label} onChange={e => updRotPeriod(pidx, { ...period, label: e.target.value })} placeholder="Ej: Semana A" className="flex-1 min-w-24 text-[10px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
@@ -2928,6 +3018,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                           ))}
                           <button type="button" onClick={() => setEditingRotation({ ...editingRotation, periods: [...editingRotation.periods, { label: '', trigger: { type: 'WEEKLY' as any }, entries: [] }] })} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar período</button>
                         </div>
+                        )}
                         <div className="flex gap-2 pt-2 border-t dark:border-slate-700">
                           <button type="button" onClick={saveRotation} className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors"><Save size={11}/> Guardar</button>
                           <button type="button" onClick={cancelEditRotation} className="px-3 py-1.5 rounded-xl text-[10px] font-black text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">Cancelar</button>

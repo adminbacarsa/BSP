@@ -101,6 +101,7 @@ export interface RotationPeriod {
 export interface ServiceRotation {
   id: string;
   name?: string;
+  cycleMode?: 'round_robin';
   referenceWeekStart?: string; // YYYY-MM-DD — lunes de la Semana A (para tipo WEEKLY)
   weekStartDay?: number;       // 1=Lun (default), 2=Mar, …7=Dom
   periods: RotationPeriod[];

@@ -66,6 +66,16 @@ export function getRotationEntriesForDate(rotation: ServiceRotation, dateStr: st
     return [];
 }
 
+export function getRoundRobinOffset(
+    rotation: ServiceRotation,
+    dateStr: string,
+    N: number,
+): number | null {
+    if (!rotation.referenceWeekStart) return null;
+    const diff = getWeekDiff(rotation.referenceWeekStart, dateStr, rotation.weekStartDay ?? 1);
+    return ((diff % N) + N) % N;
+}
+
 export function getAllDatesInMonth(year: number, month: number): string[] {
     const days = new Date(year, month + 1, 0).getDate();
     return Array.from({ length: days }, (_, i) => {

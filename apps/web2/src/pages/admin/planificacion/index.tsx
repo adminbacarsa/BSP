@@ -213,7 +213,7 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
-import { rotationPeriodApplies, getAllDatesInMonth } from '@/lib/planificacion/rotationUtils';
+import { rotationPeriodApplies, getAllDatesInMonth, getRoundRobinOffset } from '@/lib/planificacion/rotationUtils';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT']);
 
@@ -754,6 +754,48 @@ function applyRotationsForMonth(
     const additions: Record<string, any> = {};
     const allDates = getAllDatesInMonth(year, month);
     for (const rotation of rotations) {
+        if (rotation.cycleMode === 'round_robin') {
+            const _rrP = rotation.periods[0];
+            if (_rrP && _rrP.trigger.type === 'WEEKLY') {
+                const _rrE = _rrP.entries.filter((e: any) => e.employeeId && e.shiftCode);
+                const _rrN = _rrE.length;
+                if (_rrN >= 2) {
+                    for (const dateStr of allDates) {
+                        const dayLetter = getDayLetter(dateStr);
+                        const _rrOff = getRoundRobinOffset(rotation, dateStr, _rrN);
+                        if (_rrOff === null) continue;
+                        for (let _ri = 0; _ri < _rrN; _ri++) {
+                            const _rrEmp = _rrE[_ri];
+                            const _rrRot = _rrE[(_ri + _rrOff) % _rrN];
+                            if (positionStructure?.length && _rrRot.positionName) {
+                                const _posCfg = positionStructure.find((p: any) => p.positionName === _rrRot.positionName);
+                                if (_posCfg) {
+                                    if (!isPosActiveOnDay(_posCfg, dayLetter)) continue;
+                                    if (isPosExcludedOnDate(_posCfg, dateStr)) continue;
+                                }
+                            }
+                            const key = `${_rrEmp.employeeId}_${dateStr}`;
+                            const _rrPend = pendingChanges[key];
+                            const _rrFS = shiftsMap[key];
+                            const _rrIsFranco = (s: any) => s && !s.isDeleted && ['F','FF','FP','FT'].includes(s.code);
+                            if (_rrIsFranco(_rrPend) || (!_rrPend && _rrIsFranco(_rrFS))) continue;
+                            if (!_rrPend || _rrPend.isDeleted) {
+                                additions[key] = {
+                                    empId: _rrEmp.employeeId,
+                                    dateStr,
+                                    code: _rrRot.shiftCode,
+                                    positionName: _rrRot.positionName || '',
+                                    hours: 8,
+                                    startTime: '00:00',
+                                    isDeleted: false,
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        }
         for (const period of rotation.periods) {
             for (const dateStr of allDates) {
                 if (!rotationPeriodApplies(period, dateStr, rotation)) continue;
@@ -769,6 +811,9 @@ function applyRotationsForMonth(
                     }
                     const key = `${entry.employeeId}_${dateStr}`;
                     const activePending = pendingChanges[key];
+                    const _fsShift = shiftsMap[key];
+                    const _isFranco = (s: any) => s && !s.isDeleted && ['F','FF','FP','FT'].includes(s.code);
+                    if (_isFranco(activePending) || (!activePending && _isFranco(_fsShift))) continue;
                     if (!activePending || activePending.isDeleted) {
                         additions[key] = {
                             empId: entry.employeeId,
