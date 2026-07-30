@@ -2527,11 +2527,35 @@ export default function PlanificacionPage() {
             }
             if (blockedOnAllDays) disabled.set(code, lastReason || 'Sin cupo disponible');
         }
+        // Chequear restricciones de cobertura (positionAssignments) por empleado en la selección
+        if (activeSlaPositionAssignments?.length && evalPosName) {
+            const minRBulk = Math.min(selection.start.r, selection.end.r);
+            const maxRBulk = Math.max(selection.start.r, selection.end.r);
+            for (const code of codes) {
+                if (disabled.has(code)) continue;
+                let hasBlocked = false;
+                let hasAllowed = false;
+                for (let r = minRBulk; r <= maxRBulk; r++) {
+                    const selEmp = displayedEmployees[r];
+                    if (!selEmp) continue;
+                    const pa = activeSlaPositionAssignments.find((a: any) => a.employeeId === selEmp.id);
+                    if (!pa?.slots?.length) { hasAllowed = true; continue; }
+                    const sl = pa.slots.find((s: any) => s.positionName === evalPosName);
+                    if (!sl || (sl.shiftCodes.length > 0 && !sl.shiftCodes.map((x: string) => x.toUpperCase()).includes(code))) {
+                        hasBlocked = true;
+                    } else {
+                        hasAllowed = true;
+                    }
+                }
+                if (hasBlocked && !hasAllowed) disabled.set(code, 'Cobertura: turno no permitido para los empleados seleccionados');
+            }
+        }
         return disabled;
     }, [
         selection.start, selection.end, selectedObjective, bulkPerEmpMode, bulkBarScopeObjectiveId,
         bulkMonoPositionInfo, bulkEffectiveStructure, positionStructure, bulkMonoShifts, daysInMonth,
         displayedEmployees, pendingChanges, shiftsMap, absencesMap, autoCycles, resolveEffectiveShiftObjectiveId,
+        activeSlaPositionAssignments,
     ]);
 
     /**
@@ -5851,6 +5875,7 @@ export default function PlanificacionPage() {
                     continue;
                 }
                 if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 }));
+                if (isBulkCovBlocked(emp.id, assignPos, codeUpper)) { skippedCoverage++; continue; }
                 let cellIsFT = false;
                 if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') {
                     cellIsFT = markAsFT;
@@ -6070,6 +6095,7 @@ export default function PlanificacionPage() {
                 const { blocked, warnings } = checkRestricciones(emp, dateStr, posName, sh.code, covObjId, empStructure);
                 if (blocked) continue;
                 if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 }));
+                if (isBulkCovBlocked(emp.id, posName, String(sh.code || ''))) { skippedCoverage++; continue; }
                 newChanges[key] = {
                     code: sh.code,
                     name: sh.name,
@@ -6137,6 +6163,18 @@ export default function PlanificacionPage() {
             });
         }
         return { blocked: !!(objRestr || clientRestr || generoCheck.blocked), warnings };
+    };
+
+    // Verificar si un empleado tiene restringido un código por positionAssignments del SLA (Cobertura de Dotación)
+    const isBulkCovBlocked = (empId: string, posName: string, code: string): boolean => {
+        if (!activeSlaPositionAssignments?.length) return false;
+        if (!isPlanningWorkShiftCode(code)) return false;
+        const pa = activeSlaPositionAssignments.find((a: any) => a.employeeId === empId);
+        if (!pa?.slots?.length) return false;
+        const slot = pa.slots.find((s: any) => s.positionName === posName);
+        if (!slot) return true;
+        if (slot.shiftCodes.length === 0) return false;
+        return !slot.shiftCodes.map((x: string) => x.toUpperCase()).includes(String(code || '').toUpperCase());
     };
 
     const applyToPending = (config: any) => {
@@ -9942,8 +9980,9 @@ export default function PlanificacionPage() {
                                                                 }
                                                                 const s = empShiftByCode.get(code);
                                                                 if (!s) return <span key={`${emp.id}_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
+                                                                const _cov1 = isBulkCovBlocked(emp.id, empPos, (s as any).code);
                                                                 return (
-                                                                    <button key={`${emp.id}_${code}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime }, { onlyEmpId: emp.id })} disabled={isServiceLocked} title={`${emp.name} · ${empPos || 'puesto'} → ${s.code}`} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)}`}>{s.code}</button>
+                                                                    <button key={`${emp.id}_${code}`} type="button" onClick={() => applyBulkChange({ code: s.code, name: s.name, hours: s.hours, startTime: s.startTime, endTime: s.endTime }, { onlyEmpId: emp.id })} disabled={isServiceLocked || _cov1} title={_cov1 ? 'Cobertura: turno no permitido para este empleado' : `${emp.name} · ${empPos || 'puesto'} → ${s.code}`} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${_cov1 ? 'opacity-30 cursor-not-allowed' : ''}`}>{s.code}</button>
                                                                 );
                                                             })}
                                                         </div>
@@ -10023,9 +10062,9 @@ export default function PlanificacionPage() {
                                                                         startTime: s.startTime,
                                                                         endTime: s.endTime,
                                                                     }, { onlyEmpId: emp.id })}
-                                                                    disabled={isServiceLocked || needsPos}
-                                                                    title={needsPos ? 'Elegí puesto (paleta) primero' : `${emp.name} · ${posName || filterPos || bulkBarPosition || 'puesto'} → ${s.code}`}
-                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${needsPos ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                                                    disabled={isServiceLocked || needsPos || isBulkCovBlocked(emp.id, posName || filterPos || bulkBarPosition || '', (s as any).code)}
+                                                                    title={isBulkCovBlocked(emp.id, posName || filterPos || bulkBarPosition || '', (s as any).code) ? 'Cobertura: turno no permitido para este empleado' : needsPos ? 'Elegí puesto (paleta) primero' : `${emp.name} · ${posName || filterPos || bulkBarPosition || 'puesto'} → ${s.code}`}
+                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${(needsPos || isBulkCovBlocked(emp.id, posName || filterPos || bulkBarPosition || '', (s as any).code)) ? 'opacity-30 cursor-not-allowed' : ''}`}
                                                                 >
                                                                     {s.code}
                                                                 </button>
