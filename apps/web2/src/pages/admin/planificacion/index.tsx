@@ -781,9 +781,43 @@ function applyRotationsForMonth(
                         const dayLetter = getDayLetter(dateStr);
                         const _rrOff = getRoundRobinOffset(rotation, dateStr, _rrN, _rrInferredRef);
                         if (_rrOff === null) continue;
+                        // Pasada 1: detectar qué slots ya están tomados por asignaciones manuales
+                        const _slotClaimed = new Map();
+                        for (let _ri2 = 0; _ri2 < _rrN; _ri2++) {
+                            const _p2 = pendingChanges[`${_rrE[_ri2].employeeId}_${dateStr}`];
+                            if (_p2 && !_p2.isDeleted) {
+                                const _si = _rrE.findIndex((e: any) => e.shiftCode === _p2.code);
+                                if (_si >= 0) _slotClaimed.set(_si, _rrE[_ri2].employeeId);
+                            }
+                        }
+                        // Slots disponibles en orden de rotación
+                        const _availSlots: number[] = [];
+                        for (let _s = 0; _s < _rrN; _s++) {
+                            const _si2 = (_rrOff + _s) % _rrN;
+                            if (!_slotClaimed.has(_si2)) _availSlots.push(_si2);
+                        }
+                        // Pasada 2: asignar empleados libres a slots disponibles
                         for (let _ri = 0; _ri < _rrN; _ri++) {
                             const _rrEmp = _rrE[_ri];
-                            const _rrRot = _rrE[(_ri + _rrOff) % _rrN];
+                            const _key = `${_rrEmp.employeeId}_${dateStr}`;
+                            const _rrPend = pendingChanges[_key];
+                            const _rrFS = shiftsMap[_key];
+                            const _rrIsFr = (s: any) => s && !s.isDeleted && ['F','FF','FP','FT'].includes(s.code);
+                            if (_rrIsFr(_rrPend) || (!_rrPend && _rrIsFr(_rrFS))) continue;
+                            if (_rrPend && !_rrPend.isDeleted) continue;
+                            // Intentar slot natural; si está ocupado, tomar el primero libre
+                            const _nat = (_ri + _rrOff) % _rrN;
+                            let _slot: number | undefined;
+                            if (!_slotClaimed.has(_nat)) {
+                                _slot = _nat;
+                                _slotClaimed.set(_nat, _rrEmp.employeeId);
+                            } else {
+                                const _next = _availSlots.find((_s2: number) => !_slotClaimed.has(_s2));
+                                if (_next === undefined) continue;
+                                _slot = _next;
+                                _slotClaimed.set(_slot, _rrEmp.employeeId);
+                            }
+                            const _rrRot = _rrE[_slot];
                             if (positionStructure?.length && _rrRot.positionName) {
                                 const _posCfg = positionStructure.find((p: any) => p.positionName === _rrRot.positionName);
                                 if (_posCfg) {
@@ -791,22 +825,15 @@ function applyRotationsForMonth(
                                     if (isPosExcludedOnDate(_posCfg, dateStr)) continue;
                                 }
                             }
-                            const key = `${_rrEmp.employeeId}_${dateStr}`;
-                            const _rrPend = pendingChanges[key];
-                            const _rrFS = shiftsMap[key];
-                            const _rrIsFranco = (s: any) => s && !s.isDeleted && ['F','FF','FP','FT'].includes(s.code);
-                            if (_rrIsFranco(_rrPend) || (!_rrPend && _rrIsFranco(_rrFS))) continue;
-                            if (!_rrPend || _rrPend.isDeleted) {
-                                additions[key] = {
-                                    empId: _rrEmp.employeeId,
-                                    dateStr,
-                                    code: _rrRot.shiftCode,
-                                    positionName: _rrRot.positionName || '',
-                                    hours: 8,
-                                    startTime: '00:00',
-                                    isDeleted: false,
-                                };
-                            }
+                            additions[_key] = {
+                                empId: _rrEmp.employeeId,
+                                dateStr,
+                                code: _rrRot.shiftCode,
+                                positionName: _rrRot.positionName || '',
+                                hours: 8,
+                                startTime: '00:00',
+                                isDeleted: false,
+                            };
                         }
                     }
                 }
