@@ -2760,8 +2760,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <div>
                                 <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Modo</p>
                                 <div className="flex rounded-lg overflow-hidden border dark:border-slate-600">
-                                  <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={editingRotation.cycleMode !== 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por período</button>
+                                  <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={!editingRotation.cycleMode ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por período</button>
                                   <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'round_robin', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota sem. a sem.</button>
+                                  <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'cycle_rotation', cycleWorkDays: editingRotation.cycleWorkDays || 5, cycleOffDays: editingRotation.cycleOffDays || 1, periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'cycle_rotation' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota por ciclo</button>
                                 </div>
                               </div>
                               {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
@@ -2775,7 +2776,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <p className="text-[9px] text-slate-400 mt-0.5">Lunes donde emp[0] usa su código base. Puede ser del mes anterior.</p>
                                 </div>
                               )}
-                              {editingRotation.cycleMode === 'round_robin' && (
+                              {(editingRotation.cycleMode === 'round_robin' || editingRotation.cycleMode === 'cycle_rotation') && (
                                 <div>
                                   <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Ciclo</p>
                                   <div className="flex items-center gap-1.5">
@@ -2786,8 +2787,18 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <p className="text-[9px] text-slate-400 mt-0.5">Días trabajo + días franco. Ej: 5+1 coloca F automático al planificar.</p>
                                 </div>
                               )}
+                              {editingRotation.cycleMode === 'cycle_rotation' && editingRotation.cycleWorkDays && editingRotation.cycleOffDays && (
+                                <div>
+                                  <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Inicio ciclo (auto-ancla)</p>
+                                  <div className="flex items-center gap-1">
+                                    <input type="date" value={editingRotation.cycleStartDate || ''} onChange={e => setEditingRotation({ ...editingRotation, cycleStartDate: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                    <button type="button" title="Auto-calcular anclas escalonadas" disabled={!editingRotation.cycleStartDate} onClick={() => { const _e0 = editingRotation.periods[0]?.entries || []; const _N = _e0.length; if (!_N || !editingRotation.cycleStartDate) return; const _cl = (editingRotation.cycleWorkDays || 5) + (editingRotation.cycleOffDays || 1); const _sg = Math.floor(_cl / _N); const _sm = new Date(editingRotation.cycleStartDate + 'T00:00:00').getTime(); const _ue = _e0.map((e: any, i: number) => ({ ...e, cycleAnchorDate: new Date(_sm - i * _sg * 86400000).toISOString().split('T')[0] })); setEditingRotation({ ...editingRotation, periods: [{ ...editingRotation.periods[0], entries: _ue }] }); }} className="text-[9px] font-black px-2 py-1.5 rounded-lg bg-teal-600 text-white disabled:opacity-40">Auto</button>
+                                  </div>
+                                  <p className="text-[9px] text-slate-400 mt-0.5">Escalona anclas desde el primer día. Podés ajustar cada una.</p>
+                                </div>
+                              )}
                             </div>
-                            {editingRotation.cycleMode === 'round_robin' ? (
+                            {(editingRotation.cycleMode === 'round_robin' || editingRotation.cycleMode === 'cycle_rotation') ? (
                           <div>
                             <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Asignaciones (rotan en orden):</p>
                             {(editingRotation.periods[0]?.entries || []).map((entry: RotationEntry, eidx: number) => (
@@ -2922,8 +2933,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                           <div>
                             <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Modo</p>
                             <div className="flex rounded-lg overflow-hidden border dark:border-slate-600">
-                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={editingRotation.cycleMode !== 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por período</button>
+                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={!editingRotation.cycleMode ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por período</button>
                               <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'round_robin', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota sem. a sem.</button>
+                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'cycle_rotation', cycleWorkDays: editingRotation.cycleWorkDays || 5, cycleOffDays: editingRotation.cycleOffDays || 1, periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'cycle_rotation' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota por ciclo</button>
                             </div>
                           </div>
                           {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
@@ -2937,7 +2949,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <p className="text-[9px] text-slate-400 mt-0.5">Lunes donde emp[0] usa su código base. Puede ser del mes anterior.</p>
                             </div>
                           )}
-                          {editingRotation.cycleMode === 'round_robin' && (
+                          {(editingRotation.cycleMode === 'round_robin' || editingRotation.cycleMode === 'cycle_rotation') && (
                             <div>
                               <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Ciclo</p>
                               <div className="flex items-center gap-1.5">
@@ -2948,8 +2960,18 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <p className="text-[9px] text-slate-400 mt-0.5">Días trabajo + días franco. Ej: 5+1 coloca F automático al planificar.</p>
                             </div>
                           )}
+                          {editingRotation.cycleMode === 'cycle_rotation' && editingRotation.cycleWorkDays && editingRotation.cycleOffDays && (
+                            <div>
+                              <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Inicio ciclo (auto-ancla)</p>
+                              <div className="flex items-center gap-1">
+                                <input type="date" value={editingRotation.cycleStartDate || ''} onChange={e => setEditingRotation({ ...editingRotation, cycleStartDate: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                <button type="button" title="Auto-calcular anclas escalonadas" disabled={!editingRotation.cycleStartDate} onClick={() => { const _e0 = editingRotation.periods[0]?.entries || []; const _N = _e0.length; if (!_N || !editingRotation.cycleStartDate) return; const _cl = (editingRotation.cycleWorkDays || 5) + (editingRotation.cycleOffDays || 1); const _sg = Math.floor(_cl / _N); const _sm = new Date(editingRotation.cycleStartDate + 'T00:00:00').getTime(); const _ue = _e0.map((e: any, i: number) => ({ ...e, cycleAnchorDate: new Date(_sm - i * _sg * 86400000).toISOString().split('T')[0] })); setEditingRotation({ ...editingRotation, periods: [{ ...editingRotation.periods[0], entries: _ue }] }); }} className="text-[9px] font-black px-2 py-1.5 rounded-lg bg-teal-600 text-white disabled:opacity-40">Auto</button>
+                              </div>
+                              <p className="text-[9px] text-slate-400 mt-0.5">Escalona anclas desde el primer día. Podés ajustar cada una.</p>
+                            </div>
+                          )}
                         </div>
-                        {editingRotation.cycleMode === 'round_robin' ? (
+                        {(editingRotation.cycleMode === 'round_robin' || editingRotation.cycleMode === 'cycle_rotation') ? (
                   <div>
                     <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Asignaciones (rotan en orden):</p>
                     {(editingRotation.periods[0]?.entries || []).map((entry: RotationEntry, eidx: number) => (

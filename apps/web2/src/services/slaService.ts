@@ -102,11 +102,12 @@ export interface RotationPeriod {
 export interface ServiceRotation {
   id: string;
   name?: string;
-  cycleMode?: 'round_robin';
-  referenceWeekStart?: string; // YYYY-MM-DD — lunes de la Semana A (para tipo WEEKLY)
+  cycleMode?: 'round_robin' | 'cycle_rotation';
+  referenceWeekStart?: string; // YYYY-MM-DD — lunes de la Semana A (para tipo WEEKLY, round_robin)
   weekStartDay?: number;       // 1=Lun (default), 2=Mar, …7=Dom
   cycleWorkDays?: number;      // días de trabajo en el ciclo (ej. 5 para 5+1)
   cycleOffDays?: number;       // días de franco en el ciclo (ej. 1 para 5+1, 2 para 6+2)
+  cycleStartDate?: string;     // YYYY-MM-DD — para cycle_rotation nuevo servicio, auto-calcula anchors escalonados
   periods: RotationPeriod[];
 }
 

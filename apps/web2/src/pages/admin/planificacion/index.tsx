@@ -754,6 +754,43 @@ function applyRotationsForMonth(
     const additions: Record<string, any> = {};
     const allDates = getAllDatesInMonth(year, month);
     for (const rotation of rotations) {
+        if (rotation.cycleMode === 'cycle_rotation') {
+            const _crP = rotation.periods[0];
+            if (!_crP || !rotation.cycleWorkDays || !rotation.cycleOffDays) continue;
+            const _crE = _crP.entries.filter((e: any) => e.employeeId && e.shiftCode && e.cycleAnchorDate);
+            const _crN = _crE.length;
+            if (_crN < 1) continue;
+            const _cycLen = rotation.cycleWorkDays + rotation.cycleOffDays;
+            for (const dateStr of allDates) {
+                const dayLetter = getDayLetter(dateStr);
+                for (let _ci = 0; _ci < _crN; _ci++) {
+                    const _cEmp = _crE[_ci];
+                    const _key = `${_cEmp.employeeId}_${dateStr}`;
+                    const _cPend = pendingChanges[_key];
+                    if (_cPend && !_cPend.isDeleted) continue;
+                    const _ancMs = new Date(_cEmp.cycleAnchorDate + 'T00:00:00').getTime();
+                    const _dtMs = new Date(dateStr + 'T00:00:00').getTime();
+                    const _dSince = Math.round((_dtMs - _ancMs) / 86400000);
+                    const _cIdx = Math.floor(_dSince / _cycLen);
+                    const _pos = ((_dSince % _cycLen) + _cycLen) % _cycLen;
+                    if (_pos >= rotation.cycleWorkDays) {
+                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: 'F', positionName: '', hours: 0, startTime: '00:00', isDeleted: false };
+                    } else {
+                        const _eIdx = ((_ci + _cIdx) % _crN + _crN) % _crN;
+                        const _ent = _crE[_eIdx];
+                        if (positionStructure?.length && _ent.positionName) {
+                            const _pCfg = positionStructure.find((p: any) => p.positionName === _ent.positionName);
+                            if (_pCfg) {
+                                if (!isPosActiveOnDay(_pCfg, dayLetter)) continue;
+                                if (isPosExcludedOnDate(_pCfg, dateStr)) continue;
+                            }
+                        }
+                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: _ent.shiftCode, positionName: _ent.positionName || '', hours: 8, startTime: '00:00', isDeleted: false };
+                    }
+                }
+            }
+            continue;
+        }
         if (rotation.cycleMode === 'round_robin') {
             const _rrP = rotation.periods[0];
             if (_rrP && _rrP.trigger.type === 'WEEKLY') {
@@ -6390,6 +6427,19 @@ export default function PlanificacionPage() {
                 positionStructure,
             );
             Object.assign(newChanges, _rotAdditions);
+            if (activeSlaServiceRules?.length) {
+                const _rotFDates = new Set<string>();
+                for (const _rv of Object.values(_rotAdditions)) {
+                    if (_rv && !(_rv as any).isDeleted && ['F','FF','FP','FT'].includes((_rv as any).code)) {
+                        _rotFDates.add((_rv as any).dateStr);
+                    }
+                }
+                for (const _rfd of _rotFDates) {
+                    if (_rfd === selectedCell?.dateStr) continue;
+                    const _rfc = computeServiceRuleChanges(_rfd, activeSlaServiceRules, newChanges, shiftsMap, dotacionBaseEmployees, selectedObjective);
+                    Object.assign(newChanges, _rfc);
+                }
+            }
         }
         commitPendingChanges(newChanges);
         // Toast de alerta si el nuevo turno rompe el descanso mínimo de 12h
