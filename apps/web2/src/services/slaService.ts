@@ -51,6 +51,7 @@ export interface RuleTrigger {
   employeeId: string;
   employeeName: string;
   shiftCode: string;
+  shiftCodes?: string[]; // OR — si está presente y no vacío, overrides shiftCode
 }
 
 export type RuleActionType = 'EXCLUDE' | 'MOVE' | 'RESTRICT' | 'ASSIGN';

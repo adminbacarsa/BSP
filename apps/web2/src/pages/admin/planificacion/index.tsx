@@ -695,6 +695,7 @@ function computeServiceRuleChanges(
     shiftsMap: Record<string, any>,
     employees: any[],
     objectiveId: string,
+    changedEmpId?: string,
 ): Record<string, any> {
     const additions: Record<string, any> = {};
     const getEntry = (empId: string) => {
@@ -710,9 +711,13 @@ function computeServiceRuleChanges(
     };
     for (const rule of rules) {
         if (!rule.triggers.length) continue;
-        const fires = rule.triggers.every((t: import('@/services/slaService').RuleTrigger) =>
-            getCode(t.employeeId) === String(t.shiftCode || '').toUpperCase()
-        );
+        if (changedEmpId && !rule.triggers.some((t: import('@/services/slaService').RuleTrigger) => t.employeeId === changedEmpId)) continue;
+        const fires = rule.triggers.every((t: import('@/services/slaService').RuleTrigger) => {
+            const code = getCode(t.employeeId);
+            if (!code) return false;
+            const allowed = (t.shiftCodes?.length ? t.shiftCodes : [t.shiftCode]).map(s => String(s || '').toUpperCase()).filter(Boolean);
+            return allowed.includes(code);
+        });
         if (!fires) continue;
         for (const action of rule.actions) {
             if (action.type === 'EXCLUDE') {
@@ -6417,6 +6422,7 @@ export default function PlanificacionPage() {
             const _ruleAdditions = computeServiceRuleChanges(
                 selectedCell.dateStr, activeSlaServiceRules, newChanges,
                 shiftsMap, dotacionBaseEmployees, selectedObjective,
+                selectedCell.empId,
             );
             Object.assign(newChanges, _ruleAdditions);
         }
@@ -6428,16 +6434,21 @@ export default function PlanificacionPage() {
             );
             Object.assign(newChanges, _rotAdditions);
             if (activeSlaServiceRules?.length) {
-                const _rotFDates = new Set<string>();
+                const _rotFByEmp: Record<string, Set<string>> = {};
                 for (const _rv of Object.values(_rotAdditions)) {
                     if (_rv && !(_rv as any).isDeleted && ['F','FF','FP','FT'].includes((_rv as any).code)) {
-                        _rotFDates.add((_rv as any).dateStr);
+                        const _re = (_rv as any).empId as string;
+                        const _rd = (_rv as any).dateStr as string;
+                        if (!_rotFByEmp[_re]) _rotFByEmp[_re] = new Set<string>();
+                        _rotFByEmp[_re].add(_rd);
                     }
                 }
-                for (const _rfd of _rotFDates) {
-                    if (_rfd === selectedCell?.dateStr) continue;
-                    const _rfc = computeServiceRuleChanges(_rfd, activeSlaServiceRules, newChanges, shiftsMap, dotacionBaseEmployees, selectedObjective);
-                    Object.assign(newChanges, _rfc);
+                for (const [_re2, _rdates] of Object.entries(_rotFByEmp)) {
+                    for (const _rfd of _rdates) {
+                        if (_rfd === selectedCell?.dateStr && _re2 === selectedCell?.empId) continue;
+                        const _rfc = computeServiceRuleChanges(_rfd, activeSlaServiceRules, newChanges, shiftsMap, dotacionBaseEmployees, selectedObjective, _re2);
+                        Object.assign(newChanges, _rfc);
+                    }
                 }
             }
         }

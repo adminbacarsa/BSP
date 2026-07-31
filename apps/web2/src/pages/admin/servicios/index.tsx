@@ -794,7 +794,7 @@ export default function ServiciosSLAPage() {
   }
 
   function startNewRule() {
-    const r: ServiceRule = { id: 'rule_' + Date.now(), name: '', triggers: [{ employeeId: '', employeeName: '', shiftCode: 'F' }], actions: [{ type: 'EXCLUDE' as RuleActionType, positionName: '', shiftCode: '' }] };
+    const r: ServiceRule = { id: 'rule_' + Date.now(), name: '', triggers: [{ employeeId: '', employeeName: '', shiftCode: 'F', shiftCodes: [] }], actions: [{ type: 'EXCLUDE' as RuleActionType, positionName: '', shiftCode: '' }] };
     setEditingRule(r);
     setEditingRuleIsNew(true);
   }
@@ -895,6 +895,16 @@ export default function ServiciosSLAPage() {
         next.employeeName = emp ? (emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim()) : '';
       }
       return next;
+    });
+    setEditingRule({ ...editingRule, triggers });
+  }
+  function toggleTriggerCode(idx: number, code: string) {
+    if (!editingRule) return;
+    const triggers = editingRule.triggers.map((t, i) => {
+      if (i !== idx) return t;
+      const cur = (t as any).shiftCodes?.length ? (t as any).shiftCodes as string[] : (t.shiftCode ? [t.shiftCode] : []);
+      const next = cur.includes(code) ? cur.filter((x: string) => x !== code) : [...cur, code];
+      return { ...t, shiftCodes: next, shiftCode: next[0] || 'F' };
     });
     setEditingRule({ ...editingRule, triggers });
   }
@@ -2448,7 +2458,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{rule.name || ('Regla ' + (ruleIdx + 1))}</p>
                               <p className="text-[9px] text-slate-400 mt-0.5 truncate">
-                                SI {rule.triggers.map(t => (t.employeeName || t.employeeId) + ' = ' + t.shiftCode).join(' Y ')}
+                                SI {rule.triggers.map(t => { const codes = (t as any).shiftCodes?.length ? (t as any).shiftCodes.join('/') : t.shiftCode; return (t.employeeName || t.employeeId) + '∈{' + codes + '}'; }).join(' Y ')}
                                 {' → '}{rule.actions.length} acción{rule.actions.length !== 1 ? 'es' : ''}
                               </p>
                             </div>
@@ -2471,16 +2481,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <option value="">— empleado —</option>
                                   {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
                                 </select>
-                                <span className="text-[9px] text-slate-400 shrink-0">tiene código</span>
-                                <select value={t.shiftCode} onChange={e => updTrigger(ti, 'shiftCode', e.target.value)} className="w-24 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
-                                  {RULE_TRIGGER_CODES.map(c => <option key={c} value={c}>{c}</option>)}
-                                </select>
+                                <span className="text-[9px] text-slate-400 shrink-0">tiene alguno de:</span>
+                                <div className="flex flex-wrap gap-0.5">
+                                  {RULE_TRIGGER_CODES.map(cc => {
+                                    const _active = ((t as any).shiftCodes?.length ? (t as any).shiftCodes as string[] : [t.shiftCode]).includes(cc);
+                                    return <button key={cc} type="button" onClick={() => toggleTriggerCode(ti, cc)} className={`text-[8px] font-black px-1.5 py-0.5 rounded border transition-colors ${_active ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-300 dark:border-slate-600 hover:border-violet-400'}`}>{cc}</button>;
+                                  })}
+                                </div>
                                 {editingRule.triggers.length > 1 && (
                                   <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: editingRule.triggers.filter((_: any, i: number) => i !== ti) })} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
                                 )}
                               </div>
                             ))}
-                            <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: [...editingRule.triggers, { employeeId: '', employeeName: '', shiftCode: 'F' }] })} className="flex items-center gap-1 text-[9px] font-black text-violet-500 hover:text-violet-700 mt-1"><Plus size={9}/> Agregar condición</button>
+                            <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: [...editingRule.triggers, { employeeId: '', employeeName: '', shiftCode: 'F', shiftCodes: [] }] })} className="flex items-center gap-1 text-[9px] font-black text-violet-500 hover:text-violet-700 mt-1"><Plus size={9}/> Agregar condición</button>
                           </div>
                           <div>
                             <p className="text-[9px] font-black uppercase text-slate-400 mb-2">ENTONCES (acciones):</p>
@@ -2590,16 +2603,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <option value="">— empleado —</option>
                                   {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
                                 </select>
-                                <span className="text-[9px] text-slate-400 shrink-0">tiene código</span>
-                                <select value={t.shiftCode} onChange={e => updTrigger(ti, 'shiftCode', e.target.value)} className="w-24 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
-                                  {RULE_TRIGGER_CODES.map(c => <option key={c} value={c}>{c}</option>)}
-                                </select>
+                                <span className="text-[9px] text-slate-400 shrink-0">tiene alguno de:</span>
+                                <div className="flex flex-wrap gap-0.5">
+                                  {RULE_TRIGGER_CODES.map(cc => {
+                                    const _active = ((t as any).shiftCodes?.length ? (t as any).shiftCodes as string[] : [t.shiftCode]).includes(cc);
+                                    return <button key={cc} type="button" onClick={() => toggleTriggerCode(ti, cc)} className={`text-[8px] font-black px-1.5 py-0.5 rounded border transition-colors ${_active ? 'bg-violet-600 text-white border-violet-600' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-300 dark:border-slate-600 hover:border-violet-400'}`}>{cc}</button>;
+                                  })}
+                                </div>
                                 {editingRule.triggers.length > 1 && (
                                   <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: editingRule.triggers.filter((_: any, i: number) => i !== ti) })} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
                                 )}
                               </div>
                             ))}
-                            <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: [...editingRule.triggers, { employeeId: '', employeeName: '', shiftCode: 'F' }] })} className="flex items-center gap-1 text-[9px] font-black text-violet-500 hover:text-violet-700 mt-1"><Plus size={9}/> Agregar condición</button>
+                            <button type="button" onClick={() => setEditingRule({ ...editingRule, triggers: [...editingRule.triggers, { employeeId: '', employeeName: '', shiftCode: 'F', shiftCodes: [] }] })} className="flex items-center gap-1 text-[9px] font-black text-violet-500 hover:text-violet-700 mt-1"><Plus size={9}/> Agregar condición</button>
                           </div>
                           <div>
                             <p className="text-[9px] font-black uppercase text-slate-400 mb-2">ENTONCES (acciones):</p>
