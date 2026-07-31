@@ -181,6 +181,7 @@ import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
 import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageModal';
 import PlanningRecompositionModal from '@/components/planificacion/PlanningRecompositionModal';
 import PlanningCronogramasOverviewModal from '@/components/planificacion/PlanningCronogramasOverviewModal';
+import { touchPlanificacionEstadoActivity } from '@/lib/planificacion/planningCronogramaOverview';
 import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
 import { extractPackagesFromPending, emitRecompositionNotifications } from '@/lib/planificacion/planningRecompositionNotify';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
@@ -935,7 +936,8 @@ function applyRotationsForMonth(
                                 if (_rrGate && _cDate < _rrGate) continue;
                                 const _cKey = `${_cEmp.employeeId}_${_cDate}`;
                                 const _cPend = pendingChanges[_cKey];
-                                if (_cPend && !_cPend.isDeleted) continue;
+                                if (shiftsMap[_cKey] && !shiftsMap[_cKey].isDeleted) continue;
+                                if (_cPend && !_cPend.isDeleted && _cPend.isTemp) continue;
                                 const _cMs = new Date(_cDate + 'T00:00:00').getTime();
                                 const _cDays = Math.round((_cMs - _anchorMs) / 86400000);
                                 const _cPos = ((_cDays % _cycLen) + _cycLen) % _cycLen;
@@ -5286,6 +5288,7 @@ export default function PlanificacionPage() {
                             positionName: safePositionName,
                             coveredBy: change.coveredBy || null,
                             draft: correctionMode ? false : !isPublished,
+                            actorName: realActorName,
                             ...deploymentFieldsForFirestore(change),
                         };
 
@@ -5371,6 +5374,18 @@ export default function PlanificacionPage() {
                 }
 
                 await flushBatch();
+
+                if (empresaId && selectedObjective) {
+                    const touchYear = currentDate.getFullYear();
+                    const touchMonth = currentDate.getMonth() + 1;
+                    void touchPlanificacionEstadoActivity({
+                        empresaId,
+                        objectiveId: selectedObjective,
+                        year: touchYear,
+                        month: touchMonth,
+                        actorName: realActorName,
+                    }).catch((err) => console.warn('[plan] touch lastModified', err));
+                }
 
                 if (isPublished) {
                     setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
@@ -5572,6 +5587,8 @@ export default function PlanificacionPage() {
                 month,
                 publishedAt: serverTimestamp(),
                 publishedBy: actorName,
+                lastModifiedAt: serverTimestamp(),
+                lastModifiedBy: actorName,
                 empresaId,
             }, { merge: true });
             // 2. Buscar todos los turnos draft del objetivo+mes y actualizarlos a draft:false
