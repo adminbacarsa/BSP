@@ -773,6 +773,7 @@ function applyRotationsForMonth(
                     const _key = `${_cEmp.employeeId}_${dateStr}`;
                     const _cPend = pendingChanges[_key];
                     if (_cPend && !_cPend.isDeleted) continue;
+                    if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
                     const _ancMs = new Date(_cEmp.cycleAnchorDate + 'T00:00:00').getTime();
                     const _dtMs = new Date(dateStr + 'T00:00:00').getTime();
                     const _dSince = Math.round((_dtMs - _ancMs) / 86400000);
