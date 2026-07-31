@@ -792,6 +792,10 @@ export default function ServiciosSLAPage() {
     if (!pos?.allowedShiftTypes?.length) return ['M','T','N','D12','N12','RET','ESC','REF'];
     return pos.allowedShiftTypes.map((sv: ShiftVariant) => sv.code);
   }
+  function getAssignCodes(posName: string): string[] {
+    const work = getPositionCodes(posName, form.positions);
+    return [...work, ...['F','FF','FP','FT'].filter(c => !work.includes(c))];
+  }
 
   function startNewRule() {
     const r: ServiceRule = { id: 'rule_' + Date.now(), name: '', triggers: [{ employeeId: '', employeeName: '', shiftCode: 'F', shiftCodes: [] }], actions: [{ type: 'EXCLUDE' as RuleActionType, positionName: '', shiftCode: '' }] };
@@ -2568,7 +2572,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <span className="text-[9px] text-slate-400">banda</span>
                                     <select value={act.shiftCode || ''} onChange={e => updAction(ai, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
                                       <option value="">—</option>
-                                      {getPositionCodes(act.positionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                                      {getAssignCodes(act.positionName || '').map((c: string) => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                   </div>
                                 )}
@@ -2690,7 +2694,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <span className="text-[9px] text-slate-400">banda</span>
                                     <select value={act.shiftCode || ''} onChange={e => updAction(ai, 'shiftCode', e.target.value)} className="w-20 text-[9px] bg-slate-50 dark:bg-slate-700 border dark:border-slate-600 rounded-lg px-2 py-1.5">
                                       <option value="">—</option>
-                                      {getPositionCodes(act.positionName || '', form.positions).map((c: string) => <option key={c} value={c}>{c}</option>)}
+                                      {getAssignCodes(act.positionName || '').map((c: string) => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                   </div>
                                 )}
