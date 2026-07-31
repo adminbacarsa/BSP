@@ -2,9 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.processPortalCheckIn = processPortalCheckIn;
 const admin = require("firebase-admin");
+const firestore_1 = require("firebase-admin/firestore");
 const sanitizeId_1 = require("./sanitizeId");
 async function applyCheckInToShift(db, shiftId, shiftRef, shiftData, empId, coords, recordedAt, nowTs) {
-    const now = admin.firestore.FieldValue.serverTimestamp();
+    const now = firestore_1.FieldValue.serverTimestamp();
     const nowMs = nowTs.toMillis();
     const scheduledStartTs = shiftData.startTime ?? null;
     const isEarlyStart = shiftData.isEarlyStart === true;
@@ -97,7 +98,7 @@ async function applyCheckInToShift(db, shiftId, shiftRef, shiftData, empId, coor
             const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
             const outgoingRealEnd = isEarlyRelevo
                 ? outData.endTime
-                : admin.firestore.FieldValue.serverTimestamp();
+                : firestore_1.FieldValue.serverTimestamp();
             await outDoc.ref.update({
                 isCompleted: true,
                 isPresent: false,
@@ -105,7 +106,7 @@ async function applyCheckInToShift(db, shiftId, shiftRef, shiftData, empId, coor
                 realEndTime: outgoingRealEnd,
                 relievedBy: empId,
                 relievedByName: incomingName,
-                relievedAt: admin.firestore.FieldValue.serverTimestamp(),
+                relievedAt: firestore_1.FieldValue.serverTimestamp(),
                 autoRelevo: true,
                 relievedEarly: isEarlyRelevo,
             });
@@ -121,7 +122,7 @@ async function applyCheckInToShift(db, shiftId, shiftRef, shiftData, empId, coor
                 relievedEmployeeId: outEmpId,
                 relievedEmployeeName: outName,
                 description: `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''}`,
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                createdAt: firestore_1.FieldValue.serverTimestamp(),
                 autoProcessed: true,
                 source: 'AUTO_RELEVO',
             });
@@ -154,7 +155,7 @@ async function applyCheckInToShift(db, shiftId, shiftRef, shiftData, empId, coor
                     turnoId: outDoc.id,
                     read: false,
                     readAt: null,
-                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    createdAt: firestore_1.FieldValue.serverTimestamp(),
                 });
                 notifDocId = notifRef.id;
             }
@@ -207,8 +208,8 @@ async function processPortalCheckIn(db, input) {
     }
     const key = idempotencyKey?.trim() || `ci_${shiftId}_${recordedAt || Date.now()}`;
     const fichajeRef = db.collection('fichajes').doc((0, sanitizeId_1.fichajeDocIdFromKey)(key));
-    const nowTs = admin.firestore.Timestamp.now();
-    const now = admin.firestore.FieldValue.serverTimestamp();
+    const nowTs = firestore_1.Timestamp.now();
+    const now = firestore_1.FieldValue.serverTimestamp();
     const existing = await fichajeRef.get();
     if (existing.exists) {
         const st = existing.data()?.status;

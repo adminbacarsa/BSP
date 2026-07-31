@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import type { PortalCheckInInput, PortalCheckInResult } from './fichajesTypes';
 import { fichajeDocIdFromKey } from './sanitizeId';
 
@@ -10,9 +11,9 @@ async function applyCheckInToShift(
   empId: string,
   coords: PortalCheckInInput['coords'],
   recordedAt: string | null | undefined,
-  nowTs: admin.firestore.Timestamp,
+  nowTs: Timestamp,
 ): Promise<void> {
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
   const nowMs = nowTs.toMillis();
 
   const scheduledStartTs = shiftData.startTime ?? null;
@@ -108,7 +109,7 @@ async function applyCheckInToShift(
       const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
       const outgoingRealEnd = isEarlyRelevo
         ? outData.endTime
-        : admin.firestore.FieldValue.serverTimestamp();
+        : FieldValue.serverTimestamp();
 
       await outDoc.ref.update({
         isCompleted: true,
@@ -117,7 +118,7 @@ async function applyCheckInToShift(
         realEndTime: outgoingRealEnd,
         relievedBy: empId,
         relievedByName: incomingName,
-        relievedAt: admin.firestore.FieldValue.serverTimestamp(),
+        relievedAt: FieldValue.serverTimestamp(),
         autoRelevo: true,
         relievedEarly: isEarlyRelevo,
       });
@@ -134,7 +135,7 @@ async function applyCheckInToShift(
         relievedEmployeeId: outEmpId,
         relievedEmployeeName: outName,
         description: `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''}`,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
         autoProcessed: true,
         source: 'AUTO_RELEVO',
       });
@@ -171,7 +172,7 @@ async function applyCheckInToShift(
           turnoId: outDoc.id,
           read: false,
           readAt: null,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
         });
         notifDocId = notifRef.id;
       } catch (e) {
@@ -233,8 +234,8 @@ export async function processPortalCheckIn(
 
   const key = idempotencyKey?.trim() || `ci_${shiftId}_${recordedAt || Date.now()}`;
   const fichajeRef = db.collection('fichajes').doc(fichajeDocIdFromKey(key));
-  const nowTs = admin.firestore.Timestamp.now();
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const nowTs = Timestamp.now();
+  const now = FieldValue.serverTimestamp();
 
   const existing = await fichajeRef.get();
   if (existing.exists) {

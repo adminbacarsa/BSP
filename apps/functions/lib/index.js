@@ -1131,7 +1131,7 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
     return { success: true, employeeId: td.employeeId };
 });
 exports.activateAndSetPassword = functions.https.onCall(async (data, _context) => {
-    const { token, password, deviceId, deviceInfo } = data;
+    const { token, password, deviceId, deviceInfo, platform } = data;
     if (!token)
         throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
     if (!password || password.length < 6) {
@@ -1157,6 +1157,11 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
         throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
     await admin.auth().updateUser(uid, { password });
     await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
+    const resolvedPlatform = platform === 'ios' || platform === 'android' || platform === 'web'
+        ? platform
+        : deviceInfo?.platform === 'ios' || deviceInfo?.platform === 'android'
+            ? deviceInfo.platform
+            : 'web';
     await db.collection('device_tokens').doc(uid).set({
         uid,
         employeeId,
@@ -1165,6 +1170,7 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
         activatedAt: admin.firestore.FieldValue.serverTimestamp(),
         deviceInfo: deviceInfo || {},
         deviceId: deviceId || null,
+        platform: resolvedPlatform,
     });
     return { email, employeeId };
 });

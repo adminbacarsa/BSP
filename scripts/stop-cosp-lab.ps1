@@ -12,12 +12,12 @@ Write-Host 'COSP Lab — deteniendo procesos en puertos:' ($ports -join ', ') -F
 foreach ($port in $ports) {
   $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
   foreach ($c in $conns) {
-    $pid = $c.OwningProcess
-    if (-not $pid) { continue }
-    $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+    $owningPid = $c.OwningProcess
+    if (-not $owningPid) { continue }
+    $proc = Get-Process -Id $owningPid -ErrorAction SilentlyContinue
     if ($proc) {
-      Write-Host "  :$port -> PID $pid ($($proc.ProcessName))" -ForegroundColor DarkGray
-      Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+      Write-Host "  :$port -> PID $owningPid ($($proc.ProcessName))" -ForegroundColor DarkGray
+      Stop-Process -Id $owningPid -Force -ErrorAction SilentlyContinue
     }
   }
 }
