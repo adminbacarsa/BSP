@@ -744,6 +744,7 @@ function computeServiceRuleChanges(
                         hours: 8, startTime: '00:00', endTime: '00:00',
                         positionName: action.positionName, isTemp: true, isFranco: false,
                         objectiveId: e?.objectiveId ?? objectiveId,
+                        _isAutoRotation: undefined,
                     };
                 }
             }
@@ -919,6 +920,7 @@ function applyRotationsForMonth(
                                 hours: 8,
                                 startTime: '00:00',
                                 isDeleted: false,
+                                _isAutoRotation: true,
                             };
                         }
                     }
@@ -946,6 +948,7 @@ function applyRotationsForMonth(
                                         hours: 0,
                                         startTime: '00:00',
                                         isDeleted: false,
+                                        _isAutoRotation: true,
                                     };
                                 }
                             }
@@ -982,6 +985,7 @@ function applyRotationsForMonth(
                             hours: 8,
                             startTime: '00:00',
                             isDeleted: false,
+                            _isAutoRotation: true,
                         };
                     }
                 }
@@ -6428,6 +6432,7 @@ export default function PlanificacionPage() {
         newChanges[key] = {
             ...config,
             isTemp: true,
+            _isAutoRotation: undefined,
             isFranco: config.code === 'F' || config.code === 'FF' || config.isFranco,
             swapWith: config.swapWith || null,
             swapDate: config.swapDate || null,
