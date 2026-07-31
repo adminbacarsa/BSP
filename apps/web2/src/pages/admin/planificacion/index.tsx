@@ -410,6 +410,12 @@ const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): numb
     if (!shift) return 0;
     const code = String(shift.code || '').toUpperCase();
     if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return 0;
+    // Códigos CCT estándar: tabla canónica siempre gana (M=8, T=8, N=8, D12=12, etc.)
+    const fromLookup = SHIFT_HOURS_LOOKUP[code];
+    if (fromLookup !== undefined) return fromLookup;
+    // Códigos custom: definición actual del SLA tiene prioridad sobre lo almacenado
+    if (slaHoursHint?.[code] !== undefined) return slaHoursHint[code];
+    // Fallback: valor explícito guardado en el turno
     const stored = Number(shift.hours);
     if (stored > 0) return stored;
     // Firestore Timestamp
@@ -426,10 +432,6 @@ const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): numb
             return Math.max(0, Math.min(dur, 24));
         }
     }
-    const fromLookup = SHIFT_HOURS_LOOKUP[code];
-    if (fromLookup !== undefined) return fromLookup;
-    // Códigos custom (RO, RON, etc.): horas definidas en el SLA del servicio
-    if (slaHoursHint?.[code] !== undefined) return slaHoursHint[code];
     return 8;
 };
 
