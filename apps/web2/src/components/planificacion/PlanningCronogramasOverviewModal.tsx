@@ -6,8 +6,12 @@ import {
   type CronogramaEstado,
   type CronogramaOverviewRow,
 } from '@/lib/planificacion/planningCronogramaOverview';
-import format from 'date-fns/format';
-import es from 'date-fns/locale/es';
+
+function formatActivityDate(d: Date | null): string {
+  if (!d) return '—';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 const ESTADO_STYLE: Record<CronogramaEstado, string> = {
   PUBLICADO: 'bg-emerald-50 text-emerald-800 border-emerald-200',
@@ -35,11 +39,6 @@ type Props = {
   clients: { id: string; name?: string; razonSocial?: string; objetivos?: { id?: string; name?: string }[] }[];
   onNavigateToObjective: (clientId: string, objectiveId: string, year: number, month: number) => void;
 };
-
-function formatActivityDate(d: Date | null): string {
-  if (!d) return '—';
-  return format(d, 'dd/MM/yyyy HH:mm', { locale: es });
-}
 
 function groupByClient(rows: CronogramaOverviewRow[]) {
   const groups: { clientId: string; clientName: string; rows: CronogramaOverviewRow[] }[] = [];
