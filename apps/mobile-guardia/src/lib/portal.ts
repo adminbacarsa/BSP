@@ -16,6 +16,7 @@ import {
   type PortalCallables,
 } from '@cosp/portal-core';
 import type { PortalCoreConfig } from '@cosp/portal-types';
+import { resolveEmulatorHostForPlatform } from './emulatorHost';
 
 function resolveNativeAuth(app: FirebaseApp): Auth {
   try {
@@ -52,7 +53,7 @@ export function getPortalCoreConfig(): PortalCoreConfig {
       appId: extra.firebase?.appId ?? '',
     },
     useEmulator: extra.useEmulator === true,
-    emulatorHost: extra.emulatorHost,
+    emulatorHost: resolveEmulatorHostForPlatform(),
     functionsRegion: 'us-central1',
   };
 }
@@ -87,7 +88,7 @@ export function isEmulatorMode(): boolean {
 }
 
 export function getEmulatorHostLabel(): string {
-  return getPortalCoreConfig().emulatorHost?.trim() || '127.0.0.1';
+  return resolveEmulatorHostForPlatform();
 }
 
 /** En dispositivo físico, 127.0.0.1 apunta al teléfono, no a la PC. */

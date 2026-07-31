@@ -6,6 +6,7 @@ import type { Shift } from '@cosp/portal-types';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { useEmployeeShifts } from '../src/hooks/useEmployeeShifts';
 import { CommandCard } from '../src/components/ui/CommandCard';
+import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { colors, radius, shadow } from '../src/theme/tokens';
 
 function ShiftRow({ item }: { item: Shift }) {
@@ -36,6 +37,14 @@ function ShiftRow({ item }: { item: Shift }) {
 }
 
 export default function AgendaScreen() {
+  return (
+    <RequireAuth>
+      <AgendaScreenContent />
+    </RequireAuth>
+  );
+}
+
+function AgendaScreenContent() {
   const { empDocId, portalFeatures, user } = usePortalAuth();
   const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
 

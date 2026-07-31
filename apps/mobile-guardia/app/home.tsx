@@ -1,7 +1,6 @@
-import { useCallback, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getObjectiveForShift, getCheckInTiming, resolveCheckInUiStatus } from '@cosp/portal-core';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
@@ -14,6 +13,7 @@ import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
 import { formatHeroTimeRange, HeroShiftPanel } from '../src/components/ui/HeroShiftPanel';
 import { CheckInStatusBanner } from '../src/components/ui/CheckInStatusBanner';
+import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { colors, radius } from '../src/theme/tokens';
 
 function heroHeadline(todayAny: ReturnType<typeof pickTodayShiftAny>, hasNext: boolean): string {
@@ -23,6 +23,14 @@ function heroHeadline(todayAny: ReturnType<typeof pickTodayShiftAny>, hasNext: b
 }
 
 export default function HomeScreen() {
+  return (
+    <RequireAuth>
+      <HomeScreenContent />
+    </RequireAuth>
+  );
+}
+
+function HomeScreenContent() {
   const router = useRouter();
   const { user, employee, empDocId, portalFeatures, signOut, refreshEmployee, employeeProfileLoading, employeeProfileReady } =
     usePortalAuth();
@@ -34,13 +42,14 @@ export default function HomeScreen() {
   const profileMissing = employeeProfileReady && !employee && !empDocId && !!user;
   const profileStale = employeeProfileReady && !employee && !!empDocId && !!user;
 
-  useFocusEffect(
-    useCallback(() => {
-      if (user && !employee && !employeeProfileLoading) {
-        void refreshEmployee();
-      }
-    }, [user, employee, employeeProfileLoading, refreshEmployee]),
-  );
+  const profileRetried = useRef(false);
+
+  useEffect(() => {
+    if (user && !employee && employeeProfileReady && !employeeProfileLoading && !profileRetried.current) {
+      profileRetried.current = true;
+      void refreshEmployee();
+    }
+  }, [user, employee, employeeProfileReady, employeeProfileLoading, refreshEmployee]);
   const displayName = useMemo(() => {
     if (employee?.lastName || employee?.firstName) {
       return `${employee.lastName || ''}${employee.lastName && employee.firstName ? ', ' : ''}${employee.firstName || ''}`.trim();

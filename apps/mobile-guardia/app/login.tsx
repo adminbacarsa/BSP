@@ -26,7 +26,7 @@ import { colors, radius } from '../src/theme/tokens';
 
 export default function LoginScreen() {
   const { signIn, user, initializing, deviceVerified } = usePortalAuth();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(isEmulatorMode() ? 'guardia@bacarsa.com.ar' : '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -79,6 +79,7 @@ export default function LoginScreen() {
                       ? ' · El celular no alcanza la PC (misma Wi‑Fi, firewall, npm run start:lan)'
                       : ''}
                     {emulatorReach === 'ok' ? ' · Red OK' : ''}
+                    {' · Tras npm run seed: contraseña guardia1234'}
                   </Text>
                 </View>
               ) : null}

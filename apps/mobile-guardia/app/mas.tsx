@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
+import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { colors, radius } from '../src/theme/tokens';
 
 const ROADMAP = [
@@ -17,6 +18,14 @@ const ROADMAP = [
 ];
 
 export default function MasScreen() {
+  return (
+    <RequireAuth>
+      <MasScreenContent />
+    </RequireAuth>
+  );
+}
+
+function MasScreenContent() {
   const router = useRouter();
   const { portalFeatures } = usePortalAuth();
   const canNovedad = portalFeatures.reportAbsence || portalFeatures.requestLicense;

@@ -21,9 +21,11 @@ import {
 } from '@cosp/portal-types';
 import { resolveEmpDocIdWithRetry } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
+import { withTimeout } from '../lib/emulatorHost';
 import { getOrCreateDeviceId, getStoredDeviceId } from '../lib/deviceId';
 
-const EMPLOYEE_ROLES = ['employee', 'empleado'];
+const FIRESTORE_PROFILE_TIMEOUT_MS = 12_000;
+const AUTH_INIT_TIMEOUT_MS = 9_000;
 
 function normalizeRoleKey(role: string): string {
   return role.toLowerCase().replace(/_/g, '').trim();
@@ -125,14 +127,22 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     async (currentUser: User) => {
       setEmployeeProfileLoading(true);
       try {
-        const id = await resolveEmpDocIdWithRetry(db, currentUser, 3);
+        const id = await withTimeout(
+          resolveEmpDocIdWithRetry(db, currentUser, 3),
+          FIRESTORE_PROFILE_TIMEOUT_MS,
+          'Carga de legajo',
+        );
         setEmpDocId(id);
         if (!id) {
           setEmployee(null);
           setPortalFeatures(DEFAULT_PORTAL_FEATURES);
           return;
         }
-        const snap = await getDoc(doc(db, 'empleados', id));
+        const snap = await withTimeout(
+          getDoc(doc(db, 'empleados', id)),
+          FIRESTORE_PROFILE_TIMEOUT_MS,
+          'Lectura de legajo',
+        );
         if (!snap.exists()) {
           setEmployee(null);
           return;
@@ -154,6 +164,8 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         } else {
           setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         }
+      } catch {
+        setEmployee(null);
       } finally {
         setEmployeeProfileLoading(false);
         setEmployeeProfileReady(true);
@@ -163,7 +175,12 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    const authReadyTimer = setTimeout(() => {
+      setInitializing(false);
+    }, AUTH_INIT_TIMEOUT_MS);
+
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
+      clearTimeout(authReadyTimer);
       setUser(nextUser);
       if (!nextUser) {
         setEmpDocId(null);
@@ -206,7 +223,10 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         setInitializing(false);
       }
     });
-    return unsub;
+    return () => {
+      clearTimeout(authReadyTimer);
+      unsub();
+    };
   }, [auth, db, loadEmployee]);
 
   const signIn = useCallback(

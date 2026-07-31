@@ -24,8 +24,10 @@ const LAB_OBJECTIVE_ID = 'obj_lab_guardia';
 
 async function seedTurnoHoyGuardia(empDocId) {
   const now = new Date();
-  const start = new Date(now.getTime() - 60 * 60 * 1000);
-  const end = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  // Ventana fichada app: desde 15 min antes del inicio hasta ~5 min después (getCheckInTiming).
+  const minutesUntilStart = 12;
+  const start = new Date(now.getTime() + minutesUntilStart * 60 * 1000);
+  const end = new Date(start.getTime() + 8 * 60 * 60 * 1000);
 
   await db.collection('clients').doc(LAB_CLIENT_ID).set({
     name: 'Cliente Lab Portal',
@@ -37,6 +39,7 @@ async function seedTurnoHoyGuardia(empDocId) {
       active: true,
       lat: -31.42,
       lng: -64.18,
+      allowRemoteCheckIn: true,
     }],
   }, { merge: true });
 
@@ -61,7 +64,9 @@ async function seedTurnoHoyGuardia(empDocId) {
     createdAt: Timestamp.now(),
   }, { merge: true });
 
-  console.log(`✓ turnos/${shiftDocId} → turno demo (hoy, en curso)`);
+  console.log(
+    `✓ turnos/${shiftDocId} → turno demo (inicio en ~${minutesUntilStart} min, botón fichada GPS activo en lab)`,
+  );
 }
 
 async function run() {
@@ -126,7 +131,7 @@ async function run() {
   console.log(`   Password: ${PASSWORD}`);
   console.log(`   Nombre:   Juan Pérez`);
   console.log(`   Legajo:   LEG-0042`);
-  console.log(`   Turno:    Planta Bacar Lab (hoy, ventana en curso para app móvil)`);
+  console.log(`   Turno:    Planta Bacar Lab (fichada GPS en ventana tras seed; allowRemoteCheckIn en lab)`);
   console.log(`   URL:      http://localhost:3000/empleado/dashboard\n`);
   process.exit(0);
 }
