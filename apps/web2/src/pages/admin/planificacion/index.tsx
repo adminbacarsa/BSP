@@ -772,16 +772,20 @@ function applyRotationsForMonth(
                     const _cEmp = _crE[_ci];
                     const _key = `${_cEmp.employeeId}_${dateStr}`;
                     const _cPend = pendingChanges[_key];
-                    if (_cPend && !_cPend.isDeleted) continue;
-                    if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
                     const _ancMs = new Date(_cEmp.cycleAnchorDate + 'T00:00:00').getTime();
                     const _dtMs = new Date(dateStr + 'T00:00:00').getTime();
                     const _dSince = Math.round((_dtMs - _ancMs) / 86400000);
                     const _cIdx = Math.floor(_dSince / _cycLen);
                     const _pos = ((_dSince % _cycLen) + _cycLen) % _cycLen;
                     if (_pos >= rotation.cycleWorkDays) {
+                        // Franco: respeta manual (isTemp) y guardado; sobreescribe condiciones
+                        if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
+                        if (_cPend && !_cPend.isDeleted && _cPend.isTemp) continue;
                         additions[_key] = { empId: _cEmp.employeeId, dateStr, code: 'F', positionName: '', hours: 0, startTime: '00:00', isDeleted: false };
                     } else {
+                        // Trabajo: respeta todo pending y guardado
+                        if (_cPend && !_cPend.isDeleted) continue;
+                        if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
                         const _eIdx = ((_ci + _cIdx) % _crN + _crN) % _crN;
                         const _ent = _crE[_eIdx];
                         if (positionStructure?.length && _ent.positionName) {
@@ -791,7 +795,10 @@ function applyRotationsForMonth(
                                 if (isPosExcludedOnDate(_pCfg, dateStr)) continue;
                             }
                         }
-                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: _ent.shiftCode, positionName: _ent.positionName || '', hours: 8, startTime: '00:00', isDeleted: false };
+                        const _posPS = positionStructure?.find((p: any) => p.positionName === _ent.positionName);
+                        const _shiftPS = _posPS?.shifts?.find((s: any) => String(s.code || '').toUpperCase() === _ent.shiftCode.toUpperCase());
+                        const _shiftHours = (_shiftPS && Number(_shiftPS.hours) > 0) ? Number(_shiftPS.hours) : 8;
+                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: _ent.shiftCode, positionName: _ent.positionName || '', hours: _shiftHours, startTime: '00:00', isDeleted: false };
                     }
                 }
             }
@@ -6440,6 +6447,10 @@ export default function PlanificacionPage() {
                     if (_rv && !(_rv as any).isDeleted && ['F','FF','FP','FT'].includes((_rv as any).code)) {
                         const _re = (_rv as any).empId as string;
                         const _rd = (_rv as any).dateStr as string;
+                        const _prevKey = `${_re}_${_rd}`;
+                        const _prevPend = pendingChanges[_prevKey];
+                        const _prevSaved = shiftsMap[_prevKey];
+                        if ((_prevPend && !_prevPend.isDeleted) || (_prevSaved && !_prevSaved.isDeleted)) continue;
                         if (!_rotFByEmp[_re]) _rotFByEmp[_re] = new Set<string>();
                         _rotFByEmp[_re].add(_rd);
                     }
