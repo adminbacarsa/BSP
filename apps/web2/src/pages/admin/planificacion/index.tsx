@@ -736,6 +736,8 @@ function computeServiceRuleChanges(
             } else if (action.type === 'ASSIGN') {
                 if (action.employeeId && action.positionName && action.shiftCode) {
                     const e = getEntry(action.employeeId);
+                    // Idempotencia: no generar cambio si el empleado ya tiene ese código asignado
+                    if (e && !e.isDeleted && String(e.code || e.type || '').toUpperCase() === String(action.shiftCode || '').toUpperCase()) continue;
                     additions[`${action.employeeId}_${dateStr}`] = {
                         ...(e || {}),
                         code: action.shiftCode, type: action.shiftCode, name: action.shiftCode,
@@ -6450,15 +6452,32 @@ export default function PlanificacionPage() {
             Object.assign(newChanges, _rotAdditions);
             if (activeSlaServiceRules?.length) {
                 const _rotFByEmp: Record<string, Set<string>> = {};
+                // 1. F recién asignadas por ciclo en esta pasada
                 for (const _rv of Object.values(_rotAdditions)) {
                     if (_rv && !(_rv as any).isDeleted && ['F','FF','FP','FT'].includes((_rv as any).code)) {
                         const _re = (_rv as any).empId as string;
                         const _rd = (_rv as any).dateStr as string;
-                        const _prevKey = `${_re}_${_rd}`;
-                        const _prevSaved = shiftsMap[_prevKey];
-                        if (_prevSaved && !_prevSaved.isDeleted) continue;
                         if (!_rotFByEmp[_re]) _rotFByEmp[_re] = new Set<string>();
                         _rotFByEmp[_re].add(_rd);
+                    }
+                }
+                // 2. F ya guardadas en Firestore para empleados del ciclo (post-GUARDAR)
+                for (const _rot3 of activeSlaServiceRotations) {
+                    if ((_rot3 as any).cycleMode !== 'cycle_rotation') continue;
+                    const _p3 = (_rot3 as any).periods?.[0];
+                    if (!_p3) continue;
+                    for (const _e3 of ((_p3.entries || []) as any[])) {
+                        if (!_e3.employeeId) continue;
+                        if (_rotFByEmp[_e3.employeeId]?.size) continue;
+                        const _pfx = _e3.employeeId + '_';
+                        for (const _smk of Object.keys(shiftsMap)) {
+                            if (!_smk.startsWith(_pfx)) continue;
+                            const _smv = shiftsMap[_smk];
+                            if (!_smv || _smv.isDeleted) continue;
+                            if (!['F','FF','FP','FT'].includes(String((_smv as any).code || (_smv as any).type || '').toUpperCase())) continue;
+                            if (!_rotFByEmp[_e3.employeeId]) _rotFByEmp[_e3.employeeId] = new Set<string>();
+                            _rotFByEmp[_e3.employeeId].add(_smk.slice(_pfx.length));
+                        }
                     }
                 }
                 for (const [_re2, _rdates] of Object.entries(_rotFByEmp)) {
