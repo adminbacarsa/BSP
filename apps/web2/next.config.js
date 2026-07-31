@@ -81,7 +81,7 @@ const nextConfig = {
   experimental: {
     esmExternals: 'loose'
   },
-  transpilePackages: ['onnxruntime-web'],
+  transpilePackages: ['onnxruntime-web', 'date-fns'],
   staticPageGenerationTimeout: 300,
   webpack: (config, { dev }) => {
     // Soporte WASM para @imgly/background-removal
