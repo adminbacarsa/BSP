@@ -17,7 +17,12 @@ export {
   parsePendingCheckins,
   validateCheckInDistance,
 } from './checkIn/portalCheckIn';
-export type { PendingCheckInItem, PortalCheckInCoords, CheckInTiming } from './checkIn/portalCheckIn';
+export type {
+  PendingCheckInItem,
+  PortalCheckInCoords,
+  CheckInTiming,
+  CheckInTimingOptions,
+} from './checkIn/portalCheckIn';
 export {
   resolveCheckInUiStatus,
   isShiftPresent,

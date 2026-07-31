@@ -25,7 +25,7 @@ const LAB_OBJECTIVE_ID = 'obj_lab_guardia';
 async function seedTurnoHoyGuardia(empDocId) {
   const now = new Date();
   // Ventana fichada app: desde 15 min antes del inicio hasta ~5 min después (getCheckInTiming).
-  const minutesUntilStart = 12;
+  const minutesUntilStart = 5;
   const start = new Date(now.getTime() + minutesUntilStart * 60 * 1000);
   const end = new Date(start.getTime() + 8 * 60 * 60 * 1000);
 

@@ -946,20 +946,20 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     const callerRole = String(context.auth.token?.role ?? context.auth.token?.['custom:role'] ?? '');
     const callerIsSuperAdmin = isSuperAdminBackupRole(callerRole);
 
-    const empSnap = await db.collection('empleados').where('uid', '==', context.auth.uid).limit(1).get();
-    let empId: string;
-    if (empSnap.empty) {
+    const { resolvePortalEmployeeDocId } = await import('./fichajes/resolvePortalEmployee');
+    let empId: string | null = await resolvePortalEmployeeDocId(db, context.auth.token);
+    if (!empId) {
         if (callerIsSuperAdmin) {
             if (!shiftData.employeeId) throw new functions.https.HttpsError('not-found', 'Turno sin empleado asignado.');
             empId = shiftData.employeeId;
         } else {
-            throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
+            throw new functions.https.HttpsError(
+                'not-found',
+                'Empleado no encontrado. Cerrá sesión en la app, volvé a entrar con guardia@bacarsa.com.ar y probá de nuevo (si corriste npm run seed, el usuario de Auth se recrea).',
+            );
         }
-    } else {
-        empId = empSnap.docs[0].id;
-        if (!callerIsSuperAdmin && shiftData.employeeId !== empId) {
-            throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
-        }
+    } else if (!callerIsSuperAdmin && shiftData.employeeId !== empId) {
+        throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
     }
 
     const { processPortalCheckIn } = await import('./fichajes/applyPortalCheckIn');

@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 're
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getObjectiveForShift, getCheckInTiming, resolveCheckInUiStatus } from '@cosp/portal-core';
+import { isEmulatorMode } from '../src/lib/portal';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { useEmployeeShifts } from '../src/hooks/useEmployeeShifts';
 import { useObjectivesMap } from '../src/hooks/useObjectivesMap';
@@ -60,9 +61,13 @@ function HomeScreenContent() {
   const now = new Date();
   const todayAny = pickTodayShiftAny(shifts, now);
   const mainShift = heroShift(shifts, now);
-  const timing = mainShift ? getCheckInTiming(mainShift, now) : null;
   const objective = mainShift
     ? getObjectiveForShift(objectivesMap, mainShift.objectiveId, mainShift.objectiveName)
+    : null;
+  const labRelaxedCheckIn =
+    isEmulatorMode() && objective?.allowRemoteCheckIn === true;
+  const timing = mainShift
+    ? getCheckInTiming(mainShift, now, { relaxWindow: labRelaxedCheckIn })
     : null;
 
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');

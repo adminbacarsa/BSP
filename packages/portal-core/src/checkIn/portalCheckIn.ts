@@ -22,9 +22,29 @@ export type CheckInTiming = {
   tooEarly: boolean;
 };
 
-export function getCheckInTiming(shift: Shift, now = new Date()): CheckInTiming {
+export type CheckInTimingOptions = {
+  /** Lab/emulador con allowRemoteCheckIn: ventana amplia para no depender del minuto exacto del seed */
+  relaxWindow?: boolean;
+};
+
+export function getCheckInTiming(
+  shift: Shift,
+  now = new Date(),
+  options?: CheckInTimingOptions,
+): CheckInTiming {
   const start = toDate(shift.startTime);
   const diffMinutes = start ? Math.round((start.getTime() - now.getTime()) / 60000) : null;
+  const relax = options?.relaxWindow === true && !shift.isFranco;
+
+  if (relax && diffMinutes !== null) {
+    const end = toDate(shift.endTime);
+    const shiftEnded = end ? end.getTime() <= now.getTime() : false;
+    const canCheckIn = !shiftEnded && diffMinutes <= 240 && diffMinutes >= -240;
+    const tooEarly = diffMinutes > 240;
+    const lateWindow = !shiftEnded && diffMinutes < -240 && diffMinutes >= -480;
+    return { diffMinutes, canCheckIn, lateWindow, tooEarly };
+  }
+
   const canCheckIn =
     diffMinutes !== null && diffMinutes <= 15 && diffMinutes >= -5 && !shift.isFranco;
   const lateWindow = diffMinutes !== null && diffMinutes < -5 && diffMinutes >= -120;
