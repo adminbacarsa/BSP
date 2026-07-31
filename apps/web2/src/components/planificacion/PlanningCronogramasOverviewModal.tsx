@@ -6,6 +6,8 @@ import {
   type CronogramaEstado,
   type CronogramaOverviewRow,
 } from '@/lib/planificacion/planningCronogramaOverview';
+import format from 'date-fns/format';
+import es from 'date-fns/locale/es';
 
 const ESTADO_STYLE: Record<CronogramaEstado, string> = {
   PUBLICADO: 'bg-emerald-50 text-emerald-800 border-emerald-200',
@@ -33,6 +35,11 @@ type Props = {
   clients: { id: string; name?: string; razonSocial?: string; objetivos?: { id?: string; name?: string }[] }[];
   onNavigateToObjective: (clientId: string, objectiveId: string, year: number, month: number) => void;
 };
+
+function formatActivityDate(d: Date | null): string {
+  if (!d) return '—';
+  return format(d, 'dd/MM/yyyy HH:mm', { locale: es });
+}
 
 function groupByClient(rows: CronogramaOverviewRow[]) {
   const groups: { clientId: string; clientName: string; rows: CronogramaOverviewRow[] }[] = [];
@@ -240,23 +247,29 @@ export default function PlanningCronogramasOverviewModal({
             </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto rounded-2xl border border-slate-200 shadow-sm bg-white overscroll-contain">
-              <table className="w-full text-[11px] border-collapse min-w-[640px]">
+              <table className="w-full text-[11px] border-collapse min-w-[820px]">
                 <thead className="sticky top-0 z-20">
                   <tr className="bg-slate-100 border-b-2 border-slate-200 shadow-sm">
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[22%] bg-slate-100">
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[18%] bg-slate-100">
                       Cliente
                     </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[24%] bg-slate-100">
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[20%] bg-slate-100">
                       Objetivo
                     </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[22%] bg-slate-100">
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[18%] bg-slate-100">
                       Estado
                     </th>
-                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[14%] bg-slate-100">
+                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[10%] bg-slate-100">
                       Turnos
                     </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[14%] bg-slate-100">
-                      Publicado por
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
+                      Publicado
+                    </th>
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
+                      Últ. modificación
+                    </th>
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
+                      Modificado por
                     </th>
                     <th className="text-center text-[9px] font-black uppercase tracking-wider text-slate-500 px-2 py-3 w-[4%] bg-slate-100">
                       Ir
@@ -328,9 +341,25 @@ export default function PlanningCronogramasOverviewModal({
                             {r.publishedBy ? (
                               <span className="line-clamp-2" title={r.publishedBy}>{r.publishedBy}</span>
                             ) : r.publishedAt ? (
-                              <span className="text-slate-500">
-                                {r.publishedAt.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                              <span className="text-slate-500 font-mono text-[9px]">
+                                {formatActivityDate(r.publishedAt)}
                               </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 border-r border-slate-100 text-slate-700 text-[10px] font-mono">
+                            {r.lastModifiedAt ? (
+                              <span title={r.lastModifiedAt.toISOString()}>
+                                {formatActivityDate(r.lastModifiedAt)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300 font-sans">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 border-r border-slate-100 text-slate-600 text-[10px] font-medium">
+                            {r.lastModifiedBy ? (
+                              <span className="line-clamp-2" title={r.lastModifiedBy}>{r.lastModifiedBy}</span>
                             ) : (
                               <span className="text-slate-300">—</span>
                             )}
