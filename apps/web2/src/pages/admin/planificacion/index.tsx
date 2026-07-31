@@ -783,7 +783,7 @@ function applyRotationsForMonth(
                         // Franco: respeta manual (isTemp) y guardado; sobreescribe condiciones
                         if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
                         if (_cPend && !_cPend.isDeleted && _cPend.isTemp) continue;
-                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: 'F', positionName: '', hours: 0, startTime: '00:00', isDeleted: false };
+                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: 'F', positionName: '', hours: 0, startTime: '00:00', isDeleted: false, _isAutoRotation: true };
                     } else {
                         // Trabajo: respeta todo pending y guardado
                         if (_cPend && !_cPend.isDeleted) continue;
@@ -800,7 +800,7 @@ function applyRotationsForMonth(
                         const _posPS = positionStructure?.find((p: any) => p.positionName === _ent.positionName);
                         const _shiftPS = _posPS?.shifts?.find((s: any) => String(s.code || '').toUpperCase() === _ent.shiftCode.toUpperCase());
                         const _shiftHours = (_shiftPS && Number(_shiftPS.hours) > 0) ? Number(_shiftPS.hours) : 8;
-                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: _ent.shiftCode, positionName: _ent.positionName || '', hours: _shiftHours, startTime: '00:00', isDeleted: false };
+                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: _ent.shiftCode, positionName: _ent.positionName || '', hours: _shiftHours, startTime: '00:00', isDeleted: false, _isAutoRotation: true };
                     }
                 }
             }
@@ -5030,7 +5030,12 @@ export default function PlanificacionPage() {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
         const count = Object.keys(pendingChanges).length;
         if (count === 0) return;
-        if (!confirm(`¿Confirmar y guardar ${count} cambios?`)) return;
+        const _userCount = Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation).length;
+        const _rotCount = count - _userCount;
+        const _confirmMsg = _userCount > 0
+            ? `¿Confirmar y guardar ${_userCount} cambio${_userCount !== 1 ? 's' : ''}${_rotCount > 0 ? ` (+ ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo)` : ''}?`
+            : `¿Guardar ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo?`;
+        if (!confirm(_confirmMsg)) return;
 
         // Verificar si algún empleado superaría las 200h
         const overCap: { name: string; hours: number }[] = [];
@@ -6450,9 +6455,8 @@ export default function PlanificacionPage() {
                         const _re = (_rv as any).empId as string;
                         const _rd = (_rv as any).dateStr as string;
                         const _prevKey = `${_re}_${_rd}`;
-                        const _prevPend = pendingChanges[_prevKey];
                         const _prevSaved = shiftsMap[_prevKey];
-                        if ((_prevPend && !_prevPend.isDeleted) || (_prevSaved && !_prevSaved.isDeleted)) continue;
+                        if (_prevSaved && !_prevSaved.isDeleted) continue;
                         if (!_rotFByEmp[_re]) _rotFByEmp[_re] = new Set<string>();
                         _rotFByEmp[_re].add(_rd);
                     }
@@ -9504,7 +9508,7 @@ export default function PlanificacionPage() {
                                         <div className="flex items-center gap-2 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-lg">
                                             <span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest hidden md:inline">Planificando como: {operatorName}</span>
                                             <div className="h-4 w-px bg-amber-200 mx-1 hidden md:block"></div>
-                                            <span className="text-xs font-black text-amber-700 px-1">{Object.keys(pendingChanges).length} cambios</span>
+                                            <span className="text-xs font-black text-amber-700 px-1">{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation).length || Object.keys(pendingChanges).length} cambios</span>
                                             <button type="button" onClick={undoLastPending} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
                                             <button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button>
                                             <button onClick={handleSaveAll} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 shadow">
