@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+
+<html class="light" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>COSP Guardia - Acceso</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=Hanken+Grotesk:wght@700;800&amp;family=IBM+Plex+Sans:wght@700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary-fixed-variant": "#3e3c8f",
+                    "tertiary-fixed": "#85f8c4",
+                    "surface-container-lowest": "#ffffff",
+                    "primary-fixed-dim": "#c3c0ff",
+                    "on-error-container": "#93000a",
+                    "surface-container-high": "#dee8ff",
+                    "primary-fixed": "#e2dfff",
+                    "on-tertiary-fixed": "#002114",
+                    "surface-dim": "#cfdaf2",
+                    "inverse-surface": "#263143",
+                    "primary": "#3525cd",
+                    "on-background": "#111c2d",
+                    "surface-container-low": "#f0f3ff",
+                    "surface": "#f9f9ff",
+                    "on-tertiary-container": "#7df1bd",
+                    "background": "#f9f9ff",
+                    "on-surface": "#111c2d",
+                    "on-tertiary": "#ffffff",
+                    "outline": "#777587",
+                    "error-container": "#ffdad6",
+                    "on-secondary-fixed": "#100563",
+                    "inverse-on-surface": "#ecf1ff",
+                    "surface-container": "#e7eeff",
+                    "tertiary-container": "#006e4c",
+                    "on-secondary-container": "#393689",
+                    "on-primary": "#ffffff",
+                    "on-tertiary-fixed-variant": "#005137",
+                    "surface-bright": "#f9f9ff",
+                    "on-primary-fixed": "#0f0069",
+                    "surface-tint": "#4d44e3",
+                    "secondary-fixed": "#e2dfff",
+                    "on-primary-container": "#dad7ff",
+                    "secondary-fixed-dim": "#c3c0ff",
+                    "on-secondary": "#ffffff",
+                    "tertiary": "#005338",
+                    "on-surface-variant": "#464555",
+                    "outline-variant": "#c7c4d8",
+                    "on-error": "#ffffff",
+                    "secondary": "#5654a8",
+                    "secondary-container": "#a7a5ff",
+                    "inverse-primary": "#c3c0ff",
+                    "surface-container-highest": "#d8e3fb",
+                    "surface-variant": "#d8e3fb",
+                    "on-primary-fixed-variant": "#3323cc",
+                    "tertiary-fixed-dim": "#68dba9",
+                    "primary-container": "#4f46e5",
+                    "error": "#ba1a1a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "sm": "8px",
+                    "xs": "4px",
+                    "element-gap": "12px",
+                    "container-padding": "16px",
+                    "lg": "16px",
+                    "xl": "24px",
+                    "md": "12px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Inter"],
+                    "button-text": ["Inter"],
+                    "headline-md": ["Hanken Grotesk"],
+                    "label-caps": ["IBM Plex Sans"],
+                    "headline-lg": ["Hanken Grotesk"],
+                    "body-md": ["Inter"]
+            },
+            "fontSize": {
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "button-text": ["16px", {"lineHeight": "20px", "fontWeight": "600"}],
+                    "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "700"}],
+                    "label-caps": ["10px", {"lineHeight": "12px", "letterSpacing": "0.08em", "fontWeight": "700"}],
+                    "headline-lg": ["28px", {"lineHeight": "34px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "30px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #f9f9ff;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(226, 223, 255, 0.5);
+            box-shadow: 0 8px 32px 0 rgba(53, 37, 205, 0.08);
+        }
+        .security-mesh {
+            background-image: radial-gradient(#3525cd 0.5px, transparent 0.5px);
+            background-size: 24px 24px;
+            opacity: 0.05;
+        }
+        .primary-gradient {
+            background: linear-gradient(135deg, #3525cd 0%, #4f46e5 100%);
+        }
+        .active-scale:active {
+            transform: scale(0.96);
+            transition: transform 0.1s ease;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen relative p-container-padding">
+<!-- Background Pattern -->
+<div class="fixed inset-0 security-mesh pointer-events-none"></div>
+<div class="fixed top-[-10%] right-[-10%] w-[500px] h-[500px] bg-primary/5 rounded-full blur-[100px] pointer-events-none"></div>
+<div class="fixed bottom-[-10%] left-[-10%] w-[400px] h-[400px] bg-secondary/5 rounded-full blur-[80px] pointer-events-none"></div>
+<main class="w-full max-w-[400px] z-10 flex flex-col gap-xl">
+<!-- Brand Identity Section -->
+<header class="text-center space-y-md animate-fade-in">
+<div class="mx-auto w-16 h-16 primary-gradient rounded-xl flex items-center justify-center shadow-lg mb-lg">
+<span class="material-symbols-outlined text-on-primary text-[32px]" style="font-variation-settings: 'FILL' 1;">security</span>
+</div>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg text-on-background tracking-tight">
+                COSP Guardia
+            </h1>
+<p class="font-body-md text-body-md text-on-surface-variant max-w-[280px] mx-auto">
+                Sistema de Control y Gestión Operativa para Personal de Seguridad
+            </p>
+</header>
+<!-- Login Form Container -->
+<section class="glass-card rounded-[24px] p-xl space-y-xl border border-outline-variant/30">
+<form action="#" class="space-y-lg">
+<!-- Email Field -->
+<div class="space-y-xs">
+<label class="font-label-caps text-label-caps text-primary pl-xs" for="email">
+                        CORREO ELECTRÓNICO
+                    </label>
+<div class="relative flex items-center">
+<span class="material-symbols-outlined absolute left-4 text-outline text-[20px]">mail</span>
+<input class="w-full h-14 pl-12 pr-4 bg-surface-container-low border-1.5 border-outline-variant rounded-xl font-body-md text-on-surface focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-outline-variant/70" id="email" name="email" placeholder="nombre@seguridad.com" required="" type="email"/>
+</div>
+</div>
+<!-- Password Field -->
+<div class="space-y-xs">
+<div class="flex justify-between items-center px-xs">
+<label class="font-label-caps text-label-caps text-primary" for="password">
+                            CONTRASEÑA
+                        </label>
+<button class="text-[11px] font-semibold text-secondary hover:text-primary transition-colors" type="button">
+                            ¿Olvidó su clave?
+                        </button>
+</div>
+<div class="relative flex items-center">
+<span class="material-symbols-outlined absolute left-4 text-outline text-[20px]">lock</span>
+<input class="w-full h-14 pl-12 pr-12 bg-surface-container-low border-1.5 border-outline-variant rounded-xl font-body-md text-on-surface focus:ring-2 focus:ring-primary focus:border-primary transition-all placeholder:text-outline-variant/70" id="password" name="password" placeholder="••••••••" required="" type="password"/>
+<button class="absolute right-4 text-outline hover:text-primary transition-colors" onclick="togglePassword()" type="button">
+<span class="material-symbols-outlined text-[20px]" id="eye-icon">visibility</span>
+</button>
+</div>
+<!-- Legajo Hint -->
+<div class="flex items-start gap-sm mt-sm p-sm bg-primary/5 rounded-lg border border-primary/10">
+<span class="material-symbols-outlined text-primary text-[16px]">info</span>
+<p class="text-[11px] font-body-md text-on-surface-variant leading-tight">
+                            Su contraseña inicial es su número de <strong class="text-primary">Legajo</strong> asignado por la central.
+                        </p>
+</div>
+</div>
+<!-- Primary Action -->
+<button class="w-full h-14 primary-gradient text-on-primary font-button-text text-button-text rounded-xl shadow-md active-scale flex items-center justify-center gap-sm group hover:shadow-xl hover:brightness-110 transition-all" type="submit">
+<span>Entrar</span>
+<span class="material-symbols-outlined text-[20px] group-hover:translate-x-1 transition-transform">arrow_forward</span>
+</button>
+</form>
+<!-- Secondary Actions -->
+<div class="pt-md border-t border-outline-variant/20">
+<button class="w-full py-md flex items-center justify-center gap-sm font-button-text text-body-md text-secondary hover:text-primary transition-colors active-scale">
+<span class="material-symbols-outlined text-[20px]">fingerprint</span>
+<span>Acceder con Biometría</span>
+</button>
+</div>
+</section>
+<!-- Footer / Version -->
+<footer class="text-center space-y-xs opacity-60">
+<p class="font-label-caps text-label-caps text-on-surface-variant">
+                OPERACIÓN SEGURA v4.2.0
+            </p>
+<div class="flex justify-center gap-md">
+<a class="text-[11px] font-body-md text-outline hover:text-primary underline" href="#">Privacidad</a>
+<a class="text-[11px] font-body-md text-outline hover:text-primary underline" href="#">Soporte Técnico</a>
+</div>
+</footer>
+</main>
+<!-- Interactive script for visibility toggle -->
+<script>
+        function togglePassword() {
+            const passInput = document.getElementById('password');
+            const eyeIcon = document.getElementById('eye-icon');
+            if (passInput.type === 'password') {
+                passInput.type = 'text';
+                eyeIcon.innerText = 'visibility_off';
+            } else {
+                passInput.type = 'password';
+                eyeIcon.innerText = 'visibility';
+            }
+        }
+
+        // Add a subtle parallax effect to the mesh
+        document.addEventListener('mousemove', (e) => {
+            const moveX = (e.clientX - window.innerWidth / 2) * 0.01;
+            const moveY = (e.clientY - window.innerHeight / 2) * 0.01;
+            document.querySelector('.security-mesh').style.transform = `translate(${moveX}px, ${moveY}px)`;
+        });
+    </script>
+</body></html>

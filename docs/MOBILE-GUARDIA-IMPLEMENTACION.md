@@ -32,8 +32,8 @@
 | | **TOTAL** | | **88** | **21/88** | |
 
 **Fase activa recomendada:** F3 (push F3-07+)  
-**Última actualización:** 2026-07-31  
-**Última tarea completada:** F3-03 / F3-04 (certificado cámara + galería en novedad móvil)
+**Última actualización:** 2026-08-03  
+**Última tarea completada:** UI Stitch Core + Dark Ops (`docs/stitch/`, `ThemeContext` en mobile-guardia)
 
 ---
 
@@ -76,6 +76,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-08-03 | UI Stitch | Temas Core/Dark Ops + docs/stitch (Gemini Stitch export)
 2026-07-31 | F3-03/04 | Certificado en /novedad — cámara/galería, upload Storage absences/{uid}
 2026-07-30 | F3-01/02 | Pantalla /novedad — ausencias y licencias (Firestore ausencias, classifyAbsence)
 2026-07-30 | F2-05 | CheckInStatusBanner + resolveCheckInUiStatus en portal-core

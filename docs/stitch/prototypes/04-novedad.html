@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+
+<html class="light" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>COSP Guardia - Nueva Novedad</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=Hanken+Grotesk:wght@700;800&amp;family=IBM+Plex+Sans:wght@700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary-fixed-variant": "#3e3c8f",
+                    "tertiary-fixed": "#85f8c4",
+                    "surface-container-lowest": "#ffffff",
+                    "primary-fixed-dim": "#c3c0ff",
+                    "on-error-container": "#93000a",
+                    "surface-container-high": "#dee8ff",
+                    "primary-fixed": "#e2dfff",
+                    "on-tertiary-fixed": "#002114",
+                    "surface-dim": "#cfdaf2",
+                    "inverse-surface": "#263143",
+                    "primary": "#3525cd",
+                    "on-background": "#111c2d",
+                    "surface-container-low": "#f0f3ff",
+                    "surface": "#f9f9ff",
+                    "on-tertiary-container": "#7df1bd",
+                    "background": "#f9f9ff",
+                    "on-surface": "#111c2d",
+                    "on-tertiary": "#ffffff",
+                    "outline": "#777587",
+                    "error-container": "#ffdad6",
+                    "on-secondary-fixed": "#100563",
+                    "inverse-on-surface": "#ecf1ff",
+                    "surface-container": "#e7eeff",
+                    "tertiary-container": "#006e4c",
+                    "on-secondary-container": "#393689",
+                    "on-primary": "#ffffff",
+                    "on-tertiary-fixed-variant": "#005137",
+                    "surface-bright": "#f9f9ff",
+                    "on-primary-fixed": "#0f0069",
+                    "surface-tint": "#4d44e3",
+                    "secondary-fixed": "#e2dfff",
+                    "on-primary-container": "#dad7ff",
+                    "secondary-fixed-dim": "#c3c0ff",
+                    "on-secondary": "#ffffff",
+                    "tertiary": "#005338",
+                    "on-surface-variant": "#464555",
+                    "outline-variant": "#c7c4d8",
+                    "on-error": "#ffffff",
+                    "secondary": "#5654a8",
+                    "secondary-container": "#a7a5ff",
+                    "inverse-primary": "#c3c0ff",
+                    "surface-container-highest": "#d8e3fb",
+                    "surface-variant": "#d8e3fb",
+                    "on-primary-fixed-variant": "#3323cc",
+                    "tertiary-fixed-dim": "#68dba9",
+                    "primary-container": "#4f46e5",
+                    "error": "#ba1a1a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "sm": "8px",
+                    "xs": "4px",
+                    "element-gap": "12px",
+                    "container-padding": "16px",
+                    "lg": "16px",
+                    "xl": "24px",
+                    "md": "12px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Inter"],
+                    "button-text": ["Inter"],
+                    "headline-md": ["Hanken Grotesk"],
+                    "label-caps": ["IBM Plex Sans"],
+                    "headline-lg": ["Hanken Grotesk"],
+                    "body-md": ["Inter"]
+            },
+            "fontSize": {
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "button-text": ["16px", {"lineHeight": "20px", "fontWeight": "600"}],
+                    "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "700"}],
+                    "label-caps": ["10px", {"lineHeight": "12px", "letterSpacing": "0.08em", "fontWeight": "700"}],
+                    "headline-lg": ["28px", {"lineHeight": "34px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "30px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body { -webkit-tap-highlight-color: transparent; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(226, 232, 240, 1);
+        }
+        .form-input-focus:focus {
+            outline: none;
+            border-color: #3525cd;
+            box-shadow: 0 0 0 3px rgba(53, 37, 205, 0.1);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-body-md min-h-screen pb-24">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-container-padding h-14 fixed top-0 z-50 bg-primary dark:bg-primary-container shadow-md text-on-primary dark:text-on-primary-container">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined">security</span>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-extrabold">COSP Guardia</h1>
+</div>
+<button class="text-button-text font-button-text hover:bg-primary-container/20 px-3 py-1 rounded-lg transition-all active:scale-95">
+            Salir
+        </button>
+</header>
+<main class="pt-20 px-container-padding max-w-md mx-auto">
+<!-- Hero Context -->
+<section class="mb-6">
+<h2 class="font-headline-md text-headline-md text-primary mb-1">Nueva Novedad</h2>
+<p class="font-body-md text-on-surface-variant">Registra ausencias, licencias o certificados médicos.</p>
+</section>
+<!-- Form Card -->
+<div class="glass-card rounded-xl p-6 shadow-sm">
+<form class="space-y-6" id="absenceForm">
+<!-- Absence Type Dropdown -->
+<div class="space-y-2">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase block">Tipo de Novedad</label>
+<div class="relative">
+<select class="w-full h-12 bg-white border-[1.5px] border-outline-variant rounded-xl px-4 appearance-none font-body-md form-input-focus">
+<option disabled="" selected="" value="">Selecciona una opción</option>
+<option value="licencia_medica">Licencia Médica</option>
+<option value="tramite_personal">Trámite Personal</option>
+<option value="fallecimiento">Fallecimiento Familiar</option>
+<option value="estudio">Examen / Estudio</option>
+<option value="otro">Otras Inasistencias</option>
+</select>
+<span class="material-symbols-outlined absolute right-4 top-3 pointer-events-none text-outline">expand_more</span>
+</div>
+</div>
+<!-- Date Selection -->
+<div class="grid grid-cols-2 gap-4">
+<div class="space-y-2">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase block">Desde</label>
+<input class="w-full h-12 bg-white border-[1.5px] border-outline-variant rounded-xl px-4 font-body-md form-input-focus" type="date"/>
+</div>
+<div class="space-y-2">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase block">Hasta</label>
+<input class="w-full h-12 bg-white border-[1.5px] border-outline-variant rounded-xl px-4 font-body-md form-input-focus" type="date"/>
+</div>
+</div>
+<!-- Reason Textarea -->
+<div class="space-y-2">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase block">Motivo / Descripción</label>
+<textarea class="w-full bg-white border-[1.5px] border-outline-variant rounded-xl p-4 font-body-md form-input-focus resize-none" placeholder="Describe brevemente el motivo..." rows="4"></textarea>
+</div>
+<!-- Attachment Feature -->
+<div class="space-y-3">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase block">Soporte Documental</label>
+<div class="flex gap-3">
+<button class="flex-1 flex items-center justify-center gap-2 h-14 border-[1.5px] border-dashed border-primary text-primary rounded-xl font-button-text active:bg-primary-container/10 transition-colors" type="button">
+<span class="material-symbols-outlined">photo_camera</span>
+                            Cámara
+                        </button>
+<button class="flex-1 flex items-center justify-center gap-2 h-14 border-[1.5px] border-dashed border-primary text-primary rounded-xl font-button-text active:bg-primary-container/10 transition-colors" type="button">
+<span class="material-symbols-outlined">image</span>
+                            Galería
+                        </button>
+</div>
+<div class="bg-surface-container-low rounded-lg p-3 flex items-center gap-3 border border-outline-variant/30" id="fileStatus">
+<span class="material-symbols-outlined text-outline">description</span>
+<span class="text-xs text-on-surface-variant italic">No hay archivos adjuntos</span>
+</div>
+</div>
+</form>
+</div>
+<!-- Submit Button Section -->
+<div class="mt-8 mb-4">
+<button class="w-full h-14 bg-primary text-on-primary rounded-xl font-headline-md text-headline-md shadow-lg shadow-primary/20 active:scale-95 transition-transform duration-100 flex items-center justify-center gap-2" form="absenceForm" type="submit">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">send</span>
+                Enviar Novedad
+            </button>
+<p class="text-center text-[11px] text-on-surface-variant mt-3 px-4">
+                Toda información enviada tiene carácter de declaración jurada y será auditada por el departamento de RRHH.
+            </p>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-2 bg-surface dark:bg-surface-dim border-t border-outline-variant dark:border-outline shadow-[0_-4px_12px_rgba(0,0,0,0.05)] rounded-t-xl">
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">home</span>
+<span class="font-label-caps text-label-caps">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span class="font-label-caps text-label-caps">Agenda</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-secondary-container dark:bg-on-secondary-fixed-variant text-on-secondary-container dark:text-secondary-fixed rounded-full px-4 py-1 active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">assignment</span>
+<span class="font-label-caps text-label-caps">Novedad</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">more_horiz</span>
+<span class="font-label-caps text-label-caps">Más</span>
+</a>
+</nav>
+<script>
+        // Simple micro-interaction for attachment feedback
+        document.querySelectorAll('button[type="button"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const status = document.getElementById('fileStatus');
+                status.classList.remove('bg-surface-container-low');
+                status.classList.add('bg-tertiary-fixed/20');
+                status.innerHTML = `
+                    <span class="material-symbols-outlined text-tertiary">check_circle</span>
+                    <span class="text-xs text-tertiary font-bold">Certificado_Medico.jpg adjunto</span>
+                `;
+            });
+        });
+
+        // Form submission animation
+        document.getElementById('absenceForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const btn = e.target.closest('main').querySelector('button[type="submit"]');
+            btn.innerHTML = `<span class="material-symbols-outlined animate-spin">sync</span> Procesando...`;
+            btn.disabled = true;
+            
+            setTimeout(() => {
+                btn.innerHTML = `<span class="material-symbols-outlined">check_circle</span> Enviado con éxito`;
+                btn.classList.remove('bg-primary');
+                btn.classList.add('bg-tertiary');
+            }, 1500);
+        });
+    </script>
+</body></html>

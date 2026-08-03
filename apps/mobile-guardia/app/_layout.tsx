@@ -4,12 +4,13 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { PortalAuthProvider, usePortalAuth } from '../src/context/PortalAuthContext';
-import { colors } from '../src/theme/tokens';
+import { ThemeProvider, useTheme } from '../src/theme/ThemeContext';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function RootNavigator() {
   const { initializing } = usePortalAuth();
+  const { palette, isDark } = useTheme();
 
   useEffect(() => {
     const fallback = setTimeout(() => {
@@ -26,14 +27,14 @@ function RootNavigator() {
 
   return (
     <>
-      <StatusBar style="light" />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: colors.indigo900 },
-          headerTintColor: colors.white,
+          headerStyle: { backgroundColor: palette.header },
+          headerTintColor: palette.headerTint,
           headerTitleStyle: { fontWeight: '800', fontSize: 17 },
-          headerShadowVisible: true,
-          contentStyle: { backgroundColor: colors.slate50 },
+          headerShadowVisible: !isDark,
+          contentStyle: { backgroundColor: palette.background },
         }}
       />
     </>
@@ -43,9 +44,11 @@ function RootNavigator() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <PortalAuthProvider>
-        <RootNavigator />
-      </PortalAuthProvider>
+      <ThemeProvider>
+        <PortalAuthProvider>
+          <RootNavigator />
+        </PortalAuthProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

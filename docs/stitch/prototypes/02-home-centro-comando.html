@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+
+<html class="light" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>COSP Guardia - Centro de Comando</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&amp;family=Hanken+Grotesk:wght@700;800&amp;family=IBM+Plex+Sans:wght@700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary-fixed-variant": "#3e3c8f",
+                    "tertiary-fixed": "#85f8c4",
+                    "surface-container-lowest": "#ffffff",
+                    "primary-fixed-dim": "#c3c0ff",
+                    "on-error-container": "#93000a",
+                    "surface-container-high": "#dee8ff",
+                    "primary-fixed": "#e2dfff",
+                    "on-tertiary-fixed": "#002114",
+                    "surface-dim": "#cfdaf2",
+                    "inverse-surface": "#263143",
+                    "primary": "#3525cd",
+                    "on-background": "#111c2d",
+                    "surface-container-low": "#f0f3ff",
+                    "surface": "#f9f9ff",
+                    "on-tertiary-container": "#7df1bd",
+                    "background": "#f9f9ff",
+                    "on-surface": "#111c2d",
+                    "on-tertiary": "#ffffff",
+                    "outline": "#777587",
+                    "error-container": "#ffdad6",
+                    "on-secondary-fixed": "#100563",
+                    "inverse-on-surface": "#ecf1ff",
+                    "surface-container": "#e7eeff",
+                    "tertiary-container": "#006e4c",
+                    "on-secondary-container": "#393689",
+                    "on-primary": "#ffffff",
+                    "on-tertiary-fixed-variant": "#005137",
+                    "surface-bright": "#f9f9ff",
+                    "on-primary-fixed": "#0f0069",
+                    "surface-tint": "#4d44e3",
+                    "secondary-fixed": "#e2dfff",
+                    "on-primary-container": "#dad7ff",
+                    "secondary-fixed-dim": "#c3c0ff",
+                    "on-secondary": "#ffffff",
+                    "tertiary": "#005338",
+                    "on-surface-variant": "#464555",
+                    "outline-variant": "#c7c4d8",
+                    "on-error": "#ffffff",
+                    "secondary": "#5654a8",
+                    "secondary-container": "#a7a5ff",
+                    "inverse-primary": "#c3c0ff",
+                    "surface-container-highest": "#d8e3fb",
+                    "surface-variant": "#d8e3fb",
+                    "on-primary-fixed-variant": "#3323cc",
+                    "tertiary-fixed-dim": "#68dba9",
+                    "primary-container": "#4f46e5",
+                    "error": "#ba1a1a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "xxl": "24px",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "sm": "8px",
+                    "xs": "4px",
+                    "element-gap": "12px",
+                    "container-padding": "16px",
+                    "lg": "16px",
+                    "xl": "24px",
+                    "md": "12px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Inter"],
+                    "button-text": ["Inter"],
+                    "headline-md": ["Hanken Grotesk"],
+                    "label-caps": ["IBM Plex Sans"],
+                    "headline-lg": ["Hanken Grotesk"],
+                    "body-md": ["Inter"]
+            },
+            "fontSize": {
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "button-text": ["16px", {"lineHeight": "20px", "fontWeight": "600"}],
+                    "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "700"}],
+                    "label-caps": ["10px", {"lineHeight": "12px", "letterSpacing": "0.08em", "fontWeight": "700"}],
+                    "headline-lg": ["28px", {"lineHeight": "34px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "30px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .status-pulse {
+            animation: pulse-red 2s infinite;
+        }
+        @keyframes pulse-red {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(186, 26, 26, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(186, 26, 26, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(186, 26, 26, 0); }
+        }
+        body {
+            -webkit-tap-highlight-color: transparent;
+        }
+        .scroll-hide::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-container-padding h-14 fixed top-0 z-50 bg-primary dark:bg-primary-container shadow-md">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-on-primary dark:text-on-primary-container" style="font-variation-settings: 'FILL' 1;">security</span>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile font-extrabold text-on-primary dark:text-on-primary-container">COSP Guardia</h1>
+</div>
+<button class="text-on-primary/70 font-button-text text-button-text active:scale-95 duration-100 hover:bg-primary-container/20 px-3 py-1 rounded-lg">Salir</button>
+</header>
+<main class="mt-14 px-container-padding pt-6 space-y-xl">
+<!-- Welcome Header -->
+<section class="flex justify-between items-end">
+<div>
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase">ESTADO ACTUAL</p>
+<h2 class="font-headline-md text-headline-md text-on-surface">Hola, Martín S.</h2>
+<p class="font-body-md text-body-md text-on-surface-variant">Legajo: #99420-COSP</p>
+</div>
+<div class="w-12 h-12 rounded-full border-2 border-primary-container overflow-hidden bg-surface-container-high">
+<img class="w-full h-full object-cover" data-alt="Close-up professional portrait of a security guard in a clean navy blue uniform with a subtle silver badge. The lighting is crisp and bright, following a modern corporate aesthetic with a blurred tech-office background. High-quality digital photography style with professional depth of field and sharp focus on the subject." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBZmEEihHsJD5U5CuKmT3G73PHF-ob-JsWbshBkekH9v-5Pi7eMalE0m56LluENaO_GDeLkEytJdyuX25JE2fsv0VjbHK9is4rcq3fMBtH06TG23graU-RJ12CI5EJqf-QsO1HYWWtZRkz0DNTt-mjvKmbqTwVHbySKc2ipBAJpp6oL_4Hw-L0NpzUHbcZPQUjeixChpk0gXOLf-oUHLmeb3WNBWizuFhC9SsD8pR4MI9cc5pHPSjgFWQ"/>
+</div>
+</section>
+<!-- HeroShiftPanel -->
+<section class="relative overflow-hidden rounded-xxl bg-gradient-to-br from-primary to-secondary p-6 text-on-primary shadow-xl min-h-[220px]">
+
+<div class="relative z-10 space-y-4">
+<div class="flex justify-between items-start">
+<div>
+<span class="font-label-caps text-label-caps bg-white/20 px-2 py-1 rounded-md backdrop-blur-sm">TURNO DE HOY</span>
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile mt-2">08:00 — 20:00</h3>
+</div>
+<div class="flex gap-2">
+<span class="material-symbols-outlined text-tertiary-fixed">verified_user</span>
+</div>
+</div>
+<div class="space-y-2 pt-2 border-t border-white/10">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm opacity-80">business</span>
+<p class="font-body-lg text-body-lg font-semibold">Planta Industrial TechGlobal</p>
+</div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm opacity-80">location_on</span>
+<p class="font-body-md text-body-md">Acceso Norte, Sector B-14</p>
+</div>
+</div>
+<div class="flex gap-2 pt-2">
+<span class="bg-white/10 border border-white/20 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-green-400"></span> Exterior
+                    </span>
+<span class="bg-white/10 border border-white/20 px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1">
+<span class="material-symbols-outlined text-xs">radio</span> Freq 144.5
+                    </span>
+</div>
+</div>
+</section>
+<!-- CheckInStatusBanner -->
+<div class="bg-error-container/20 border border-error/20 p-4 rounded-xl flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-error-container flex items-center justify-center text-error status-pulse">
+<span class="material-symbols-outlined">report</span>
+</div>
+<div class="flex-1">
+<p class="font-label-caps text-label-caps text-error">ATENCIÓN</p>
+<p class="font-body-md text-body-md text-on-error-container font-semibold">Fichada de ingreso pendiente</p>
+</div>
+</div>
+<!-- Main Actions -->
+<section class="grid gap-md">
+<button class="h-16 w-full bg-tertiary-container hover:bg-tertiary text-on-tertiary-container rounded-xxl flex items-center justify-center gap-3 shadow-lg active:scale-95 transition-all duration-200">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">location_searching</span>
+<span class="font-button-text text-button-text uppercase tracking-wider">Marcar presente (GPS)</span>
+</button>
+<button class="h-14 w-full bg-surface-container-highest border border-outline-variant text-on-surface-variant rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all">
+<span class="material-symbols-outlined">schedule</span>
+<span class="font-button-text text-button-text">Informar llegada tarde</span>
+</button>
+</section>
+<!-- Bottom Cards Grid (Bento style) -->
+<section class="grid grid-cols-2 gap-md">
+<div class="bg-surface-container-low border border-outline-variant p-4 rounded-xxl shadow-sm flex flex-col justify-between aspect-square">
+<div class="w-10 h-10 rounded-lg bg-primary-container/10 flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined">calendar_month</span>
+</div>
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface">Agenda</h4>
+<p class="text-[12px] text-on-surface-variant">Próximos turnos y francos</p>
+</div>
+</div>
+<div class="bg-surface-container-low border border-outline-variant p-4 rounded-xxl shadow-sm flex flex-col justify-between aspect-square">
+<div class="w-10 h-10 rounded-lg bg-secondary-container/20 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined">grid_view</span>
+</div>
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface">Más</h4>
+<p class="text-[12px] text-on-surface-variant">Recibos, EPP y formación</p>
+</div>
+</div>
+</section>
+<!-- Quick Activity Feed (Glassmorphic) -->
+<section class="bg-surface border border-outline-variant rounded-xxl overflow-hidden shadow-sm">
+<div class="p-4 bg-surface-container border-b border-outline-variant">
+<h4 class="font-label-caps text-label-caps text-on-surface-variant">ÚLTIMA NOVEDAD</h4>
+</div>
+<div class="p-4 flex gap-4 items-start">
+<div class="w-1 h-12 bg-primary rounded-full"></div>
+<div>
+<p class="font-body-md text-body-md text-on-surface-variant">Hace 2 horas</p>
+<p class="font-body-lg text-body-lg text-on-surface">Finalización de guardia anterior sin incidencias críticas.</p>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-2 bg-surface dark:bg-surface-dim shadow-[0_-4px_12px_rgba(0,0,0,0.05)] border-t border-outline-variant dark:border-outline rounded-t-xl">
+<a class="flex flex-col items-center justify-center bg-secondary-container dark:bg-on-secondary-fixed-variant text-on-secondary-container dark:text-secondary-fixed rounded-full px-4 py-1 active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-label-caps text-label-caps">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span class="font-label-caps text-label-caps">Agenda</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">assignment</span>
+<span class="font-label-caps text-label-caps">Novedad</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">more_horiz</span>
+<span class="font-label-caps text-label-caps">Más</span>
+</a>
+</nav>
+<script>
+        // Simple micro-interaction for button press
+        document.querySelectorAll('button').forEach(button => {
+            button.addEventListener('mousedown', () => {
+                button.classList.add('scale-95');
+            });
+            button.addEventListener('mouseup', () => {
+                button.classList.remove('scale-95');
+            });
+            button.addEventListener('mouseleave', () => {
+                button.classList.remove('scale-95');
+            });
+        });
+
+        // Current time update simulation
+        function updateTime() {
+            // Optional: can add logic to update clocks or states
+        }
+        setInterval(updateTime, 1000);
+    </script>
+</body></html>

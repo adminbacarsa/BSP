@@ -5,7 +5,7 @@ param([switch]$All)
 
 $ErrorActionPreference = 'Continue'
 $ports = @(8080, 9099, 5001, 4000, 4400, 3010)
-if ($All) { $ports += @(3001, 3000) }
+if ($All) { $ports += @(3001, 3000, 8081, 9199) }
 
 Write-Host 'COSP Lab — deteniendo procesos en puertos:' ($ports -join ', ') -ForegroundColor Yellow
 

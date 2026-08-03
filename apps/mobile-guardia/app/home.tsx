@@ -15,7 +15,8 @@ import { CommandCard } from '../src/components/ui/CommandCard';
 import { formatHeroTimeRange, HeroShiftPanel } from '../src/components/ui/HeroShiftPanel';
 import { CheckInStatusBanner } from '../src/components/ui/CheckInStatusBanner';
 import { RequireAuth } from '../src/hooks/useRequireAuth';
-import { colors, radius } from '../src/theme/tokens';
+import { radius, spacing } from '../src/theme/tokens';
+import { useTheme } from '../src/theme/ThemeContext';
 
 function heroHeadline(todayAny: ReturnType<typeof pickTodayShiftAny>, hasNext: boolean): string {
   if (todayAny) return 'HOY';
@@ -33,6 +34,7 @@ export default function HomeScreen() {
 
 function HomeScreenContent() {
   const router = useRouter();
+  const { palette } = useTheme();
   const { user, employee, empDocId, portalFeatures, signOut, refreshEmployee, employeeProfileLoading, employeeProfileReady, employeeProfileError } =
     usePortalAuth();
   const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
@@ -122,31 +124,34 @@ function HomeScreenContent() {
         options={{
           title: 'Centro de comando',
           headerRight: () => (
-            <Text style={styles.headerAction} onPress={() => signOut().then(() => router.replace('/login'))}>
+            <Text
+              style={[styles.headerAction, { color: palette.headerTint }]}
+              onPress={() => signOut().then(() => router.replace('/login'))}
+            >
               Salir
             </Text>
           ),
         }}
       />
-      <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['bottom']}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <View style={styles.welcome}>
-            <Text style={styles.welcomeLabel}>Portal del vigilador</Text>
-            <Text style={styles.welcomeName}>{displayName}</Text>
+            <Text style={[styles.welcomeLabel, { color: palette.primary }]}>Portal del vigilador</Text>
+            <Text style={[styles.welcomeName, { color: palette.onSurface }]}>{displayName}</Text>
             {employee?.fileNumber ? (
-              <Text style={styles.welcomeMeta}>Legajo {employee.fileNumber}</Text>
+              <Text style={[styles.welcomeMeta, { color: palette.onSurfaceMuted }]}>Legajo {employee.fileNumber}</Text>
             ) : employeeProfileLoading ? (
-              <Text style={styles.welcomeMeta}>Cargando legajo…</Text>
+              <Text style={[styles.welcomeMeta, { color: palette.onSurfaceMuted }]}>Cargando legajo…</Text>
             ) : profileStale ? (
               <View style={styles.profileWarnBox}>
-                <Text style={styles.welcomeWarn}>
+                <Text style={[styles.welcomeWarn, { color: palette.warning }]}>
                   No se pudo leer el legajo (red lenta). Tocá reintentar.
                 </Text>
                 <CommandButton label="Reintentar legajo" variant="ghost" onPress={() => refreshEmployee()} />
               </View>
             ) : profileMissing ? (
               <View style={styles.profileWarnBox}>
-                <Text style={styles.welcomeWarn}>
+                <Text style={[styles.welcomeWarn, { color: palette.warning }]}>
                   {employeeProfileError ||
                     'Sin legajo en Firestore. En la PC: npm run emulators y npm run seed. Luego cerrá sesión y entrá con guardia@bacarsa.com.ar'}
                 </Text>
@@ -154,23 +159,23 @@ function HomeScreenContent() {
               </View>
             ) : employeeProfileError && !employee ? (
               <View style={styles.profileWarnBox}>
-                <Text style={styles.welcomeWarn}>{employeeProfileError}</Text>
+                <Text style={[styles.welcomeWarn, { color: palette.warning }]}>{employeeProfileError}</Text>
                 <CommandButton label="Reintentar legajo" variant="ghost" onPress={() => refreshEmployee()} />
               </View>
             ) : null}
           </View>
 
           {loading ? (
-            <ActivityIndicator size="large" color={colors.indigo600} style={styles.loader} />
+            <ActivityIndicator size="large" color={palette.primary} style={styles.loader} />
           ) : error ? (
             <CommandCard title="Cronograma">
               <Text style={styles.error}>{error}</Text>
             </CommandCard>
           ) : shifts.length === 0 && !loading ? (
             <CommandCard title="Cronograma">
-              <Text style={styles.emptyShifts}>
+              <Text style={[styles.emptyShifts, { color: palette.onSurfaceMuted }]}>
                 No hay turnos este mes para tu usuario. Si recién configuraste el lab, ejecutá{' '}
-                <Text style={styles.emptyBold}>npm run seed</Text> en la PC (emuladores activos) y reiniciá sesión.
+                <Text style={{ fontWeight: '800', color: palette.primary }}>npm run seed</Text> en la PC (emuladores activos) y reiniciá sesión.
               </Text>
               <CommandButton label="Reintentar carga" variant="secondary" onPress={() => refreshEmployee()} />
             </CommandCard>
@@ -217,8 +222,8 @@ function HomeScreenContent() {
           <View style={styles.quickGrid}>
             {portalFeatures.viewSchedule ? (
               <CommandCard style={styles.quickCard}>
-                <Text style={styles.quickTitle}>Agenda</Text>
-                <Text style={styles.quickSub}>{shifts.length} turnos este mes</Text>
+              <Text style={[styles.quickTitle, { color: palette.onSurface }]}>Agenda</Text>
+              <Text style={[styles.quickSub, { color: palette.onSurfaceMuted }]}>{shifts.length} turnos este mes</Text>
                 <CommandButton
                   label="Ver cronograma"
                   variant="secondary"
@@ -227,8 +232,8 @@ function HomeScreenContent() {
               </CommandCard>
             ) : null}
             <CommandCard style={styles.quickCard}>
-              <Text style={styles.quickTitle}>Más servicios</Text>
-              <Text style={styles.quickSub}>Ausencias, permutas, credencial</Text>
+              <Text style={[styles.quickTitle, { color: palette.onSurface }]}>Más servicios</Text>
+              <Text style={[styles.quickSub, { color: palette.onSurfaceMuted }]}>Ausencias, permutas, credencial</Text>
               <CommandButton label="Abrir" variant="secondary" onPress={() => router.push('/mas')} />
             </CommandCard>
           </View>
@@ -239,29 +244,27 @@ function HomeScreenContent() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.slate50 },
-  scroll: { padding: 20, gap: 20, paddingBottom: 36 },
+  safe: { flex: 1 },
+  scroll: { padding: spacing.container, gap: spacing.lg, paddingBottom: 36 },
   welcome: { gap: 4 },
   welcomeLabel: {
     fontSize: 11,
     fontWeight: '800',
-    color: colors.indigo600,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
-  welcomeName: { fontSize: 26, fontWeight: '900', color: colors.slate950 },
-  welcomeMeta: { fontSize: 14, color: colors.slate500, fontWeight: '600' },
-  welcomeWarn: { fontSize: 12, color: colors.amber600, fontWeight: '600', lineHeight: 18 },
+  welcomeName: { fontSize: 26, fontWeight: '900' },
+  welcomeMeta: { fontSize: 14, fontWeight: '600' },
+  welcomeWarn: { fontSize: 12, fontWeight: '600', lineHeight: 18 },
   profileWarnBox: { marginTop: 6, gap: 8 },
   loader: { marginVertical: 40 },
-  error: { color: colors.amber600 },
-  emptyShifts: { color: colors.slate600, fontSize: 14, lineHeight: 22 },
-  emptyBold: { fontWeight: '800', color: colors.indigo700 },
-  pendingLine: { color: '#fcd34d', fontSize: 12, fontWeight: '700', marginTop: 8 },
+  error: { fontSize: 14 },
+  emptyShifts: { fontSize: 14, lineHeight: 22 },
+  pendingLine: { fontSize: 12, fontWeight: '700', marginTop: 8 },
   heroActions: { gap: 10, marginTop: 16 },
   quickGrid: { gap: 14 },
   quickCard: { gap: 8 },
-  quickTitle: { fontSize: 17, fontWeight: '800', color: colors.indigo900 },
-  quickSub: { fontSize: 13, color: colors.slate500, marginBottom: 4 },
-  headerAction: { color: colors.white, fontWeight: '800', marginRight: 12, fontSize: 14 },
+  quickTitle: { fontSize: 17, fontWeight: '800' },
+  quickSub: { fontSize: 13, marginBottom: 4 },
+  headerAction: { fontWeight: '800', marginRight: 12, fontSize: 14 },
 });

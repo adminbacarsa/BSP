@@ -8,7 +8,8 @@ param(
   [switch]$NoCursor,
   [switch]$NoBrowser,
   [switch]$Restart,
-  [switch]$Network
+  [switch]$Network,
+  [switch]$WithExpo
 )
 
 $ErrorActionPreference = 'Stop'
@@ -71,6 +72,19 @@ function Stop-PortListeners([int[]]$Ports) {
   Start-Sleep -Seconds 2
 }
 
+function Get-LanIPv4 {
+  $addr = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.IPAddress -notlike '127.*' -and
+      $_.IPAddress -notlike '169.254.*' -and
+      $_.PrefixOrigin -ne 'WellKnown'
+    } |
+    Sort-Object -Property InterfaceMetric |
+    Select-Object -First 1 -ExpandProperty IPAddress
+  if ($addr) { return $addr }
+  return '127.0.0.1'
+}
+
 function Ensure-EnvFiles {
   $envLocal = Join-Path $projectRoot 'apps\web2\.env.local'
   $envEmu = Join-Path $projectRoot 'apps\web2\.env.emulator'
@@ -92,6 +106,17 @@ function Ensure-EnvFiles {
     }
   } elseif (-not (Select-String -Path $fnEnv -Pattern 'GEMINI_API_KEY=\S+' -Quiet)) {
     Write-Step '  AVISO: apps\functions\.env sin GEMINI_API_KEY — el asistente no responderá' 'Yellow'
+  }
+
+  $mobEnv = Join-Path $projectRoot 'apps\mobile-guardia\.env'
+  $mobExample = Join-Path $projectRoot 'apps\mobile-guardia\.env.example'
+  if (-not (Test-Path -LiteralPath $mobEnv)) {
+    if (Test-Path -LiteralPath $mobExample) {
+      Copy-Item -LiteralPath $mobExample -Destination $mobEnv -Force
+      Write-Step '  Creado apps\mobile-guardia\.env desde .env.example' 'Green'
+    } else {
+      Write-Step '  AVISO: falta apps\mobile-guardia\.env' 'Yellow'
+    }
   }
 }
 
@@ -117,8 +142,8 @@ if (-not (Test-Path (Join-Path $projectRoot 'node_modules'))) {
 Ensure-EnvFiles
 
 if ($Restart) {
-  Write-Step 'Reiniciando: liberando puertos 8080, 9099, 5001, 4000, 4400, 3010...' 'Yellow'
-  Stop-PortListeners @(8080, 9099, 5001, 4000, 4400, 3010)
+  Write-Step 'Reiniciando: liberando puertos 8080, 9099, 5001, 4000, 4400, 3010, 8081, 9199...' 'Yellow'
+  Stop-PortListeners @(8080, 9099, 5001, 4000, 4400, 3010, 8081, 9199)
 }
 
 $emulatorsUp = (Test-TcpPort 8080) -and (Test-TcpPort 9099)
@@ -209,15 +234,44 @@ if (-not $NoBrowser) {
   Start-Process "http://127.0.0.1:$devPort"
 }
 
+$expoPort = 8081
+$lanIp = Get-LanIPv4
+if ($WithExpo) {
+  if (-not (Test-TcpPort $expoPort)) {
+    Write-Step 'Abriendo Expo — app móvil guardia (ventana nueva)...' 'Yellow'
+    $expoCmd = 'npx expo start -c --host lan'
+    $mobileRoot = Join-Path $projectRoot 'apps\mobile-guardia'
+    Start-Process cmd.exe -ArgumentList @(
+      '/k',
+      "cd /d `"$mobileRoot`" && title COSP Expo :8081 && $expoCmd"
+    )
+    Write-Step "Esperando Metro http://127.0.0.1:$expoPort ..." 'DarkGray'
+    try {
+      Wait-TcpPort $expoPort 120 'Expo '
+      Write-Step '  Expo listo — escaneá QR en la ventana o Expo Go.' 'Green'
+    } catch {
+      Write-Step 'AVISO: Metro aún inicia — revisá la ventana COSP Expo :8081' 'Yellow'
+    }
+  } else {
+    Write-Step "Puerto $expoPort ocupado — asumo que Expo ya corre." 'Green'
+  }
+}
+
 Write-Host ''
 Write-Step 'Listo.' 'Green'
-Write-Host "  App:        http://localhost:$devPort" -ForegroundColor White
+Write-Host "  App web:    http://localhost:$devPort" -ForegroundColor White
 Write-Host '  Emuladores: http://127.0.0.1:4000' -ForegroundColor White
-Write-Host '  Login lab:  admin@bacarsa.com.ar / admin1234' -ForegroundColor White
+if ($WithExpo) {
+  Write-Host "  Expo (LAN): exp://$lanIp`:$expoPort" -ForegroundColor White
+  Write-Host "  Expo (PC):  http://localhost:$expoPort" -ForegroundColor White
+  Write-Host '  Guardia:    guardia@bacarsa.com.ar / guardia1234' -ForegroundColor White
+}
+Write-Host '  Login web:  admin@bacarsa.com.ar / admin1234' -ForegroundColor White
 Write-Host ''
 Write-Host 'Opciones del script:' -ForegroundColor DarkGray
 Write-Host '  -NoSeed     no ejecuta seed' -ForegroundColor DarkGray
 Write-Host '  -NoCursor   no abre Cursor' -ForegroundColor DarkGray
 Write-Host '  -Restart    mata procesos en puertos lab y relanza' -ForegroundColor DarkGray
 Write-Host '  -Network    Next en 0.0.0.0 (acceso LAN)' -ForegroundColor DarkGray
+Write-Host '  -WithExpo    abre Expo (mobile-guardia) en :8081 LAN' -ForegroundColor DarkGray
 Write-Host ''

@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+
+<html class="light" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Hanken+Grotesk:wght@700;800&family=IBM+Plex+Sans:wght@700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@100..900&family=IBM+Plex+Sans:wght@100..900&family=Inter:wght@100..900&display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary-fixed-variant": "#3e3c8f",
+                    "tertiary-fixed": "#85f8c4",
+                    "surface-container-lowest": "#ffffff",
+                    "primary-fixed-dim": "#c3c0ff",
+                    "on-error-container": "#93000a",
+                    "surface-container-high": "#dee8ff",
+                    "primary-fixed": "#e2dfff",
+                    "on-tertiary-fixed": "#002114",
+                    "surface-dim": "#cfdaf2",
+                    "inverse-surface": "#263143",
+                    "primary": "#3525cd",
+                    "on-background": "#111c2d",
+                    "surface-container-low": "#f0f3ff",
+                    "surface": "#f9f9ff",
+                    "on-tertiary-container": "#7df1bd",
+                    "background": "#f9f9ff",
+                    "on-surface": "#111c2d",
+                    "on-tertiary": "#ffffff",
+                    "outline": "#777587",
+                    "error-container": "#ffdad6",
+                    "on-secondary-fixed": "#100563",
+                    "inverse-on-surface": "#ecf1ff",
+                    "surface-container": "#e7eeff",
+                    "tertiary-container": "#006e4c",
+                    "on-secondary-container": "#393689",
+                    "on-primary": "#ffffff",
+                    "on-tertiary-fixed-variant": "#005137",
+                    "surface-bright": "#f9f9ff",
+                    "on-primary-fixed": "#0f0069",
+                    "surface-tint": "#4d44e3",
+                    "secondary-fixed": "#e2dfff",
+                    "on-primary-container": "#dad7ff",
+                    "secondary-fixed-dim": "#c3c0ff",
+                    "on-secondary": "#ffffff",
+                    "tertiary": "#005338",
+                    "on-surface-variant": "#464555",
+                    "outline-variant": "#c7c4d8",
+                    "on-error": "#ffffff",
+                    "secondary": "#5654a8",
+                    "secondary-container": "#a7a5ff",
+                    "inverse-primary": "#c3c0ff",
+                    "surface-container-highest": "#d8e3fb",
+                    "surface-variant": "#d8e3fb",
+                    "on-primary-fixed-variant": "#3323cc",
+                    "tertiary-fixed-dim": "#68dba9",
+                    "primary-container": "#4f46e5",
+                    "error": "#ba1a1a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "sm": "8px",
+                    "xs": "4px",
+                    "element-gap": "12px",
+                    "container-padding": "16px",
+                    "lg": "16px",
+                    "xl": "24px",
+                    "md": "12px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Inter"],
+                    "button-text": ["Inter"],
+                    "headline-md": ["Hanken Grotesk"],
+                    "label-caps": ["IBM Plex Sans"],
+                    "headline-lg": ["Hanken Grotesk"],
+                    "body-md": ["Inter"]
+            },
+            "fontSize": {
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "button-text": ["16px", {"lineHeight": "20px", "fontWeight": "600"}],
+                    "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "700"}],
+                    "label-caps": ["10px", {"lineHeight": "12px", "letterSpacing": "0.08em", "fontWeight": "700"}],
+                    "headline-lg": ["28px", {"lineHeight": "34px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .active-scale:active { transform: scale(0.96); transition: transform 0.1s; }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(226, 232, 240, 0.5);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface min-h-screen font-body-md selection:bg-primary-fixed selection:text-on-primary-fixed">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-container-padding h-14 fixed top-0 z-50 bg-primary dark:bg-primary-container shadow-md">
+<div class="flex items-center gap-md">
+<span class="material-symbols-outlined text-on-primary dark:text-on-primary-container" style="font-size: 24px;">security</span>
+<h1 class="font-headline-md text-headline-md text-on-primary dark:text-on-primary-container">COSP Guardia</h1>
+</div>
+<button class="px-4 py-1 rounded-full text-on-primary/70 font-button-text hover:bg-primary-container/20 active:scale-95 duration-100 transition-all">
+            Salir
+        </button>
+</header>
+<main class="pt-20 pb-32 px-container-padding max-w-md mx-auto">
+<!-- Hero Profile Section -->
+<section class="mb-xl">
+<div class="bg-gradient-to-br from-primary to-secondary p-container-padding rounded-xl shadow-lg relative overflow-hidden">
+<!-- Abstract pattern overlay -->
+<div class="absolute inset-0 opacity-10 pointer-events-none">
+<svg height="100%" preserveaspectratio="none" viewbox="0 0 100 100" width="100%">
+<path d="M0 0 L100 100 M100 0 L0 100" stroke="white" stroke-width="0.5"></path>
+</svg>
+</div>
+<div class="relative z-10 flex items-center gap-lg">
+<div class="w-16 h-16 rounded-full border-2 border-on-primary/30 p-0.5 overflow-hidden bg-surface-container">
+<img class="w-full h-full object-cover rounded-full" data-alt="A professional portrait of a security officer in a clean, modern dark blue uniform. The lighting is crisp and cinematic, emphasizing authority and professionalism. The background is a slightly blurred command center with blue accent lights, maintaining a high-contrast corporate aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDUVRExUpwRsajU3J2jlAVoqvyospe0sDrMxp_RB93Ps5iDbrIg1l9tF2Iu2QAvCTQdwXM328HtbRb3YQws4_-ltKd-foB4-YhcgCN5jlICrcNFVjwlidEsvAJDqtn-qZyCTB34_m67_2XQzJSNBbTCvFkixAjtbH9D9nLwmv4PdBoJYDCIbP6kY9RbbMsThXEgfIO5aYHzFaiJjidsXxGF9uH4WEI5h_VkIcz409ZvQ8bWA6R1Uo2nGg"/>
+</div>
+<div>
+<h2 class="text-on-primary font-headline-md text-headline-md">Martín Rodríguez</h2>
+<p class="text-on-primary/80 font-body-md">Legajo: #4829 - Sector Norte</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Services Menu Grid -->
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-md px-1 uppercase tracking-widest">Servicios y Gestión</h3>
+<div class="grid grid-cols-1 gap-md">
+<!-- Ausencias -->
+<button class="active-scale glass-card flex items-center p-lg rounded-xl shadow-sm hover:bg-surface-container-low transition-colors group">
+<div class="w-12 h-12 rounded-xl bg-primary-fixed-dim flex items-center justify-center mr-lg">
+<span class="material-symbols-outlined text-primary" style="font-size: 28px;">event_busy</span>
+</div>
+<div class="flex-grow text-left">
+<span class="block font-headline-md text-headline-md text-on-surface">Ausencias</span>
+<span class="block font-body-md text-on-surface-variant">Reportar licencias o faltas</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<!-- Permutas -->
+<button class="active-scale glass-card flex items-center p-lg rounded-xl shadow-sm hover:bg-surface-container-low transition-colors group">
+<div class="w-12 h-12 rounded-xl bg-secondary-container flex items-center justify-center mr-lg">
+<span class="material-symbols-outlined text-on-secondary-container" style="font-size: 28px;">swap_horiz</span>
+</div>
+<div class="flex-grow text-left">
+<span class="block font-headline-md text-headline-md text-on-surface">Permutas futuras</span>
+<span class="block font-body-md text-on-surface-variant">Gestión de cambios de turno</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<!-- Credencial Digital -->
+<button class="active-scale glass-card flex items-center p-lg rounded-xl shadow-sm hover:bg-surface-container-low transition-colors group">
+<div class="w-12 h-12 rounded-xl bg-tertiary-fixed flex items-center justify-center mr-lg">
+<span class="material-symbols-outlined text-on-tertiary-fixed-variant" style="font-size: 28px;">badge</span>
+</div>
+<div class="flex-grow text-left">
+<span class="block font-headline-md text-headline-md text-on-surface">Credencial digital</span>
+<span class="block font-body-md text-on-surface-variant">Identificación oficial QR</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<!-- Soporte Técnico -->
+<button class="active-scale glass-card flex items-center p-lg rounded-xl shadow-sm hover:bg-surface-container-low transition-colors group">
+<div class="w-12 h-12 rounded-xl bg-surface-container-high flex items-center justify-center mr-lg">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-size: 28px;">support_agent</span>
+</div>
+<div class="flex-grow text-left">
+<span class="block font-headline-md text-headline-md text-on-surface">Soporte técnico</span>
+<span class="block font-body-md text-on-surface-variant">Ayuda y reportes de la App</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+<!-- Configuración -->
+<button class="active-scale glass-card flex items-center p-lg rounded-xl shadow-sm hover:bg-surface-container-low transition-colors group">
+<div class="w-12 h-12 rounded-xl bg-outline-variant/30 flex items-center justify-center mr-lg">
+<span class="material-symbols-outlined text-on-surface-variant" style="font-size: 28px;">settings</span>
+</div>
+<div class="flex-grow text-left">
+<span class="block font-headline-md text-headline-md text-on-surface">Configuración</span>
+<span class="block font-body-md text-on-surface-variant">Preferencias y seguridad</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors">chevron_right</span>
+</button>
+</div>
+<!-- System Status Info -->
+<div class="mt-xl text-center px-container-padding">
+<div class="inline-flex items-center gap-xs px-3 py-1 bg-surface-container-highest rounded-full mb-sm">
+<span class="w-2 h-2 rounded-full bg-tertiary animate-pulse"></span>
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Sistema Operativo</span>
+</div>
+<p class="font-body-md text-on-surface-variant/60">
+                Versión 4.2.1-build.202310<br/>
+                COSP Seguridad Privada S.A.
+            </p>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-2 bg-surface dark:bg-surface-dim rounded-t-xl border-t border-outline-variant dark:border-outline shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">home</span>
+<span class="font-label-caps text-label-caps">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span class="font-label-caps text-label-caps">Agenda</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-4 py-1 hover:bg-surface-container-high transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">assignment</span>
+<span class="font-label-caps text-label-caps">Novedad</span>
+</a>
+<!-- Active Tab: Más -->
+<a class="flex flex-col items-center justify-center bg-secondary-container dark:bg-on-secondary-fixed-variant text-on-secondary-container dark:text-secondary-fixed rounded-full px-4 py-1 active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">more_horiz</span>
+<span class="font-label-caps text-label-caps">Más</span>
+</a>
+</nav>
+<script>
+        // Micro-interaction for tactile feedback on cards
+        document.querySelectorAll('.active-scale').forEach(card => {
+            card.addEventListener('touchstart', () => {
+                card.style.transform = 'scale(0.98)';
+                card.style.transition = 'transform 0.1s cubic-bezier(0.4, 0, 0.2, 1)';
+            });
+            card.addEventListener('touchend', () => {
+                card.style.transform = 'scale(1)';
+            });
+            card.addEventListener('touchcancel', () => {
+                card.style.transform = 'scale(1)';
+            });
+        });
+    </script>
+</body></html>

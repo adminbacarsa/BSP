@@ -1,45 +1,57 @@
 import { StyleSheet, Text, View } from 'react-native';
 import type { CheckInUiStatusView } from '@cosp/portal-core';
-import { colors, radius } from '../../theme/tokens';
+import { radius } from '../../theme/tokens';
+import { useTheme } from '../../theme/ThemeContext';
 
 type Props = {
   view: CheckInUiStatusView;
 };
 
-const toneStyles: Record<
-  CheckInUiStatusView['tone'],
-  { box: object; title: object; sub: object }
-> = {
-  neutral: {
-    box: { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.12)' },
-    title: { color: colors.indigo100 },
-    sub: { color: colors.indigo200 },
-  },
-  info: {
-    box: { backgroundColor: 'rgba(99,102,241,0.25)', borderColor: 'rgba(165,180,252,0.35)' },
-    title: { color: '#e0e7ff' },
-    sub: { color: colors.indigo200 },
-  },
-  success: {
-    box: { backgroundColor: 'rgba(16,185,129,0.22)', borderColor: 'rgba(52,211,153,0.35)' },
-    title: { color: colors.emerald200 },
-    sub: { color: '#a7f3d0' },
-  },
-  warning: {
-    box: { backgroundColor: 'rgba(245,158,11,0.2)', borderColor: 'rgba(251,191,36,0.4)' },
-    title: { color: '#fde68a' },
-    sub: { color: '#fcd34d' },
-  },
-  danger: {
-    box: { backgroundColor: 'rgba(239,68,68,0.22)', borderColor: 'rgba(248,113,113,0.4)' },
-    title: { color: '#fecaca' },
-    sub: { color: '#fca5a5' },
-  },
-};
-
 export function CheckInStatusBanner({ view }: Props) {
+  const { palette } = useTheme();
   if (!view.title || view.status === 'none') return null;
-  const tone = toneStyles[view.tone];
+
+  const tone = (() => {
+    switch (view.tone) {
+      case 'success':
+        return {
+          box: {
+            backgroundColor: palette.mode === 'core' ? 'rgba(16,185,129,0.22)' : 'rgba(16,185,129,0.15)',
+            borderColor: palette.success,
+          },
+          title: { color: palette.successMuted },
+          sub: { color: palette.onSurfaceMuted },
+        };
+      case 'warning':
+        return {
+          box: { backgroundColor: palette.warningContainer, borderColor: palette.warning },
+          title: { color: palette.warning },
+          sub: { color: palette.onSurfaceMuted },
+        };
+      case 'danger':
+        return {
+          box: { backgroundColor: palette.errorContainer, borderColor: palette.error },
+          title: { color: palette.onError },
+          sub: { color: palette.onSurfaceMuted },
+        };
+      case 'info':
+        return {
+          box: {
+            backgroundColor: palette.mode === 'core' ? 'rgba(99,102,241,0.2)' : 'rgba(78,222,163,0.1)',
+            borderColor: palette.primary,
+          },
+          title: { color: palette.primary },
+          sub: { color: palette.onSurfaceMuted },
+        };
+      default:
+        return {
+          box: { backgroundColor: palette.inputBg, borderColor: palette.outline },
+          title: { color: palette.onSurface },
+          sub: { color: palette.onSurfaceMuted },
+        };
+    }
+  })();
+
   return (
     <View style={[styles.box, tone.box]}>
       <Text style={[styles.title, tone.title]}>{view.title}</Text>

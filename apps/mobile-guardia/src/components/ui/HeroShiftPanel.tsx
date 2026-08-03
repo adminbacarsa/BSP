@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
 import { formatTimeAr } from '@cosp/portal-core';
-import { colors, radius, shadow, typography } from '../../theme/tokens';
+import { radius, shadow, typography } from '../../theme/tokens';
+import { useTheme } from '../../theme/ThemeContext';
 import { CommandBadge } from './CommandButton';
 
 type Props = {
@@ -24,6 +26,7 @@ export function HeroShiftPanel({
   footer,
   statusSlot,
 }: Props) {
+  const { palette, isDark } = useTheme();
   const mapsUrl =
     objective?.lat && objective?.lng
       ? `https://www.google.com/maps?q=${objective.lat},${objective.lng}`
@@ -31,56 +34,93 @@ export function HeroShiftPanel({
         ? `https://www.google.com/maps/search/${encodeURIComponent(objective.address)}`
         : null;
 
-  return (
-    <View style={[styles.hero, shadow.hero]}>
-      <View style={styles.orbTop} />
-      <View style={styles.orbBottom} />
-      <View style={styles.inner}>
-        <View style={styles.topRow}>
-          <Text style={styles.sectionLabel}>Próximo turno</Text>
-          {empresaNombre ? (
-            <View style={styles.empresaPill}>
-              <Text style={styles.empresaText} numberOfLines={1}>
-                {empresaNombre}
+  const inner = (
+    <>
+      <View style={styles.topRow}>
+        <Text style={[styles.sectionLabel, { color: palette.heroSubtext }]}>Próximo turno</Text>
+        {empresaNombre ? (
+          <View style={[styles.empresaPill, { borderColor: palette.chipBg }]}>
+            <Text style={[styles.empresaText, { color: palette.heroSubtext }]} numberOfLines={1}>
+              {empresaNombre}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+      {isDark ? (
+        <View style={styles.darkStatusRow}>
+          <View style={[styles.statusDot, { backgroundColor: palette.success }]} />
+          <Text style={[styles.sectionLabel, { color: palette.success }]}>OPERATIVO</Text>
+        </View>
+      ) : null}
+      <Text style={[styles.headline, { color: palette.heroText }]}>{headline}</Text>
+      <Text style={[styles.subline, { color: palette.heroSubtext }]}>{subline}</Text>
+
+      {shift && !shift.isFranco ? (
+        <View style={styles.chips}>
+          <CommandBadge>{objective?.name || shift.objectiveName || 'Objetivo'}</CommandBadge>
+          {shift.clientName || objective?.clientName ? (
+            <View style={[styles.chip, { backgroundColor: palette.chipBg }]}>
+              <Text style={[styles.chipText, { color: palette.chipText }]}>
+                {shift.clientName || objective?.clientName}
               </Text>
             </View>
           ) : null}
+          {shift.positionName ? (
+            <View style={[styles.chip, { backgroundColor: palette.chipBg }]}>
+              <Text style={[styles.chipText, { color: palette.chipText }]}>{shift.positionName}</Text>
+            </View>
+          ) : null}
         </View>
-        <Text style={styles.headline}>{headline}</Text>
-        <Text style={styles.subline}>{subline}</Text>
+      ) : null}
 
-        {shift && !shift.isFranco ? (
-          <View style={styles.chips}>
-            <CommandBadge>{objective?.name || shift.objectiveName || 'Objetivo'}</CommandBadge>
-            {shift.clientName || objective?.clientName ? (
-              <View style={styles.chip}>
-                <Text style={styles.chipText}>{shift.clientName || objective?.clientName}</Text>
-              </View>
-            ) : null}
-            {shift.positionName ? (
-              <View style={styles.chip}>
-                <Text style={styles.chipText}>{shift.positionName}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
+      {shift?.isFranco ? (
+        <View
+          style={[
+            styles.francoBox,
+            {
+              backgroundColor: isDark ? 'rgba(16,185,129,0.15)' : 'rgba(16,185,129,0.22)',
+              borderColor: palette.success,
+            },
+          ]}
+        >
+          <Text style={[styles.francoText, { color: palette.successMuted }]}>Franco — día libre</Text>
+        </View>
+      ) : null}
 
-        {shift?.isFranco ? (
-          <View style={styles.francoBox}>
-            <Text style={styles.francoText}>Franco — día libre</Text>
-          </View>
-        ) : null}
+      {mapsUrl ? (
+        <Text style={[styles.mapsLink, { color: palette.heroSubtext }]} onPress={() => Linking.openURL(mapsUrl)}>
+          Cómo llegar →
+        </Text>
+      ) : null}
 
-        {mapsUrl ? (
-          <Text style={styles.mapsLink} onPress={() => Linking.openURL(mapsUrl)}>
-            Cómo llegar →
-          </Text>
-        ) : null}
+      {statusSlot}
+      {footer}
+    </>
+  );
 
-        {statusSlot}
-        {footer}
+  if (isDark) {
+    return (
+      <View
+        style={[
+          styles.heroDark,
+          shadow.hero,
+          {
+            backgroundColor: palette.card,
+            borderColor: palette.heroBorderAccent ?? palette.cardBorder,
+          },
+        ]}
+      >
+        <View style={styles.inner}>{inner}</View>
       </View>
-    </View>
+    );
+  }
+
+  return (
+    <LinearGradient colors={palette.heroGradient} style={[styles.hero, shadow.hero]}>
+      <View style={styles.orbTop} />
+      <View style={styles.orbBottom} />
+      <View style={styles.inner}>{inner}</View>
+    </LinearGradient>
   );
 }
 
@@ -90,10 +130,14 @@ export function formatHeroTimeRange(shift: Shift): string {
 
 const styles = StyleSheet.create({
   hero: {
-    backgroundColor: colors.indigo900,
     borderRadius: radius.xl,
     overflow: 'hidden',
     position: 'relative',
+  },
+  heroDark: {
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
   orbTop: {
     position: 'absolute',
@@ -120,53 +164,47 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  darkStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
   sectionLabel: {
     ...typography.sectionLabel,
-    color: colors.indigo200,
   },
   empresaPill: {
     maxWidth: 140,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
   },
-  empresaText: { color: colors.indigo200, fontSize: 10, fontWeight: '800' },
+  empresaText: { fontSize: 10, fontWeight: '800' },
   headline: {
     fontSize: 32,
     fontWeight: '900',
-    color: colors.white,
     letterSpacing: -0.5,
   },
   subline: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.indigo200,
   },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
   chip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  chipText: { color: colors.indigo200, fontSize: 12, fontWeight: '700' },
+  chipText: { fontSize: 12, fontWeight: '700' },
   francoBox: {
     marginTop: 8,
     alignSelf: 'flex-start',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(16,185,129,0.22)',
     borderWidth: 1,
-    borderColor: 'rgba(52,211,153,0.35)',
   },
-  francoText: { color: colors.emerald200, fontWeight: '800', fontSize: 14 },
+  francoText: { fontWeight: '800', fontSize: 14 },
   mapsLink: {
     marginTop: 8,
-    color: '#a5b4fc',
     fontWeight: '800',
     fontSize: 13,
   },

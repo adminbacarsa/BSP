@@ -1,12 +1,16 @@
+import { corePalette } from './palettes';
+
+/** Legacy flat map (Core) — prefer `useTheme().palette` en UI nueva */
 export const colors = {
   indigo950: '#1e1b4b',
   indigo900: '#312e81',
   indigo800: '#3730a3',
-  indigo600: '#4f46e5',
+  indigo700: '#4338ca',
+  indigo600: corePalette.primary,
   indigo500: '#6366f1',
   indigo200: '#c7d2fe',
   indigo100: '#e0e7ff',
-  emerald600: '#059669',
+  emerald600: corePalette.success,
   emerald500: '#10b981',
   emerald200: '#a7f3d0',
   slate950: '#0f172a',
@@ -16,7 +20,7 @@ export const colors = {
   slate500: '#64748b',
   slate200: '#e2e8f0',
   slate100: '#f1f5f9',
-  slate50: '#f8fafc',
+  slate50: corePalette.background,
   amber600: '#d97706',
   amber100: '#fef3c7',
   red600: '#dc2626',
@@ -25,10 +29,20 @@ export const colors = {
 };
 
 export const radius = {
+  sm: 8,
   md: 16,
   lg: 20,
   xl: 24,
   pill: 999,
+};
+
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  container: 16,
 };
 
 export const shadow = {
@@ -58,4 +72,9 @@ export const typography = {
   },
   cardTitle: { fontSize: 16, fontWeight: '700' as const },
   body: { fontSize: 14, lineHeight: 20 },
+};
+
+export const layout = {
+  buttonMinHeight: 52,
+  touchTarget: 48,
 };

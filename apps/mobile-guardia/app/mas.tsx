@@ -5,7 +5,8 @@ import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
 import { RequireAuth } from '../src/hooks/useRequireAuth';
-import { colors, radius } from '../src/theme/tokens';
+import { radius, spacing } from '../src/theme/tokens';
+import { useTheme } from '../src/theme/ThemeContext';
 
 const ROADMAP = [
   { title: 'Fichada GPS + offline', status: 'Listo', done: true },
@@ -29,26 +30,47 @@ function MasScreenContent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { portalFeatures } = usePortalAuth();
+  const { palette, mode, setThemeMode } = useTheme();
   const canNovedad = portalFeatures.reportAbsence || portalFeatures.requestLicense;
   const scrollBottomPad = Math.max(insets.bottom, 12) + 88;
 
   return (
     <>
       <Stack.Screen options={{ title: 'Servicios' }} />
-      <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['bottom']}>
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollBottomPad }]}
           showsVerticalScrollIndicator
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.intro}>
+          <Text style={[styles.intro, { color: palette.onSurfaceMuted }]}>
             Misma lógica que el portal web del empleado. Los módulos deshabilitados por RRHH no aparecen.
           </Text>
 
+          <CommandCard title="Apariencia">
+            <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+              Core (claro) para uso diurno · Dark Ops para patrullas nocturnas.
+            </Text>
+            <View style={styles.themeRow}>
+              <CommandButton
+                label="Core"
+                variant={mode === 'core' ? 'primary' : 'secondary'}
+                onPress={() => setThemeMode('core')}
+                style={styles.themeBtn}
+              />
+              <CommandButton
+                label="Dark Ops"
+                variant={mode === 'darkOps' ? 'success' : 'secondary'}
+                onPress={() => setThemeMode('darkOps')}
+                style={styles.themeBtn}
+              />
+            </View>
+          </CommandCard>
+
           {canNovedad ? (
             <CommandCard title="Novedades RRHH">
-              <Text style={styles.cardSub}>
+              <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
                 Ausencias, licencias y avisos («Hoy no me presento») con la misma clasificación que el portal web.
               </Text>
               <CommandButton label="Solicitar novedad" onPress={() => router.push('/novedad')} />
@@ -65,11 +87,24 @@ function MasScreenContent() {
             </View>
           </CommandCard>
 
-          <Text style={styles.section}>Hoja de ruta app nativa</Text>
+          <Text style={[styles.section, { color: palette.primary }]}>Hoja de ruta app nativa</Text>
           {ROADMAP.map((item) => (
-            <View key={item.title} style={styles.row}>
-              <Text style={styles.rowTitle}>{item.title}</Text>
-              <Text style={[styles.rowStatus, item.done ? styles.done : styles.pending]}>{item.status}</Text>
+            <View
+              key={item.title}
+              style={[
+                styles.row,
+                { backgroundColor: palette.card, borderColor: palette.cardBorder },
+              ]}
+            >
+              <Text style={[styles.rowTitle, { color: palette.onSurface }]}>{item.title}</Text>
+              <Text
+                style={[
+                  styles.rowStatus,
+                  { color: item.done ? palette.success : palette.primary },
+                ]}
+              >
+                {item.status}
+              </Text>
             </View>
           ))}
         </ScrollView>
@@ -79,43 +114,52 @@ function MasScreenContent() {
 }
 
 function Flag({ label, on }: { label: string; on: boolean }) {
+  const { palette } = useTheme();
   return (
-    <View style={[styles.flag, on ? styles.flagOn : styles.flagOff]}>
-      <Text style={[styles.flagText, on ? styles.flagTextOn : styles.flagTextOff]}>{label}</Text>
+    <View
+      style={[
+        styles.flag,
+        {
+          backgroundColor: on ? 'rgba(16,185,129,0.18)' : palette.inputBg,
+          borderColor: on ? palette.success : palette.outline,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.flagText,
+          { color: on ? palette.success : palette.onSurfaceMuted },
+        ]}
+      >
+        {label}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.slate50 },
+  safe: { flex: 1 },
   scroll: { flex: 1 },
-  scrollContent: { padding: 20, gap: 14 },
-  intro: { color: colors.slate500, fontSize: 14, lineHeight: 21 },
-  cardSub: { fontSize: 13, color: colors.slate500, marginBottom: 4 },
+  scrollContent: { padding: spacing.container, gap: spacing.md },
+  intro: { fontSize: 14, lineHeight: 21 },
+  cardSub: { fontSize: 13, marginBottom: 4 },
+  themeRow: { flexDirection: 'row', gap: 10 },
+  themeBtn: { flex: 1 },
   flagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   flag: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.pill, borderWidth: 1 },
-  flagOn: { backgroundColor: '#d1fae5', borderColor: '#6ee7b7' },
-  flagOff: { backgroundColor: colors.slate100, borderColor: colors.slate200 },
   flagText: { fontSize: 12, fontWeight: '800' },
-  flagTextOn: { color: colors.emerald600 },
-  flagTextOff: { color: colors.slate500 },
   section: {
     fontSize: 11,
     fontWeight: '800',
-    color: colors.indigo600,
     letterSpacing: 1,
     textTransform: 'uppercase',
     marginTop: 8,
   },
   row: {
-    backgroundColor: colors.white,
     borderRadius: radius.md,
     padding: 16,
     borderWidth: 1,
-    borderColor: colors.slate200,
   },
-  rowTitle: { fontWeight: '800', color: colors.slate950 },
+  rowTitle: { fontWeight: '800' },
   rowStatus: { fontSize: 12, marginTop: 4, fontWeight: '600' },
-  done: { color: colors.emerald600 },
-  pending: { color: colors.indigo600 },
 });

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>COSP Guardia - Centro de Comando</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Chivo:wght@600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-high": "#222a3d",
+                    "on-secondary-fixed": "#001a42",
+                    "on-surface-variant": "#bbcabf",
+                    "secondary-container": "#0566d9",
+                    "outline": "#86948a",
+                    "secondary": "#adc6ff",
+                    "on-secondary-fixed-variant": "#004395",
+                    "surface-bright": "#31394d",
+                    "on-error-container": "#ffdad6",
+                    "on-surface": "#dae2fd",
+                    "primary-fixed-dim": "#4edea3",
+                    "secondary-fixed": "#d8e2ff",
+                    "background": "#0b1326",
+                    "on-primary-container": "#00422b",
+                    "surface-container-highest": "#2d3449",
+                    "on-tertiary-container": "#523200",
+                    "surface-dim": "#0b1326",
+                    "tertiary-fixed": "#ffddb8",
+                    "tertiary-fixed-dim": "#ffb95f",
+                    "on-primary-fixed-variant": "#005236",
+                    "inverse-surface": "#dae2fd",
+                    "error-container": "#93000a",
+                    "surface": "#0b1326",
+                    "outline-variant": "#3c4a42",
+                    "primary-fixed": "#6ffbbe",
+                    "on-secondary-container": "#e6ecff",
+                    "error": "#ffb4ab",
+                    "on-primary-fixed": "#002113",
+                    "inverse-on-surface": "#283044",
+                    "on-secondary": "#002e6a",
+                    "primary": "#4edea3",
+                    "surface-container-low": "#131b2e",
+                    "tertiary": "#ffb95f",
+                    "on-background": "#dae2fd",
+                    "primary-container": "#10b981",
+                    "surface-container": "#171f33",
+                    "on-tertiary-fixed": "#2a1700",
+                    "surface-variant": "#2d3449",
+                    "tertiary-container": "#e29100",
+                    "surface-tint": "#4edea3",
+                    "on-error": "#690005",
+                    "secondary-fixed-dim": "#adc6ff",
+                    "surface-container-lowest": "#060e20",
+                    "on-primary": "#003824"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.125rem",
+                    "lg": "0.25rem",
+                    "xl": "0.5rem",
+                    "full": "0.75rem"
+            },
+            "spacing": {
+                    "xs": "4px",
+                    "margin-desktop": "32px",
+                    "lg": "24px",
+                    "gutter": "20px",
+                    "base": "4px",
+                    "margin-mobile": "16px",
+                    "xl": "40px",
+                    "container-max": "1440px",
+                    "sm": "8px",
+                    "md": "16px"
+            },
+            "fontFamily": {
+                    "telemetry-data": ["JetBrains Mono"],
+                    "body-md": ["JetBrains Mono"],
+                    "headline-lg": ["Chivo"],
+                    "display-lg": ["Chivo"],
+                    "body-lg": ["JetBrains Mono"],
+                    "headline-lg-mobile": ["Chivo"],
+                    "label-bold": ["Chivo"],
+                    "headline-md": ["Chivo"]
+            },
+            "fontSize": {
+                    "telemetry-data": ["18px", {"lineHeight": "24px", "letterSpacing": "-0.02em", "fontWeight": "500"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                    "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "800"}],
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "700"}],
+                    "label-bold": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .status-pulse {
+            animation: pulse-emerald 2s infinite;
+        }
+        @keyframes pulse-emerald {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(78, 222, 163, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(78, 222, 163, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(78, 222, 163, 0); }
+        }
+        .scanline {
+            background: linear-gradient(to bottom, transparent 50%, rgba(78, 222, 163, 0.05) 50%);
+            background-size: 100% 4px;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="bg-surface-container-low/70 backdrop-blur-xl border-b border-outline-variant/15 fixed top-0 w-full z-50 flex justify-between items-center px-margin-mobile h-16">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">shield</span>
+<h1 class="font-headline-md text-headline-md font-bold text-primary tracking-tight">COSP Guardia</h1>
+</div>
+<button class="text-primary font-body-md uppercase tracking-widest text-xs border border-primary/30 px-3 py-1 rounded hover:bg-primary/10 transition-colors active:scale-95 duration-150">Salir</button>
+</header>
+<main class="mt-16 px-margin-mobile pt-6 space-y-md">
+<!-- Welcome Header -->
+<section class="flex justify-between items-center bg-surface-container-lowest/50 p-4 rounded-xl border border-outline-variant/10">
+<div>
+<p class="font-label-bold text-label-bold text-primary mb-1 uppercase">SISTEMA ACTIVO</p>
+<h2 class="font-headline-md text-headline-md text-on-surface">Hola, Martín S.</h2>
+<p class="font-body-md text-body-md text-on-surface-variant font-telemetry-data">#99420-COSP</p>
+</div>
+<div class="relative">
+<div class="w-14 h-14 rounded-full border-2 border-primary/50 overflow-hidden bg-surface-container-high p-0.5">
+<img alt="User Profile" class="w-full h-full object-cover rounded-full" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBZmEEihHsJD5U5CuKmT3G73PHF-ob-JsWbshBkekH9v-5Pi7eMalE0m56LluENaO_GDeLkEytJdyuX25JE2fsv0VjbHK9is4rcq3fMBtH06TG23graU-RJ12CI5EJqf-QsO1HYWWtZRkz0DNTt-mjvKmbqTwVHbySKc2ipBAJpp6oL_4Hw-L0NpzUHbcZPQUjeixChpk0gXOLf-oUHLmeb3WNBWizuFhC9SsD8pR4MI9cc5pHPSjgFWQ"/>
+</div>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-primary border-2 border-background rounded-full"></div>
+</div>
+</section>
+<!-- HeroShiftPanel (Dark Gradient with Emerald) -->
+<section class="relative overflow-hidden rounded-xl bg-gradient-to-br from-surface-container-high to-surface-container-lowest border border-primary/20 p-6 text-on-surface shadow-2xl min-h-[220px] scanline">
+<div class="absolute top-0 right-0 p-4">
+<div class="status-pulse w-3 h-3 bg-primary rounded-full"></div>
+</div>
+<div class="relative z-10 space-y-6">
+<div>
+<span class="font-label-bold text-label-bold text-primary-container bg-primary-container/10 px-2 py-0.5 rounded border border-primary-container/20">ESTADO: EN TURNO</span>
+<h3 class="font-display-lg text-[36px] text-primary mt-2 font-black tracking-tighter">08:00 — 20:00</h3>
+</div>
+<div class="space-y-3 pt-4 border-t border-outline-variant/20">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant text-lg">factory</span>
+<p class="font-body-lg text-body-lg text-on-surface font-semibold uppercase tracking-wide">Planta Industrial TechGlobal</p>
+</div>
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant text-lg">sensors</span>
+<p class="font-body-md text-body-md text-on-surface-variant font-telemetry-data">SECTOR: ACCESO NORTE B-14</p>
+</div>
+</div>
+<div class="flex gap-2 pt-2">
+<span class="bg-secondary-container/20 border border-secondary/30 px-3 py-1 rounded text-[10px] font-bold text-secondary flex items-center gap-1 uppercase tracking-widest">
+<span class="material-symbols-outlined text-xs">public</span> Exterior
+                    </span>
+<span class="bg-secondary-container/20 border border-secondary/30 px-3 py-1 rounded text-[10px] font-bold text-secondary flex items-center gap-1 uppercase tracking-widest">
+<span class="material-symbols-outlined text-xs">settings_input_antenna</span> Freq 144.5
+                    </span>
+</div>
+</div>
+</section>
+<!-- CheckInStatusBanner (Alert) -->
+<div class="bg-error-container/10 border border-error/30 p-4 rounded-xl flex items-center gap-4">
+<div class="w-10 h-10 rounded-lg bg-error-container/20 flex items-center justify-center text-error">
+<span class="material-symbols-outlined">warning</span>
+</div>
+<div class="flex-1">
+<p class="font-label-bold text-label-bold text-error uppercase tracking-wider">Alerta de Seguridad</p>
+<p class="font-body-md text-body-md text-on-surface font-medium">Fichada de ingreso no detectada</p>
+</div>
+</div>
+<!-- Main Actions (Tactical Buttons) -->
+<section class="grid gap-sm">
+<button class="h-16 w-full bg-primary hover:bg-primary-container text-on-primary rounded-xl flex items-center justify-center gap-3 shadow-lg active:scale-95 transition-all duration-200 uppercase font-label-bold tracking-widest">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">gps_fixed</span>
+<span>Confirmar Posición (GPS)</span>
+</button>
+<button class="h-14 w-full bg-surface-container-high border border-outline-variant/30 text-on-surface rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all font-label-bold uppercase tracking-wider text-sm">
+<span class="material-symbols-outlined text-on-surface-variant">history_toggle_off</span>
+<span>Reportar Retraso</span>
+</button>
+</section>
+<!-- Bottom Cards Grid (Bento style) -->
+<section class="grid grid-cols-2 gap-sm">
+<div class="bg-surface-container-low border border-outline-variant/20 p-5 rounded-xl shadow-sm flex flex-col justify-between aspect-square hover:bg-surface-container-high transition-colors">
+<div class="w-10 h-10 rounded-lg bg-secondary/10 flex items-center justify-center text-secondary border border-secondary/20">
+<span class="material-symbols-outlined">event_note</span>
+</div>
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface text-lg">Agenda</h4>
+<p class="text-[10px] font-telemetry-data text-on-surface-variant uppercase mt-1">Planificación</p>
+</div>
+</div>
+<div class="bg-surface-container-low border border-outline-variant/20 p-5 rounded-xl shadow-sm flex flex-col justify-between aspect-square hover:bg-surface-container-high transition-colors">
+<div class="w-10 h-10 rounded-lg bg-secondary/10 flex items-center justify-center text-secondary border border-secondary/20">
+<span class="material-symbols-outlined">terminal</span>
+</div>
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface text-lg">Consola</h4>
+<p class="text-[10px] font-telemetry-data text-on-surface-variant uppercase mt-1">Sistemas v4.2</p>
+</div>
+</div>
+</section>
+<!-- Quick Activity Feed -->
+<section class="bg-surface-container-lowest border border-outline-variant/10 rounded-xl overflow-hidden shadow-sm">
+<div class="p-3 bg-surface-container/50 border-b border-outline-variant/10 flex justify-between items-center">
+<h4 class="font-label-bold text-label-bold text-primary uppercase tracking-widest">Logs de Actividad</h4>
+<span class="font-telemetry-data text-[10px] text-on-surface-variant">SYNC: OK</span>
+</div>
+<div class="p-4 flex gap-4 items-start">
+<div class="w-1 h-12 bg-primary/40 rounded-full"></div>
+<div class="space-y-1">
+<p class="font-telemetry-data text-[11px] text-primary/70 uppercase">T-2.0 Hours</p>
+<p class="font-body-md text-body-md text-on-surface leading-snug">Guardia relevada: SIN INCIDENCIAS. Perímetro asegurado.</p>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 w-full z-50 rounded-t-full bg-surface-container-lowest/85 backdrop-blur-xl border-t border-outline-variant/15 flex justify-around items-center h-20 px-xs">
+<a class="flex flex-col items-center justify-center text-primary font-bold active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-label-bold text-label-bold">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-container-highest/20 rounded-xl px-2 py-1 transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">event_note</span>
+<span class="font-label-bold text-label-bold">Agenda</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-container-highest/20 rounded-xl px-2 py-1 transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">warning</span>
+<span class="font-label-bold text-label-bold">Novedad</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-container-highest/20 rounded-xl px-2 py-1 transition-colors active:scale-90 duration-200" href="#">
+<span class="material-symbols-outlined">menu</span>
+<span class="font-label-bold text-label-bold">Más</span>
+</a>
+</nav>
+<script>
+        // Micro-interactions for buttons
+        document.querySelectorAll('button, a').forEach(el => {
+            el.addEventListener('mousedown', () => el.classList.add('scale-95'));
+            el.addEventListener('mouseup', () => el.classList.remove('scale-95'));
+            el.addEventListener('mouseleave', () => el.classList.remove('scale-95'));
+        });
+    </script>
+</body></html>
