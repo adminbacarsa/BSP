@@ -17,7 +17,7 @@ import {
     resolvePlanningMonthSlaHours,
     type PlanningPositionRow,
 } from '@/lib/slaPlanningMatch';
-import { partitionObjectiveServicePositions } from './objectiveServiceModel';
+import { buildObjectiveScheduleProfile } from './objectiveServiceModel';
 import { normalizeCoverageTypeFromSla, summarizeObjectiveCoverage, type ObjectiveCoverageSummary } from './positionCoverageKind';
 import { customCoverSimultaneousPax } from './customCoverCycle';
 import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
@@ -33,6 +33,7 @@ import {
 } from './plannerDotacionValidator';
 import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
 import { applySlaContractDotacion, assessSlaContractReadiness } from './slaContractPlanning';
+import { cronogramSlaRuleWarnings, resolveCronogramPlanningRules } from './cronogramPlanningRules';
 import { computeObjectiveHeadcountBalance } from './rosterHeadcountBalance';
 
 export const AUTO_LAB_REAL_CASE_ID = 'case-real-service';
@@ -242,7 +243,7 @@ export async function loadAutoLabRealServiceBundle(params: {
     }
 
     const positions = structure.map(planningRowToV2Position);
-    const servicePartition = partitionObjectiveServicePositions(positions);
+    const servicePartition = buildObjectiveScheduleProfile(positions);
     warnings.push(...servicePartition.labels);
     const positionAssignmentsByEmp = buildPositionAssignmentsByEmp(srv.positionAssignments);
     const coverageSummary = summarizeObjectiveCoverage(positions, { positionAssignmentsByEmp });
@@ -408,7 +409,8 @@ export async function loadAutoLabRealServiceBundle(params: {
         serviceRotations: srv.serviceRotations,
         dateStrs: monthDateStrs,
     });
-    warnings.push(...slaReadiness.hints);
+    const cronoRules = resolveCronogramPlanningRules(positions);
+    warnings.push(...cronogramSlaRuleWarnings(cronoRules, slaReadiness));
 
     const slaDot = applySlaContractDotacion({
         positionAssignments: srv.positionAssignments,

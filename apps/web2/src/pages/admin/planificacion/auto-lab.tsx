@@ -57,7 +57,7 @@ import {
 import { toast } from 'sonner';
 
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
-import { summarizeObjectiveCoverage } from '@/lib/planificacion/positionCoverageKind';
+import { buildObjectiveScheduleProfile } from '@/lib/planificacion/objectiveServiceModel';
 
 const IS_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
@@ -73,16 +73,17 @@ function rotationLabel(
     positions?: AutoLabCaseDefinition['positions'],
 ): string {
     if (positions && positions.length > 0) {
-        const summary = summarizeObjectiveCoverage(positions);
-        if (summary.allCustomPool) {
-            return summary.motorLabel;
+        const profile = buildObjectiveScheduleProfile(positions);
+        if (profile.kind === 'custom_only') {
+            return profile.cronogramTypeLabel;
         }
-        if (!summary.has24hsRotation) {
-            if (mode === 'rotative') return 'Personalizado — cupos SLA (no rotación 24 h)';
-            return summary.motorLabel;
+        if (profile.kind === 'mixed') {
+            return profile.cronogramTypeLabel;
         }
-        if (summary.has24hsRotation && positions.some((p) => String(p.coverageType).toLowerCase() === 'custom')) {
-            return summary.motorLabel;
+        if (profile.kind === '24hs_only') {
+            if (mode === 'fixed') return 'Puro 24 HS — bandas fijas';
+            if (mode === 'rotative') return 'Puro 24 HS — rotativo M→T→N';
+            return profile.cronogramTypeLabel;
         }
     }
     if (mode === 'fixed') return 'Banda fija';

@@ -55,7 +55,16 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
-import { buildPositionRequiredHeadcountMap, computeObjectiveRequiredHeadcount, computePositionRequiredHeadcount, effectivePositionGroupNeed, estimatePeopleFromContractHours, isFullCustomObjectivePool, isLabSyntheticEmpId } from './objectiveHeadcount';
+import {
+    buildPositionRequiredHeadcountMap,
+    computeObjectiveRequiredHeadcount,
+    computePositionRequiredHeadcount,
+    effectivePositionGroupNeed,
+    estimatePeopleFromContractHours,
+    isFullCustomObjectivePool,
+    isLabSyntheticEmpId,
+} from './objectiveHeadcount';
+import { resolveCyclePreferenceForPositions } from './objectiveServiceModel';
 import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, fillDemandGapsWithFlexibleCycle, forceCloseRemainingSlaGaps, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, finalizeApretarDayAssignments, stripUnauthorizedRetAssignments, recomputeUncoveredStats, repairForbiddenAfterNightTransitions, assignUnassignedWorkDayEmployeesToGaps, repairPositionDayTripletGaps, tryAssignEmployeeToDayGap } from './demandDrivenSchedule';
 import {
     mtnOpeningSlotFromGroupOffset,
@@ -117,10 +126,7 @@ const CUSTOM_POOL_CYCLE_PREFERENCE = ['5+1', '6+1', '6+2'] as const;
 const AJUSTAR_CRONO_CYCLE_PREFERENCE = ['4+2', '5+1', '6+1'] as const;
 
 export function resolveAutoCyclePreferenceOrder(ctx: Pick<V2EngineContext, 'positions' | 'headcountByPax'>): readonly string[] {
-    if (isFullCustomObjectivePool(ctx.positions)) {
-        return CUSTOM_POOL_CYCLE_PREFERENCE;
-    }
-    return AUTO_CYCLE_PREFERENCE;
+    return resolveCyclePreferenceForPositions(ctx.positions);
 }
 
 function scoreAutoCycleFeasibility(
@@ -180,10 +186,11 @@ export function pickOptimalAutoCycles(ctx: V2EngineContext): {
         };
     }
 
-    const customPool = isFullCustomObjectivePool(ctx.positions);
+    const profileKind = buildObjectiveScheduleProfile(ctx.positions).kind;
+    const customPool = profileKind === 'custom_only';
     const preferenceOrder = ajustarCrono
         ? AJUSTAR_CRONO_CYCLE_PREFERENCE
-        : resolveAutoCyclePreferenceOrder(ctx);
+        : resolveCyclePreferenceForPositions(ctx.positions);
     const evaluated = preferenceOrder.map((key) => {
         const feas = checkFeasibility({ ...ctx, autoCycles: [key] });
         return {
@@ -195,7 +202,7 @@ export function pickOptimalAutoCycles(ctx: V2EngineContext): {
     });
     const eightHour = customPool
         ? new Set(['5+1', '6+1', '6+2'])
-        : new Set(['6+2', '6+1']);
+        : new Set(['6+2', '6+1', '5+1']);
     const intensiveSet = new Set<string>(AJUSTAR_CRONO_CYCLE_PREFERENCE);
     const firstViableIntensive = ajustarCrono
         ? evaluated.find(e => e.ok && intensiveSet.has(e.cycleKey))
@@ -593,12 +600,19 @@ export interface V2EngineResult {
     changes: Record<string, any>;
 }
 
-/** Devuelve [cL, cF] del ciclo "más representativo" elegido por el usuario.
- *  Prefiere 6+2 (mayor descanso); 4+2 solo para ajustar/licencias. 6+1 y 5+1 eliminados. */
+/** Devuelve ciclo CCT para viabilidad y generación según `autoCycles` del contexto. */
 export function pickRepresentativeCycle(autoCycles: string[]): { key: string; cL: number; cF: number } {
-    const ordered = ['6+2', '4+2'];
+    const list = autoCycles?.length ? autoCycles : ['6+2'];
+    for (const key of list) {
+        const pair = CYCLE_MAP[key];
+        if (pair) {
+            const [cL, cF] = pair;
+            return { key, cL, cF };
+        }
+    }
+    const ordered = ['6+2', '5+1', '6+1', '4+2'] as const;
     for (const key of ordered) {
-        if (autoCycles.includes(key)) {
+        if (list.includes(key)) {
             const [cL, cF] = CYCLE_MAP[key];
             return { key, cL, cF };
         }

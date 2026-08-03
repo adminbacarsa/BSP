@@ -1,5 +1,5 @@
 import type { V2PositionDef } from './autoScheduleEngineV2';
-import { isCustomCoverPosition } from './autoScheduleEngineV2';
+import { is24hsRotationPosition, isCustomCoverPosition } from './autoScheduleEngineV2';
 import {
     customCoverRequiredHeadcount,
     customCoverSimultaneousPax,
@@ -148,6 +148,29 @@ export function computeObjectiveRequiredHeadcount(
     if (isFullCustomObjectivePool(positions)) {
         return computeCustomObjectivePoolHeadcount(positions, cycleKey);
     }
+
+    const has24 = positions.some(is24hsRotationPosition);
+    const hasCustom = positions.some(isCustomCoverPosition);
+    if (has24 && hasCustom) {
+        let total = 0;
+        const customPositions: V2PositionDef[] = [];
+        for (const pos of positions) {
+            if (isCustomCoverPosition(pos)) {
+                customPositions.push(pos);
+                continue;
+            }
+            if (is24hsRotationPosition(pos)) {
+                total += computePositionRequiredHeadcount(pos, cycleKey);
+                continue;
+            }
+            total += computePositionRequiredHeadcount(pos, cycleKey);
+        }
+        if (customPositions.length > 0) {
+            total += computeCustomObjectivePoolHeadcount(customPositions, cycleKey);
+        }
+        return total;
+    }
+
     return positions.reduce(
         (sum, pos) => sum + computePositionRequiredHeadcount(pos, cycleKey),
         0,

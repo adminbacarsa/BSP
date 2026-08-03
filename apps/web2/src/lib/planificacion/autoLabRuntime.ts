@@ -27,6 +27,7 @@ import {
     isFullCustomObjectivePool,
     computeCustomObjectivePoolHeadcount,
 } from './objectiveHeadcount';
+import { buildObjectiveScheduleProfile } from './objectiveServiceModel';
 import { buildRosterSurplusReport, type RosterSurplusReport } from './rosterSurplus';
 
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
@@ -357,7 +358,12 @@ export function runAutoLabCase(
 
     const slots = computeDailyServiceSlots(caseDef.positions, '8');
 
-    const cycleKey = caseDef.cycleOverride ?? caseDef.cycle ?? '6+2';
+    const cycleKey = caseDef.cycleOverride
+        ?? (() => {
+            const k = buildObjectiveScheduleProfile(caseDef.positions).kind;
+            if (k === 'custom_only') return '5+1';
+            return caseDef.cycle ?? '6+2';
+        })();
     const empMonthlyInitial = Object.fromEntries(sourceEmployees.map((e) => [e.id, 0]));
     const padResult = padPlanningRosterForAutoSchedule({
         positions: caseDef.positions,

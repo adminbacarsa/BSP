@@ -23,7 +23,10 @@ import {
     type V2PositionDef,
 } from './autoScheduleEngineV2';
 import { customCoverSlotsRequiredOnDay } from './customCoverCycle';
-import { partitionObjectiveServicePositions } from './objectiveServiceModel';
+import {
+    formatCronogramPlaybookForBrain,
+    resolveCronogramPlanningRules,
+} from './cronogramPlanningRules';
 import { computeObjectiveRequiredHeadcount, isFullCustomObjectivePool } from './objectiveHeadcount';
 import {
     buildPlanningOperationalDiagnosis,
@@ -208,7 +211,9 @@ function resolveRotateShifts(
     cycleKey: string,
     feasibilityOk: boolean,
 ): boolean {
-    const has24 = positions.some(is24hs);
+    const rules = resolveCronogramPlanningRules(positions);
+    if (!rules.generation.allowGlobalRotateShifts) return false;
+    const has24 = rules.kind === '24hs_only' || rules.kind === 'mixed';
     if (!has24 || !feasibilityOk) return false;
     if (cycleKey === '4+2') return false;
     if (peopleAvailable < 4) return false;
@@ -248,8 +253,14 @@ export type AutoPlanningBrainInput = Omit<
  */
 export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPlanningBrainResult {
     const warnings: string[] = [];
-    const servicePartition = partitionObjectiveServicePositions(input.positions);
-    warnings.push(...servicePartition.labels);
+    const rules = resolveCronogramPlanningRules(input.positions);
+    warnings.unshift(`Tipo de crono: ${rules.cronogramTypeLabel}.`);
+    warnings.push(
+        `Política: plantilla=${rules.feasibility.headcountFormula}; `
+        + `ciclos ${rules.feasibility.cyclePreference.join(' → ')}; `
+        + `roster ${rules.roster.phasedByKind ? 'fase 24hs → custom' : 'lineal'}.`,
+    );
+    warnings.push(...formatCronogramPlaybookForBrain(rules));
     const employeeIds = input.employees.map(e => e.id);
     const monthDateStrs = input.daysInMonth.map(d => input.getDateKey(d));
 
@@ -257,6 +268,10 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
     let cycleKey = picked.pickedKey;
     let cycles = picked.cycles;
     let feasibility = picked.feasibility;
+
+    if (cycles.length > 0 && feasibility.metrics.cycleUsed !== cycleKey) {
+        feasibility = checkFeasibility({ ...input, autoCycles: cycles, headcountByPax: input.headcountByPax });
+    }
 
     const staffingRef6x2Model = computeDailyStaffingModel(
         input.positions,

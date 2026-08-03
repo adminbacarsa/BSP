@@ -70,13 +70,16 @@ export function buildRosterSurplusReport(params: {
     const m = feasibility.metrics;
     const staffing = computeDailyStaffingModel(positions, cycleKey, slaVendidas);
     const floorHeads = floorHeadsFromPositions(positions);
+    const customPool = isFullCustomObjectivePool(positions);
     const perPositionHeads = computeObjectiveRequiredHeadcount(positions, cycleKey);
-    const objectiveHeadcount = Math.max(
-        staffing.plantillaTotal,
-        perPositionHeads,
-        m.peopleNeededForStructure ?? 0,
-        m.structuralPeakPeople ?? 0,
-    );
+    const objectiveHeadcount = customPool
+        ? perPositionHeads
+        : Math.max(
+            staffing.plantillaTotal,
+            perPositionHeads,
+            m.peopleNeededForStructure ?? 0,
+            m.structuralPeakPeople ?? 0,
+        );
     const peopleNeededFinal = objectiveHeadcount;
 
     const sourceCount = sourceEmployees.length;
@@ -101,7 +104,6 @@ export function buildRosterSurplusReport(params: {
         ? pickRetDesignee(ctx, stats, assignments)
         : stats?.retDesignateEmpIds?.[0];
 
-    const customPool = isFullCustomObjectivePool(positions);
     const warnings: string[] = [];
 
     warnings.push(
