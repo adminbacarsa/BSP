@@ -129,9 +129,15 @@ export function computePositionDayComposition(pos: ServicePosition, dayCode: str
   if (!activeDays.includes(dayCode)) return { dayTotal: 0, dayNight: 0 };
 
   const addVariant = (v: ShiftVariant) => {
-    const comp = analyzeShiftComposition(v.startTime, v.endTime);
-    dayTotal += comp.total;
-    dayNight += comp.night;
+    const timeBlocks =
+      Array.isArray(v.blocks) && v.blocks.length >= 2
+        ? v.blocks
+        : [{ startTime: v.startTime, endTime: v.endTime }];
+    for (const b of timeBlocks) {
+      const comp = analyzeShiftComposition(b.startTime, b.endTime);
+      dayTotal += comp.total;
+      dayNight += comp.night;
+    }
   };
 
   if (pos.coverageType === '24hs') {
