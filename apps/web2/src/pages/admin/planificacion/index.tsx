@@ -4028,7 +4028,9 @@ export default function PlanificacionPage() {
                 setPositionStructure(structure);
                 setActiveSlaPositionAssignments(srvForStructure?.positionAssignments ?? null);
                 setActiveSlaServiceRules(srvForStructure?.serviceRules ?? null);
-                setActiveSlaServiceRotations(srvForStructure?.serviceRotations ?? null);
+                const _loadedRot = srvForStructure?.serviceRotations ?? null;
+                console.log('[CRONO rot] slaId:', srvForStructure?.id, '| serviceRotations:', _loadedRot?.length ?? 'null', _loadedRot?.map((r: any) => ({ id: r.id, mode: r.cycleMode, entries: r.periods?.[0]?.entries?.map((e: any) => ({ eid: e.employeeId, sc: e.shiftCode })) })));
+                setActiveSlaServiceRotations(_loadedRot);
                 setSlaVendidas(
                     monthHasSla && srvForStructure
                         ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
@@ -8510,6 +8512,14 @@ export default function PlanificacionPage() {
                                 </span>
                             );
                         })()}
+                        {selectedObjective && !isSnapshotView && (
+                            <span
+                                className={`block text-[7px] font-bold mt-0.5 ${activeSlaServiceRotations?.length ? 'text-teal-600' : 'text-slate-400'}`}
+                                title={activeSlaServiceRotations?.length ? `Rotaciones SLA: ${activeSlaServiceRotations.map((r: any) => r.name || r.id).join(', ')}` : 'Sin rotaciones SLA cargadas'}
+                            >
+                                {activeSlaServiceRotations?.length ? `⟳ ${activeSlaServiceRotations.length} rot` : '⟳ —'}
+                            </span>
+                        )}
                         {hasSlaExcludedDatesInMonth && !isSnapshotView && (
                             <span className="block text-[7px] font-bold text-rose-500 mt-1 leading-tight" title="En el número del día aparece el puesto excluido (Servicios → Días excluidos)">
                                 ⊘ = sin servicio SLA
