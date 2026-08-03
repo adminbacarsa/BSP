@@ -23,6 +23,7 @@ import {
     type V2PositionDef,
 } from './autoScheduleEngineV2';
 import { customCoverSlotsRequiredOnDay } from './customCoverCycle';
+import { partitionObjectiveServicePositions } from './objectiveServiceModel';
 import { computeObjectiveRequiredHeadcount, isFullCustomObjectivePool } from './objectiveHeadcount';
 import {
     buildPlanningOperationalDiagnosis,
@@ -247,6 +248,8 @@ export type AutoPlanningBrainInput = Omit<
  */
 export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPlanningBrainResult {
     const warnings: string[] = [];
+    const servicePartition = partitionObjectiveServicePositions(input.positions);
+    warnings.push(...servicePartition.labels);
     const employeeIds = input.employees.map(e => e.id);
     const monthDateStrs = input.daysInMonth.map(d => input.getDateKey(d));
 

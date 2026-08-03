@@ -18,7 +18,31 @@ export function createPortalCallables(functions: Functions) {
       PORTAL_CALLABLES.notificarLlegadaTarde,
     ),
     deleteMyTokens: httpsCallable<void, unknown>(functions, PORTAL_CALLABLES.deleteMyTokens),
-    sendTestNotification: httpsCallable<void, unknown>(functions, PORTAL_CALLABLES.sendTestNotification),
+    sendTestNotification: httpsCallable<{ title?: string; body?: string }, unknown>(
+      functions,
+      PORTAL_CALLABLES.sendTestNotification,
+    ),
+    getSwapPeople: httpsCallable<Record<string, never>, { data?: { id: string; name: string }[] }>(
+      functions,
+      PORTAL_CALLABLES.getSwapPeople,
+    ),
+    getSwapCandidates: httpsCallable<{ shiftId: string }, { data?: unknown[] }>(
+      functions,
+      PORTAL_CALLABLES.getSwapCandidates,
+    ),
+    createSwapRequest: httpsCallable<{ myShiftId: string; targetShiftId: string }, unknown>(
+      functions,
+      PORTAL_CALLABLES.createSwapRequest,
+    ),
+    respondSwapRequest: httpsCallable<{ requestId: string; accept: boolean }, unknown>(
+      functions,
+      PORTAL_CALLABLES.respondSwapRequest,
+    ),
+    confirmSwapRequest: httpsCallable<{ requestId: string; confirm: boolean }, unknown>(
+      functions,
+      PORTAL_CALLABLES.confirmSwapRequest,
+    ),
+    cancelSwapRequest: httpsCallable<{ requestId: string }, unknown>(functions, PORTAL_CALLABLES.cancelSwapRequest),
   };
 }
 

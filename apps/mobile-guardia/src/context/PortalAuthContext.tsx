@@ -23,6 +23,7 @@ import { resolveEmpDocIdWithRetry } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 import { withTimeout } from '../lib/emulatorHost';
 import { getOrCreateDeviceId, getStoredDeviceId } from '../lib/deviceId';
+import { unregisterPushForUser } from '../lib/pushNotifications';
 
 const FIRESTORE_PROFILE_TIMEOUT_MS = 22_000;
 const AUTH_INIT_TIMEOUT_MS = 9_000;
@@ -229,6 +230,17 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         await loadEmployee(nextUser);
         const verified = await verifyDeviceForUser(nextUser, db);
         setDeviceVerified(verified);
+        if (verified) {
+          const resolvedId = await resolveEmpDocIdWithRetry(db, nextUser, 2);
+          const empSnap = resolvedId ? await getDoc(doc(db, 'empleados', resolvedId)) : null;
+          const { registerPushNotifications } = await import('../lib/pushNotifications');
+          await registerPushNotifications({
+            user: nextUser,
+            db,
+            empDocId: resolvedId,
+            empresaId: (empSnap?.data()?.empresaId as string) ?? null,
+          }).catch(() => {});
+        }
       } catch (err) {
         const token = await nextUser.getIdTokenResult(true).catch(() => null);
         const role = normalizeRoleKey(String(token?.claims?.role ?? ''));
@@ -266,6 +278,17 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         await loadEmployee(cred.user);
         const verified = await verifyDeviceForUser(cred.user, db);
         setDeviceVerified(verified);
+        if (verified) {
+          const resolvedId = await resolveEmpDocIdWithRetry(db, cred.user, 2);
+          const empSnap = resolvedId ? await getDoc(doc(db, 'empleados', resolvedId)) : null;
+          const { registerPushNotifications } = await import('../lib/pushNotifications');
+          await registerPushNotifications({
+            user: cred.user,
+            db,
+            empDocId: resolvedId,
+            empresaId: (empSnap?.data()?.empresaId as string) ?? null,
+          }).catch(() => {});
+        }
       } catch (err) {
         if (isNetworkOrFirestoreError(err)) {
           throw new Error(
@@ -279,6 +302,11 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    try {
+      await unregisterPushForUser(db);
+    } catch {
+      /* no bloquear logout */
+    }
     await firebaseSignOut(auth);
     setUser(null);
     setEmpDocId(null);
@@ -286,7 +314,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setEmployeeProfileReady(false);
     setDeviceVerified(null);
     setEmployeeProfileError(null);
-  }, [auth]);
+  }, [auth, db, loadEmployee]);
 
   const refreshEmployee = useCallback(async () => {
     if (!user) return;

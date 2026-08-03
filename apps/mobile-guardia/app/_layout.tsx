@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { PortalAuthProvider, usePortalAuth } from '../src/context/PortalAuthContext';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeContext';
+import { PushNotificationsBootstrap } from '../src/components/PushNotificationsBootstrap';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -46,6 +47,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ThemeProvider>
         <PortalAuthProvider>
+          <PushNotificationsBootstrap />
           <RootNavigator />
         </PortalAuthProvider>
       </ThemeProvider>

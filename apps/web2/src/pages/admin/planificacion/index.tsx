@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
+import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
 import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
@@ -9044,6 +9045,9 @@ export default function PlanificacionPage() {
             )}
             <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } .sla-excluded-day-col { background-image: repeating-linear-gradient(-45deg, transparent, transparent 4px, rgba(251, 113, 133, 0.07) 4px, rgba(251, 113, 133, 0.07) 8px); } .planning-grid-table { border-collapse: separate; border-spacing: 0; } .planning-grid-table thead th { box-shadow: 0 1px 0 rgba(148,163,184,0.35); } .planning-grid-table .planning-sticky-corner { position: sticky; left: 0; top: 0; z-index: 50; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
             <Toaster position="top-center" />
+            <div className="no-print px-2 max-w-[1600px] mx-auto">
+                <SwapSupervisorQueue empresaId={empresaId} />
+            </div>
             {coverageTooltip && (
                 <div
                     className="fixed z-[9999]"

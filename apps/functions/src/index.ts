@@ -1117,6 +1117,17 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
     }
 });
 
+export {
+  getSwapPeople,
+  getSwapCandidates,
+  createSwapRequest,
+  respondSwapRequest,
+  confirmSwapRequest,
+  cancelSwapRequest,
+  approveSwapRequest,
+  rejectSwapRequestSupervisor,
+} from './swap/swapPortal';
+
 // =========================================================
 // 13. ENVÃO DE ACCESO AL PORTAL DE EMPLEADOS
 // =========================================================

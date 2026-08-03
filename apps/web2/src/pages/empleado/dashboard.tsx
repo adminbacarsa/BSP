@@ -2610,10 +2610,15 @@ export default function EmployeeDashboard() {
                             <button onClick={() => handleRespondSwap(r.id, false)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Rechazar</button>
                           </div>
                         )}
-                        {status === 'PENDING_REQUESTER' && r.requesterUid === user?.uid && (
+        {status === 'PENDING_REQUESTER' && r.requesterUid === user?.uid && (
                           <div className="flex gap-2 mt-2">
                             <button onClick={() => handleConfirmSwap(r.id, true)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Confirmar</button>
                             <button onClick={() => handleConfirmSwap(r.id, false)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Cancelar</button>
+                          </div>
+                        )}
+                        {status === 'PENDING_SUPERVISOR' && (
+                          <div className="text-[10px] text-amber-400 mt-2 font-bold">
+                            Pendiente de autorización de supervisor en planificación.
                           </div>
                         )}
                       </div>

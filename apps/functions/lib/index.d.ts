@@ -27,6 +27,7 @@ export declare const requestCheckIn: functions.HttpsFunction & functions.Runnabl
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const notificarLlegadaTarde: functions.HttpsFunction & functions.Runnable<any>;
+export { getSwapPeople, getSwapCandidates, createSwapRequest, respondSwapRequest, confirmSwapRequest, cancelSwapRequest, approveSwapRequest, rejectSwapRequestSupervisor, } from './swap/swapPortal';
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateDevice: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateAndSetPassword: functions.HttpsFunction & functions.Runnable<any>;

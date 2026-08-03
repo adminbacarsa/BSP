@@ -603,7 +603,8 @@ export default function AutoLabPage() {
                     objectiveIdForBrain: realBundle.objectiveId,
                 }
                 : undefined);
-        } catch {
+        } catch (err) {
+            console.error('[Auto Lab] runAutoLabCase', err);
             return null;
         }
     }, [activeCase, year, month, isRealMode, realBundle]);
@@ -1108,8 +1109,16 @@ export default function AutoLabPage() {
                                     )}
                                 </div>
                             ) : (
-                                <div className="p-8 text-center text-sm text-slate-500">
-                                    No se pudo calcular el cerebro para este caso.
+                                <div className="p-8 text-center text-sm text-slate-500 space-y-2">
+                                    <p>No se pudo calcular el cerebro para este caso.</p>
+                                    {isRealMode && !realBundle && (
+                                        <p className="text-xs text-amber-800">
+                                            Elegí objetivo y empresa en el panel «Servicio real» y esperá a que cargue el SLA.
+                                        </p>
+                                    )}
+                                    <p className="text-[10px] text-slate-400">
+                                        Abrí la consola del navegador (F12) si el caso ya está cargado — suele ser un error de runtime en el motor.
+                                    </p>
                                 </div>
                             )}
                         </div>

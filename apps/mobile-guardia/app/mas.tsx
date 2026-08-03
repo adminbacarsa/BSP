@@ -1,4 +1,5 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
@@ -7,14 +8,16 @@ import { CommandCard } from '../src/components/ui/CommandCard';
 import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
+import { usePortalInbox } from '../src/hooks/usePortalInbox';
+import { getPortalCallables } from '../src/lib/portal';
 
 const ROADMAP = [
   { title: 'Fichada GPS + offline', status: 'Listo', done: true },
   { title: 'Llegada tarde', status: 'Listo', done: true },
   { title: 'Ausencias y licencias', status: 'Formulario activo', done: true },
   { title: 'Adjunto certificado', status: 'Cámara y galería', done: true },
-  { title: 'Notificaciones push', status: 'F3 · EAS', done: false },
-  { title: 'Permutas', status: 'F4', done: false },
+  { title: 'Notificaciones push', status: 'Auto al login', done: true },
+  { title: 'Permutas', status: 'Con supervisor', done: true },
   { title: 'Credencial digital', status: 'F5', done: false },
 ];
 
@@ -29,10 +32,30 @@ export default function MasScreen() {
 function MasScreenContent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { portalFeatures } = usePortalAuth();
+  const { portalFeatures, user, signOut } = usePortalAuth();
   const { palette, mode, setThemeMode } = useTheme();
+  const { items, loading: inboxLoading, unreadCount, markRead, markAllUnreadRead } = usePortalInbox(user);
+  const [testBusy, setTestBusy] = useState(false);
   const canNovedad = portalFeatures.reportAbsence || portalFeatures.requestLicense;
   const scrollBottomPad = Math.max(insets.bottom, 12) + 88;
+
+  const sendTestPush = useCallback(async () => {
+    if (!user) return;
+    setTestBusy(true);
+    try {
+      const callables = getPortalCallables();
+      await callables.sendTestNotification({
+        title: 'Prueba COSP Guardia',
+        body: 'Si ves esto, FCM y la app nativa están alineados.',
+      });
+      Alert.alert('Enviada', 'Revisá la bandeja del sistema si la app está en segundo plano.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'No se pudo enviar la prueba';
+      Alert.alert('Error', msg);
+    } finally {
+      setTestBusy(false);
+    }
+  }, [user]);
 
   return (
     <>
@@ -67,6 +90,71 @@ function MasScreenContent() {
               />
             </View>
           </CommandCard>
+
+          <CommandCard title="Bandeja de alertas">
+            <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+              Las notificaciones push se activan automáticamente al iniciar sesión (permiso del sistema). Aquí ves el
+              mismo historial que en el portal web.
+              {unreadCount > 0 ? ` · ${unreadCount} sin leer` : ''}
+            </Text>
+            {__DEV__ ? (
+              <CommandButton
+                label={testBusy ? 'Enviando…' : 'Prueba FCM (dev)'}
+                variant="secondary"
+                onPress={sendTestPush}
+                disabled={testBusy}
+                style={{ marginBottom: 8 }}
+              />
+            ) : null}
+            {unreadCount > 0 ? (
+              <CommandButton label="Marcar todas leídas" variant="secondary" onPress={() => markAllUnreadRead()} />
+            ) : null}
+            {inboxLoading ? (
+              <ActivityIndicator color={palette.primary} style={styles.inboxLoader} />
+            ) : items.length === 0 ? (
+              <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>Sin novedades en bandeja.</Text>
+            ) : (
+              items.slice(0, 6).map((n) => (
+                <View
+                  key={n.id}
+                  style={[
+                    styles.inboxItem,
+                    {
+                      backgroundColor: n.read ? palette.inputBg : palette.card,
+                      borderColor: palette.cardBorder,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.inboxTitle, { color: palette.onSurface }]}>
+                    {n.title || 'Alerta'}
+                    {!n.read ? ' · nueva' : ''}
+                  </Text>
+                  {n.body ? (
+                    <Text style={[styles.inboxBody, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
+                      {n.body}
+                    </Text>
+                  ) : null}
+                  {!n.read ? (
+                    <CommandButton
+                      label="Marcar leída"
+                      variant="secondary"
+                      onPress={() => markRead(n.id)}
+                      style={styles.markReadBtn}
+                    />
+                  ) : null}
+                </View>
+              ))
+            )}
+          </CommandCard>
+
+          {portalFeatures.swapShifts ? (
+            <CommandCard title="Permutas de turno">
+              <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+                Pedí cambio con un compañero del mismo objetivo. Tras tu confirmación, un supervisor debe autorizar.
+              </Text>
+              <CommandButton label="Gestionar permutas" onPress={() => router.push('/permutas')} />
+            </CommandCard>
+          ) : null}
 
           {canNovedad ? (
             <CommandCard title="Novedades RRHH">
@@ -107,6 +195,10 @@ function MasScreenContent() {
               </Text>
             </View>
           ))}
+
+          <CommandCard title="Sesión">
+            <CommandButton label="Cerrar sesión" variant="secondary" onPress={() => signOut()} />
+          </CommandCard>
         </ScrollView>
       </SafeAreaView>
     </>
@@ -143,6 +235,16 @@ const styles = StyleSheet.create({
   scrollContent: { padding: spacing.container, gap: spacing.md },
   intro: { fontSize: 14, lineHeight: 21 },
   cardSub: { fontSize: 13, marginBottom: 4 },
+  inboxLoader: { marginVertical: 12 },
+  inboxItem: {
+    borderRadius: radius.md,
+    padding: 12,
+    borderWidth: 1,
+    marginTop: 8,
+  },
+  inboxTitle: { fontWeight: '800', fontSize: 14 },
+  inboxBody: { fontSize: 13, marginTop: 4, lineHeight: 18 },
+  markReadBtn: { marginTop: 8 },
   themeRow: { flexDirection: 'row', gap: 10 },
   themeBtn: { flex: 1 },
   flagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

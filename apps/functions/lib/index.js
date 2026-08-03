@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = void 0;
+exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -904,6 +904,15 @@ exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => 
         throw new functions.https.HttpsError('internal', error.message);
     }
 });
+var swapPortal_1 = require("./swap/swapPortal");
+Object.defineProperty(exports, "getSwapPeople", { enumerable: true, get: function () { return swapPortal_1.getSwapPeople; } });
+Object.defineProperty(exports, "getSwapCandidates", { enumerable: true, get: function () { return swapPortal_1.getSwapCandidates; } });
+Object.defineProperty(exports, "createSwapRequest", { enumerable: true, get: function () { return swapPortal_1.createSwapRequest; } });
+Object.defineProperty(exports, "respondSwapRequest", { enumerable: true, get: function () { return swapPortal_1.respondSwapRequest; } });
+Object.defineProperty(exports, "confirmSwapRequest", { enumerable: true, get: function () { return swapPortal_1.confirmSwapRequest; } });
+Object.defineProperty(exports, "cancelSwapRequest", { enumerable: true, get: function () { return swapPortal_1.cancelSwapRequest; } });
+Object.defineProperty(exports, "approveSwapRequest", { enumerable: true, get: function () { return swapPortal_1.approveSwapRequest; } });
+Object.defineProperty(exports, "rejectSwapRequestSupervisor", { enumerable: true, get: function () { return swapPortal_1.rejectSwapRequestSupervisor; } });
 const nodemailer = require("nodemailer");
 function buildPortalEmailHtml(activationLink, empresaNombre) {
     const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';

@@ -24,16 +24,16 @@
 | **F0** | Fundación | `EN_CURSO` | 12 | 8/12 | — |
 | **F1** | Auth, activación y turnos | `EN_CURSO` | 14 | 11/14 | — |
 | **F2** | Fichada con GPS | `EN_CURSO` | 10 | 8/10 | — |
-| **F3** | Ausencias, licencias y push | `EN_CURSO` | 12 | 5/12 | — |
+| **F3** | Ausencias, licencias y push | `EN_CURSO` | 12 | 10/12 | — |
 | **F4** | Permutas de turno | `PENDIENTE` | 8 | 0/8 | — |
 | **F5** | Credencial digital y UX | `PENDIENTE` | 10 | 0/10 | — |
 | **F6** | Beta cerrada y hardening | `PENDIENTE` | 10 | 0/10 | — |
 | **F7** | Publicación en stores | `PENDIENTE` | 12 | 0/12 | — |
-| | **TOTAL** | | **88** | **21/88** | |
+| | **TOTAL** | | **88** | **26/88** | |
 
-**Fase activa recomendada:** F3 (push F3-07+)  
+**Fase activa recomendada:** F3 (APNs F3-06 + prueba física F3-12) o F4 permutas  
 **Última actualización:** 2026-08-03  
-**Última tarea completada:** UI Stitch Core + Dark Ops (`docs/stitch/`, `ThemeContext` en mobile-guardia)
+**Última tarea completada:** F3-07..F3-11 push FCM + bandeja in-app (`expo-notifications`, `usePortalInbox`)
 
 ---
 
@@ -45,7 +45,7 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **F3-07** | `expo-notifications` + FCM | Permisos push; token al login | F3 |
+| **F3-06** | APNs en Firebase Console | Certificado Apple para iOS | F3 |
 
 ### Bloqueantes actuales
 
@@ -76,6 +76,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-08-03 | F3-07..11 | Push FCM (expo-notifications), bandeja user_notifications, prueba sendTestNotification en Más
 2026-08-03 | UI Stitch | Temas Core/Dark Ops + docs/stitch (Gemini Stitch export)
 2026-07-31 | F3-03/04 | Certificado en /novedad — cámara/galería, upload Storage absences/{uid}
 2026-07-30 | F3-01/02 | Pantalla /novedad — ausencias y licencias (Firestore ausencias, classifyAbsence)
@@ -244,12 +245,12 @@ npm run dev:mobile
 | F3-04 | Adjunto certificado (galería) | Galería en `CertificateAttachmentField` | ✅ Hecha | 2026-07-31 |
 | F3-05 | `notificarLlegadaTarde` | Botón y confirmación; estado en UI | ✅ Hecha | 2026-07-30 |
 | F3-06 | Configurar APNs en Firebase | Key/cert Apple para push iOS | ⬜ Pendiente | — |
-| F3-07 | `expo-notifications` + FCM | Permisos push; token al login | ⬜ Pendiente | — |
-| F3-08 | Registrar token en backend | Compatible con `deleteMyTokens` existente | ⬜ Pendiente | — |
-| F3-09 | Centro notificaciones in-app | Listener `user_notifications` | ⬜ Pendiente | — |
-| F3-10 | Push en foreground | Toast/banner cuando app abierta | ⬜ Pendiente | — |
-| F3-11 | `sendTestNotification` en app | Botón debug (solo dev o superadmin) | ⬜ Pendiente | — |
-| F3-12 | Prueba cross-platform push | Notificación recibida en Android + iOS | ⬜ Pendiente | — |
+| F3-07 | `expo-notifications` + FCM | Permisos push; token al login | ✅ Hecha | 2026-08-03 |
+| F3-08 | Registrar token en backend | Doc `device_tokens` (id = token FCM) | ✅ Hecha | 2026-08-03 |
+| F3-09 | Centro notificaciones in-app | Listener `user_notifications` | ✅ Hecha | 2026-08-03 |
+| F3-10 | Push en foreground | Alert al recibir con app abierta | ✅ Hecha | 2026-08-03 |
+| F3-11 | `sendTestNotification` en app | Botón en Servicios (Más) | ✅ Hecha | 2026-08-03 |
+| F3-12 | Prueba cross-platform push | Notificación en Android + iOS (build EAS) | ⬜ Pendiente | — |
 
 ---
 
@@ -270,14 +271,14 @@ npm run dev:mobile
 
 | ID | Tarea | Criterio de aceptación | Estado | Fecha |
 |----|-------|------------------------|--------|-------|
-| F4-01 | UI listado permutas | Listener `swap_requests` del empleado | ⬜ Pendiente | — |
-| F4-02 | Buscar compañero | `getSwapPeople` + búsqueda local | ⬜ Pendiente | — |
-| F4-03 | Candidatos de turno | `getSwapCandidates` | ⬜ Pendiente | — |
-| F4-04 | Crear solicitud | `createSwapRequest` | ⬜ Pendiente | — |
-| F4-05 | Responder solicitud | `respondSwapRequest` (aceptar/rechazar) | ⬜ Pendiente | — |
-| F4-06 | Confirmar / cancelar | `confirmSwapRequest`, `cancelSwapRequest` | ⬜ Pendiente | — |
-| F4-07 | Notificación de permuta | Push al recibir solicitud (si F3 lista) | ⬜ Pendiente | — |
-| F4-08 | Prueba E2E permuta | Dos guardias: uno app, uno web | ⬜ Pendiente | — |
+| F4-01 | UI listado permutas | Pantalla `/permutas` + listener | ✅ Hecha | 2026-08-03 |
+| F4-02 | Buscar compañero | `getSwapPeople` + candidatos por turno | ✅ Hecha | 2026-08-03 |
+| F4-03 | Candidatos de turno | `getSwapCandidates` | ✅ Hecha | 2026-08-03 |
+| F4-04 | Crear solicitud | `createSwapRequest` | ✅ Hecha | 2026-08-03 |
+| F4-05 | Responder solicitud | `respondSwapRequest` (aceptar/rechazar) | ✅ Hecha | 2026-08-03 |
+| F4-06 | Confirmar / cancelar | `confirmSwapRequest` → `PENDING_SUPERVISOR` | ✅ Hecha | 2026-08-03 |
+| F4-07 | Notificación de permuta | `user_notifications` en cada paso | ✅ Hecha | 2026-08-03 |
+| F4-08 | Prueba E2E permuta | Dos guardias + supervisor (`approveSwapRequest`) | ⬜ Pendiente | — |
 
 ---
 

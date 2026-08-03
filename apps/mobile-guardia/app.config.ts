@@ -55,6 +55,15 @@ const config: ExpoConfig = {
           'COSP Guardia usa la cámara para adjuntar certificados médicos a tus novedades.',
       },
     ],
+    [
+      'expo-notifications',
+      {
+        icon: './assets/android-icon-foreground.png',
+        color: '#312e81',
+        defaultChannel: 'default',
+        sounds: [],
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,
