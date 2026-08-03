@@ -3,6 +3,7 @@ import { slaCoversCalendarMonth, toYyyyMmDd } from '@/lib/firestoreDates';
 import {
   calculateMonthlyBreakdown,
   calculateSlaHoursForDateRange,
+  calculateSlaHoursForMonth,
   parseYmdToLocalDate,
 } from '@/lib/servicios/slaHoursCalculator';
 import {
@@ -104,6 +105,17 @@ export function slaHoursForServiceInRange(
     rs.getFullYear() === re.getFullYear();
 
   if (isFullCalendarMonth && slaCoversCalendarMonth(srv.startDate, srv.endDate, rs.getFullYear(), rs.getMonth())) {
+    const calculated = Math.round(
+      calculateSlaHoursForMonth(
+        positions,
+        toYyyyMmDd(srv.startDate),
+        toYyyyMmDd(srv.endDate),
+        srv.excludedDates as string[] | undefined,
+        rs.getFullYear(),
+        rs.getMonth(),
+      ).total,
+    );
+    if (calculated > 0) return calculated;
     const stored = Math.round(Number(srv.totalMonthlyHours) || 0);
     if (stored > 0) return stored;
   }

@@ -6,7 +6,7 @@ import {
     parseYmdToLocalDate,
     WEEK_DAY_CODES,
 } from '@/lib/servicios/slaHoursCalculator';
-import type { ServicePosition } from '@/services/slaService';
+import type { ServicePosition, ShiftVariant } from '@/services/slaService';
 
 export const AUTO_LAB_DAY_LETTERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 export type AutoLabDayLetter = (typeof AUTO_LAB_DAY_LETTERS)[number];
@@ -52,13 +52,24 @@ export function v2PositionToServicePosition(pos: V2PositionDef, id: string): Ser
         allowedShiftTypes: shifts.map((s) => {
             const code = String(s.code || '').toUpperCase();
             const times = bandTimes[code] || { start: '07:00', end: '15:00' };
-            return {
+            const variant: ShiftVariant = {
                 code,
                 name: s.name || code,
                 startTime: s.startTime || times.start,
                 endTime: s.endTime || times.end,
                 hours: Number(s.hours) || 8,
             };
+            if (Array.isArray(s.blocks) && s.blocks.length >= 2) {
+                variant.blocks = s.blocks.map((b) => ({
+                    startTime: String(b.startTime),
+                    endTime: String(b.endTime),
+                }));
+            }
+            if (Array.isArray(s.days) && s.days.length > 0) variant.days = [...s.days];
+            if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
+                variant.specificDates = [...s.specificDates];
+            }
+            return variant;
         }),
         activeDays,
         excludedDates: pos.excludedDates,
