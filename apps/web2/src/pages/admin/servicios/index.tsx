@@ -880,7 +880,12 @@ export default function ServiciosSLAPage() {
     if (!_p0) return;
     const _e = _p0.entries.map((e: RotationEntry, i: number) => {
       if (i !== eidx) return e;
-      const next: any = { ...e, [field]: val };
+      const next: any = { ...e };
+      if (field === 'sequence') {
+        next.sequence = val.trim().toUpperCase().split(/[\s,]+/).filter(Boolean);
+      } else {
+        next[field] = val;
+      }
       if (field === 'employeeId') {
         const emp = coverageEmps.find((em: any) => em.id === val);
         next.employeeName = emp ? (emp.name || ((emp.firstName || '') + ' ' + (emp.lastName || '')).trim()) : '';
@@ -2783,6 +2788,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={!editingRotation.cycleMode ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por período</button>
                                   <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'round_robin', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota sem. a sem.</button>
                                   <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'cycle_rotation', cycleWorkDays: editingRotation.cycleWorkDays || 5, cycleOffDays: editingRotation.cycleOffDays || 1, periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'cycle_rotation' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota por ciclo</button>
+                                  <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'custom_sequence', sequenceAnchorDate: editingRotation.sequenceAnchorDate || '', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: (editingRotation.periods[0]?.entries || []).map((e: any) => ({ ...e, sequence: e.sequence || [] })) }] })} className={editingRotation.cycleMode === 'custom_sequence' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por patrón</button>
                                 </div>
                               </div>
                               {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
@@ -2817,8 +2823,37 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <p className="text-[9px] text-slate-400 mt-0.5">Escalona anclas desde el primer día. Podés ajustar cada una.</p>
                                 </div>
                               )}
+                              {editingRotation.cycleMode === 'custom_sequence' && (
+                                <div>
+                                  <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Día 0 del patrón</p>
+                                  <input type="date" value={editingRotation.sequenceAnchorDate || ''} onChange={e => setEditingRotation({ ...editingRotation, sequenceAnchorDate: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                  <p className="text-[9px] text-slate-400 mt-0.5">Fecha del día 1 de la secuencia de cada empleado.</p>
+                                </div>
+                              )}
                             </div>
-                            {(editingRotation.cycleMode === 'round_robin' || editingRotation.cycleMode === 'cycle_rotation') ? (
+                            {editingRotation.cycleMode === 'custom_sequence' ? (
+                          <div>
+                            <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Empleados y secuencias:</p>
+                            {(editingRotation.periods[0]?.entries || []).map((entry: RotationEntry, eidx: number) => (
+                              <div key={eidx} className="mb-2 p-2 bg-slate-50 dark:bg-slate-700 rounded-lg border dark:border-slate-600">
+                                <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                  <select value={entry.employeeId} onChange={e => updRREntry(eidx, 'employeeId', e.target.value)} className="flex-1 min-w-0 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                    <option value="">— empleado —</option>
+                                    {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                                  </select>
+                                  <select value={entry.positionName} onChange={e => updRREntry(eidx, 'positionName', e.target.value)} className="text-[9px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                                    <option value="">— puesto —</option>
+                                    {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                                  </select>
+                                  <button type="button" onClick={() => removeRREntry(eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                                </div>
+                                <input type="text" placeholder="F N N N N N F T T T T T" value={((entry as any).sequence || []).join(' ')} onChange={e => updRREntry(eidx, 'sequence', e.target.value)} className="w-full text-[10px] font-mono bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                {(entry as any).sequence?.length ? <p className="text-[9px] text-teal-600 mt-0.5">{(entry as any).sequence.length} días · ciclo de {(entry as any).sequence.length} días</p> : <p className="text-[9px] text-slate-400 mt-0.5">Ej: F N N N N N F T T T T T (separados por espacio)</p>}
+                              </div>
+                            ))}
+                            <button type="button" onClick={addRREntry} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar empleado</button>
+                          </div>
+                        ) : (editingRotation.cycleMode === 'round_robin' || editingRotation.cycleMode === 'cycle_rotation') ? (
                           <div>
                             <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Asignaciones (rotan en orden):</p>
                             {(editingRotation.periods[0]?.entries || []).map((entry: RotationEntry, eidx: number) => (
@@ -2956,6 +2991,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: undefined })} className={!editingRotation.cycleMode ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por período</button>
                               <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'round_robin', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'round_robin' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota sem. a sem.</button>
                               <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'cycle_rotation', cycleWorkDays: editingRotation.cycleWorkDays || 5, cycleOffDays: editingRotation.cycleOffDays || 1, periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: editingRotation.periods[0]?.entries || [] }] })} className={editingRotation.cycleMode === 'cycle_rotation' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Rota por ciclo</button>
+                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'custom_sequence', sequenceAnchorDate: editingRotation.sequenceAnchorDate || '', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: (editingRotation.periods[0]?.entries || []).map((e: any) => ({ ...e, sequence: e.sequence || [] })) }] })} className={editingRotation.cycleMode === 'custom_sequence' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por patrón</button>
                             </div>
                           </div>
                           {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
@@ -2990,8 +3026,37 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <p className="text-[9px] text-slate-400 mt-0.5">Escalona anclas desde el primer día. Podés ajustar cada una.</p>
                             </div>
                           )}
+                          {editingRotation.cycleMode === 'custom_sequence' && (
+                            <div>
+                              <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Día 0 del patrón</p>
+                              <input type="date" value={editingRotation.sequenceAnchorDate || ''} onChange={e => setEditingRotation({ ...editingRotation, sequenceAnchorDate: e.target.value })} className="text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                              <p className="text-[9px] text-slate-400 mt-0.5">Fecha del día 1 de la secuencia de cada empleado.</p>
+                            </div>
+                          )}
                         </div>
-                        {(editingRotation.cycleMode === 'round_robin' || editingRotation.cycleMode === 'cycle_rotation') ? (
+                        {editingRotation.cycleMode === 'custom_sequence' ? (
+                  <div>
+                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Empleados y secuencias:</p>
+                    {(editingRotation.periods[0]?.entries || []).map((entry: RotationEntry, eidx: number) => (
+                      <div key={eidx} className="mb-2 p-2 bg-slate-50 dark:bg-slate-700 rounded-lg border dark:border-slate-600">
+                        <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                          <select value={entry.employeeId} onChange={e => updRREntry(eidx, 'employeeId', e.target.value)} className="flex-1 min-w-0 text-[10px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                            <option value="">— empleado —</option>
+                            {coverageEmps.map((e: any) => <option key={e.id} value={e.id}>{e.name || ((e.firstName || '') + ' ' + (e.lastName || '')).trim()}</option>)}
+                          </select>
+                          <select value={entry.positionName} onChange={e => updRREntry(eidx, 'positionName', e.target.value)} className="text-[9px] bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5">
+                            <option value="">— puesto —</option>
+                            {form.positions.map((p: ServicePosition) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                          </select>
+                          <button type="button" onClick={() => removeRREntry(eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
+                        </div>
+                        <input type="text" placeholder="F N N N N N F T T T T T" value={((entry as any).sequence || []).join(' ')} onChange={e => updRREntry(eidx, 'sequence', e.target.value)} className="w-full text-[10px] font-mono bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                        {(entry as any).sequence?.length ? <p className="text-[9px] text-teal-600 mt-0.5">{(entry as any).sequence.length} días · ciclo de {(entry as any).sequence.length} días</p> : <p className="text-[9px] text-slate-400 mt-0.5">Ej: F N N N N N F T T T T T (separados por espacio)</p>}
+                      </div>
+                    ))}
+                    <button type="button" onClick={addRREntry} className="flex items-center gap-1 text-[9px] font-black text-teal-500 hover:text-teal-700 mt-1"><Plus size={9}/> Agregar empleado</button>
+                  </div>
+                ) : (editingRotation.cycleMode === 'round_robin' || editingRotation.cycleMode === 'cycle_rotation') ? (
                   <div>
                     <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Asignaciones (rotan en orden):</p>
                     {(editingRotation.periods[0]?.entries || []).map((entry: RotationEntry, eidx: number) => (

@@ -815,6 +815,47 @@ function applyRotationsForMonth(
             }
             continue;
         }
+        if (rotation.cycleMode === 'custom_sequence') {
+            const _csAnchor = rotation.sequenceAnchorDate;
+            if (!_csAnchor) continue;
+            const _csP = rotation.periods[0];
+            if (!_csP) continue;
+            const _csEntries = _csP.entries.filter((e: any) => e.employeeId && e.sequence?.length);
+            if (!_csEntries.length) continue;
+            const _csAncMs = new Date(_csAnchor + 'T00:00:00').getTime();
+            for (const dateStr of allDates) {
+                const dayLetter = getDayLetter(dateStr);
+                const _dtMs = new Date(dateStr + 'T00:00:00').getTime();
+                const _daysSince = Math.round((_dtMs - _csAncMs) / 86400000);
+                for (const _csEmp of _csEntries) {
+                    const _seqLen = _csEmp.sequence.length;
+                    const _pos = ((_daysSince % _seqLen) + _seqLen) % _seqLen;
+                    const _code = (_csEmp.sequence[_pos] as string).toUpperCase();
+                    const _key = `${_csEmp.employeeId}_${dateStr}`;
+                    const _cPend = pendingChanges[_key];
+                    if (_code === 'F' || _code === 'FF' || _code === 'FP') {
+                        if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
+                        if (_cPend && !_cPend.isDeleted && _cPend.isTemp) continue;
+                        additions[_key] = { empId: _csEmp.employeeId, dateStr, code: _code, positionName: '', hours: 0, startTime: '00:00', isDeleted: false, _isAutoRotation: true };
+                    } else {
+                        if (_cPend && !_cPend.isDeleted) continue;
+                        if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
+                        if (positionStructure?.length && _csEmp.positionName) {
+                            const _pCfg = positionStructure.find((p: any) => p.positionName === _csEmp.positionName);
+                            if (_pCfg) {
+                                if (!isPosActiveOnDay(_pCfg, dayLetter)) continue;
+                                if (isPosExcludedOnDate(_pCfg, dateStr)) continue;
+                            }
+                        }
+                        const _posPS = positionStructure?.find((p: any) => p.positionName === _csEmp.positionName);
+                        const _shiftPS = _posPS?.shifts?.find((s: any) => String(s.code || '').toUpperCase() === _code);
+                        const _shiftHours = (_shiftPS && Number(_shiftPS.hours) > 0) ? Number(_shiftPS.hours) : 8;
+                        additions[_key] = { empId: _csEmp.employeeId, dateStr, code: _code, positionName: _csEmp.positionName || '', hours: _shiftHours, startTime: '00:00', isDeleted: false, _isAutoRotation: true };
+                    }
+                }
+            }
+            continue;
+        }
         if (rotation.cycleMode === 'round_robin') {
             const _rrP = rotation.periods[0];
             if (_rrP && _rrP.trigger.type === 'WEEKLY') {
