@@ -737,15 +737,18 @@ function computeServiceRuleChanges(
             } else if (action.type === 'ASSIGN') {
                 if (action.employeeId && action.positionName && action.shiftCode) {
                     const e = getEntry(action.employeeId);
-                    // Idempotencia: no generar cambio si el empleado ya tiene ese código asignado
-                    if (e && !e.isDeleted && String(e.code || e.type || '').toUpperCase() === String(action.shiftCode || '').toUpperCase()) continue;
+                    // Para idempotencia: si el entry pendiente es auto-rotación, preferir shiftsMap
+                    const eSaved = shiftsMap[`${action.employeeId}_${dateStr}`];
+                    const eCheck = (e && !e.isDeleted && !e._isAutoRotation) ? e : (eSaved && !eSaved.isDeleted ? eSaved : null);
+                    if (eCheck && String(eCheck.code || eCheck.type || '').toUpperCase() === String(action.shiftCode || '').toUpperCase()) continue;
                     additions[`${action.employeeId}_${dateStr}`] = {
-                        ...(e || {}),
+                        ...(eCheck || e || {}),
                         code: action.shiftCode, type: action.shiftCode, name: action.shiftCode,
                         hours: 8, startTime: '00:00', endTime: '00:00',
                         positionName: action.positionName, isTemp: true, isFranco: false,
-                        objectiveId: e?.objectiveId ?? objectiveId,
+                        objectiveId: (eCheck || e)?.objectiveId ?? objectiveId,
                         _isAutoRotation: undefined,
+                        _isAutoCondition: true,
                     };
                 }
             }
@@ -6450,6 +6453,7 @@ export default function PlanificacionPage() {
             ...config,
             isTemp: true,
             _isAutoRotation: undefined,
+            _isAutoCondition: undefined,
             isFranco: config.code === 'F' || config.code === 'FF' || config.isFranco,
             swapWith: config.swapWith || null,
             swapDate: config.swapDate || null,
@@ -9549,7 +9553,7 @@ export default function PlanificacionPage() {
                                         <div className="flex items-center gap-2 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-lg">
                                             <span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest hidden md:inline">Planificando como: {operatorName}</span>
                                             <div className="h-4 w-px bg-amber-200 mx-1 hidden md:block"></div>
-                                            <span className="text-xs font-black text-amber-700 px-1">{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation).length || Object.keys(pendingChanges).length} cambios</span>
+                                            <span className="text-xs font-black text-amber-700 px-1">{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation && !v?._isAutoCondition).length || Object.keys(pendingChanges).length} cambios</span>
                                             <button type="button" onClick={undoLastPending} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
                                             <button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button>
                                             <button onClick={handleSaveAll} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 shadow">
