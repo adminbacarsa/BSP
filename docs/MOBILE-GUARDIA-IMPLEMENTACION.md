@@ -25,15 +25,15 @@
 | **F1** | Auth, activación y turnos | `EN_CURSO` | 14 | 11/14 | — |
 | **F2** | Fichada con GPS | `EN_CURSO` | 10 | 8/10 | — |
 | **F3** | Ausencias, licencias y push | `EN_CURSO` | 12 | 10/12 | — |
-| **F4** | Permutas de turno | `PENDIENTE` | 8 | 0/8 | — |
-| **F5** | Credencial digital y UX | `PENDIENTE` | 10 | 0/10 | — |
+| **F4** | Permutas de turno | `EN_CURSO` | 8 | 7/8 | — |
+| **F5** | Credencial digital y UX | `EN_CURSO` | 10 | 4/10 | — |
 | **F6** | Beta cerrada y hardening | `PENDIENTE` | 10 | 0/10 | — |
 | **F7** | Publicación en stores | `PENDIENTE` | 12 | 0/12 | — |
 | | **TOTAL** | | **88** | **26/88** | |
 
-**Fase activa recomendada:** F3 (APNs F3-06 + prueba física F3-12) o F4 permutas  
+**Fase activa recomendada:** F5 (UX) · F4-08 prueba E2E permutas · F3-06/12 push nativo  
 **Última actualización:** 2026-08-03  
-**Última tarea completada:** F3-07..F3-11 push FCM + bandeja in-app (`expo-notifications`, `usePortalInbox`)
+**Última tarea completada:** F5-01..04 credencial digital en app (`/credencial`)
 
 ---
 
@@ -45,7 +45,7 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **F3-06** | APNs en Firebase Console | Certificado Apple para iOS | F3 |
+| **F5-05** | Pantallas error / sin conexión | UX clara; no pantalla en blanco | F5 |
 
 ### Bloqueantes actuales
 
@@ -76,7 +76,8 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
-2026-08-03 | F3-07..11 | Push FCM (expo-notifications), bandeja user_notifications, prueba sendTestNotification en Más
+2026-08-03 | F5-01..04 | Credencial digital: QR, código 60s, foto cámara, cache AsyncStorage
+2026-08-03 | F4 | Permutas app + callables swap + supervisor en planificación
 2026-08-03 | UI Stitch | Temas Core/Dark Ops + docs/stitch (Gemini Stitch export)
 2026-07-31 | F3-03/04 | Certificado en /novedad — cámara/galería, upload Storage absences/{uid}
 2026-07-30 | F3-01/02 | Pantalla /novedad — ausencias y licencias (Firestore ausencias, classifyAbsence)
@@ -299,10 +300,10 @@ npm run dev:mobile
 
 | ID | Tarea | Criterio de aceptación | Estado | Fecha |
 |----|-------|------------------------|--------|-------|
-| F5-01 | Pantalla credencial | Foto, nombre, legajo, DNI, empresa | ⬜ Pendiente | — |
-| F5-02 | QR de credencial | `react-native-qrcode-svg`; mismo payload que web | ⬜ Pendiente | — |
-| F5-03 | Actualizar foto legajo | Cámara → Storage → doc empleado | ⬜ Pendiente | — |
-| F5-04 | Cache offline credencial | Última versión visible sin red | ⬜ Pendiente | — |
+| F5-01 | Pantalla credencial | Foto, nombre, legajo, DNI, empresa | ✅ Hecha | 2026-08-03 |
+| F5-02 | QR de credencial | `react-native-qrcode-svg`; mismo payload que web | ✅ Hecha | 2026-08-03 |
+| F5-03 | Actualizar foto legajo | Cámara → Storage → doc empleado | ✅ Hecha | 2026-08-03 |
+| F5-04 | Cache offline credencial | AsyncStorage última versión | ✅ Hecha | 2026-08-03 |
 | F5-05 | Pantallas error / sin conexión | UX clara; no pantalla en blanco | ⬜ Pendiente | — |
 | F5-06 | Loading states globales | Skeleton o spinners consistentes | ⬜ Pendiente | — |
 | F5-07 | Icono y splash app | Assets para dev y stores (1024 icon) | ⬜ Pendiente | — |

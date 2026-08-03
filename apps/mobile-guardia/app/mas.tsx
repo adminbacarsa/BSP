@@ -18,7 +18,7 @@ const ROADMAP = [
   { title: 'Adjunto certificado', status: 'Cámara y galería', done: true },
   { title: 'Notificaciones push', status: 'Auto al login', done: true },
   { title: 'Permutas', status: 'Con supervisor', done: true },
-  { title: 'Credencial digital', status: 'F5', done: false },
+  { title: 'Credencial digital', status: 'QR + verificación', done: true },
 ];
 
 export default function MasScreen() {
@@ -145,6 +145,13 @@ function MasScreenContent() {
                 </View>
               ))
             )}
+          </CommandCard>
+
+          <CommandCard title="Credencial digital">
+            <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+              Foto, legajo, QR y código de verificación (misma lógica que el portal web).
+            </Text>
+            <CommandButton label="Ver credencial" onPress={() => router.push('/credencial')} />
           </CommandCard>
 
           {portalFeatures.swapShifts ? (
