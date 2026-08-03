@@ -906,6 +906,7 @@ function applyRotationsForMonth(
                             const _rrIsFr = (s: any) => s && !s.isDeleted && ['F','FF','FP','FT'].includes(s.code);
                             if (_rrIsFr(_rrPend) || (!_rrPend && _rrIsFr(_rrFS))) continue;
                             if (_rrPend && !_rrPend.isDeleted) continue;
+                            if (!_rrPend && _rrFS && !_rrFS.isDeleted) continue;
                             const _slotIdx = _empToSlot2.get(_ri);
                             if (_slotIdx === undefined) continue;
                             const _rrRot = _rrE[_slotIdx];
