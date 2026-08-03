@@ -318,13 +318,12 @@ export function customCoverSlotsRequiredOnDay(
  *   con francos escalonados (ej. 4 pax MA → 5 guardias en 6+1 semanal).
  */
 export function customCoverRequiredHeadcount(pos: V2PositionDef): number {
-    const qty = customCoverDailyPax(pos);
-    const bandCount = customCoverDistinctBandCount(pos);
+    const simultaneous = customCoverSimultaneousPax(pos);
     if (!customPositionOperatesAllWeek(pos)) {
-        return bandCount > 1 ? qty * bandCount : qty;
+        return simultaneous;
     }
     const { workDays, cycleLen } = customCoverWeeklyWorkRest(pos);
-    return Math.ceil((qty * cycleLen) / workDays);
+    return Math.ceil((simultaneous * cycleLen) / workDays);
 }
 
 /** Puesto opera los 7 días de la semana según activeDays del SLA. */

@@ -242,6 +242,19 @@ export default function AutoLabRealServicePanel({
                             <p className="text-xs text-slate-600">{bundle.clientName}</p>
                             <p className="text-[10px] text-slate-400 font-mono">{bundle.objectiveId}</p>
                             <p className="text-[11px] text-emerald-800 mt-1">SLA: {bundle.slaLabel}</p>
+                            <p className="text-[10px] text-indigo-800 mt-1.5 font-medium leading-snug">
+                                {bundle.coverageSummary.motorLabel}
+                            </p>
+                            <ul className="mt-2 space-y-0.5">
+                                {bundle.coverageSummary.positions.map((p) => (
+                                    <li key={p.positionName} className="text-[9px] text-slate-600">
+                                        <span className="font-bold text-slate-700">{p.positionName}</span>
+                                        {' · '}
+                                        {p.kindLabel}
+                                        {p.slotsTypicalDay > 0 ? ` · ${p.slotsTypicalDay} cupo(s)/día` : ''}
+                                    </li>
+                                ))}
+                            </ul>
                             <div className="flex flex-wrap gap-1.5 mt-2">
                                 <span
                                     className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-lg border ${slaFeatureBadgeClass(bundle.slaContract.coberturaDotacion)}`}

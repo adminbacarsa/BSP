@@ -19,7 +19,7 @@ import {
     empHasPositionAssignmentRestriction,
 } from './positionAssignmentPolicy';
 import { assignmentBreaksBandTransition } from './rotativeBandGuard';
-import { isCustomCoverTitular, francoCodeForPositionDay, buildCustomWeekendRestOptions } from './customCoverCycle';
+import { isCustomCoverTitular, francoCodeForPositionDay, buildCustomWeekendRestOptions, customCoverSimultaneousPax } from './customCoverCycle';
 import { CYCLE_24_MTN } from './rotativeMtnCycle';
 
 export { CYCLE_24_MTN, CYCLE_24_MTN_LEN } from './rotativeMtnCycle';
@@ -123,9 +123,11 @@ function positionCapacity(pos: V2PositionDef): number {
         return qty * (only12h ? 3 : 4);
     }
 
-    // Puestos custom (no 24hs):
-    // - Sin bandas M/T/N (shifts propios como EN, RO, etc.): 1 empleado por pax.
-    // - Con bandas M/T/N pero no 24hs (rotación L-D): 2 empleados por pax por banda.
+    // Puestos custom (no 24hs): cupos simultáneos del SLA (M+T+N en Control = 3 titulares, no 6).
+    if (sevenDays && isCustomCoverPosition(pos)) {
+        return customCoverSimultaneousPax(pos);
+    }
+
     if (sevenDays) {
         const activeBands = (pos.shifts || []).filter(s => WORK_BANDS.has(String(s.code || '').toUpperCase())).length;
         if (activeBands === 0) return qty;

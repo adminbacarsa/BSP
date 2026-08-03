@@ -57,6 +57,7 @@ import {
 import { toast } from 'sonner';
 
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
+import { summarizeObjectiveCoverage } from '@/lib/planificacion/positionCoverageKind';
 
 const IS_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
@@ -67,9 +68,25 @@ const MONTH_NAMES = [
 
 const CYCLE_OPTIONS = ['6+2', '6+1', '5+1', '4+2'] as const;
 
-function rotationLabel(mode: AutoLabCaseDefinition['rotationMode']): string {
+function rotationLabel(
+    mode: AutoLabCaseDefinition['rotationMode'],
+    positions?: AutoLabCaseDefinition['positions'],
+): string {
+    if (positions && positions.length > 0) {
+        const summary = summarizeObjectiveCoverage(positions);
+        if (summary.allCustomPool) {
+            return summary.motorLabel;
+        }
+        if (!summary.has24hsRotation) {
+            if (mode === 'rotative') return 'Personalizado — cupos SLA (no rotación 24 h)';
+            return summary.motorLabel;
+        }
+        if (summary.has24hsRotation && positions.some((p) => String(p.coverageType).toLowerCase() === 'custom')) {
+            return summary.motorLabel;
+        }
+    }
     if (mode === 'fixed') return 'Banda fija';
-    if (mode === 'rotative') return 'Rotativo M→T→N';
+    if (mode === 'rotative') return 'Rotativo M→T→N (solo puestos 24 h)';
     return 'Auto (cerebro decide)';
 }
 
@@ -832,7 +849,7 @@ export default function AutoLabPage() {
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                             <p className="font-black uppercase text-slate-500 text-[10px]">Rotación</p>
-                                            <p className="font-bold text-slate-800 mt-1">{rotationLabel(activeCase.rotationMode)}</p>
+                                            <p className="font-bold text-slate-800 mt-1">{rotationLabel(activeCase.rotationMode, activeCase.positions)}</p>
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                             <p className="font-black uppercase text-slate-500 text-[10px]">Dotación</p>
@@ -889,7 +906,7 @@ export default function AutoLabPage() {
                                             <p className="font-black uppercase text-slate-500 text-[10px]">Rotación</p>
                                             <p className="font-bold text-slate-800 mt-1 flex items-center gap-1">
                                                 <RotateCw size={12} className="text-indigo-600" />
-                                                {rotationLabel(activeCase.rotationMode)}
+                                                {rotationLabel(activeCase.rotationMode, activeCase.positions)}
                                             </p>
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">

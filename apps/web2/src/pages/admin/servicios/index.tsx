@@ -2331,7 +2331,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               </div>
               {coverageOpen && (form.positionAssignments === undefined ? (
                 <p className="text-[10px] text-slate-400">
-                  Activá la cobertura para definir en qué puestos y bandas puede trabajar cada guardia de la dotación. El motor de planificación respetará estas restricciones.
+                  En puestos <span className="font-bold text-slate-500">personalizados</span> no hay rotación obligatoria M→T→N: definí en qué puesto y bandas puede trabajar cada guardia (ej. solo M, o M y T sin N). En puestos <span className="font-bold text-slate-500">24 h</span> la rotación de bandas la arma el motor con esquema 6+2. El planificador respeta estas restricciones.
                 </p>
               ) : form.positions.length === 0 ? (
                 <p className="text-[10px] text-slate-400">Definí al menos un puesto para configurar restricciones de cobertura.</p>
@@ -3427,6 +3427,18 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                 <Info size={14}/>
                                 <p className="text-[9px] font-bold">El cálculo de horas (Noc/Finde) es automático según los días asignados.</p>
                              </div>
+                             {['M', 'T', 'N'].every((c) =>
+                                positionForm.allowedShiftTypes.some((x) => x.code === c && !x.isCustom),
+                             ) && (
+                                <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-900/30 p-3 text-[10px] text-indigo-900 dark:text-indigo-100">
+                                    <p className="font-black uppercase text-indigo-600 dark:text-indigo-300 mb-1">M + T + N en puesto personalizado</p>
+                                    <p>
+                                        No es cobertura <b>24 horas rotativa</b>: son <b>3 cupos en simultáneo</b> por día
+                                        (tres guardias: mañana, tarde y noche). Si querés que cada guardia rote M→T→N en el mes,
+                                        cambiá el tipo de cobertura a <b>24 HORAS (Lunes a Lunes)</b>.
+                                    </p>
+                                </div>
+                             )}
                             
                             <label className="text-[10px] font-black uppercase text-slate-400 mb-2 block">1. Turnos Estándar (Todos los días)</label>
                             <div className="flex flex-wrap gap-2 mb-4">

@@ -4,7 +4,7 @@
  */
 
 import type { V2FeasibilityReport, V2PositionDef } from './autoScheduleEngineV2';
-import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
+import { computeObjectiveRequiredHeadcount, isFullCustomObjectivePool } from './objectiveHeadcount';
 
 export type PlanningBalanceKind = 'short' | 'exact' | 'surplus' | 'hours_short';
 
@@ -113,9 +113,12 @@ export function buildPlanningOperationalDiagnosis(params: {
     const { positions, feasibility, staffing, peopleAvailable, soldHours, pickedCycle } = params;
     const m = feasibility.metrics;
     const modo8 = computeModo8Slots(positions);
-    const plantilla6x2 = computeObjectiveRequiredHeadcount(positions, '6+2');
+    const cycleForPlantilla = pickedCycle || staffing.cycleKey || '6+2';
+    const plantillaRequired = computeObjectiveRequiredHeadcount(positions, cycleForPlantilla);
     const servicio = staffing.servicioDiarioModo8;
-    const poolFrancos = Math.max(0, plantilla6x2 - servicio);
+    const poolFrancos = Math.max(0, plantillaRequired - servicio);
+    const customPool = isFullCustomObjectivePool(positions);
+    const plantillaLabel = customPool ? `plantilla ${cycleForPlantilla}` : 'plantilla 6+2';
 
     const structuralHours = m.structuralDemandHours || staffing.structuralHoras || 0;
     const sold = soldHours > 0 ? soldHours : m.contractedHours || 0;
@@ -123,14 +126,14 @@ export function buildPlanningOperationalDiagnosis(params: {
     const offerHours = m.offerHours || 0;
     const hoursGap = sold > 0 ? Math.max(0, sold - offerHours) : 0;
 
-    const headcountDelta = peopleAvailable - plantilla6x2;
+    const headcountDelta = peopleAvailable - plantillaRequired;
     const warnings: string[] = [...(feasibility.warnings || [])];
 
     let balance: PlanningBalanceKind;
     let balanceLabel: string;
 
     if (!feasibility.ok && (hoursGap > 1 || peopleAvailable < m.peopleNeededForTarget)) {
-        balance = hoursGap > 1 && peopleAvailable >= plantilla6x2 ? 'hours_short' : 'short';
+        balance = hoursGap > 1 && peopleAvailable >= plantillaRequired ? 'hours_short' : 'short';
     } else if (headcountDelta < 0) {
         balance = 'short';
     } else if (headcountDelta === 0 && hoursGap <= 1) {
@@ -145,24 +148,25 @@ export function buildPlanningOperationalDiagnosis(params: {
 
     switch (balance) {
         case 'exact':
-            balanceLabel = 'Justo — dotación = plantilla 6+2';
+            balanceLabel = customPool
+                ? `Justo — dotación = ${plantillaLabel} (pool custom)`
+                : 'Justo — dotación = plantilla 6+2';
             break;
         case 'short':
-            balanceLabel = `Faltan ${Math.abs(headcountDelta)} persona(s) vs plantilla 6+2`;
+            balanceLabel = `Faltan ${Math.abs(headcountDelta)} persona(s) vs ${plantillaLabel}`;
             break;
         case 'surplus':
-            balanceLabel = `Sobran ${headcountDelta} persona(s) vs plantilla 6+2`;
+            balanceLabel = `Sobran ${headcountDelta} persona(s) vs ${plantillaLabel}`;
             break;
         case 'hours_short':
             balanceLabel = `Faltan ~${Math.round(hoursGap)}h de capacidad del equipo`;
             break;
     }
 
-    const recommendedCycle = balance === 'exact' && feasibility.ok
-        ? '6+2'
-        : (pickedCycle || staffing.cycleKey || '6+2');
+    const recommendedCycle = pickedCycle || staffing.cycleKey || '6+2';
 
-    const strictSixTwo = balance === 'exact'
+    const strictSixTwo = !customPool
+        && balance === 'exact'
         && feasibility.ok
         && headcountDelta === 0
         && hoursGap <= 1
@@ -175,12 +179,14 @@ export function buildPlanningOperationalDiagnosis(params: {
             + 'Bandas fijas M/T/N + flotante por puesto (sin péndulo rotativo). '
             + 'No degradar a 5+1/6+1 ni convertir F→turno para cerrar SLA.';
     } else if (balance === 'short' || balance === 'hours_short') {
-        resolution =
-            'Dotación o capacidad horaria insuficiente. Evaluar refuerzo, Modo 12 en más días, '
+        resolution = customPool
+            ? 'Dotación o capacidad horaria insuficiente. En objetivos custom probá 5+1/6+1, revisá Cobertura de dotación en Servicios, o refuerzo puntual.'
+            : 'Dotación o capacidad horaria insuficiente. Evaluar refuerzo, Modo 12 en más días, '
             + 'esquema 6+1/5+1 puntual, o revisar horas vendidas / ausencias.';
     } else if (balance === 'surplus') {
-        resolution =
-            `${headcountDelta} guardia(s) por encima de plantilla 6+2. Excedente en RET (días laborables) y Franco (descanso); `
+        resolution = customPool
+            ? `${headcountDelta} guardia(s) por encima de ${plantillaLabel}. Excedente en RET/Franco; asignar puestos vacíos (Salon 2, CORTADO) desde cobertura SLA.`
+            : `${headcountDelta} guardia(s) por encima de plantilla 6+2. Excedente en RET (días laborables) y Franco (descanso); `
             + 'sin turnos facturables ni reparto extra que rompa ~180h/guardia.';
     } else {
         resolution =
@@ -212,7 +218,7 @@ export function buildPlanningOperationalDiagnosis(params: {
             offerHoursT2: m.offerHoursNextCycle || 0,
             priorHoursTeam: m.totalPriorHoursTeam || 0,
             absenceHoursTeam: m.totalAbsenceHoursTeam || 0,
-            plantillaRequired6x2: plantilla6x2,
+            plantillaRequired6x2: plantillaRequired,
             servicioDiario: servicio,
             poolFrancos6x2: poolFrancos,
         },

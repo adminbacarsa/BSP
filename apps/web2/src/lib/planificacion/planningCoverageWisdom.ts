@@ -777,3 +777,28 @@ export function calendarMonthsBefore(
 export function wisdomBandFromShiftCode(code: string): string {
     return bandFromCode(code);
 }
+
+/**
+ * Puesto/banda dominantes por legajo a partir de cronogramas ya planificados (ej. mes anterior).
+ * Completa planificacionDotacion cuando falta — no pisa asignaciones explícitas del usuario.
+ */
+export function inferPlannerDotacionFromWisdom(
+    wisdom: PlanningCoverageWisdom | null | undefined,
+    employeeIds: string[],
+): { defaultPositionByEmp: Record<string, string>; defaultShiftByEmp: Record<string, string> } {
+    const defaultPositionByEmp: Record<string, string> = {};
+    const defaultShiftByEmp: Record<string, string> = {};
+    const profiles = wisdom?.employeeProfiles;
+    if (!profiles) {
+        return { defaultPositionByEmp, defaultShiftByEmp };
+    }
+    for (const id of employeeIds) {
+        const prof = profiles[id];
+        if (!prof) continue;
+        const topPos = Object.entries(prof.byPosition || {}).sort((a, b) => b[1] - a[1])[0]?.[0];
+        const topBand = Object.entries(prof.byBand || {}).sort((a, b) => b[1] - a[1])[0]?.[0];
+        if (topPos) defaultPositionByEmp[id] = topPos;
+        if (topBand) defaultShiftByEmp[id] = String(topBand).toUpperCase();
+    }
+    return { defaultPositionByEmp, defaultShiftByEmp };
+}

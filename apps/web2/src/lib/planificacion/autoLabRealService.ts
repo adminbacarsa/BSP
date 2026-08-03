@@ -17,6 +17,7 @@ import {
     resolvePlanningMonthSlaHours,
     type PlanningPositionRow,
 } from '@/lib/slaPlanningMatch';
+import { normalizeCoverageTypeFromSla, summarizeObjectiveCoverage, type ObjectiveCoverageSummary } from './positionCoverageKind';
 import { customCoverSimultaneousPax } from './customCoverCycle';
 import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
 import { fetchPlanningMonthAbsences, fetchPlanningMonthShifts } from './loadPlanningMonthShifts';
@@ -24,12 +25,13 @@ import {
     DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
     fetchCoverageWisdomHistory,
 } from './fetchPlanningCoverageWisdomHistory';
+import { inferPlannerDotacionFromWisdom } from './planningCoverageWisdom';
 import {
     validatePlannerDotacionAgainstSla,
     dotacionValidationSummaryEs,
 } from './plannerDotacionValidator';
 import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
-import { computeObjectiveHeadcountBalance } from './rosterHeadcountBalance';
+import { applySlaContractDotacion, assessSlaContractReadiness, buildSlaRotationByDate } from './slaContractPlanning';
 
 export const AUTO_LAB_REAL_CASE_ID = 'case-real-service';
 
@@ -119,6 +121,7 @@ export interface AutoLabRealServiceBundle {
     absencesRrhh: PlanningAbsenceRecord[];
     coverageWisdom?: PlanningCoverageWisdom | null;
     slaContract: AutoLabSlaContractSummary;
+    coverageSummary: ObjectiveCoverageSummary;
 }
 
 function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
@@ -142,11 +145,10 @@ function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
     const provisional: V2PositionDef = {
         positionName: row.positionName,
         qty: Math.max(1, Number(row.qty) || 1),
-        coverageType: String(row.coverageType || '').toLowerCase() === 'custom'
-            ? 'custom'
-            : String(row.coverageType || '').toLowerCase().match(/^24(hs?)?$/)
-                ? '24hs'
-                : String(row.coverageType || ''),
+        coverageType: normalizeCoverageTypeFromSla(
+            String(row.coverageType || ''),
+            (row.shifts || []) as Array<{ code?: string }>,
+        ),
         shifts: shifts.length > 0 ? shifts : [
             { code: 'M', name: 'Mañana', hours: 8 },
             { code: 'T', name: 'Tarde', hours: 8 },
@@ -158,7 +160,7 @@ function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
     const is24 = is24hsRotationPosition(provisional);
     return {
         ...provisional,
-        coverageType: explicitCoverageTypeFromRow(row.coverageType) ?? (is24 ? '24hs' : 'custom'),
+        coverageType: explicitCoverageTypeFromRow(row.coverageType) ?? provisional.coverageType,
         activeDays: is24
             ? ['L', 'M', 'X', 'J', 'V', 'S', 'D']
             : provisional.activeDays,
@@ -238,6 +240,14 @@ export async function loadAutoLabRealServiceBundle(params: {
     }
 
     const positions = structure.map(planningRowToV2Position);
+    const positionAssignmentsByEmp = buildPositionAssignmentsByEmp(srv.positionAssignments);
+    const coverageSummary = summarizeObjectiveCoverage(positions, { positionAssignmentsByEmp });
+    warnings.push(...coverageSummary.warnings);
+    if (coverageSummary.allCustomPool) {
+        warnings.push(coverageSummary.motorLabel);
+    } else if (coverageSummary.has24hsRotation) {
+        warnings.push(coverageSummary.motorLabel);
+    }
     const serviceStart = String(srv.startDate || '').slice(0, 10);
     const serviceEnd = String(srv.endDate || '').slice(0, 10);
     const excludedDates = Array.isArray(srv.excludedDates) ? [...srv.excludedDates] : undefined;
@@ -342,6 +352,71 @@ export async function loadAutoLabRealServiceBundle(params: {
         warnings.push(`Solo ${employees.length} guardia(s) en dotación real; el motor puede agregar sintéticos para cerrar pax/horas.`);
     }
 
+    let coverageWisdom: PlanningCoverageWisdom | null = null;
+    try {
+        const empNames: Record<string, string> = {};
+        employees.forEach((e) => { empNames[e.id] = e.nombre || e.id; });
+        coverageWisdom = await fetchCoverageWisdomHistory({
+            empresaId,
+            objectiveId: objective.objectiveId,
+            year,
+            month,
+            lookbackMonths: DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
+            scopeEmpresa,
+            migracionCompleta,
+            employeeNames: empNames,
+            rosterEmployeeIds: new Set(employees.map((e) => e.id)),
+        });
+        const inferred = inferPlannerDotacionFromWisdom(
+            coverageWisdom,
+            employees.map((e) => e.id),
+        );
+        let fromHistory = 0;
+        for (const [empId, posName] of Object.entries(inferred.defaultPositionByEmp)) {
+            if (defaultPositionByEmp[empId]) continue;
+            defaultPositionByEmp[empId] = posName;
+            fromHistory += 1;
+        }
+        for (const [empId, band] of Object.entries(inferred.defaultShiftByEmp)) {
+            if (defaultShiftByEmp[empId]) continue;
+            defaultShiftByEmp[empId] = band;
+        }
+        if (fromHistory > 0) {
+            warnings.push(
+                `Dotación inferida desde cronogramas previos (${fromHistory} guardia(s); meses en historial de cobertura).`,
+            );
+        }
+        if (coverageWisdom.cellsAnalyzed > 0 || coverageWisdom.events.length > 0) {
+            warnings.push(`Historial ${coverageWisdom.periodLabel}: ${coverageWisdom.summary}`);
+        }
+    } catch (wisdomErr) {
+        warnings.push('Sin historial de coberturas (error al leer turnos previos).');
+        console.warn('[autoLab] fetchCoverageWisdomHistory', wisdomErr);
+    }
+
+    const monthDateStrs = Array.from({ length: new Date(year, month, 0).getDate() }, (_, i) => {
+        const d = i + 1;
+        return `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    });
+    const slaReadiness = assessSlaContractReadiness({
+        positionAssignments: srv.positionAssignments,
+        serviceRules: srv.serviceRules,
+        serviceRotations: srv.serviceRotations,
+        dateStrs: monthDateStrs,
+    });
+    warnings.push(...slaReadiness.hints);
+
+    const slaDot = applySlaContractDotacion({
+        positionAssignments: srv.positionAssignments,
+        defaultPositionByEmp,
+        defaultShiftByEmp,
+    });
+    if (slaDot.fromSlaCobertura > 0 || slaDot.fromSlaShift > 0) {
+        warnings.push(
+            `Dotación desde Cobertura SLA: ${slaDot.fromSlaCobertura} puesto(s) y ${slaDot.fromSlaShift} banda(s) primarias.`,
+        );
+    }
+
     const dotacionCount = Object.keys(defaultPositionByEmp).length;
     const dotacionValidation = validatePlannerDotacionAgainstSla({
         positions,
@@ -350,7 +425,7 @@ export async function loadAutoLabRealServiceBundle(params: {
         cycleKey: '6+2',
     });
     if (dotacionCount > 0) {
-        warnings.push(`Dotación por puesto desde legajos: ${dotacionCount} guardia(s) con planificacionDotacion.`);
+        warnings.push(`Dotación por puesto (legajos y/o cronogramas previos): ${dotacionCount} guardia(s).`);
         warnings.push(dotacionValidationSummaryEs(dotacionValidation));
         warnings.push(...dotacionValidation.errors);
         warnings.push(...dotacionValidation.warnings);
@@ -394,29 +469,6 @@ export async function loadAutoLabRealServiceBundle(params: {
         rosterEmployeeIds: new Set(employees.map((e) => e.id)),
     });
 
-    let coverageWisdom: PlanningCoverageWisdom | null = null;
-    try {
-        const empNames: Record<string, string> = {};
-        employees.forEach((e) => { empNames[e.id] = e.nombre || e.id; });
-        coverageWisdom = await fetchCoverageWisdomHistory({
-            empresaId,
-            objectiveId: objective.objectiveId,
-            year,
-            month,
-            lookbackMonths: DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
-            scopeEmpresa,
-            migracionCompleta,
-            employeeNames: empNames,
-            rosterEmployeeIds: new Set(employees.map((e) => e.id)),
-        });
-        if (coverageWisdom.cellsAnalyzed > 0 || coverageWisdom.events.length > 0) {
-            warnings.push(`Historial ${coverageWisdom.periodLabel}: ${coverageWisdom.summary}`);
-        }
-    } catch (wisdomErr) {
-        warnings.push('Sin historial de coberturas (error al leer turnos previos).');
-        console.warn('[autoLab] fetchCoverageWisdomHistory', wisdomErr);
-    }
-
     const absencesByDate = absencesRrhh.map((a) => ({
         empId: a.employeeId,
         dateStr: a.dateStr,
@@ -459,13 +511,8 @@ export async function loadAutoLabRealServiceBundle(params: {
         positions,
         employeeCount: employees.length,
         cycle: '6+2',
-        rotationMode: 'rotative',
-        rotateShiftsOverride: (() => {
-            const has24 = positions.some(is24hsRotationPosition);
-            if (!has24) return false;
-            // Objetivo con 24hs: motor ciclo 24d (fixedBandFloater), no péndulo demand-driven.
-            return false;
-        })(),
+        rotationMode: positions.some(is24hsRotationPosition) ? 'rotative' : 'fixed',
+        rotateShiftsOverride: false,
         slaVendidas: slaVendidas > 0 ? slaVendidas : undefined,
         serviceStartDate: serviceStart || undefined,
         serviceEndDate: serviceEnd || undefined,
@@ -492,5 +539,6 @@ export async function loadAutoLabRealServiceBundle(params: {
         absencesRrhh,
         coverageWisdom,
         slaContract,
+        coverageSummary,
     };
 }

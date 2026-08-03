@@ -24,6 +24,8 @@ import {
     computePositionRequiredHeadcount,
     isLabPaddingEmpId,
     isLabSyntheticEmpId,
+    isFullCustomObjectivePool,
+    computeCustomObjectivePoolHeadcount,
 } from './objectiveHeadcount';
 import { buildRosterSurplusReport, type RosterSurplusReport } from './rosterSurplus';
 
@@ -124,7 +126,16 @@ export function padPlanningRosterForAutoSchedule(params: {
     const perPositionHeads = computeObjectiveRequiredHeadcount(params.positions, cycleKey);
     const realCount = params.employees.filter((e) => !isLabPaddingEmpId(e.id)).length;
     /** Plantilla del objetivo (4+4+2=10). Solo legajos reales; sin inflar por horas SLA. */
-    const structuralTarget = perPositionHeads;
+    let structuralTarget = perPositionHeads;
+    if (isFullCustomObjectivePool(params.positions)) {
+        for (const ck of ['5+1', '6+2', '6+1', '4+2'] as const) {
+            const need = computeCustomObjectivePoolHeadcount(params.positions, ck);
+            if (realCount >= need) {
+                structuralTarget = need;
+                break;
+            }
+        }
+    }
     let need = Math.max(0, structuralTarget - realCount);
 
     if (need > 0) {
@@ -388,7 +399,7 @@ export function runAutoLabCase(
         paddedEmployees: padResult.added,
         employees,
         feasibility: brain.feasibility,
-        cycleKey,
+        cycleKey: brain.pickedCycle,
         slaVendidas,
     });
 

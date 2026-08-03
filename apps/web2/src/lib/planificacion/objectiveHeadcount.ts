@@ -1,6 +1,10 @@
 import type { V2PositionDef } from './autoScheduleEngineV2';
 import { isCustomCoverPosition } from './autoScheduleEngineV2';
-import { customCoverRequiredHeadcount } from './customCoverCycle';
+import {
+    customCoverRequiredHeadcount,
+    customCoverSimultaneousPax,
+    customCoverSlotsRequiredOnDay,
+} from './customCoverCycle';
 
 const CYCLE_MAP: Record<string, [number, number]> = {
     '6+2': [6, 2],
@@ -105,10 +109,45 @@ export function computePositionRequiredHeadcount(
     return Math.ceil(qty * cycleFactor);
 }
 
+const POOL_WEEKDAY_LETTERS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
+
+/** Objetivo 100 % custom (ej. Shopping): cupos simultáneos comparten pool de guardias, no plantilla por puesto. */
+export function isFullCustomObjectivePool(positions: V2PositionDef[]): boolean {
+    return positions.length > 0 && positions.every(isCustomCoverPosition);
+}
+
+/** Pico de cupos SLA en un día (suma puestos × bandas activas). */
+export function customObjectivePeakConcurrentSlots(positions: V2PositionDef[]): number {
+    let peak = 0;
+    for (const day of POOL_WEEKDAY_LETTERS) {
+        let daySlots = 0;
+        for (const pos of positions) {
+            if (!isCustomCoverPosition(pos)) continue;
+            daySlots += customCoverSlotsRequiredOnDay(pos, day);
+        }
+        peak = Math.max(peak, daySlots);
+    }
+    return peak;
+}
+
+/** Plantilla del objetivo custom pool: ceil(pico × factor ciclo), no suma de headcount por puesto. */
+export function computeCustomObjectivePoolHeadcount(
+    positions: V2PositionDef[],
+    cycleKey: string = '6+2',
+): number {
+    const peak = customObjectivePeakConcurrentSlots(positions);
+    const [cL, cF] = CYCLE_MAP[cycleKey] ?? CYCLE_MAP['6+2'];
+    const factor = (cL + cF) / cL;
+    return Math.max(1, Math.ceil(peak * factor));
+}
+
 export function computeObjectiveRequiredHeadcount(
     positions: V2PositionDef[],
     cycleKey: string = '6+2',
 ): number {
+    if (isFullCustomObjectivePool(positions)) {
+        return computeCustomObjectivePoolHeadcount(positions, cycleKey);
+    }
     return positions.reduce(
         (sum, pos) => sum + computePositionRequiredHeadcount(pos, cycleKey),
         0,
@@ -119,9 +158,12 @@ export function buildPositionRequiredHeadcountMap(
     positions: V2PositionDef[],
     cycleKey: string = '6+2',
 ): Record<string, number> {
+    const pool = isFullCustomObjectivePool(positions);
     const map: Record<string, number> = {};
     for (const pos of positions) {
-        map[pos.positionName] = computePositionRequiredHeadcount(pos, cycleKey);
+        map[pos.positionName] = pool
+            ? customCoverSimultaneousPax(pos)
+            : computePositionRequiredHeadcount(pos, cycleKey);
     }
     return map;
 }

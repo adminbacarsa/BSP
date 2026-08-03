@@ -23,7 +23,7 @@ import {
     type V2PositionDef,
 } from './autoScheduleEngineV2';
 import { customCoverSlotsRequiredOnDay } from './customCoverCycle';
-import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
+import { computeObjectiveRequiredHeadcount, isFullCustomObjectivePool } from './objectiveHeadcount';
 import {
     buildPlanningOperationalDiagnosis,
     type PlanningOperationalDiagnosis,
@@ -339,14 +339,18 @@ export function resolveAutoPlanningBrain(input: AutoPlanningBrainInput): AutoPla
     let diagnosis = buildPlanningOperationalDiagnosis({
         positions: input.positions,
         feasibility,
-        staffing: staffingRef6x2,
+        staffing: {
+            servicioDiarioModo8: staffingPrelim.servicioDiarioModo8,
+            structuralHoras: staffingPrelim.structuralHoras,
+            cycleKey,
+        },
         peopleAvailable: input.employees.length,
         soldHours: input.slaVendidas,
         modo12DayCount: modo12DaysAuto.length,
         pickedCycle: cycleKey,
     });
 
-    if (diagnosis.strictSixTwo && !ajustarCrono) {
+    if (diagnosis.strictSixTwo && !ajustarCrono && !isFullCustomObjectivePool(input.positions)) {
         const feas62 = checkFeasibility({ ...input, autoCycles: ['6+2'] });
         if (feas62.ok) {
             cycleKey = '6+2';

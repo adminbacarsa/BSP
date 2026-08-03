@@ -1,6 +1,6 @@
 import type { V2EmployeeDef, V2FeasibilityReport, V2GenerateStats, V2PositionDef } from './autoScheduleEngineV2';
 import { computeDailyStaffingModel } from './autoPlanningBrain';
-import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
+import { computeObjectiveRequiredHeadcount, isFullCustomObjectivePool } from './objectiveHeadcount';
 import { pickRetDesignee } from './absenceFrancoUtils';
 import { buildSurplusEmployeePool } from './surplusAbsentSubstitution';
 import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
@@ -101,18 +101,25 @@ export function buildRosterSurplusReport(params: {
         ? pickRetDesignee(ctx, stats, assignments)
         : stats?.retDesignateEmpIds?.[0];
 
+    const customPool = isFullCustomObjectivePool(positions);
     const warnings: string[] = [];
 
     warnings.push(
-        `Objetivo requiere ${objectiveHeadcount} guardia(s) estructural(es) `
-        + `(rotación 24hs + custom según SLA); dotación real ${sourceCount}, roster planificado ${totalCount}.`,
+        customPool
+            ? `Objetivo custom pool: plantilla ${objectiveHeadcount} con ciclo ${cycleKey}; `
+            + `dotación real ${sourceCount}, roster ${totalCount}.`
+            : `Objetivo requiere ${objectiveHeadcount} guardia(s) estructural(es) `
+            + `(rotación 24hs + custom según SLA); dotación real ${sourceCount}, roster planificado ${totalCount}.`,
     );
 
     if (surplusVsFloor > 0) {
         warnings.push(
-            `Dotación en exceso (piso): ${sourceCount} guardia(s) asignado(s) al objetivo pero la estructura del SLA `
-            + `solo requiere ${floorHeads} puesto(s) en simultáneo (suma de qty). Sobran ${surplusVsFloor} legajo(s) reales `
-            + `que no tienen puesto fijo — el motor los mezcla en rotación 24hs o los deja en RET/Franco.`,
+            customPool
+                ? `Dotación (${sourceCount}) supera el piso de qty simultáneos (${floorHeads}): `
+                + `${surplusVsFloor} legajo(s) sin puesto titular fijo — asignar por Cobertura de dotación o RET.`
+                : `Dotación en exceso (piso): ${sourceCount} guardia(s) asignado(s) al objetivo pero la estructura del SLA `
+                + `solo requiere ${floorHeads} puesto(s) en simultáneo (suma de qty). Sobran ${surplusVsFloor} legajo(s) reales `
+                + `que no tienen puesto fijo — el motor los mezcla en rotación 24hs o los deja en RET/Franco.`,
         );
     }
 

@@ -14,6 +14,7 @@ import {
     isLabSyntheticEmpId,
 } from './objectiveHeadcount';
 import { is24hsPosition } from './scheduleObjectiveFlags';
+import { empMayJoinPositionRoster } from './slaContractPlanning';
 
 export type PositionScheduleKind = '24hs' | 'custom' | 'other';
 
@@ -43,6 +44,7 @@ export interface ResolveObjectiveRosterParams {
     overcapFactor: number;
     /** Si false, usa reparto por mayor brecha (legacy) sin priorizar 24hs. */
     phasedByKind?: boolean;
+    positionAssignmentsByEmp?: Record<string, Array<{ positionName: string; shiftCodes: string[] }>>;
 }
 
 export interface ResolveObjectiveRosterResult {
@@ -137,6 +139,10 @@ export function resolveObjectivePositionRoster(
         overcapFactor,
     } = params;
 
+    const rosterCtx = { positionAssignmentsByEmp: params.positionAssignmentsByEmp };
+    const canJoin = (empId: string, posName: string) =>
+        empMayJoinPositionRoster(rosterCtx, empId, posName);
+
     const phasedByKind = params.phasedByKind ?? objectiveHasMixedScheduleKinds(positions);
     const positionGroups = initEmptyGroups(positions);
     const empAssignedTo: Record<string, string | null> = {};
@@ -155,6 +161,7 @@ export function resolveObjectivePositionRoster(
     for (const emp of sortedEmps) {
         const fixed = userLockedPos[emp.id];
         if (!fixed || positionGroups[fixed] === undefined) continue;
+        if (!canJoin(emp.id, fixed)) continue;
         assign(emp.id, fixed, false);
     }
 
@@ -163,6 +170,7 @@ export function resolveObjectivePositionRoster(
             if (empAssignedTo[emp.id] !== undefined) continue;
             const target = pickPositionWithLargestGap(candidates, positionGroups, positionNeed);
             if (!target) continue;
+            if (!canJoin(emp.id, target)) continue;
             const pos = positions.find((p) => p.positionName === target);
             if (!pos) continue;
             const monthH = perPositionMonthHours[pos.positionName] ?? 0;
@@ -198,7 +206,7 @@ export function resolveObjectivePositionRoster(
             overcapFactor,
             phasedByKind,
         );
-        if (target) {
+        if (target && canJoin(emp.id, target)) {
             const pos = positions.find((p) => p.positionName === target);
             const monthH = perPositionMonthHours[pos?.positionName ?? ''] ?? 0;
             const need = pos

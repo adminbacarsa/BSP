@@ -2,6 +2,7 @@ import type { AutoPlanningBrainResult } from './autoPlanningBrain';
 import { generateScheduleV4 } from './autoScheduleEngineV4';
 import type { V2EngineContext, V2GenerateResult, V2GenerateStats, V2PositionDef, V2EmployeeDef } from './autoScheduleEngineV2';
 import { applySlaContractPostProcess } from './autoScheduleEngineV2';
+import { buildSlaRotationByDate } from './slaContractPlanning';
 import { findPositionAssignmentViolations } from './positionAssignmentPolicy';
 import { isCustomCoverPosition, is24hsRotationPosition, normalize24hsPositionCalendars } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
@@ -710,6 +711,8 @@ export function buildAutoLabGenContext(
     const monthStartGlobalDayIndex = resolveMonthStartGlobalDayIndex({
         daysInMonth: run.daysInMonth,
     } as V2EngineContext);
+    const monthDateStrs = run.daysInMonth.map((d) => getAutoLabDateKey(d));
+    const slaRotationByDate = buildSlaRotationByDate(caseDef.serviceRotations, monthDateStrs);
     return {
         positions: normalize24hsPositionCalendars(run.positions),
         employees: run.employees.map((e) => ({
@@ -753,6 +756,7 @@ export function buildAutoLabGenContext(
             : {}),
         ...(caseDef.serviceRules?.length ? { serviceRules: caseDef.serviceRules } : {}),
         ...(caseDef.serviceRotations?.length ? { serviceRotations: caseDef.serviceRotations } : {}),
+        ...(slaRotationByDate ? { slaRotationByDate } : {}),
     };
 }
 

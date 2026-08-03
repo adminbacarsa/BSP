@@ -131,6 +131,7 @@ import {
     PLANNING_COVERAGE_RULES,
     type AutoPlanningBrainResult,
 } from '@/lib/planificacion/autoPlanningBrain';
+import { applySlaContractDotacion, buildSlaRotationByDate } from '@/lib/planificacion/slaContractPlanning';
 import {
     countPositionClosedUnitsFromShifts,
     PLANNING_NON_BILLABLE_CODES,
@@ -7513,6 +7514,15 @@ export default function PlanificacionPage() {
                 const shift = empDefaultShift[`${e.id}___${selectedObjective}`];
                 if (shift) defaultShiftByEmp[e.id] = shift;
             });
+            applySlaContractDotacion({
+                positionAssignments: activeSlaPositionAssignments ?? undefined,
+                defaultPositionByEmp,
+                defaultShiftByEmp,
+            });
+            const slaRotationByDate = buildSlaRotationByDate(
+                activeSlaServiceRotations,
+                daysInMonth.map((d) => getDateKey(d)),
+            );
             // Flotantes de empresa: empleados activos sin objetivo asignado.
             // El motor V3 los usa como refuerzo (Fase 3) cuando quedan slots sin cubrir
             // tras los regulares y los FLEX del objetivo en curso.
@@ -7629,6 +7639,7 @@ export default function PlanificacionPage() {
                 })(),
                 serviceRules: activeSlaServiceRules ?? undefined,
                 serviceRotations: activeSlaServiceRotations ?? undefined,
+                ...(slaRotationByDate ? { slaRotationByDate } : {}),
             };
             const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
             const canFloater = !can6x1

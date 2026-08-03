@@ -55,7 +55,7 @@ import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 import { SUVICO_POLICY } from './suvicoPolicy';
 import type { CctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
 import { buildCctSchemeCalendarProjectionBlock } from './cctSchemeMonthlyProjection2026';
-import { buildPositionRequiredHeadcountMap, computeObjectiveRequiredHeadcount, computePositionRequiredHeadcount, effectivePositionGroupNeed, estimatePeopleFromContractHours, isLabSyntheticEmpId } from './objectiveHeadcount';
+import { buildPositionRequiredHeadcountMap, computeObjectiveRequiredHeadcount, computePositionRequiredHeadcount, effectivePositionGroupNeed, estimatePeopleFromContractHours, isFullCustomObjectivePool, isLabSyntheticEmpId } from './objectiveHeadcount';
 import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, fillDemandGapsWithFlexibleCycle, forceCloseRemainingSlaGaps, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, finalizeApretarDayAssignments, stripUnauthorizedRetAssignments, recomputeUncoveredStats, repairForbiddenAfterNightTransitions, assignUnassignedWorkDayEmployeesToGaps, repairPositionDayTripletGaps, tryAssignEmployeeToDayGap } from './demandDrivenSchedule';
 import {
     mtnOpeningSlotFromGroupOffset,
@@ -92,6 +92,8 @@ import {
     findLowAffinityDotacionWarnings,
     type WisdomRosterAlignmentResult,
 } from './wisdomRosterAlignment';
+import { empCanCoverPositionShift } from './positionAssignmentPolicy';
+import { slaRotationExpectedShift } from './slaContractPlanning';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
 const SHIFT_HRS_DEFAULT: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
@@ -109,11 +111,24 @@ const CYCLE_SHIFT_DEFAULT: Record<string, number> = {
     '6+2': 8,
 };
 
-/** Único ciclo permitido: 6+2. D12/N12 se activan por Modo12 (ajustar + V/L/E), no por ciclo. */
+/** Producción wizard (24hs): solo 6+2 salvo override. Objetivo 100 % custom: 5+1 → 6+1 → 6+2 por viabilidad. */
 const AUTO_CYCLE_PREFERENCE = ['6+2'] as const;
-const AJUSTAR_CRONO_CYCLE_PREFERENCE = ['6+2'] as const;
+const CUSTOM_POOL_CYCLE_PREFERENCE = ['5+1', '6+1', '6+2'] as const;
+const AJUSTAR_CRONO_CYCLE_PREFERENCE = ['4+2', '5+1', '6+1'] as const;
 
-function scoreAutoCycleFeasibility(feas: V2FeasibilityReport, cycleKey: string, ajustarCrono?: boolean): number {
+export function resolveAutoCyclePreferenceOrder(ctx: Pick<V2EngineContext, 'positions' | 'headcountByPax'>): readonly string[] {
+    if (isFullCustomObjectivePool(ctx.positions)) {
+        return CUSTOM_POOL_CYCLE_PREFERENCE;
+    }
+    return AUTO_CYCLE_PREFERENCE;
+}
+
+function scoreAutoCycleFeasibility(
+    feas: V2FeasibilityReport,
+    cycleKey: string,
+    ajustarCrono?: boolean,
+    customPool?: boolean,
+): number {
     if (!feas.ok) {
         const cmp = feas.metrics.cycleComparison.find(c => c.cycleKey === cycleKey);
         const gap = (cmp?.structuralPeakPeople ?? 99) - feas.metrics.peopleAvailable;
@@ -129,7 +144,9 @@ function scoreAutoCycleFeasibility(feas: V2FeasibilityReport, cycleKey: string, 
         return buffer + hourMargin * 0.25 - idle * 8 + intensiveBonus + softPenalty;
     }
     const d12Penalty = cycleKey === '4+2' ? 40 : 0;
-    const spiritBonus = cycleKey === '6+2' ? 25 : cycleKey === '5+1' ? 10 : 0;
+    const spiritBonus = customPool
+        ? (cycleKey === '5+1' ? 22 : cycleKey === '6+1' ? 18 : cycleKey === '6+2' ? 8 : 0)
+        : (cycleKey === '6+2' ? 25 : cycleKey === '5+1' ? 10 : 0);
     return buffer + hourMargin * 0.3 - idle * 15 - d12Penalty + spiritBonus;
 }
 
@@ -163,11 +180,22 @@ export function pickOptimalAutoCycles(ctx: V2EngineContext): {
         };
     }
 
-    const evaluated = AUTO_CYCLE_PREFERENCE.map((key) => {
+    const customPool = isFullCustomObjectivePool(ctx.positions);
+    const preferenceOrder = ajustarCrono
+        ? AJUSTAR_CRONO_CYCLE_PREFERENCE
+        : resolveAutoCyclePreferenceOrder(ctx);
+    const evaluated = preferenceOrder.map((key) => {
         const feas = checkFeasibility({ ...ctx, autoCycles: [key] });
-        return { cycleKey: key, ok: feas.ok, score: scoreAutoCycleFeasibility(feas, key, ajustarCrono), feas };
+        return {
+            cycleKey: key,
+            ok: feas.ok,
+            score: scoreAutoCycleFeasibility(feas, key, ajustarCrono, customPool),
+            feas,
+        };
     });
-    const eightHour = new Set(['6+2', '6+1']);
+    const eightHour = customPool
+        ? new Set(['5+1', '6+1', '6+2'])
+        : new Set(['6+2', '6+1']);
     const intensiveSet = new Set<string>(AJUSTAR_CRONO_CYCLE_PREFERENCE);
     const firstViableIntensive = ajustarCrono
         ? evaluated.find(e => e.ok && intensiveSet.has(e.cycleKey))
@@ -447,6 +475,8 @@ export interface V2EngineContext {
     /** Reglas IF→THEN aplicadas como post-procesamiento por dia. */
     serviceRules?: import('@/services/slaService').ServiceRule[];
     serviceRotations?: import('@/services/slaService').ServiceRotation[];
+    /** Rotaciones SLA resueltas por día (prioridad sobre péndulo M/T/N del motor). */
+    slaRotationByDate?: import('./slaContractPlanning').SlaRotationByDate;
 }
 
 export interface V2PositionDemand {
@@ -1088,9 +1118,12 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
 
     if (ctx.headcountByPax === true) {
         if (peopleAvailable < plantillaByPax) {
+            const plantillaHint = isFullCustomObjectivePool(ctx.positions)
+                ? `pool custom ~${peakConcurrent} cupos/día × factor ${cycleKey}`
+                : `(24hs ×4/pax 6+2 + custom por qty)`;
             reasons.push(
                 `Dotación insuficiente por puestos: hacen falta ${plantillaByPax} guardia(s) `
-                + `(24hs ×4/pax 6+2 + custom por qty) y hay ${peopleAvailable}.`,
+                + `${plantillaHint} y hay ${peopleAvailable}.`,
             );
         }
         if (
@@ -1596,6 +1629,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         hardMax,
         overcapFactor,
         phasedByKind: rosterPhased,
+        positionAssignmentsByEmp: ctx.positionAssignmentsByEmp,
     });
 
     for (const pos of ctx.positions) {
@@ -1869,6 +1903,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
      * - rotateShifts=false: banda fija todo el mes.
      */
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
+        const slaCode = slaRotationExpectedShift(ctx, empId, dateStr, posName);
+        if (slaCode) return slaCode;
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
@@ -2621,6 +2657,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (assignmentBreaksBandTransition(assignments, empId, dateStr, sCode)) return false;
         if (nextAssignmentBreaksBandTransition(assignments, empId, dateStr, sCode)) return false;
         if (!passesAgreementRest(empId, dateStr, sCode, sStart, sHrs)) return false;
+        if (!empCanCoverPositionShift(ctx, empId, pos.positionName, sCode)) return false;
         writeAssignment(empId, dateStr, pos.positionName, sCode, sh.name || sCode, sHrs, sStart, inCurrent, sEnd);
         return true;
     };
@@ -2642,7 +2679,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (ctx.absences[empId]?.has(dateStr)) return false;
         if (!opts?.ignoreCycleWorkDay && !cycleWorkDays[empId]?.has(dateStr)) return false;
         if (!positionIsActiveOn(pos, dayLetter)) return false;
-        const dayBands = customCoverBandsForDay(pos, dayLetter, ctx.autoCycles, dateStr);
+        const dayBands = customCoverBandsForDay(pos, dayLetter, ctx.autoCycles, dateStr).filter((b) =>
+            empCanCoverPositionShift(ctx, empId, pos.positionName, String(b.code ?? '').toUpperCase()),
+        );
         if (dayBands.length === 0) return false;
 
         const qty = customCoverDailyPax(pos);
@@ -2658,6 +2697,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
             for (const sh of dayBands) {
                 const code = String(sh.code ?? '').toUpperCase();
+                if (!empCanCoverPositionShift(ctx, empId, pos.positionName, code)) continue;
                 const filled = assignments.filter((a) =>
                     a.dateStr === dateStr
                     && a.positionName === pos.positionName
@@ -2672,6 +2712,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         const sh = pickBand();
         if (!sh) return false;
         const sCode = String(sh.code ?? '').toUpperCase();
+        if (!empCanCoverPositionShift(ctx, empId, pos.positionName, sCode)) return false;
         const sHrs = shiftHoursH(sh);
         const sStart = sh.startTime || DEFAULT_SHIFT_TIMES[sCode] || '07:00';
         const sEnd = sh.endTime || undefined;
@@ -2698,6 +2739,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         for (const eid of sorted) {
             if (runtime[eid].assignedDays.has(dateStr)) continue;
             if (ctx.absences[eid]?.has(dateStr)) continue;
+            if (!empCanCoverPositionShift(ctx, eid, pos.positionName)) continue;
             if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent)) return true;
         }
         return false;
@@ -3143,15 +3185,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     if (assignmentBreaksBandTransition(assignments, empId, dateStr, assignCode)) continue;
                     if (nextAssignmentBreaksBandTransition(assignments, empId, dateStr, assignCode)) continue;
                     if (!passesAgreementRest(empId, dateStr, assignCode, assignStart, assignHrs)) continue;
-                    // Restricción de cobertura: si el empleado tiene asignaciones definidas, verificar puesto y banda
-                    if (ctx.positionAssignmentsByEmp) {
-                        const empSlots = ctx.positionAssignmentsByEmp[empId];
-                        if (empSlots) {
-                            const posSlot = empSlots.find(s => s.positionName === pos.positionName);
-                            if (!posSlot) continue;
-                            if (posSlot.shiftCodes.length > 0 && !posSlot.shiftCodes.includes(assignCode)) continue;
-                        }
-                    }
+                    if (!empCanCoverPositionShift(ctx, empId, pos.positionName, assignCode)) continue;
                     writeAssignment(empId, dateStr, pos.positionName, assignCode, sh.name || assignCode, assignHrs, assignStart, inCurrentCycle, assignEnd);
                     if (extensionMode && assignCode === 'D12') extD12Assigns.push(assignments[assignments.length - 1]);
                     if (extensionMode && assignCode === 'N12') extN12Assigns.push(assignments[assignments.length - 1]);
