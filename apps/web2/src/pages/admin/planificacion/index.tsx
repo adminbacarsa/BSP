@@ -828,9 +828,13 @@ function applyRotationsForMonth(
                 const _dtMs = new Date(dateStr + 'T00:00:00').getTime();
                 const _daysSince = Math.round((_dtMs - _csAncMs) / 86400000);
                 for (const _csEmp of _csEntries) {
-                    const _seqLen = _csEmp.sequence.length;
+                    // Normalizar: si la secuencia se guardó como un único string concatenado, split por caracter
+                    const _seq: string[] = (_csEmp.sequence.length === 1 && (_csEmp.sequence[0] as string).length > 2)
+                        ? (_csEmp.sequence[0] as string).split('').filter((c: string) => /[A-Z]/.test(c))
+                        : _csEmp.sequence;
+                    const _seqLen = _seq.length;
                     const _pos = ((_daysSince % _seqLen) + _seqLen) % _seqLen;
-                    const _code = (_csEmp.sequence[_pos] as string).toUpperCase();
+                    const _code = (_seq[_pos] as string).toUpperCase();
                     const _key = `${_csEmp.employeeId}_${dateStr}`;
                     const _cPend = pendingChanges[_key];
                     if (_code === 'F' || _code === 'FF' || _code === 'FP') {

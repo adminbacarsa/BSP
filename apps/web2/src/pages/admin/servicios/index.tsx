@@ -882,7 +882,12 @@ export default function ServiciosSLAPage() {
       if (i !== eidx) return e;
       const next: any = { ...e };
       if (field === 'sequence') {
-        next.sequence = val.trim().toUpperCase().split(/[\s,]+/).filter(Boolean);
+        const _raw = val.trim().toUpperCase();
+        // Sin separadores → split caracter a caracter (para códigos de 1 letra: F, N, T, M…)
+        // Con espacios o comas → split por separador (para códigos multi-char: D12, N12, REF…)
+        next.sequence = (!_raw.includes(' ') && !_raw.includes(','))
+          ? _raw.split('').filter((c: string) => /[A-Z]/.test(c))
+          : _raw.split(/[\s,]+/).filter(Boolean);
       } else {
         next[field] = val;
       }
@@ -2847,7 +2852,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   </select>
                                   <button type="button" onClick={() => removeRREntry(eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
                                 </div>
-                                <input type="text" placeholder="F N N N N N F T T T T T" value={((entry as any).sequence || []).join(' ')} onChange={e => updRREntry(eidx, 'sequence', e.target.value)} className="w-full text-[10px] font-mono bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                                <input type="text" placeholder="F N N N N N F T T T T T  (con espacios para D12/N12)" value={((entry as any).sequence || []).join(' ')} onChange={e => updRREntry(eidx, 'sequence', e.target.value)} className="w-full text-[10px] font-mono bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
                                 {(entry as any).sequence?.length ? <p className="text-[9px] text-teal-600 mt-0.5">{(entry as any).sequence.length} días · ciclo de {(entry as any).sequence.length} días</p> : <p className="text-[9px] text-slate-400 mt-0.5">Ej: F N N N N N F T T T T T (separados por espacio)</p>}
                               </div>
                             ))}
@@ -3050,7 +3055,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                           </select>
                           <button type="button" onClick={() => removeRREntry(eidx)} className="p-1 text-rose-400 hover:bg-rose-50 rounded-lg shrink-0"><X size={10}/></button>
                         </div>
-                        <input type="text" placeholder="F N N N N N F T T T T T" value={((entry as any).sequence || []).join(' ')} onChange={e => updRREntry(eidx, 'sequence', e.target.value)} className="w-full text-[10px] font-mono bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
+                        <input type="text" placeholder="F N N N N N F T T T T T  (con espacios para D12/N12)" value={((entry as any).sequence || []).join(' ')} onChange={e => updRREntry(eidx, 'sequence', e.target.value)} className="w-full text-[10px] font-mono bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-lg px-2 py-1.5" />
                         {(entry as any).sequence?.length ? <p className="text-[9px] text-teal-600 mt-0.5">{(entry as any).sequence.length} días · ciclo de {(entry as any).sequence.length} días</p> : <p className="text-[9px] text-slate-400 mt-0.5">Ej: F N N N N N F T T T T T (separados por espacio)</p>}
                       </div>
                     ))}
