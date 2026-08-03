@@ -2796,7 +2796,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'custom_sequence', sequenceAnchorDate: editingRotation.sequenceAnchorDate || '', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: (editingRotation.periods[0]?.entries || []).map((e: any) => ({ ...e, sequence: e.sequence || [] })) }] })} className={editingRotation.cycleMode === 'custom_sequence' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por patrón</button>
                                 </div>
                               </div>
-                              {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
+                              {(editingRotation.cycleMode === 'round_robin' || (!editingRotation.cycleMode && editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY'))) && (
                                 <div>
                                   <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana de ref. (sem. 0)</p>
                                   <div className="flex items-center gap-1">
@@ -2999,7 +2999,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cycleMode: 'custom_sequence', sequenceAnchorDate: editingRotation.sequenceAnchorDate || '', periods: [{ label: '', trigger: { type: 'WEEKLY' as any }, entries: (editingRotation.periods[0]?.entries || []).map((e: any) => ({ ...e, sequence: e.sequence || [] })) }] })} className={editingRotation.cycleMode === 'custom_sequence' ? 'text-[9px] font-black px-3 py-1.5 bg-teal-600 text-white' : 'text-[9px] font-black px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-400 hover:bg-slate-50'}>Por patrón</button>
                             </div>
                           </div>
-                          {(editingRotation.cycleMode === 'round_robin' || editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY')) && (
+                          {(editingRotation.cycleMode === 'round_robin' || (!editingRotation.cycleMode && editingRotation.periods.some((p: RotationPeriod) => p.trigger.type === 'WEEKLY'))) && (
                             <div>
                               <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Semana de ref. (sem. 0)</p>
                               <div className="flex items-center gap-1">
