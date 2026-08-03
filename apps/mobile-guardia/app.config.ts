@@ -16,11 +16,15 @@ const config: ExpoConfig = {
     infoPlist: {
       NSLocationWhenInUseUsageDescription:
         'COSP Guardia usa tu ubicación para validar la fichada en el puesto de trabajo.',
+      NSCameraUsageDescription:
+        'COSP Guardia usa la cámara para adjuntar certificados médicos a tus novedades.',
+      NSPhotoLibraryUsageDescription:
+        'COSP Guardia accede a tus fotos para adjuntar certificados a novedades de ausencia.',
     },
   },
   android: {
     package: 'com.grupobacar.cosp.guardia',
-    permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION'],
+    permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION', 'CAMERA'],
     ...(useEmulator ? { usesCleartextTraffic: true } : {}),
     adaptiveIcon: {
       foregroundImage: './assets/android-icon-foreground.png',
@@ -40,6 +44,15 @@ const config: ExpoConfig = {
       {
         locationWhenInUsePermission:
           'COSP Guardia necesita tu ubicación para validar que estás en el puesto al marcar presente.',
+      },
+    ],
+    [
+      'expo-image-picker',
+      {
+        photosPermission:
+          'COSP Guardia accede a tus fotos para adjuntar certificados a novedades de ausencia.',
+        cameraPermission:
+          'COSP Guardia usa la cámara para adjuntar certificados médicos a tus novedades.',
       },
     ],
   ],

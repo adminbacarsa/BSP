@@ -1,20 +1,36 @@
 import type { Shift } from '@cosp/portal-types';
 import { toDate } from '../utils/dates';
 
+/** Valores guardados en `ausencias.type` desde el portal empleado. */
 export type AbsenceType =
   | 'Vacaciones'
   | 'Licencia Esp.'
   | 'Enfermedad'
   | 'ART'
-  | 'Injustificada';
+  | 'Ausencia con aviso';
 
 export const ABSENCE_TYPE_OPTIONS: AbsenceType[] = [
   'Vacaciones',
   'Licencia Esp.',
   'Enfermedad',
   'ART',
-  'Injustificada',
+  'Ausencia con aviso',
 ];
+
+/** Texto en chips/botones del portal (no el valor de negocio en Firestore). */
+export function absenceTypeEmployeeLabel(type: AbsenceType): string {
+  if (type === 'Ausencia con aviso') {
+    return 'Hoy no me presento';
+  }
+  return type;
+}
+
+export function absenceTypeEmployeeHint(type: AbsenceType): string | null {
+  if (type === 'Ausencia con aviso') {
+    return 'Avisá que no vas a asistir a tu turno. No es una falta injustificada: es un aviso anticipado para Operaciones y RRHH.';
+  }
+  return null;
+}
 
 export type AbsenceCase = 'PROGRAMADA' | 'CORTO_PLAZO' | 'ANTICIPADA';
 
@@ -135,6 +151,22 @@ export function absenceSubmitToastMessage(absenceCase: AbsenceCase): string {
   return 'Solicitud enviada — RRHH revisará tu pedido';
 }
 
+export function absenceSubmitToastMessageForType(
+  absenceType: AbsenceType,
+  absenceCase: AbsenceCase,
+): string {
+  if (absenceType === 'Ausencia con aviso') {
+    if (absenceCase === 'CORTO_PLAZO') {
+      return 'Aviso enviado: hoy no te presentás. Operaciones fue notificado.';
+    }
+    if (absenceCase === 'ANTICIPADA') {
+      return 'Aviso enviado: no vas a asistir. RRHH y Planificación fueron notificados.';
+    }
+    return 'Aviso registrado: informaste que no vas a asistir. RRHH revisará el pedido.';
+  }
+  return absenceSubmitToastMessage(absenceCase);
+}
+
 export function filterAbsenceTypesForFeatures(opts: {
   reportAbsence: boolean;
   requestLicense: boolean;
@@ -146,7 +178,7 @@ export function filterAbsenceTypesForFeatures(opts: {
     return ['Vacaciones', 'Licencia Esp.'];
   }
   if (opts.reportAbsence) {
-    return ['Enfermedad', 'ART', 'Injustificada'];
+    return ['Ausencia con aviso', 'Enfermedad', 'ART'];
   }
   return [];
 }

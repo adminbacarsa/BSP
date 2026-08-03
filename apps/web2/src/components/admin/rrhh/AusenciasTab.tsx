@@ -373,7 +373,7 @@ export default function AusenciasTab({
             ) : filteredAbsences.map(a => {
               const isLT = a.type === 'Llegada Tarde';
               const isAA = (a.type === 'No Presentacion' || a.type === 'No Presentación' || (a as any).absenceType === 'AA') && !isLT;
-              const hasCert = !!(a as any).certificateUrl || a.hasCertificate;
+              const hasCert = !!(a as any).certificateDriveLink || !!(a as any).certificateUrl || a.hasCertificate;
               // checkInTime (Timestamp CF), checkInTimeStr (string CF), arrivedAt (Timestamp cliente)
               const checkInStr = fmtCheckIn((a as any).checkInTimeStr, (a as any).checkInTime, (a as any).arrivedAt);
               const rowBg = selectedAbsenceIds.has(a.id!)

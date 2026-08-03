@@ -346,6 +346,10 @@ export default function EmployeesPage() {
 
   const replicarAusenciaEnPlanificador = async (absenceId: string, data: Absence) => {
     try {
+      if (!data.employeeId?.trim()) {
+        addToast('No se puede replicar: la ausencia no tiene empleado asignado.', 'error');
+        return;
+      }
       const range = validateAbsenceDateRange(data.startDate, data.endDate);
       if (!range.ok) return;
       const turnosQ = query(collection(db, 'turnos'), where('absenceId', '==', absenceId));
@@ -356,39 +360,46 @@ export default function EmployeesPage() {
       const end = new Date(eY, eM - 1, eD);
       const code = inferAbsenceCode(data);
       const emp = employees.find(e => e.id === data.employeeId);
-      const objectiveId = emp?.preferredObjectiveId || '';
+      const portal = data as Absence & { objectiveId?: string; objectiveName?: string; clientId?: string };
+      const objectiveId =
+        String(portal.objectiveId ?? '').trim() ||
+        String(emp?.preferredObjectiveId ?? '').trim();
       const objRow = allObjectives.find(o => o.id === objectiveId || o.docId === objectiveId);
-      const clientId = objRow?.clientId || '';
-      const objectiveName = objRow?.name || (objectiveId ? `Objetivo ${objectiveId}` : `NOVEDAD - ${data.type}`);
+      const clientId =
+        String(portal.clientId ?? '').trim() ||
+        String(objRow?.clientId ?? '').trim();
+      const objectiveName =
+        String(portal.objectiveName ?? '').trim() ||
+        objRow?.name ||
+        (objectiveId ? `Objetivo ${objectiveId}` : `NOVEDAD - ${data.type}`);
       const absenceCreatedAt = new Date().toISOString();
       const batch = writeBatch(db);
 
-      // ── Marcar turnos originales planificados del empleado en el rango ────────
-      // Para cada día del período buscamos turnos reales (no NOVEDAD) del empleado
-      // y los marcamos con hasNovedad:true + isAbsent:true para que Operaciones
-      // pueda detectarlos y calcular la anticipación (≥12h → Planning, <12h → Ops).
       const rangeStartTs = Timestamp.fromDate(new Date(sY, sM - 1, sD, 0, 0, 0));
       const rangeEndTs   = Timestamp.fromDate(new Date(eY, eM - 1, eD, 23, 59, 59));
-      const originalTurnosSnap = await getDocs(query(
-        collection(db, 'turnos'),
-        where('employeeId', '==', data.employeeId),
-        where('startTime', '>=', rangeStartTs),
-        where('startTime', '<=', rangeEndTs),
-      ));
-      originalTurnosSnap.forEach(docSnap => {
-        const t = docSnap.data();
-        // Solo marcar turnos reales planificados — no tocar NOVEDADs ni ausencias ya marcadas
-        if (t.type === 'NOVEDAD' || t.hasNovedad || t.isAbsent || t.isFranco) return;
-        batch.update(docSnap.ref, {
-          hasNovedad: true,
-          isAbsent: true,
-          absenceId,
-          absenceType: data.type,
-          absenceCreatedAt,
+      try {
+        const originalTurnosSnap = await getDocs(query(
+          collection(db, 'turnos'),
+          where('employeeId', '==', data.employeeId),
+          where('startTime', '>=', rangeStartTs),
+          where('startTime', '<=', rangeEndTs),
+        ));
+        originalTurnosSnap.forEach(docSnap => {
+          const t = docSnap.data();
+          if (!belongsToEmpresaView(t, empresaId, migracionCompleta)) return;
+          if (t.type === 'NOVEDAD' || t.hasNovedad || t.isAbsent || t.isFranco) return;
+          batch.update(docSnap.ref, {
+            hasNovedad: true,
+            isAbsent: true,
+            absenceId,
+            absenceType: data.type,
+            absenceCreatedAt,
+          });
         });
-      });
+      } catch (queryErr) {
+        console.warn('[replicarAusencia] No se pudieron marcar turnos originales (índice o permisos):', queryErr);
+      }
 
-      // ── Crear turnos NOVEDAD en el planificador (comportamiento existente) ────
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
         const isPeriodOnly = code === 'V';
@@ -396,7 +407,7 @@ export default function EmployeesPage() {
           ? new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
           : new Date(dayStart.getTime() + 8 * 3600000);
         const turnoRef = doc(collection(db, 'turnos'));
-        batch.set(turnoRef, stampEmpresaId({
+        const turnoPayload: Record<string, unknown> = {
           employeeId: data.employeeId,
           employeeName: data.employeeName,
           startTime: Timestamp.fromDate(dayStart),
@@ -405,20 +416,27 @@ export default function EmployeesPage() {
           type: 'NOVEDAD',
           code,
           status: 'Approved',
-          objectiveId: objectiveId || undefined,
-          objectiveName,
-          clientId: clientId || undefined,
           absenceId,
           isFranco: false,
           hasNovedad: true,
           plannedNovedad: data.type?.includes('Licencia') ? 'LICENCIA' : 'AVISO',
-          comments: data.reason,
-        }, empresaId));
+          comments: data.reason || '',
+        };
+        if (objectiveId) turnoPayload.objectiveId = objectiveId;
+        if (objectiveName) turnoPayload.objectiveName = objectiveName;
+        if (clientId) turnoPayload.clientId = clientId;
+        batch.set(turnoRef, stampEmpresaId(turnoPayload, empresaId));
       }
       await batch.commit();
     } catch (e) {
-      const msg = e instanceof TenantIsolationError ? e.message : 'Error replicando';
-      addToast(msg, 'error');
+      console.error('[replicarAusencia]', e);
+      const msg =
+        e instanceof TenantIsolationError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : 'Error replicando';
+      addToast(msg.length > 120 ? `${msg.slice(0, 120)}…` : msg, 'error');
     }
   };
 
@@ -434,6 +452,10 @@ export default function EmployeesPage() {
   useEffect(() => { loadData(); loadClientsAndObjectives(); loadAbsences(); loadHolidays(); loadAgreements(); }, [empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (scopeEmpresa && !empresaId) {
+      setPendingPortalRequests([]);
+      return;
+    }
     const unsub = onSnapshotFresh(
       scopeEmpresa
         ? query(collection(db, 'ausencias'), where('empresaId', '==', empresaId), where('source', '==', 'EMPLEADO'), where('status', '==', 'Pendiente'), limit(50))
@@ -447,7 +469,7 @@ export default function EmployeesPage() {
       }
     );
     return () => unsub();
-  }, []);
+  }, [empresaId, scopeEmpresa]);
   useEffect(() => { const activeAbs = absences.filter(a => a.status === 'Pendiente' || a.status === 'Justificada').length; const nextHols = holidays.filter(h => new Date(h.date) >= new Date()).length; setGlobalStats({ totalEmployees: employees.length, activeAbsences: activeAbs, nextHolidays: nextHols }); }, [employees, absences, holidays]);
   useEffect(() => {
     const term = searchTerm.toLowerCase();
@@ -1213,7 +1235,8 @@ export default function EmployeesPage() {
         type: outcome === 'Injustificada' ? 'Injustificada' : verifyModal.absence.type,
         hasCertificate: outcome === 'Justificada' ? true : verifyModal.absence.hasCertificate,
       };
-      await absenceService.update(verifyModal.absenceId, dataToUpdate, { empresaId, migracionCompleta });
+      const { id: _omitId, ...updatePayload } = dataToUpdate;
+      await absenceService.update(verifyModal.absenceId, updatePayload, { empresaId, migracionCompleta });
       await replicarAusenciaEnPlanificador(verifyModal.absenceId, dataToUpdate);
       await registrarAuditoria(
         'VERIFY_ABSENCE',
@@ -1766,6 +1789,7 @@ export default function EmployeesPage() {
                                                     'Enfermedad': 'bg-rose-100 text-rose-700',
                                                     'ART': 'bg-orange-100 text-orange-700',
                                                     'Licencia Esp.': 'bg-purple-100 text-purple-700',
+                                                    'Ausencia con aviso': 'bg-amber-100 text-amber-800',
                                                 };
                                                 const tc = typeColors[a.type] || 'bg-slate-100 text-slate-600';
                                                 const fmtD = (v: any) => v ? String(v).slice(5, 10).replace('-', '/') : '--';
@@ -3313,9 +3337,32 @@ export default function EmployeesPage() {
                                 </div>
                             </div>
                         )}
-                        <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl border border-slate-200 dark:border-slate-600">
-                            <input type="checkbox" id="hasCert" checked={absenceForm.hasCertificate} onChange={e => setAbsenceForm(f => ({...f, hasCertificate: e.target.checked}))} className="w-4 h-4 rounded accent-rose-600"/>
-                            <label htmlFor="hasCert" className="text-sm font-bold text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-2"><FileCheck size={14} className="text-rose-500"/> Presenta certificado / documentación</label>
+                        <div className="space-y-2">
+                            <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl border border-slate-200 dark:border-slate-600">
+                                <input type="checkbox" id="hasCert" checked={absenceForm.hasCertificate} onChange={e => setAbsenceForm(f => ({...f, hasCertificate: e.target.checked}))} className="w-4 h-4 rounded accent-rose-600"/>
+                                <label htmlFor="hasCert" className="text-sm font-bold text-slate-700 dark:text-slate-200 cursor-pointer flex items-center gap-2"><FileCheck size={14} className="text-rose-500"/> Presenta certificado / documentación</label>
+                            </div>
+                            {(absenceForm.certificateDriveLink || absenceForm.certificateUrl) ? (
+                                <a
+                                    href={absenceForm.certificateDriveLink || absenceForm.certificateUrl || '#'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center justify-center gap-2 w-full p-3 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-black text-sm hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shadow-sm"
+                                >
+                                    <ExternalLink size={16} />
+                                    Ver certificado adjunto
+                                    {absenceForm.certificateDriveLink ? (
+                                        <span className="font-bold text-indigo-500 dark:text-indigo-400">(Google Drive)</span>
+                                    ) : null}
+                                    {absenceForm.certificateName ? (
+                                        <span className="font-bold text-indigo-500 dark:text-indigo-400 truncate max-w-[45%]">({absenceForm.certificateName})</span>
+                                    ) : null}
+                                </a>
+                            ) : absenceForm.hasCertificate ? (
+                                <p className="text-xs font-bold text-amber-600 dark:text-amber-400 px-1">
+                                    Figura certificado en la solicitud; si no ves el enlace, recargá la página o pedí al empleado que reenvíe el archivo desde el portal.
+                                </p>
+                            ) : null}
                         </div>
                     </div>
                     <div className="flex gap-3 mt-6">
@@ -3394,9 +3441,20 @@ export default function EmployeesPage() {
                             <p className="text-[10px] text-slate-400 font-mono mt-0.5">{getArgentinaDate(verifyModal.absence.startDate)} → {getArgentinaDate(verifyModal.absence.endDate)}</p>
                         </div>
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-300 mb-5">
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mb-4">
                         La guardia ya figura ausente en planificación. Confirmá si el certificado justifica la ausencia o marcala como injustificada.
                     </p>
+                    {(verifyModal.absence.certificateDriveLink || verifyModal.absence.certificateUrl) ? (
+                        <a
+                            href={verifyModal.absence.certificateDriveLink || verifyModal.absence.certificateUrl || '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center gap-2 w-full p-3 mb-4 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-black text-xs uppercase hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+                        >
+                            <ExternalLink size={14} />
+                            Ver certificado
+                        </a>
+                    ) : null}
                     <div className="flex flex-col gap-3">
                         <button
                             type="button"

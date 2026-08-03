@@ -32,6 +32,9 @@ export type { CheckInUiStatus, CheckInUiStatusView } from './checkIn/checkInUiSt
 export {
   ABSENCE_TYPE_OPTIONS,
   absenceSubmitToastMessage,
+  absenceSubmitToastMessageForType,
+  absenceTypeEmployeeLabel,
+  absenceTypeEmployeeHint,
   classifyAbsenceForEmployee,
   dateKeyLocal,
   filterAbsenceTypesForFeatures,

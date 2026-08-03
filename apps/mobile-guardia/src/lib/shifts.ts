@@ -46,6 +46,26 @@ export function pickNextShift(shifts: Shift[], now = new Date()): Shift | undefi
   });
 }
 
-export function heroShift(shifts: Shift[], now = new Date()): Shift | undefined {
-  return pickTodayWorkShift(shifts, now) ?? pickNextShift(shifts, now);
+export function shiftOwnedByEmployee(
+  shift: Shift,
+  empDocId: string | null | undefined,
+  authUid: string | null | undefined,
+): boolean {
+  const id = String(shift.employeeId ?? '').trim();
+  if (!id) return false;
+  if (empDocId?.trim() && id === empDocId.trim()) return true;
+  if (authUid?.trim() && id === authUid.trim()) return true;
+  return false;
+}
+
+export function heroShift(
+  shifts: Shift[],
+  now = new Date(),
+  owner?: { empDocId?: string | null; authUid?: string | null },
+): Shift | undefined {
+  const scoped =
+    owner?.empDocId || owner?.authUid
+      ? shifts.filter((s) => shiftOwnedByEmployee(s, owner.empDocId, owner.authUid))
+      : shifts;
+  return pickTodayWorkShift(scoped, now) ?? pickNextShift(scoped, now);
 }

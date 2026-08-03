@@ -111,7 +111,7 @@ async function exportAuthUsers(): Promise<any[]> {
  * Resuelve o crea una subcarpeta en Google Drive.
  * Devuelve el ID de la carpeta (existente o recién creada).
  */
-async function resolveOrCreateDriveFolder(drive: any, parentId: string, folderName: string): Promise<string> {
+export async function resolveOrCreateDriveFolder(drive: any, parentId: string, folderName: string): Promise<string> {
   const res = await drive.files.list({
     q: `'${parentId}' in parents and name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
     fields: 'files(id)',

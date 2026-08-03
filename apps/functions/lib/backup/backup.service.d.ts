@@ -18,6 +18,7 @@ export interface BackupResult {
     error?: string;
     empresaId?: string;
 }
+export declare function resolveOrCreateDriveFolder(drive: any, parentId: string, folderName: string): Promise<string>;
 export declare function runBackup(folderId: string, opts?: BackupOptions): Promise<BackupResult>;
 export interface SyncDriveBackupsResult {
     checked: number;

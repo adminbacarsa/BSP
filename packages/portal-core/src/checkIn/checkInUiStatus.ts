@@ -51,11 +51,11 @@ export function resolveCheckInUiStatus(
   }
 
   if (isShiftPresent(shift)) {
-    const at = toDate(shift.checkInTime);
+    const turnoStart = toDate(shift.startTime) ?? toDate(shift.checkInTime);
     return {
       status: 'present',
-      title: 'Presente confirmado',
-      subtitle: at ? `Fichada ${formatTimeAr(at)}` : undefined,
+      title: turnoStart ? `Tu turno comenzó a las ${formatTimeAr(turnoStart)}` : 'Presente confirmado',
+      subtitle: turnoStart ? 'Presente confirmado' : undefined,
       tone: 'success',
     };
   }

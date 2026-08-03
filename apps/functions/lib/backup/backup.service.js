@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getBackupDb = getBackupDb;
+exports.resolveOrCreateDriveFolder = resolveOrCreateDriveFolder;
 exports.runBackup = runBackup;
 exports.syncDriveBackups = syncDriveBackups;
 exports.deleteDriveBackup = deleteDriveBackup;

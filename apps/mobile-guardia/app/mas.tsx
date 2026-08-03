@@ -1,6 +1,6 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
@@ -11,7 +11,7 @@ const ROADMAP = [
   { title: 'Fichada GPS + offline', status: 'Listo', done: true },
   { title: 'Llegada tarde', status: 'Listo', done: true },
   { title: 'Ausencias y licencias', status: 'Formulario activo', done: true },
-  { title: 'Adjunto certificado', status: 'F3-03', done: false },
+  { title: 'Adjunto certificado', status: 'Cámara y galería', done: true },
   { title: 'Notificaciones push', status: 'F3 · EAS', done: false },
   { title: 'Permutas', status: 'F4', done: false },
   { title: 'Credencial digital', status: 'F5', done: false },
@@ -27,21 +27,30 @@ export default function MasScreen() {
 
 function MasScreenContent() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { portalFeatures } = usePortalAuth();
   const canNovedad = portalFeatures.reportAbsence || portalFeatures.requestLicense;
+  const scrollBottomPad = Math.max(insets.bottom, 12) + 88;
 
   return (
     <>
       <Stack.Screen options={{ title: 'Servicios' }} />
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <View style={styles.container}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollBottomPad }]}
+          showsVerticalScrollIndicator
+          keyboardShouldPersistTaps="handled"
+        >
           <Text style={styles.intro}>
             Misma lógica que el portal web del empleado. Los módulos deshabilitados por RRHH no aparecen.
           </Text>
 
           {canNovedad ? (
             <CommandCard title="Novedades RRHH">
-              <Text style={styles.cardSub}>Ausencias, licencias y avisos con la misma clasificación que el portal web.</Text>
+              <Text style={styles.cardSub}>
+                Ausencias, licencias y avisos («Hoy no me presento») con la misma clasificación que el portal web.
+              </Text>
               <CommandButton label="Solicitar novedad" onPress={() => router.push('/novedad')} />
             </CommandCard>
           ) : null}
@@ -55,6 +64,7 @@ function MasScreenContent() {
               <Flag label="Permutas" on={portalFeatures.swapShifts} />
             </View>
           </CommandCard>
+
           <Text style={styles.section}>Hoja de ruta app nativa</Text>
           {ROADMAP.map((item) => (
             <View key={item.title} style={styles.row}>
@@ -62,7 +72,7 @@ function MasScreenContent() {
               <Text style={[styles.rowStatus, item.done ? styles.done : styles.pending]}>{item.status}</Text>
             </View>
           ))}
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </>
   );
@@ -78,7 +88,8 @@ function Flag({ label, on }: { label: string; on: boolean }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.slate50 },
-  container: { padding: 20, gap: 14 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: 20, gap: 14 },
   intro: { color: colors.slate500, fontSize: 14, lineHeight: 21 },
   cardSub: { fontSize: 13, color: colors.slate500, marginBottom: 4 },
   flagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

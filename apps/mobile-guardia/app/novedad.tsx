@@ -14,7 +14,9 @@ import { Redirect, Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import {
-  absenceSubmitToastMessage,
+  absenceSubmitToastMessageForType,
+  absenceTypeEmployeeLabel,
+  absenceTypeEmployeeHint,
   classifyAbsenceForEmployee,
   dateKeyLocal,
   filterAbsenceTypesForFeatures,
@@ -23,6 +25,11 @@ import {
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { useEmployeeShifts } from '../src/hooks/useEmployeeShifts';
 import { getPortalFirebase } from '../src/lib/portal';
+import {
+  uploadAbsenceCertificate,
+  type LocalCertificateFile,
+} from '../src/lib/uploadAbsenceCertificate';
+import { CertificateAttachmentField } from '../src/components/CertificateAttachmentField';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
 import { colors, radius } from '../src/theme/tokens';
@@ -31,6 +38,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function todayKey(): string {
   return dateKeyLocal(new Date());
+}
+
+function typeAcceptsCertificate(type: AbsenceType): boolean {
+  return type === 'Enfermedad' || type === 'ART';
 }
 
 export default function NovedadScreen() {
@@ -48,10 +59,11 @@ export default function NovedadScreen() {
     [portalFeatures.reportAbsence, portalFeatures.requestLicense],
   );
 
-  const [absenceType, setAbsenceType] = useState<AbsenceType>(typeOptions[0] ?? 'Enfermedad');
+  const [absenceType, setAbsenceType] = useState<AbsenceType>(typeOptions[0] ?? 'Ausencia con aviso');
   const [startDate, setStartDate] = useState(todayKey());
   const [endDate, setEndDate] = useState(todayKey());
   const [reason, setReason] = useState('');
+  const [certificate, setCertificate] = useState<LocalCertificateFile | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const displayName = useMemo(() => {
@@ -62,6 +74,7 @@ export default function NovedadScreen() {
   }, [employee, user]);
 
   const canAccess = portalFeatures.reportAbsence || portalFeatures.requestLicense;
+  const showCertificate = typeAcceptsCertificate(absenceType);
 
   async function handleSubmit() {
     if (!user) return;
@@ -83,40 +96,54 @@ export default function NovedadScreen() {
       shifts,
     });
 
+    const employeeKey = empDocId?.trim() || user.uid;
+
     setSubmitting(true);
     try {
+      let fileUrl: string | null = null;
+      let fileName: string | null = null;
+      let certificateStoragePath: string | null = null;
+      if (showCertificate && certificate) {
+        const uploaded = await uploadAbsenceCertificate(user.uid, certificate);
+        fileUrl = uploaded.url;
+        fileName = uploaded.name;
+        certificateStoragePath = uploaded.storagePath;
+      }
+
       const empresaId = String(employee?.empresaId || 'bacarsa').trim();
-      await addDoc(
-        collection(db, 'ausencias'),
-        {
-          employeeId: user.uid,
-          employeeName: displayName,
-          type: absenceType,
-          startDate,
-          endDate,
-          status: 'Pendiente',
-          hasCertificate: false,
-          certificateUrl: null,
-          certificateName: null,
-          reason: reason.trim(),
-          source: 'EMPLEADO',
-          createdAt: serverTimestamp(),
-          absenceCase: classified.absenceCase,
-          minutesBeforeShift: classified.minutesBeforeShift,
-          handledBy: classified.handledBy,
-          receivedAt: serverTimestamp(),
-          shiftId: classified.shiftId,
-          objectiveId: classified.objectiveId,
-          objectiveName: classified.objectiveName,
-          positionName: classified.positionName,
-          clientId: classified.clientId,
-          ...(empresaId ? { empresaId } : {}),
-        },
-      );
-      Alert.alert('Enviado', absenceSubmitToastMessage(classified.absenceCase), [
+      await addDoc(collection(db, 'ausencias'), {
+        employeeId: employeeKey,
+        employeeName: displayName,
+        type: absenceType,
+        startDate,
+        endDate,
+        status: 'Pendiente',
+        hasCertificate: !!fileUrl,
+        certificateUrl: fileUrl,
+        certificateName: fileName,
+        certificateStoragePath,
+        reason: reason.trim(),
+        source: 'EMPLEADO',
+        createdAt: serverTimestamp(),
+        absenceCase: classified.absenceCase,
+        minutesBeforeShift: classified.minutesBeforeShift,
+        handledBy: classified.handledBy,
+        receivedAt: serverTimestamp(),
+        shiftId: classified.shiftId,
+        objectiveId: classified.objectiveId,
+        objectiveName: classified.objectiveName,
+        positionName: classified.positionName,
+        clientId: classified.clientId,
+        ...(empresaId ? { empresaId } : {}),
+      });
+
+      const certNote = fileUrl ? ' El certificado quedó adjunto.' : '';
+      const toastMsg = absenceSubmitToastMessageForType(absenceType, classified.absenceCase);
+      Alert.alert('Enviado', `${toastMsg}${certNote}`, [
         { text: 'OK', onPress: () => router.back() },
       ]);
       setReason('');
+      setCertificate(null);
       setStartDate(todayKey());
       setEndDate(todayKey());
     } catch (e) {
@@ -155,7 +182,7 @@ export default function NovedadScreen() {
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
             <Text style={styles.intro}>
-              Misma lógica que el portal web. RRHH revisará el pedido; avisos urgentes notifican a Operaciones.
+              Informá ausencias, licencias o que hoy no vas a asistir. RRHH y Operaciones reciben el aviso según urgencia.
             </Text>
 
             <CommandCard title="Tipo">
@@ -163,13 +190,21 @@ export default function NovedadScreen() {
                 {typeOptions.map((t) => (
                   <Pressable
                     key={t}
-                    onPress={() => setAbsenceType(t)}
+                    onPress={() => {
+                      setAbsenceType(t);
+                      if (!typeAcceptsCertificate(t)) setCertificate(null);
+                    }}
                     style={[styles.chip, absenceType === t && styles.chipActive]}
                   >
-                    <Text style={[styles.chipText, absenceType === t && styles.chipTextActive]}>{t}</Text>
+                    <Text style={[styles.chipText, absenceType === t && styles.chipTextActive]}>
+                      {absenceTypeEmployeeLabel(t)}
+                    </Text>
                   </Pressable>
                 ))}
               </View>
+              {absenceTypeEmployeeHint(absenceType) ? (
+                <Text style={styles.typeHint}>{absenceTypeEmployeeHint(absenceType)}</Text>
+              ) : null}
             </CommandCard>
 
             <CommandCard title="Período">
@@ -204,11 +239,13 @@ export default function NovedadScreen() {
                 numberOfLines={4}
                 textAlignVertical="top"
               />
-              {(absenceType === 'Enfermedad' || absenceType === 'ART') && (
-                <Text style={styles.hint}>
-                  Certificado médico: próximo paso en la app (cámara/galería). Podés adjuntarlo después desde el portal web.
-                </Text>
-              )}
+              {showCertificate ? (
+                <CertificateAttachmentField
+                  value={certificate}
+                  onChange={setCertificate}
+                  disabled={submitting}
+                />
+              ) : null}
             </CommandCard>
 
             <CommandButton
@@ -260,11 +297,11 @@ const styles = StyleSheet.create({
   },
   chipActive: {
     backgroundColor: colors.indigo600,
-    borderColor: colors.indigo700,
+    borderColor: colors.indigo800,
   },
   chipText: { fontSize: 12, fontWeight: '800', color: colors.slate600 },
   chipTextActive: { color: colors.white },
-  hint: { fontSize: 12, color: colors.slate500, marginTop: 10, lineHeight: 18 },
+  typeHint: { fontSize: 12, color: colors.slate500, marginTop: 10, lineHeight: 18 },
   blocked: { flex: 1, padding: 24, justifyContent: 'center', gap: 12 },
   blockedTitle: { fontSize: 20, fontWeight: '900', color: colors.slate950 },
   blockedBody: { fontSize: 14, color: colors.slate500, lineHeight: 22 },

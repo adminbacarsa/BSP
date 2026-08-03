@@ -13,7 +13,7 @@ import {
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import {
   DEFAULT_PORTAL_FEATURES,
   type PortalFeatures,
@@ -24,8 +24,9 @@ import { getPortalFirebase } from '../lib/portal';
 import { withTimeout } from '../lib/emulatorHost';
 import { getOrCreateDeviceId, getStoredDeviceId } from '../lib/deviceId';
 
-const FIRESTORE_PROFILE_TIMEOUT_MS = 12_000;
+const FIRESTORE_PROFILE_TIMEOUT_MS = 22_000;
 const AUTH_INIT_TIMEOUT_MS = 9_000;
+const EMPLOYEE_ROLES = ['employee', 'empleado'];
 
 function normalizeRoleKey(role: string): string {
   return role.toLowerCase().replace(/_/g, '').trim();
@@ -40,6 +41,7 @@ type PortalAuthContextValue = {
   employee: EmpleadoPortal | null;
   portalFeatures: PortalFeatures;
   deviceVerified: boolean | null;
+  employeeProfileError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshEmployee: () => Promise<void>;
@@ -122,13 +124,16 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const [employee, setEmployee] = useState<EmpleadoPortal | null>(null);
   const [portalFeatures, setPortalFeatures] = useState<PortalFeatures>(DEFAULT_PORTAL_FEATURES);
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
+  const [employeeProfileError, setEmployeeProfileError] = useState<string | null>(null);
 
   const loadEmployee = useCallback(
     async (currentUser: User) => {
       setEmployeeProfileLoading(true);
+      setEmployeeProfileError(null);
       try {
+        await currentUser.getIdToken(true);
         const id = await withTimeout(
-          resolveEmpDocIdWithRetry(db, currentUser, 3),
+          resolveEmpDocIdWithRetry(db, currentUser, 4),
           FIRESTORE_PROFILE_TIMEOUT_MS,
           'Carga de legajo',
         );
@@ -136,6 +141,9 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         if (!id) {
           setEmployee(null);
           setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+          setEmployeeProfileError(
+            'No hay legajo para tu usuario. Cerrá sesión, ejecutá npm run seed en la PC y volvé a entrar con guardia@bacarsa.com.ar',
+          );
           return;
         }
         const snap = await withTimeout(
@@ -145,12 +153,20 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         );
         if (!snap.exists()) {
           setEmployee(null);
+          setEmployeeProfileError('Legajo no encontrado en Firestore.');
           return;
         }
         const data = snap.data();
+        if (data.uid !== currentUser.uid) {
+          try {
+            await updateDoc(doc(db, 'empleados', id), { uid: currentUser.uid });
+          } catch {
+            /* emulador / permisos */
+          }
+        }
         setEmployee({
           id,
-          uid: data.uid,
+          uid: currentUser.uid,
           email: data.email,
           firstName: data.firstName || data.nombre,
           lastName: data.lastName || data.apellido,
@@ -164,8 +180,16 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         } else {
           setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         }
-      } catch {
+      } catch (err) {
         setEmployee(null);
+        if (isNetworkOrFirestoreError(err)) {
+          setEmployeeProfileError(
+            'No se pudo leer Firestore desde el celular. Misma Wi‑Fi, firewall (8080/9099) y EXPO_PUBLIC_FIREBASE_EMULATOR_HOST=192.168.0.49 en .env. Tocá Reintentar.',
+          );
+        } else {
+          const msg = err instanceof Error ? err.message : 'Error cargando legajo';
+          setEmployeeProfileError(msg);
+        }
       } finally {
         setEmployeeProfileLoading(false);
         setEmployeeProfileReady(true);
@@ -188,6 +212,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         setEmployeeProfileReady(false);
         setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         setDeviceVerified(null);
+        setEmployeeProfileError(null);
         setInitializing(false);
         return;
       }
@@ -260,6 +285,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setEmployee(null);
     setEmployeeProfileReady(false);
     setDeviceVerified(null);
+    setEmployeeProfileError(null);
   }, [auth]);
 
   const refreshEmployee = useCallback(async () => {
@@ -279,11 +305,12 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       employee,
       portalFeatures,
       deviceVerified,
+      employeeProfileError,
       signIn,
       signOut,
       refreshEmployee,
     }),
-    [user, initializing, employeeProfileLoading, employeeProfileReady, empDocId, employee, portalFeatures, deviceVerified, signIn, signOut, refreshEmployee],
+    [user, initializing, employeeProfileLoading, employeeProfileReady, empDocId, employee, portalFeatures, deviceVerified, employeeProfileError, signIn, signOut, refreshEmployee],
   );
 
   return <PortalAuthContext.Provider value={value}>{children}</PortalAuthContext.Provider>;

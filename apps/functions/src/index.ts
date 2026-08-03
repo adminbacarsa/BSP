@@ -34,6 +34,7 @@ import { ClientService } from './data-management/client.service';
 import { EmployeeService } from './data-management/employee.service';
 import { SystemUserService } from './data-management/system-user.service';
 import { AbsenceService } from './data-management/absence.service';
+import { migrateAbsenceCertificateToDrive } from './rrhh/migrateAbsenceCertificateToDrive';
 import { PatternService } from './scheduling/pattern.service';
 import { LaborAgreementService } from './data-management/labor-agreement.service';
 
@@ -947,7 +948,10 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     const callerIsSuperAdmin = isSuperAdminBackupRole(callerRole);
 
     const { resolvePortalEmployeeDocId } = await import('./fichajes/resolvePortalEmployee');
-    let empId: string | null = await resolvePortalEmployeeDocId(db, context.auth.token);
+    let empId: string | null = await resolvePortalEmployeeDocId(db, {
+      uid: context.auth.uid,
+      email: context.auth.token.email,
+    });
     if (!empId) {
         if (callerIsSuperAdmin) {
             if (!shiftData.employeeId) throw new functions.https.HttpsError('not-found', 'Turno sin empleado asignado.');
@@ -958,8 +962,18 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                 'Empleado no encontrado. Cerrá sesión en la app, volvé a entrar con guardia@bacarsa.com.ar y probá de nuevo (si corriste npm run seed, el usuario de Auth se recrea).',
             );
         }
-    } else if (!callerIsSuperAdmin && shiftData.employeeId !== empId) {
-        throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado.');
+    }
+
+    const shiftEmp = String(shiftData.employeeId ?? '');
+    const ownsShift =
+      callerIsSuperAdmin ||
+      shiftEmp === empId ||
+      shiftEmp === context.auth.uid;
+    if (!ownsShift) {
+        throw new functions.https.HttpsError(
+          'permission-denied',
+          'Turno no pertenece al empleado. Cerrá sesión y volvé a entrar tras npm run seed.',
+        );
     }
 
     const { processPortalCheckIn } = await import('./fichajes/applyPortalCheckIn');
@@ -3268,20 +3282,46 @@ export const scheduledAutoInjustificada = functions
   });
 
 // =========================================================
-// 20. TRIGGER: CERTIFICADO PRESENTADO → NOVEDAD RRHH
+// 20. TRIGGER: CERTIFICADO PRESENTADO → DRIVE + NOVEDAD RRHH
 // =========================================================
-// Cuando el empleado sube un certificado médico desde el portal,
-// se crea una novedad en RRHH para que lo revisen y clasifiquen la ausencia.
+// Sube certificado a Google Drive (híbrido), libera Storage y avisa a RRHH.
 export const onAusenciaCertificado = functions
   .region('us-central1')
-  .runWith({ timeoutSeconds: 30, memory: '128MB' })
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
   .firestore.document('ausencias/{ausenciaId}')
   .onUpdate(async (change) => {
     const before = change.before.data();
     const after = change.after.data();
 
-    // Solo actuar cuando certificateUrl pasa de vacío a tener valor
-    if (after.certificateUrl && !before.certificateUrl) {
+    const certSignalNew =
+      (!!after.certificateUrl && !before.certificateUrl) ||
+      (!!after.certificateStoragePath && !before.certificateStoragePath);
+
+    let viewLink = String(after.certificateDriveLink || after.certificateUrl || '').trim();
+
+    const shouldMigrate =
+      !after.certificateDriveFileId &&
+      (!!after.certificateUrl || !!after.certificateStoragePath);
+
+    if (shouldMigrate) {
+      try {
+        const result = await migrateAbsenceCertificateToDrive(change.after.id, after);
+        if (result.ok) {
+          viewLink = result.driveLink;
+        } else if (result.ok === false && result.skipped === false) {
+          await change.after.ref.update({
+            certificateDriveMigrateError: String(result.error).slice(0, 500),
+          });
+        }
+      } catch (e) {
+        console.error('[onAusenciaCertificado] migrate Drive', e);
+        await change.after.ref.update({
+          certificateDriveMigrateError: String((e as Error).message || e).slice(0, 500),
+        }).catch(() => {});
+      }
+    }
+
+    if (certSignalNew) {
       const db = admin.firestore();
       const now = admin.firestore.Timestamp.now();
 
@@ -3298,7 +3338,8 @@ export const onAusenciaCertificado = functions
         clientId: after.clientId || null,
         shiftId: after.shiftId || null,
         ausenciaId: change.after.id,
-        certificateUrl: after.certificateUrl,
+        certificateUrl: viewLink || after.certificateUrl || null,
+        certificateDriveLink: viewLink.includes('drive.google.com') ? viewLink : null,
         absenceDate: after.startDate || '',
         urgency: 'HIGH',
         handledBy: 'RRHH',

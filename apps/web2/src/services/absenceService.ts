@@ -13,11 +13,19 @@ export interface Absence {
   endDate: string;
   status: 'Pendiente' | 'En verificación' | 'Autorizada' | 'Justificada' | 'Injustificada' | 'Rechazada';
   hasCertificate: boolean;
+  certificateUrl?: string | null;
+  certificateName?: string | null;
+  certificateStoragePath?: string | null;
+  certificateDriveFileId?: string | null;
+  certificateDriveLink?: string | null;
   reason: string;
   comments: string;
   rejectionReason?: string;
   alternativePeriodStart?: string;
   alternativePeriodEnd?: string;
+  objectiveId?: string;
+  objectiveName?: string;
+  clientId?: string;
   source?: string;
   ajusteCronoId?: string;
   coberturaEstado?: 'PENDIENTE' | 'GESTIONADA' | 'VACANTE';
@@ -63,16 +71,20 @@ export const absenceService = {
 
   update: async (id: string, data: Partial<Absence>, opts?: { empresaId: string; migracionCompleta: boolean }) => {
     const payload = { ...data } as Partial<Absence>;
-    if (payload.startDate != null || payload.endDate != null) {
-      const range = validateAbsenceDateRange(payload.startDate, payload.endDate);
+    delete (payload as { id?: string }).id;
+    const cleanPayload = Object.fromEntries(
+      Object.entries(payload).filter(([, v]) => v !== undefined),
+    ) as Partial<Absence>;
+    if (cleanPayload.startDate != null || cleanPayload.endDate != null) {
+      const range = validateAbsenceDateRange(cleanPayload.startDate, cleanPayload.endDate);
       if (!range.ok) throw new Error(range.message);
-      payload.startDate = range.startDate;
-      payload.endDate = range.endDate;
+      cleanPayload.startDate = range.startDate;
+      cleanPayload.endDate = range.endDate;
     }
     if (opts?.empresaId) {
-      return updateDocForEmpresa('ausencias', id, payload as Record<string, unknown>, opts.empresaId, opts.migracionCompleta);
+      return updateDocForEmpresa('ausencias', id, cleanPayload as Record<string, unknown>, opts.empresaId, opts.migracionCompleta);
     }
-    return updateDoc(doc(db, 'ausencias', id), payload);
+    return updateDoc(doc(db, 'ausencias', id), cleanPayload);
   },
 
   delete: (id: string, opts?: { empresaId: string; migracionCompleta: boolean }) => {

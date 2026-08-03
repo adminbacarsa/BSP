@@ -9,7 +9,8 @@ import {
   validateCheckInDistance,
   type PendingCheckInItem,
 } from '@cosp/portal-core';
-import { getPortalCallables } from '../lib/portal';
+import { getPortalCallables, getPortalFirebase } from '../lib/portal';
+import { mapPortalCallableError } from '../lib/mapPortalCallableError';
 import { enqueuePendingCheckin, loadPendingCheckins, savePendingCheckins } from '../lib/pendingCheckins';
 
 async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
@@ -35,6 +36,12 @@ export function useCheckIn() {
   }, []);
 
   const invokeCheckIn = useCallback(async (payload: ReturnType<typeof buildCheckInPayload>) => {
+    const { auth } = getPortalFirebase();
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('Sesión expirada. Volvé a iniciar sesión.');
+    }
+    await user.getIdToken(true);
     const { requestCheckIn } = getPortalCallables();
     await requestCheckIn(payload);
   }, []);
@@ -71,9 +78,25 @@ export function useCheckIn() {
     async (
       shift: Shift,
       objectivesMap: Record<string, ObjectiveLocation>,
+      owner?: { empDocId: string | null; authUid: string | null },
     ): Promise<{ ok: true; message: string } | { ok: false; message: string }> => {
       setBusyShiftId(shift.id);
       try {
+        const shiftEmp = String(shift.employeeId ?? '').trim();
+        const empDocId = owner?.empDocId?.trim() ?? '';
+        const authUid = owner?.authUid?.trim() ?? '';
+        const owns =
+          !shiftEmp ||
+          (empDocId && shiftEmp === empDocId) ||
+          (authUid && shiftEmp === authUid);
+        if (!owns) {
+          return {
+            ok: false,
+            message:
+              'Este turno no está asignado a tu legajo. Cerrá sesión, entrá de nuevo (tras npm run seed) y probá el turno Planta Bacar Lab.',
+          };
+        }
+
         const objective = getObjectiveForShift(
           objectivesMap,
           shift.objectiveId,
@@ -111,8 +134,7 @@ export function useCheckIn() {
         await invokeCheckIn(payload);
         return { ok: true, message: 'Solicitud de presente enviada' };
       } catch (e) {
-        const message = e instanceof Error ? e.message : 'No se pudo registrar el presente';
-        return { ok: false, message };
+        return { ok: false, message: mapPortalCallableError(e) };
       } finally {
         setBusyShiftId(null);
       }
@@ -127,8 +149,7 @@ export function useCheckIn() {
       await notificarLlegadaTarde({ shiftId });
       return { ok: true as const, message: 'Llegada tarde notificada' };
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'No se pudo notificar';
-      return { ok: false as const, message };
+      return { ok: false as const, message: mapPortalCallableError(e) };
     } finally {
       setBusyShiftId(null);
     }

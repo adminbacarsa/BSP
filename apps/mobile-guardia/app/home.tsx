@@ -33,7 +33,7 @@ export default function HomeScreen() {
 
 function HomeScreenContent() {
   const router = useRouter();
-  const { user, employee, empDocId, portalFeatures, signOut, refreshEmployee, employeeProfileLoading, employeeProfileReady } =
+  const { user, employee, empDocId, portalFeatures, signOut, refreshEmployee, employeeProfileLoading, employeeProfileReady, employeeProfileError } =
     usePortalAuth();
   const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { objectivesMap } = useObjectivesMap();
@@ -60,7 +60,7 @@ function HomeScreenContent() {
 
   const now = new Date();
   const todayAny = pickTodayShiftAny(shifts, now);
-  const mainShift = heroShift(shifts, now);
+  const mainShift = heroShift(shifts, now, { empDocId, authUid: user?.uid ?? null });
   const objective = mainShift
     ? getObjectiveForShift(objectivesMap, mainShift.objectiveId, mainShift.objectiveName)
     : null;
@@ -96,7 +96,10 @@ function HomeScreenContent() {
 
   async function onCheckIn() {
     if (!mainShift) return;
-    const result = await requestCheckInForShift(mainShift, objectivesMap);
+    const result = await requestCheckInForShift(mainShift, objectivesMap, {
+      empDocId,
+      authUid: user?.uid ?? null,
+    });
     Alert.alert(result.ok ? 'Presente' : 'Fichada', result.message);
   }
 
@@ -144,9 +147,15 @@ function HomeScreenContent() {
             ) : profileMissing ? (
               <View style={styles.profileWarnBox}>
                 <Text style={styles.welcomeWarn}>
-                  Sin legajo en Firestore. En la PC: npm run emulators y npm run seed. Luego cerrá sesión y entrá con
-                  guardia@bacarsa.com.ar
+                  {employeeProfileError ||
+                    'Sin legajo en Firestore. En la PC: npm run emulators y npm run seed. Luego cerrá sesión y entrá con guardia@bacarsa.com.ar'}
                 </Text>
+                <CommandButton label="Reintentar legajo" variant="ghost" onPress={() => refreshEmployee()} />
+              </View>
+            ) : employeeProfileError && !employee ? (
+              <View style={styles.profileWarnBox}>
+                <Text style={styles.welcomeWarn}>{employeeProfileError}</Text>
+                <CommandButton label="Reintentar legajo" variant="ghost" onPress={() => refreshEmployee()} />
               </View>
             ) : null}
           </View>

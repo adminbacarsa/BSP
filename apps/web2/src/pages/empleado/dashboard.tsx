@@ -175,7 +175,7 @@ export default function EmployeeDashboard() {
   const [loadingShifts, setLoadingShifts] = useState(false);
   const [objectivesMap, setObjectivesMap] = useState<Record<string, ObjectiveLocation>>({});
   const [checkingShiftId, setCheckingShiftId] = useState<string | null>(null);
-  const [absenceType, setAbsenceType] = useState<'Vacaciones' | 'Enfermedad' | 'ART' | 'Injustificada' | 'Licencia Esp.'>('Vacaciones');
+  const [absenceType, setAbsenceType] = useState<'Vacaciones' | 'Enfermedad' | 'ART' | 'Ausencia con aviso' | 'Licencia Esp.'>('Vacaciones');
   const [absenceReason, setAbsenceReason] = useState('');
   const [absenceStart, setAbsenceStart] = useState('');
   const [absenceEnd, setAbsenceEnd] = useState('');
@@ -1250,10 +1250,12 @@ export default function EmployeeDashboard() {
 
       let fileUrl = absenceFileUrl;
       let fileName = absenceFileName;
+      let certificateStoragePath: string | null = null;
       if ((absenceType === 'Enfermedad' || absenceType === 'ART') && absenceFile && !fileUrl) {
         setAbsenceUploading(true);
         const safeName = `${Date.now()}_${absenceFile.name.replace(/\s+/g, '_')}`;
-        const fileRef = ref(storage, `absences/${user.uid}/${safeName}`);
+        certificateStoragePath = `absences/${user.uid}/${safeName}`;
+        const fileRef = ref(storage, certificateStoragePath);
         await uploadBytes(fileRef, absenceFile);
         fileUrl = await getDownloadURL(fileRef);
         fileName = absenceFile.name;
@@ -1270,6 +1272,7 @@ export default function EmployeeDashboard() {
         hasCertificate: !!fileUrl,
         certificateUrl: fileUrl || null,
         certificateName: fileName || null,
+        certificateStoragePath,
         reason: absenceReason,
         source: 'EMPLEADO',
         createdAt: serverTimestamp(),
@@ -1321,7 +1324,7 @@ export default function EmployeeDashboard() {
         .map(d => ({ id: d.id, ...d.data() } as any))
         .filter((a: any) => {
           const t = String(a.absenceType || a.type || '').toLowerCase();
-          return (t === 'aa' || t === 'no presentacion' || t === 'no presentación') && !a.certificateUrl;
+          return (t === 'aa' || t === 'no presentacion' || t === 'no presentación') && !a.certificateUrl && !a.certificateDriveLink;
         });
       setMyPendingAbsences(pending);
     } catch (e) {
@@ -1335,12 +1338,14 @@ export default function EmployeeDashboard() {
     setCertUploadingId(ausenciaId);
     try {
       const safeName = `${Date.now()}_${certFile.name.replace(/\s+/g, '_')}`;
-      const fileRef = ref(storage, `certificados/${user.uid}/${safeName}`);
+      const certificateStoragePath = `absences/${user.uid}/${safeName}`;
+      const fileRef = ref(storage, certificateStoragePath);
       await uploadBytes(fileRef, certFile);
       const url = await getDownloadURL(fileRef);
       await updateDoc(doc(db, 'ausencias', ausenciaId), {
         certificateUrl: url,
         certificateName: certFile.name,
+        certificateStoragePath,
         certificateUploadedAt: serverTimestamp(),
         hasCertificate: true,
         status: 'Confirmada', // vuelve a Confirmada para que RRHH la revise
@@ -2172,10 +2177,15 @@ export default function EmployeeDashboard() {
               )}
 
               {/* PRESENTE */}
-              {portalFeatures.checkIn && blueIsConfirmedPresent && (
-                <div className="mt-4 flex items-center gap-2 bg-emerald-500/20 border border-emerald-400/30 rounded-2xl px-4 py-3">
-                  <CheckCircle size={18} className="text-emerald-300"/>
-                  <span className="text-sm font-black text-emerald-200">Presente registrado</span>
+              {portalFeatures.checkIn && blueIsConfirmedPresent && blueShift && (
+                <div className="mt-4 flex flex-col gap-1 bg-emerald-500/20 border border-emerald-400/30 rounded-2xl px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle size={18} className="text-emerald-300"/>
+                    <span className="text-sm font-black text-emerald-200">
+                      Tu turno comenzó a las {formatTime(blueShift.startTime)}
+                    </span>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-300/90 pl-7">Presente confirmado</span>
                 </div>
               )}
               {portalFeatures.checkIn && blueHasPendingRequest && !blueIsConfirmedPresent && (
@@ -2683,8 +2693,10 @@ export default function EmployeeDashboard() {
                         <p className="text-sm font-black text-white truncate">{(s.objectiveName && objectivesMap[s.objectiveName]?.name) || s.objectiveName || (s.objectiveId ? objectivesMap[s.objectiveId]?.name : null) || 'Sin objetivo'}</p>
                         <p className="text-[11px] font-bold mt-0.5" style={{ color: empresaColor }}>{formatDate(s.startTime)}</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">{formatTime(s.startTime)} – {formatTime(s.endTime)}</p>
-                        {s.checkInTime && (
-                          <p className="text-[9px] text-emerald-400 font-bold mt-1">✓ Check-in: {formatTime(s.checkInTime)}</p>
+                        {(s.isPresent || s.checkInTime) && s.startTime && (
+                          <p className="text-[9px] text-emerald-400 font-bold mt-1">
+                            ✓ Tu turno comenzó a las {formatTime(s.startTime)}
+                          </p>
                         )}
                       </div>
                       <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-950/60 border border-emerald-800/40 shrink-0">
@@ -2752,7 +2764,7 @@ export default function EmployeeDashboard() {
                       <option value="Licencia Esp.">Licencia Esp.</option>
                       <option value="Enfermedad">Enfermedad</option>
                       <option value="ART">ART</option>
-                      <option value="Injustificada">Injustificada</option>
+                      <option value="Ausencia con aviso">Hoy no me presento</option>
                     </select>
                   </div>
                   <div className="grid grid-cols-2 gap-3">

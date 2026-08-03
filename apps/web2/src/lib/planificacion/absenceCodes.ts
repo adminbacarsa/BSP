@@ -36,6 +36,7 @@ export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     'np': 'AA',
     // Injustificada (resultado de revisión RRHH)
     'injustificada': 'AA',
+    'ausencia con aviso': 'AA',
     'falta injustificada': 'AA',
     'aa': 'AA',
     // Llegada Tarde
@@ -55,6 +56,7 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
     'No Presentacion': 'AA',
     'No Presentación': 'AA',
     'Injustificada': 'AA',
+    'Ausencia con aviso': 'AA',
     'Justificada': 'AA',
     'Llegada Tarde': 'LT',
     'Licencia Esp.': 'L',

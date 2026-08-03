@@ -24,16 +24,16 @@
 | **F0** | Fundación | `EN_CURSO` | 12 | 8/12 | — |
 | **F1** | Auth, activación y turnos | `EN_CURSO` | 14 | 11/14 | — |
 | **F2** | Fichada con GPS | `EN_CURSO` | 10 | 8/10 | — |
-| **F3** | Ausencias, licencias y push | `EN_CURSO` | 12 | 3/12 | — |
+| **F3** | Ausencias, licencias y push | `EN_CURSO` | 12 | 5/12 | — |
 | **F4** | Permutas de turno | `PENDIENTE` | 8 | 0/8 | — |
 | **F5** | Credencial digital y UX | `PENDIENTE` | 10 | 0/10 | — |
 | **F6** | Beta cerrada y hardening | `PENDIENTE` | 10 | 0/10 | — |
 | **F7** | Publicación en stores | `PENDIENTE` | 12 | 0/12 | — |
-| | **TOTAL** | | **88** | **19/88** | |
+| | **TOTAL** | | **88** | **21/88** | |
 
-**Fase activa recomendada:** F3 (adjuntos certificado + push)  
-**Última actualización:** 2026-07-30  
-**Última tarea completada:** F3-01 / F3-02 (novedad móvil)
+**Fase activa recomendada:** F3 (push F3-07+)  
+**Última actualización:** 2026-07-31  
+**Última tarea completada:** F3-03 / F3-04 (certificado cámara + galería en novedad móvil)
 
 ---
 
@@ -45,7 +45,7 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **F3-03** | Adjunto certificado (cámara) | `expo-image-picker` → Storage | F3 |
+| **F3-07** | `expo-notifications` + FCM | Permisos push; token al login | F3 |
 
 ### Bloqueantes actuales
 
@@ -76,6 +76,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-07-31 | F3-03/04 | Certificado en /novedad — cámara/galería, upload Storage absences/{uid}
 2026-07-30 | F3-01/02 | Pantalla /novedad — ausencias y licencias (Firestore ausencias, classifyAbsence)
 2026-07-30 | F2-05 | CheckInStatusBanner + resolveCheckInUiStatus en portal-core
 2026-07-30 | F1-14 | seed-empleado crea turno demo del día (Planta Bacar Lab) para app móvil
@@ -238,8 +239,8 @@ npm run dev:mobile
 |----|-------|------------------------|--------|-------|
 | F3-01 | Formulario reportar ausencia | Mismos campos que web → colección `ausencias` | ✅ Hecha | 2026-07-30 |
 | F3-02 | Formulario solicitar licencia | Flujo separado o unificado según web | ✅ Hecha | 2026-07-30 |
-| F3-03 | Adjunto certificado (cámara) | `expo-image-picker` → Storage | ⬜ Pendiente | — |
-| F3-04 | Adjunto certificado (galería) | `expo-document-picker` como alternativa | ⬜ Pendiente | — |
+| F3-03 | Adjunto certificado (cámara) | `expo-image-picker` → Storage `absences/{uid}/` | ✅ Hecha | 2026-07-31 |
+| F3-04 | Adjunto certificado (galería) | Galería en `CertificateAttachmentField` | ✅ Hecha | 2026-07-31 |
 | F3-05 | `notificarLlegadaTarde` | Botón y confirmación; estado en UI | ✅ Hecha | 2026-07-30 |
 | F3-06 | Configurar APNs en Firebase | Key/cert Apple para push iOS | ⬜ Pendiente | — |
 | F3-07 | `expo-notifications` + FCM | Permisos push; token al login | ⬜ Pendiente | — |
