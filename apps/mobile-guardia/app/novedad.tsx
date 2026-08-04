@@ -24,6 +24,7 @@ import {
 } from '@cosp/portal-core';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { useEmployeeShifts } from '../src/hooks/useEmployeeShifts';
+import { useNetworkStatus } from '../src/hooks/useNetworkStatus';
 import { getPortalFirebase } from '../src/lib/portal';
 import {
   uploadAbsenceCertificate,
@@ -32,7 +33,8 @@ import {
 import { CertificateAttachmentField } from '../src/components/CertificateAttachmentField';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
-import { colors, radius } from '../src/theme/tokens';
+import { radius } from '../src/theme/tokens';
+import { useTheme } from '../src/theme/ThemeContext';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -49,6 +51,8 @@ export default function NovedadScreen() {
   const { user, employee, empDocId, portalFeatures, initializing } = usePortalAuth();
   const { shifts } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { db } = getPortalFirebase();
+  const { palette } = useTheme();
+  const { isOffline } = useNetworkStatus();
 
   const typeOptions = useMemo(
     () =>
@@ -78,6 +82,13 @@ export default function NovedadScreen() {
 
   async function handleSubmit() {
     if (!user) return;
+    if (isOffline) {
+      Alert.alert(
+        'Sin conexión',
+        'Para enviar una novedad necesitás internet. La fichada offline sigue disponible desde el inicio.',
+      );
+      return;
+    }
     if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
       Alert.alert('Fechas', 'Usá formato AAAA-MM-DD (ej. 2026-07-30).');
       return;
@@ -164,10 +175,12 @@ export default function NovedadScreen() {
     return (
       <>
         <Stack.Screen options={{ title: 'Novedad' }} />
-        <SafeAreaView style={styles.safe} edges={['bottom']}>
+        <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['bottom']}>
           <View style={styles.blocked}>
-            <Text style={styles.blockedTitle}>Módulo no habilitado</Text>
-            <Text style={styles.blockedBody}>Tu empresa no tiene activas ausencias o licencias en el portal.</Text>
+            <Text style={[styles.blockedTitle, { color: palette.onSurface }]}>Módulo no habilitado</Text>
+            <Text style={[styles.blockedBody, { color: palette.onSurfaceMuted }]}>
+              Tu empresa no tiene activas ausencias o licencias en el portal.
+            </Text>
             <CommandButton label="Volver" variant="secondary" onPress={() => router.back()} />
           </View>
         </SafeAreaView>
@@ -178,10 +191,15 @@ export default function NovedadScreen() {
   return (
     <>
       <Stack.Screen options={{ title: 'Solicitar novedad' }} />
-      <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['bottom']}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-            <Text style={styles.intro}>
+            {isOffline ? (
+              <Text style={[styles.offlineHint, { color: palette.warning }]}>
+                Sin conexión: no podés enviar hasta recuperar red.
+              </Text>
+            ) : null}
+            <Text style={[styles.intro, { color: palette.onSurfaceMuted }]}>
               Informá ausencias, licencias o que hoy no vas a asistir. RRHH y Operaciones reciben el aviso según urgencia.
             </Text>
 
@@ -194,47 +212,82 @@ export default function NovedadScreen() {
                       setAbsenceType(t);
                       if (!typeAcceptsCertificate(t)) setCertificate(null);
                     }}
-                    style={[styles.chip, absenceType === t && styles.chipActive]}
+                    style={[
+                      styles.chip,
+                      {
+                        borderColor: absenceType === t ? palette.primary : palette.outline,
+                        backgroundColor: absenceType === t ? palette.primary : palette.inputBg,
+                      },
+                    ]}
                   >
-                    <Text style={[styles.chipText, absenceType === t && styles.chipTextActive]}>
+                    <Text
+                      style={[
+                        styles.chipText,
+                        { color: absenceType === t ? palette.onPrimary : palette.onSurfaceMuted },
+                      ]}
+                    >
                       {absenceTypeEmployeeLabel(t)}
                     </Text>
                   </Pressable>
                 ))}
               </View>
               {absenceTypeEmployeeHint(absenceType) ? (
-                <Text style={styles.typeHint}>{absenceTypeEmployeeHint(absenceType)}</Text>
+                <Text style={[styles.typeHint, { color: palette.onSurfaceMuted }]}>
+                  {absenceTypeEmployeeHint(absenceType)}
+                </Text>
               ) : null}
             </CommandCard>
 
             <CommandCard title="Período">
-              <Text style={styles.label}>Desde (AAAA-MM-DD)</Text>
+              <Text style={[styles.label, { color: palette.onSurfaceMuted }]}>Desde (AAAA-MM-DD)</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: palette.outline,
+                    color: palette.onSurface,
+                    backgroundColor: palette.inputBg,
+                  },
+                ]}
                 value={startDate}
                 onChangeText={setStartDate}
                 placeholder="2026-07-30"
-                placeholderTextColor={colors.slate500}
+                placeholderTextColor={palette.onSurfaceMuted}
                 autoCapitalize="none"
               />
-              <Text style={styles.label}>Hasta (AAAA-MM-DD)</Text>
+              <Text style={[styles.label, { color: palette.onSurfaceMuted }]}>Hasta (AAAA-MM-DD)</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: palette.outline,
+                    color: palette.onSurface,
+                    backgroundColor: palette.inputBg,
+                  },
+                ]}
                 value={endDate}
                 onChangeText={setEndDate}
                 placeholder="2026-07-30"
-                placeholderTextColor={colors.slate500}
+                placeholderTextColor={palette.onSurfaceMuted}
                 autoCapitalize="none"
               />
             </CommandCard>
 
             <CommandCard title="Motivo">
               <TextInput
-                style={[styles.input, styles.textArea]}
+                style={[
+                  styles.input,
+                  styles.textArea,
+                  {
+                    borderColor: palette.outline,
+                    color: palette.onSurface,
+                    backgroundColor: palette.inputBg,
+                  },
+                ]}
                 value={reason}
                 onChangeText={setReason}
                 placeholder="Describí brevemente el motivo…"
-                placeholderTextColor={colors.slate500}
+                placeholderTextColor={palette.onSurfaceMuted}
                 multiline
                 numberOfLines={4}
                 textAlignVertical="top"
@@ -251,6 +304,7 @@ export default function NovedadScreen() {
             <CommandButton
               label={submitting ? 'Enviando…' : 'Enviar solicitud'}
               loading={submitting}
+              disabled={isOffline}
               onPress={handleSubmit}
             />
           </ScrollView>
@@ -261,14 +315,14 @@ export default function NovedadScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.slate50 },
+  safe: { flex: 1 },
   flex: { flex: 1 },
   scroll: { padding: 20, gap: 16, paddingBottom: 32 },
-  intro: { fontSize: 14, color: colors.slate500, lineHeight: 21 },
+  offlineHint: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  intro: { fontSize: 14, lineHeight: 21 },
   label: {
     fontSize: 11,
     fontWeight: '800',
-    color: colors.slate500,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 6,
@@ -276,14 +330,11 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: colors.slate200,
     borderRadius: radius.md,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
     fontWeight: '600',
-    color: colors.slate950,
-    backgroundColor: colors.white,
   },
   textArea: { minHeight: 100 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -292,17 +343,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: colors.slate200,
-    backgroundColor: colors.slate50,
   },
-  chipActive: {
-    backgroundColor: colors.indigo600,
-    borderColor: colors.indigo800,
-  },
-  chipText: { fontSize: 12, fontWeight: '800', color: colors.slate600 },
-  chipTextActive: { color: colors.white },
-  typeHint: { fontSize: 12, color: colors.slate500, marginTop: 10, lineHeight: 18 },
+  chipText: { fontSize: 12, fontWeight: '800' },
+  typeHint: { fontSize: 12, marginTop: 10, lineHeight: 18 },
   blocked: { flex: 1, padding: 24, justifyContent: 'center', gap: 12 },
-  blockedTitle: { fontSize: 20, fontWeight: '900', color: colors.slate950 },
-  blockedBody: { fontSize: 14, color: colors.slate500, lineHeight: 22 },
+  blockedTitle: { fontSize: 20, fontWeight: '900' },
+  blockedBody: { fontSize: 14, lineHeight: 22 },
 });

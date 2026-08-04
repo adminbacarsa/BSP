@@ -8,6 +8,8 @@ import { useEmployeeShifts } from '../src/hooks/useEmployeeShifts';
 import { CommandCard } from '../src/components/ui/CommandCard';
 import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { radius, shadow } from '../src/theme/tokens';
+import { PortalErrorPanel } from '../src/components/PortalErrorPanel';
+import { useNetworkStatus } from '../src/hooks/useNetworkStatus';
 import { useTheme } from '../src/theme/ThemeContext';
 
 function ShiftRow({ item }: { item: Shift }) {
@@ -58,6 +60,7 @@ function AgendaScreenContent() {
   const { empDocId, portalFeatures, user } = usePortalAuth();
   const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { palette } = useTheme();
+  const { isOffline } = useNetworkStatus();
 
   if (!portalFeatures.viewSchedule) {
     return (
@@ -79,9 +82,14 @@ function AgendaScreenContent() {
         {loading ? (
           <ActivityIndicator size="large" color={palette.primary} style={styles.loader} />
         ) : error ? (
-          <CommandCard style={styles.centerCard}>
-            <Text style={styles.error}>{error}</Text>
-          </CommandCard>
+          <PortalErrorPanel
+            title="Agenda"
+            message={
+              isOffline
+                ? 'Sin conexión. Los turnos en pantalla pueden estar desactualizados hasta que vuelva la red.'
+                : error
+            }
+          />
         ) : (
           <FlatList
             data={shifts}

@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { PortalAuthProvider, usePortalAuth } from '../src/context/PortalAuthContext';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeContext';
 import { PushNotificationsBootstrap } from '../src/components/PushNotificationsBootstrap';
+import { OfflineBanner } from '../src/components/OfflineBanner';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -48,6 +49,7 @@ export default function RootLayout() {
       <ThemeProvider>
         <PortalAuthProvider>
           <PushNotificationsBootstrap />
+          <OfflineBanner />
           <RootNavigator />
         </PortalAuthProvider>
       </ThemeProvider>

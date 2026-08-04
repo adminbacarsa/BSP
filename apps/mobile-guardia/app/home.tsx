@@ -16,6 +16,8 @@ import { formatHeroTimeRange, HeroShiftPanel } from '../src/components/ui/HeroSh
 import { CheckInStatusBanner } from '../src/components/ui/CheckInStatusBanner';
 import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { radius, spacing } from '../src/theme/tokens';
+import { PortalErrorPanel } from '../src/components/PortalErrorPanel';
+import { useNetworkStatus } from '../src/hooks/useNetworkStatus';
 import { useTheme } from '../src/theme/ThemeContext';
 
 function heroHeadline(todayAny: ReturnType<typeof pickTodayShiftAny>, hasNext: boolean): string {
@@ -35,6 +37,7 @@ export default function HomeScreen() {
 function HomeScreenContent() {
   const router = useRouter();
   const { palette } = useTheme();
+  const { isOffline } = useNetworkStatus();
   const { user, employee, empDocId, portalFeatures, signOut, refreshEmployee, employeeProfileLoading, employeeProfileReady, employeeProfileError } =
     usePortalAuth();
   const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
@@ -168,9 +171,15 @@ function HomeScreenContent() {
           {loading ? (
             <ActivityIndicator size="large" color={palette.primary} style={styles.loader} />
           ) : error ? (
-            <CommandCard title="Cronograma">
-              <Text style={styles.error}>{error}</Text>
-            </CommandCard>
+            <PortalErrorPanel
+              title="Cronograma"
+              message={
+                isOffline
+                  ? 'Sin red: no se pueden actualizar turnos en tiempo real. Revisa Wi‑Fi o datos y reintenta.'
+                  : error
+              }
+              onRetry={() => refreshEmployee()}
+            />
           ) : shifts.length === 0 && !loading ? (
             <CommandCard title="Cronograma">
               <Text style={[styles.emptyShifts, { color: palette.onSurfaceMuted }]}>
@@ -235,6 +244,11 @@ function HomeScreenContent() {
               <Text style={[styles.quickTitle, { color: palette.onSurface }]}>Más servicios</Text>
               <Text style={[styles.quickSub, { color: palette.onSurfaceMuted }]}>Ausencias, permutas, credencial</Text>
               <CommandButton label="Abrir" variant="secondary" onPress={() => router.push('/mas')} />
+            </CommandCard>
+            <CommandCard style={styles.quickCard}>
+              <Text style={[styles.quickTitle, { color: palette.onSurface }]}>Credencial</Text>
+              <Text style={[styles.quickSub, { color: palette.onSurfaceMuted }]}>QR y código de verificación</Text>
+              <CommandButton label="Ver credencial" variant="secondary" onPress={() => router.push('/credencial')} />
             </CommandCard>
           </View>
         </ScrollView>

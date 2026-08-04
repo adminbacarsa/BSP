@@ -1,13 +1,13 @@
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { colors } from '../theme/tokens';
+import { useTheme } from '../theme/ThemeContext';
 
 export function LoadingScreen({ label = 'Cargando…' }: { label?: string }) {
+  const { palette } = useTheme();
   return (
-    <LinearGradient colors={[colors.slate950, colors.indigo950]} style={styles.wrap}>
-      <ActivityIndicator size="large" color={colors.indigo200} />
-      <Text style={styles.label}>{label}</Text>
-    </LinearGradient>
+    <View style={[styles.wrap, { backgroundColor: palette.background }]}>
+      <ActivityIndicator size="large" color={palette.primary} />
+      <Text style={[styles.label, { color: palette.onSurfaceMuted }]}>{label}</Text>
+    </View>
   );
 }
 
@@ -19,7 +19,6 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   label: {
-    color: colors.indigo200,
     fontSize: 14,
     fontWeight: '600',
   },

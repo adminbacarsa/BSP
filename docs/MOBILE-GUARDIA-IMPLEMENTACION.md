@@ -26,14 +26,14 @@
 | **F2** | Fichada con GPS | `EN_CURSO` | 10 | 8/10 | — |
 | **F3** | Ausencias, licencias y push | `EN_CURSO` | 12 | 10/12 | — |
 | **F4** | Permutas de turno | `EN_CURSO` | 8 | 7/8 | — |
-| **F5** | Credencial digital y UX | `EN_CURSO` | 10 | 4/10 | — |
+| **F5** | Credencial digital y UX | `EN_CURSO` | 10 | 6/10 | — |
 | **F6** | Beta cerrada y hardening | `PENDIENTE` | 10 | 0/10 | — |
 | **F7** | Publicación en stores | `PENDIENTE` | 12 | 0/12 | — |
-| | **TOTAL** | | **88** | **26/88** | |
+| | **TOTAL** | | **88** | **32/88** | |
 
 **Fase activa recomendada:** F5 (UX) · F4-08 prueba E2E permutas · F3-06/12 push nativo  
 **Última actualización:** 2026-08-03  
-**Última tarea completada:** F5-01..04 credencial digital en app (`/credencial`)
+**Última tarea completada:** F5-05/06 UX offline, errores y loading temático
 
 ---
 
@@ -45,7 +45,7 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **F5-05** | Pantallas error / sin conexión | UX clara; no pantalla en blanco | F5 |
+| **F4-08** | Prueba E2E permuta | Dos guardias + supervisor en prod/lab | F4 |
 
 ### Bloqueantes actuales
 
@@ -76,6 +76,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-08-04 | F5-05/06 | Banner sin conexión, PortalErrorPanel, novedad temática, LoadingScreen
 2026-08-03 | F5-01..04 | Credencial digital: QR, código 60s, foto cámara, cache AsyncStorage
 2026-08-03 | F4 | Permutas app + callables swap + supervisor en planificación
 2026-08-03 | UI Stitch | Temas Core/Dark Ops + docs/stitch (Gemini Stitch export)
@@ -304,8 +305,8 @@ npm run dev:mobile
 | F5-02 | QR de credencial | `react-native-qrcode-svg`; mismo payload que web | ✅ Hecha | 2026-08-03 |
 | F5-03 | Actualizar foto legajo | Cámara → Storage → doc empleado | ✅ Hecha | 2026-08-03 |
 | F5-04 | Cache offline credencial | AsyncStorage última versión | ✅ Hecha | 2026-08-03 |
-| F5-05 | Pantallas error / sin conexión | UX clara; no pantalla en blanco | ⬜ Pendiente | — |
-| F5-06 | Loading states globales | Skeleton o spinners consistentes | ⬜ Pendiente | — |
+| F5-05 | Pantallas error / sin conexión | Banner offline + PortalErrorPanel | ✅ Hecha | 2026-08-04 |
+| F5-06 | Loading states globales | LoadingScreen temático + ActivityIndicator | ✅ Hecha | 2026-08-04 |
 | F5-07 | Icono y splash app | Assets para dev y stores (1024 icon) | ⬜ Pendiente | — |
 | F5-08 | Accesibilidad básica | Tamaños táctiles, contraste, labels | ⬜ Pendiente | — |
 | F5-09 | Revisión en 3 tamaños pantalla | Phone pequeño, estándar, tablet | ⬜ Pendiente | — |
