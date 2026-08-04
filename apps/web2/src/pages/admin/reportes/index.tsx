@@ -495,7 +495,7 @@ export default function ReportsPage() {
                                                                                 : null;
                                                                             const rDur   = rStart && rEnd ? Math.min(36, Math.max(0, (rEnd.getTime()-rStart.getTime())/3600000)) : null;
                                                                             const hasOvertime = isRetentionShift && rDur != null && rDur > dur + 0.1;
-                                                                            const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+                                                                            const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
                                                                             const isLeaveRow = isLeaveReportShift(s);
                                                                             return (
                                                                                 <tr key={s.id} className={isVacant ? 'bg-amber-50/60' : hasOvertime ? 'bg-orange-50/40' : isLeaveRow ? 'bg-blue-50/30' : ''}>
@@ -1094,26 +1094,25 @@ export default function ReportsPage() {
                         </div>
                     </div>
                     <div className="flex-1 overflow-auto bg-slate-50 p-3">
-                        <table className="w-full text-xs text-left border-collapse bg-white shadow-sm rounded-xl overflow-hidden">
+                        <table className="w-full min-w-[820px] text-xs text-left border-collapse bg-white shadow-sm rounded-xl overflow-hidden">
                             <thead className="text-[10px] font-black text-slate-500 uppercase border-b border-slate-200 bg-slate-100">
                                 <tr>
-                                    <th className="py-2 px-3">Fecha</th>
-                                    <th className="py-2 px-3">Planificado</th>
-                                    <th className="py-2 px-3">Real</th>
-                                    <th className="py-2 px-3 text-center">Tipo</th>
-                                    <th className="py-2 px-3 text-center border-l border-slate-200 text-slate-400">Hs. Teóricas</th>
-                                    <th className="py-2 px-3 text-center text-indigo-600">Hs. Reales</th>
-                                    <th className="py-2 px-3 text-center text-amber-500">Diurnas</th>
-                                    <th className="py-2 px-3 text-center text-violet-600">Nocturnas</th>
-                                    <th className="py-2 px-3 text-center text-orange-500 border-l border-slate-200">Al 50%</th>
-                                    <th className="py-2 px-3 text-center text-rose-600">Al 100% (FT)</th>
-                                    <th className="py-2 px-3 text-center text-emerald-600">Plus Feriado</th>
-                                    <th className="py-2 px-3 text-center">Estado</th>
+                                    <th className="py-2 px-2">Fecha</th>
+                                    <th className="py-2 px-2">Planificado</th>
+                                    <th className="py-2 px-2">Real</th>
+                                    <th className="py-2 px-2 text-center">Tipo</th>
+                                    <th className="py-2 px-2 text-center border-l border-slate-200 text-slate-400">Hs. Teór.</th>
+                                    <th className="py-2 px-2 text-center text-indigo-600">Hs. Reales</th>
+                                    <th className="py-2 px-2 text-center text-amber-500">Diurnas</th>
+                                    <th className="py-2 px-2 text-center text-violet-600">Nocturnas</th>
+                                    <th className="py-2 px-2 text-center text-rose-600 border-l border-slate-200">Al 100% (FT)</th>
+                                    <th className="py-2 px-2 text-center text-emerald-600">Plus Feriado</th>
+                                    <th className="py-2 px-2 text-center">Estado</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {rowsWithData.map((row:any) => {
-                                    const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+                                    const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
                                     const isLicenciaRow = ['L','PG','E','A'].includes(row.code);
                                     const isLeaveClickable = ['E','L','PG','A'].includes(row.code);
                                 const detailCodeStyle = row.code === 'PG' ? 'bg-blue-100 text-blue-700 border-blue-300'
@@ -1124,16 +1123,16 @@ export default function ReportsPage() {
                                     : 'bg-slate-100 text-slate-600';
                                 return (
                                     <tr key={row.id} className={`hover:bg-indigo-50/50 ${isLicenciaRow ? 'bg-blue-50/40 border-l-4 border-l-blue-300' : ''} ${row.hasOvertime ? 'bg-orange-50/30' : ''}`}>
-                                        <td className="py-2 px-3 font-bold text-slate-700 whitespace-nowrap">{formatDate({seconds: row.date.getTime()/1000})}</td>
-                                        <td className="py-2 px-3 text-slate-500 font-mono whitespace-nowrap">
+                                        <td className="py-2 px-2 font-bold text-slate-700 whitespace-nowrap">{formatDate({seconds: row.date.getTime()/1000})}</td>
+                                        <td className="py-2 px-2 text-slate-500 font-mono whitespace-nowrap">
                                             {row.isLeaveDay ? <span className="text-slate-300">—</span> : `${fmt(row.date)}${row.endDate ? `–${fmt(row.endDate)}` : ''}`}
                                         </td>
-                                        <td className="py-2 px-3 font-mono whitespace-nowrap">
+                                        <td className="py-2 px-2 font-mono whitespace-nowrap">
                                             {row.rStart && row.rEnd
                                                 ? <span className={row.hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-500'}>{fmt(row.rStart)}–{fmt(row.rEnd)}</span>
                                                 : <span className="text-slate-300">—</span>}
                                         </td>
-                                        <td className="py-2 px-3 text-center relative">
+                                        <td className="py-2 px-2 text-center relative">
                                             {isLeaveClickable ? (
                                                 <button
                                                     type="button"
@@ -1160,19 +1159,18 @@ export default function ReportsPage() {
                                                 </div>
                                             )}
                                         </td>
-                                        <td className="py-2 px-3 text-center text-slate-400 border-l border-slate-100">{row.total > 0 ? row.total.toFixed(1) : '-'}</td>
-                                        <td className={`py-2 px-3 text-center font-black border-l border-slate-100 ${row.hasOvertime ? 'text-orange-600' : row.horasTrabajadas > 0 ? 'text-indigo-600' : 'text-slate-300'}`}>
+                                        <td className="py-2 px-2 text-center text-slate-400 border-l border-slate-100">{row.total > 0 ? row.total.toFixed(1) : '-'}</td>
+                                        <td className={`py-2 px-2 text-center font-black border-l border-slate-100 ${row.hasOvertime ? 'text-orange-600' : row.horasTrabajadas > 0 ? 'text-indigo-600' : 'text-slate-300'}`}>
                                             {row.rDur != null && row.rDur > 0 && row.horasTrabajadas === 0
                                               ? row.rDur.toFixed(1)
                                               : row.horasTrabajadas > 0 ? row.horasTrabajadas.toFixed(1) : '—'}
                                             {row.hasOvertime && row.rDur != null && row.horasTrabajadas > 0 && <span className="text-[9px] ml-1 text-orange-400">+{(row.rDur - row.total).toFixed(1)}</span>}
                                         </td>
-                                        <td className="py-2 px-3 text-center font-mono text-amber-600"><div className="flex items-center justify-center gap-1">{row.day > 0 && <Sun size={10}/>} {row.day > 0 ? row.day.toFixed(1) : '-'}</div></td>
-                                        <td className="py-2 px-3 text-center font-mono text-violet-600"><div className="flex items-center justify-center gap-1">{row.night > 0 && <Moon size={10}/>} {row.night > 0 ? row.night.toFixed(1) : '-'}</div></td>
-                                        <td className="py-2 px-3 text-center text-slate-300 border-l border-slate-100">—</td>
-                                        <td className="py-2 px-3 text-center font-black text-rose-600 bg-rose-50/20">{row.h100 > 0 ? row.h100.toFixed(1) : <span className="text-slate-300">—</span>}</td>
-                                        <td className="py-2 px-3 text-center font-bold text-emerald-600">{row.hFeriado > 0 ? <span className="bg-emerald-50 px-1.5 py-0.5 rounded">{row.hFeriado.toFixed(1)}</span> : <span className="text-slate-300">—</span>}</td>
-                                        <td className="py-2 px-3 text-center whitespace-nowrap">
+                                        <td className="py-2 px-2 text-center font-mono text-amber-600"><div className="flex items-center justify-center gap-1">{row.day > 0 && <Sun size={10}/>} {row.day > 0 ? row.day.toFixed(1) : '-'}</div></td>
+                                        <td className="py-2 px-2 text-center font-mono text-violet-600"><div className="flex items-center justify-center gap-1">{row.night > 0 && <Moon size={10}/>} {row.night > 0 ? row.night.toFixed(1) : '-'}</div></td>
+                                        <td className="py-2 px-2 text-center font-black text-rose-600 bg-rose-50/20 border-l border-slate-100">{row.h100 > 0 ? row.h100.toFixed(1) : <span className="text-slate-300">—</span>}</td>
+                                        <td className="py-2 px-2 text-center font-bold text-emerald-600">{row.hFeriado > 0 ? <span className="bg-emerald-50 px-1.5 py-0.5 rounded">{row.hFeriado.toFixed(1)}</span> : <span className="text-slate-300">—</span>}</td>
+                                        <td className="py-2 px-2 text-center whitespace-nowrap">
                                             {row.swapWith && <span className="text-[9px] bg-amber-50 text-amber-600 px-1 rounded border border-amber-100 mr-1">🔁 {row.swapWith}</span>}
                                             {(() => {
                                                 if (row.code === 'V') return <span className="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold border border-emerald-200">Vacaciones</span>;
@@ -1205,14 +1203,13 @@ export default function ReportsPage() {
                                     <td className="py-3 px-3 text-center font-black text-emerald-400">{totalSum.horasTrabajadas.toFixed(1)}</td>
                                     <td className="py-3 px-3 text-center text-amber-400">{totalSum.day.toFixed(1)}</td>
                                     <td className="py-3 px-3 text-center text-violet-300">{totalSum.night.toFixed(1)}</td>
-                                    <td className="py-3 px-3 text-center text-orange-400 font-black border-l border-slate-700">{excedente > 0 ? excedente.toFixed(1) : '—'}</td>
-                                    <td className="py-3 px-3 text-center text-rose-400 font-black">{totalSum.h100.toFixed(1)}</td>
+                                    <td className="py-3 px-3 text-center text-rose-400 font-black border-l border-slate-700">{totalSum.h100.toFixed(1)}</td>
                                     <td className="py-3 px-3 text-center text-emerald-400 font-black">{totalSum.hFeriado > 0 ? totalSum.hFeriado.toFixed(1) : '—'}</td>
                                     <td></td>
                                 </tr>
                                 <tr className="bg-slate-800 border-t border-slate-700">
                                     <td colSpan={4} className="py-3 px-3 text-right uppercase text-amber-400">Liquidación (204hs):</td>
-                                    <td colSpan={8} className="py-3 px-3">
+                                    <td colSpan={7} className="py-3 px-3">
                                         <div className="flex justify-around items-center">
                                             <div className="flex flex-col items-center">
                                                 <span className="text-[9px] text-slate-400 uppercase">Normales</span>
