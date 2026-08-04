@@ -127,6 +127,10 @@ import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificac
 import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
 import { resolveObjectiveScheduleFlags, shouldBypassFixedBandFloater } from '@/lib/planificacion/scheduleObjectiveFlags';
+import { buildObjectiveScheduleProfile } from '@/lib/planificacion/objectiveServiceModel';
+import { resolveCronogramPlanningRules } from '@/lib/planificacion/cronogramPlanningRules';
+import { dominantDotacionFromPlanningCells } from '@/lib/planificacion/seedDotacionFromPrevMonth';
+import { fetchPlanningMonthShifts } from '@/lib/planificacion/loadPlanningMonthShifts';
 import {
     resolveAutoPlanningBrain,
     PLANNING_COVERAGE_RULES,
@@ -1294,6 +1298,39 @@ export default function PlanificacionPage() {
     const [autoCycles, setAutoCycles] = useState<string[]>([]);
     const autoSelectedCyclesRef = useRef<string[]>([]);
     const autoRotAppliedRef = useRef<string>('');
+    const [mesRotacionesDesactivadas, setMesRotacionesDesactivadas] = useState<Set<string>>(new Set());
+    const [rotMesDropOpen, setRotMesDropOpen] = useState(false);
+
+    const _saveRotOverrides = useCallback((next: Set<string>, objId: string, yr: number, mo: number, empId: string) => {
+        const stateKey = buildPlanificacionEstadoDocId(empId, objId, yr, mo);
+        setDoc(doc(db, 'planificacion_estados', stateKey),
+            { rotacionesDesactivadasMes: Array.from(next), empresaId: empId },
+            { merge: true },
+        ).catch(e => console.warn('[planif] rot-overrides save', e));
+    }, []);
+
+    const toggleMesRotacion = useCallback((rotId: string) => {
+        if (!selectedObjective) return;
+        const yr = currentDate.getFullYear(), mo = currentDate.getMonth() + 1;
+        setMesRotacionesDesactivadas(prev => {
+            const next = new Set(prev);
+            if (next.has(rotId)) next.delete(rotId); else next.add(rotId);
+            _saveRotOverrides(next, selectedObjective, yr, mo, empresaId);
+            return next;
+        });
+        autoRotAppliedRef.current = '';
+    }, [selectedObjective, currentDate, empresaId, _saveRotOverrides]);
+
+    const toggleTodasMesRotaciones = useCallback((desactivar: boolean) => {
+        if (!selectedObjective || !activeSlaServiceRotations?.length) return;
+        const yr = currentDate.getFullYear(), mo = currentDate.getMonth() + 1;
+        const next = desactivar
+            ? new Set((activeSlaServiceRotations as any[]).map(r => r.id as string))
+            : new Set<string>();
+        setMesRotacionesDesactivadas(next);
+        _saveRotOverrides(next, selectedObjective, yr, mo, empresaId);
+        autoRotAppliedRef.current = '';
+    }, [selectedObjective, currentDate, empresaId, activeSlaServiceRotations, _saveRotOverrides]);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     const [useSixPlusOne, setUseSixPlusOne] = useState(false);
     /** true = forzar siempre 6+2 (default). false = dejar que el cerebro elija entre 6+2/6+1/4+2. */
@@ -2308,6 +2345,11 @@ export default function PlanificacionPage() {
         });
         const totalNeeded = perPos.reduce((s: number, p: any) => s + p.needed, 0);
         return { perPos, totalNeeded };
+    }, [positionStructure]);
+
+    const objectiveCronogramRules = useMemo(() => {
+        if (!positionStructure?.length) return null;
+        return resolveCronogramPlanningRules(positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[]);
     }, [positionStructure]);
 
     // Colchón disponible (horas): si hoy se ausenta alguien, ¿cuánto se podría cubrir
@@ -4109,10 +4151,13 @@ export default function PlanificacionPage() {
             ([k, v]: [string, any]) => k.includes(`_${monthPrefix}`) && v?.objectiveId === selectedObjective && !v?.isDeleted,
         );
         if (hasAnySaved) return;
+        // Filtrar rotaciones desactivadas para este mes
+        const rotacionesActivas = (activeSlaServiceRotations as any[]).filter(r => !mesRotacionesDesactivadas.has(r.id));
+        if (!rotacionesActivas.length) return;
         autoRotAppliedRef.current = periodKey;
         // Generar entradas de rotación para todo el mes (respeta shiftsMap vacío)
         const rotAdditions = applyRotationsForMonth(
-            activeSlaServiceRotations, {}, shiftsMap, year, month, positionStructure,
+            rotacionesActivas, {}, shiftsMap, year, month, positionStructure,
         );
         if (!Object.keys(rotAdditions).length) return;
         commitPendingChanges((prev: Record<string, any>) => {
@@ -4120,8 +4165,11 @@ export default function PlanificacionPage() {
             if (Object.values(prev).some((v: any) => v && !v._isAutoRotation && !v._isAutoCondition)) return prev;
             return { ...prev, ...rotAdditions };
         });
-        toast.info('Rotación pre-cargada — revisá y guardá cuando estés listo', { duration: 4000 });
-    }, [activeSlaServiceRotations, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges]);
+        const desactCount = mesRotacionesDesactivadas.size;
+        const totalCount = activeSlaServiceRotations.length;
+        const hint = desactCount > 0 ? ` (${rotacionesActivas.length}/${totalCount} activas)` : '';
+        toast.info(`Rotación pre-cargada${hint} — revisá y guardá cuando estés listo`, { duration: 4000 });
+    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges]);
 
     // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
     useEffect(() => {
@@ -4432,7 +4480,9 @@ export default function PlanificacionPage() {
                 } else {
                     setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
                 }
-            }).catch(() => {});
+                const disabled = (row?.data.rotacionesDesactivadasMes as string[] | undefined) ?? [];
+                setMesRotacionesDesactivadas(new Set(disabled));
+            }).catch(() => { setMesRotacionesDesactivadas(new Set()); });
     }, [selectedObjective, currentDate, empresaId, dataRefreshNonce]);
 
     // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
@@ -7204,6 +7254,10 @@ export default function PlanificacionPage() {
             const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
             await bumpAutoV2Progress(52, 'Cerebro Auto: esquema, dotación y Modo 12…');
             await new Promise<void>((r) => setTimeout(r, 0));
+            const v2Pos = positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[];
+            const autoCronogramRulesFeas = resolveCronogramPlanningRules(v2Pos);
+            const autoScheduleProfileFeas = buildObjectiveScheduleProfile(v2Pos);
+            const autoCycleOverride = autoScheduleProfileFeas.cyclePreference[0] ?? '6+2';
             const brainInput = {
                 positions: positionStructure,
                 employees: planningDotacionEmployees.map((e:any) => ({
@@ -7224,9 +7278,9 @@ export default function PlanificacionPage() {
                 getDayLetter,
                 getDateKey,
                 contingencyDaysManual: [...autoContingenciaDias].filter(d => !autoModo12AbsDays.has(d)),
-                rotateShiftsOverride: autoRotateForce ?? undefined,
+                rotateShiftsOverride: autoRotateForce ?? (autoCronogramRulesFeas.generation.allowGlobalRotateShifts ? undefined : false),
                 ajustarCronoOverride: autoAjustarCrono,
-                cycleOverride: '6+2',
+                cycleOverride: autoCycleOverride,
             };
             autoPlanningBrainInputRef.current = brainInput;
             const brain = resolveAutoPlanningBrain(brainInput);
@@ -7594,6 +7648,51 @@ export default function PlanificacionPage() {
                 const shift = empDefaultShift[`${e.id}___${selectedObjective}`];
                 if (shift) defaultShiftByEmp[e.id] = shift;
             });
+
+            const rosterIdsForSeed = new Set(displayedEmployees.map((e: any) => e.id));
+            const prevMonthCal = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+            if (empresaId && selectedObjective && rosterIdsForSeed.size > 0) {
+                try {
+                    const prevMonthCells = await fetchPlanningMonthShifts({
+                        empresaId,
+                        objectiveId: selectedObjective,
+                        year: prevMonthCal.getFullYear(),
+                        month: prevMonthCal.getMonth() + 1,
+                        scopeEmpresa,
+                        migracionCompleta,
+                        publishedOnly: true,
+                    });
+                    const prevDom = dominantDotacionFromPlanningCells(
+                        prevMonthCells,
+                        selectedObjective,
+                        rosterIdsForSeed,
+                    );
+                    let posFromPrev = 0;
+                    let bandFromPrev = 0;
+                    for (const [empId, pos] of Object.entries(prevDom.positionByEmp)) {
+                        if (!defaultPositionByEmp[empId]) {
+                            defaultPositionByEmp[empId] = pos;
+                            posFromPrev++;
+                        }
+                    }
+                    for (const [empId, band] of Object.entries(prevDom.shiftByEmp)) {
+                        if (!defaultShiftByEmp[empId]) {
+                            defaultShiftByEmp[empId] = band;
+                            bandFromPrev++;
+                        }
+                    }
+                    if (posFromPrev > 0 || bandFromPrev > 0) {
+                        const prevLabel = `${String(prevMonthCal.getMonth() + 1).padStart(2, '0')}/${prevMonthCal.getFullYear()}`;
+                        toast.info(
+                            `Dotación base desde crono publicado ${prevLabel}: ${posFromPrev} puesto(s), ${bandFromPrev} banda(s).`,
+                            { duration: 7000 },
+                        );
+                    }
+                } catch (seedErr) {
+                    console.warn('[auto] seed dotacion mes anterior', seedErr);
+                }
+            }
+
             applySlaContractDotacion({
                 positionAssignments: activeSlaPositionAssignments ?? undefined,
                 defaultPositionByEmp,
@@ -7603,6 +7702,8 @@ export default function PlanificacionPage() {
                 activeSlaServiceRotations,
                 daysInMonth.map((d) => getDateKey(d)),
             );
+            const v2PosGen = positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[];
+            const cronogramRules = resolveCronogramPlanningRules(v2PosGen);
             // Flotantes de empresa: empleados activos sin objetivo asignado.
             // El motor V3 los usa como refuerzo (Fase 3) cuando quedan slots sin cubrir
             // tras los regulares y los FLEX del objetivo en curso.
@@ -7635,9 +7736,9 @@ export default function PlanificacionPage() {
                 getDayLetter,
                 getDateKey,
                 contingencyDaysManual: [...autoContingenciaDias].filter(d => !autoModo12AbsDays.has(d)),
-                rotateShiftsOverride: autoRotateForce ?? undefined,
+                rotateShiftsOverride: autoRotateForce ?? (cronogramRules.generation.allowGlobalRotateShifts ? undefined : false),
                 ajustarCronoOverride: autoAjustarCrono,
-                cycleOverride: '6+2',
+                cycleOverride: buildObjectiveScheduleProfile(v2PosGen).cyclePreference[0] ?? '6+2',
             });
             autoPlanningBrainRef.current = genBrain;
             setAutoPlanningBrainReport(genBrain);
@@ -7709,6 +7810,7 @@ export default function PlanificacionPage() {
                 schedulePhasedRotativeFirst: objectiveScheduleFlags.schedulePhasedRotativeFirst,
                 preserveRotativeIntegrity: objectiveScheduleFlags.preserveRotativeIntegrity,
                 allowCustom24hsBackup: objectiveScheduleFlags.allowCustom24hsBackup,
+                cronogramRules,
                 coverageWisdom,
                 positionAssignmentsByEmp: (() => {
                     const pa = activeSlaPositionAssignments;
@@ -8590,12 +8692,57 @@ export default function PlanificacionPage() {
                             );
                         })()}
                         {selectedObjective && !isSnapshotView && (
-                            <span
-                                className={`block text-[7px] font-bold mt-0.5 ${activeSlaServiceRotations?.length ? 'text-teal-600' : 'text-slate-400'}`}
-                                title={activeSlaServiceRotations?.length ? `Rotaciones SLA: ${activeSlaServiceRotations.map((r: any) => r.name || r.id).join(', ')}` : 'Sin rotaciones SLA cargadas'}
-                            >
-                                {activeSlaServiceRotations?.length ? `⟳ ${activeSlaServiceRotations.length} rot` : '⟳ —'}
-                            </span>
+                            activeSlaServiceRotations?.length ? (
+                                <div className="relative mt-0.5">
+                                    <button
+                                        onClick={() => setRotMesDropOpen(p => !p)}
+                                        className={`block text-[7px] font-bold leading-tight ${
+                                            mesRotacionesDesactivadas.size === (activeSlaServiceRotations as any[]).length
+                                                ? 'text-slate-400'
+                                                : mesRotacionesDesactivadas.size > 0
+                                                    ? 'text-amber-600'
+                                                    : 'text-teal-600'
+                                        }`}
+                                        title="Click para activar/desactivar rotaciones en este mes"
+                                    >
+                                        ⟳ {(activeSlaServiceRotations as any[]).length - mesRotacionesDesactivadas.size}/{(activeSlaServiceRotations as any[]).length} rot
+                                    </button>
+                                    {rotMesDropOpen && (
+                                        <>
+                                            <div className="fixed inset-0 z-40" onClick={() => setRotMesDropOpen(false)}/>
+                                            <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 min-w-[210px]">
+                                                <p className="px-3 py-1 text-[9px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 mb-1">
+                                                    Rotaciones · {currentDate.toLocaleString('es', { month: 'long', year: 'numeric' })}
+                                                </p>
+                                                {(activeSlaServiceRotations as any[]).map(rot => {
+                                                    const off = mesRotacionesDesactivadas.has(rot.id);
+                                                    return (
+                                                        <button
+                                                            key={rot.id}
+                                                            onClick={() => toggleMesRotacion(rot.id)}
+                                                            className="w-full px-3 py-2 text-left text-[11px] font-semibold flex items-center gap-2 hover:bg-slate-50 transition-colors"
+                                                        >
+                                                            <span className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${off ? 'border-slate-300 bg-white' : 'border-teal-500 bg-teal-500'}`}>
+                                                                {!off && <span className="text-white text-[9px] font-black">✓</span>}
+                                                            </span>
+                                                            <span className={off ? 'text-slate-400 line-through' : 'text-slate-700'}>{rot.name || rot.id}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                                <div className="h-px bg-slate-100 mx-2 my-1"/>
+                                                <button
+                                                    onClick={() => { toggleTodasMesRotaciones(mesRotacionesDesactivadas.size < (activeSlaServiceRotations as any[]).length); setRotMesDropOpen(false); }}
+                                                    className="w-full px-3 py-1.5 text-left text-[10px] font-bold text-slate-500 hover:bg-slate-50 flex items-center gap-2"
+                                                >
+                                                    {mesRotacionesDesactivadas.size < (activeSlaServiceRotations as any[]).length ? '⊘ Desactivar todas' : '✓ Activar todas'}
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            ) : (
+                                <span className="block text-[7px] font-bold mt-0.5 text-slate-400">⟳ —</span>
+                            )
                         )}
                         {hasSlaExcludedDatesInMonth && !isSnapshotView && (
                             <span className="block text-[7px] font-bold text-rose-500 mt-1 leading-tight" title="En el número del día aparece el puesto excluido (Servicios → Días excluidos)">
@@ -9517,7 +9664,18 @@ export default function PlanificacionPage() {
                                         <Activity size={14} className="text-emerald-500 animate-pulse shrink-0"/>
                                         <div className="flex flex-col leading-none">
                                             <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">Diagnóstico de Estructura</span>
-                                            <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1">
+                                            <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 flex-wrap">
+                                                {objectiveCronogramRules && (
+                                                    <>
+                                                        <span
+                                                            className="text-indigo-600 font-black"
+                                                            title={objectiveCronogramRules.playbook.join('\n')}
+                                                        >
+                                                            {objectiveCronogramRules.cronogramTypeLabel}
+                                                        </span>
+                                                        <span className="text-slate-300 dark:text-slate-600">|</span>
+                                                    </>
+                                                )}
                                                 {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
                                                     ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
                                                     : positionStructure.length} Puestos
