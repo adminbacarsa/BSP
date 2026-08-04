@@ -204,6 +204,64 @@ export const AUTO_LAB_CASES: AutoLabCaseDefinition[] = [
         rotateShiftsOverride: true,
         absences: [{ empIndex: 0, dayOfMonth: 17, code: 'E' }],
     },
+    {
+        id: 'case-06-mixed-matriz',
+        order: 6,
+        title: 'Mixto — Encargada custom + Puesto 24hs',
+        subtitle: '1 custom L–V + 1×24hs M+T+N · pipeline en dos fases',
+        description:
+            'Referencia Casa Matriz: un puesto personalizado (mañana fija) y un puesto 24hs con rotación. '
+            + 'El motor debe cerrar 24hs primero y custom después, sin mezclar pools ni péndulo en custom.',
+        expectations: [
+            'Tipo de crono: mixto (24 HS + custom).',
+            'Plantilla ≈ 4 (24hs) + 1 (custom) con 6+2 en la parte 24hs.',
+            'Sin rotateShifts global en custom; sin backup 24hs→custom.',
+            'Validación mixto: mismo legajo no trabaja 24hs y custom el mismo día.',
+        ],
+        coverageNotes: 'Custom 1/1 L–V; 24hs 3/3 M+T+N fines de semana y 7d según calendario del puesto.',
+        positions: [
+            {
+                positionName: 'Encargada',
+                qty: 1,
+                coverageType: 'custom',
+                shifts: [{ code: 'M', name: 'Mañana', hours: 8 }],
+                activeDays: [...WEEKDAYS],
+            },
+            puesto24hs('Puesto 24hs', 1),
+        ],
+        employeeCount: 5,
+        cycle: '6+2',
+        rotationMode: 'auto',
+    },
+    {
+        id: 'case-07-shopping-pool',
+        order: 7,
+        title: 'Custom pool — Control M+T+N',
+        subtitle: '3 cupos simultáneos · ciclo 5+1',
+        description:
+            'Mini Shopping: un puesto custom con M+T+N = tres cupos el mismo día (no rotación 24h). '
+            + 'Plantilla por pool y ciclo 5+1.',
+        expectations: [
+            'Tipo de crono: puro custom.',
+            'Plantilla ≈ ceil(3 × 6/5) = 4 guardias con 5+1.',
+            'rotateShifts OFF; bandas por dotación/rotaciones SLA si se cargan.',
+        ],
+        coverageNotes: 'Pico 3 cupos/día (M+T+N); pool compartido.',
+        positions: [
+            {
+                positionName: 'Control',
+                qty: 1,
+                coverageType: 'custom',
+                shifts: M_T_N,
+                activeDays: [...ALL_DAYS],
+            },
+        ],
+        employeeCount: 4,
+        cycle: '5+1',
+        rotationMode: 'fixed',
+        rotateShiftsOverride: false,
+        cycleOverride: '5+1',
+    },
 ];
 
 export function getAutoLabCaseById(id: string): AutoLabCaseDefinition | undefined {

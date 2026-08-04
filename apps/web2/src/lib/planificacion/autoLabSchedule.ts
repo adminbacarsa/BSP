@@ -100,6 +100,10 @@ export interface AutoLabScheduleOutcome {
     coverageGapFillActions?: CoverageGapFillAction[];
     /** Celdas facturables que no respetan positionAssignments del SLA. */
     positionAssignmentViolations?: import('./positionAssignmentPolicy').PositionAssignmentViolation[];
+    /** Validación según tipo de crono (cupos custom, mixto, dotación). */
+    cronogramValidationIssues?: import('./cronogramScheduleValidation').CronogramValidationIssue[];
+    /** Contingencia manual inviable — no bloquea generación. */
+    contingencyWarning?: string;
 }
 
 import {
@@ -107,6 +111,8 @@ import {
     computePositionRequiredHeadcount,
 } from './objectiveHeadcount';
 import { is24hsPosition, resolveObjectiveScheduleFlags, shouldBypassFixedBandFloater } from './scheduleObjectiveFlags';
+import { resolveCronogramPlanningRules } from './cronogramPlanningRules';
+import { validateScheduleAgainstCronogramRules } from './cronogramScheduleValidation';
 
 function buildLabDefaultPositionByEmp(
     positions: V2PositionDef[],
@@ -641,6 +647,7 @@ function postProcessAutoLabSchedule(
     );
 
     const positionAssignmentViolations = findPositionAssignmentViolations(ctx, assignments);
+    const cronogramValidationIssues = validateScheduleAgainstCronogramRules(ctx, assignments);
 
     return {
         generation: {
@@ -681,6 +688,7 @@ function postProcessAutoLabSchedule(
         coverageBalanceRepairs,
         coverageGapFillActions,
         positionAssignmentViolations,
+        cronogramValidationIssues,
     };
 }
 
@@ -708,6 +716,7 @@ export function buildAutoLabGenContext(
     };
     const defaultShiftByEmp: Record<string, string> = { ...(caseDef.defaultShiftByEmp || {}) };
     const scheduleFlags = resolveObjectiveScheduleFlags(run.positions);
+    const cronogramRules = resolveCronogramPlanningRules(run.positions);
     const monthStartGlobalDayIndex = resolveMonthStartGlobalDayIndex({
         daysInMonth: run.daysInMonth,
     } as V2EngineContext);
@@ -747,6 +756,7 @@ export function buildAutoLabGenContext(
         allowCustom24hsBackup: scheduleFlags.allowCustom24hsBackup,
         schedulePhasedRotativeFirst: scheduleFlags.schedulePhasedRotativeFirst,
         preserveRotativeIntegrity: scheduleFlags.preserveRotativeIntegrity,
+        cronogramRules,
         allowFrancoWorkedRescue: false,
         headcountByPax: true,
         coverageWisdom: caseDef.coverageWisdom ?? null,
@@ -768,17 +778,10 @@ export function generateAutoLabSchedule(
     const plantillaTotal = brain.staffing?.plantillaTotal ?? run.rosterSurplus?.plantillaTotal;
 
     // Igual que Planificación real: déficit de horas/dotación no bloquea la generación.
-    // El motor intenta cerrar; huecos residuales → RET externo en post-proceso.
-    if (!brain.contingencyOk) {
-        return {
-            pipeline: 'none',
-            generation: null,
-            error: brain.contingencyMessages[0] || 'Contingencia no viable.',
-        };
-    }
-
-    // Modo 12 por ausencias: no bloquea generación; si la plantilla no alcanza, el post-proceso
-    // deja huecos para RET externo (ver brain.absenceModo12Messages en panel cerebro).
+    // Contingencia no viable → aviso en cerebro; el motor sigue y deja huecos/RET en post-proceso.
+    const contingencyWarning = !brain.contingencyOk
+        ? (brain.contingencyMessages[0] || 'Contingencia manual no viable con la dotación actual.')
+        : undefined;
 
     const ctx = buildAutoLabGenContext(caseDef, run, brain);
 
@@ -798,7 +801,7 @@ export function generateAutoLabSchedule(
                 assignments: post.generation!.assignments,
                 ctx,
             });
-            return { pipeline: 'fixedBandFloater', ...post, rosterSurplus };
+            return { pipeline: 'fixedBandFloater', ...post, rosterSurplus, contingencyWarning };
         }
 
         const generation = generateScheduleV4(ctx);
@@ -809,61 +812,18 @@ export function generateAutoLabSchedule(
             assignments: post.generation!.assignments,
             ctx,
         });
-        return { pipeline: 'v4', ...post, rosterSurplus };
+        return { pipeline: 'v4', ...post, rosterSurplus, contingencyWarning };
     } catch (err) {
         return {
             pipeline: 'none',
             generation: null,
             error: err instanceof Error ? err.message : 'Error al generar cronograma',
+            contingencyWarning,
         };
     }
 }
 
-export function buildAssignmentIndex(
-    assignments: V2GenerateResult['assignments'],
-): Map<string, Map<string, V2GenerateResult['assignments'][number][]>> {
-    const byEmp = new Map<string, Map<string, V2GenerateResult['assignments'][number][]>>();
-    for (const a of assignments) {
-        if (!byEmp.has(a.empId)) byEmp.set(a.empId, new Map());
-        const byDay = byEmp.get(a.empId)!;
-        if (!byDay.has(a.dateStr)) byDay.set(a.dateStr, []);
-        byDay.get(a.dateStr)!.push(a);
-    }
-    return byEmp;
-}
-
-/** Puesto principal por guardia (motor positionGroups; sin inferir puesto para ociosos). */
-export function buildEmployeePositionMap(
-    employees: { id: string }[],
-    assignments: V2GenerateResult['assignments'],
-    positionGroups?: Record<string, string[]>,
-    idleEmployeeIds?: string[],
-): Record<string, string> {
-    const map: Record<string, string> = {};
-    const idleSet = new Set(idleEmployeeIds ?? []);
-
-    if (positionGroups) {
-        for (const [posName, ids] of Object.entries(positionGroups)) {
-            for (const id of ids) map[id] = posName;
-        }
-    }
-
-    const counts: Record<string, Record<string, number>> = {};
-    for (const a of assignments) {
-        if (!a.positionName || (a.hours ?? 0) <= 0) continue;
-        if (!counts[a.empId]) counts[a.empId] = {};
-        counts[a.empId][a.positionName] = (counts[a.empId][a.positionName] || 0) + 1;
-    }
-    for (const emp of employees) {
-        if (map[emp.id] || idleSet.has(emp.id)) continue;
-        const tallies = counts[emp.id];
-        if (!tallies) continue;
-        const top = Object.entries(tallies).sort(([, a], [, b]) => b - a)[0];
-        if (top) map[emp.id] = top[0];
-    }
-
-    return map;
-}
+export { buildAssignmentIndex, buildEmployeePositionMap } from './autoLabAssignmentIndex';
 
 export function shortPositionLabel(
     positionName: string,

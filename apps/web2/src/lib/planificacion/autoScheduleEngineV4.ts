@@ -17,6 +17,10 @@ import {
     type V2GenerateResult,
 } from './autoScheduleEngineV2';
 import { generateScheduleFixedBand } from './fixedBandScheduleEngine';
+import {
+    generateScheduleMixedObjective,
+    objectiveRequiresMixedSchedulePipeline,
+} from './mixedScheduleEngine';
 
 function ctxHas24hs(ctx: V2EngineContext): boolean {
     return ctx.positions.some(p => {
@@ -26,6 +30,9 @@ function ctxHas24hs(ctx: V2EngineContext): boolean {
 }
 
 export function generateScheduleV4(ctx: V2EngineContext): V2GenerateResult {
+    if (!ctx._skipMixedPipeline && objectiveRequiresMixedSchedulePipeline(ctx.positions)) {
+        return generateScheduleMixedObjective(ctx);
+    }
     if (ctx.rotateShifts === false) {
         const fixed = generateScheduleFixedBand(ctx);
         const gaps = fixed.stats.uncoveredSlots ?? 0;

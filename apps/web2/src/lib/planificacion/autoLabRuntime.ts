@@ -12,7 +12,7 @@ import {
 } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import type { AutoLabScheduleOutcome } from './autoLabSchedule';
-import { buildEmployeePositionMap } from './autoLabSchedule';
+import { buildEmployeePositionMap } from './autoLabAssignmentIndex';
 import {
     calculateSlaHoursForVigencia,
     getServiceDaysInMonth,
@@ -493,12 +493,14 @@ export function buildAutoLabExportJson(
             || (caseDef.serviceRules?.length ?? 0) > 0
             || (caseDef.serviceRotations?.length ?? 0) > 0
             || (scheduleOutcome?.positionAssignmentViolations?.length ?? 0) > 0
+            || (scheduleOutcome?.cronogramValidationIssues?.length ?? 0) > 0
             ? {
                 hasPositionAssignments: !!caseDef.positionAssignmentsByEmp,
                 positionAssignmentEmpCount: Object.keys(caseDef.positionAssignmentsByEmp ?? {}).length,
                 serviceRulesCount: caseDef.serviceRules?.length ?? 0,
                 serviceRotationsCount: caseDef.serviceRotations?.length ?? 0,
                 positionAssignmentViolationCount: scheduleOutcome?.positionAssignmentViolations?.length ?? 0,
+                cronogramValidationIssueCount: scheduleOutcome?.cronogramValidationIssues?.length ?? 0,
             }
             : undefined,
         brain: {

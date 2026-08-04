@@ -398,14 +398,20 @@ export default function AutoLabResolutionGrid({
                     Resolución cronograma
                 </p>
                 <p className="text-sm text-amber-950 mt-2">{scheduleOutcome.error}</p>
+                {scheduleOutcome.contingencyWarning && (
+                    <p className="text-xs text-amber-800 mt-2">{scheduleOutcome.contingencyWarning}</p>
+                )}
             </div>
         );
     }
 
     if (!scheduleOutcome.generation || !assignmentIndex) {
         return (
-            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-6 text-sm text-slate-500">
-                Sin cronograma generado.
+            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-6 text-sm text-slate-500 space-y-2">
+                <p>Sin cronograma generado.</p>
+                {scheduleOutcome.contingencyWarning && (
+                    <p className="text-xs text-amber-800">{scheduleOutcome.contingencyWarning}</p>
+                )}
             </div>
         );
     }

@@ -64,7 +64,7 @@ import {
     isFullCustomObjectivePool,
     isLabSyntheticEmpId,
 } from './objectiveHeadcount';
-import { resolveCyclePreferenceForPositions } from './objectiveServiceModel';
+import { buildObjectiveScheduleProfile, resolveCyclePreferenceForPositions } from './objectiveServiceModel';
 import { fillScheduleFromDemand, shouldUseDemandDrivenScheduling, fillDemandGapsBeforeFrancos, fillDemandGapsWithFlexibleCycle, forceCloseRemainingSlaGaps, rebalanceEqual24hsPositionGroups, seedDemandDrivenCycleFrancos, alignAssignmentsToPendulum, restoreRotativeCycleFrancos, ensureRotativeCellsAssigned, finalizeApretarDayAssignments, stripUnauthorizedRetAssignments, recomputeUncoveredStats, repairForbiddenAfterNightTransitions, assignUnassignedWorkDayEmployeesToGaps, repairPositionDayTripletGaps, tryAssignEmployeeToDayGap } from './demandDrivenSchedule';
 import {
     mtnOpeningSlotFromGroupOffset,
@@ -74,6 +74,7 @@ import {
 } from './rotativeMtnCycle';
 import { applyBalancedLdNineHourRetCctTopUp, buildCustomCycleWorkDays, buildCustomWeekendRestOptions, customCoverDailyPax, customCoverBandsForDay, customCoverSlotsRequiredOnDay, customCoverSimultaneousPax, customCoverWeeklyWorkRest, customPositionOperatesAllWeek, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay, pickBalancedCustomWorkers } from './customCoverCycle';
 import { fillCycleBaseRotativeAssignments } from './cycleBaseSchedule';
+import { fillCustomConcurrentMtnBands, isCustomConcurrentMtnPosition, countCustomBandFilled } from './customConcurrentMtnSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
 import { enforceFrancoStreakRules } from './francoStreakGuard';
 import { isApretarCronoDay, isApretarScheduleActive, isContingencyApretarDay, isModo12Day, getModo12Days, usesExpandedRetPool } from './objectiveCoverageDemand';
@@ -484,6 +485,12 @@ export interface V2EngineContext {
     serviceRotations?: import('@/services/slaService').ServiceRotation[];
     /** Rotaciones SLA resueltas por día (prioridad sobre péndulo M/T/N del motor). */
     slaRotationByDate?: import('./slaContractPlanning').SlaRotationByDate;
+    /** Reglas del tipo de crono (puro 24hs / custom / mixto). */
+    cronogramRules?: import('./cronogramPlanningRules').CronogramPlanningRules;
+    /** Fase mixta: celdas ya asignadas en pasada 24hs (no sobrescribir en custom). */
+    pinnedAssignments?: V2Assignment[];
+    /** Interno: evita reentrada del pipeline mixto. */
+    _skipMixedPipeline?: boolean;
 }
 
 export interface V2PositionDemand {
@@ -1919,6 +1926,15 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const expectedShiftForDay = (empId: string, dateStr: string, posName: string): string | null => {
         const slaCode = slaRotationExpectedShift(ctx, empId, dateStr, posName);
         if (slaCode) return slaCode;
+        const posForBand = ctx.positions.find((p) => p.positionName === posName);
+        const bandCustom = ctx.cronogramRules?.generation.bandSourceCustom;
+        if (posForBand && isCustomCoverPosition(posForBand) && bandCustom === 'sla_rotation_first') {
+            const def = ctx.defaultShiftByEmp?.[empId];
+            if (def) return String(def).toUpperCase();
+            const ringEarly = shiftRingByPosition[posName];
+            if (ringEarly?.length === 1) return ringEarly[0];
+            return empPrimaryShift[empId] ?? null;
+        }
         const ring = shiftRingByPosition[posName];
         if (!ring || ring.length === 0) return empPrimaryShift[empId];
         const slot = empRotationSlot[empId] ?? 0;
@@ -2430,7 +2446,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     // Dos calendarios: venta 1→fin (cobertura SLA) vs liquidación 26→25 (tope 200 h/tramo).
     // NO recortar cycleWorkDays por tope CCT; el cupo se aplica al asignar (cctTrancheUsed).
 
-    const assignments: V2Assignment[] = [];
+    const assignments: V2Assignment[] = [...(ctx.pinnedAssignments ?? [])];
     // Techo de horas facturables en la generación: el MÁXIMO entre vendidas y demanda
     // estructural del SLA en pantalla. Antes usábamos solo `contractedHours` cuando
     // existía, y si la grilla (puestos × bandas × días) pedía MÁS horas que las
@@ -2537,6 +2553,24 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         if (!m) return null;
         return Number(m[1]) + Number(m[2]) / 60;
     };
+
+    for (const a of assignments) {
+        const st = runtime[a.empId];
+        if (!st) continue;
+        st.assignedDays.add(a.dateStr);
+        const hrs = a.hours ?? 0;
+        if (hrs > 0) {
+            st.monthHours += hrs;
+            stats.employeeMonthlyHours[a.empId] = st.monthHours;
+            stats.totalBillableHours += hrs;
+            stats.totalAssignments += 1;
+            st.lastWorkDate = a.dateStr;
+            st.lastShiftCode = a.code;
+            st.lastShiftStart = parseHour(a.startTime || '00:00');
+            st.lastShiftHours = hrs;
+        }
+    }
+
     const passesAgreementRest = (empId: string, dateStr: string, shiftCode: string, curStartTime: string | undefined, curHrs: number): boolean => {
         const codeUp = String(shiftCode || '').toUpperCase();
         if (FRANCO_SET.has(codeUp)) return true;
@@ -2856,6 +2890,28 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             && !runtime[eid].assignedDays.has(dateStr)
             && !ctx.absences[eid]?.has(dateStr),
         );
+
+        if (isCustomConcurrentMtnPosition(pos)) {
+            fillCustomConcurrentMtnBands({
+                ctx,
+                pos,
+                dateStr,
+                dayLetter,
+                inCurrent,
+                groupIds,
+                titular,
+                assignments,
+                runtimeAssignedDays: (empId) => runtime[empId].assignedDays.has(dateStr),
+                cycleWorkDay: (empId, ds) => cycleWorkDays[empId]?.has(ds) ?? false,
+                isAbsent: (empId, ds) => ctx.absences[empId]?.has(ds) ?? false,
+                sortByFewerHours,
+                writeBand: (empId, shiftCode, sh) =>
+                    writeCustomCoverShift(empId, pos, dateStr, dayLetter, inCurrent, {
+                        shiftCode,
+                        strictRest: true,
+                    }),
+            });
+        } else {
         const orderedWork = titular
             ? [titular, ...sortByFewerHours(workCandidates.filter((id) => id !== titular), inCurrent)]
             : sortByFewerHours(workCandidates, inCurrent);
@@ -2864,6 +2920,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         for (const eid of orderedWork) {
             if (assigned >= daySlots) break;
             if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent)) assigned++;
+        }
         }
 
         for (const eid of workCandidates) {
@@ -2897,7 +2954,29 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
 
         let covered = countCover();
         while (covered < daySlots) {
-            let filled = tryAssignCustomFromGroup(pos, dateStr, dayLetter, inCurrent, groupIds, titular);
+            let filled = false;
+            if (isCustomConcurrentMtnPosition(pos)) {
+                const dayBands = customCoverBandsForDay(pos, dayLetter, ctx.autoCycles, dateStr);
+                const qty = customCoverDailyPax(pos);
+                for (const sh of dayBands) {
+                    const code = String(sh.code ?? '').toUpperCase();
+                    const have = countCustomBandFilled(assignments, dateStr, pos.positionName, code);
+                    if (have >= qty) continue;
+                    for (const eid of groupIds) {
+                        if (runtime[eid].assignedDays.has(dateStr)) continue;
+                        if (!cycleWorkDays[eid]?.has(dateStr)) continue;
+                        if (ctx.absences[eid]?.has(dateStr)) continue;
+                        if (!empCanCoverPositionShift(ctx, eid, pos.positionName, code)) continue;
+                        if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent, { shiftCode: code })) {
+                            filled = true;
+                            break;
+                        }
+                    }
+                    if (filled) break;
+                }
+            } else {
+                filled = tryAssignCustomFromGroup(pos, dateStr, dayLetter, inCurrent, groupIds, titular);
+            }
             if (!filled) {
                 for (const eid of backupPool) {
                     if (groupIds.includes(eid)) continue;

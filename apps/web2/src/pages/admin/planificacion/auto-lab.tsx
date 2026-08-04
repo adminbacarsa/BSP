@@ -595,18 +595,20 @@ export default function AutoLabPage() {
         return estimateSlaVendidas(built.positions, days);
     }, [isCustomMode, customDraft, year, month]);
 
-    const runResult: AutoLabRunResult | null = useMemo(() => {
-        if (!activeCase) return null;
+    const { runResult, runError } = useMemo((): { runResult: AutoLabRunResult | null; runError: string | null } => {
+        if (!activeCase) return { runResult: null, runError: null };
         try {
-            return runAutoLabCase(activeCase, year, month, isRealMode && realBundle
+            const result = runAutoLabCase(activeCase, year, month, isRealMode && realBundle
                 ? {
                     employees: realBundle.employees,
                     objectiveIdForBrain: realBundle.objectiveId,
                 }
                 : undefined);
+            return { runResult: result, runError: null };
         } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
             console.error('[Auto Lab] runAutoLabCase', err);
-            return null;
+            return { runResult: null, runError: msg };
         }
     }, [activeCase, year, month, isRealMode, realBundle]);
 
@@ -1112,6 +1114,11 @@ export default function AutoLabPage() {
                             ) : (
                                 <div className="p-8 text-center text-sm text-slate-500 space-y-2">
                                     <p>No se pudo calcular el cerebro para este caso.</p>
+                                    {runError && (
+                                        <p className="text-xs text-red-800 font-mono bg-red-50 border border-red-200 rounded-lg p-2">
+                                            {runError}
+                                        </p>
+                                    )}
                                     {isRealMode && !realBundle && (
                                         <p className="text-xs text-amber-800">
                                             Elegí objetivo y empresa en el panel «Servicio real» y esperá a que cargue el SLA.
@@ -1138,6 +1145,21 @@ export default function AutoLabPage() {
                             runResult={runResult}
                             scheduleOutcome={scheduleOutcome}
                         />
+                        {scheduleOutcome.cronogramValidationIssues
+                            && scheduleOutcome.cronogramValidationIssues.length > 0 && (
+                            <div className="rounded-2xl border border-amber-200 bg-amber-50/80 shadow-sm p-4">
+                                <p className="text-xs font-black uppercase text-amber-900 mb-2">
+                                    Reglas de crono ({scheduleOutcome.cronogramValidationIssues.length})
+                                </p>
+                                <ul className="space-y-1 max-h-40 overflow-y-auto text-[11px] text-amber-950">
+                                    {scheduleOutcome.cronogramValidationIssues.slice(0, 30).map((v, i) => (
+                                        <li key={`${v.code}-${v.dateStr ?? ''}-${i}`}>
+                                            [{v.severity}] {v.message}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                         {scheduleOutcome.capacityRisks && scheduleOutcome.capacityRisks.length > 0 && (
                             <div className="rounded-2xl border border-violet-200 bg-violet-50/80 shadow-sm p-4">
                                 <p className="text-xs font-black uppercase text-violet-900 mb-2">
