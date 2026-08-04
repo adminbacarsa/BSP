@@ -4141,6 +4141,7 @@ export default function PlanificacionPage() {
         if (!shiftsMapLoaded) return;
         if (!activeSlaServiceRotations?.length) return;
         if (!selectedObjective) return;
+        if (!hasActiveSLA) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth();
         const periodKey = `${selectedObjective}_${year}_${month}`;
@@ -4169,7 +4170,7 @@ export default function PlanificacionPage() {
         const totalCount = activeSlaServiceRotations.length;
         const hint = desactCount > 0 ? ` (${rotacionesActivas.length}/${totalCount} activas)` : '';
         toast.info(`Rotación pre-cargada${hint} — revisá y guardá cuando estés listo`, { duration: 4000 });
-    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges]);
+    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges]);
 
     // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
     useEffect(() => {
