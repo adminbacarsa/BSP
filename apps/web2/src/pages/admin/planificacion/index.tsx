@@ -3851,6 +3851,12 @@ export default function PlanificacionPage() {
         fetchSLA();
     }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce]);
 
+    // Resetear autorización 200h al cambiar de objetivo o mes
+    useEffect(() => {
+        setAuthorizedOver200Ids(new Set());
+        authorizedOver200IdsRef.current = new Set();
+    }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
+
     // Auto-aplicar rotación cuando el mes está vacío y hay rotación configurada en el SLA
     useEffect(() => {
         if (!shiftsMapLoaded) return;
@@ -4907,14 +4913,15 @@ export default function PlanificacionPage() {
             : `¿Guardar ${_rotCount} turno${_rotCount !== 1 ? 's' : ''} de ciclo?`;
         if (!confirm(_confirmMsg)) return;
 
-        // Verificar si algún empleado superaría las 200h
-        const overCap: { name: string; hours: number }[] = [];
+        // Verificar si algún empleado superaría las 200h (saltar los ya autorizados esta sesión)
+        const overCap: { empId: string; name: string; hours: number }[] = [];
         Object.keys(pendingChanges).forEach(key => {
             const empId = key.split('_')[0];
+            if (authorizedOver200Ids.has(empId)) return;
             const hours = empMonthlyHours[empId] || 0;
             if (hours > planningLimits.monthly) {
                 const empName = displayedEmployees.find((e: any) => e.id === empId)?.name || empId;
-                if (!overCap.some(e => e.name === empName)) overCap.push({ name: empName, hours: Math.round(hours) });
+                if (!overCap.some(e => e.empId === empId)) overCap.push({ empId, name: empName, hours: Math.round(hours) });
             }
         });
 
@@ -12819,6 +12826,11 @@ export default function PlanificacionPage() {
                                         // PIN válido → ejecutar el guardado
                                         await authModal.pendingFn!();
                                         if (authModal.isSaveFlow) {
+                                            // Recordar autorización para no pedir PIN de nuevo en esta sesión
+                                            const newAuthorized = new Set(authorizedOver200IdsRef.current);
+                                            authModal.employees.forEach(e => { if ((e as any).empId) newAuthorized.add((e as any).empId); });
+                                            authorizedOver200IdsRef.current = newAuthorized;
+                                            setAuthorizedOver200Ids(newAuthorized);
                                             await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
                                                 timestamp: serverTimestamp(),
                                                 action: 'OVERRIDE_200H',
