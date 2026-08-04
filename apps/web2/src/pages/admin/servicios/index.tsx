@@ -2835,6 +2835,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <p className="text-[9px] text-slate-400 mt-0.5">Fecha del día 1 de la secuencia de cada empleado.</p>
                                 </div>
                               )}
+                              <label className="flex items-center gap-1.5 self-end pb-1 text-[9px] font-black text-slate-500 cursor-pointer select-none">
+                                <input type="checkbox" checked={!!editingRotation.cumplirCondicion} onChange={e => setEditingRotation({ ...editingRotation, cumplirCondicion: e.target.checked })} className="accent-teal-600 w-3 h-3 cursor-pointer" />
+                                Cumplir condiciones al auto-cargar
+                              </label>
                             </div>
                             {editingRotation.cycleMode === 'custom_sequence' ? (
                           <div>
@@ -3038,6 +3042,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <p className="text-[9px] text-slate-400 mt-0.5">Fecha del día 1 de la secuencia de cada empleado.</p>
                             </div>
                           )}
+                          <label className="flex items-center gap-1.5 self-end pb-1 text-[9px] font-black text-slate-500 cursor-pointer select-none">
+                            <input type="checkbox" checked={!!editingRotation.cumplirCondicion} onChange={e => setEditingRotation({ ...editingRotation, cumplirCondicion: e.target.checked })} className="accent-teal-600 w-3 h-3 cursor-pointer" />
+                            Cumplir condiciones al auto-cargar
+                          </label>
                         </div>
                         {editingRotation.cycleMode === 'custom_sequence' ? (
                   <div>

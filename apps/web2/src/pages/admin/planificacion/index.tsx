@@ -132,11 +132,16 @@ import { resolveCronogramPlanningRules } from '@/lib/planificacion/cronogramPlan
 import { dominantDotacionFromPlanningCells } from '@/lib/planificacion/seedDotacionFromPrevMonth';
 import { fetchPlanningMonthShifts } from '@/lib/planificacion/loadPlanningMonthShifts';
 import {
+    compareObjectiveMonthSchedules,
+    formatCompareObjectiveMonthsReport,
+} from '@/lib/planificacion/compareObjectiveMonthSchedules';
+import {
     resolveAutoPlanningBrain,
     PLANNING_COVERAGE_RULES,
     type AutoPlanningBrainResult,
 } from '@/lib/planificacion/autoPlanningBrain';
-import { applySlaContractDotacion, buildSlaRotationByDate } from '@/lib/planificacion/slaContractPlanning';
+import { applySlaContractDotacion, buildPositionAssignmentsByEmp, buildSlaRotationByDate } from '@/lib/planificacion/slaContractPlanning';
+import { applyRotationsForMonth } from '@/lib/planificacion/slaRotationMonthPlanner';
 import {
     countPositionClosedUnitsFromShifts,
     PLANNING_NON_BILLABLE_CODES,
@@ -220,7 +225,6 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
-import { rotationPeriodApplies, getAllDatesInMonth, getRoundRobinOffset, getWeekStartForDate } from '@/lib/planificacion/rotationUtils';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT']);
 
@@ -756,295 +760,6 @@ function computeServiceRuleChanges(
                         _isAutoRotation: undefined,
                         _isAutoCondition: true,
                     };
-                }
-            }
-        }
-    }
-    return additions;
-}
-
-function applyRotationsForMonth(
-    rotations: import('@/services/slaService').ServiceRotation[],
-    pendingChanges: Record<string, any>,
-    shiftsMap: Record<string, any>,
-    year: number,
-    month: number,
-    positionStructure?: any[],
-): Record<string, any> {
-    const additions: Record<string, any> = {};
-    const allDates = getAllDatesInMonth(year, month);
-    for (const rotation of rotations) {
-        if (rotation.cycleMode === 'cycle_rotation') {
-            const _crP = rotation.periods[0];
-            if (!_crP || !rotation.cycleWorkDays || !rotation.cycleOffDays) continue;
-            const _crE = _crP.entries.filter((e: any) => e.employeeId && e.shiftCode && e.cycleAnchorDate);
-            const _crN = _crE.length;
-            if (_crN < 1) continue;
-            const _cycLen = rotation.cycleWorkDays + rotation.cycleOffDays;
-            for (const dateStr of allDates) {
-                const dayLetter = getDayLetter(dateStr);
-                for (let _ci = 0; _ci < _crN; _ci++) {
-                    const _cEmp = _crE[_ci];
-                    const _key = `${_cEmp.employeeId}_${dateStr}`;
-                    const _cPend = pendingChanges[_key];
-                    const _ancMs = new Date(_cEmp.cycleAnchorDate + 'T00:00:00').getTime();
-                    const _dtMs = new Date(dateStr + 'T00:00:00').getTime();
-                    const _dSince = Math.round((_dtMs - _ancMs) / 86400000);
-                    const _cIdx = Math.floor(_dSince / _cycLen);
-                    const _pos = ((_dSince % _cycLen) + _cycLen) % _cycLen;
-                    if (_pos >= rotation.cycleWorkDays) {
-                        // Franco: respeta manual (isTemp) y guardado; sobreescribe condiciones
-                        if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
-                        if (_cPend && !_cPend.isDeleted && _cPend.isTemp) continue;
-                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: 'F', positionName: '', hours: 0, startTime: '00:00', isDeleted: false, _isAutoRotation: true };
-                    } else {
-                        // Trabajo: respeta todo pending y guardado
-                        if (_cPend && !_cPend.isDeleted) continue;
-                        if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
-                        const _eIdx = ((_ci + _cIdx) % _crN + _crN) % _crN;
-                        const _ent = _crE[_eIdx];
-                        if (positionStructure?.length && _ent.positionName) {
-                            const _pCfg = positionStructure.find((p: any) => p.positionName === _ent.positionName);
-                            if (_pCfg) {
-                                if (!isPosActiveOnDay(_pCfg, dayLetter)) continue;
-                                if (isPosExcludedOnDate(_pCfg, dateStr)) continue;
-                            }
-                        }
-                        const _posPS = positionStructure?.find((p: any) => p.positionName === _ent.positionName);
-                        const _shiftPS = _posPS?.shifts?.find((s: any) => String(s.code || '').toUpperCase() === _ent.shiftCode.toUpperCase());
-                        const _shiftHours = (_shiftPS && Number(_shiftPS.hours) > 0) ? Number(_shiftPS.hours) : 8;
-                        additions[_key] = { empId: _cEmp.employeeId, dateStr, code: _ent.shiftCode, positionName: _ent.positionName || '', hours: _shiftHours, startTime: '00:00', isDeleted: false, _isAutoRotation: true };
-                    }
-                }
-            }
-            continue;
-        }
-        if (rotation.cycleMode === 'custom_sequence') {
-            const _csAnchor = rotation.sequenceAnchorDate;
-            if (!_csAnchor) continue;
-            const _csP = rotation.periods[0];
-            if (!_csP) continue;
-            const _csEntries = _csP.entries.filter((e: any) => e.employeeId && e.sequence?.length);
-            if (!_csEntries.length) continue;
-            const _csAncMs = new Date(_csAnchor + 'T00:00:00').getTime();
-            for (const dateStr of allDates) {
-                const dayLetter = getDayLetter(dateStr);
-                const _dtMs = new Date(dateStr + 'T00:00:00').getTime();
-                const _daysSince = Math.round((_dtMs - _csAncMs) / 86400000);
-                for (const _csEmp of _csEntries) {
-                    // Normalizar: si la secuencia se guardó como un único string concatenado, split por caracter
-                    const _seq: string[] = (_csEmp.sequence.length === 1 && (_csEmp.sequence[0] as string).length > 2)
-                        ? (_csEmp.sequence[0] as string).split('').filter((c: string) => /[A-Z]/.test(c))
-                        : _csEmp.sequence;
-                    const _seqLen = _seq.length;
-                    const _pos = ((_daysSince % _seqLen) + _seqLen) % _seqLen;
-                    const _code = (_seq[_pos] as string).toUpperCase();
-                    const _key = `${_csEmp.employeeId}_${dateStr}`;
-                    const _cPend = pendingChanges[_key];
-                    if (_code === 'F' || _code === 'FF' || _code === 'FP') {
-                        if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
-                        if (_cPend && !_cPend.isDeleted && _cPend.isTemp) continue;
-                        additions[_key] = { empId: _csEmp.employeeId, dateStr, code: _code, positionName: '', hours: 0, startTime: '00:00', isDeleted: false, _isAutoRotation: true };
-                    } else {
-                        if (_cPend && !_cPend.isDeleted) continue;
-                        if (shiftsMap[_key] && !shiftsMap[_key].isDeleted) continue;
-                        if (positionStructure?.length && _csEmp.positionName) {
-                            const _pCfg = positionStructure.find((p: any) => p.positionName === _csEmp.positionName);
-                            if (_pCfg) {
-                                if (!isPosActiveOnDay(_pCfg, dayLetter)) continue;
-                                if (isPosExcludedOnDate(_pCfg, dateStr)) continue;
-                            }
-                        }
-                        const _posPS = positionStructure?.find((p: any) => p.positionName === _csEmp.positionName);
-                        const _shiftPS = _posPS?.shifts?.find((s: any) => String(s.code || '').toUpperCase() === _code);
-                        const _shiftHours = (_shiftPS && Number(_shiftPS.hours) > 0) ? Number(_shiftPS.hours) : 8;
-                        additions[_key] = { empId: _csEmp.employeeId, dateStr, code: _code, positionName: _csEmp.positionName || '', hours: _shiftHours, startTime: '00:00', isDeleted: false, _isAutoRotation: true };
-                    }
-                }
-            }
-            continue;
-        }
-        if (rotation.cycleMode === 'round_robin') {
-            const _rrP = rotation.periods[0];
-            if (_rrP && _rrP.trigger.type === 'WEEKLY') {
-                const _rrE = _rrP.entries.filter((e: any) => e.employeeId && e.shiftCode);
-                const _rrN = _rrE.length;
-                if (_rrN >= 2) {
-                    // Inferir semana de referencia desde pendingChanges: si el empleado en índice i
-                    // tiene su código de sem.0 asignado, esa semana ES la sem.0.
-                    let _rrInferredRef: string | undefined = rotation.referenceWeekStart;
-                    outer: for (const _rrd of allDates) {
-                        for (let _ri2 = 0; _ri2 < _rrN; _ri2++) {
-                            const _p2 = pendingChanges[`${_rrE[_ri2].employeeId}_${_rrd}`];
-                            if (_p2 && !_p2.isDeleted && _p2.code === _rrE[_ri2].shiftCode) {
-                                _rrInferredRef = getWeekStartForDate(_rrd, rotation.weekStartDay ?? 1);
-                                break outer;
-                            }
-                        }
-                    }
-                    // No rellenar fechas anteriores a la semana de referencia
-                    const _rrGate = rotation.referenceWeekStart
-                        ? getWeekStartForDate(rotation.referenceWeekStart, rotation.weekStartDay ?? 1)
-                        : null;
-                    // Pre-computar asignación de slots a nivel SEMANA (no por fecha individual)
-                    // para que la rotación sea consistente en toda la semana aunque el usuario
-                    // haya asignado manualmente en un día que no es lunes.
-                    const _rrWeekGroups = new Map<string, string[]>();
-                    for (const _d of allDates) {
-                        const _ws = getWeekStartForDate(_d, rotation.weekStartDay ?? 1);
-                        if (!_rrWeekGroups.has(_ws)) _rrWeekGroups.set(_ws, []);
-                        _rrWeekGroups.get(_ws)!.push(_d);
-                    }
-                    // weekSlotMap: weekStart → Map<empIdx → slotIdx>
-                    const _rrWeekSlotMap = new Map<string, Map<number, number>>();
-                    for (const [_ws, _wDates] of _rrWeekGroups) {
-                        if (_rrGate && _ws < _rrGate) continue;
-                        const _wOff = getRoundRobinOffset(rotation, _wDates[0], _rrN, _rrInferredRef);
-                        if (_wOff === null) continue;
-                        const _empToSlot = new Map<number, number>();
-                        const _wClaimed = new Set<number>();
-                        // Pasada 1: empleados con código "override" (distinto al natural) reclaman slot
-                        for (let _ri2 = 0; _ri2 < _rrN; _ri2++) {
-                            const _natS = (_ri2 + _wOff) % _rrN;
-                            for (const _wd of _wDates) {
-                                const _p = pendingChanges[`${_rrE[_ri2].employeeId}_${_wd}`];
-                                if (_p && !_p.isDeleted) {
-                                    const _si = _rrE.findIndex((e: any) => e.shiftCode === _p.code);
-                                    if (_si >= 0 && _si !== _natS && !_empToSlot.has(_ri2)) {
-                                        _empToSlot.set(_ri2, _si);
-                                        _wClaimed.add(_si);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        // Pasada 2: empleados sin override toman su slot natural o el primero libre
-                        const _wAvail: number[] = [];
-                        for (let _s = 0; _s < _rrN; _s++) {
-                            const _si2 = (_wOff + _s) % _rrN;
-                            if (!_wClaimed.has(_si2)) _wAvail.push(_si2);
-                        }
-                        let _wAIdx = 0;
-                        for (let _ri2 = 0; _ri2 < _rrN; _ri2++) {
-                            if (_empToSlot.has(_ri2)) continue;
-                            const _natS2 = (_ri2 + _wOff) % _rrN;
-                            if (!_wClaimed.has(_natS2)) {
-                                _empToSlot.set(_ri2, _natS2);
-                                _wClaimed.add(_natS2);
-                            } else {
-                                while (_wAIdx < _wAvail.length && _wClaimed.has(_wAvail[_wAIdx])) _wAIdx++;
-                                if (_wAIdx < _wAvail.length) {
-                                    _empToSlot.set(_ri2, _wAvail[_wAIdx]);
-                                    _wClaimed.add(_wAvail[_wAIdx]);
-                                    _wAIdx++;
-                                }
-                            }
-                        }
-                        _rrWeekSlotMap.set(_ws, _empToSlot);
-                    }
-                    // Aplicar asignaciones semanales a cada fecha
-                    for (const dateStr of allDates) {
-                        if (_rrGate && dateStr < _rrGate) continue;
-                        const dayLetter = getDayLetter(dateStr);
-                        const _ws2 = getWeekStartForDate(dateStr, rotation.weekStartDay ?? 1);
-                        const _empToSlot2 = _rrWeekSlotMap.get(_ws2);
-                        if (!_empToSlot2) continue;
-                        for (let _ri = 0; _ri < _rrN; _ri++) {
-                            const _rrEmp = _rrE[_ri];
-                            const _key = `${_rrEmp.employeeId}_${dateStr}`;
-                            const _rrPend = pendingChanges[_key];
-                            const _rrFS = shiftsMap[_key];
-                            const _rrIsFr = (s: any) => s && !s.isDeleted && ['F','FF','FP','FT'].includes(s.code);
-                            if (_rrIsFr(_rrPend) || (!_rrPend && _rrIsFr(_rrFS))) continue;
-                            if (_rrPend && !_rrPend.isDeleted) continue;
-                            if (!_rrPend && _rrFS && !_rrFS.isDeleted) continue;
-                            const _slotIdx = _empToSlot2.get(_ri);
-                            if (_slotIdx === undefined) continue;
-                            const _rrRot = _rrE[_slotIdx];
-                            if (positionStructure?.length && _rrRot.positionName) {
-                                const _posCfg = positionStructure.find((p: any) => p.positionName === _rrRot.positionName);
-                                if (_posCfg) {
-                                    if (!isPosActiveOnDay(_posCfg, dayLetter)) continue;
-                                    if (isPosExcludedOnDate(_posCfg, dateStr)) continue;
-                                }
-                            }
-                            additions[_key] = {
-                                empId: _rrEmp.employeeId,
-                                dateStr,
-                                code: _rrRot.shiftCode,
-                                positionName: _rrRot.positionName || '',
-                                hours: 8,
-                                startTime: '00:00',
-                                isDeleted: false,
-                                _isAutoRotation: true,
-                            };
-                        }
-                    }
-                    // Francos automáticos por ciclo de trabajo (cycleWorkDays + cycleOffDays)
-                    if (rotation.cycleWorkDays && rotation.cycleOffDays) {
-                        const _cycLen = rotation.cycleWorkDays + rotation.cycleOffDays;
-                        for (let _ci = 0; _ci < _rrN; _ci++) {
-                            const _cEmp = _rrE[_ci];
-                            if (!_cEmp.cycleAnchorDate) continue;
-                            const _anchorMs = new Date(_cEmp.cycleAnchorDate + 'T00:00:00').getTime();
-                            for (const _cDate of allDates) {
-                                if (_rrGate && _cDate < _rrGate) continue;
-                                const _cKey = `${_cEmp.employeeId}_${_cDate}`;
-                                const _cPend = pendingChanges[_cKey];
-                                if (shiftsMap[_cKey] && !shiftsMap[_cKey].isDeleted) continue;
-                                if (_cPend && !_cPend.isDeleted && _cPend.isTemp) continue;
-                                const _cMs = new Date(_cDate + 'T00:00:00').getTime();
-                                const _cDays = Math.round((_cMs - _anchorMs) / 86400000);
-                                const _cPos = ((_cDays % _cycLen) + _cycLen) % _cycLen;
-                                if (_cPos < rotation.cycleOffDays) {
-                                    additions[_cKey] = {
-                                        empId: _cEmp.employeeId,
-                                        dateStr: _cDate,
-                                        code: 'F',
-                                        positionName: '',
-                                        hours: 0,
-                                        startTime: '00:00',
-                                        isDeleted: false,
-                                        _isAutoRotation: true,
-                                    };
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            continue;
-        }
-        for (const period of rotation.periods) {
-            for (const dateStr of allDates) {
-                if (!rotationPeriodApplies(period, dateStr, rotation)) continue;
-                const dayLetter = getDayLetter(dateStr);
-                for (const entry of period.entries) {
-                    if (!entry.employeeId || !entry.shiftCode) continue;
-                    if (positionStructure?.length && entry.positionName) {
-                        const posCfg = positionStructure.find((p: any) => p.positionName === entry.positionName);
-                        if (posCfg) {
-                            if (!isPosActiveOnDay(posCfg, dayLetter)) continue;
-                            if (isPosExcludedOnDate(posCfg, dateStr)) continue;
-                        }
-                    }
-                    const key = `${entry.employeeId}_${dateStr}`;
-                    const activePending = pendingChanges[key];
-                    const _fsShift = shiftsMap[key];
-                    const _isFranco = (s: any) => s && !s.isDeleted && ['F','FF','FP','FT'].includes(s.code);
-                    if (_isFranco(activePending) || (!activePending && _isFranco(_fsShift))) continue;
-                    if (!activePending || activePending.isDeleted) {
-                        additions[key] = {
-                            empId: entry.employeeId,
-                            dateStr,
-                            code: entry.shiftCode,
-                            positionName: entry.positionName || '',
-                            hours: 8,
-                            startTime: '00:00',
-                            isDeleted: false,
-                            _isAutoRotation: true,
-                        };
-                    }
                 }
             }
         }
@@ -4161,6 +3876,17 @@ export default function PlanificacionPage() {
             rotacionesActivas, {}, shiftsMap, year, month, positionStructure,
         );
         if (!Object.keys(rotAdditions).length) return;
+        // Si alguna rotación activa tiene cumplirCondicion, también aplicar las reglas del SLA
+        if (activeSlaServiceRules?.length && rotacionesActivas.some((r: any) => r.cumplirCondicion)) {
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                const condChanges = computeServiceRuleChanges(
+                    dateStr, activeSlaServiceRules, rotAdditions, shiftsMap, employees, selectedObjective,
+                );
+                Object.assign(rotAdditions, condChanges);
+            }
+        }
         commitPendingChanges((prev: Record<string, any>) => {
             // No sobreescribir si el usuario ya tiene cambios manuales en curso
             if (Object.values(prev).some((v: any) => v && !v._isAutoRotation && !v._isAutoCondition)) return prev;
@@ -4170,7 +3896,7 @@ export default function PlanificacionPage() {
         const totalCount = activeSlaServiceRotations.length;
         const hint = desactCount > 0 ? ` (${rotacionesActivas.length}/${totalCount} activas)` : '';
         toast.info(`Rotación pre-cargada${hint} — revisá y guardá cuando estés listo`, { duration: 4000 });
-    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges]);
+    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges, activeSlaServiceRules, employees]);
 
     // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
     useEffect(() => {
@@ -7643,9 +7369,13 @@ export default function PlanificacionPage() {
             const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
             const defaultPositionByEmp: Record<string,string> = {};
             const defaultShiftByEmp: Record<string,string> = {};
+            const plannerGridPositionByEmp: Record<string, string> = {};
             displayedEmployees.forEach((e:any) => {
                 const pos = empDefaultPos[`${e.id}___${selectedObjective}`];
-                if (pos) defaultPositionByEmp[e.id] = pos;
+                if (pos) {
+                    defaultPositionByEmp[e.id] = pos;
+                    plannerGridPositionByEmp[e.id] = pos;
+                }
                 const shift = empDefaultShift[`${e.id}___${selectedObjective}`];
                 if (shift) defaultShiftByEmp[e.id] = shift;
             });
@@ -7702,6 +7432,7 @@ export default function PlanificacionPage() {
             const slaRotationByDate = buildSlaRotationByDate(
                 activeSlaServiceRotations,
                 daysInMonth.map((d) => getDateKey(d)),
+                positionStructure,
             );
             const v2PosGen = positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[];
             const cronogramRules = resolveCronogramPlanningRules(v2PosGen);
@@ -7813,13 +7544,8 @@ export default function PlanificacionPage() {
                 allowCustom24hsBackup: objectiveScheduleFlags.allowCustom24hsBackup,
                 cronogramRules,
                 coverageWisdom,
-                positionAssignmentsByEmp: (() => {
-                    const pa = activeSlaPositionAssignments;
-                    if (!pa?.length) return undefined;
-                    const m: Record<string, Array<{ positionName: string; shiftCodes: string[] }>> = {};
-                    for (const a of pa) { if (a.slots?.length) m[a.employeeId] = a.slots; }
-                    return Object.keys(m).length ? m : undefined;
-                })(),
+                plannerGridPositionByEmp,
+                positionAssignmentsByEmp: buildPositionAssignmentsByEmp(activeSlaPositionAssignments),
                 serviceRules: activeSlaServiceRules ?? undefined,
                 serviceRotations: activeSlaServiceRotations ?? undefined,
                 ...(slaRotationByDate ? { slaRotationByDate } : {}),
@@ -8206,6 +7932,76 @@ export default function PlanificacionPage() {
 
             await bumpAutoV2Progress(100, slaClosed ? 'Listo' : 'SLA sin cerrar — vista previa');
             await new Promise<void>((r) => setTimeout(r, 180));
+
+            if (empresaId && selectedObjective && positionStructure.length > 0) {
+                const prevMonthCal = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+                const compareDays = daysInMonth.map((day) => {
+                    const dateStr = getDateKey(day);
+                    return { dateStr, dayLetter: getDayLetter(dateStr) };
+                });
+                try {
+                    const prevPublished = await fetchPlanningMonthShifts({
+                        empresaId,
+                        objectiveId: selectedObjective,
+                        year: prevMonthCal.getFullYear(),
+                        month: prevMonthCal.getMonth() + 1,
+                        scopeEmpresa,
+                        migracionCompleta,
+                        publishedOnly: true,
+                    });
+                    if (prevPublished.length > 0) {
+                        const generatedCells = finalAssignments
+                            .filter((a) => (a.hours ?? 0) > 0 && a.positionName && a.code)
+                            .map((a) => ({
+                                id: `${a.empId}_${a.dateStr}`,
+                                employeeId: a.empId,
+                                objectiveId: selectedObjective,
+                                dateStr: a.dateStr,
+                                code: String(a.code || '').toUpperCase(),
+                                positionName: a.positionName,
+                            }));
+                        const monthCmp = compareObjectiveMonthSchedules(
+                            {
+                                objectiveId: selectedObjective,
+                                positions: positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[],
+                                days: compareDays,
+                                cells: prevPublished,
+                                cycles: cyclesForGen,
+                            },
+                            {
+                                objectiveId: selectedObjective,
+                                positions: positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[],
+                                days: compareDays,
+                                cells: generatedCells,
+                                cycles: cyclesForGen,
+                            },
+                        );
+                        const prevLabel = `${String(prevMonthCal.getMonth() + 1).padStart(2, '0')}/${prevMonthCal.getFullYear()}`;
+                        const gapDays = monthCmp.daysWithGapsInCompareOnly.length;
+                        if (gapDays > 0) {
+                            toast.warning(
+                                `vs crono publicado ${prevLabel}: ${gapDays} día(s) con huecos · referencia ${monthCmp.reference.daysFull} día(s) OK`,
+                                { duration: 11000 },
+                            );
+                        }
+                        if (monthCmp.compare.nomenclatureViolations.length > 0) {
+                            toast.warning(
+                                `${monthCmp.compare.nomenclatureViolations.length} celda(s) con código no habilitado para el puesto (SLA)`,
+                                { duration: 9000 },
+                            );
+                        }
+                        console.info(
+                            '[auto] compare vs mes anterior publicado',
+                            formatCompareObjectiveMonthsReport(monthCmp, {
+                                reference: `Publicado ${prevLabel}`,
+                                compare: 'Generado',
+                            }),
+                        );
+                    }
+                } catch (cmpErr) {
+                    console.warn('[auto] compareObjectiveMonthSchedules', cmpErr);
+                }
+            }
 
             const gridGap = Math.abs(verifiedBillableFinal - gridBillableHours);
 
