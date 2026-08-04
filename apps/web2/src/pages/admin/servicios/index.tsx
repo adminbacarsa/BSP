@@ -2835,10 +2835,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <p className="text-[9px] text-slate-400 mt-0.5">Fecha del día 1 de la secuencia de cada empleado.</p>
                                 </div>
                               )}
-                              <label className="flex items-center gap-2 w-full text-[10px] font-semibold text-slate-500 cursor-pointer select-none">
-                                <input type="checkbox" checked={!!editingRotation.cumplirCondicion} onChange={e => setEditingRotation({ ...editingRotation, cumplirCondicion: e.target.checked })} className="accent-teal-600 cursor-pointer shrink-0" />
-                                Cumplir condiciones al auto-cargar
-                              </label>
+                              <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cumplirCondicion: !editingRotation.cumplirCondicion })} className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-[10px] font-black border transition-colors ${editingRotation.cumplirCondicion ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-300 dark:border-slate-600 hover:bg-slate-50'}`}>
+                                {editingRotation.cumplirCondicion ? '✓' : '○'} Cumplir condiciones
+                              </button>
                             </div>
                             {editingRotation.cycleMode === 'custom_sequence' ? (
                           <div>
@@ -3042,10 +3041,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <p className="text-[9px] text-slate-400 mt-0.5">Fecha del día 1 de la secuencia de cada empleado.</p>
                             </div>
                           )}
-                          <label className="flex items-center gap-2 w-full text-[10px] font-semibold text-slate-500 cursor-pointer select-none">
-                            <input type="checkbox" checked={!!editingRotation.cumplirCondicion} onChange={e => setEditingRotation({ ...editingRotation, cumplirCondicion: e.target.checked })} className="accent-teal-600 cursor-pointer shrink-0" />
-                            Cumplir condiciones al auto-cargar
-                          </label>
+                          <button type="button" onClick={() => setEditingRotation({ ...editingRotation, cumplirCondicion: !editingRotation.cumplirCondicion })} className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-[10px] font-black border transition-colors ${editingRotation.cumplirCondicion ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-slate-800 text-slate-400 border-slate-300 dark:border-slate-600 hover:bg-slate-50'}`}>
+                            {editingRotation.cumplirCondicion ? '✓' : '○'} Cumplir condiciones
+                          </button>
                         </div>
                         {editingRotation.cycleMode === 'custom_sequence' ? (
                   <div>
