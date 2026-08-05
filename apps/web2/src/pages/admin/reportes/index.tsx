@@ -1910,8 +1910,9 @@ export default function ReportsPage() {
                     const enPeriodoRaw = svcReportData.filter(isVigenteEnPeriodo);
                     const dedupeMap = new Map<string, any>();
                     enPeriodoRaw.forEach((s: any) => {
-                        // Misma clave visual que la página Servicios: clientName + objectiveName
-                        const key = `${(s.clientName||'').toLowerCase().trim()}_${(s.objectiveName||'').toLowerCase().trim()}`;
+                        // clientId es único por empresa en Firestore → evita mezclar servicios de distintas empresas
+                        // que tengan el mismo nombre de cliente/objetivo
+                        const key = `${(s.clientId || s.clientName || '').trim()}_${(s.objectiveName || '').trim()}`;
                         const prev = dedupeMap.get(key);
                         const sDate = toYyyyMmDd(s.startDate) || '';
                         const pDate = prev ? (toYyyyMmDd(prev.startDate) || '') : '';
