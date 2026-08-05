@@ -11,6 +11,7 @@ import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
+import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { shouldScopeQueriesToEmpresa, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, type ReportPublishFilter } from '@/hooks/useReportes';
 import { toast } from 'sonner';
@@ -1894,12 +1895,14 @@ export default function ReportsPage() {
                 {activeTab === 'PLANIFICADO' && renderPlanificadoTable()}
 
                 {activeTab === 'SERVICIOS' && (() => {
-                    // Un contrato está vigente en el período si sus fechas se solapan con dateRange
+                    // Normaliza con toYyyyMmDd para manejar strings, Timestamps y objetos {seconds}
                     const isVigenteEnPeriodo = (s: any): boolean => {
-                        const sd = (s.startDate || '').slice(0, 10);
-                        const ed = (s.endDate || '').slice(0, 10);
-                        if (!sd || !ed) return false;
-                        return sd <= dateRange.end && ed >= dateRange.start;
+                        const sd = toYyyyMmDd(s.startDate);
+                        const ed = toYyyyMmDd(s.endDate);
+                        if (!sd && !ed) return false;
+                        const start = sd || '1970-01-01';
+                        const end   = ed || '2099-12-31';
+                        return start <= dateRange.end && end >= dateRange.start;
                     };
                     const q = svcSearch.toLowerCase().trim();
                     // Base: contratos vigentes en el período seleccionado
