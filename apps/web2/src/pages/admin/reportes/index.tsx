@@ -1905,8 +1905,16 @@ export default function ReportsPage() {
                         return start <= dateRange.end && end >= dateRange.start;
                     };
                     const q = svcSearch.toLowerCase().trim();
-                    // Base: contratos vigentes en el período seleccionado
-                    const enPeriodo = svcReportData.filter(isVigenteEnPeriodo);
+                    // Base: contratos vigentes en el período seleccionado, deduplicados por objectiveId
+                    // (Firestore puede tener varios docs por objetivo; se queda con el de startDate más reciente)
+                    const enPeriodoRaw = svcReportData.filter(isVigenteEnPeriodo);
+                    const dedupeMap = new Map<string, any>();
+                    enPeriodoRaw.forEach((s: any) => {
+                        const key = String(s.objectiveId || `${s.clientId}_${s.objectiveName}`).trim();
+                        const prev = dedupeMap.get(key);
+                        if (!prev || (s.startDate || '') > (prev.startDate || '')) dedupeMap.set(key, s);
+                    });
+                    const enPeriodo = Array.from(dedupeMap.values());
                     const filtered = enPeriodo
                         .filter((s: any) => {
                             if (q && !(s.clientName||'').toLowerCase().includes(q) && !(s.objectiveName||'').toLowerCase().includes(q)) return false;
