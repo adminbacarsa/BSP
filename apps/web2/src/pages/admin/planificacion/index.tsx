@@ -3857,6 +3857,11 @@ export default function PlanificacionPage() {
         authorizedOver200IdsRef.current = new Set();
     }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
 
+    // Resetear guard de auto-rotación al cambiar objetivo o mes para que vuelva a pre-cargar
+    useEffect(() => {
+        autoRotAppliedRef.current = '';
+    }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
+
     // Auto-aplicar rotación cuando el mes está vacío y hay rotación configurada en el SLA
     useEffect(() => {
         if (!shiftsMapLoaded) return;
