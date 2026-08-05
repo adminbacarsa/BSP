@@ -1910,9 +1910,14 @@ export default function ReportsPage() {
                     const enPeriodoRaw = svcReportData.filter(isVigenteEnPeriodo);
                     const dedupeMap = new Map<string, any>();
                     enPeriodoRaw.forEach((s: any) => {
-                        const key = String(s.objectiveId || `${s.clientId}_${s.objectiveName}`).trim();
+                        // Clave robusta: objectiveId si existe, si no clientName+objectiveName (normalizado)
+                        const key = s.objectiveId?.trim()
+                            ? s.objectiveId.trim()
+                            : `${(s.clientName||s.clientId||'').toLowerCase().trim()}_${(s.objectiveName||'').toLowerCase().trim()}`;
                         const prev = dedupeMap.get(key);
-                        if (!prev || (s.startDate || '') > (prev.startDate || '')) dedupeMap.set(key, s);
+                        const sDate = toYyyyMmDd(s.startDate) || '';
+                        const pDate = prev ? (toYyyyMmDd(prev.startDate) || '') : '';
+                        if (!prev || sDate > pDate) dedupeMap.set(key, s);
                     });
                     const enPeriodo = Array.from(dedupeMap.values());
                     const filtered = enPeriodo
