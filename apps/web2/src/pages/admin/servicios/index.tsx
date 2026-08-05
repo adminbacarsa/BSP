@@ -1202,6 +1202,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   const [kpiMonth, setKpiMonth] = useState(new Date().getMonth());
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
   const [srvSearch, setSrvSearch] = useState('');
+  const [srvStatusFilter, setSrvStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [srvFeatureFilter, setSrvFeatureFilter] = useState<'all' | 'rotaciones' | 'condiciones'>('all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [listMode, setListMode] = useState<'objectives' | 'clients'>('objectives');
   const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
@@ -1219,9 +1221,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
   const groupedServices = useMemo((): SrvGroupItem[] => {
     const q = srvSearch.toLowerCase().trim();
-    const filtered = (services as (ServiceSLA & { id: string })[]).filter(s =>
-      !q || (s.clientName||'').toLowerCase().includes(q) || (s.objectiveName||'').toLowerCase().includes(q)
-    );
+    const filtered = (services as (ServiceSLA & { id: string })[]).filter(s => {
+      if (q && !(s.clientName||'').toLowerCase().includes(q) && !(s.objectiveName||'').toLowerCase().includes(q)) return false;
+      if (srvStatusFilter === 'active' && !isSlaContractActive(s.status)) return false;
+      if (srvStatusFilter === 'inactive' && isSlaContractActive(s.status)) return false;
+      if (srvFeatureFilter === 'rotaciones' && !(s.serviceRotations?.length)) return false;
+      if (srvFeatureFilter === 'condiciones' && !(s.serviceRules?.length)) return false;
+      return true;
+    });
     const map = new Map<string, (ServiceSLA & { id: string })[]>();
     filtered.forEach(s => {
       const key = s.objectiveId || `${s.clientId}_${s.objectiveName}`;
@@ -1234,7 +1241,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       objectiveName: items[0].objectiveName || 'General',
       services: items.sort((a, b) => (b.startDate||'').localeCompare(a.startDate||'')),
     }));
-  }, [services, srvSearch, clientNameById]);
+  }, [services, srvSearch, srvStatusFilter, srvFeatureFilter, clientNameById]);
 
 
   const kpiHistory = useMemo(() => {
@@ -1364,6 +1371,28 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             />
           </div>
 
+          {/* Filtros rápidos */}
+          <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+              {(['all', 'active', 'inactive'] as const).map(v => (
+                <button key={v} onClick={() => setSrvStatusFilter(v)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${srvStatusFilter === v ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  {v === 'all' ? 'Todos' : v === 'active' ? '● Activos' : '○ Inactivos'}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+              {(['all', 'rotaciones', 'condiciones'] as const).map(v => (
+                <button key={v} onClick={() => setSrvFeatureFilter(v)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${srvFeatureFilter === v ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  {v === 'all' ? 'Todos' : v === 'rotaciones' ? '⟳ Rotaciones' : '⚡ Condiciones'}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Toggle de vista */}
           <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 w-fit">
             <button
@@ -1418,6 +1447,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               ? `${clientGroups.length} cliente${clientGroups.length !== 1 ? 's' : ''} · ${groupedServices.length} objetivo${groupedServices.length !== 1 ? 's' : ''}`
               : `${groupedServices.length} objetivo${groupedServices.length !== 1 ? 's' : ''}`}
             {srvSearch && ` · búsqueda: "${srvSearch}"`}
+            {srvStatusFilter !== 'all' && ` · ${srvStatusFilter === 'active' ? 'activos' : 'inactivos'}`}
+            {srvFeatureFilter !== 'all' && ` · con ${srvFeatureFilter}`}
           </p>
 
           {/* Vista por cliente */}

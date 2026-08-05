@@ -3,12 +3,15 @@ import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import {
     Users, Building, Download, Printer,
-    Calendar, User, X, ChevronRight, ChevronDown, Sun, Moon, BarChart3, FileText, CalendarDays, TrendingUp
+    Calendar, User, X, ChevronRight, ChevronDown, Sun, Moon, BarChart3, FileText, CalendarDays, TrendingUp,
+    Shield, CheckCircle2, Minus, RotateCw, Zap, Search
 } from 'lucide-react';
 import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
+import { isSlaContractActive } from '@/lib/slaPlanningMatch';
+import { shouldScopeQueriesToEmpresa, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, type ReportPublishFilter } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
@@ -82,7 +85,7 @@ export default function ReportsPage() {
 
     const [empSortBy, setEmpSortBy] = useState<'name' | 'legajo'>('name');
 
-    const [activeTab, setActiveTab] = useState<'EMPLOYEE' | 'OBJECTIVE' | 'AUDIT' | 'SHIFTS' | 'PLANIFICADO'>('EMPLOYEE');
+    const [activeTab, setActiveTab] = useState<'EMPLOYEE' | 'OBJECTIVE' | 'AUDIT' | 'SHIFTS' | 'PLANIFICADO' | 'SERVICIOS'>('EMPLOYEE');
     const [selectedDetailEmployee, setSelectedDetailEmployee] = useState<string>('');
     const [shiftsFilterTimeFrom, setShiftsFilterTimeFrom] = useState('');
     const [shiftsFilterTimeTo, setShiftsFilterTimeTo] = useState('');
@@ -112,6 +115,37 @@ export default function ReportsPage() {
     const [auditActorSearch, setAuditActorSearch] = useState('');
     const [objFilterClientSearch, setObjFilterClientSearch] = useState('');
     const [auditFilterActor, setAuditFilterActor] = useState<string>('');
+
+    // --- Tab Servicios ---
+    const [svcReportData, setSvcReportData] = useState<any[]>([]);
+    const [svcReportLoading, setSvcReportLoading] = useState(false);
+    const [svcReportLoaded, setSvcReportLoaded] = useState(false);
+    const [svcStatusFilter, setSvcStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+    const [svcSearch, setSvcSearch] = useState('');
+
+    useEffect(() => {
+        if (activeTab !== 'SERVICIOS' || svcReportLoaded || !empresaId) return;
+        const load = async () => {
+            setSvcReportLoading(true);
+            try {
+                const migracionCompleta = false;
+                const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+                const q = scopeEmpresa
+                    ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
+                    : query(collection(db, 'servicios_sla'));
+                const snap = await getDocs(q);
+                const raw = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+                const filtered = filterSlaRowsByEmpresa(raw as any, empresaId, migracionCompleta, new Set<string>());
+                setSvcReportData(filtered);
+                setSvcReportLoaded(true);
+            } catch (e) {
+                console.error('Error cargando servicios para reporte:', e);
+            } finally {
+                setSvcReportLoading(false);
+            }
+        };
+        load();
+    }, [activeTab, svcReportLoaded, empresaId]);
 
     useEffect(() => {
         const auth = getAuth();
@@ -1537,6 +1571,7 @@ export default function ReportsPage() {
                             { id: 'SHIFTS',      label: 'Detalle Turnos', icon: Calendar },
                             { id: 'OBJECTIVE',   label: 'Por Objetivo', icon: Building },
                             { id: 'PLANIFICADO', label: 'Planificado', icon: CalendarDays },
+                            { id: 'SERVICIOS',   label: 'Servicios', icon: Shield },
                             { id: 'AUDIT',       label: 'Auditoría', icon: FileText },
                         ]}
                         active={activeTab}
@@ -1856,6 +1891,133 @@ export default function ReportsPage() {
                 {activeTab === 'SHIFTS' && renderShiftsDetailTable()}
                 {activeTab === 'OBJECTIVE' && renderObjectiveTable()}
                 {activeTab === 'PLANIFICADO' && renderPlanificadoTable()}
+
+                {activeTab === 'SERVICIOS' && (() => {
+                    const q = svcSearch.toLowerCase().trim();
+                    const filtered = svcReportData.filter((s: any) => {
+                        if (q && !(s.clientName||'').toLowerCase().includes(q) && !(s.objectiveName||'').toLowerCase().includes(q)) return false;
+                        if (svcStatusFilter === 'active' && !isSlaContractActive(s.status)) return false;
+                        if (svcStatusFilter === 'inactive' && isSlaContractActive(s.status)) return false;
+                        return true;
+                    });
+                    const totalActivos = svcReportData.filter((s: any) => isSlaContractActive(s.status)).length;
+                    const totalInactivos = svcReportData.filter((s: any) => !isSlaContractActive(s.status)).length;
+                    const totalConRot = svcReportData.filter((s: any) => (s.serviceRotations?.length ?? 0) > 0).length;
+                    const totalConCond = svcReportData.filter((s: any) => (s.serviceRules?.length ?? 0) > 0).length;
+                    const totalConCumplirCond = svcReportData.filter((s: any) =>
+                        (s.serviceRotations || []).some((r: any) => r.cumplirCondicion)
+                    ).length;
+                    return (
+                        <div className="space-y-4">
+                            {/* KPIs */}
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                {[
+                                    { label: 'Total contratos', value: svcReportData.length, color: '#4f46e5' },
+                                    { label: 'Activos', value: totalActivos, color: '#059669' },
+                                    { label: 'Inactivos', value: totalInactivos, color: '#64748b' },
+                                    { label: 'Con rotaciones', value: totalConRot, color: '#d97706' },
+                                    { label: 'Con condiciones', value: totalConCond, color: '#7c3aed' },
+                                ].map(({ label, value, color }) => (
+                                    <ContentCard key={label} className="!p-4">
+                                        <p className="text-[9px] font-black uppercase text-slate-400 tracking-wide mb-1">{label}</p>
+                                        <p className="text-2xl font-black" style={{ color }}>{value}</p>
+                                    </ContentCard>
+                                ))}
+                            </div>
+                            {/* Filtros */}
+                            <ContentCard className="!p-3 flex flex-wrap gap-3 items-center">
+                                <div className="relative flex-1 min-w-[180px]">
+                                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                    <input type="text" placeholder="Buscar cliente u objetivo..." value={svcSearch} onChange={e => setSvcSearch(e.target.value)}
+                                        className="w-full pl-8 pr-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-white placeholder-slate-400 outline-none focus:border-indigo-400"/>
+                                </div>
+                                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
+                                    {(['all', 'active', 'inactive'] as const).map(v => (
+                                        <button key={v} onClick={() => setSvcStatusFilter(v)}
+                                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${svcStatusFilter === v ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                                            {v === 'all' ? 'Todos' : v === 'active' ? '● Activos' : '○ Inactivos'}
+                                        </button>
+                                    ))}
+                                </div>
+                                <span className="text-[10px] font-black text-slate-400 uppercase">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''}</span>
+                            </ContentCard>
+                            {/* Tabla */}
+                            <ContentCard padding={false} className="overflow-hidden">
+                                {svcReportLoading ? (
+                                    <div className="flex items-center justify-center py-16 text-slate-400">
+                                        <RotateCw size={18} className="animate-spin mr-2"/> Cargando contratos…
+                                    </div>
+                                ) : filtered.length === 0 ? (
+                                    <div className="flex items-center justify-center py-16 text-slate-400 text-sm font-bold">Sin resultados</div>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-xs text-left">
+                                            <thead className="bg-slate-50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 font-black uppercase text-[10px]">
+                                                <tr>
+                                                    <th className="p-3 pl-4">Estado</th>
+                                                    <th className="p-3">Cliente</th>
+                                                    <th className="p-3">Objetivo</th>
+                                                    <th className="p-3">Desde</th>
+                                                    <th className="p-3">Hasta</th>
+                                                    <th className="p-3">Puestos</th>
+                                                    <th className="p-3">Cobertura</th>
+                                                    <th className="p-3">Hs/mes</th>
+                                                    <th className="p-3 text-center">Rotaciones</th>
+                                                    <th className="p-3 text-center">Condiciones</th>
+                                                    <th className="p-3 text-center">Cond. auto</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                                                {filtered.map((s: any) => {
+                                                    const active = isSlaContractActive(s.status);
+                                                    const posCount = (s.positions || []).length;
+                                                    const hasRot = (s.serviceRotations?.length ?? 0) > 0;
+                                                    const hasCond = (s.serviceRules?.length ?? 0) > 0;
+                                                    const hasCumplir = (s.serviceRotations || []).some((r: any) => r.cumplirCondicion);
+                                                    const coverageTypes = [...new Set<string>((s.positions || []).map((p: any) => String(p.coverageType || '24hs')))];
+                                                    const coverageLabel = coverageTypes.length === 1 ? coverageTypes[0] : 'Mixto';
+                                                    return (
+                                                        <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                                                            <td className="p-3 pl-4">
+                                                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${active ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-400 dark:bg-slate-700 dark:text-slate-500'}`}>
+                                                                    {active ? 'Activo' : 'Inactivo'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-3 font-bold text-slate-700 dark:text-slate-200 max-w-[150px] truncate">{s.clientName || '—'}</td>
+                                                            <td className="p-3 text-slate-600 dark:text-slate-300 max-w-[150px] truncate">{s.objectiveName || '—'}</td>
+                                                            <td className="p-3 font-mono text-slate-500">{s.startDate || '—'}</td>
+                                                            <td className="p-3 font-mono text-slate-500">{s.endDate || '—'}</td>
+                                                            <td className="p-3 font-bold text-slate-700 dark:text-slate-200">{posCount}</td>
+                                                            <td className="p-3">
+                                                                <span className="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded text-[9px] font-black uppercase">{coverageLabel}</span>
+                                                            </td>
+                                                            <td className="p-3 font-bold text-slate-700 dark:text-slate-200 tabular-nums">{s.totalMonthlyHours ?? '—'}</td>
+                                                            <td className="p-3 text-center">
+                                                                {hasRot
+                                                                    ? <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 font-black text-[10px]"><Zap size={11}/>{s.serviceRotations.length}</span>
+                                                                    : <Minus size={12} className="text-slate-300 mx-auto"/>}
+                                                            </td>
+                                                            <td className="p-3 text-center">
+                                                                {hasCond
+                                                                    ? <span className="inline-flex items-center gap-1 text-violet-600 dark:text-violet-400 font-black text-[10px]"><CheckCircle2 size={11}/>{s.serviceRules.length}</span>
+                                                                    : <Minus size={12} className="text-slate-300 mx-auto"/>}
+                                                            </td>
+                                                            <td className="p-3 text-center">
+                                                                {hasCumplir
+                                                                    ? <span className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400 font-black text-[10px]"><CheckCircle2 size={11}/>sí</span>
+                                                                    : <Minus size={12} className="text-slate-300 mx-auto"/>}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </ContentCard>
+                        </div>
+                    );
+                })()}
 
                 {activeTab === 'AUDIT' && (
                     <ContentCard padding={false} className="overflow-hidden">
