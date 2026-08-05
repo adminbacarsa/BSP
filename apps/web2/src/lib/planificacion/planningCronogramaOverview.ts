@@ -63,14 +63,14 @@ function toDate(val: unknown): Date | null {
 }
 
 export function deriveCronogramaEstado(
-  hasPublishDoc: boolean,
+  hasPublishedAt: boolean,
   draftCount: number,
   publishedCount: number,
 ): CronogramaEstado {
   const total = draftCount + publishedCount;
-  if (total === 0 && !hasPublishDoc) return 'SIN_DATOS';
-  if (hasPublishDoc && draftCount === 0) return 'PUBLICADO';
-  if (hasPublishDoc && draftCount > 0) return 'PUBLICADO_CON_CAMBIOS';
+  if (total === 0 && !hasPublishedAt) return 'SIN_DATOS';
+  if (hasPublishedAt && draftCount === 0) return 'PUBLICADO';
+  if (hasPublishedAt && draftCount > 0) return 'PUBLICADO_CON_CAMBIOS';
   return 'BORRADOR';
 }
 
@@ -226,7 +226,7 @@ export async function loadCronogramaOverview(params: {
         shiftActivity?.lastModifiedAt ?? null,
         shiftActivity?.lastModifiedBy ?? '',
       );
-      const estado = deriveCronogramaEstado(!!pub, counts.draft, counts.published);
+      const estado = deriveCronogramaEstado(!!(pub?.publishedAt), counts.draft, counts.published);
 
       rows.push({
         clientId: client.id,
