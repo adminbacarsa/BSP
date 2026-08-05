@@ -1893,26 +1893,32 @@ export default function ReportsPage() {
                 {activeTab === 'PLANIFICADO' && renderPlanificadoTable()}
 
                 {activeTab === 'SERVICIOS' && (() => {
+                    // Un contrato está vigente en el período si sus fechas se solapan con dateRange
+                    const isVigenteEnPeriodo = (s: any): boolean => {
+                        const sd = (s.startDate || '').slice(0, 10);
+                        const ed = (s.endDate || '').slice(0, 10);
+                        if (!sd || !ed) return false;
+                        return sd <= dateRange.end && ed >= dateRange.start;
+                    };
                     const q = svcSearch.toLowerCase().trim();
-                    const filtered = svcReportData.filter((s: any) => {
+                    // Base: contratos vigentes en el período seleccionado
+                    const enPeriodo = svcReportData.filter(isVigenteEnPeriodo);
+                    const filtered = enPeriodo.filter((s: any) => {
                         if (q && !(s.clientName||'').toLowerCase().includes(q) && !(s.objectiveName||'').toLowerCase().includes(q)) return false;
                         if (svcStatusFilter === 'active' && !isSlaContractActive(s.status)) return false;
                         if (svcStatusFilter === 'inactive' && isSlaContractActive(s.status)) return false;
                         return true;
                     });
-                    const totalActivos = svcReportData.filter((s: any) => isSlaContractActive(s.status)).length;
-                    const totalInactivos = svcReportData.filter((s: any) => !isSlaContractActive(s.status)).length;
-                    const totalConRot = svcReportData.filter((s: any) => (s.serviceRotations?.length ?? 0) > 0).length;
-                    const totalConCond = svcReportData.filter((s: any) => (s.serviceRules?.length ?? 0) > 0).length;
-                    const totalConCumplirCond = svcReportData.filter((s: any) =>
-                        (s.serviceRotations || []).some((r: any) => r.cumplirCondicion)
-                    ).length;
+                    const totalActivos = enPeriodo.filter((s: any) => isSlaContractActive(s.status)).length;
+                    const totalInactivos = enPeriodo.filter((s: any) => !isSlaContractActive(s.status)).length;
+                    const totalConRot = enPeriodo.filter((s: any) => (s.serviceRotations?.length ?? 0) > 0).length;
+                    const totalConCond = enPeriodo.filter((s: any) => (s.serviceRules?.length ?? 0) > 0).length;
                     return (
                         <div className="space-y-4">
                             {/* KPIs */}
                             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                                 {[
-                                    { label: 'Total contratos', value: svcReportData.length, color: '#4f46e5' },
+                                    { label: 'Total servicios', value: enPeriodo.length, color: '#4f46e5' },
                                     { label: 'Activos', value: totalActivos, color: '#059669' },
                                     { label: 'Inactivos', value: totalInactivos, color: '#64748b' },
                                     { label: 'Con rotaciones', value: totalConRot, color: '#d97706' },
