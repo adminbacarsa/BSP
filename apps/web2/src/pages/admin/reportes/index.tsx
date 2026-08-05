@@ -13,6 +13,7 @@ import { collection, addDoc, serverTimestamp, getDocs, query, where } from 'fire
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { shouldScopeQueriesToEmpresa, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
+import { slaService } from '@/services/slaService';
 import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, type ReportPublishFilter } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
@@ -132,12 +133,16 @@ export default function ReportsPage() {
             try {
                 const migracionCompleta = false;
                 const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+                // Cargar clientes para poder filtrar por empresa (igual que la página Servicios)
+                const clientRows = await slaService.getClients({ empresaId, scopeEmpresa });
+                const clientIds = new Set<string>(clientRows.map((c: any) => String(c.id)));
                 const q = scopeEmpresa
                     ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
                     : query(collection(db, 'servicios_sla'));
                 const snap = await getDocs(q);
                 const raw = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
-                const filtered = filterSlaRowsByEmpresa(raw as any, empresaId, migracionCompleta, new Set<string>());
+                // Forzar filtro por empresa aunque scopeEmpresa=false (excluye docs de otras empresas)
+                const filtered = filterSlaRowsByEmpresa(raw as any, empresaId, true, clientIds);
                 setSvcReportData(filtered);
                 setSvcReportLoaded(true);
             } catch (e) {
@@ -1910,9 +1915,8 @@ export default function ReportsPage() {
                     const enPeriodoRaw = svcReportData.filter(isVigenteEnPeriodo);
                     const dedupeMap = new Map<string, any>();
                     enPeriodoRaw.forEach((s: any) => {
-                        // clientId es único por empresa en Firestore → evita mezclar servicios de distintas empresas
-                        // que tengan el mismo nombre de cliente/objetivo
-                        const key = `${(s.clientId || s.clientName || '').trim()}_${(s.objectiveName || '').trim()}`;
+                        // Datos ya filtrados por empresa → clientName+objectiveName une duplicados del mismo objetivo
+                        const key = `${(s.clientName || '').toLowerCase().trim()}_${(s.objectiveName || '').toLowerCase().trim()}`;
                         const prev = dedupeMap.get(key);
                         const sDate = toYyyyMmDd(s.startDate) || '';
                         const pDate = prev ? (toYyyyMmDd(prev.startDate) || '') : '';
