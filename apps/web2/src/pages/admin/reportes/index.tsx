@@ -2079,7 +2079,7 @@ export default function ReportsPage() {
                                                                             <td className="p-2">
                                                                                 <div className="flex flex-wrap gap-1">
                                                                                     {Array.isArray(p.allowedShiftTypes) && p.allowedShiftTypes.length > 0
-                                                                                        ? p.allowedShiftTypes.map((c: string) => shiftBadge(c))
+                                                                                        ? p.allowedShiftTypes.map((c: any) => shiftBadge(typeof c === 'string' ? c : (c.code || c.name || '?')))
                                                                                         : <span className="text-slate-300 text-[9px]">—</span>}
                                                                                 </div>
                                                                             </td>
@@ -2112,7 +2112,7 @@ export default function ReportsPage() {
                                                                                 {entries.map((e: any, ei: number) => (
                                                                                     <div key={ei} className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 rounded-lg px-2 py-1">
                                                                                         <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{e.employeeName || e.name || e.employeeId || `Emp.${ei+1}`}</span>
-                                                                                        {e.shiftCode && shiftBadge(e.shiftCode)}
+                                                                                        {e.shiftCode && shiftBadge(typeof e.shiftCode === 'string' ? e.shiftCode : (e.shiftCode.code || e.shiftCode.name || '?'))}
                                                                                     </div>
                                                                                 ))}
                                                                             </div>
