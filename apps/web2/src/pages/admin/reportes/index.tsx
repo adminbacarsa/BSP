@@ -1907,12 +1907,18 @@ export default function ReportsPage() {
                     const q = svcSearch.toLowerCase().trim();
                     // Base: contratos vigentes en el período seleccionado
                     const enPeriodo = svcReportData.filter(isVigenteEnPeriodo);
-                    const filtered = enPeriodo.filter((s: any) => {
-                        if (q && !(s.clientName||'').toLowerCase().includes(q) && !(s.objectiveName||'').toLowerCase().includes(q)) return false;
-                        if (svcStatusFilter === 'active' && !isSlaContractActive(s.status)) return false;
-                        if (svcStatusFilter === 'inactive' && isSlaContractActive(s.status)) return false;
-                        return true;
-                    });
+                    const filtered = enPeriodo
+                        .filter((s: any) => {
+                            if (q && !(s.clientName||'').toLowerCase().includes(q) && !(s.objectiveName||'').toLowerCase().includes(q)) return false;
+                            if (svcStatusFilter === 'active' && !isSlaContractActive(s.status)) return false;
+                            if (svcStatusFilter === 'inactive' && isSlaContractActive(s.status)) return false;
+                            return true;
+                        })
+                        .sort((a: any, b: any) => {
+                            const cn = (a.clientName || '').localeCompare(b.clientName || '', 'es');
+                            if (cn !== 0) return cn;
+                            return (a.objectiveName || '').localeCompare(b.objectiveName || '', 'es');
+                        });
                     const totalActivos = enPeriodo.filter((s: any) => isSlaContractActive(s.status)).length;
                     const totalInactivos = enPeriodo.filter((s: any) => !isSlaContractActive(s.status)).length;
                     const totalConRot = enPeriodo.filter((s: any) => (s.serviceRotations?.length ?? 0) > 0).length;

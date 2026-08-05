@@ -1256,9 +1256,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
       let active = 0, hours = 0, positions = 0, guards = 0;
       services.forEach(srv => {
-        if (!srv.startDate || !srv.endDate) return;
+        if (!srv.startDate) return;
         const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
-        const sEnd = parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10));
+        // Sin endDate = contrato en curso (abierto); usar fecha lejana
+        const sEnd = srv.endDate
+          ? parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10))
+          : new Date(2099, 11, 31);
         if (!sStart || !sEnd || sStart > mEnd || sEnd < mStart) return;
         active++;
         positions += (srv.positions || []).length;
@@ -1295,7 +1298,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       const mStart = new Date(y, m, 1);
       const mEnd = new Date(y, m + 1, 0);
       const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
-      const sEnd = parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10));
+      const sEnd = srv.endDate
+        ? parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10))
+        : new Date(2099, 11, 31);
       if (!sStart || !sEnd) return 0;
       if (sStart > mEnd || sEnd < mStart) return 0;
       const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
