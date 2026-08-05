@@ -32,7 +32,7 @@ import {
   WEEK_DAY_CODES,
 } from '@/lib/servicios/slaHoursCalculator';
 
-import { toYyyyMmDd } from '@/lib/firestoreDates';
+import { toYyyyMmDd, slaCoversCalendarMonth } from '@/lib/firestoreDates';
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
@@ -1223,8 +1223,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     const q = srvSearch.toLowerCase().trim();
     const filtered = (services as (ServiceSLA & { id: string })[]).filter(s => {
       if (q && !(s.clientName||'').toLowerCase().includes(q) && !(s.objectiveName||'').toLowerCase().includes(q)) return false;
-      if (srvStatusFilter === 'active' && !isSlaContractActive(s.status)) return false;
-      if (srvStatusFilter === 'inactive' && isSlaContractActive(s.status)) return false;
+      // Filtro activo/inactivo: usa el mes seleccionado en los KPIs (kpiMonth 0-based)
+      if (srvStatusFilter === 'active' && !slaCoversCalendarMonth(s.startDate, s.endDate, kpiYear, kpiMonth)) return false;
+      if (srvStatusFilter === 'inactive' && slaCoversCalendarMonth(s.startDate, s.endDate, kpiYear, kpiMonth)) return false;
       if (srvFeatureFilter === 'rotaciones' && !(s.serviceRotations?.length)) return false;
       if (srvFeatureFilter === 'condiciones' && !(s.serviceRules?.length)) return false;
       return true;
@@ -1241,7 +1242,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       objectiveName: items[0].objectiveName || 'General',
       services: items.sort((a, b) => (b.startDate||'').localeCompare(a.startDate||'')),
     }));
-  }, [services, srvSearch, srvStatusFilter, srvFeatureFilter, clientNameById]);
+  }, [services, srvSearch, srvStatusFilter, srvFeatureFilter, clientNameById, kpiYear, kpiMonth]);
 
 
   const kpiHistory = useMemo(() => {
@@ -1376,9 +1377,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
               {(['all', 'active', 'inactive'] as const).map(v => (
                 <button key={v} onClick={() => setSrvStatusFilter(v)}
+                  title={v === 'active' ? `Vigentes en ${kpiCurrent.label}` : v === 'inactive' ? `Sin cobertura en ${kpiCurrent.label}` : undefined}
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${srvStatusFilter === v ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                  {v === 'all' ? 'Todos' : v === 'active' ? '● Activos' : '○ Inactivos'}
+                  {v === 'all' ? 'Todos' : v === 'active' ? '● Activos' : '○ Sin cobertura'}
                 </button>
               ))}
             </div>
@@ -1447,7 +1449,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               ? `${clientGroups.length} cliente${clientGroups.length !== 1 ? 's' : ''} · ${groupedServices.length} objetivo${groupedServices.length !== 1 ? 's' : ''}`
               : `${groupedServices.length} objetivo${groupedServices.length !== 1 ? 's' : ''}`}
             {srvSearch && ` · búsqueda: "${srvSearch}"`}
-            {srvStatusFilter !== 'all' && ` · ${srvStatusFilter === 'active' ? 'activos' : 'inactivos'}`}
+            {srvStatusFilter !== 'all' && ` · ${srvStatusFilter === 'active' ? `activos en ${kpiCurrent.label}` : `sin cobertura en ${kpiCurrent.label}`}`}
             {srvFeatureFilter !== 'all' && ` · con ${srvFeatureFilter}`}
           </p>
 
