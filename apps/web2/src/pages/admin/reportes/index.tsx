@@ -122,6 +122,7 @@ export default function ReportsPage() {
     const [svcReportLoaded, setSvcReportLoaded] = useState(false);
     const [svcStatusFilter, setSvcStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
     const [svcSearch, setSvcSearch] = useState('');
+    const [svcDetailItem, setSvcDetailItem] = useState<any | null>(null);
 
     useEffect(() => {
         if (activeTab !== 'SERVICIOS' || svcReportLoaded || !empresaId) return;
@@ -1983,7 +1984,7 @@ export default function ReportsPage() {
                                                     const coverageTypes = [...new Set<string>((s.positions || []).map((p: any) => String(p.coverageType || '24hs')))];
                                                     const coverageLabel = coverageTypes.length === 1 ? coverageTypes[0] : 'Mixto';
                                                     return (
-                                                        <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                                                        <tr key={s.id} onClick={() => setSvcDetailItem(s)} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 cursor-pointer">
                                                             <td className="p-3 pl-4">
                                                                 <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${active ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-400 dark:bg-slate-700 dark:text-slate-500'}`}>
                                                                     {active ? 'Activo' : 'Inactivo'}
@@ -2021,6 +2022,137 @@ export default function ReportsPage() {
                                     </div>
                                 )}
                             </ContentCard>
+                            {/* Modal detalle de servicio */}
+                            {svcDetailItem && (() => {
+                            const d = svcDetailItem;
+                            const active = isSlaContractActive(d.status);
+                            const positions: any[] = d.positions || [];
+                            const rotations: any[] = d.serviceRotations || [];
+                            const rules: any[] = d.serviceRules || [];
+                            const shiftBadge = (code: string) => (
+                                <span key={code} className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[9px] font-black uppercase">{code}</span>
+                            );
+                            return (
+                                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setSvcDetailItem(null)}>
+                                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                                        {/* Header */}
+                                        <div className="flex items-start justify-between p-5 border-b border-slate-100 dark:border-slate-800">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${active ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-400 dark:bg-slate-700 dark:text-slate-500'}`}>
+                                                        {active ? 'Activo' : 'Inactivo'}
+                                                    </span>
+                                                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wide">{d.startDate} → {d.endDate}</span>
+                                                </div>
+                                                <h2 className="text-base font-black text-slate-800 dark:text-white">{d.clientName || '—'}</h2>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400 font-bold">{d.objectiveName || '—'}</p>
+                                            </div>
+                                            <button onClick={() => setSvcDetailItem(null)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-black text-xl leading-none mt-1">✕</button>
+                                        </div>
+                                        <div className="p-5 space-y-5">
+                                            {/* Puestos */}
+                                            <section>
+                                                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Puestos ({positions.length})</h3>
+                                                {positions.length === 0
+                                                    ? <p className="text-xs text-slate-400 italic">Sin puestos definidos</p>
+                                                    : (
+                                                        <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-800">
+                                                            <table className="w-full text-xs text-left">
+                                                                <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 font-black uppercase text-[9px]">
+                                                                    <tr>
+                                                                        <th className="p-2 pl-3">Nombre</th>
+                                                                        <th className="p-2 text-center">Cant.</th>
+                                                                        <th className="p-2">Cobertura</th>
+                                                                        <th className="p-2">Días activos</th>
+                                                                        <th className="p-2">Turnos permitidos</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                                                    {positions.map((p: any, i: number) => (
+                                                                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                                                                            <td className="p-2 pl-3 font-bold text-slate-700 dark:text-slate-200">{p.name || `Puesto ${i+1}`}</td>
+                                                                            <td className="p-2 text-center font-black text-slate-600 dark:text-slate-300">{p.quantity ?? p.qty ?? 1}</td>
+                                                                            <td className="p-2">
+                                                                                <span className="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded text-[9px] font-black uppercase">{p.coverageType || '24hs'}</span>
+                                                                            </td>
+                                                                            <td className="p-2 text-slate-500 dark:text-slate-400">{Array.isArray(p.activeDays) ? p.activeDays.join(', ') : (p.activeDays || 'Todos')}</td>
+                                                                            <td className="p-2">
+                                                                                <div className="flex flex-wrap gap-1">
+                                                                                    {Array.isArray(p.allowedShiftTypes) && p.allowedShiftTypes.length > 0
+                                                                                        ? p.allowedShiftTypes.map((c: string) => shiftBadge(c))
+                                                                                        : <span className="text-slate-300 text-[9px]">—</span>}
+                                                                                </div>
+                                                                            </td>
+                                                                        </tr>
+                                                                    ))}
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    )}
+                                            </section>
+                                            {/* Rotaciones */}
+                                            <section>
+                                                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Rotaciones ({rotations.length})</h3>
+                                                {rotations.length === 0
+                                                    ? <p className="text-xs text-slate-400 italic">Sin rotaciones configuradas</p>
+                                                    : (
+                                                        <div className="space-y-2">
+                                                            {rotations.map((r: any, ri: number) => {
+                                                                const entries: any[] = r.entries || r.rotationEntries || [];
+                                                                return (
+                                                                    <div key={ri} className="rounded-xl border border-slate-100 dark:border-slate-800 p-3">
+                                                                        <div className="flex items-center gap-2 mb-2">
+                                                                            <span className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase">{r.name || `Rotación ${ri+1}`}</span>
+                                                                            {r.mode && <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 rounded text-[9px] font-black uppercase">{r.mode}</span>}
+                                                                            {r.cumplirCondicion && <span className="px-1.5 py-0.5 bg-teal-50 dark:bg-teal-900/20 text-teal-600 dark:text-teal-400 rounded text-[9px] font-black uppercase">Aplica condición</span>}
+                                                                            {r.active === false && <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-400 rounded text-[9px] font-black uppercase">Inactiva</span>}
+                                                                        </div>
+                                                                        {entries.length > 0 && (
+                                                                            <div className="flex flex-wrap gap-1.5">
+                                                                                {entries.map((e: any, ei: number) => (
+                                                                                    <div key={ei} className="flex items-center gap-1 bg-slate-50 dark:bg-slate-800 rounded-lg px-2 py-1">
+                                                                                        <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">{e.employeeName || e.name || e.employeeId || `Emp.${ei+1}`}</span>
+                                                                                        {e.shiftCode && shiftBadge(e.shiftCode)}
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                            </section>
+                                            {/* Condiciones / Reglas */}
+                                            <section>
+                                                <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Condiciones ({rules.length})</h3>
+                                                {rules.length === 0
+                                                    ? <p className="text-xs text-slate-400 italic">Sin condiciones configuradas</p>
+                                                    : (
+                                                        <div className="space-y-2">
+                                                            {rules.map((rule: any, rui: number) => (
+                                                                <div key={rui} className="rounded-xl border border-violet-100 dark:border-violet-900/30 bg-violet-50/50 dark:bg-violet-900/10 p-3">
+                                                                    <div className="flex items-start gap-2">
+                                                                        <CheckCircle2 size={13} className="text-violet-500 mt-0.5 shrink-0"/>
+                                                                        <div className="text-[11px] leading-relaxed">
+                                                                            {rule.description && <p className="font-bold text-slate-700 dark:text-slate-200 mb-1">{rule.description}</p>}
+                                                                            {rule.trigger && <p className="text-slate-500 dark:text-slate-400"><span className="font-black text-violet-600 dark:text-violet-400">SI</span> {rule.trigger}</p>}
+                                                                            {rule.action && <p className="text-slate-500 dark:text-slate-400"><span className="font-black text-teal-600 dark:text-teal-400">ENTONCES</span> {rule.action}</p>}
+                                                                            {!rule.description && !rule.trigger && !rule.action && (
+                                                                                <pre className="text-[10px] text-slate-400 font-mono whitespace-pre-wrap">{JSON.stringify(rule, null, 2)}</pre>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                            </section>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                            })()}
                         </div>
                     );
                 })()}
