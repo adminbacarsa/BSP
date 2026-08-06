@@ -43,7 +43,22 @@ function useCountdownTo2359(startDate: string | undefined) {
 }
 import type { Absence } from '@/services/absenceService';
 
-const NOVEDAD_TYPES = ['Vacaciones', 'Enfermedad', 'ART', 'Injustificada', 'Licencia Esp.', 'PG Permiso Gremial'] as const;
+const NOVEDAD_TYPES = [
+    'Vacaciones',
+    'Matrimonio',
+    'Maternidad',
+    'Nacimiento / Paternidad',
+    'Fallecimiento Familiar',
+    'Examen / Estudio',
+    'Mudanza',
+    'Donación de Sangre',
+    'Licencia Esp.',
+    'Enfermedad',
+    'ART',
+    'PG Permiso Gremial',
+    'Sin Goce de Sueldo',
+    'Injustificada',
+] as const;
 
 function SelectionBox({
   checked,

@@ -43,6 +43,26 @@ export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     'llegada tarde': 'LT',
     'tarde': 'LT',
     'lt': 'LT',
+    // Licencias CCT especiales
+    'matrimonio': 'L',
+    'casamiento': 'L',
+    'maternidad': 'L',
+    'nacimiento': 'L',
+    'paternidad': 'L',
+    'nacimiento / paternidad': 'L',
+    'fallecimiento familiar': 'L',
+    'fallecimiento': 'L',
+    'duelo': 'L',
+    'examen': 'L',
+    'examen / estudio': 'L',
+    'estudio': 'L',
+    'mudanza': 'L',
+    'donacion de sangre': 'L',
+    'donación de sangre': 'L',
+    // Sin goce de sueldo
+    'sin goce de sueldo': 'SGS',
+    'sin goce': 'SGS',
+    'sgs': 'SGS',
     // Callable manageAbsences (backend Nest)
     'vacation': 'V',
     'sick_leave': 'E',
@@ -61,6 +81,16 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
     'Llegada Tarde': 'LT',
     'Licencia Esp.': 'L',
     'PG Permiso Gremial': 'PG',
+    // Licencias CCT especiales
+    'Matrimonio': 'L',
+    'Maternidad': 'L',
+    'Nacimiento / Paternidad': 'L',
+    'Fallecimiento Familiar': 'L',
+    'Examen / Estudio': 'L',
+    'Mudanza': 'L',
+    'Donación de Sangre': 'L',
+    // Sin goce de sueldo
+    'Sin Goce de Sueldo': 'SGS',
 };
 
 /** Tipos disponibles para cargar manualmente en RRHH */
@@ -72,8 +102,16 @@ export const RRHH_ABSENCE_TYPES = [
     'Enfermedad',
     'ART',
     'Vacaciones',
+    'Matrimonio',
+    'Maternidad',
+    'Nacimiento / Paternidad',
+    'Fallecimiento Familiar',
+    'Examen / Estudio',
+    'Mudanza',
+    'Donación de Sangre',
     'Licencia Esp.',
     'PG Permiso Gremial',
+    'Sin Goce de Sueldo',
 ] as const;
 
 /**
@@ -100,10 +138,22 @@ export const ABSENCE_STATUSES = [
 export const AUTO_ABSENCE_TYPES = new Set(['No Presentacion', 'No Presentación']);
 
 /** Tipos que requieren autorización gerencial antes de impactar planificación */
-export const REQUIRES_AUTHORIZATION_TYPES = new Set(['Vacaciones', 'Licencia Esp.', 'PG Permiso Gremial']);
+export const REQUIRES_AUTHORIZATION_TYPES = new Set([
+    'Vacaciones',
+    'Licencia Esp.',
+    'PG Permiso Gremial',
+    'Matrimonio',
+    'Maternidad',
+    'Nacimiento / Paternidad',
+    'Fallecimiento Familiar',
+    'Examen / Estudio',
+    'Mudanza',
+    'Donación de Sangre',
+    'Sin Goce de Sueldo',
+]);
 
 /** Códigos válidos de ausencia/licencia para grilla. */
-export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA', 'LT']);
+export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA', 'LT', 'SGS']);
 
 /** Códigos de licencias pagas (computan horas y bloquean planificación). */
 export const PAID_LEAVE_CODES = new Set(['V', 'L', 'A', 'E', 'PG']);
@@ -145,6 +195,7 @@ export function inferAbsenceCode(doc: any): string {
     if (t.includes('gremial')) return 'PG';
     if (t.includes('licen')) return 'L';
     if (t.includes('injust') || t.includes('aa')) return 'AA';
+    if (t.includes('sin goce') || t === 'sgs') return 'SGS';
 
     return 'AA';
 }
@@ -283,7 +334,7 @@ export function buildAbsencesMapFromDocs(
 }
 
 export const PLANNING_ABSENCE_GRID_CODES = new Set([
-    'V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET',
+    'V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET', 'SGS',
 ]);
 
 export type GridShiftLike = {

@@ -214,7 +214,22 @@ interface ExtendedAgreement extends Agreement {
     sundayIs100?: boolean;
 }
 
-const NOVEDAD_TYPES = ['Vacaciones', 'Enfermedad', 'ART', 'Injustificada', 'Licencia Esp.', 'PG Permiso Gremial'] as const;
+const NOVEDAD_TYPES = [
+    'Vacaciones',
+    'Matrimonio',
+    'Maternidad',
+    'Nacimiento / Paternidad',
+    'Fallecimiento Familiar',
+    'Examen / Estudio',
+    'Mudanza',
+    'Donación de Sangre',
+    'Licencia Esp.',
+    'Enfermedad',
+    'ART',
+    'PG Permiso Gremial',
+    'Sin Goce de Sueldo',
+    'Injustificada',
+] as const;
 
 export default function EmployeesPage() {
   const { empresaId, empresa, empresas } = useEmpresa();

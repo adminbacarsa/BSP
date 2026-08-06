@@ -238,7 +238,7 @@ import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPrefer
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
 
-const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT']);
+const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'SGS']);
 
 function resolveTitularCoverageName(
     titularEmpId: string,
@@ -297,6 +297,7 @@ const SHIFT_STYLES: any = {
     'AA':  'bg-white text-amber-700 border-amber-400',
     'LT':  'bg-orange-50 text-orange-700 border-orange-400 font-black',
     'RET': 'bg-slate-100 text-slate-700 border border-slate-400 font-bold',
+    'SGS': 'bg-orange-50 text-orange-700 border border-orange-300 font-bold',
     'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
     'RFZ': 'bg-red-500 text-white border-red-600 font-black',
     'TURA': 'bg-red-600 text-white border-red-700 font-black',
@@ -3640,8 +3641,9 @@ export default function PlanificacionPage() {
                     { code: 'L',  name: 'Licencia',         sub: 'Licencia general (art. CCT) · pago' },
                     { code: 'E',  name: 'Enfermedad',       sub: 'Baja médica con certificado · pago' },
                     { code: 'A',  name: 'ART / Autorizada', sub: 'Ausencia autorizada o ART · pago' },
-                    { code: 'PG', name: 'Permiso Gremial',  sub: 'Actividad sindical · pago' },
-                    { code: 'AA', name: 'Injustificada',    sub: 'Sin justificación ni cert. · sin pago · punto rojo' },
+                    { code: 'PG',  name: 'Permiso Gremial',       sub: 'Actividad sindical · pago' },
+                    { code: 'SGS', name: 'Sin Goce de Sueldo',   sub: 'Licencia sin remuneración · no computa pago' },
+                    { code: 'AA',  name: 'Injustificada',         sub: 'Sin justificación ni cert. · sin pago · punto rojo' },
                 ],
             },
             {
