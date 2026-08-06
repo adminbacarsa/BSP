@@ -110,7 +110,7 @@ export function normalizePlanningShifts(shiftList: unknown): PlanningPositionShi
     const code = String(s.code ?? '').toUpperCase();
     const row: PlanningPositionShiftRow = {
       code,
-      hours: Number(s.hours) || 8,
+      hours: (s.hours != null && !isNaN(Number(s.hours))) ? Number(s.hours) : 8,
       name: s.name != null ? String(s.name) : undefined,
     };
     if (s.startTime != null) row.startTime = String(s.startTime);
