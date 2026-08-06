@@ -670,8 +670,9 @@ function filterShiftsForPlanningDay(
     cycles?: string[],
 ): any[] {
     if (!shifts?.length) return [];
-    // Para puestos 24hs se muestran todas las bandas (M/T/N y D12/N12) siempre, sin filtrar por ciclo
-    if (String(pos?.coverageType ?? '').toLowerCase() === '24hs') {
+    // Para puestos 24hs o CUSTOM se muestran todos los turnos del SLA sin filtrar por ciclo
+    const ct = String(pos?.coverageType ?? '').toLowerCase();
+    if (ct === '24hs' || ct === 'custom') {
         return shifts.filter((s: any) => {
             const code = String(s.code || '').toUpperCase();
             if (PLANNING_REST_SHIFT_CODES.has(code)) return true;
