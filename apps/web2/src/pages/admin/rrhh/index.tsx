@@ -228,6 +228,7 @@ const NOVEDAD_TYPES = [
     'ART',
     'PG Permiso Gremial',
     'Sin Goce de Sueldo',
+    'Suspensión',
     'Injustificada',
 ] as const;
 

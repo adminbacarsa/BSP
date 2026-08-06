@@ -63,6 +63,10 @@ export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     'sin goce de sueldo': 'SGS',
     'sin goce': 'SGS',
     'sgs': 'SGS',
+    // Suspensión disciplinaria
+    'suspensión': 'SUS',
+    'suspension': 'SUS',
+    'sus': 'SUS',
     // Callable manageAbsences (backend Nest)
     'vacation': 'V',
     'sick_leave': 'E',
@@ -91,6 +95,8 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
     'Donación de Sangre': 'L',
     // Sin goce de sueldo
     'Sin Goce de Sueldo': 'SGS',
+    // Suspensión disciplinaria
+    'Suspensión': 'SUS',
 };
 
 /** Tipos disponibles para cargar manualmente en RRHH */
@@ -112,6 +118,7 @@ export const RRHH_ABSENCE_TYPES = [
     'Licencia Esp.',
     'PG Permiso Gremial',
     'Sin Goce de Sueldo',
+    'Suspensión',
 ] as const;
 
 /**
@@ -153,7 +160,7 @@ export const REQUIRES_AUTHORIZATION_TYPES = new Set([
 ]);
 
 /** Códigos válidos de ausencia/licencia para grilla. */
-export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA', 'LT', 'SGS']);
+export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA', 'LT', 'SGS', 'SUS']);
 
 /** Códigos de licencias pagas (computan horas y bloquean planificación). */
 export const PAID_LEAVE_CODES = new Set(['V', 'L', 'A', 'E', 'PG']);
@@ -196,6 +203,7 @@ export function inferAbsenceCode(doc: any): string {
     if (t.includes('licen')) return 'L';
     if (t.includes('injust') || t.includes('aa')) return 'AA';
     if (t.includes('sin goce') || t === 'sgs') return 'SGS';
+    if (t.includes('suspens') || t === 'sus') return 'SUS';
 
     return 'AA';
 }
@@ -334,7 +342,7 @@ export function buildAbsencesMapFromDocs(
 }
 
 export const PLANNING_ABSENCE_GRID_CODES = new Set([
-    'V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET', 'SGS',
+    'V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'F', 'FF', 'FT', 'PAST', 'LOCKED', 'RET', 'SGS', 'SUS',
 ]);
 
 export type GridShiftLike = {
