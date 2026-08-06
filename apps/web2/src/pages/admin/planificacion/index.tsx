@@ -185,7 +185,9 @@ import {
     listExtensionCandidates,
     listEarlyStartCandidates,
     defaultSplitForBand,
+    defaultSplitForBandAtPosition,
     neighborBandsForTarget,
+    neighborBandsForTargetAtPosition,
     collectSplitFrancoConflicts,
     formatFrancoConflictSummary,
     type FrancoCoverageConflict,
@@ -5728,6 +5730,11 @@ export default function PlanificacionPage() {
                     shiftsMap,
                     pendingChanges,
                     [vacancyData.employeeId],
+                    {
+                        positionStructure: effectivePosStructure,
+                        gapPositionName: resolved.gapPosition,
+                        gapBand: resolved.gapBand,
+                    },
                 ).find(c => c.id === resolved.extEmpId);
                 const adelRow = listEarlyStartCandidates(
                     resolved.gapBand,
@@ -5737,6 +5744,11 @@ export default function PlanificacionPage() {
                     shiftsMap,
                     pendingChanges,
                     [vacancyData.employeeId, resolved.extEmpId],
+                    {
+                        positionStructure: effectivePosStructure,
+                        gapPositionName: resolved.gapPosition,
+                        gapBand: resolved.gapBand,
+                    },
                 ).find(c => c.id === resolved.adelEmpId);
                 return {
                     dateStr,
@@ -5766,7 +5778,15 @@ export default function PlanificacionPage() {
                     getTypicalShift,
                     employeesById,
                     clientId: selectedClient || undefined,
-                    defaultSplitForBand,
+                    defaultSplitForBand: (band, gapPosition) => {
+                        const times = defaultSplitForBandAtPosition(
+                            band,
+                            effectivePosStructure,
+                            gapPosition ?? null,
+                        );
+                        return { ext: times.ext, adel: times.adel };
+                    },
+                    positionStructure: effectivePosStructure,
                     authorizeFrancoTrabajado: authorizeFranco,
                 });
                 const vd = vacancyData;
@@ -12266,13 +12286,28 @@ export default function PlanificacionPage() {
                     const retenCandidatos = candidatos.filter(e => e.dayRole === 'RETEN' && matchesSearch(e)).sort(sortKm);
                     const escCandidatos = candidatos.filter(e => e.dayRole === 'ESC' && matchesSearch(e)).sort(sortKm);
                     const sinTurnoCandidatos = candidatos.filter(e => e.dayRole === 'FREE' && matchesSearch(e)).sort(sortKm);
+                    const vacancySplitListCtx = {
+                        positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+                        preferSamePosition: true,
+                    };
                     const splitReferenceDate = vacancyEditingDay || candidateDate || '';
                     const splitTitularShift = splitReferenceDate ? resolveTitularShiftForDay(splitReferenceDate) : null;
                     const splitWorkBand = splitTitularShift
                         ? { code: splitTitularShift.code, positionName: splitTitularShift.positionName }
                         : null;
-                    const splitPlan = splitTitularShift ? describeVacancySplitPlan(splitTitularShift) : null;
-                    const splitNeighbors = splitWorkBand ? neighborBandsForTarget(splitWorkBand.code) : null;
+                    const splitPlan = splitTitularShift
+                        ? describeVacancySplitPlan(splitTitularShift, vacancySplitListCtx.positionStructure)
+                        : null;
+                    const splitNeighbors = splitWorkBand
+                        ? neighborBandsForTargetAtPosition(
+                            splitWorkBand.code,
+                            vacancySplitListCtx.positionStructure,
+                            splitWorkBand.positionName,
+                        )
+                        : null;
+                    const splitListCtxWithGap = splitWorkBand
+                        ? { ...vacancySplitListCtx, gapPositionName: splitWorkBand.positionName, gapBand: splitWorkBand.code }
+                        : vacancySplitListCtx;
                     const splitExtCandidates = splitWorkBand && splitReferenceDate
                         ? listExtensionCandidates(
                             splitWorkBand.code,
@@ -12282,6 +12317,7 @@ export default function PlanificacionPage() {
                             shiftsMap,
                             pendingChanges,
                             [vacancyData?.employeeId].filter(Boolean),
+                            splitListCtxWithGap,
                         ).filter(c => !q || c.name.toLowerCase().includes(q))
                         : [];
                     const splitAdelCandidates = splitWorkBand && splitReferenceDate
@@ -12293,6 +12329,7 @@ export default function PlanificacionPage() {
                             shiftsMap,
                             pendingChanges,
                             [vacancyData?.employeeId, vacancySplitExtId].filter(Boolean),
+                            splitListCtxWithGap,
                         ).filter(c => !q || c.name.toLowerCase().includes(q))
                         : [];
                     const splitFrancoPreview = (vacancySplitExtId && vacancySplitAdelId)

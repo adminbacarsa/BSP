@@ -1,11 +1,15 @@
 /** Lógica de cobertura por licencia/vacante en planificador. */
 import { toCalendarDateStr } from './absenceCodes';
 import {
+  defaultSplitTimesCct,
+  defaultSplitTimesForVacancyGap,
+  neighborBandsForVacancyGap,
+  type VacancyPositionSla,
+} from './vacancySplitBands';
+import {
   buildRecompositionPendingUpdates,
   collectSplitFrancoConflicts,
-  defaultSplitForBand,
   isPlannedFrancoShift,
-  neighborBandsForTarget,
   resolveEmployeeShift,
   type FrancoCoverageConflict,
 } from './planningRecompositionApply';
@@ -174,15 +178,18 @@ export function formatTitularVacancyShiftSummary(info: TitularVacancyWorkShift):
   return `${info.code} · ${info.bandLabel} · ${info.positionName} · ${info.scheduleLabel}`;
 }
 
-export function describeVacancySplitPlan(work: TitularVacancyWorkShift): {
+export function describeVacancySplitPlan(
+  work: TitularVacancyWorkShift,
+  positionStructure?: VacancyPositionSla[],
+): {
   gapLabel: string;
   extBand: string;
   extSegment: string;
   adelBand: string;
   adelSegment: string;
 } {
-  const split = defaultSplitForBand(work.code);
-  const neighbors = neighborBandsForTarget(work.code);
+  const split = defaultSplitTimesForVacancyGap(positionStructure, work.positionName, work.code);
+  const neighbors = neighborBandsForVacancyGap(positionStructure, work.positionName, work.code);
   return {
     gapLabel: `${split.gap.from}–${split.gap.to}`,
     extBand: neighbors.extensionBand,
@@ -359,10 +366,11 @@ export type ProcessVacancyInput = {
   getTypicalShift: (empId: string) => any | null;
   employeesById: Record<string, any>;
   clientId?: string;
-  defaultSplitForBand: (band: string) => {
+  defaultSplitForBand: (band: string, gapPosition?: string | null) => {
     ext: { from: string; to: string };
     adel: { from: string; to: string };
   };
+  positionStructure?: VacancyPositionSla[];
   authorizeFrancoTrabajado?: boolean;
 };
 
@@ -529,7 +537,7 @@ export function applyVacancyCoverageToChanges(
         label: `${titularName} · ${coverage.gapPosition || workShift.positionName} · ${gapBand}`,
         kind: 'absence',
       };
-      const splitTimes = input.defaultSplitForBand(gapBand);
+      const splitTimes = input.defaultSplitForBand(gapBand, coverage.gapPosition || workShift.positionName);
       const pkg = buildVacancySplitPackage(input, dateStr, coverage, target, splitTimes);
       try {
         const updates = buildRecompositionPendingUpdates(pkg, {

@@ -1,4 +1,13 @@
 import type { RecompositionPackage, RecompositionPendingMeta } from './planningRecomposition.types';
+import {
+  defaultSplitTimesCct,
+  defaultSplitTimesForVacancyGap,
+  isVacancySegmentWorkCode,
+  neighborBandsCct,
+  neighborBandsForVacancyGap,
+  type VacancySplitListContext,
+  type VacancyPositionSla,
+} from './vacancySplitBands';
 
 const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'D12', 'REF', 'ESC', 'FT']);
 const PLANNED_FRANCO_CODES = new Set(['F', 'FF', 'FP']);
@@ -313,11 +322,15 @@ export function resolveRecompositionTargetForEmployee(
 
 /** Bandas CCT adyacentes para split ext+adel al cubrir una banda objetivo. */
 export function neighborBandsForTarget(targetBand: string): { extensionBand: string; earlyStartBand: string } {
-  const b = String(targetBand || '').toUpperCase();
-  if (b === 'M' || b === 'D12') return { extensionBand: 'N', earlyStartBand: 'T' };
-  if (b === 'T') return { extensionBand: 'M', earlyStartBand: 'N' };
-  if (b === 'N' || b === 'N12') return { extensionBand: 'T', earlyStartBand: 'M' };
-  return { extensionBand: 'M', earlyStartBand: 'T' };
+  return neighborBandsCct(targetBand);
+}
+
+export function neighborBandsForTargetAtPosition(
+  targetBand: string,
+  positionStructure: VacancyPositionSla[] | undefined,
+  positionName: string | undefined | null,
+): { extensionBand: string; earlyStartBand: string } {
+  return neighborBandsForVacancyGap(positionStructure, positionName, targetBand);
 }
 
 /** Guardias del objetivo con turno laboral ese día (candidatos ext/adel). */
@@ -329,9 +342,11 @@ export function listSegmentCandidates(
   pendingChanges: Record<string, any>,
   excludeIds: string[] = [],
   bandFilter?: string,
+  listCtx?: VacancySplitListContext,
 ) {
   const exclude = new Set(excludeIds);
   const band = bandFilter ? String(bandFilter).toUpperCase() : null;
+  const positionStructure = listCtx?.positionStructure;
   const rows: { id: string; name: string; code: string; positionName: string }[] = [];
 
   for (const emp of employees) {
@@ -343,7 +358,7 @@ export function listSegmentCandidates(
     if (!shift || shift.objectiveId !== objectiveId) continue;
     const code = String(shift.code || '').toUpperCase();
     if (isPlannedFrancoShift(shift)) continue;
-    if (!WORK_CODES.has(code)) continue;
+    if (!WORK_CODES.has(code) && !isVacancySegmentWorkCode(code, positionStructure)) continue;
     if (band && code !== band) continue;
     rows.push({
       id: emp.id,
@@ -353,7 +368,13 @@ export function listSegmentCandidates(
     });
   }
 
-  return rows.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  let sorted = rows.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  if (listCtx?.preferSamePosition !== false && listCtx?.gapPositionName) {
+    const pos = listCtx.gapPositionName;
+    const samePos = sorted.filter((r) => r.positionName === pos);
+    if (samePos.length > 0) sorted = samePos;
+  }
+  return sorted;
 }
 
 /** Extensión: guardias de la banda **anterior** (ej. cubrir M → turnos N). */
@@ -365,9 +386,22 @@ export function listExtensionCandidates(
   shiftsMap: Record<string, any>,
   pendingChanges: Record<string, any>,
   excludeIds: string[] = [],
+  listCtx?: VacancySplitListContext,
 ) {
-  const { extensionBand } = neighborBandsForTarget(targetBand);
-  return listSegmentCandidates(dateStr, objectiveId, employees, shiftsMap, pendingChanges, excludeIds, extensionBand);
+  const positionName = listCtx?.gapPositionName ?? null;
+  const { extensionBand } = listCtx?.positionStructure?.length
+    ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
+    : neighborBandsForTarget(targetBand);
+  return listSegmentCandidates(
+    dateStr,
+    objectiveId,
+    employees,
+    shiftsMap,
+    pendingChanges,
+    excludeIds,
+    extensionBand,
+    { ...listCtx, gapBand: targetBand, gapPositionName: positionName ?? listCtx?.gapPositionName },
+  );
 }
 
 /** Adelanto: guardias de la banda **siguiente** (ej. cubrir M → turnos T). */
@@ -379,37 +413,32 @@ export function listEarlyStartCandidates(
   shiftsMap: Record<string, any>,
   pendingChanges: Record<string, any>,
   excludeIds: string[] = [],
+  listCtx?: VacancySplitListContext,
 ) {
-  const { earlyStartBand } = neighborBandsForTarget(targetBand);
-  return listSegmentCandidates(dateStr, objectiveId, employees, shiftsMap, pendingChanges, excludeIds, earlyStartBand);
+  const positionName = listCtx?.gapPositionName ?? null;
+  const { earlyStartBand } = listCtx?.positionStructure?.length
+    ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
+    : neighborBandsForTarget(targetBand);
+  return listSegmentCandidates(
+    dateStr,
+    objectiveId,
+    employees,
+    shiftsMap,
+    pendingChanges,
+    excludeIds,
+    earlyStartBand,
+    { ...listCtx, gapBand: targetBand, gapPositionName: positionName ?? listCtx?.gapPositionName },
+  );
 }
 
 export function defaultSplitForBand(band: string): { ext: { from: string; to: string }; adel: { from: string; to: string }; gap: { from: string; to: string } } {
-  const b = band.toUpperCase();
-  if (b === 'T') {
-    return {
-      gap: { from: '15:00', to: '23:00' },
-      ext: { from: '15:00', to: '19:00' },
-      adel: { from: '19:00', to: '23:00' },
-    };
-  }
-  if (b === 'N') {
-    return {
-      gap: { from: '19:00', to: '07:00' },
-      ext: { from: '19:00', to: '23:00' },
-      adel: { from: '23:00', to: '07:00' },
-    };
-  }
-  if (b === 'M') {
-    return {
-      gap: { from: '07:00', to: '15:00' },
-      ext: { from: '07:00', to: '11:00' },
-      adel: { from: '11:00', to: '15:00' },
-    };
-  }
-  return {
-    gap: { from: '15:00', to: '23:00' },
-    ext: { from: '15:00', to: '19:00' },
-    adel: { from: '19:00', to: '23:00' },
-  };
+  return defaultSplitTimesCct(band);
+}
+
+export function defaultSplitForBandAtPosition(
+  band: string,
+  positionStructure: VacancyPositionSla[] | undefined,
+  positionName: string | undefined | null,
+): { ext: { from: string; to: string }; adel: { from: string; to: string }; gap: { from: string; to: string } } {
+  return defaultSplitTimesForVacancyGap(positionStructure, positionName, band);
 }
