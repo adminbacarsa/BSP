@@ -126,8 +126,15 @@ import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
+import { runPlanningGeneration, resolvePlanningGenerationRoute } from '@/lib/planificacion/planningGenerationRouter';
 import { resolveObjectiveScheduleFlags, shouldBypassFixedBandFloater } from '@/lib/planificacion/scheduleObjectiveFlags';
-import { buildObjectiveScheduleProfile } from '@/lib/planificacion/objectiveServiceModel';
+import {
+    buildObjectiveScheduleProfile,
+    buildObjectiveServiceAnalysis,
+    formatObjectiveCycleBlocksSummary,
+    objectiveIsMixedSchedule,
+} from '@/lib/planificacion/objectiveServiceModel';
+import ObjectiveServiceAnalysisCard from '@/components/planificacion/ObjectiveServiceAnalysisCard';
 import { resolveCronogramPlanningRules } from '@/lib/planificacion/cronogramPlanningRules';
 import { dominantDotacionFromPlanningCells } from '@/lib/planificacion/seedDotacionFromPrevMonth';
 import { fetchPlanningMonthShifts } from '@/lib/planificacion/loadPlanningMonthShifts';
@@ -184,6 +191,9 @@ import {
     type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
+import { analyzeCoveragePolicyBalance } from '@/lib/planificacion/coveragePolicyBalance';
+import { evaluateScheduleClosure } from '@/lib/planificacion/scheduleClosureGate';
+import { prepare24hsPlanningContext } from '@/lib/planificacion/planningOrchestrator24hs';
 import { fetchCoverageWisdomHistory, DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS } from '@/lib/planificacion/fetchPlanningCoverageWisdomHistory';
 import type { PlanningCoverageWisdom } from '@/lib/planificacion/planningCoverageWisdom';
 import { runStrictSixTwoPipeline, runSixPlusOnePipeline } from '@/lib/planificacion/planningPipeline';
@@ -2066,6 +2076,17 @@ export default function PlanificacionPage() {
         if (!positionStructure?.length) return null;
         return resolveCronogramPlanningRules(positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[]);
     }, [positionStructure]);
+
+    const objectiveServiceAnalysis = useMemo(() => {
+        if (!positionStructure?.length) return null;
+        const cycle = autoPlanningBrainReport?.pickedCycle
+            ?? buildObjectiveScheduleProfile(positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[]).cyclePreference[0]
+            ?? '6+2';
+        return buildObjectiveServiceAnalysis(
+            positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[],
+            cycle,
+        );
+    }, [positionStructure, autoPlanningBrainReport?.pickedCycle]);
 
     // Colchón disponible (horas): si hoy se ausenta alguien, ¿cuánto se podría cubrir
     // promoviendo RETs a turno facturable sin pasar 200h por empleado?
@@ -6468,7 +6489,7 @@ export default function PlanificacionPage() {
         if (existing && existing.objectiveId !== selectedObjective && !existing.isFranco && !isFT) { const objName = getObjectiveName(existing.objectiveId); if(!confirm(`⚠️ ALERTA DE TRANSFERENCIA\n\nEl empleado ya tiene turno en "${objName}".\n\n¿Desea moverlo a este objetivo?`)) return; applyToPending({ ...shiftConfig, oldObjectiveId: existing.objectiveId, positionName }); return; }
         if (!correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F' && !isFT) { if(!confirm(`⚠️ ATENCIÓN: ESTÁ ELIMINANDO UN FRANCO\n\n¿Seguro que desea eliminar el Franco?`)) return; }
         if (correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { if(!confirm(`⚠️ MODO CORRECCIÓN: Vas a reemplazar un Franco publicado.\n\n¿Confirmar corrección directa?`)) return; }
-        const [y, m, d] = selectedCell.dateStr.split('-').map(Number); const targetDate = new Date(y, m-1, d); const hours = shiftConfig.hours || 8;
+        const [y, m, d] = selectedCell.dateStr.split('-').map(Number); const targetDate = new Date(y, m-1, d); const hours = shiftConfig.hours != null ? shiftConfig.hours : 8;
         if (shiftConfig.code !== 'F' && !isFT && !correctionMode) {
             const warning = checkLaborRules(selectedCell.empId, targetDate, hours, {
                 code: shiftConfig.code,
@@ -7020,6 +7041,7 @@ export default function PlanificacionPage() {
                 rotateShiftsOverride: autoRotateForce ?? (autoCronogramRulesFeas.generation.allowGlobalRotateShifts ? undefined : false),
                 ajustarCronoOverride: autoAjustarCrono,
                 cycleOverride: autoCycleOverride,
+                headcountByPax: resolveObjectiveScheduleFlags(v2Pos).headcountByPax,
             };
             autoPlanningBrainInputRef.current = brainInput;
             const brain = resolveAutoPlanningBrain(brainInput);
@@ -7460,6 +7482,8 @@ export default function PlanificacionPage() {
                 )
                 .map((e: any) => ({ id: e.id, nombre: e.nombre || e.name }));
 
+            const objectiveScheduleFlags = resolveObjectiveScheduleFlags(positionStructure);
+
             const genBrain = autoPlanningBrainRef.current ?? resolveAutoPlanningBrain({
                 positions: positionStructure,
                 employees: planningDotacionEmployees.map((e:any) => ({
@@ -7483,7 +7507,12 @@ export default function PlanificacionPage() {
                 rotateShiftsOverride: autoRotateForce ?? (cronogramRules.generation.allowGlobalRotateShifts ? undefined : false),
                 ajustarCronoOverride: autoAjustarCrono,
                 cycleOverride: buildObjectiveScheduleProfile(v2PosGen).cyclePreference[0] ?? '6+2',
+                headcountByPax: objectiveScheduleFlags.headcountByPax,
             });
+            for (const padEmp of genBrain.dotacionPadding?.added ?? []) {
+                empMonthlyInitial[padEmp.id] = 0;
+                if (!absences[padEmp.id]) absences[padEmp.id] = new Map();
+            }
             autoPlanningBrainRef.current = genBrain;
             setAutoPlanningBrainReport(genBrain);
             if (!genBrain.contingencyOk) {
@@ -7500,23 +7529,21 @@ export default function PlanificacionPage() {
                 && prevMonthGenKey.year === prevMonthEndDate.getFullYear()
                 && prevMonthGenKey.month === prevMonthEndDate.getMonth();
 
-            const objectiveScheduleFlags = resolveObjectiveScheduleFlags(positionStructure);
-
             const serviceExcludedDates = [...new Set(
                 (positionStructure as any[]).flatMap((p: any) => p.excludedDates || []),
             )] as string[];
 
             const baseGenCtx = {
                 positions: positionStructure,
-                employees: planningDotacionEmployees
-                    .filter((e:any) => !selectedObjective || e.preferredObjectiveId === selectedObjective)
-                    .map((e:any) => ({
+                employees: (genBrain.effectiveEmployees?.length
+                    ? genBrain.effectiveEmployees
+                    : planningDotacionEmployees.map((e:any) => ({
                         id: e.id,
                         nombre: e.nombre || e.name,
                         lat: typeof e.lat === 'number' ? e.lat : null,
                         lng: typeof e.lng === 'number' ? e.lng : null,
-                        preferredObjectiveId: e.preferredObjectiveId,
-                    })),
+                        preferredObjectiveId: e.preferredObjectiveId ?? selectedObjective,
+                    }))),
                 daysInMonth,
                 calendarDaysInMonth: daysInMonth,
                 serviceExcludedDates,
@@ -7561,28 +7588,36 @@ export default function PlanificacionPage() {
                 serviceRules: activeSlaServiceRules ?? undefined,
                 serviceRotations: activeSlaServiceRotations ?? undefined,
                 ...(slaRotationByDate ? { slaRotationByDate } : {}),
-            };
-            const can6x1 = useSixPlusOne && canUseSixPlusOne(baseGenCtx);
-            const canFloater = !can6x1
-                && canUseFixedBandFloater(baseGenCtx)
-                && !shouldBypassFixedBandFloater(positionStructure);
-            await bumpAutoV2Progress(40, can6x1
-                ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 6+1)…`
-                : canFloater
-                    ? `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ciclo 24d)…`
-                    : `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · V4)…`);
-            await new Promise<void>((r) => setTimeout(r, 0));
-            const useStrictPipeline = genBrain.strictSixTwo === true;
-            const strictPipeline = can6x1
-                ? (() => { try { return runSixPlusOnePipeline(baseGenCtx); } catch (e) { return null; } })()
-                : canFloater
-                    ? (() => { try { return runStrictSixTwoPipeline({ ...baseGenCtx, rotateShifts: false, demandDriven: false }); } catch (e) { return null; } })()
-                    : null;
-            const useFloaterPipeline = !!strictPipeline;
-            const gen = strictPipeline?.generation ?? generateScheduleV4({
-                ...baseGenCtx,
-                ...(useStrictPipeline ? { rotateShifts: false, demandDriven: false } : {}),
+            } as import('@/lib/planificacion/autoScheduleEngineV2').V2EngineContext;
+
+            const genRoutePreview = resolvePlanningGenerationRoute(baseGenCtx, {
+                strictSixTwo: genBrain.strictSixTwo === true,
+                preferSixPlusOne: useSixPlusOne,
             });
+            await bumpAutoV2Progress(40, `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ${genRoutePreview.labelEs})…`);
+            await new Promise<void>((r) => setTimeout(r, 0));
+
+            let gen: import('@/lib/planificacion/autoScheduleEngineV2').V2GenerateResult;
+            let genCtx: typeof baseGenCtx;
+            try {
+                const runGen = runPlanningGeneration(baseGenCtx, {
+                    strictSixTwo: genBrain.strictSixTwo === true,
+                    preferSixPlusOne: useSixPlusOne,
+                });
+                gen = runGen.generation;
+                genCtx = runGen.genCtx;
+                if (runGen.prepareWarnings.length > 0) {
+                    toast.message(runGen.prepareWarnings.join(' '), { duration: 8000 });
+                }
+            } catch (planErr) {
+                await bumpAutoV2Progress(100, 'Error al generar');
+                toast.error(planErr instanceof Error ? planErr.message : 'Error al generar cronograma', { duration: 12000 });
+                setAutoWizardStep('sla_open');
+                setAutoV2Running(false);
+                return;
+            }
+
+            const useFloaterPipeline = genRoutePreview.postProcessPipeline === 'fixedBandFloater';
 
             // Guardar slots de apertura para que el siguiente mes pueda continuar el ciclo exactamente.
             if (gen.stats.openingSlotByEmp) {
@@ -7626,7 +7661,7 @@ export default function PlanificacionPage() {
                 await bumpAutoV2Progress(50, 'Analizando cobertura de ausencias…');
                 const covResult = applyAbsenceCoverage(
                     gen.assignments,
-                    baseGenCtx,
+                    genCtx,
                     gen.stats.openingSlotByEmp,
                 );
 
@@ -7664,7 +7699,7 @@ export default function PlanificacionPage() {
                 setAutoCoverageGaps([]);
             }
 
-            finalGenAssignments = applyServiceExcludedDays(finalGenAssignments, baseGenCtx);
+            finalGenAssignments = applyServiceExcludedDays(finalGenAssignments, genCtx);
 
             await bumpAutoV2Progress(58, 'Verificando cobertura…');
             // Volcamos a pendingChanges tras verificar; si SLA abierto = vista previa diagnóstica.
@@ -7849,10 +7884,14 @@ export default function PlanificacionPage() {
 
             const verifiedBillable = coverage.hours?.billableHoursGenerated ?? gen.stats.totalBillableHours;
             const verifiedUncovered = coverage.coverage.uncoveredSlots;
+            const policyBalanceForClosure = analyzeCoveragePolicyBalance(verifyCtx, finalAssignments, {
+                inferModo12TCoverage: true,
+            });
+            const scheduleClosureGate = evaluateScheduleClosure(coverage, policyBalanceForClosure);
             const hrsDeficit = slaVendidas > 0
                 ? Math.max(0, Math.round((slaVendidas - verifiedBillable) * 10) / 10)
                 : 0;
-            const slaClosed = slaVendidas <= 0 || (hrsDeficit <= 0.5 && verifiedUncovered <= 0);
+            const slaClosed = scheduleClosureGate.ok;
 
             let statsAfterForm = gen.stats;
             const hourFormIssues = formReport.metrics.hoursSpread > 24
@@ -8018,9 +8057,13 @@ export default function PlanificacionPage() {
             const gridGap = Math.abs(verifiedBillableFinal - gridBillableHours);
 
             if (!slaClosed) {
-                const parts: string[] = [];
-                if (hrsDeficit > 0.5) parts.push(`${Math.round(hrsDeficit)}h faltantes`);
-                if (verifiedUncovered > 0) parts.push(`${verifiedUncovered} slots sin cubrir`);
+                const parts: string[] = scheduleClosureGate.messages.length > 0
+                    ? scheduleClosureGate.messages
+                    : [];
+                if (parts.length === 0) {
+                    if (hrsDeficit > 0.5) parts.push(`${Math.round(hrsDeficit)}h faltantes`);
+                    if (verifiedUncovered > 0) parts.push(`${verifiedUncovered} slots sin cubrir`);
+                }
                 toast.warning(
                     `Vista previa en grilla: SLA abierto (${parts.join(' · ')}). Revisá la grilla detrás del modal; no publiques hasta cerrar.`,
                     { duration: 12000 },
@@ -13776,7 +13819,12 @@ export default function PlanificacionPage() {
                                                         </div>
                                                         <div className="rounded-lg bg-white/90 border border-indigo-100 px-2 py-1.5">
                                                             <p className="text-[9px] font-black text-slate-400 uppercase mb-0.5">Oferta</p>
-                                                            <p className="text-[10px] font-bold text-slate-800">{autoPlanningBrainReport.diagnosis.supply.peopleAvailable} guardias · plantilla 6+2: {autoPlanningBrainReport.diagnosis.supply.plantillaRequired6x2}</p>
+                                                            <p className="text-[10px] font-bold text-slate-800">
+                                                                {autoPlanningBrainReport.diagnosis.supply.paddingLegajos
+                                                                    ? `${autoPlanningBrainReport.diagnosis.supply.realLegajos ?? autoPlanningBrainReport.diagnosis.supply.peopleAvailable} reales + ${autoPlanningBrainReport.diagnosis.supply.paddingLegajos} ref. SLA = ${autoPlanningBrainReport.diagnosis.supply.peopleAvailable} guardias`
+                                                                    : `${autoPlanningBrainReport.diagnosis.supply.peopleAvailable} guardias`}
+                                                                {' · plantilla 6+2: '}{autoPlanningBrainReport.diagnosis.supply.plantillaRequired6x2}
+                                                            </p>
                                                         </div>
                                                     </div>
                                                     <div className={`rounded-lg px-2.5 py-1.5 border text-[10px] font-bold ${autoPlanningBrainReport.diagnosis.balance === 'exact' ? 'bg-emerald-100 border-emerald-300 text-emerald-900' : autoPlanningBrainReport.diagnosis.balance === 'surplus' ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-rose-100 border-rose-300 text-rose-900'}`}>
@@ -13934,6 +13982,14 @@ export default function PlanificacionPage() {
                                     </div>
                                 )}
 
+                                {(autoPlanningBrainReport?.serviceAnalysis ?? objectiveServiceAnalysis)
+                                    && (autoWizardStep === 'configure' || autoWizardStep === 'verified' || autoWizardStep === 'done' || autoWizardStep === 'sla_open')
+                                    && !autoV2Loading && !autoV2Generating && (
+                                    <ObjectiveServiceAnalysisCard
+                                        analysis={autoPlanningBrainReport?.serviceAnalysis ?? objectiveServiceAnalysis!}
+                                    />
+                                )}
+
                                 {autoPlanningBrainReport?.diagnosis && (autoWizardStep === 'configure' || autoWizardStep === 'verified' || autoWizardStep === 'done' || autoWizardStep === 'sla_open') && !autoV2Loading && !autoV2Generating && (
                                     <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/80 px-3 py-2.5 space-y-2">
                                         <p className="text-[10px] font-black text-indigo-800 uppercase tracking-wide">Diagnóstico operativo</p>
@@ -13948,7 +14004,12 @@ export default function PlanificacionPage() {
                                             </div>
                                             <div className="rounded-lg bg-white/90 border border-indigo-100 px-2 py-1.5">
                                                 <p className="font-black text-slate-500 uppercase text-[9px]">Oferta</p>
-                                                <p className="font-bold text-slate-800">{autoPlanningBrainReport.diagnosis.supply.peopleAvailable} guardias · {Math.round(autoPlanningBrainReport.diagnosis.supply.offerHours)}h max</p>
+                                                <p className="font-bold text-slate-800">
+                                                    {autoPlanningBrainReport.diagnosis.supply.paddingLegajos
+                                                        ? `${autoPlanningBrainReport.diagnosis.supply.realLegajos ?? autoPlanningBrainReport.diagnosis.supply.peopleAvailable} reales + ${autoPlanningBrainReport.diagnosis.supply.paddingLegajos} ref. SLA = ${autoPlanningBrainReport.diagnosis.supply.peopleAvailable} guardias`
+                                                        : `${autoPlanningBrainReport.diagnosis.supply.peopleAvailable} guardias`}
+                                                    {' · '}{Math.round(autoPlanningBrainReport.diagnosis.supply.offerHours)}h max
+                                                </p>
                                                 <p className="text-slate-600">T1 {Math.round(autoPlanningBrainReport.diagnosis.supply.offerHoursT1)}h · T2 {Math.round(autoPlanningBrainReport.diagnosis.supply.offerHoursT2)}h</p>
                                                 <p className="text-slate-600">Plantilla 6+2: {autoPlanningBrainReport.diagnosis.supply.servicioDiario}+{autoPlanningBrainReport.diagnosis.supply.poolFrancos6x2}={autoPlanningBrainReport.diagnosis.supply.plantillaRequired6x2}</p>
                                             </div>
@@ -13977,7 +14038,14 @@ export default function PlanificacionPage() {
                                             Modo 8: <strong>{autoPlanningBrainReport.staffing.servicioDiarioModo8}</strong> servicio
                                             + <strong>{autoPlanningBrainReport.staffing.poolFrancos}</strong> franco
                                             = <strong>{autoPlanningBrainReport.staffing.plantillaTotal}</strong> plantilla
-                                            <span className="text-slate-500 font-bold"> ({autoPlanningBrainReport.pickedCycle})</span>
+                                            {autoPlanningBrainReport.serviceAnalysis?.kind === 'mixed' ? (
+                                                <span className="text-slate-500 font-bold block mt-0.5">
+                                                    Ciclos: 24 HS {autoPlanningBrainReport.pickedCycle} · Custom{' '}
+                                                    {autoPlanningBrainReport.serviceAnalysis.cycleBlocks.custom}
+                                                </span>
+                                            ) : (
+                                                <span className="text-slate-500 font-bold"> ({autoPlanningBrainReport.pickedCycle})</span>
+                                            )}
                                         </p>
                                         <p className="text-[10px] font-bold text-slate-500">
                                             Modo 12: {autoPlanningBrainReport.staffing.servicioDiarioModo12} en servicio (D12/N12)
@@ -14747,6 +14815,11 @@ export default function PlanificacionPage() {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <p className="text-[9px] font-black text-slate-400 uppercase mb-2 tracking-widest">Estructura del Servicio</p>
+                        {objectiveServiceAnalysis && (
+                            <div className="mb-3">
+                                <ObjectiveServiceAnalysisCard analysis={objectiveServiceAnalysis} compact />
+                            </div>
+                        )}
                         <div className="space-y-1.5">
                             {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
                                 ? selectedGrupo.objectiveIds.map((objId: string, oi: number) => {
