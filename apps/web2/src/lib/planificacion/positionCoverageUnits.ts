@@ -246,6 +246,59 @@ function collectLegacyExtAdelPairs(
     return pairs;
 }
 
+function inferDualExtensionTargetBand(rows: ShiftRow[]): string {
+    const codes = new Set(
+        rows.map((r) => normBandCode(r.code)).filter((c) => c && c !== 'F' && c !== 'V'),
+    );
+    if (codes.has('E1') && codes.has('E2') && !codes.has('E3')) return 'E3';
+    return '';
+}
+
+function collectDualExtensionOrphanGroups(
+    employeesList: Array<{ id: string }>,
+    dateStr: string,
+    resolveShift: (empId: string, dateStr: string) => PlanningShiftSlice | null | undefined,
+    options: {
+        selectedObjective: string;
+        isPendingChange?: (empId: string, dateStr: string) => boolean;
+    },
+    skipEmpIds: Set<string>,
+): ShiftRow[][] {
+    const extRows: ShiftRow[] = [];
+    for (const emp of employeesList) {
+        if (skipEmpIds.has(emp.id)) continue;
+        const shift = resolveShift(emp.id, dateStr);
+        if (!shift || shift.isDeleted) continue;
+        if (!shiftBelongsToObjective(shift, options.selectedObjective, options.isPendingChange?.(emp.id, dateStr))) continue;
+        if (!shift.isExtended || shift.isEarlyStart) continue;
+        if (shift.coverageSegmentRole === 'EARLY_START') continue;
+        extRows.push({ ...shift, employeeId: emp.id });
+    }
+
+    const byPos = new Map<string, ShiftRow[]>();
+    for (const row of extRows) {
+        const pos = normalizePlanningPositionName(row.coversPositionName || row.positionName || '');
+        if (!pos) continue;
+        const list = byPos.get(pos) || [];
+        list.push(row);
+        byPos.set(pos, list);
+    }
+
+    const groups: ShiftRow[][] = [];
+    for (const rows of byPos.values()) {
+        if (rows.length < 2) continue;
+        let band = rows.map((r) => normBandCode(r.coversBandCode)).find((b) => !!b) || '';
+        if (!band) band = inferDualExtensionTargetBand(rows);
+        if (!band) continue;
+        const enriched = rows.map((r) => (
+            r.coversBandCode ? r : { ...r, coversBandCode: band, coverageStatus: 'COVERED' as const }
+        ));
+        if (assessSplitPackageStatus(enriched) !== 'COVERED') continue;
+        groups.push(enriched);
+    }
+    return groups;
+}
+
 /**
  * Créditos de banda por puesto cuando ext+adel cierran un hueco (½+½ = 1 puesto).
  * La ext/adel suman en su turno base (M, N…) pero no en el puesto/banda ausente (ej. MM).
@@ -311,6 +364,19 @@ export function collectSplitBandCreditsForDay(
     );
     for (const pair of legacyPairs) {
         for (const empId of creditSplitPackage(pair.rows, credits, { ...bandCtx, titularId: pair.titularId })) {
+            creditedEmpIds.add(empId);
+        }
+    }
+
+    const dualOrphans = collectDualExtensionOrphanGroups(
+        employeesList,
+        dateStr,
+        resolveShift,
+        options,
+        creditedEmpIds,
+    );
+    for (const group of dualOrphans) {
+        for (const empId of creditSplitPackage(group, credits, bandCtx)) {
             creditedEmpIds.add(empId);
         }
     }

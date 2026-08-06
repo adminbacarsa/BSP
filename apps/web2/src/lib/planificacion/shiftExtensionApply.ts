@@ -5,6 +5,7 @@
 import { resolveEmployeeShift } from './planningRecompositionApply';
 import { applyOperationalGapCloseToChanges, type OperationalGapCloseInput } from './operationalGapCoverage';
 import { shiftTimeWindowFromSla, type VacancyPositionSla } from './vacancySplitBands';
+import { normalizePlanningPositionName } from './positionCoverageUnits';
 
 const NON_WORK = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET', 'REF', 'ESC', 'PAST', 'LOCKED']);
 
@@ -101,6 +102,58 @@ export function applySingleShiftExtension(
   return { ...baseChanges, [key]: next };
 }
 
+function normBand(code: unknown): string {
+  return String(code || '').toUpperCase();
+}
+
+/** Une dos extensiones sueltas del mismo día/banda/puesto para acreditar SLA (4/4). */
+export function synchronizeDualExtensionPackage(
+  changes: Record<string, any>,
+  dateStr: string,
+  empId: string,
+  gapBand: string,
+  gapPosition: string,
+): Record<string, any> {
+  const key = `${empId}_${dateStr}`;
+  const cur = changes[key];
+  if (!cur?.isExtended) return changes;
+
+  const band = normBand(gapBand);
+  const posNorm = normalizePlanningPositionName(gapPosition);
+  let partnerKey: string | null = null;
+  let sharedPkg: string | undefined = cur.coveragePackageId;
+
+  for (const [k, sh] of Object.entries(changes)) {
+    if (!k.endsWith(`_${dateStr}`) || k === key) continue;
+    if (!sh || sh.isDeleted || !sh.isExtended || sh.isEarlyStart) continue;
+    const shPos = normalizePlanningPositionName(sh.coversPositionName || sh.positionName || '');
+    if (shPos !== posNorm) continue;
+    const shBand = sh.coversBandCode ? normBand(sh.coversBandCode) : '';
+    if (shBand && band && shBand !== band) continue;
+    partnerKey = k;
+    if (sh.coveragePackageId) sharedPkg = sh.coveragePackageId;
+    break;
+  }
+
+  const pkgId = sharedPkg || `sla_ext_pair_${dateStr}_${band}_${posNorm}`;
+  const sharedMeta = {
+    coveragePackageId: pkgId,
+    coversBandCode: band,
+    coversPositionName: gapPosition,
+    coverageType: 'ABSENCE_COVERAGE',
+    coverageMode: 'SPLIT',
+    coverageSegmentRole: 'EXTENSION',
+    coverageStatus: partnerKey ? 'COVERED' : 'PARTIAL',
+  };
+
+  const patch: Record<string, any> = { ...changes };
+  patch[key] = { ...cur, ...sharedMeta };
+  if (partnerKey && patch[partnerKey]) {
+    patch[partnerKey] = { ...patch[partnerKey], ...sharedMeta, coverageStatus: 'COVERED' };
+  }
+  return patch;
+}
+
 export function applyShiftExtensionFromCell(
   baseChanges: Record<string, any>,
   opts: {
@@ -145,7 +198,7 @@ export function applyShiftExtensionFromCell(
     });
   }
 
-  return applySingleShiftExtension(baseChanges, {
+  let changes = applySingleShiftExtension(baseChanges, {
     shiftsMap: opts.shiftsMap,
     positionStructure: opts.positionStructure,
   }, {
@@ -156,6 +209,17 @@ export function applyShiftExtensionFromCell(
     coversBandCode: opts.gapBand,
     coversPositionName: opts.gapPosition,
   });
+
+  if (opts.gapBand && opts.gapPosition) {
+    changes = synchronizeDualExtensionPackage(
+      changes,
+      opts.dateStr,
+      opts.primaryEmpId,
+      opts.gapBand,
+      opts.gapPosition,
+    );
+  }
+  return changes;
 }
 
 export function isShiftEligibleForExtension(shift: Record<string, any> | null | undefined): boolean {

@@ -21,6 +21,8 @@ export type ShiftExtendModalData = {
   empId: string;
   empName: string;
   dateStr: string;
+  /** Banda SLA faltante (ej. E3) inferida del pie de cobertura */
+  suggestedGapBand?: string;
 };
 
 type Props = {
@@ -54,13 +56,13 @@ export default function PlanningShiftExtendModal({
   const [primaryExtraH, setPrimaryExtraH] = useState(2);
   const [secondExtraH, setSecondExtraH] = useState<number | null>(4);
   const [secondId, setSecondId] = useState('');
-  const [gapBand, setGapBand] = useState('');
+  const [gapBand, setGapBand] = useState(data.suggestedGapBand || '');
   const [q, setQ] = useState('');
 
   const shift = resolveEmployeeShift(data.empId, data.dateStr, shiftsMap, pendingChanges);
   const positionName = String(shift?.positionName || positionStructure[0]?.positionName || 'General');
   const gapOptions = listVacancyGapBandOptions(positionStructure, positionName);
-  const effectiveGapBand = gapBand || gapOptions[0]?.code || '';
+  const effectiveGapBand = gapBand || data.suggestedGapBand || gapOptions[0]?.code || '';
 
   const slaEnd = slaEndForShift(shift, positionStructure);
   const primaryEnd = endTimeAfterExtraHours(slaEnd, primaryExtraH);
@@ -125,7 +127,7 @@ export default function PlanningShiftExtendModal({
       primaryExtraHours: primaryExtraH,
       secondEmpId: secondId || null,
       secondExtraHours: secondId ? secondExtraH : null,
-      gapBand: secondId ? effectiveGapBand : (gapBand || null),
+      gapBand: effectiveGapBand || gapBand || null,
       gapPosition: positionName,
       positionStructure,
       shiftsMap,

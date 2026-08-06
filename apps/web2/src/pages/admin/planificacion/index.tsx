@@ -11907,10 +11907,26 @@ export default function PlanificacionPage() {
                                                     <button
                                                         type="button"
                                                         onClick={() => {
+                                                            const dateStr = selectedCell.dateStr;
+                                                            const dayLetter = getDayLetter(dateStr);
+                                                            const posForGap = String(extShift?.positionName || activePosition || 'General');
+                                                            const codeCounts = buildDayCodeCountsByPosition(dateStr);
+                                                            const dayReport = analyzeDayCoverageGaps(
+                                                                positionStructure || [],
+                                                                dateStr,
+                                                                dayLetter,
+                                                                codeCounts,
+                                                                cyclesForCoverage,
+                                                                isPosActiveOnDay,
+                                                            );
+                                                            const gapRows = flattenDayGapsForUi(dayReport);
+                                                            const gapRow = gapRows.find((g) => g.positionName === posForGap)
+                                                                || gapRows.find((g) => g.gapBand);
                                                             setShiftExtendModal({
                                                                 empId: selectedCell.empId,
                                                                 empName: employeeName,
-                                                                dateStr: selectedCell.dateStr,
+                                                                dateStr,
+                                                                suggestedGapBand: gapRow?.gapBand || gapRow?.code,
                                                             });
                                                         }}
                                                         className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-red-200 bg-red-50 text-red-800 hover:bg-red-100 flex items-center justify-center gap-2"
