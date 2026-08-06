@@ -187,7 +187,8 @@ export function deploymentFieldsForFirestore(change: Record<string, unknown>): R
         return {
             deploymentRole: 'POOL',
             countsForCoverage: false,
-            isReten: true,
+            // RET del cronograma planificado: no marcar isReten (eso es stand-by operativo origin RETEN).
+            isReten: false,
             isRefuerzo: false,
             isEscuela: false,
         };

@@ -461,7 +461,6 @@ function isOperationalOriginShift(data: any): boolean {
     const o = String(data?.origin || '').toUpperCase();
     if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
     if (data?.resolvedBy === 'OPERACIONES') return true;
-    if (data?.isReten === true) return true;
     return false;
 }
 
