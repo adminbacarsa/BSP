@@ -15,9 +15,13 @@ import type { V2PositionDef } from './autoScheduleEngineV2';
 import { is24hsRotationPosition, isCustomCoverPosition } from './autoScheduleEngineV2';
 import {
     computeObjectiveRequiredHeadcount,
+    computeCustomObjectivePoolHeadcount,
+    computeMixedCustomTitularHeadcount,
+    computePositionRequiredHeadcount,
     customObjectivePeakConcurrentSlots,
     isFullCustomObjectivePool,
 } from './objectiveHeadcount';
+import { buildObjectiveFrancoBudget, type ObjectiveFrancoBudget } from './francoBudgetRules';
 
 export type ObjectiveServiceKind = '24hs_only' | 'custom_only' | 'mixed' | 'empty';
 
@@ -220,7 +224,189 @@ export function objectiveIs24hsOnly(positions: V2PositionDef[]): boolean {
     return buildObjectiveScheduleProfile(positions).kind === '24hs_only';
 }
 
+/** Resumen operativo del SLA para UI / cerebro (paso 1: qué tipo de crono es). */
+export interface ObjectiveServiceAnalysis {
+    kind: ObjectiveServiceKind;
+    cronogramTypeLabel: string;
+    motorMode: ObjectiveMotorMode;
+    /** Ciclo CCT elegido para rotación 24 HS (o único ciclo si el servicio no es mixto). */
+    cycleKey: string;
+    /** Mixto: reglas distintas por bloque; custom = titular por cupo, no el mismo 6+2 global. */
+    cycleBlocks: {
+        rotation24hs: string | null;
+        custom: string | null;
+    };
+    positionCounts: {
+        total: number;
+        rotation24hs: number;
+        custom: number;
+        other: number;
+    };
+    peakConcurrent24hs: number;
+    peakConcurrentCustom: number;
+    plantilla: {
+        total: number;
+        rotation24hs: number;
+        customPool: number;
+        other: number;
+    };
+    positions24hs: Array<{
+        positionName: string;
+        qty: number;
+        structuralHeadcount: number;
+    }>;
+    positionsCustom: Array<{
+        positionName: string;
+        qty: number;
+        structuralHeadcount: number;
+        activeDaysLabel: string;
+    }>;
+    summaryLines: string[];
+    /** Francos: rotación (por pax) vs pool día pico (plantilla − servicio). */
+    francoBudget: ObjectiveFrancoBudget;
+}
+
+function activeDaysLabel(pos: V2PositionDef): string {
+    const ad = pos.activeDays;
+    if (!ad || ad.length === 0 || ad.length >= 7) return 'L–D (7d)';
+    return ad.join(' ');
+}
+
+export function buildObjectiveServiceAnalysis(
+    positions: V2PositionDef[],
+    cycleKey: string = '6+2',
+): ObjectiveServiceAnalysis {
+    const profile = buildObjectiveScheduleProfile(positions);
+    const { kind, positions24hs, positionsCustom, positionsOther } = profile;
+
+    const positions24hsDetail = positions24hs.map((pos) => ({
+        positionName: pos.positionName,
+        qty: Math.max(1, Number(pos.qty) || 1),
+        structuralHeadcount: computePositionRequiredHeadcount(pos, cycleKey),
+    }));
+
+    const positionsCustomDetail = positionsCustom.map((pos) => ({
+        positionName: pos.positionName,
+        qty: Math.max(1, Number(pos.qty) || 1),
+        structuralHeadcount: computePositionRequiredHeadcount(pos, cycleKey),
+        activeDaysLabel: activeDaysLabel(pos),
+    }));
+
+    let plantilla24 = 0;
+    for (const p of positions24hs) {
+        plantilla24 += computePositionRequiredHeadcount(p, cycleKey);
+    }
+    let plantillaOther = 0;
+    for (const p of positionsOther) {
+        plantillaOther += computePositionRequiredHeadcount(p, cycleKey);
+    }
+
+    let plantillaCustomPool = 0;
+    if (positionsCustom.length > 0) {
+        plantillaCustomPool = kind === 'mixed'
+            ? computeMixedCustomTitularHeadcount(positionsCustom, cycleKey)
+            : computeCustomObjectivePoolHeadcount(positionsCustom, cycleKey);
+    }
+
+    const plantillaTotal = profile.plantillaForCycle(cycleKey);
+
+    const cycleBlocks: ObjectiveServiceAnalysis['cycleBlocks'] = {
+        rotation24hs: kind === '24hs_only' || kind === 'mixed' ? cycleKey : null,
+        custom: kind === 'custom_only'
+            ? cycleKey
+            : kind === 'mixed'
+                ? 'Titular por cupo (días SLA)'
+                : null,
+    };
+
+    const summaryLines: string[] = [];
+    switch (kind) {
+        case '24hs_only':
+            summaryLines.push(
+                `Servicio puro 24 HS: ${positions24hs.length} puesto(s), `
+                + `pico ${profile.peakConcurrent24hs} pax en simultáneo, plantilla ${cycleKey} ≈ ${plantillaTotal} guardias.`,
+            );
+            break;
+        case 'custom_only':
+            summaryLines.push(
+                `Servicio puro custom: ${positionsCustom.length} puesto(s), `
+                + `pico ~${profile.peakConcurrentCustom} cupos/día, pool ${cycleKey} ≈ ${plantillaTotal} guardias.`,
+            );
+            break;
+        case 'mixed':
+            summaryLines.push(
+                `Servicio mixto: ${positions24hs.length} puesto(s) 24 HS + ${positionsCustom.length} custom`
+                + (positionsOther.length ? ` + ${positionsOther.length} otro(s)` : '')
+                + '.',
+            );
+            summaryLines.push(
+                `Plantilla: ${plantilla24} guardias (24 HS, ciclo ${cycleKey}) + ${plantillaCustomPool} titular(es) custom`
+                + (plantillaOther ? ` + ${plantillaOther} otros` : '')
+                + ` = ${plantillaTotal} total.`,
+            );
+            summaryLines.push(
+                'Ciclos: rotación M/T/N con CCT 6+2 (bloque 24 HS); custom con titular por cupo en días operativos (sin pool global).',
+            );
+            summaryLines.push(
+                'Motor en dos fases: primero cupo M/T/N por puesto 24 HS; después custom (sin mezclar reglas).',
+            );
+            break;
+        default:
+            summaryLines.push('Sin puestos en el SLA vigente.');
+            break;
+    }
+
+    for (const line of profile.labels) {
+        if (!summaryLines.includes(line)) summaryLines.push(line);
+    }
+
+    const francoBudget = buildObjectiveFrancoBudget(positions, cycleKey);
+    for (const line of francoBudget.summaryLines) {
+        if (!summaryLines.includes(line)) summaryLines.push(line);
+    }
+
+    return {
+        kind: profile.kind,
+        cronogramTypeLabel: profile.cronogramTypeLabel,
+        motorMode: profile.motorMode,
+        cycleKey,
+        cycleBlocks,
+        positionCounts: {
+            total: positions.length,
+            rotation24hs: positions24hs.length,
+            custom: positionsCustom.length,
+            other: positionsOther.length,
+        },
+        peakConcurrent24hs: profile.peakConcurrent24hs,
+        peakConcurrentCustom: profile.peakConcurrentCustom,
+        plantilla: {
+            total: plantillaTotal,
+            rotation24hs: plantilla24,
+            customPool: plantillaCustomPool,
+            other: plantillaOther,
+        },
+        positions24hs: positions24hsDetail,
+        positionsCustom: positionsCustomDetail,
+        summaryLines,
+        francoBudget,
+    };
+}
+
 /** @deprecated Usar buildObjectiveScheduleProfile */
 export function objectiveUsesCustomPoolOnlyLegacy(positions: V2PositionDef[]): boolean {
     return isFullCustomObjectivePool(positions);
+}
+
+export function formatObjectiveCycleBlocksSummary(
+    analysis: Pick<ObjectiveServiceAnalysis, 'kind' | 'cycleKey' | 'cycleBlocks'>,
+): string {
+    if (analysis.kind === 'mixed') {
+        const r = analysis.cycleBlocks.rotation24hs ?? analysis.cycleKey;
+        const c = analysis.cycleBlocks.custom ?? 'Titular por cupo';
+        return `24 HS: ${r} · Custom: ${c}`;
+    }
+    if (analysis.kind === 'custom_only') {
+        return `Pool custom: ${analysis.cycleKey}`;
+    }
+    return analysis.cycleKey;
 }

@@ -72,7 +72,7 @@ import {
     resolveRotativeMtnCode,
     rotativeMtnIsWorkDay,
 } from './rotativeMtnCycle';
-import { applyBalancedLdNineHourRetCctTopUp, buildCustomCycleWorkDays, buildCustomWeekendRestOptions, customCoverDailyPax, customCoverBandsForDay, customCoverSlotsRequiredOnDay, customCoverSimultaneousPax, customCoverWeeklyWorkRest, customPositionOperatesAllWeek, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay, pickBalancedCustomWorkers } from './customCoverCycle';
+import { applyBalancedLdNineHourRetCctTopUp, buildCustomCycleWorkDays, buildObjectivePoolCycleWorkDays, buildCustomWeekendRestOptions, customCoverDailyPax, customCoverBandsForDay, customCoverSlotsRequiredOnDay, customCoverSimultaneousPax, customCoverWeeklyWorkRest, customPositionOperatesAllWeek, fixedWeekdayCustomUsesModo12, francoCodeForPositionDay, pickBalancedCustomWorkers } from './customCoverCycle';
 import { fillCycleBaseRotativeAssignments } from './cycleBaseSchedule';
 import { fillCustomConcurrentMtnBands, isCustomConcurrentMtnPosition, countCustomBandFilled } from './customConcurrentMtnSchedule';
 import { buildFixedBandPlan, assignFixedBandOffsets, computeFixedBandGlobalStagger, enforceFixedBandFrancoRetCap, isFixedBandIntensiveMode } from './fixedBandScheduleEngine';
@@ -90,7 +90,7 @@ import {
     resolveObjectivePositionRoster,
 } from './objectiveRosterResolver';
 import { stripIdleEmployeeBillableAssignments } from './surplusRetCycle';
-import { getRotationEntriesForDate } from './rotationUtils';
+import { applyRotationsForMonth } from './slaRotationMonthPlanner';
 import { buildSurplusRetEmployeeSet, enforceObjectiveRosterCaps } from './rosterHeadcountBalance';
 import {
     hasExplicitPlannerDotacion,
@@ -102,7 +102,8 @@ import {
     findLowAffinityDotacionWarnings,
     type WisdomRosterAlignmentResult,
 } from './wisdomRosterAlignment';
-import { empCanCoverPositionShift } from './positionAssignmentPolicy';
+import { empCanCoverPositionShift, empHasPositionAssignmentRestriction } from './positionAssignmentPolicy';
+import { resolveRosterLockedPositions } from './slaContractPlanning';
 import { slaRotationExpectedShift } from './slaContractPlanning';
 
 const FRANCO_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET']);
@@ -291,6 +292,8 @@ export interface V2EmployeeDef {
     absenceRate?: number;
     /** IDs de objetivos donde este empleado puede trabajar como volante (comodín). */
     volante?: string[];
+    /** Refuerzo semi-real (lab-pad) para cerrar plantilla; no es legajo Firestore. */
+    planningPadding?: boolean;
 }
 
 export interface V2AbsenceMap {
@@ -331,6 +334,10 @@ export interface V2EngineContext {
     rosterSeedByEmp?: Record<string, string>;
     /** Guardias sobrantes de plantilla (RET stand-by del objetivo). */
     idleSurplusEmpIds?: string[];
+    /**
+     * Roster fijado por pipeline unificado (puro 24hs). El floater usa estos grupos sin heurística.
+     */
+    planningRoster24hs?: import('./planningRoster24hs').PlanningRoster24hsResult;
     /**
      * Cupo CCT vs mes de venta (dos calendarios):
      * - **Venta/SLA:** días 1→último del mes en pantalla → cobertura slot×día y horas vendidas.
@@ -394,6 +401,13 @@ export interface V2EngineContext {
      * que cierren la cobertura sin incidencias.
      */
     distributedOffsetSeed?: number;
+    /**
+     * Inicio de ciclo pool custom (YYYY-MM-DD) cuando no hay trailing del mes anterior.
+     * Suele ser cycleStartDate de rotación SLA o inicio de vigencia.
+     */
+    poolCycleStartDate?: string;
+    /** Anclas por legajo (cycleAnchorDate en rotaciones SLA). */
+    poolCycleAnchorByEmp?: Record<string, string>;
     /**
      * Pool de empleados de la empresa que NO están asignados al objetivo en curso.
      * El motor V3 los usa como flotantes de último recurso (Fase 3) para cubrir slots
@@ -487,6 +501,8 @@ export interface V2EngineContext {
     slaRotationByDate?: import('./slaContractPlanning').SlaRotationByDate;
     /** Reglas del tipo de crono (puro 24hs / custom / mixto). */
     cronogramRules?: import('./cronogramPlanningRules').CronogramPlanningRules;
+    /** Puesto fijado en grilla planificador (dotación manual), prioridad sobre SLA. */
+    plannerGridPositionByEmp?: Record<string, string>;
     /** Fase mixta: celdas ya asignadas en pasada 24hs (no sobrescribir en custom). */
     pinnedAssignments?: V2Assignment[];
     /** Interno: evita reentrada del pipeline mixto. */
@@ -943,6 +959,9 @@ function dayDemandHoursForPosition(pos: V2PositionDef, dayLetter: string, autoCy
 
 function dayPeakConcurrentForPosition(pos: V2PositionDef, dayLetter: string, autoCycles?: string[]): number {
     if (!positionIsActiveOn(pos, dayLetter)) return 0;
+    if (isCustomCoverPosition(pos)) {
+        return customCoverSlotsRequiredOnDay(pos, dayLetter, autoCycles);
+    }
     const qty = Math.max(1, Number(pos.qty) || 1);
     if (is24hsCoverage(pos)) return qty;
     const eff = effectiveShiftsForPositionDay(pos, dayLetter, autoCycles);
@@ -969,9 +988,7 @@ export function checkFeasibility(ctx: V2EngineContext): V2FeasibilityReport {
                 monthHours += dh;
                 const peak = dayPeakConcurrentForPosition(pos, letter, ctx.autoCycles);
                 if (peak > peakConcurrent) peakConcurrent = peak;
-                // Slots = qty × bandas activas ese día
-                const bands = effectiveShiftsForPositionDay(pos, letter, ctx.autoCycles).length;
-                totalSlots += qty * Math.max(1, bands);
+                totalSlots += customCoverSlotsRequiredOnDay(pos, letter, ctx.autoCycles, ctx.getDateKey(d));
             }
         });
         // Custom (MA, ME…): dotación = qty. 24hs: regla pax (4 por pax en 6+2).
@@ -1552,11 +1569,13 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     const cycleLen = cL + cF; // p.ej. 6+1 → 7
     const has4x2 = ctx.autoCycles.includes('4+2');
     const defaultPos: Record<string, string> = { ...(ctx.rosterSeedByEmp || {}) };
-    const userLockedPos: Record<string, string> = {};
+    const userLockedPos = resolveRosterLockedPositions({
+        plannerGridPositionByEmp: ctx.plannerGridPositionByEmp,
+        positionAssignmentsByEmp: ctx.positionAssignmentsByEmp,
+    });
     for (const [empId, pos] of Object.entries(ctx.defaultPositionByEmp || {})) {
         if (empId.startsWith('lab-pad-')) continue;
         defaultPos[empId] = pos;
-        userLockedPos[empId] = pos;
     }
     // Empleados con puesto fijo EXPLÍCITO (configurado por el usuario, no auto-detectado).
 
@@ -1688,6 +1707,9 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
 
     const rosterVirtualAssignmentCount = rosterResolved.virtualAssignmentCount;
     const rosterPhasedByKind = rosterResolved.phasedByKind;
+    if (rosterResolved.rosterWarnings?.length) {
+        feasibility.warnings.push(...rosterResolved.rosterWarnings);
+    }
 
     // ── SURPLUS: mover empleados sobrantes a capacidad ociosa real ──────────
     // Solo cuando el grupo supera MAX(need_ciclo, need_cap200h). Sin +1 retén artificial:
@@ -2185,6 +2207,23 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             empPrimaryShift[empId] = resolvedCode;
             empRotationSlot[empId] = ringIdx;
         });
+        empIds.forEach((empId) => {
+            const slots = ctx.positionAssignmentsByEmp?.[empId];
+            if (!slots?.length) return;
+            const posKey = String(posName).trim().toLowerCase();
+            const slot = slots.find((s) => String(s.positionName || '').trim().toLowerCase() === posKey);
+            if (!slot?.shiftCodes?.length) return;
+            const allowed = new Set(slot.shiftCodes.map((c) => String(c).toUpperCase()));
+            const current = String(empPrimaryShift[empId] || '').toUpperCase();
+            if (current && allowed.has(current)) return;
+            const pick = slot.shiftCodes.find((c) => shiftCodes.includes(String(c).toUpperCase()))
+                ?? slot.shiftCodes[0];
+            const code = String(pick).toUpperCase();
+            if (!allowed.has(code)) return;
+            empPrimaryShift[empId] = code;
+            const ringIdx = shiftCodes.indexOf(code);
+            if (ringIdx >= 0) empRotationSlot[empId] = ringIdx;
+        });
     });
 
     if (ctx.rotateShifts === false && fixedBandPlan) {
@@ -2365,7 +2404,37 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         return letters.every((l) => positionIsActiveOn(pos, l));
     };
     const cycleWorkDays: Record<string, Set<string>> = {};
+    const fullCustomPool = isFullCustomObjectivePool(ctx.positions);
+    const poolOperationalDay = (dateStr: string, dayLetter: string): boolean =>
+        ctx.positions.some(
+            (p) =>
+                isCustomCoverPosition(p)
+                && customCoverSlotsRequiredOnDay(p, dayLetter, ctx.autoCycles, dateStr) > 0,
+        );
+
+    if (fullCustomPool) {
+        const poolEmpIds = ctx.employees.map((e) => e.id);
+        const poolCycles = buildObjectivePoolCycleWorkDays({
+            employeeIds: poolEmpIds,
+            daysInMonth: ctx.daysInMonth,
+            cycleKey,
+            monthStartGlobalDayIndex,
+            getDateKey: ctx.getDateKey,
+            getDayLetter: ctx.getDayLetter,
+            isOperationalDay: poolOperationalDay,
+            prevMonthTrailingWorkDays: ctx.prevMonthTrailingWorkDays,
+            prevMonthTrailingRestDays: ctx.prevMonthTrailingRestDays,
+            distributedOffsetSeed: ctx.distributedOffsetSeed,
+            poolCycleStartDate: ctx.poolCycleStartDate,
+            cycleAnchorByEmp: ctx.poolCycleAnchorByEmp,
+        });
+        for (const emp of ctx.employees) {
+            cycleWorkDays[emp.id] = poolCycles[emp.id] ?? new Set<string>();
+        }
+    }
+
     ctx.employees.forEach((emp, globalIdx) => {
+        if (fullCustomPool) return;
         const set = new Set<string>();
         const assignedPosName = empAssignedTo[emp.id];
         const assignedPos = assignedPosName ? ctx.positions.find((p) => p.positionName === assignedPosName) : null;
@@ -2855,21 +2924,39 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         titular?: string,
         backupPool: string[] = [],
     ): void => {
+        const effectiveGroupIds =
+            groupIds.length > 0
+                ? groupIds
+                : (isFullCustomObjectivePool(ctx.positions)
+                    ? sortByFewerHours(
+                        ctx.employees
+                            .filter((e) => {
+                                if (empAssignedTo[e.id]) return false;
+                                return empCanCoverPositionShift(ctx, e.id, pos.positionName)
+                                    || !empHasPositionAssignmentRestriction(ctx, e.id);
+                            })
+                            .map((e) => e.id),
+                        inCurrent,
+                    )
+                    : groupIds);
+
         const daySlots = customCoverSlotsRequiredOnDay(pos, dayLetter, ctx.autoCycles, dateStr);
         const qty = customCoverDailyPax(pos);
+        const poolCustomObjective = isFullCustomObjectivePool(ctx.positions);
 
         if (titular && cycleWorkDays[titular]?.has(dateStr)) {
             stripFrancoOnCustomActiveDay(titular, pos, dateStr);
         }
 
-        for (const eid of groupIds) {
+        if (!poolCustomObjective) {
+        for (const eid of effectiveGroupIds) {
             if (runtime[eid].assignedDays.has(dateStr)) continue;
             if (cycleWorkDays[eid]?.has(dateStr)) continue;
             if (ctx.absences[eid]?.has(dateStr)) continue;
             const francoCode = francoCodeForPositionDay(
                 pos,
                 dayLetter,
-                buildCustomWeekendRestOptions(pos, eid, dateStr, groupIds, { positions: ctx.positions, positionGroups }),
+                buildCustomWeekendRestOptions(pos, eid, dateStr, effectiveGroupIds, { positions: ctx.positions, positionGroups }),
             );
             assignments.push({
                 empId: eid,
@@ -2884,12 +2971,63 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             });
             runtime[eid].assignedDays.add(dateStr);
         }
+        }
 
-        const workCandidates = groupIds.filter((eid) =>
-            cycleWorkDays[eid]?.has(dateStr)
-            && !runtime[eid].assignedDays.has(dateStr)
-            && !ctx.absences[eid]?.has(dateStr),
+        const bandsToday = customCoverBandsForDay(pos, dayLetter, ctx.autoCycles, dateStr);
+        const poolCoverRank = (eid: string): number => {
+            const titulars = positionGroups[pos.positionName] ?? [];
+            const titIdx = titulars.indexOf(eid);
+            const need = Math.max(1, positionNeed[pos.positionName] ?? 1);
+            if (titIdx >= 0 && titIdx < need) return titIdx;
+            if (empAssignedTo[eid] === pos.positionName) return 10 + Math.max(0, titIdx);
+            if (defaultPos[eid] === pos.positionName) return 20;
+            return 100;
+        };
+        const poolEligibleIds = poolCustomObjective
+            ? ctx.employees
+                .filter((e) => cycleWorkDays[e.id]?.has(dateStr) && !ctx.absences[e.id]?.has(dateStr))
+                .filter((e) =>
+                    bandsToday.some((b) =>
+                        empCanCoverPositionShift(ctx, e.id, pos.positionName, String(b.code ?? '').toUpperCase()),
+                    ),
+                )
+                .map((e) => e.id)
+            : [];
+
+        const titularCap = Math.max(
+            1,
+            positionNeed[pos.positionName] ?? customCoverSimultaneousPax(pos),
         );
+        const coreGroupIds = poolCustomObjective
+            ? (positionGroups[pos.positionName] ?? []).slice(0, titularCap)
+            : effectiveGroupIds;
+        const poolBackupIds = poolCustomObjective
+            ? poolEligibleIds.filter((id) => !coreGroupIds.includes(id))
+            : [];
+
+        const workCandidates = poolCustomObjective
+            ? sortByFewerHours(
+                coreGroupIds
+                    .filter(
+                        (eid) =>
+                            cycleWorkDays[eid]?.has(dateStr)
+                            && !runtime[eid].assignedDays.has(dateStr)
+                            && !ctx.absences[eid]?.has(dateStr),
+                    )
+                    .sort((a, b) => poolCoverRank(a) - poolCoverRank(b)),
+                inCurrent,
+            )
+            : effectiveGroupIds.filter((eid) =>
+                cycleWorkDays[eid]?.has(dateStr)
+                && !runtime[eid].assignedDays.has(dateStr)
+                && !ctx.absences[eid]?.has(dateStr),
+            );
+
+        const bandPoolIds = poolCustomObjective
+            ? coreGroupIds.filter(
+                (eid) => cycleWorkDays[eid]?.has(dateStr) && !ctx.absences[eid]?.has(dateStr),
+            )
+            : effectiveGroupIds;
 
         if (isCustomConcurrentMtnPosition(pos)) {
             fillCustomConcurrentMtnBands({
@@ -2898,7 +3036,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                 dateStr,
                 dayLetter,
                 inCurrent,
-                groupIds,
+                groupIds: bandPoolIds,
                 titular,
                 assignments,
                 runtimeAssignedDays: (empId) => runtime[empId].assignedDays.has(dateStr),
@@ -2923,6 +3061,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
         }
         }
 
+        if (!poolCustomObjective) {
         for (const eid of workCandidates) {
             if (runtime[eid].assignedDays.has(dateStr)) continue;
             if (ctx.absences[eid]?.has(dateStr)) continue;
@@ -2944,6 +3083,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             });
             runtime[eid].assignedDays.add(dateStr);
         }
+        }
 
         const countCover = () => assignments.filter((a) =>
             a.dateStr === dateStr
@@ -2962,7 +3102,7 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     const code = String(sh.code ?? '').toUpperCase();
                     const have = countCustomBandFilled(assignments, dateStr, pos.positionName, code);
                     if (have >= qty) continue;
-                    for (const eid of groupIds) {
+                    for (const eid of coreGroupIds) {
                         if (runtime[eid].assignedDays.has(dateStr)) continue;
                         if (!cycleWorkDays[eid]?.has(dateStr)) continue;
                         if (ctx.absences[eid]?.has(dateStr)) continue;
@@ -2972,15 +3112,38 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                             break;
                         }
                     }
+                    if (!filled && poolCustomObjective) {
+                        for (const eid of sortByFewerHours(poolBackupIds, inCurrent)) {
+                            if (runtime[eid].assignedDays.has(dateStr)) continue;
+                            if (!cycleWorkDays[eid]?.has(dateStr)) continue;
+                            if (ctx.absences[eid]?.has(dateStr)) continue;
+                            if (!empCanCoverPositionShift(ctx, eid, pos.positionName, code)) continue;
+                            if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent, { shiftCode: code })) {
+                                filled = true;
+                                break;
+                            }
+                        }
+                    }
                     if (filled) break;
                 }
             } else {
-                filled = tryAssignCustomFromGroup(pos, dateStr, dayLetter, inCurrent, groupIds, titular);
+                filled = tryAssignCustomFromGroup(pos, dateStr, dayLetter, inCurrent, effectiveGroupIds, titular);
             }
             if (!filled) {
                 for (const eid of backupPool) {
-                    if (groupIds.includes(eid)) continue;
+                    if (coreGroupIds.includes(eid)) continue;
                     if (assignCustomBackupOrSubstitute(eid, pos, dateStr, dayLetter, inCurrent)) {
+                        filled = true;
+                        break;
+                    }
+                }
+            }
+            if (!filled && poolCustomObjective) {
+                for (const eid of sortByFewerHours(poolBackupIds, inCurrent)) {
+                    if (runtime[eid].assignedDays.has(dateStr)) continue;
+                    if (!cycleWorkDays[eid]?.has(dateStr)) continue;
+                    if (ctx.absences[eid]?.has(dateStr)) continue;
+                    if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent)) {
                         filled = true;
                         break;
                     }
@@ -2988,20 +3151,20 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
             }
             if (!filled) {
                 const simultaneousPax = customCoverSimultaneousPax(pos);
-                const useBalancedFill = customPositionOperatesAllWeek(pos) && groupIds.length > simultaneousPax;
+                const useBalancedFill = customPositionOperatesAllWeek(pos) && effectiveGroupIds.length > simultaneousPax;
                 if (useBalancedFill) {
                     const di = ctx.daysInMonth.findIndex((d) => ctx.getDateKey(d) === dateStr);
                     const absDay = monthStartGlobalDayIndex + (di >= 0 ? di : 0);
                     const { workDays, cycleLen } = customCoverWeeklyWorkRest(pos);
                     const workerIdxs = pickBalancedCustomWorkers(
                         absDay,
-                        groupIds.length,
+                        effectiveGroupIds.length,
                         simultaneousPax,
                         workDays,
                         cycleLen,
                     );
                     for (const wi of workerIdxs) {
-                        const eid = groupIds[wi];
+                        const eid = effectiveGroupIds[wi];
                         if (!eid || runtime[eid].assignedDays.has(dateStr)) continue;
                         if (ctx.absences[eid]?.has(dateStr)) continue;
                         if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent)) {
@@ -3010,8 +3173,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
                     }
                 }
             }
-            if (!filled) {
-                for (const eid of sortByFewerHours(groupIds, inCurrent)) {
+            if (!filled && !poolCustomObjective) {
+                for (const eid of sortByFewerHours(effectiveGroupIds, inCurrent)) {
                     if (runtime[eid].assignedDays.has(dateStr)) continue;
                     if (ctx.absences[eid]?.has(dateStr)) continue;
                     if (writeCustomCoverShift(eid, pos, dateStr, dayLetter, inCurrent, { ignoreCycleWorkDay: true })) {
@@ -3398,13 +3561,51 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
 
     // Cobertura custom: primero dotación del puesto (MA/ME/RO); respaldo 24hs solo si falta gente.
     if (!deferCustomToFinal) {
-    for (const pos of ctx.positions) {
-        if (!isCustomCoverPosition(pos)) continue;
+    if (fullCustomPool) {
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            const dayLetter = ctx.getDayLetter(dateStr);
+            if (!poolOperationalDay(dateStr, dayLetter)) continue;
+            for (const emp of ctx.employees) {
+                const eid = emp.id;
+                if (runtime[eid].assignedDays.has(dateStr)) continue;
+                if (ctx.absences[eid]?.has(dateStr)) continue;
+                if (cycleWorkDays[eid]?.has(dateStr)) continue;
+                assignments.push({
+                    empId: eid,
+                    dateStr,
+                    positionName: '',
+                    code: 'F',
+                    name: 'Franco',
+                    hours: 0,
+                    startTime: '00:00',
+                    isFranco: true,
+                });
+                runtime[eid].assignedDays.add(dateStr);
+            }
+        }
+    }
+    for (const pos of [...ctx.positions]
+        .filter((p) => isCustomCoverPosition(p))
+        .sort(
+            (a, b) =>
+                customCoverSimultaneousPax(a) - customCoverSimultaneousPax(b)
+                || a.positionName.localeCompare(b.positionName, 'es'),
+        )) {
         const titular = customTitular[pos.positionName];
         const groupIds = positionGroups[pos.positionName] ?? [];
         const backupPool = primary24hsPosition
             ? sortByFewerHours(positionGroups[primary24hsPosition.positionName] ?? [], true)
-            : [];
+            : sortByFewerHours(
+                ctx.employees
+                    .filter((e) => {
+                        if (empAssignedTo[e.id]) return false;
+                        return empCanCoverPositionShift(ctx, e.id, pos.positionName)
+                            || !empHasPositionAssignmentRestriction(ctx, e.id);
+                    })
+                    .map((e) => e.id),
+                true,
+            );
         for (const day of ctx.daysInMonth) {
             const dateStr = ctx.getDateKey(day);
             const dayLetter = ctx.getDayLetter(dateStr);
@@ -4179,8 +4380,8 @@ export function generateScheduleV2(ctx: V2EngineContext): V2GenerateResult {
     );
 
     const expandedAssignments = expandSplitShiftAssignments(assignments, engineCtx.positions);
-    const rulesApplied = applyServiceRulesPostProcess(engineCtx, expandedAssignments as Array<{ empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown }>);
-    const finalAssignments = applyRotationsPostProcess(engineCtx, rulesApplied);
+    const rotatedAssignments = applyRotationsPostProcess(engineCtx, expandedAssignments as Array<{ empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown }>);
+    const finalAssignments = applyServiceRulesPostProcess(engineCtx, rotatedAssignments);
     return { feasibility, assignments: finalAssignments as typeof expandedAssignments, stats, capOverflowSlots, coverageViolations };
 }
 
@@ -4200,7 +4401,11 @@ function applyServiceRulesPostProcess(
             if (!rule.triggers.length) continue;
             const fires = rule.triggers.every(t => {
                 const empA = dayAsgn.find(a => a.empId === t.employeeId);
-                return empA != null && String(empA.code || '').toUpperCase() === String(t.shiftCode || '').toUpperCase();
+                if (!empA) return false;
+                const allowed = (t.shiftCodes?.length ? t.shiftCodes : [t.shiftCode])
+                    .map((c) => String(c || '').toUpperCase())
+                    .filter(Boolean);
+                return allowed.includes(String(empA.code || '').toUpperCase());
             });
             if (!fires) continue;
             for (const action of rule.actions) {
@@ -4251,41 +4456,51 @@ function applyServiceRulesPostProcess(
 }
 
 function applyRotationsPostProcess(
-    ctx: Pick<V2EngineContext, 'serviceRotations'>,
+    ctx: Pick<V2EngineContext, 'serviceRotations' | 'positions' | 'daysInMonth' | 'getDateKey'>,
     assignments: Array<{ empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown }>,
 ): typeof assignments {
     if (!ctx.serviceRotations?.length) return assignments;
-    let result = assignments.slice();
-    const allDates = [...new Set(result.map((a: any) => a.dateStr as string))];
-    for (const dateStr of allDates) {
-        for (const rotation of ctx.serviceRotations!) {
-            const entries = getRotationEntriesForDate(rotation, dateStr);
-            for (const entry of entries as any[]) {
-                const empA = result.find((a: any) => a.dateStr === dateStr && a.empId === entry.employeeId);
-                if (empA) {
-                    const idx = result.indexOf(empA);
-                    if (idx >= 0) result[idx] = { ...result[idx], positionName: entry.positionName, code: entry.shiftCode };
-                } else {
-                    result.push({ empId: entry.employeeId, dateStr, positionName: entry.positionName, code: entry.shiftCode, name: entry.shiftCode, hours: 8, startTime: '00:00' });
-                }
-            }
-        }
+    const dateStrs =
+        ctx.daysInMonth?.length && ctx.getDateKey
+            ? ctx.daysInMonth.map((d) => ctx.getDateKey!(d))
+            : [...new Set(assignments.map((a) => a.dateStr))];
+    if (!dateStrs.length) return assignments;
+    const first = dateStrs.sort()[0];
+    const [y, m] = first.split('-').map(Number);
+    const additions = applyRotationsForMonth(ctx.serviceRotations, {}, {}, y, m - 1, ctx.positions);
+    const rotationKeys = new Set(Object.keys(additions));
+    if (rotationKeys.size === 0) return assignments;
+    let result = assignments.filter((a) => !rotationKeys.has(`${a.empId}_${a.dateStr}`));
+    for (const cell of Object.values(additions)) {
+        const code = String(cell.code || '').toUpperCase();
+        const francoCodes = new Set(['F', 'FF', 'FP', 'FT']);
+        const hours = Number(cell.hours) || (francoCodes.has(code) ? 0 : 8);
+        result.push({
+            empId: cell.empId,
+            dateStr: cell.dateStr,
+            positionName: cell.positionName || '',
+            code,
+            name: code,
+            hours,
+            startTime: cell.startTime || '00:00',
+            _isAutoRotation: true,
+        });
     }
     return result;
 }
 
 /** Post-proceso de particularidades SLA (turno cortado, condiciones, rotaciones). Usar en pipelines que no pasan por el cierre de generateScheduleV2. */
 export function applySlaContractPostProcess(
-    ctx: Pick<V2EngineContext, 'positions' | 'serviceRules' | 'serviceRotations'>,
+    ctx: Pick<V2EngineContext, 'positions' | 'serviceRules' | 'serviceRotations' | 'daysInMonth' | 'getDateKey'>,
     assignments: V2Assignment[],
 ): V2Assignment[] {
     type AssignRow = { empId: string; dateStr: string; positionName: string; code: string; [key: string]: unknown };
     let result = expandSplitShiftAssignments(assignments, ctx.positions);
-    if ((ctx.serviceRules?.length ?? 0) > 0) {
-        result = applyServiceRulesPostProcess(ctx, result as AssignRow[]) as V2Assignment[];
-    }
     if ((ctx.serviceRotations?.length ?? 0) > 0) {
         result = applyRotationsPostProcess(ctx, result as AssignRow[]) as V2Assignment[];
+    }
+    if ((ctx.serviceRules?.length ?? 0) > 0) {
+        result = applyServiceRulesPostProcess(ctx, result as AssignRow[]) as V2Assignment[];
     }
     return result;
 }

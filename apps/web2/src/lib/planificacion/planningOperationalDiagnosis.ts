@@ -4,6 +4,7 @@
  */
 
 import type { V2FeasibilityReport, V2PositionDef } from './autoScheduleEngineV2';
+import { customCoverSlotsRequiredOnDay } from './customCoverCycle';
 import { computeObjectiveRequiredHeadcount, isFullCustomObjectivePool } from './objectiveHeadcount';
 
 export type PlanningBalanceKind = 'short' | 'exact' | 'surplus' | 'hours_short';
@@ -26,11 +27,31 @@ function computeModo8Slots(positions: V2PositionDef[]): {
     peakConcurrent: number;
     structuralMonthHours: number;
 } {
+    let peakConcurrent = 0;
+    let structuralMonthHours = 0;
+    const weekdayLetters = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
+    if (isFullCustomObjectivePool(positions)) {
+        let peakDaySlots = 0;
+        for (const day of weekdayLetters) {
+            let daySlots = 0;
+            for (const pos of positions) {
+                daySlots += customCoverSlotsRequiredOnDay(pos, day);
+            }
+            peakDaySlots = Math.max(peakDaySlots, daySlots);
+        }
+        const slotsPerDay = peakDaySlots;
+        structuralMonthHours = slotsPerDay * 30 * 8;
+        return {
+            slotsPerDay,
+            slots24hs: 0,
+            slotsCustom: slotsPerDay,
+            peakConcurrent: slotsPerDay,
+            structuralMonthHours,
+        };
+    }
     let slotsPerDay = 0;
     let slots24hs = 0;
     let slotsCustom = 0;
-    let peakConcurrent = 0;
-    let structuralMonthHours = 0;
     for (const pos of positions) {
         const qty = Math.max(1, Number(pos.qty) || 1);
         if (is24hs(pos)) {
@@ -40,8 +61,11 @@ function computeModo8Slots(positions: V2PositionDef[]): {
             peakConcurrent += qty;
             structuralMonthHours += s * 30 * 8;
         } else {
-            const bands = (pos.shifts || []).length || 1;
-            const s = qty * bands;
+            let peak = 0;
+            for (const day of weekdayLetters) {
+                peak = Math.max(peak, customCoverSlotsRequiredOnDay(pos, day));
+            }
+            const s = peak > 0 ? peak : qty * Math.max(1, (pos.shifts || []).length || 1);
             slotsPerDay += s;
             slotsCustom += s;
             peakConcurrent += s;
@@ -65,6 +89,10 @@ export interface PlanningOperationalDiagnosis {
     /** Oferta */
     supply: {
         peopleAvailable: number;
+        /** Legajos reales (sin lab-pad). */
+        realLegajos?: number;
+        /** Refuerzos semi-reales protocolo lab-pad. */
+        paddingLegajos?: number;
         offerHours: number;
         offerHoursT1: number;
         offerHoursT2: number;
@@ -106,11 +134,15 @@ export function buildPlanningOperationalDiagnosis(params: {
     feasibility: V2FeasibilityReport;
     staffing: PlanningStaffingRef;
     peopleAvailable: number;
+    realLegajos?: number;
+    paddingLegajos?: number;
     soldHours: number;
     modo12DayCount?: number;
     pickedCycle?: string;
 }): PlanningOperationalDiagnosis {
     const { positions, feasibility, staffing, peopleAvailable, soldHours, pickedCycle } = params;
+    const realLegajos = params.realLegajos ?? peopleAvailable;
+    const paddingLegajos = params.paddingLegajos ?? 0;
     const m = feasibility.metrics;
     const modo8 = computeModo8Slots(positions);
     const cycleForPlantilla = pickedCycle || staffing.cycleKey || '6+2';
@@ -174,8 +206,11 @@ export function buildPlanningOperationalDiagnosis(params: {
 
     let resolution: string;
     if (strictSixTwo) {
+        const padNote = paddingLegajos > 0
+            ? ` (${realLegajos} reales + ${paddingLegajos} ref. SLA semi-real)`
+            : '';
         resolution =
-            `${peopleAvailable} guardias = ${servicio} servicio + ${poolFrancos} franco (6+2). `
+            `${peopleAvailable} guardias${padNote} = ${servicio} servicio + ${poolFrancos} franco (6+2). `
             + 'Bandas fijas M/T/N + flotante por puesto (sin péndulo rotativo). '
             + 'No degradar a 5+1/6+1 ni convertir F→turno para cerrar SLA.';
     } else if (balance === 'short' || balance === 'hours_short') {
@@ -213,6 +248,8 @@ export function buildPlanningOperationalDiagnosis(params: {
         },
         supply: {
             peopleAvailable,
+            realLegajos,
+            paddingLegajos,
             offerHours,
             offerHoursT1: m.offerHoursCurrentCycle || 0,
             offerHoursT2: m.offerHoursNextCycle || 0,

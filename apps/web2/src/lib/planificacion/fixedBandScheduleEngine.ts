@@ -16,6 +16,7 @@ import {
     type V2EngineContext,
     type V2GenerateResult,
 } from './autoScheduleEngineV2';
+import { isFullCustomObjectivePool } from './objectiveHeadcount';
 
 export type FixedBandSchemeKey = '6+2' | '6+1' | '5+1';
 
@@ -516,6 +517,9 @@ function scheduleFairnessPenalty(result: V2GenerateResult): number {
 }
 
 export function generateScheduleFixedBand(ctx: V2EngineContext): V2GenerateResult {
+    if (isFullCustomObjectivePool(ctx.positions)) {
+        return generateScheduleV2({ ...ctx, rotateShifts: false });
+    }
     const { cL, cF } = pickRepresentativeCycle(ctx.autoCycles);
     const cycleLen = Math.max(1, cL + cF);
 

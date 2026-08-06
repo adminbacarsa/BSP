@@ -16,6 +16,7 @@ import {
     type V2EngineContext,
     type V2GenerateResult,
 } from './autoScheduleEngineV2';
+import { isFullCustomObjectivePool } from './objectiveHeadcount';
 import { generateScheduleFixedBand } from './fixedBandScheduleEngine';
 import {
     generateScheduleMixedObjective,
@@ -34,6 +35,9 @@ export function generateScheduleV4(ctx: V2EngineContext): V2GenerateResult {
         return generateScheduleMixedObjective(ctx);
     }
     if (ctx.rotateShifts === false) {
+        if (isFullCustomObjectivePool(ctx.positions)) {
+            return generateScheduleV2({ ...ctx, rotateShifts: false });
+        }
         const fixed = generateScheduleFixedBand(ctx);
         const gaps = fixed.stats.uncoveredSlots ?? 0;
         if (gaps > 0 && ctxHas24hs(ctx)) {

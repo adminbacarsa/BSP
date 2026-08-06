@@ -141,6 +141,20 @@ export function computeCustomObjectivePoolHeadcount(
     return Math.max(1, Math.ceil(peak * factor));
 }
 
+/**
+ * Custom en objetivo **mixto** (24 HS + custom): titulares por cupo/puesto (qty en días operativos).
+ * No aplica pool pico×ciclo (eso es solo para objetivo 100 % custom).
+ */
+export function computeMixedCustomTitularHeadcount(
+    customPositions: V2PositionDef[],
+    cycleKey: string = '6+2',
+): number {
+    return customPositions.reduce(
+        (sum, pos) => sum + computePositionRequiredHeadcount(pos, cycleKey),
+        0,
+    );
+}
+
 export function computeObjectiveRequiredHeadcount(
     positions: V2PositionDef[],
     cycleKey: string = '6+2',
@@ -166,7 +180,7 @@ export function computeObjectiveRequiredHeadcount(
             total += computePositionRequiredHeadcount(pos, cycleKey);
         }
         if (customPositions.length > 0) {
-            total += computeCustomObjectivePoolHeadcount(customPositions, cycleKey);
+            total += computeMixedCustomTitularHeadcount(customPositions, cycleKey);
         }
         return total;
     }

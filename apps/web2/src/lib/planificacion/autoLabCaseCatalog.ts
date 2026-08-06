@@ -52,6 +52,15 @@ export interface AutoLabCaseDefinition {
     serviceRules?: import('@/services/slaService').ServiceRule[];
     /** Rotaciones periódicas del SLA (solo si el contrato las define). */
     serviceRotations?: import('@/services/slaService').ServiceRotation[];
+    /** Fase de ciclo al cierre del mes anterior (continuidad con planificación publicada). */
+    prevMonthTrailingWorkDays?: Record<string, number>;
+    prevMonthTrailingRestDays?: Record<string, number>;
+    prevMonthLastShiftByEmp?: Record<string, string>;
+    prevMonthLastWorkBandBeforeRest?: Record<string, string>;
+    /** Inicio ciclo pool si no hay mes anterior (servicio nuevo). */
+    poolCycleStartDate?: string;
+    /** Anclas por legajo (rotación SLA). */
+    poolCycleAnchorByEmp?: Record<string, string>;
 }
 
 const WEEKDAYS = ['L', 'M', 'X', 'J', 'V'] as const;

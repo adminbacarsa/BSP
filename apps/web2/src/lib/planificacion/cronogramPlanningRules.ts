@@ -97,7 +97,7 @@ function playbookForKind(kind: ObjectiveServiceKind): string[] {
             ];
         case 'mixed':
             return [
-                'Plantilla = plantilla 24hs (por pax) + pool custom (pico cupos × ciclo); no un solo pool global.',
+                'Plantilla = plantilla 24hs (por pax × ciclo 6+2) + Σ titulares custom por cupo; no un solo ciclo ni pool custom global.',
                 'Roster fase 1: completar grupos 24hs; fase 2: custom con restricciones SLA.',
                 'Desactivar rotateShifts global; bandas 24hs y custom con fuentes distintas.',
                 'Prohibir backup 24hs→custom; validar cada sub-sistema por separado.',

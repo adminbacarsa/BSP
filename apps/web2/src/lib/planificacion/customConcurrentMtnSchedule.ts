@@ -88,12 +88,13 @@ export function fillCustomConcurrentMtnBands(params: FillCustomConcurrentMtnPara
             bandSortOrder(String(a.code || '').toUpperCase())
             - bandSortOrder(String(b.code || '').toUpperCase()),
     );
+    const perBandNeed = bandsSorted.length > 0 ? Math.max(1, Math.ceil(qty / bandsSorted.length)) : qty;
 
     let totalFilled = 0;
 
     for (const sh of bandsSorted) {
         const bandCode = String(sh.code || '').toUpperCase();
-        const need = qty;
+        const need = perBandNeed;
         let have = countCustomBandFilled(assignments, dateStr, pos.positionName, bandCode);
         if (have >= need) continue;
 

@@ -12,6 +12,7 @@
 import type { V2Assignment, V2EngineContext } from './autoScheduleEngineV2';
 import { effectiveShiftsForPositionDay, isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV2';
 import { isModo12Day } from './objectiveCoverageDemand';
+import { empCanCoverPositionShift } from './positionAssignmentPolicy';
 import type { SurplusAbsentSubstitutionAction } from './surplusAbsentSubstitution';
 
 const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET']);
@@ -345,6 +346,24 @@ const SHIFT_META: Record<string, { name: string; hours: number; startTime: strin
     N: { name: 'Noche', hours: 8, startTime: '23:00' },
 };
 
+function shiftMetaForGap(
+    ctx: V2EngineContext,
+    positionName: string,
+    band: string,
+): { name: string; hours: number; startTime: string } {
+    const pos = ctx.positions.find((p) => p.positionName === positionName);
+    const code = band.toUpperCase();
+    const sh = pos?.shifts?.find((s) => String(s.code || '').toUpperCase() === code);
+    if (sh) {
+        return {
+            name: String(sh.name || sh.code || code),
+            hours: Number(sh.hours) || 8,
+            startTime: String(sh.startTime || '07:00'),
+        };
+    }
+    return SHIFT_META[code] ?? { name: code, hours: 8, startTime: '07:00' };
+}
+
 function countBandAtPosition(
     assignments: V2Assignment[],
     dateStr: string,
@@ -364,6 +383,7 @@ function countBandAtPosition(
 
 function tryReassignSurplusToGap(
     assignments: V2Assignment[],
+    ctx: V2EngineContext,
     empId: string,
     gap: CoverageSlotImbalance,
     qtyRequired: number,
@@ -382,7 +402,7 @@ function tryReassignSurplusToGap(
     );
     if (remainAtSource < qtyRequired) return false;
 
-    const meta = SHIFT_META[gap.shiftCode.toUpperCase()] ?? { name: gap.shiftCode, hours: 8, startTime: '07:00' };
+    const meta = shiftMetaForGap(ctx, gap.positionName, gap.shiftCode);
     existing.code = gap.shiftCode.toUpperCase();
     existing.name = meta.name;
     existing.hours = meta.hours;
@@ -470,7 +490,7 @@ export function fillCoverageGapsFromSurplusPool(params: {
         if (need <= 0) continue;
 
         const band = gap.shiftCode.toUpperCase();
-        const meta = SHIFT_META[band] ?? { name: band, hours: 8, startTime: '07:00' };
+        const meta = shiftMetaForGap(params.ctx, gap.positionName, band);
         let filled = 0;
 
         const titularsOfPos = new Set(params.stats?.positionGroups?.[gap.positionName] ?? []);
@@ -482,12 +502,13 @@ export function fillCoverageGapsFromSurplusPool(params: {
         for (const empId of candidateOrder) {
             if (filled >= need) break;
             if (params.ctx.absences[empId]?.has(gap.dateStr)) continue;
+            if (!empCanCoverPositionShift(params.ctx, empId, gap.positionName, band)) continue;
 
             const posDef = params.ctx.positions.find((p) => p.positionName === gap.positionName);
             const qtyRequired = Math.max(1, Number(posDef?.qty) || 1);
 
             if (empHasBillableShift(result, empId, gap.dateStr)) {
-                if (!tryReassignSurplusToGap(result, empId, gap, qtyRequired)) continue;
+                if (!tryReassignSurplusToGap(result, params.ctx, empId, gap, qtyRequired)) continue;
                 actions.push({
                     dateStr: gap.dateStr,
                     empId,

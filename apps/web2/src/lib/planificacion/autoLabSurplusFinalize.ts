@@ -166,7 +166,7 @@ export function enforceSurplusPoolStandbyPolicy(
         if (!pool.has(a.empId)) continue;
         if (protectCustomTitularAssignment(a, positions, positionGroups)) continue;
         const code = String(a.code || '').toUpperCase();
-        if (!BILLABLE_CODES.has(code)) continue;
+        if (!isWorkBandCode(code)) continue;
         const key = `${a.empId}__${a.dateStr}`;
         if (allowedBillableKeys.has(key)) continue;
         assignments.splice(i, 1);
@@ -192,7 +192,7 @@ export function stripSurplusStandbyAssignments(
         const code = String(a.code || '').toUpperCase();
         if (ABSENCE_CODES.has(code)) continue;
         const key = `${a.empId}__${a.dateStr}`;
-        if (allowedBillableKeys.has(key) && BILLABLE_CODES.has(code) && (Number(a.hours) || 0) > 0) {
+        if (allowedBillableKeys.has(key) && isWorkBandCode(code) && (Number(a.hours) || 0) > 0) {
             continue;
         }
         assignments.splice(i, 1);

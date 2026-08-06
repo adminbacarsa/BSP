@@ -57,7 +57,8 @@ import {
 import { toast } from 'sonner';
 
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
-import { buildObjectiveScheduleProfile } from '@/lib/planificacion/objectiveServiceModel';
+import { buildObjectiveScheduleProfile, buildObjectiveServiceAnalysis, formatObjectiveCycleBlocksSummary } from '@/lib/planificacion/objectiveServiceModel';
+import ObjectiveServiceAnalysisCard from '@/components/planificacion/ObjectiveServiceAnalysisCard';
 
 const IS_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
@@ -977,11 +978,46 @@ export default function AutoLabPage() {
 
                             {brain && staffing && feasibility ? (
                                 <div className="p-5 space-y-4">
+                                    <ObjectiveServiceAnalysisCard
+                                        analysis={
+                                            brain.serviceAnalysis
+                                            ?? buildObjectiveServiceAnalysis(
+                                                runResult?.positions ?? activeCase.positions,
+                                                brain.pickedCycle,
+                                            )
+                                        }
+                                    />
                                     <div className="grid grid-cols-2 gap-2 text-xs">
-                                        <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3">
-                                            <p className="font-black uppercase text-indigo-700 text-[10px]">Ciclo elegido</p>
-                                            <p className="font-black text-indigo-900 text-lg mt-1">{brain.pickedCycle}</p>
-                                        </div>
+                                        {(() => {
+                                            const sa = brain.serviceAnalysis
+                                                ?? buildObjectiveServiceAnalysis(
+                                                    runResult?.positions ?? activeCase.positions,
+                                                    brain.pickedCycle,
+                                                );
+                                            if (sa.kind === 'mixed') {
+                                                return (
+                                                    <div className="col-span-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                                                        <p className="font-black uppercase text-amber-800 text-[10px]">
+                                                            Ciclos (servicio mixto)
+                                                        </p>
+                                                        <p className="font-bold text-violet-900 text-sm mt-1">
+                                                            24 HS (M/T/N):{' '}
+                                                            <span className="font-black">{brain.pickedCycle}</span>
+                                                        </p>
+                                                        <p className="font-bold text-cyan-900 text-sm">
+                                                            Custom:{' '}
+                                                            <span className="font-black">{sa.cycleBlocks.custom}</span>
+                                                        </p>
+                                                    </div>
+                                                );
+                                            }
+                                            return (
+                                                <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3">
+                                                    <p className="font-black uppercase text-indigo-700 text-[10px]">Ciclo elegido</p>
+                                                    <p className="font-black text-indigo-900 text-lg mt-1">{brain.pickedCycle}</p>
+                                                </div>
+                                            );
+                                        })()}
                                         <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3">
                                             <p className="font-black uppercase text-emerald-700 text-[10px]">Plantilla</p>
                                             <p className="font-black text-emerald-900 text-lg mt-1">{staffing.plantillaTotal}</p>
@@ -990,9 +1026,25 @@ export default function AutoLabPage() {
                                             <p className="font-black uppercase text-slate-500 text-[10px]">Servicio/día (8h)</p>
                                             <p className="font-bold text-slate-800 mt-1">{staffing.servicioDiarioModo8}</p>
                                         </div>
-                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                            <p className="font-black uppercase text-slate-500 text-[10px]">Pool francos</p>
-                                            <p className="font-bold text-slate-800 mt-1">{staffing.poolFrancos}</p>
+                                        <div className="col-span-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-1">
+                                            <p className="font-black uppercase text-emerald-800 text-[10px]">Francos</p>
+                                            {brain.serviceAnalysis?.francoBudget ? (
+                                                <>
+                                                    <p className="text-[11px] font-bold text-violet-900">
+                                                        Rotación 24 HS:{' '}
+                                                        {brain.serviceAnalysis.francoBudget.rotation24hs.francosSimultaneosRotacion}{' '}
+                                                        F simultáneo(s) (1 por pax)
+                                                    </p>
+                                                    <p className="text-[11px] font-bold text-slate-800">
+                                                        Día pico: pool {brain.serviceAnalysis.francoBudget.poolFrancosDiaPico}{' '}
+                                                        <span className="font-normal text-slate-500">
+                                                            ({staffing.plantillaTotal} − {staffing.servicioDiarioModo8} servicio)
+                                                        </span>
+                                                    </p>
+                                                </>
+                                            ) : (
+                                                <p className="font-bold text-slate-800 mt-1">{staffing.poolFrancos}</p>
+                                            )}
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                                             <p className="font-black uppercase text-slate-500 text-[10px]">Rotación M→T→N</p>

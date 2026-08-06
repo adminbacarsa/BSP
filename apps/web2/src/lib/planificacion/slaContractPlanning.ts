@@ -9,6 +9,7 @@
 
 import type { PositionAssignment, ServiceRotation, ServiceRule } from '@/services/slaService';
 import { getRotationEntriesForDate } from './rotationUtils';
+import { applyRotationsForMonth, rotationAdditionsToSlaRotationByDate } from './slaRotationMonthPlanner';
 import { empCanCoverPositionShift } from './positionAssignmentPolicy';
 import type { V2EngineContext } from './autoScheduleEngineV2';
 
@@ -22,6 +23,38 @@ export type SlaRotationByDate = Record<string, Record<string, SlaRotationCell>>;
 export interface ApplySlaDotacionResult {
     fromSlaCobertura: number;
     fromSlaShift: number;
+}
+
+export function buildPositionAssignmentsByEmp(
+    positionAssignments?: PositionAssignment[] | null,
+): Record<string, Array<{ positionName: string; shiftCodes: string[] }>> | undefined {
+    if (!positionAssignments?.length) return undefined;
+    const result: Record<string, Array<{ positionName: string; shiftCodes: string[] }>> = {};
+    for (const row of positionAssignments) {
+        const empId = String(row.employeeId || '').trim();
+        if (!empId) continue;
+        // Vacío = «Sin restricciones» en Servicios (cualquier puesto/banda del SLA).
+        result[empId] = row.slots?.length
+            ? row.slots.map((s) => ({
+                positionName: String(s.positionName || '').trim(),
+                shiftCodes: (s.shiftCodes ?? []).map((c) => String(c).toUpperCase()),
+            }))
+            : [];
+    }
+    return Object.keys(result).length > 0 ? result : undefined;
+}
+
+export function normalizePositionNameKey(name: string): string {
+    return String(name || '').trim().toLowerCase();
+}
+
+export function slotsAllowPosition(
+    slots: Array<{ positionName: string; shiftCodes: string[] }> | undefined,
+    positionName: string,
+): boolean {
+    if (!slots?.length) return true;
+    const key = normalizePositionNameKey(positionName);
+    return slots.some((s) => normalizePositionNameKey(s.positionName) === key);
 }
 
 function primaryFromSlots(slots: PositionAssignment['slots']): { positionName: string; shiftCode?: string } | null {
@@ -66,12 +99,38 @@ export function applySlaContractDotacion(params: {
     return { fromSlaCobertura, fromSlaShift };
 }
 
-/** Mapa fecha → legajo → { puesto, banda } según rotaciones SLA activas. */
+/**
+ * Puesto fijo en roster: grilla planificador o un solo slot SLA (ej. Galli/Miranda solo Control).
+ * Multi-slot (Varas) o sin restricciones (Pozas) no bloquean el roster a un puesto.
+ */
+export function resolveRosterLockedPositions(params: {
+    plannerGridPositionByEmp?: Record<string, string>;
+    positionAssignmentsByEmp?: Record<string, Array<{ positionName: string; shiftCodes: string[] }>>;
+}): Record<string, string> {
+    const locked: Record<string, string> = {};
+    for (const [empId, pos] of Object.entries(params.plannerGridPositionByEmp ?? {})) {
+        const p = String(pos || '').trim();
+        if (p) locked[empId] = p;
+    }
+    for (const [empId, slots] of Object.entries(params.positionAssignmentsByEmp ?? {})) {
+        if (locked[empId]) continue;
+        if (slots.length === 1 && slots[0].positionName) {
+            locked[empId] = slots[0].positionName;
+        }
+    }
+    return locked;
+}
 export function buildSlaRotationByDate(
     rotations: ServiceRotation[] | undefined | null,
     dateStrs: string[],
+    positionStructure?: unknown[],
 ): SlaRotationByDate | undefined {
     if (!rotations?.length || dateStrs.length === 0) return undefined;
+    const first = dateStrs[0];
+    const [y, m] = first.split('-').map(Number);
+    const additions = applyRotationsForMonth(rotations, {}, {}, y, m - 1, positionStructure);
+    const fromPlanner = rotationAdditionsToSlaRotationByDate(additions, dateStrs);
+    if (fromPlanner) return fromPlanner;
     const out: SlaRotationByDate = {};
     for (const dateStr of dateStrs) {
         for (const rotation of rotations) {
@@ -130,7 +189,9 @@ export function slaRotationExpectedShift(
 ): string | null {
     const cell = ctx.slaRotationByDate?.[dateStr]?.[empId];
     if (!cell) return null;
-    if (cell.positionName !== positionName) return null;
+    const want = String(positionName || '').trim().toLowerCase();
+    const got = String(cell.positionName || '').trim().toLowerCase();
+    if (want && got && want !== got) return null;
     const code = String(cell.shiftCode || '').toUpperCase();
     return code || null;
 }

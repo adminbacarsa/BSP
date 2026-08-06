@@ -1,5 +1,6 @@
 import type { V2Assignment, V2PositionDef, V2ShiftDef } from './autoScheduleEngineV2';
 import { effectiveShiftsForPositionDay, isCustomCoverPosition, positionIsActiveOn } from './autoScheduleEngineV2';
+import { positionCoverageKind } from './positionCoverageKind';
 import { RET_STANDBY_REFERENCE_HOURS } from './constants';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
@@ -260,10 +261,17 @@ export function isPlannedCustomCoverRetAssignment(
 }
 
 /**
- * Pax en servicio simultáneo del puesto custom (lo que pide el SLA por día).
- * Con varias bandas (M + M2…), es qty × bandas en el mismo día operativo.
+ * Pax en servicio simultáneo del puesto custom (personas a la vez en el puesto).
+ * M+T+N cupos: qty guardias cubriendo bandas (no qty×bandas si qty ya es plantilla del puesto).
  */
 export function customCoverSimultaneousPax(pos: V2PositionDef): number {
+    if (positionCoverageKind(pos) === 'custom_concurrent_mtn') {
+        let peak = 0;
+        for (const day of ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const) {
+            peak = Math.max(peak, customCoverSlotsRequiredOnDay(pos, day));
+        }
+        return Math.max(1, peak);
+    }
     return customCoverDailyPax(pos) * customCoverDistinctBandCount(pos);
 }
 
@@ -308,6 +316,10 @@ export function customCoverSlotsRequiredOnDay(
     const qty = customCoverDailyPax(pos);
     const bands = customCoverBandsForDay(pos, dayLetter, autoCycles, dateStr);
     if (bands.length === 0) return 0;
+    if (positionCoverageKind(pos) === 'custom_concurrent_mtn') {
+        const perBand = Math.max(1, Math.ceil(qty / bands.length));
+        return bands.length * perBand;
+    }
     return qty * bands.length;
 }
 
@@ -405,6 +417,22 @@ export function pickBalancedCustomWorkers(
     const skipAt = absDayIndex % candidates.length;
     return candidates.filter((_, idx) => idx !== skipAt).slice(0, qty);
 }
+
+const POOL_CYCLE_MAP: Record<string, [number, number]> = {
+    '4+2': [4, 2],
+    '5+1': [5, 1],
+    '6+1': [6, 1],
+    '6+2': [6, 2],
+};
+
+/** Etiqueta operativa del patrón (ej. 5+1 → XXXXXF). */
+export function customPoolCyclePatternLabel(cycleKey: string): string {
+    const [work, rest] = POOL_CYCLE_MAP[cycleKey] ?? POOL_CYCLE_MAP['5+1'];
+    return `${'X'.repeat(work)}${rest > 0 ? 'F' : ''}`;
+}
+
+/** Francos escalonados por día operativo: dotación − cupos simultáneos. */
+export { francosPerOperationalDay, poolCycleOffsetForEmployee, buildPoolCycleOffsetByEmp, buildObjectivePoolCycleWorkDays, type BuildObjectivePoolCycleWorkDaysParams } from './poolCycleBootstrap';
 
 export function buildCustomCycleWorkDays(params: BuildCustomCycleWorkDaysParams): Set<string> {
     const set = new Set<string>();

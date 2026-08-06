@@ -508,6 +508,18 @@ export default function AutoLabResolutionGrid({
                         <span className="font-bold text-emerald-700">SLA cerrado</span>
                     </>
                 )}
+                {scheduleOutcome?.scheduleClosure && !scheduleOutcome.scheduleClosure.ok && (
+                    <>
+                        <span className="text-slate-500">·</span>
+                        <span
+                            className="inline-flex items-center gap-1 font-bold text-rose-700"
+                            title={scheduleOutcome.scheduleClosure.messages.join(' ')}
+                        >
+                            <AlertTriangle size={12} />
+                            Sin cierre SLA
+                        </span>
+                    </>
+                )}
             </div>
 
             <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap gap-2">

@@ -1,5 +1,9 @@
 import type { V2EngineContext } from './autoScheduleEngineV2';
 
+function normalizePositionNameKey(name: string): string {
+    return String(name || '').trim().toLowerCase();
+}
+
 const NON_WORK_CODES = new Set([
     'F', 'FF', 'FP', 'FT', 'RET', 'R',
     'V', 'L', 'E', 'A', 'PG', 'AA',
@@ -27,7 +31,8 @@ export function empCanCoverPositionShift(
     if (!map) return true;
     const slots = map[empId];
     if (!slots?.length) return true;
-    const slot = slots.find((s) => s.positionName === positionName);
+    const posKey = normalizePositionNameKey(positionName);
+    const slot = slots.find((s) => normalizePositionNameKey(s.positionName) === posKey);
     if (!slot) return false;
     if (!shiftCode) return true;
     const code = String(shiftCode || '').toUpperCase();

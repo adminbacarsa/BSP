@@ -12,9 +12,11 @@ import { isCustomCoverPosition } from './autoScheduleEngineV2';
 import {
     effectivePositionGroupNeed,
     isLabSyntheticEmpId,
+    isFullCustomObjectivePool,
 } from './objectiveHeadcount';
 import { is24hsPosition } from './scheduleObjectiveFlags';
 import { empMayJoinPositionRoster } from './slaContractPlanning';
+import { empHasPositionAssignmentRestriction } from './positionAssignmentPolicy';
 
 export type PositionScheduleKind = '24hs' | 'custom' | 'other';
 
@@ -53,6 +55,8 @@ export interface ResolveObjectiveRosterResult {
     /** Guardias asignados en fase virtual (sin defaultPositionByEmp previo). */
     virtualAssignmentCount: number;
     phasedByKind: boolean;
+    /** Puestos custom sin titular por restricción de cobertura SLA. */
+    rosterWarnings: string[];
 }
 
 function initEmptyGroups(positions: V2PositionDef[]): Record<string, string[]> {
@@ -118,6 +122,61 @@ function pickReinforcementPosition(
 
     tryPositions(positions);
     return target;
+}
+
+/**
+ * Custom pool (Shopping): cada puesto con cupo SLA debe tener titular(es) en el roster.
+ * Si cobertura de dotación no lista un legajo para Salon 1/2, etc., usa comodines sin restricción SLA.
+ */
+function ensureCustomPoolMinimumTitulars(params: {
+    positions: V2PositionDef[];
+    positionNeed: Record<string, number>;
+    positionGroups: Record<string, string[]>;
+    empAssignedTo: Record<string, string | null>;
+    sortedEmps: V2EmployeeDef[];
+    positionAssignmentsByEmp?: ResolveObjectiveRosterParams['positionAssignmentsByEmp'];
+}): string[] {
+    const warnings: string[] = [];
+    if (!isFullCustomObjectivePool(params.positions)) return warnings;
+
+    const rosterCtx = { positionAssignmentsByEmp: params.positionAssignmentsByEmp };
+
+    for (const pos of params.positions) {
+        if (!isCustomCoverPosition(pos)) continue;
+        const need = Math.max(1, params.positionNeed[pos.positionName] ?? 1);
+        const group = params.positionGroups[pos.positionName] ?? [];
+        let gap = need - group.length;
+        if (gap <= 0) continue;
+
+        const candidates = params.sortedEmps.filter((e) => {
+            if (group.includes(e.id)) return false;
+            const assignedPos = params.empAssignedTo[e.id];
+            if (assignedPos) return false;
+            return true;
+        });
+
+        while (gap > 0) {
+            const pick =
+                candidates.find((e) => empMayJoinPositionRoster(rosterCtx, e.id, pos.positionName))
+                ?? candidates.find((e) => !empHasPositionAssignmentRestriction(rosterCtx, e.id))
+                ?? candidates[0];
+
+            if (!pick) {
+                warnings.push(
+                    `«${pos.positionName}»: sin titular en roster (faltan ${gap}); revisá Cobertura de dotación en SLA.`,
+                );
+                break;
+            }
+
+            group.push(pick.id);
+            params.empAssignedTo[pick.id] = pos.positionName;
+            const idx = candidates.indexOf(pick);
+            if (idx >= 0) candidates.splice(idx, 1);
+            gap--;
+        }
+    }
+
+    return warnings;
 }
 
 /**
@@ -223,10 +282,20 @@ export function resolveObjectivePositionRoster(
         }
     }
 
+    const rosterWarnings = ensureCustomPoolMinimumTitulars({
+        positions,
+        positionNeed,
+        positionGroups,
+        empAssignedTo,
+        sortedEmps,
+        positionAssignmentsByEmp: params.positionAssignmentsByEmp,
+    });
+
     return {
         positionGroups,
         empAssignedTo,
         virtualAssignmentCount,
         phasedByKind,
+        rosterWarnings,
     };
 }

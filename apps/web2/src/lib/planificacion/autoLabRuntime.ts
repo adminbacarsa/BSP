@@ -5,10 +5,8 @@ import {
     type AutoPlanningBrainResult,
 } from './autoPlanningBrain';
 import {
-    checkFeasibility,
     type V2AbsenceMap,
     type V2EmployeeDef,
-    type V2PositionDef,
 } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
 import type { AutoLabScheduleOutcome } from './autoLabSchedule';
@@ -17,18 +15,11 @@ import {
     calculateSlaHoursForVigencia,
     getServiceDaysInMonth,
 } from './autoLabServicePeriod';
-import {
-    buildPositionRequiredHeadcountMap,
-    computeObjectiveRequiredHeadcount,
-    estimatePeopleFromContractHours,
-    computePositionRequiredHeadcount,
-    isLabPaddingEmpId,
-    isLabSyntheticEmpId,
-    isFullCustomObjectivePool,
-    computeCustomObjectivePoolHeadcount,
-} from './objectiveHeadcount';
 import { buildObjectiveScheduleProfile } from './objectiveServiceModel';
 import { buildRosterSurplusReport, type RosterSurplusReport } from './rosterSurplus';
+import { padPlanningRosterForAutoSchedule } from './planningPaddingProtocol';
+
+export { padPlanningRosterForAutoSchedule } from './planningPaddingProtocol';
 
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
@@ -58,153 +49,6 @@ export function buildSyntheticEmployees(count: number): V2EmployeeDef[] {
         id: `lab-emp-${String(i + 1).padStart(2, '0')}`,
         nombre: `Guardia ${String(i + 1).padStart(2, '0')}`,
     }));
-}
-
-function buildPaddingEmployees(
-    startLabel: number,
-    count: number,
-    occupiedIds: Set<string>,
-): V2EmployeeDef[] {
-    const out: V2EmployeeDef[] = [];
-    let n = startLabel;
-    while (out.length < count) {
-        const id = `lab-pad-${String(n).padStart(2, '0')}`;
-        n += 1;
-        if (occupiedIds.has(id)) continue;
-        occupiedIds.add(id);
-        out.push({
-            id,
-            nombre: `Guardia ${n - 1} (completar dotación)`,
-        });
-    }
-    return out;
-}
-
-/**
- * Completa la dotación con guardias sintéticos cuando la viabilidad marca déficit de
- * personas u horas. Auto-planificación: resolver, no solo alertar.
- */
-export function padPlanningRosterForAutoSchedule(params: {
-    positions: V2PositionDef[];
-    employees: V2EmployeeDef[];
-    daysInMonth: Date[];
-    slaVendidas: number;
-    absences: V2AbsenceMap;
-    empMonthlyInitial: Record<string, number>;
-    cycleKey?: string;
-    getDateKey: (d: Date) => string;
-    getDayLetter: (dateStr: string) => string;
-    maxPad?: number;
-}): { employees: V2EmployeeDef[]; added: V2EmployeeDef[]; warnings: string[] } {
-    const maxPad = params.maxPad ?? 24;
-    const cycleKey = params.cycleKey ?? '6+2';
-    const warnings: string[] = [];
-    let roster = [...params.employees];
-    const occupiedIds = new Set(roster.map((e) => e.id));
-    const added: V2EmployeeDef[] = [];
-
-    const staffing = computeDailyStaffingModel(params.positions, cycleKey, params.slaVendidas);
-    const minByPlantilla = staffing.plantillaTotal;
-
-    const empMonthlyInitialBase = { ...params.empMonthlyInitial };
-    const preFeas = checkFeasibility({
-        positions: params.positions,
-        employees: roster,
-        daysInMonth: params.daysInMonth,
-        empMonthlyInitial: empMonthlyInitialBase,
-        absences: params.absences,
-        slaVendidas: params.slaVendidas,
-        autoCycles: [cycleKey],
-        objectiveId: 'roster-pad-check',
-        getDateKey: params.getDateKey,
-        getDayLetter: params.getDayLetter,
-        budgetMode: 'cct',
-        headcountByPax: true,
-    });
-    const m0 = preFeas.metrics;
-    const structuralRow = m0.cycleComparison?.find((c) => c.cycleKey === cycleKey);
-    const structuralPeak = structuralRow?.structuralPeakPeople ?? 0;
-    const perPositionHeads = computeObjectiveRequiredHeadcount(params.positions, cycleKey);
-    const realCount = params.employees.filter((e) => !isLabPaddingEmpId(e.id)).length;
-    /** Plantilla del objetivo (4+4+2=10). Solo legajos reales; sin inflar por horas SLA. */
-    let structuralTarget = perPositionHeads;
-    if (isFullCustomObjectivePool(params.positions)) {
-        for (const ck of ['5+1', '6+2', '6+1', '4+2'] as const) {
-            const need = computeCustomObjectivePoolHeadcount(params.positions, ck);
-            if (realCount >= need) {
-                structuralTarget = need;
-                break;
-            }
-        }
-    }
-    let need = Math.max(0, structuralTarget - realCount);
-
-    if (need > 0) {
-        const batch = buildPaddingEmployees(
-            roster.length + 1,
-            Math.min(need, maxPad),
-            occupiedIds,
-        );
-        if (batch.length > 0) {
-            added.push(...batch);
-            roster = [...roster, ...batch];
-        }
-    }
-
-    // Segunda pasada solo si aún falta gente estructural (no por déficit de horas CCT).
-    if (added.length > 0 && added.length < maxPad) {
-        const empMonthlyInitial: Record<string, number> = {};
-        for (const emp of roster) {
-            empMonthlyInitial[emp.id] = params.empMonthlyInitial[emp.id] ?? 0;
-        }
-        const feas = checkFeasibility({
-            positions: params.positions,
-            employees: roster,
-            daysInMonth: params.daysInMonth,
-            empMonthlyInitial,
-            absences: params.absences,
-            slaVendidas: params.slaVendidas,
-            autoCycles: [cycleKey],
-            objectiveId: 'roster-pad-check',
-            getDateKey: params.getDateKey,
-            getDayLetter: params.getDayLetter,
-            budgetMode: 'cct',
-            headcountByPax: true,
-        });
-        const structuralAfter = computeObjectiveRequiredHeadcount(params.positions, cycleKey);
-        const peopleGap = Math.max(0, structuralAfter - realCount - added.length);
-        if (peopleGap > 0) {
-            const batch = buildPaddingEmployees(
-                roster.length + 1,
-                Math.min(peopleGap, maxPad - added.length),
-                occupiedIds,
-            );
-            added.push(...batch);
-            roster = [...roster, ...batch];
-        }
-    }
-
-    const hrsPerPerson = structuralRow?.hrsPerPerson ?? 180;
-    const hoursHeadcountHint = m0.peopleNeededByHoursEstimate ?? estimatePeopleFromContractHours(params.slaVendidas);
-    if (
-        roster.length >= structuralTarget
-        && hoursHeadcountHint > structuralTarget
-    ) {
-        warnings.push(
-            `Dotación estructural completa (${roster.length}/${structuralTarget} guardias: plantilla ${cycleKey}). `
-            + `Las horas vendidas del SLA (~${hoursHeadcountHint} personas si se reparten a ~192h) no inflan la dotación: `
-            + `se planifica por pax de puestos.`,
-        );
-    }
-
-    if (added.length > 0) {
-        warnings.push(
-            `Auto-planificación: se agregaron ${added.length} guardia(s) sintética(s) RET/sin turno `
-            + `(${params.employees.length} legajos → ${roster.length}; plantilla ${structuralTarget}, ciclo ${cycleKey}).`,
-        );
-    }
-
-    return { employees: roster, added, warnings };
 }
 
 function positionActiveOnDay(pos: AutoLabCaseDefinition['positions'][number], dayLetter: string): boolean {
@@ -375,6 +219,7 @@ export function runAutoLabCase(
         cycleKey,
         getDateKey: getAutoLabDateKey,
         getDayLetter: getAutoLabDayLetter,
+        objectiveId: options?.objectiveIdForBrain ?? `auto-lab-${caseDef.id}`,
     });
     const employees = padResult.employees;
     const fullEmpMonthlyInitial = {
@@ -527,8 +372,19 @@ export function buildAutoLabExportJson(
         schedule: gen
             ? {
                 pipeline: scheduleOutcome?.pipeline,
+                planningGeneration: scheduleOutcome?.planningRoute
+                    ? {
+                        serviceKind: scheduleOutcome.planningRoute.serviceKind,
+                        motorId: scheduleOutcome.planningRoute.motorId,
+                        labelEs: scheduleOutcome.planningRoute.labelEs,
+                        postProcessPipeline: scheduleOutcome.planningRoute.postProcessPipeline,
+                        reasons: scheduleOutcome.planningRoute.reasons,
+                    }
+                    : undefined,
                 totalBillableHours: gen.stats.totalBillableHours,
                 uncoveredSlots: gen.stats.uncoveredSlots,
+                scheduleClosureOk: scheduleOutcome?.scheduleClosure?.ok,
+                scheduleClosureMessages: scheduleOutcome?.scheduleClosure?.messages ?? [],
                 positionGroups,
                 primaryShiftByEmp: gen.stats.primaryShiftByEmp,
                 employeePositionMap: empPositionMap,

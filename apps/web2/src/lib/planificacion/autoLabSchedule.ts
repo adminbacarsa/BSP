@@ -1,12 +1,15 @@
 import type { AutoPlanningBrainResult } from './autoPlanningBrain';
-import { generateScheduleV4 } from './autoScheduleEngineV4';
 import type { V2EngineContext, V2GenerateResult, V2GenerateStats, V2PositionDef, V2EmployeeDef } from './autoScheduleEngineV2';
 import { applySlaContractPostProcess } from './autoScheduleEngineV2';
 import { buildSlaRotationByDate } from './slaContractPlanning';
 import { findPositionAssignmentViolations } from './positionAssignmentPolicy';
 import { isCustomCoverPosition, is24hsRotationPosition, normalize24hsPositionCalendars } from './autoScheduleEngineV2';
 import type { AutoLabCaseDefinition } from './autoLabCaseCatalog';
-import { canUseFixedBandFloater } from './fixedBandFloaterScheduleEngine';
+import { runPlanningGeneration, type PlanningGenerationRoute } from './planningGenerationRouter';
+import { objectiveIsMixedSchedule, objectiveIs24hsOnly } from './objectiveServiceModel';
+import { auditPure24hsBandCoverage, auditPure24hsTitularBandSpread } from './pure24hsBandAudit';
+import { isLabPaddingEmpId } from './objectiveHeadcount';
+import { reconcileScheduleToSlaTargets, expandSlaGapFillPool } from './slaScheduleReconciliation';
 import { verifyScheduleCoverage, type CoverageVerificationReport } from './coverageVerification';
 import { applyAbsenceCoverage, type CoverageGap } from './coverageEngine';
 import { applyAbsenceSplitCoverage, type AbsenceSplitAction } from './absenceSplitCoverage';
@@ -30,7 +33,6 @@ import { resolveOpeningSlotByEmpForPostProcess } from './openingSlotResolver';
 import { finalizeAutoLabSurplusSchedule, recomputeScheduleStatsFromAssignments } from './autoLabSurplusFinalize';
 import { applyBalancedLdNineHourRetCctTopUp, recomputeRetPotentialStats } from './customCoverCycle';
 import { resolveMonthStartGlobalDayIndex } from './surplusRetCycle';
-import { runStrictSixTwoPipeline } from './planningPipeline';
 import type { AutoLabRunResult } from './autoLabRuntime';
 import { getAutoLabDateKey, getAutoLabDayLetter } from './autoLabRuntime';
 import { enrichRosterSurplusWithSchedule, type RosterSurplusReport } from './rosterSurplus';
@@ -46,8 +48,28 @@ import {
 } from './coveragePolicyBalance';
 import { fillCustomGapsFromVolantes, type VolanteCoverageAction } from './volanteCustomCoverage';
 import type { SurplusAbsentSubstitutionAction } from './surplusAbsentSubstitution';
+import { evaluateScheduleClosure, type ScheduleClosureResult } from './scheduleClosureGate';
 
 export type AutoLabSchedulePipeline = 'none' | 'v4' | 'fixedBandFloater';
+
+function isAllCustomCoverObjective(ctx: V2EngineContext): boolean {
+    return ctx.positions.length > 0 && ctx.positions.every((p) => isCustomCoverPosition(p));
+}
+
+function appendGapFillToSubstitutionActions(
+    actions: CoverageGapFillAction[],
+    surplusSubActions: SurplusAbsentSubstitutionAction[],
+): void {
+    for (const g of actions) {
+        surplusSubActions.push({
+            dateStr: g.dateStr,
+            absentEmpId: '',
+            surplusEmpId: g.empId,
+            positionName: g.positionName,
+            band: g.band,
+        });
+    }
+}
 
 /** Excedente solo en custom (EN/RO): no desactivar parches RET del ciclo 24d. */
 function surplusPoolIsCustomTitularOnly(pool: string[], ctx: V2EngineContext): boolean {
@@ -79,6 +101,8 @@ function has24hsAbsenceCoverageNeed(ctx: V2EngineContext): boolean {
 
 export interface AutoLabScheduleOutcome {
     pipeline: AutoLabSchedulePipeline;
+    /** Tipo SLA + motor elegido (router único). */
+    planningRoute?: PlanningGenerationRoute;
     generation: V2GenerateResult | null;
     error?: string;
     coverageReport?: CoverageVerificationReport | null;
@@ -104,6 +128,8 @@ export interface AutoLabScheduleOutcome {
     cronogramValidationIssues?: import('./cronogramScheduleValidation').CronogramValidationIssue[];
     /** Contingencia manual inviable — no bloquea generación. */
     contingencyWarning?: string;
+    /** Cierre post-proceso: huecos SLA + horas vendidas. */
+    scheduleClosure?: ScheduleClosureResult;
 }
 
 import {
@@ -163,7 +189,10 @@ function buildMotorPositionByEmp(
 ): Record<string, string> {
     const map: Record<string, string> = {};
     for (const [posName, empIds] of Object.entries(stats.positionGroups || {})) {
-        for (const empId of empIds) map[empId] = posName;
+        for (const empId of empIds) {
+            if (isLabPaddingEmpId(empId)) continue;
+            map[empId] = posName;
+        }
     }
     return map;
 }
@@ -207,21 +236,34 @@ function postProcessAutoLabSchedule(
         defaultPositionByEmp: ctx.defaultPositionByEmp,
         absences: ctx.absences,
     };
-    const surplusPoolEarly = buildSurplusEmployeePool(
-        generation.stats,
-        ctx.employees.map((e) => e.id),
-        ctx.positions,
-        ctx.autoCycles?.[0] ?? '6+2',
-        plantillaTotal,
-        surplusPoolOptions,
-    );
+    const surplusPoolEarly = ctx.planningRoster24hs?.ok
+        ? [...ctx.planningRoster24hs.floaters]
+        : buildSurplusEmployeePool(
+            generation.stats,
+            ctx.employees.map((e) => e.id),
+            ctx.positions,
+            ctx.autoCycles?.[0] ?? '6+2',
+            plantillaTotal,
+            surplusPoolOptions,
+        );
     const classicRotationPipeline = pipeline === 'fixedBandFloater';
     const absenceOn24hs = has24hsAbsenceCoverageNeed(ctx);
+    const pure24hsOnly = objectiveIs24hsOnly(ctx.positions);
+    /** Sin ausencias: el floater ya cerró M/T/N; no parchear con excedente ni RET externo. */
+    const pure24RotativeBaseline = pure24hsOnly && !absenceOn24hs;
     const runSurplusGapPipeline = surplusPoolEarly.length > 0
-        && (!classicRotationPipeline || absenceOn24hs);
+        && !pure24RotativeBaseline
+        && (
+            !classicRotationPipeline
+            || absenceOn24hs
+            || objectiveIsMixedSchedule(ctx.positions)
+        );
     const surplusStandbyMode = surplusPoolEarly.length > 0
-        && (ctx.modo12Days?.length ?? 0) === 0
-        && !surplusPoolIsCustomTitularOnly(surplusPoolEarly, ctx);
+        && (pure24RotativeBaseline
+            || ((ctx.modo12Days?.length ?? 0) === 0
+                && !surplusPoolIsCustomTitularOnly(surplusPoolEarly, ctx)
+                && !isAllCustomCoverObjective(ctx)
+                && !objectiveIsMixedSchedule(ctx.positions)));
 
     if (
         pipeline === 'fixedBandFloater'
@@ -431,15 +473,7 @@ function postProcessAutoLabSchedule(
             });
             assignments = slaPos.assignments;
             coverageGapFillActions.push(...slaPos.actions);
-            for (const g of slaPos.actions) {
-                surplusSubActions.push({
-                    dateStr: g.dateStr,
-                    absentEmpId: '',
-                    surplusEmpId: g.empId,
-                    positionName: g.positionName,
-                    band: g.band,
-                });
-            }
+            appendGapFillToSubstitutionActions(slaPos.actions, surplusSubActions);
 
             const repairPos = repairCoverageOverstaffFromSurplus({
                 assignments,
@@ -480,15 +514,7 @@ function postProcessAutoLabSchedule(
         });
         assignments = globalGaps.assignments;
         coverageGapFillActions.push(...globalGaps.actions);
-        for (const g of globalGaps.actions) {
-            surplusSubActions.push({
-                dateStr: g.dateStr,
-                absentEmpId: '',
-                surplusEmpId: g.empId,
-                positionName: g.positionName,
-                band: g.band,
-            });
-        }
+        appendGapFillToSubstitutionActions(globalGaps.actions, surplusSubActions);
     }
 
     assignments = finalizeAutoLabSurplusSchedule({
@@ -521,6 +547,7 @@ function postProcessAutoLabSchedule(
             });
             assignments = lastGap.assignments;
             coverageGapFillActions.push(...lastGap.actions);
+            appendGapFillToSubstitutionActions(lastGap.actions, surplusSubActions);
 
             assignments = finalizeAutoLabSurplusSchedule({
                 assignments,
@@ -559,6 +586,7 @@ function postProcessAutoLabSchedule(
             });
             assignments = lastGap.assignments;
             coverageGapFillActions.push(...lastGap.actions);
+            appendGapFillToSubstitutionActions(lastGap.actions, surplusSubActions);
 
             assignments = finalizeAutoLabSurplusSchedule({
                 assignments,
@@ -571,7 +599,7 @@ function postProcessAutoLabSchedule(
 
             coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
         }
-        if (!coveragePolicyBalance.ok && coveragePolicyBalance.underSlotCount > 0) {
+        if (!coveragePolicyBalance.ok && coveragePolicyBalance.underSlotCount > 0 && !pure24RotativeBaseline) {
             const residualExt = applyResidualExternalRetForGaps({
                 assignments,
                 ctx,
@@ -587,6 +615,41 @@ function postProcessAutoLabSchedule(
         }
     }
 
+    if (surplusPool.length > 0 && runSurplusGapPipeline) {
+        const closureCtx: V2EngineContext = {
+            ...extendedCtx,
+            modo12Days: modo12DaysForCoverage,
+            apretarCronoDays: modo12DaysForCoverage,
+        };
+        const MAX_CLOSURE_PASSES = 4;
+        for (let pass = 0; pass < MAX_CLOSURE_PASSES; pass++) {
+            let balanceProbe = analyzeCoveragePolicyBalance(closureCtx, assignments, {
+                inferModo12TCoverage: true,
+            });
+            if (balanceProbe.ok || balanceProbe.underSlotCount <= 0) break;
+
+            const gapPass = fillCoverageGapsFromSurplusPool({
+                assignments,
+                ctx: closureCtx,
+                surplusPool,
+                stats: statsWithSurplus,
+            });
+            if (gapPass.actions.length === 0) break;
+            assignments = gapPass.assignments;
+            coverageGapFillActions.push(...gapPass.actions);
+            appendGapFillToSubstitutionActions(gapPass.actions, surplusSubActions);
+
+            assignments = finalizeAutoLabSurplusSchedule({
+                assignments,
+                ctx,
+                surplusPool,
+                substitutionActions: surplusSubActions,
+                openingSlotByEmp,
+                positionGroups: statsWithSurplus.positionGroups,
+            });
+        }
+    }
+
     assignments = applyServiceExcludedDays(assignments, ctx);
 
     const retTopUp = applyBalancedLdNineHourRetCctTopUp({
@@ -597,11 +660,23 @@ function postProcessAutoLabSchedule(
     });
     const retStats = recomputeRetPotentialStats(assignments);
 
-    const coverageCtx: V2EngineContext = {
+    const coverageCtxPre: V2EngineContext = {
         ...extendedCtx,
         modo12Days: modo12DaysForCoverage,
         apretarCronoDays: modo12DaysForCoverage,
     };
+
+    const slaReconcile = reconcileScheduleToSlaTargets({
+        ctx: coverageCtxPre,
+        assignments,
+        stats: statsWithSurplus,
+        surplusPool: expandSlaGapFillPool(coverageCtxPre, statsWithSurplus, surplusPool),
+        maxRounds: 8,
+        rotativeSafe: ctx.preserveRotativeIntegrity === true,
+    });
+    assignments = slaReconcile.assignments;
+
+    const coverageCtx: V2EngineContext = coverageCtxPre;
 
     coveragePolicyBalance = analyzeCoveragePolicyBalance(coverageCtx, assignments, {
         inferModo12TCoverage: true,
@@ -649,6 +724,23 @@ function postProcessAutoLabSchedule(
     const positionAssignmentViolations = findPositionAssignmentViolations(ctx, assignments);
     const cronogramValidationIssues = validateScheduleAgainstCronogramRules(ctx, assignments);
 
+    const bandAudit = objectiveIs24hsOnly(ctx.positions)
+        ? auditPure24hsBandCoverage(ctx, assignments)
+        : null;
+    const rotationAudit = objectiveIs24hsOnly(ctx.positions)
+        ? auditPure24hsTitularBandSpread(
+            ctx,
+            assignments,
+            generation.stats.positionGroups,
+            generation.stats.openingSlotByEmp,
+        )
+        : null;
+
+    const scheduleClosure = evaluateScheduleClosure(coverageReport, coveragePolicyBalance, {
+        bandAudit,
+        rotationAudit,
+    });
+
     return {
         generation: {
             ...generation,
@@ -671,10 +763,11 @@ function postProcessAutoLabSchedule(
                     : generation.stats.idleEmployeeIds,
                 uncoveredSlotsByDay,
                 uncoveredSlots,
-                slaHoursClosed: coveragePolicyBalance.ok,
+                slaHoursClosed: scheduleClosure.ok,
             },
         },
         coverageReport,
+        scheduleClosure,
         absenceCoverageGaps,
         absenceSplitActions: split.actions,
         surplusSubstitutionActions: surplusSubActions,
@@ -721,14 +814,12 @@ export function buildAutoLabGenContext(
         daysInMonth: run.daysInMonth,
     } as V2EngineContext);
     const monthDateStrs = run.daysInMonth.map((d) => getAutoLabDateKey(d));
-    const slaRotationByDate = buildSlaRotationByDate(caseDef.serviceRotations, monthDateStrs);
+    const slaRotationByDate = buildSlaRotationByDate(caseDef.serviceRotations, monthDateStrs, run.positions);
     return {
         positions: normalize24hsPositionCalendars(run.positions),
         employees: run.employees.map((e) => ({
             ...e,
-            preferredObjectiveId: e.preferredObjectiveId?.trim()
-                ? e.preferredObjectiveId
-                : run.objectiveId,
+            preferredObjectiveId: run.objectiveId,
         })),
         daysInMonth: run.daysInMonth,
         calendarDaysInMonth: run.calendarDaysInVigencia,
@@ -767,6 +858,22 @@ export function buildAutoLabGenContext(
         ...(caseDef.serviceRules?.length ? { serviceRules: caseDef.serviceRules } : {}),
         ...(caseDef.serviceRotations?.length ? { serviceRotations: caseDef.serviceRotations } : {}),
         ...(slaRotationByDate ? { slaRotationByDate } : {}),
+        ...(caseDef.prevMonthTrailingWorkDays
+            ? { prevMonthTrailingWorkDays: caseDef.prevMonthTrailingWorkDays }
+            : {}),
+        ...(caseDef.prevMonthTrailingRestDays
+            ? { prevMonthTrailingRestDays: caseDef.prevMonthTrailingRestDays }
+            : {}),
+        ...(caseDef.prevMonthLastShiftByEmp
+            ? { prevMonthLastShiftByEmp: caseDef.prevMonthLastShiftByEmp }
+            : {}),
+        ...(caseDef.prevMonthLastWorkBandBeforeRest
+            ? { prevMonthLastWorkBandBeforeRest: caseDef.prevMonthLastWorkBandBeforeRest }
+            : {}),
+        ...(caseDef.poolCycleStartDate ? { poolCycleStartDate: caseDef.poolCycleStartDate } : {}),
+        ...(caseDef.poolCycleAnchorByEmp
+            ? { poolCycleAnchorByEmp: caseDef.poolCycleAnchorByEmp }
+            : {}),
     };
 }
 
@@ -779,40 +886,43 @@ export function generateAutoLabSchedule(
 
     // Igual que Planificación real: déficit de horas/dotación no bloquea la generación.
     // Contingencia no viable → aviso en cerebro; el motor sigue y deja huecos/RET en post-proceso.
-    const contingencyWarning = !brain.contingencyOk
+    let contingencyWarning = !brain.contingencyOk
         ? (brain.contingencyMessages[0] || 'Contingencia manual no viable con la dotación actual.')
         : undefined;
 
     const ctx = buildAutoLabGenContext(caseDef, run, brain);
 
     try {
-        const bypassFloater = shouldBypassFixedBandFloater(run.positions);
-        const useFixedBandFloater = canUseFixedBandFloater(ctx) && !bypassFloater;
-        if (useFixedBandFloater) {
-            const piped = runStrictSixTwoPipeline({
-                ...ctx,
-                rotateShifts: false,
-                demandDriven: false,
-            });
-            const post = postProcessAutoLabSchedule(ctx, 'fixedBandFloater', piped.generation, plantillaTotal);
-            const rosterSurplus = enrichRosterSurplusWithSchedule(run.rosterSurplus, {
-                employees: run.employees,
-                stats: post.generation!.stats,
-                assignments: post.generation!.assignments,
-                ctx,
-            });
-            return { pipeline: 'fixedBandFloater', ...post, rosterSurplus, contingencyWarning };
+        const runGen = runPlanningGeneration(ctx, {
+            strictSixTwo: brain.strictSixTwo === true,
+        });
+        if (runGen.prepareWarnings.length > 0) {
+            contingencyWarning = contingencyWarning
+                ? `${contingencyWarning} ${runGen.prepareWarnings.join(' ')}`
+                : runGen.prepareWarnings.join(' ');
         }
 
-        const generation = generateScheduleV4(ctx);
-        const post = postProcessAutoLabSchedule(ctx, 'v4', generation, plantillaTotal);
+        const postPipeline: AutoLabSchedulePipeline =
+            runGen.route.postProcessPipeline === 'fixedBandFloater' ? 'fixedBandFloater' : 'v4';
+        const post = postProcessAutoLabSchedule(
+            runGen.genCtx,
+            postPipeline,
+            runGen.generation,
+            plantillaTotal,
+        );
         const rosterSurplus = enrichRosterSurplusWithSchedule(run.rosterSurplus, {
             employees: run.employees,
             stats: post.generation!.stats,
             assignments: post.generation!.assignments,
-            ctx,
+            ctx: runGen.genCtx,
         });
-        return { pipeline: 'v4', ...post, rosterSurplus, contingencyWarning };
+        return {
+            pipeline: postPipeline,
+            planningRoute: runGen.route,
+            ...post,
+            rosterSurplus,
+            contingencyWarning,
+        };
     } catch (err) {
         return {
             pipeline: 'none',

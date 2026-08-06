@@ -21,7 +21,12 @@ import { buildObjectiveScheduleProfile } from './objectiveServiceModel';
 import { normalizeCoverageTypeFromSla, summarizeObjectiveCoverage, type ObjectiveCoverageSummary } from './positionCoverageKind';
 import { customCoverSimultaneousPax } from './customCoverCycle';
 import { computeObjectiveRequiredHeadcount } from './objectiveHeadcount';
-import { fetchPlanningMonthAbsences, fetchPlanningMonthShifts } from './loadPlanningMonthShifts';
+import { fetchPlanningMonthAbsences, fetchPlanningMonthShifts, previousCalendarMonth } from './loadPlanningMonthShifts';
+import {
+    buildShiftTrailByEmpFromCells,
+    computePrevMonthCycleTrailing,
+    defaultCalendarDateKey,
+} from './prevMonthCycleTrailing';
 import {
     DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
     fetchCoverageWisdomHistory,
@@ -32,8 +37,12 @@ import {
     dotacionValidationSummaryEs,
 } from './plannerDotacionValidator';
 import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
-import { applySlaContractDotacion, assessSlaContractReadiness } from './slaContractPlanning';
+import { applySlaContractDotacion, assessSlaContractReadiness, buildPositionAssignmentsByEmp } from './slaContractPlanning';
 import { cronogramSlaRuleWarnings, resolveCronogramPlanningRules } from './cronogramPlanningRules';
+import {
+    extractPoolCycleAnchorsFromRotations,
+    resolvePoolCycleStartDate,
+} from './poolCycleBootstrap';
 import { computeObjectiveHeadcountBalance } from './rosterHeadcountBalance';
 
 export const AUTO_LAB_REAL_CASE_ID = 'case-real-service';
@@ -43,17 +52,6 @@ function explicitCoverageTypeFromRow(raw: string | undefined): '24hs' | 'custom'
     if (cov === '24hs' || cov === '24' || cov === '24h') return '24hs';
     if (cov === 'custom') return 'custom';
     return null;
-}
-
-function buildPositionAssignmentsByEmp(
-    assignments?: import('@/services/slaService').PositionAssignment[],
-): Record<string, Array<{ positionName: string; shiftCodes: string[] }>> | undefined {
-    if (!assignments?.length) return undefined;
-    const result: Record<string, Array<{ positionName: string; shiftCodes: string[] }>> = {};
-    for (const a of assignments) {
-        if (a.slots?.length) result[a.employeeId] = a.slots;
-    }
-    return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export type AutoLabSlaOptionalFeatureState = 'off' | 'active' | 'on_empty';
@@ -488,6 +486,47 @@ export async function loadAutoLabRealServiceBundle(params: {
         warnings.push(`${absenceInTurnos} celda(s) con código de ausencia en turnos — el motor las usará si están en absencesByDate al armar el caso.`);
     }
 
+    let prevMonthTrailingWorkDays: Record<string, number> | undefined;
+    let prevMonthTrailingRestDays: Record<string, number> | undefined;
+    let prevMonthLastShiftByEmp: Record<string, string> | undefined;
+    let prevMonthLastWorkBandBeforeRest: Record<string, string> | undefined;
+    try {
+        const { year: prevY, month: prevM } = previousCalendarMonth(year, month);
+        const prevTrailCells = await fetchPlanningMonthShifts({
+            empresaId,
+            objectiveId: objective.objectiveId,
+            year: prevY,
+            month: prevM,
+            scopeEmpresa,
+            migracionCompleta,
+        });
+        const prevMonthEndDate = new Date(year, month - 1, 0);
+        const prevTrailByEmp = buildShiftTrailByEmpFromCells(prevTrailCells, objective.objectiveId);
+        const trailing = computePrevMonthCycleTrailing({
+            employeeIds: employees.map((e) => e.id),
+            prevTrailByEmp,
+            prevMonthEndDate,
+            getDateKey: defaultCalendarDateKey,
+        });
+        if (
+            Object.keys(trailing.prevMonthTrailingWorkDays).length > 0
+            || Object.keys(trailing.prevMonthTrailingRestDays).length > 0
+        ) {
+            prevMonthTrailingWorkDays = trailing.prevMonthTrailingWorkDays;
+            prevMonthTrailingRestDays = trailing.prevMonthTrailingRestDays;
+            prevMonthLastShiftByEmp = trailing.prevMonthLastShiftByEmp;
+            prevMonthLastWorkBandBeforeRest = trailing.prevMonthLastWorkBandBeforeRest;
+            warnings.push(
+                `Ciclo: semilla desde ${prevM}/${prevY} publicado (${new Set([
+                    ...Object.keys(trailing.prevMonthTrailingWorkDays),
+                    ...Object.keys(trailing.prevMonthTrailingRestDays),
+                ]).size} legajo(s) con racha al cierre).`,
+            );
+        }
+    } catch {
+        warnings.push('No se pudo leer turnos del mes anterior para semilla de ciclo — offsets distribuidos.');
+    }
+
     let slaVendidas = 0;
     if (serviceStart && serviceEnd) {
         slaVendidas = resolvePlanningMonthSlaHours(srv, year, month - 1);
@@ -498,6 +537,14 @@ export async function loadAutoLabRealServiceBundle(params: {
             `SLA vendidas: sin desglose para ${year}-${String(month).padStart(2, '0')}; se usa totalMonthlyHours (${slaVendidas} h).`,
         );
     }
+
+    const monthFirstDay = `${year}-${String(month).padStart(2, '0')}-01`;
+    const poolCycleStartDate = resolvePoolCycleStartDate(
+        srv.serviceRotations,
+        serviceStart || monthFirstDay,
+        monthFirstDay,
+    );
+    const poolCycleAnchorByEmp = extractPoolCycleAnchorsFromRotations(srv.serviceRotations);
 
     const caseDef: AutoLabCaseDefinition = {
         id: AUTO_LAB_REAL_CASE_ID,
@@ -530,6 +577,18 @@ export async function loadAutoLabRealServiceBundle(params: {
         positionAssignmentsByEmp: buildPositionAssignmentsByEmp(srv.positionAssignments),
         serviceRules: srv.serviceRules?.length ? srv.serviceRules : undefined,
         serviceRotations: srv.serviceRotations?.length ? srv.serviceRotations : undefined,
+        ...(prevMonthTrailingWorkDays || prevMonthTrailingRestDays
+            ? {
+                prevMonthTrailingWorkDays,
+                prevMonthTrailingRestDays,
+                prevMonthLastShiftByEmp,
+                prevMonthLastWorkBandBeforeRest,
+            }
+            : {}),
+        poolCycleStartDate,
+        ...(Object.keys(poolCycleAnchorByEmp).length > 0
+            ? { poolCycleAnchorByEmp }
+            : {}),
     };
 
     return {

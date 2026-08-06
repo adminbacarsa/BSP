@@ -21,6 +21,7 @@ import {
 import { assignmentBreaksBandTransition } from './rotativeBandGuard';
 import { isCustomCoverTitular, francoCodeForPositionDay, buildCustomWeekendRestOptions, customCoverSimultaneousPax } from './customCoverCycle';
 import { CYCLE_24_MTN } from './rotativeMtnCycle';
+import { isLabPaddingEmpId } from './objectiveHeadcount';
 
 export { CYCLE_24_MTN, CYCLE_24_MTN_LEN } from './rotativeMtnCycle';
 
@@ -137,6 +138,16 @@ function positionCapacity(pos: V2PositionDef): number {
     return qty;
 }
 
+/** Reales primero; lab-pad nunca como titular del cuarteto/ciclo 24d. */
+function sortIdsRealBeforePadding(ids: string[]): string[] {
+    return [...ids].sort((a, b) => {
+        const padA = isLabPaddingEmpId(a) ? 1 : 0;
+        const padB = isLabPaddingEmpId(b) ? 1 : 0;
+        if (padA !== padB) return padA - padB;
+        return a.localeCompare(b);
+    });
+}
+
 function shiftMeta(pos: V2PositionDef, code: string): Pick<V2Assignment, 'name' | 'hours' | 'startTime' | 'endTime'> {
     const upper = code.toUpperCase();
     const sh = (pos.shifts || []).find(s => String(s.code || '').toUpperCase() === upper);
@@ -195,7 +206,9 @@ function buildPositionGroups(ctx: V2EngineContext): Record<string, string[]> {
     const unassigned: string[] = [];
     for (const emp of ctx.employees) {
         // EXT / huéspedes → idle siempre.
-        if (ctx.objectiveId && emp.preferredObjectiveId !== ctx.objectiveId) continue;
+        if (ctx.objectiveId && emp.preferredObjectiveId
+            && emp.preferredObjectiveId !== ctx.objectiveId) continue;
+        if (isLabPaddingEmpId(emp.id)) continue;
         const fixed = resolveFixedPosition(emp.id);
         if (fixed) {
             positionGroups[fixed].push(emp.id);
@@ -249,6 +262,118 @@ function neededCountFor24hPos(pos: V2PositionDef): number {
     const codes = (pos.shifts || []).map(s => String(s.code || '').toUpperCase());
     const only12h = codes.length > 0 && codes.every(c => BANDS_12H.has(c));
     return qty * (only12h ? 3 : 4);
+}
+
+/** Recorta grupos al cupo estructural (qty×4 o ×3); excedentes → surplus (RET en motor). */
+function trim24hsPositionGroupsToNeed(
+    ctx: V2EngineContext,
+    groups: Record<string, string[]>,
+): { groups: Record<string, string[]>; surplusIds: string[] } {
+    const out: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(groups)) out[k] = [...v];
+    const surplusIds: string[] = [];
+    for (const pos of ctx.positions) {
+        if (!is24hs(pos)) continue;
+        if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) continue;
+        const need = neededCountFor24hPos(pos);
+        const g = out[pos.positionName] || [];
+        while (g.length > need) {
+            const padIdx = g.findIndex((id) => isLabPaddingEmpId(id));
+            const withoutCont = g.findIndex(
+                (id) => !ctx.prevMonthLastShiftByEmp?.[id]
+                    && ctx.prevMonthOpeningSlotByEmp?.[id] === undefined,
+            );
+            const idx = padIdx >= 0
+                ? padIdx
+                : withoutCont >= 0
+                    ? withoutCont
+                    : g.length - 1;
+            const [extra] = g.splice(idx, 1);
+            surplusIds.push(extra);
+        }
+        out[pos.positionName] = g;
+    }
+    return { groups: out, surplusIds };
+}
+
+function billableBandCount(
+    assignments: V2Assignment[],
+    posName: string,
+    dateStr: string,
+    band: string,
+): number {
+    return assignments.filter(
+        (a) => a.positionName === posName
+            && a.dateStr === dateStr
+            && a.code === band
+            && (a.hours ?? 0) > 0,
+    ).length;
+}
+
+/** Nunca más de `qty` facturables por banda y día en el mismo puesto (pax SLA). */
+function enforceDailyBandQuota(
+    ctx: V2EngineContext,
+    assignments: V2Assignment[],
+    employeeMonthlyHours: Record<string, number>,
+    employeeCycleHours: { current: Record<string, number>; next: Record<string, number> },
+    cutoffDay: number,
+): void {
+    for (const pos of ctx.positions) {
+        if (!is24hs(pos)) continue;
+        const posName = pos.positionName;
+        const qty = Math.max(1, Number(pos.qty) || 1);
+        const bands = ['M', 'T', 'N'] as const;
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            const inCurrent = day.getDate() <= cutoffDay;
+            for (const band of bands) {
+                for (;;) {
+                    const hits = assignments
+                        .map((a, i) => ({ a, i }))
+                        .filter(({ a }) => a.positionName === posName
+                            && a.dateStr === dateStr
+                            && a.code === band
+                            && (a.hours ?? 0) > 0);
+                    if (hits.length <= qty) break;
+                    hits.sort((x, y) => {
+                        const padX = isLabPaddingEmpId(x.a.empId) ? 1 : 0;
+                        const padY = isLabPaddingEmpId(y.a.empId) ? 1 : 0;
+                        if (padX !== padY) return padY - padX;
+                        const fixX = ctx.defaultShiftByEmp?.[x.a.empId]?.toUpperCase() === band ? 1 : 0;
+                        const fixY = ctx.defaultShiftByEmp?.[y.a.empId]?.toUpperCase() === band ? 1 : 0;
+                        if (fixX !== fixY) return fixY - fixX;
+                        return y.a.empId.localeCompare(x.a.empId);
+                    });
+                    const demote = hits[hits.length - 1]!;
+                    const oldH = Number(demote.a.hours) || 0;
+                    assignments[demote.i] = {
+                        empId: demote.a.empId,
+                        dateStr,
+                        positionName: '',
+                        code: 'RET',
+                        name: 'Retén',
+                        hours: 0,
+                        startTime: '00:00',
+                    };
+                    employeeMonthlyHours[demote.a.empId] = Math.max(
+                        0,
+                        (employeeMonthlyHours[demote.a.empId] || 0) - oldH,
+                    );
+                    if (inCurrent) {
+                        employeeCycleHours.current[demote.a.empId] = Math.max(
+                            0,
+                            (employeeCycleHours.current[demote.a.empId] || 0) - oldH,
+                        );
+                    } else {
+                        employeeCycleHours.next[demote.a.empId] = Math.max(
+                            0,
+                            (employeeCycleHours.next[demote.a.empId] || 0) - oldH,
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -326,9 +451,8 @@ function buildSubgroupsFor24hs(
 ): { subgroups: string[][]; strandedIds: string[]; subgroupMeta: Array<{ puesteName: string; indexWithinPuesto: number }> } {
     const result: string[][] = [];
     const subgroupMeta: Array<{ puesteName: string; indexWithinPuesto: number }> = [];
-    // Empleados de puestos 24hs con dotación insuficiente para armar subgrupo completo.
-    // Se redistribuyen como flotantes al final, en vez de quedar idle.
-    const stranded: string[] = [];
+    const insufficientPool: string[] = [];
+    const overflowIds: string[] = [];
     for (const [posName, groupIds] of Object.entries(positionGroups)) {
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos || !is24hs(pos)) continue;
@@ -337,28 +461,39 @@ function buildSubgroupsFor24hs(
         const codes = (pos.shifts || []).map(s => String(s.code || '').toUpperCase());
         const only12h = codes.length > 0 && codes.every(c => BANDS_12H.has(c));
         const subgroupSize = only12h ? 3 : 4; // 4+2 → 3 emp/subgrupo; 6+2 → 4 emp/subgrupo
-        const subgroupCount = Math.min(qty, Math.floor(groupIds.length / subgroupSize));
+        const orderedIds = sortIdsRealBeforePadding(groupIds);
+        const rotationTitulars = orderedIds.filter((id) => !isLabPaddingEmpId(id));
+        let subgroupCount = Math.min(qty, Math.floor(rotationTitulars.length / subgroupSize));
+        if (subgroupCount === 0 && rotationTitulars.length >= Math.min(3, subgroupSize) && qty >= 1) {
+            subgroupCount = Math.min(qty, 1);
+        }
         if (subgroupCount === 0) {
-            // Insuficientes para subgrupo propio → redistribuir como flotantes
-            stranded.push(...groupIds);
+            insufficientPool.push(...rotationTitulars);
+            overflowIds.push(...orderedIds.filter((id) => isLabPaddingEmpId(id)));
             continue;
         }
-        // Subgrupos de N regulares según ciclo
+        // Subgrupos de N regulares según ciclo (sin lab-pad en cuarteto)
         const subs: string[][] = [];
         for (let i = 0; i < subgroupCount; i++) {
-            subs.push(groupIds.slice(i * subgroupSize, i * subgroupSize + subgroupSize));
+            subs.push(rotationTitulars.slice(i * subgroupSize, i * subgroupSize + subgroupSize));
         }
-        // Sobrantes → flotantes en round-robin
-        const floaters = groupIds.slice(subgroupCount * subgroupSize);
-        floaters.forEach((id, fi) => { subs[fi % subs.length].push(id); });
+        const floaters = [
+            ...rotationTitulars.slice(subgroupCount * subgroupSize),
+            ...orderedIds.filter((id) => isLabPaddingEmpId(id)),
+        ];
+        overflowIds.push(...floaters);
         result.push(...subs);
         subs.forEach((_, i) => subgroupMeta.push({ puesteName: posName, indexWithinPuesto: i }));
     }
-    // Redistribuir stranded como flotantes extra en los subgrupos existentes
-    if (stranded.length > 0 && result.length > 0) {
-        stranded.forEach((id, i) => { result[i % result.length].push(id); });
+    if (insufficientPool.length > 0 && result.length > 0) {
+        // No inflar cuartetos: sobrantes quedan en stranded (RET), no como 5.º titular.
+        overflowIds.push(...insufficientPool);
     }
-    return { subgroups: result, strandedIds: stranded, subgroupMeta };
+    return {
+        subgroups: result,
+        strandedIds: [...overflowIds],
+        subgroupMeta,
+    };
 }
 
 // Cold-starts POR SUBGRUPO con deduplicación POR ZONA de banda.
@@ -705,14 +840,41 @@ function patchRetForAbsences(
 }
 
 export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2GenerateResult {
-    const rawPositionGroups = buildPositionGroups(ctx);
-    // Corregir asignaciones incorrectas: mover excedentes de puestos sobre-dotados a sub-dotados
-    const { groups: positionGroups, relocatedIds } = rebalance24hPositionGroups(ctx, rawPositionGroups);
+    const rosterPlan = ctx.planningRoster24hs;
+    let rawPositionGroups: Record<string, string[]>;
+    let relocatedIds: string[] = [];
+
+    if (rosterPlan?.ok) {
+        rawPositionGroups = {};
+        for (const [k, v] of Object.entries(rosterPlan.positionGroups)) {
+            rawPositionGroups[k] = [...v];
+        }
+        relocatedIds = [...rosterPlan.relocatedEmpIds];
+    } else {
+        rawPositionGroups = buildPositionGroups(ctx);
+        const rebalanced = rebalance24hPositionGroups(ctx, rawPositionGroups);
+        rawPositionGroups = rebalanced.groups;
+        relocatedIds = rebalanced.relocatedIds;
+    }
+    const positionGroups = rawPositionGroups;
+    const trimmed = trim24hsPositionGroupsToNeed(ctx, positionGroups);
+    const structuralSurplusIds = trimmed.surplusIds;
+    const positionGroupsTrimmed = trimmed.groups;
+    const labPadStranded: string[] = [];
+    for (const posName of Object.keys(positionGroupsTrimmed)) {
+        const kept: string[] = [];
+        for (const id of positionGroupsTrimmed[posName] || []) {
+            if (isLabPaddingEmpId(id)) labPadStranded.push(id);
+            else kept.push(id);
+        }
+        positionGroupsTrimmed[posName] = kept;
+    }
     // Subgrupos independientes por slot concurrente (qty>1 → N subgrupos de 4-5 c/u)
-    const { subgroups, strandedIds, subgroupMeta } = buildSubgroupsFor24hs(ctx, positionGroups);
+    const { subgroups, strandedIds, subgroupMeta } = buildSubgroupsFor24hs(ctx, positionGroupsTrimmed);
+    const allStranded = [...new Set([...strandedIds, ...structuralSurplusIds, ...labPadStranded])];
     // empToPosition: usado para L-V y patchRetForAbsences
     const empToPosition: Record<string, string> = {};
-    for (const [posName, ids] of Object.entries(positionGroups)) {
+    for (const [posName, ids] of Object.entries(positionGroupsTrimmed)) {
         ids.forEach(id => { empToPosition[id] = posName; });
     }
     const openingSlotByEmp = resolveOpeningSlotByEmp(ctx, subgroups, subgroupMeta);
@@ -805,7 +967,7 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                     if (inCurrent) employeeCycleHours.current[emp.id] = (employeeCycleHours.current[emp.id] || 0) + meta.hours;
                     else employeeCycleHours.next[emp.id] = (employeeCycleHours.next[emp.id] || 0) + meta.hours;
                 } else {
-                    const titularIds = (positionGroups[pos.positionName] ?? []).slice(
+                    const titularIds = (positionGroupsTrimmed[pos.positionName] ?? []).slice(
                         0,
                         Math.max(1, Number(pos.qty) || 1),
                     );
@@ -840,10 +1002,12 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         const pos = ctx.positions.find(p => p.positionName === posName);
         if (!pos) continue;
 
-        const posGroup = positionGroups[posName] ?? [];
+        const posGroup = positionGroupsTrimmed[posName] ?? [];
         const needHeads = neededCountFor24hPos(pos);
         const rankInPos = posGroup.indexOf(emp.id);
-        const isRetFloater = rankInPos >= needHeads && rankInPos >= 0;
+        const isRetFloater = isLabPaddingEmpId(emp.id)
+            || allStranded.includes(emp.id)
+            || (rankInPos >= needHeads && rankInPos >= 0);
         if (isRetFloater) retFloaterEmpIds.push(emp.id);
 
         ctx.daysInMonth.forEach((day, di) => {
@@ -855,19 +1019,21 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             const rawCode = CYCLE_24_MTN[(opening + di) % 24] as string;
             const ownFixedBand = ctx.defaultShiftByEmp?.[emp.id]?.toUpperCase();
             let rawCodeFinal: string;
-            if (ownFixedBand && WORK_BANDS.has(ownFixedBand) && WORK_BANDS.has(rawCode)) {
-                // Empleado con banda fija: siempre trabaja su banda en días laborales.
-                rawCodeFinal = ownFixedBand;
+            const disp = subgroupDisplacement.get(emp.id);
+            if (disp && rawCode === disp.fixedBand && WORK_BANDS.has(rawCode)) {
+                const naturalOfFixed = CYCLE_24_MTN[(disp.fixedOpening + di) % 24] as string;
+                rawCodeFinal = WORK_BANDS.has(naturalOfFixed) ? naturalOfFixed : rawCode;
+            } else if (
+                ownFixedBand
+                && WORK_BANDS.has(ownFixedBand)
+                && WORK_BANDS.has(rawCode)
+                && (ctx.positionAssignmentsByEmp?.[emp.id]?.length ?? 0) > 0
+            ) {
+                const quota = Math.max(1, Number(pos.qty) || 1);
+                const taken = billableBandCount(assignments, posName, dateStr, ownFixedBand);
+                rawCodeFinal = taken < quota ? ownFixedBand : (isRetFloater ? 'RET' : rawCode);
             } else {
-                const disp = subgroupDisplacement.get(emp.id);
-                if (disp && rawCode === disp.fixedBand && WORK_BANDS.has(rawCode)) {
-                    // El ciclo natural da la misma banda que el fijo del subgrupo.
-                    // Sustituir por lo que el fijo "resignó" para mantener 1M+1T+1N+1F.
-                    const naturalOfFixed = CYCLE_24_MTN[(disp.fixedOpening + di) % 24] as string;
-                    rawCodeFinal = WORK_BANDS.has(naturalOfFixed) ? naturalOfFixed : rawCode;
-                } else {
-                    rawCodeFinal = rawCode;
-                }
+                rawCodeFinal = rawCode;
             }
             const isExcludedDay = !isRetFloater && WORK_BANDS.has(rawCodeFinal) && !!pos.excludedDates?.includes(dateStr);
             let workCode = rawCodeFinal;
@@ -932,18 +1098,17 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         if (!WORK_BANDS.has(rawNaturalCode)) continue;
         let naturalCode = rawNaturalCode;
         if (assignmentBreaksBandTransition(assignments, a.empId, a.dateStr, naturalCode)) {
-            let detectedBand: string | null = null;
-            for (let k = di - 1; k >= 0 && k >= di - 14; k--) {
-                const dateK = ctx.getDateKey(ctx.daysInMonth[k]!);
-                const prev = assignments.find(x =>
-                    x.empId === a.empId && x.dateStr === dateK &&
-                    (x.hours ?? 0) > 0 && WORK_BANDS.has(x.code),
-                );
-                if (prev) { detectedBand = prev.code; break; }
+            let picked: string | null = null;
+            for (let step = 0; step < 24; step++) {
+                const tryCode = CYCLE_24_MTN[(opening + di + step) % 24] as string;
+                if (!WORK_BANDS.has(tryCode)) continue;
+                if (!assignmentBreaksBandTransition(assignments, a.empId, a.dateStr, tryCode)) {
+                    picked = tryCode;
+                    break;
+                }
             }
-            if (!detectedBand) continue;
-            naturalCode = detectedBand;
-            if (assignmentBreaksBandTransition(assignments, a.empId, a.dateStr, naturalCode)) continue;
+            if (!picked) continue;
+            naturalCode = picked;
         }
         const posName = empToPosition[a.empId] ?? '';
         const pos = ctx.positions.find(p => p.positionName === posName);
@@ -1064,7 +1229,10 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                         const ai = assignments.findIndex(a =>
                             a.positionName === posName && a.dateStr === dateStr &&
                             a.code === overBand && (a.hours ?? 0) > 0 &&
-                            !WORK_BANDS.has((ctx.defaultShiftByEmp?.[a.empId] ?? '').toUpperCase()) &&
+                            (
+                                !WORK_BANDS.has((ctx.defaultShiftByEmp?.[a.empId] ?? '').toUpperCase())
+                                || bandCounts[overBand] > qty
+                            ) &&
                             !assignmentBreaksBandTransition(assignments, a.empId, dateStr, underBand),
                         );
                         if (ai < 0) break;
@@ -1089,6 +1257,35 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
         }
     }
 
+    enforceDailyBandQuota(ctx, assignments, employeeMonthlyHours, employeeCycleHours, cutoffDay);
+
+    patchRetForAbsences(
+        ctx, assignments, openingSlotByEmp, subgroups, empToPosition,
+        employeeMonthlyHours, employeeCycleHours, cutoffDay,
+    );
+
+    const assignIdx = new Set(assignments.map((a) => `${a.empId}|${a.dateStr}`));
+    for (const empId of allStranded) {
+        for (const day of ctx.daysInMonth) {
+            const dateStr = ctx.getDateKey(day);
+            if (ctx.absences[empId]?.has(dateStr)) continue;
+            const key = `${empId}|${dateStr}`;
+            if (assignIdx.has(key)) continue;
+            assignments.push({
+                empId,
+                dateStr,
+                positionName: '',
+                code: 'RET',
+                name: 'Retén',
+                hours: 0,
+                startTime: '00:00',
+                isReten: true,
+            });
+            assignIdx.add(key);
+        }
+        if (!retFloaterEmpIds.includes(empId)) retFloaterEmpIds.push(empId);
+    }
+
     const totalBillableHours = Object.values(employeeMonthlyHours).reduce((s, h) => s + h, 0);
     const slaTarget = Math.max(0, ctx.slaVendidas || 0);
     const slaDeficitRemaining = Math.max(0, Math.round((slaTarget - totalBillableHours) * 10) / 10);
@@ -1106,14 +1303,18 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
             employeeMonthlyHours,
             employeeCycleHours,
             employeesOver200: [],
-            positionGroups,
-            idleEmployeeIds: ctx.employees.filter((e) => {
-                if (openingSlotByEmp[e.id] !== undefined) return false;
-                const posName = empToPosition[e.id];
-                const pos = posName ? ctx.positions.find((p) => p.positionName === posName) : undefined;
-                return !pos || !isCustomCoverPosition(pos);
-            }).map((e) => e.id),
-            strandedEmployeeIds: strandedIds.length > 0 ? strandedIds : undefined,
+            positionGroups: positionGroupsTrimmed,
+            idleEmployeeIds: [
+                ...(rosterPlan?.ok ? rosterPlan.floaters : []),
+                ...allStranded,
+                ...ctx.employees.filter((e) => {
+                    if (openingSlotByEmp[e.id] !== undefined) return false;
+                    const posName = empToPosition[e.id];
+                    const pos = posName ? ctx.positions.find((p) => p.positionName === posName) : undefined;
+                    return !pos || !isCustomCoverPosition(pos);
+                }).map((e) => e.id),
+            ].filter((id, i, arr) => arr.indexOf(id) === i),
+            strandedEmployeeIds: allStranded.length > 0 ? allStranded : undefined,
             relocatedEmployeeIds: relocatedIds.length > 0 ? relocatedIds : undefined,
             primaryShiftByEmp,
             retFloaterEmpIds: retFloaterEmpIds.length > 0 ? retFloaterEmpIds : undefined,
