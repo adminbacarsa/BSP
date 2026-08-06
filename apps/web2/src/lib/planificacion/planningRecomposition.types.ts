@@ -1,6 +1,6 @@
 /** Paquete de cobertura / liberación planificada (ext + adel split). */
 
-export type RecompositionMode = 'absence' | 'liberation' | 'anticipated_absence';
+export type RecompositionMode = 'absence' | 'liberation' | 'anticipated_absence' | 'operational_gap';
 
 export type CoverageSegmentRole = 'EXTENSION' | 'EARLY_START' | 'LIBERATED' | 'TARGET';
 
@@ -38,8 +38,8 @@ export interface RecompositionTarget {
   positionName: string;
   code: string;
   label: string;
-  /** Ausencia, vacante o titular a liberar */
-  kind: 'absence' | 'vacancy' | 'working';
+  /** Ausencia, vacante, titular a liberar o hueco SLA sin persona ausente */
+  kind: 'absence' | 'vacancy' | 'working' | 'sla_gap';
 }
 
 export interface RecompositionPackage {

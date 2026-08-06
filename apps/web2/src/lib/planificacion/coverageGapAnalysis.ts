@@ -325,13 +325,36 @@ export function analyzeObjectiveCoverageGaps(
 export function flattenDayGapsForUi(dayReport: DayCoverageGapReport): Array<{
     positionName: string;
     code: string;
+    gapBand?: string;
     missing: number;
     detail: string;
 }> {
-    return dayReport.positions.map(pg => ({
-        positionName: pg.positionName,
-        code: pg.primaryScheme + (pg.alternateScheme ? ` o ${pg.alternateScheme}` : ''),
-        missing: pg.missingUnits,
-        detail: pg.summary,
-    }));
+    const rows: Array<{
+        positionName: string;
+        code: string;
+        gapBand?: string;
+        missing: number;
+        detail: string;
+    }> = [];
+    for (const pg of dayReport.positions) {
+        if (pg.missingBandsPrimary.length > 0) {
+            for (const bg of pg.missingBandsPrimary) {
+                rows.push({
+                    positionName: pg.positionName,
+                    code: bg.code,
+                    gapBand: bg.code,
+                    missing: bg.missing,
+                    detail: `Falta ${bg.missing}×${bg.code} (${pg.schemeLabel})`,
+                });
+            }
+        } else if (pg.missingUnits > 0) {
+            rows.push({
+                positionName: pg.positionName,
+                code: pg.primaryScheme + (pg.alternateScheme ? ` o ${pg.alternateScheme}` : ''),
+                missing: pg.missingUnits,
+                detail: pg.summary,
+            });
+        }
+    }
+    return rows;
 }

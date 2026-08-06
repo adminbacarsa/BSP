@@ -63,8 +63,21 @@ export function lookupSplitCreditsForPosition(
 /** Paquete ext+adel completo → 1 banda SLA cerrada en el puesto cubierto. */
 export function assessSplitPackageStatus(rows: PlanningShiftSlice[]): 'COVERED' | 'PARTIAL' | 'NONE' {
     if (!rows.length) return 'NONE';
-    const hasExt = rows.some(r => r.coverageSegmentRole === 'EXTENSION' || !!r.isExtended);
-    const hasAdel = rows.some(r => r.coverageSegmentRole === 'EARLY_START' || !!r.isEarlyStart);
+    const extLike = rows.filter((r) =>
+        r.coverageSegmentRole === 'EXTENSION' || (!!r.isExtended && !r.isEarlyStart));
+    const adelLike = rows.filter((r) =>
+        r.coverageSegmentRole === 'EARLY_START' || (!!r.isEarlyStart && !r.isExtended));
+    const hasBandMeta = !!rows.find((r) => r.coversBandCode);
+    const hasPackage = !!rows.find((r) => r.coveragePackageId);
+
+    if (extLike.length >= 2 && adelLike.length === 0 && (hasBandMeta || hasPackage)) {
+        const explicit = rows.find((r) => r.coverageStatus === 'COVERED' || r.coverageStatus === 'PARTIAL')?.coverageStatus;
+        if (explicit === 'PARTIAL') return 'PARTIAL';
+        return 'COVERED';
+    }
+
+    const hasExt = extLike.length > 0;
+    const hasAdel = adelLike.length > 0;
     if (!hasExt || !hasAdel) return 'PARTIAL';
     const explicit = rows.find(r => r.coverageStatus === 'COVERED' || r.coverageStatus === 'PARTIAL')?.coverageStatus;
     if (explicit === 'COVERED') return 'COVERED';

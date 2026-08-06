@@ -125,25 +125,30 @@ export function buildRecompositionPendingUpdates(
 
   const extEmp = employeesById[pkg.extension.employeeId];
   const adelEmp = employeesById[pkg.earlyStart.employeeId];
-  const targetEmp = employeesById[pkg.target.employeeId];
+  const targetEmp = pkg.target.employeeId ? employeesById[pkg.target.employeeId] : undefined;
   const extName = empDisplayName(extEmp, pkg.extension.employeeId);
   const adelName = empDisplayName(adelEmp, pkg.earlyStart.employeeId);
-  const targetName = empDisplayName(targetEmp, pkg.target.employeeId);
+  const targetName = targetEmp ? empDisplayName(targetEmp, pkg.target.employeeId) : pkg.target.label;
+  const isOperationalGap = pkg.mode === 'operational_gap';
 
-  const coveredByLabel = `${extName.split(',')[0]} ext ${pkg.extension.fromTime}-${pkg.extension.toTime} + ${adelName.split(',')[0]} adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime}`;
+  const coveredByLabel = isOperationalGap
+    ? `${extName.split(',')[0]} ext ${pkg.extension.fromTime}-${pkg.extension.toTime} + ${adelName.split(',')[0]} cierre ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime}`
+    : `${extName.split(',')[0]} ext ${pkg.extension.fromTime}-${pkg.extension.toTime} + ${adelName.split(',')[0]} adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime}`;
 
   const baseMeta = (role: RecompositionPendingMeta['coverageSegmentRole'], extra: Partial<RecompositionPendingMeta> = {}): RecompositionPendingMeta => ({
     coveragePackageId: pkg.id,
     coverageType: pkg.type,
     coverageSegmentRole: role,
-    coversEmployeeId: pkg.target.employeeId,
+    coversEmployeeId: isOperationalGap ? undefined : pkg.target.employeeId,
     coversPositionName: pkg.gapPositionName,
     coversBandCode: String(pkg.target.code || '').toUpperCase() || undefined,
     coverageMode: 'SPLIT',
+    coverageStatus: 'COVERED',
     ...extra,
   });
 
-  // ── Titular / ausente / vacante (target) ──
+  // ── Titular / ausente / vacante (target) — omitido en hueco SLA sin persona ──
+  if (!isOperationalGap && pkg.target.employeeId) {
   const targetKey = shiftKey(pkg.target.employeeId, pkg.dateStr);
   const targetBase = getShift(pkg.target.employeeId, pkg.dateStr) || {
     code: pkg.target.code,
@@ -203,6 +208,7 @@ export function buildRecompositionPendingUpdates(
       }),
     });
   }
+  }
 
   // ── Extensión (G1) ──
   const extKey = shiftKey(pkg.extension.employeeId, pkg.dateStr);
@@ -224,7 +230,7 @@ export function buildRecompositionPendingUpdates(
       adjustedEndTime: pkg.extension.toTime,
       segmentFromTime: pkg.extension.fromTime,
       segmentToTime: pkg.extension.toTime,
-      coverageNote: `${extOnFranco ? 'FT ' : ''}Ext +${pkg.gapPositionName} ${pkg.extension.fromTime}-${pkg.extension.toTime} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
+      coverageNote: `${extOnFranco ? 'FT ' : ''}Ext ${pkg.gapPositionName} ${pkg.extension.fromTime}-${pkg.extension.toTime} · ${isOperationalGap ? `cierra ${pkg.target.code}` : `${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`}`,
     }),
   });
 
@@ -250,7 +256,7 @@ export function buildRecompositionPendingUpdates(
         adjustedEndTime: pkg.earlyStart.toTime,
         segmentFromTime: pkg.earlyStart.fromTime,
         segmentToTime: pkg.earlyStart.toTime,
-        coverageNote: `${adelOnFranco ? 'FT ' : ''}Ext cierre ${pkg.gapPositionName} ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
+        coverageNote: `${adelOnFranco ? 'FT ' : ''}Ext cierre ${pkg.gapPositionName} ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime} · ${isOperationalGap ? `cierra ${pkg.target.code}` : `${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`}`,
       }),
     });
   } else {

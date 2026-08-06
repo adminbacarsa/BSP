@@ -1,0 +1,317 @@
+import React, { useMemo, useState } from 'react';
+import { X, Clock, ShieldCheck } from 'lucide-react';
+import {
+  collectSplitFrancoConflicts,
+  listVacancySplitWorkersForDay,
+  resolveEmployeeShift,
+  type FrancoCoverageConflict,
+} from '@/lib/planificacion/planningRecompositionApply';
+import { applyOperationalGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
+import {
+  describeVacancySplitPlan,
+  resolveVacancySplitSegmentTimes,
+  vacancySplitUsesManualExtraHours,
+  type TitularVacancyWorkShift,
+} from '@/lib/planificacion/vacancyCoverage';
+import { listVacancyGapBandOptions } from '@/lib/planificacion/vacancyGapBands';
+import type { VacancyPositionSla } from '@/lib/planificacion/vacancySplitBands';
+
+export type SlaGapCloseModalData = {
+  dateStr: string;
+  positionName: string;
+  gapBand: string;
+};
+
+type Props = {
+  data: SlaGapCloseModalData;
+  objectiveId: string;
+  clientId?: string;
+  employees: { id: string; name?: string }[];
+  shiftsMap: Record<string, any>;
+  pendingChanges: Record<string, any>;
+  positionStructure: VacancyPositionSla[];
+  onApply: (changes: Record<string, any>) => void;
+  onClose: () => void;
+  onRequestSupervisorAuth?: (
+    conflicts: FrancoCoverageConflict[],
+    onAuthorized: () => void,
+  ) => void;
+};
+
+function titularFromGap(band: string, positionName: string, structure: VacancyPositionSla[]): TitularVacancyWorkShift {
+  const opt = listVacancyGapBandOptions(structure, positionName).find((o) => o.code === band);
+  return {
+    code: band,
+    bandLabel: band,
+    positionName,
+    scheduleLabel: opt?.scheduleLabel || '—',
+    hours: opt?.hours || 8,
+    source: 'user_selected',
+    sourceLabel: 'Hueco SLA del día',
+  };
+}
+
+export default function PlanningSlaGapCloseModal({
+  data,
+  objectiveId,
+  clientId,
+  employees,
+  shiftsMap,
+  pendingChanges,
+  positionStructure,
+  onApply,
+  onClose,
+  onRequestSupervisorAuth,
+}: Props) {
+  const [extId, setExtId] = useState('');
+  const [secondId, setSecondId] = useState('');
+  const [extExtraH, setExtExtraH] = useState<number | null>(null);
+  const [secondExtraH, setSecondExtraH] = useState<number | null>(null);
+  const [q, setQ] = useState('');
+
+  const titular = useMemo(
+    () => titularFromGap(data.gapBand, data.positionName, positionStructure),
+    [data.gapBand, data.positionName, positionStructure],
+  );
+  const splitPlan = useMemo(
+    () => describeVacancySplitPlan(titular, positionStructure),
+    [titular, positionStructure],
+  );
+  const listCtx = {
+    positionStructure,
+    preferSamePosition: true,
+    gapPositionName: data.positionName,
+    gapBand: data.gapBand,
+  };
+  const poolExt = listVacancySplitWorkersForDay(
+    data.dateStr,
+    objectiveId,
+    employees,
+    shiftsMap,
+    pendingChanges,
+    [],
+    listCtx,
+    splitPlan ? [splitPlan.extBand] : [],
+  ).filter((c) => !q || c.name.toLowerCase().includes(q));
+  const poolSecond = listVacancySplitWorkersForDay(
+    data.dateStr,
+    objectiveId,
+    employees,
+    shiftsMap,
+    pendingChanges,
+    [extId].filter(Boolean),
+    listCtx,
+    splitPlan ? [splitPlan.adelBand] : [],
+  ).filter((c) => !q || c.name.toLowerCase().includes(q));
+
+  const manual = vacancySplitUsesManualExtraHours({ extExtraHours: extExtraH, secondExtExtraHours: secondExtraH });
+  const extCand = poolExt.find((c) => c.id === extId);
+  const secondCand = poolSecond.find((c) => c.id === secondId);
+  const preview = extId && secondId
+    ? resolveVacancySplitSegmentTimes(
+      positionStructure,
+      data.gapBand,
+      data.positionName,
+      { positionName: extCand?.positionName, code: extCand?.code },
+      { positionName: secondCand?.positionName, code: secondCand?.code },
+      extExtraH,
+      secondExtraH,
+    )
+    : null;
+
+  const employeesById = useMemo(
+    () => Object.fromEntries(employees.filter((e) => e.id).map((e) => [e.id!, e])),
+    [employees],
+  );
+
+  const commit = (authorizeFranco: boolean) => {
+    if (!extId || !secondId || extId === secondId) return;
+    const extShift = resolveEmployeeShift(extId, data.dateStr, shiftsMap, pendingChanges);
+    const secondShift = resolveEmployeeShift(secondId, data.dateStr, shiftsMap, pendingChanges);
+    const changes = applyOperationalGapCloseToChanges(pendingChanges, {
+      objectiveId,
+      clientId,
+      dateStr: data.dateStr,
+      gapPosition: data.positionName,
+      gapBand: data.gapBand,
+      extEmpId: extId,
+      secondEmpId: secondId,
+      extHomePosition: extShift?.positionName,
+      extBaseCode: extShift?.code,
+      secondBaseCode: secondShift?.code,
+      extExtraHours: extExtraH,
+      secondExtExtraHours: secondExtraH,
+      positionStructure,
+      authorizeFrancoTrabajado: authorizeFranco,
+    }, {
+      shiftsMap,
+      employeesById,
+    });
+    onApply(changes);
+    onClose();
+  };
+
+  const tryApply = () => {
+    const conflicts = collectSplitFrancoConflicts(
+      data.dateStr,
+      extId,
+      secondId,
+      employeesById,
+      shiftsMap,
+      pendingChanges,
+    );
+    if (conflicts.length > 0 && onRequestSupervisorAuth) {
+      onRequestSupervisorAuth(conflicts, () => commit(true));
+      return;
+    }
+    commit(conflicts.length > 0);
+  };
+
+  const [, mo, dd] = data.dateStr.split('-');
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col border border-slate-200"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-rose-50 to-violet-50 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-black text-lg text-slate-900 flex items-center gap-2">
+              <ShieldCheck className="text-rose-600" size={20} />
+              Cerrar hueco SLA
+            </h3>
+            <p className="text-[11px] font-bold text-slate-600 mt-1">
+              {dd}/{mo} · {data.positionName} · banda <span className="font-mono text-rose-700">{data.gapBand}</span>
+              {titular.scheduleLabel !== '—' && <> · {titular.scheduleLabel}</>}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-0.5">Sin licencia en titular — solo extensiones de quien ya está en servicio.</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-white/80 text-slate-500">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-4 overflow-y-auto custom-scrollbar space-y-3 flex-1">
+          <input
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold bg-slate-50"
+            placeholder="Filtrar guardias..."
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+
+          <div>
+            <div className="text-[10px] font-black uppercase text-slate-500 mb-1">
+              1.er tramo {preview ? `(${preview.first.from}–${preview.first.to})` : splitPlan ? `(${splitPlan.extSegment})` : ''}
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto rounded-xl border border-slate-100 p-1">
+              {poolExt.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setExtId(c.id)}
+                  className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${extId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
+                >
+                  {c.name} · {c.code} · {c.positionName}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[10px] font-black uppercase text-slate-500 mb-1">
+              2.º tramo {preview ? `(${preview.second.from}–${preview.second.to})` : splitPlan ? `(${splitPlan.adelSegment})` : ''}
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto rounded-xl border border-slate-100 p-1">
+              {poolSecond.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setSecondId(c.id)}
+                  className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${secondId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
+                >
+                  {c.name} · {c.code} · {c.positionName}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-violet-200 bg-violet-50/80 px-3 py-2.5 space-y-2">
+            <div className="text-[10px] font-black uppercase text-violet-900 flex items-center gap-1">
+              <Clock size={11} /> Horas de extensión
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => { setExtExtraH(null); setSecondExtraH(null); }}
+                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border ${!manual ? 'bg-violet-600 text-white border-violet-600' : 'bg-white border-slate-200'}`}
+              >
+                Auto SLA
+              </button>
+              <button
+                type="button"
+                onClick={() => { setExtExtraH(2); setSecondExtraH(4); }}
+                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border ${manual && extExtraH === 2 && secondExtraH === 4 ? 'bg-red-600 text-white border-red-600' : 'bg-white border-slate-200'}`}
+              >
+                +2h / +4h
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-[9px] font-bold text-slate-600">
+                1.er (+h)
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  step={0.5}
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1 text-xs font-bold"
+                  placeholder="Auto"
+                  value={extExtraH ?? ''}
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    setExtExtraH(raw ? Number(raw) : null);
+                  }}
+                />
+              </label>
+              <label className="text-[9px] font-bold text-slate-600">
+                2.º (+h)
+                <input
+                  type="number"
+                  min={0}
+                  max={12}
+                  step={0.5}
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1 text-xs font-bold"
+                  placeholder="Auto"
+                  value={secondExtraH ?? ''}
+                  onChange={(e) => {
+                    const raw = e.target.value.trim();
+                    setSecondExtraH(raw ? Number(raw) : null);
+                  }}
+                />
+              </label>
+            </div>
+            {preview && (
+              <p className="text-[9px] font-bold text-violet-900 border-t border-violet-200/80 pt-1">
+                Hueco {preview.gap.from}–{preview.gap.to} · 1.º {preview.first.from}–{preview.first.to} · 2.º {preview.second.from}–{preview.second.to}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-slate-100 flex gap-2">
+          <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl font-bold text-slate-500 bg-slate-100">
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={!extId || !secondId || extId === secondId}
+            onClick={tryApply}
+            className="flex-1 py-3 rounded-xl font-black text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 shadow-lg shadow-rose-200"
+          >
+            Aplicar y cerrar banda
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

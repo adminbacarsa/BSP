@@ -214,6 +214,7 @@ import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterSche
 import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
 import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageModal';
 import PlanningRecompositionModal from '@/components/planificacion/PlanningRecompositionModal';
+import PlanningSlaGapCloseModal, { type SlaGapCloseModalData } from '@/components/planificacion/PlanningSlaGapCloseModal';
 import PlanningCronogramasOverviewModal from '@/components/planificacion/PlanningCronogramasOverviewModal';
 import { touchPlanificacionEstadoActivity } from '@/lib/planificacion/planningCronogramaOverview';
 import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
@@ -911,10 +912,11 @@ export default function PlanificacionPage() {
     const [secondBlockMap, setSecondBlockMap] = useState<Record<string, { startTime: any; endTime: any }>>({});
     const [coverageTooltip, setCoverageTooltip] = useState<{
         dateStr: string;
-        gaps: { positionName: string; code: string; missing: number; detail?: string }[];
+        gaps: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string }[];
         x: number;
         y: number;
     } | null>(null);
+    const [slaGapCloseModal, setSlaGapCloseModal] = useState<SlaGapCloseModalData | null>(null);
     const [showCoverageDiagnostic, setShowCoverageDiagnostic] = useState(false);
     const [columnSelectMode, setColumnSelectMode] = useState(false);
     const [columnSelectSource, setColumnSelectSource] = useState<number | null>(null);
@@ -9194,12 +9196,12 @@ export default function PlanificacionPage() {
                 <div
                     className="fixed z-[9999]"
                     style={{ left: Math.min(coverageTooltip.x + 8, window.innerWidth - 220), top: coverageTooltip.y + 10 }}
-                    onClick={() => setCoverageTooltip(null)}
+                    onClick={(e) => e.stopPropagation()}
                 >
                     <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
                         <div className="text-rose-300 text-[9px] uppercase tracking-wide mb-0.5">Puestos sin cerrar · {coverageTooltip.dateStr.slice(8)}</div>
                         {coverageTooltip.gaps.map((g, i) => (
-                            <div key={i} className="flex flex-col gap-0.5 border-b border-slate-700/50 pb-1 last:border-0">
+                            <div key={i} className="flex flex-col gap-1 border-b border-slate-700/50 pb-1.5 last:border-0">
                                 <div className="flex items-center justify-between gap-2">
                                     <span className="text-slate-200">{g.positionName}</span>
                                     <span className="text-rose-400 font-black shrink-0">{g.missing} pax</span>
@@ -9207,11 +9209,52 @@ export default function PlanificacionPage() {
                                 {'detail' in g && g.detail && (
                                     <span className="text-[9px] text-slate-400 font-medium leading-snug">{g.detail}</span>
                                 )}
+                                {g.gapBand && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSlaGapCloseModal({
+                                                dateStr: coverageTooltip.dateStr,
+                                                positionName: g.positionName,
+                                                gapBand: g.gapBand!,
+                                            });
+                                            setCoverageTooltip(null);
+                                        }}
+                                        className="mt-0.5 w-full py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[9px] font-black uppercase tracking-wide"
+                                    >
+                                        Cerrar banda {g.gapBand}
+                                    </button>
+                                )}
                             </div>
                         ))}
-                        <div className="text-slate-500 text-[8px] mt-1">Click para cerrar</div>
+                        <button
+                            type="button"
+                            onClick={() => setCoverageTooltip(null)}
+                            className="text-slate-500 text-[8px] mt-1 text-left hover:text-slate-300"
+                        >
+                            Cerrar
+                        </button>
                     </div>
                 </div>
+            )}
+            {slaGapCloseModal && selectedObjective && (
+                <PlanningSlaGapCloseModal
+                    data={slaGapCloseModal}
+                    objectiveId={selectedObjective}
+                    clientId={selectedClient || undefined}
+                    employees={displayedEmployees}
+                    shiftsMap={shiftsMap}
+                    pendingChanges={pendingChanges}
+                    positionStructure={effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[]}
+                    onApply={(changes) => {
+                        setPendingChanges(changes);
+                        toast.success('Hueco SLA cerrado en borrador — guardá el cronograma.');
+                    }}
+                    onClose={() => setSlaGapCloseModal(null)}
+                    onRequestSupervisorAuth={(conflicts, onAuthorized) => {
+                        requestSupervisorFrancoAuth(conflicts, onAuthorized, 'cierre hueco SLA');
+                    }}
+                />
             )}
             {shiftTooltip && (
                 <div
