@@ -301,6 +301,7 @@ const SHIFT_STYLES: any = {
     'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
     'RFZ': 'bg-red-500 text-white border-red-600 font-black',
     'TURA': 'bg-red-600 text-white border-red-700 font-black',
+    'EXTENDED': 'bg-red-600 text-white border-red-700 font-black shadow-sm',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
     'PG':  'bg-white text-blue-700 border-blue-400 font-black',
     'LOCKED': 'bg-slate-200 text-slate-500 border-slate-300 pattern-grid',
@@ -339,7 +340,8 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'FT': 'Franco Trabajado (Pago Doble)',
     'FF': 'Franco x Franco (Devolución)',
     'SWAP': 'Intercambio de Turno',
-    'SWAP_PENDING': 'Intercambio pendiente de autorización'
+    'SWAP_PENDING': 'Intercambio pendiente de autorización',
+    'EXTENDED': 'Turno extendido (cobertura / horas extra)',
 };
 
 const SHIFT_RANGES: Record<string, string> = {
@@ -8889,7 +8891,6 @@ export default function PlanificacionPage() {
                                         if (content === 'REF' || content === 'ESC') {
                                             content = cellLabelForDeployment(String(content), _deployBand);
                                         }
-                                        if (isExtended) { style += ' ring-2 ring-violet-600 z-10'; }
                                         if (isEarly) { style += ' ring-2 ring-cyan-500 z-10'; }
                                         if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; }
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
@@ -8907,6 +8908,17 @@ export default function PlanificacionPage() {
                                             style = String(content).toUpperCase() === 'RET'
                                                 ? SHIFT_STYLES['RET']
                                                 : OTHER_OBJECTIVE_CELL_STYLE;
+                                        }
+                                        if (
+                                            isExtended
+                                            && !isFT
+                                            && !isFF
+                                            && !absence
+                                            && !isOtherObjectiveShift
+                                            && content != null
+                                            && !(activeShift?.id && turaMap[activeShift.id])
+                                        ) {
+                                            style = `${SHIFT_STYLES['EXTENDED']} z-10`;
                                         }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView

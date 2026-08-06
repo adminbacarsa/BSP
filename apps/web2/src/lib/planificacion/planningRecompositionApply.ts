@@ -5,6 +5,7 @@ import {
   isVacancySegmentWorkCode,
   neighborBandsCct,
   neighborBandsForVacancyGap,
+  vacancySecondSegmentIsTailExtension,
   type VacancySplitListContext,
   type VacancyPositionSla,
 } from './vacancySplitBands';
@@ -237,6 +238,22 @@ export function buildRecompositionPendingUpdates(
   if (adelOnFranco && !ctx.authorizeFrancoTrabajado) {
     throw new Error(`FRANCO_COVERAGE:${adelName} tiene franco planificado (${adelBase.code}) el ${pkg.dateStr} — requiere PIN de supervisor (FT / costo extra).`);
   }
+  const tailExtension = vacancySecondSegmentIsTailExtension(String(pkg.target.code || ''));
+  if (tailExtension) {
+    updates[adelKey] = mergeShift(adelBase, {
+      isFrancoTrabajado: adelOnFranco ? true : (adelBase.isFrancoTrabajado || false),
+      isFranco: adelOnFranco ? false : adelBase.isFranco,
+      code: adelOnFranco ? (pkg.earlyStart.baseCode || adelBase.code) : adelBase.code,
+      isExtended: true,
+      isEarlyStart: false,
+      ...baseMeta('EXTENSION', {
+        adjustedEndTime: pkg.earlyStart.toTime,
+        segmentFromTime: pkg.earlyStart.fromTime,
+        segmentToTime: pkg.earlyStart.toTime,
+        coverageNote: `${adelOnFranco ? 'FT ' : ''}Ext cierre ${pkg.gapPositionName} ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
+      }),
+    });
+  } else {
   updates[adelKey] = mergeShift(adelBase, {
     isFrancoTrabajado: adelOnFranco ? true : (adelBase.isFrancoTrabajado || false),
     isFranco: adelOnFranco ? false : adelBase.isFranco,
@@ -250,6 +267,7 @@ export function buildRecompositionPendingUpdates(
       coverageNote: `${adelOnFranco ? 'FT ' : ''}Adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime} · ${pkg.gapPositionName} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
     }),
   });
+  }
 
   return updates;
 }

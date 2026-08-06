@@ -155,7 +155,9 @@ export function neighborBandsCct(targetBand: string): VacancySplitNeighborBands 
 }
 
 /**
- * Bandas anterior/siguiente en el SLA del puesto (ej. hueco E3 → ext E2, adel E1).
+ * Bandas que cubren el hueco en custom concurrente (ej. falta E3 14–20):
+ * - 1.er tramo: quien tenía el turno más temprano (E1) extiende 14–16.
+ * - 2.º tramo: el intermedio (E2) extiende 16–20 (no es “adelanto” de inicio).
  */
 export function neighborBandsForVacancyGap(
   positionStructure: VacancyPositionSla[] | undefined,
@@ -171,11 +173,15 @@ export function neighborBandsForVacancyGap(
   const idx = codes.indexOf(target);
   if (idx < 0 || codes.length < 2) return neighborBandsCct(target);
 
-  const extensionBand = codes[Math.max(0, idx - 1)];
-  let earlyStartBand = codes[Math.min(codes.length - 1, idx + 1)];
-  if (idx === codes.length - 1 && codes.length >= 2) {
-    earlyStartBand = codes[Math.max(0, idx - 2)];
+  if (idx === codes.length - 1 && codes.length >= 3) {
+    return {
+      extensionBand: codes[idx - 2],
+      earlyStartBand: codes[idx - 1],
+    };
   }
+
+  const extensionBand = codes[Math.max(0, idx - 1)];
+  const earlyStartBand = codes[Math.min(codes.length - 1, idx + 1)];
   return { extensionBand, earlyStartBand };
 }
 
@@ -232,14 +238,28 @@ export function defaultSplitTimesForVacancyGap(
 
   const win = shiftTimeWindowFromSla(shift);
   const gap = { from: win.from, to: win.to };
-  const duration = win.endMin - win.startMin;
-  const midMin = win.startMin + Math.floor(duration / 2);
-  const mid = minutesToHHmm(midMin);
+  const codes = ordered.map((s) => normCode(s.code));
+  const idx = codes.indexOf(target);
+  const prevCode = idx > 0 ? codes[idx - 1] : null;
+  const prevShift = prevCode ? ordered.find((s) => normCode(s.code) === prevCode) : null;
+  let splitMin = win.startMin + Math.floor((win.endMin - win.startMin) / 2);
+  if (prevShift) {
+    const prevWin = shiftTimeWindowFromSla(prevShift);
+    if (prevWin.endMin > win.startMin && prevWin.endMin < win.endMin) {
+      splitMin = prevWin.endMin;
+    }
+  }
+  const mid = minutesToHHmm(splitMin);
   return {
     gap,
     ext: { from: gap.from, to: mid },
     adel: { from: mid, to: gap.to },
   };
+}
+
+/** En custom playa/banco, el 2.° tramo suele ser extensión de cierre (ej. 16–20), no adelanto de inicio. */
+export function vacancySecondSegmentIsTailExtension(targetBand: string): boolean {
+  return !CCT_BANDS.has(normCode(targetBand));
 }
 
 export type VacancySplitListContext = {
