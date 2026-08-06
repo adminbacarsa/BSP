@@ -3854,11 +3854,18 @@ export default function PlanificacionPage() {
         const month = currentDate.getMonth();
         const periodKey = `${selectedObjective}_${year}_${month}`;
         if (autoRotAppliedRef.current === periodKey) return;
-        // Verificar si el mes ya tiene turnos guardados en Firestore para este objetivo
+        // Verificar si el mes ya tiene turnos guardados en Firestore para este objetivo (o grupo)
         const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
-        const hasAnySaved = Object.entries(shiftsMap).some(
-            ([k, v]: [string, any]) => k.includes(`_${monthPrefix}`) && v?.objectiveId === selectedObjective && !v?.isDeleted,
-        );
+        const grupoObjIds = (selectedGrupo && grupoUnifiedMode && Array.isArray(selectedGrupo.objectiveIds))
+            ? (selectedGrupo.objectiveIds as string[])
+            : null;
+        const hasAnySaved = Object.entries(shiftsMap).some(([k, v]: [string, any]) => {
+            if (!k.includes(`_${monthPrefix}`) || v?.isDeleted) return false;
+            const objId = v?.objectiveId;
+            if (objId === selectedObjective) return true;
+            if (grupoObjIds && grupoObjIds.includes(objId)) return true;
+            return false;
+        });
         if (hasAnySaved) return;
         // Filtrar rotaciones desactivadas para este mes
         const rotacionesActivas = (activeSlaServiceRotations as any[]).filter(r => !mesRotacionesDesactivadas.has(r.id));
@@ -3889,7 +3896,7 @@ export default function PlanificacionPage() {
         const totalCount = activeSlaServiceRotations.length;
         const hint = desactCount > 0 ? ` (${rotacionesActivas.length}/${totalCount} activas)` : '';
         toast.info(`Rotación pre-cargada${hint} — revisá y guardá cuando estés listo`, { duration: 4000 });
-    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges, activeSlaServiceRules, employees]);
+    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges, activeSlaServiceRules, employees, selectedGrupo, grupoUnifiedMode]);
 
     // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
     useEffect(() => {
