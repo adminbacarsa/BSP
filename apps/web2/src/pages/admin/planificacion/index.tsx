@@ -2696,68 +2696,19 @@ export default function PlanificacionPage() {
         getBulkEmpShifts, bulkMonoShifts,
     ]);
 
-    /** Guardias del panel ordenados por puesto (orden SLA) y luego por nombre. */
+    /** Guardias del panel en el mismo orden que aparecen en el cronograma. */
     const bulkPanelEmployeesSorted = useMemo(() => {
         if (!bulkShowPerEmpPanel || !bulkSelectionEmployees.length) return bulkSelectionEmployees;
 
-        const getEmpObjId = (emp: any): string => {
-            if (bulkPerEmpMode && selectedGrupo) {
-                const native = resolveNativeObjectiveInGrupo(emp);
-                return native
-                    || bulkEmpObjectiveOverrides[emp.id]
-                    || bulkTargetObjectiveId
-                    || selectedGrupo.objectiveIds[0]
-                    || '';
-            }
-            return selectedObjective || '';
-        };
-
-        const getPosForEmp = (emp: any): string => {
-            const objId = getEmpObjId(emp);
-            if (objId) {
-                const fromObj = empDefaultPos[`${emp.id}___${objId}`];
-                if (fromObj) return fromObj;
-            }
-            return resolveBulkPanelEmpPosition(emp, objId || null) || '';
-        };
-
-        const getStructureForEmp = (emp: any) => {
-            const objId = getEmpObjId(emp);
-            if (selectedGrupo && grupoUnifiedMode && objId && grupoSlaMap[objId]?.length) {
-                return grupoSlaMap[objId];
-            }
-            return bulkEffectiveStructure || positionStructure || [];
-        };
-
-        const positionOrderIndex = (posName: string, structure: any[]) => {
-            if (!posName) return 9999;
-            const idx = structure.findIndex((p: any) => p.positionName === posName);
-            return idx >= 0 ? idx : 9998;
-        };
+        const gridIndex = new Map<string, number>();
+        displayedEmployees.forEach((emp: any, i: number) => { if (emp?.id) gridIndex.set(emp.id, i); });
 
         return [...bulkSelectionEmployees].sort((a, b) => {
-            const objA = getEmpObjId(a);
-            const objB = getEmpObjId(b);
-            if (bulkPerEmpMode && selectedGrupo && !bulkBarScopeObjectiveId) {
-                const oiA = selectedGrupo.objectiveIds.indexOf(objA);
-                const oiB = selectedGrupo.objectiveIds.indexOf(objB);
-                if (oiA !== oiB) return oiA - oiB;
-            }
-            const posA = getPosForEmp(a);
-            const posB = getPosForEmp(b);
-            const piA = positionOrderIndex(posA, getStructureForEmp(a));
-            const piB = positionOrderIndex(posB, getStructureForEmp(b));
-            if (piA !== piB) return piA - piB;
-            const cmpPos = posA.localeCompare(posB, 'es');
-            if (cmpPos !== 0) return cmpPos;
-            return String(a.name || '').localeCompare(String(b.name || ''), 'es');
+            const giA = gridIndex.get(a.id) ?? 9999;
+            const giB = gridIndex.get(b.id) ?? 9999;
+            return giA - giB;
         });
-    }, [
-        bulkShowPerEmpPanel, bulkSelectionEmployees, bulkPerEmpMode, selectedGrupo,
-        bulkBarScopeObjectiveId, resolveNativeObjectiveInGrupo, bulkEmpObjectiveOverrides,
-        bulkTargetObjectiveId, selectedObjective, empDefaultPos, resolveBulkPanelEmpPosition,
-        grupoUnifiedMode, grupoSlaMap, bulkEffectiveStructure, positionStructure,
-    ]);
+    }, [bulkShowPerEmpPanel, bulkSelectionEmployees, displayedEmployees]);
 
     const objectivePublishLookupKey = useMemo(() => {
         if (!selectedObjective) return '';
