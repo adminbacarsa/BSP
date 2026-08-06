@@ -3866,11 +3866,15 @@ export default function PlanificacionPage() {
             if (grupoObjIds && grupoObjIds.includes(objId)) return true;
             return false;
         });
-        if (hasAnySaved) return;
+        if (hasAnySaved) {
+            autoRotAppliedRef.current = periodKey;
+            return;
+        }
         // Filtrar rotaciones desactivadas para este mes
         const rotacionesActivas = (activeSlaServiceRotations as any[]).filter(r => !mesRotacionesDesactivadas.has(r.id));
         if (!rotacionesActivas.length) return;
         autoRotAppliedRef.current = periodKey;
+        console.log('[ROT-APPLY] Aplicando rotación automática para', periodKey);
         // Generar entradas de rotación para todo el mes (respeta shiftsMap vacío)
         const rotAdditions = applyRotationsForMonth(
             rotacionesActivas, {}, shiftsMap, year, month, positionStructure,
@@ -5068,6 +5072,7 @@ export default function PlanificacionPage() {
                                 : `Asignó ${change.code} a ${empName} el ${dateStr}`;
 
                     const allExistingIds = jobAllShiftIds[key] ?? (existing?.id ? [existing.id] : []);
+                    console.log('[SAVE-DBG] key:', key, '| code:', change.code, '| deletingIds:', allExistingIds, '| existingCode:', existing?.code ?? 'none');
                     const deleteAllExisting = () => {
                         for (const docId of allExistingIds) {
                             batch.delete(doc(db, 'turnos', docId));
@@ -5237,6 +5242,7 @@ export default function PlanificacionPage() {
                 }
 
                 await flushBatch();
+                console.log('[SAVE-DBG] batch committed OK, changes:', jobCount);
 
                 if (empresaId && selectedObjective) {
                     const touchYear = currentDate.getFullYear();
