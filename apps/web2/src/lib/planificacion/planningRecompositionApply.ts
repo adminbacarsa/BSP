@@ -373,7 +373,9 @@ export function listSegmentCandidates(
     const pending = pendingChanges[key];
     const saved = shiftsMap[key];
     const shift = pending && !pending.isDeleted ? pending : saved;
-    if (!shift || shift.objectiveId !== objectiveId) continue;
+    if (!shift) continue;
+    const shiftObj = shift.objectiveId;
+    if (shiftObj != null && shiftObj !== '' && String(shiftObj) !== String(objectiveId)) continue;
     const code = String(shift.code || '').toUpperCase();
     if (isPlannedFrancoShift(shift)) continue;
     if (!WORK_CODES.has(code) && !isVacancySegmentWorkCode(code, positionStructure)) continue;
@@ -395,6 +397,78 @@ export function listSegmentCandidates(
   return sorted;
 }
 
+function listSegmentCandidatesWithBandFallback(
+  dateStr: string,
+  objectiveId: string,
+  employees: { id: string; name?: string }[],
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+  excludeIds: string[],
+  band: string,
+  listCtx?: VacancySplitListContext,
+) {
+  const ctx = { ...listCtx, preferSamePosition: listCtx?.preferSamePosition ?? true };
+  let rows = listSegmentCandidates(
+    dateStr,
+    objectiveId,
+    employees,
+    shiftsMap,
+    pendingChanges,
+    excludeIds,
+    band,
+    ctx,
+  );
+  if (rows.length > 0) return rows;
+  const loose = listSegmentCandidates(
+    dateStr,
+    objectiveId,
+    employees,
+    shiftsMap,
+    pendingChanges,
+    excludeIds,
+    undefined,
+    { ...ctx, preferSamePosition: false },
+  );
+  const bandUp = String(band).toUpperCase();
+  const byBand = loose.filter((r) => r.code === bandUp);
+  if (byBand.length > 0) return byBand;
+  return loose;
+}
+
+/**
+ * Todos los guardias con turno laboral ese día en el objetivo (elección manual ext/cierre).
+ * Las bandas sugeridas se listan primero.
+ */
+export function listVacancySplitWorkersForDay(
+  dateStr: string,
+  objectiveId: string,
+  employees: { id: string; name?: string }[],
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+  excludeIds: string[] = [],
+  listCtx?: VacancySplitListContext,
+  suggestBands: string[] = [],
+) {
+  const rows = listSegmentCandidates(
+    dateStr,
+    objectiveId,
+    employees,
+    shiftsMap,
+    pendingChanges,
+    excludeIds,
+    undefined,
+    { ...listCtx, preferSamePosition: false },
+  );
+  if (!suggestBands.length) return rows;
+  const pref = new Set(suggestBands.map((b) => String(b).toUpperCase()));
+  const first = rows.filter((r) => pref.has(r.code));
+  const rest = rows.filter((r) => !pref.has(r.code));
+  return [
+    ...first.sort((a, b) => a.name.localeCompare(b.name, 'es')),
+    ...rest.sort((a, b) => a.name.localeCompare(b.name, 'es')),
+  ];
+}
+
 /** Extensión: guardias de la banda **anterior** (ej. cubrir M → turnos N). */
 export function listExtensionCandidates(
   targetBand: string,
@@ -410,7 +484,7 @@ export function listExtensionCandidates(
   const { extensionBand } = listCtx?.positionStructure?.length
     ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
     : neighborBandsForTarget(targetBand);
-  return listSegmentCandidates(
+  return listSegmentCandidatesWithBandFallback(
     dateStr,
     objectiveId,
     employees,
@@ -437,7 +511,7 @@ export function listEarlyStartCandidates(
   const { earlyStartBand } = listCtx?.positionStructure?.length
     ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
     : neighborBandsForTarget(targetBand);
-  return listSegmentCandidates(
+  return listSegmentCandidatesWithBandFallback(
     dateStr,
     objectiveId,
     employees,

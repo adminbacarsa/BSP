@@ -4,6 +4,7 @@ import {
   defaultSplitTimesCct,
   defaultSplitTimesForVacancyGap,
   neighborBandsForVacancyGap,
+  alignVacancyGapBand,
   type VacancyPositionSla,
 } from './vacancySplitBands';
 import {
@@ -105,6 +106,7 @@ export function resolveTitularVacancyWorkShift(
   pendingChanges: Record<string, any>,
   getTypicalShift?: (empId: string) => Record<string, any> | null,
   getSlaBlocks?: (positionName: string, code: string) => Array<{ startTime: string; endTime: string }> | null,
+  options?: { absenceBlockStart?: string },
 ): TitularVacancyWorkShift | null {
   const toResult = (
     shift: Record<string, any>,
@@ -131,12 +133,17 @@ export function resolveTitularVacancyWorkShift(
     return toResult(direct, 'saved_day', 'Turno planificado ese día (antes de la licencia)');
   }
 
-  for (const delta of [-1, 1, -7, 7, -2, 2]) {
-    const adj = addCalendarDays(dateStr, delta);
+  const anchor = options?.absenceBlockStart || dateStr;
+  for (let delta = -1; delta >= -31; delta--) {
+    const adj = addCalendarDays(anchor, delta);
     const s = readWorkShift(titularId, adj, shiftsMap, pendingChanges);
     if (s) {
       const [, m, d] = adj.split('-');
-      return toResult(s, 'adjacent_day', `Referencia del ${d}/${m} en el cronograma`);
+      return toResult(
+        s,
+        'adjacent_day',
+        `Último turno laboral antes del bloque (${d}/${m})`,
+      );
     }
   }
 
@@ -171,6 +178,15 @@ export function resolveTitularVacancyWorkShift(
     }
   }
 
+  for (const delta of [1, 7, -7, 2]) {
+    const adj = addCalendarDays(dateStr, delta);
+    const s = readWorkShift(titularId, adj, shiftsMap, pendingChanges);
+    if (s) {
+      const [, m, d] = adj.split('-');
+      return toResult(s, 'adjacent_day', `Referencia del ${d}/${m} en el cronograma`);
+    }
+  }
+
   return null;
 }
 
@@ -187,15 +203,23 @@ export function describeVacancySplitPlan(
   extSegment: string;
   adelBand: string;
   adelSegment: string;
+  effectiveGapBand: string;
 } {
-  const split = defaultSplitTimesForVacancyGap(positionStructure, work.positionName, work.code);
-  const neighbors = neighborBandsForVacancyGap(positionStructure, work.positionName, work.code);
+  const effectiveGapBand = alignVacancyGapBand(
+    work.code,
+    work.positionName,
+    positionStructure,
+    work.rawShift,
+  );
+  const split = defaultSplitTimesForVacancyGap(positionStructure, work.positionName, effectiveGapBand);
+  const neighbors = neighborBandsForVacancyGap(positionStructure, work.positionName, effectiveGapBand);
   return {
     gapLabel: `${split.gap.from}–${split.gap.to}`,
     extBand: neighbors.extensionBand,
     extSegment: `${split.ext.from}–${split.ext.to}`,
     adelBand: neighbors.earlyStartBand,
     adelSegment: `${split.adel.from}–${split.adel.to}`,
+    effectiveGapBand,
   };
 }
 
@@ -478,6 +502,8 @@ export function applyVacancyCoverageToChanges(
       input.shiftsMap,
       newChanges,
       input.getTypicalShift,
+      undefined,
+      { absenceBlockStart: input.vacancyData.startDate },
     );
     const workShift = workInfo?.rawShift ?? input.getTypicalShift(titularId);
 
@@ -528,7 +554,13 @@ export function applyVacancyCoverageToChanges(
       };
       covered++;
     } else if (coverage.mode === 'split' && coverage.extEmpId && coverage.adelEmpId && workShift) {
-      const gapBand = coverage.gapBand || String(workShift.code || 'M').toUpperCase();
+      const gapBand = coverage.gapBand
+        || alignVacancyGapBand(
+          String(workShift?.code || workInfo?.code || 'M'),
+          coverage.gapPosition || workShift?.positionName,
+          input.positionStructure,
+          workShift,
+        );
       const target: RecompositionTarget = {
         employeeId: titularId,
         dateStr,

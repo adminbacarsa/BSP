@@ -180,16 +180,19 @@ import {
     describeVacancySplitPlan,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
+import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
 import { resolveCellSecondBlock, slaBlocksForPositionShift } from '@/lib/planificacion/splitShiftDisplay';
 import {
     listExtensionCandidates,
     listEarlyStartCandidates,
+    listVacancySplitWorkersForDay,
     defaultSplitForBand,
     defaultSplitForBandAtPosition,
     neighborBandsForTarget,
     neighborBandsForTargetAtPosition,
     collectSplitFrancoConflicts,
     formatFrancoConflictSummary,
+    resolveEmployeeShift,
     type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
 import { verifyScheduleCoverage } from '@/lib/planificacion/coverageVerification';
@@ -5728,34 +5731,8 @@ export default function PlanificacionPage() {
                 };
             }
             if (resolved.mode === 'split') {
-                const extRow = listExtensionCandidates(
-                    resolved.gapBand,
-                    dateStr,
-                    selectedObjective,
-                    employees,
-                    shiftsMap,
-                    pendingChanges,
-                    [vacancyData.employeeId],
-                    {
-                        positionStructure: effectivePosStructure,
-                        gapPositionName: resolved.gapPosition,
-                        gapBand: resolved.gapBand,
-                    },
-                ).find(c => c.id === resolved.extEmpId);
-                const adelRow = listEarlyStartCandidates(
-                    resolved.gapBand,
-                    dateStr,
-                    selectedObjective,
-                    employees,
-                    shiftsMap,
-                    pendingChanges,
-                    [vacancyData.employeeId, resolved.extEmpId],
-                    {
-                        positionStructure: effectivePosStructure,
-                        gapPositionName: resolved.gapPosition,
-                        gapBand: resolved.gapBand,
-                    },
-                ).find(c => c.id === resolved.adelEmpId);
+                const extShift = resolveEmployeeShift(resolved.extEmpId, dateStr, shiftsMap, pendingChanges);
+                const adelShift = resolveEmployeeShift(resolved.adelEmpId, dateStr, shiftsMap, pendingChanges);
                 return {
                     dateStr,
                     coverage: {
@@ -5764,9 +5741,9 @@ export default function PlanificacionPage() {
                         adelEmpId: resolved.adelEmpId,
                         gapBand: resolved.gapBand,
                         gapPosition: resolved.gapPosition,
-                        extHomePosition: extRow?.positionName,
-                        extBaseCode: extRow?.code,
-                        adelBaseCode: adelRow?.code,
+                        extHomePosition: extShift?.positionName,
+                        extBaseCode: extShift?.code,
+                        adelBaseCode: adelShift?.code,
                     },
                 };
             }
@@ -12185,7 +12162,8 @@ export default function PlanificacionPage() {
                         shiftsMap,
                         pendingChanges,
                         getTypicalShiftForTitular,
-                        (positionName, code) => slaBlocksForPositionShift(positionStructure, positionName, code),
+                        (positionName, code) => slaBlocksForPositionShift(effectivePosStructure, positionName, code),
+                        { absenceBlockStart: vacancyData?.startDate },
                     );
                     const openDayCoveragePicker = (d: string) => {
                         const existing = vacancyDayCoverages[d] ?? resolveVacancyDayCoverage(d, {}, selectedReplacement);
@@ -12314,19 +12292,21 @@ export default function PlanificacionPage() {
                     const splitPlan = splitTitularShift
                         ? describeVacancySplitPlan(splitTitularShift, vacancySplitListCtx.positionStructure)
                         : null;
-                    const splitNeighbors = splitWorkBand
-                        ? neighborBandsForTargetAtPosition(
-                            splitWorkBand.code,
-                            vacancySplitListCtx.positionStructure,
-                            splitWorkBand.positionName,
-                        )
-                        : null;
+                    const splitGapBand = splitPlan?.effectiveGapBand ?? splitWorkBand?.code ?? '';
+                    const splitNeighbors = splitPlan
+                        ? { extensionBand: splitPlan.extBand, earlyStartBand: splitPlan.adelBand }
+                        : (splitWorkBand
+                            ? neighborBandsForTargetAtPosition(
+                                splitWorkBand.code,
+                                vacancySplitListCtx.positionStructure,
+                                splitWorkBand.positionName,
+                            )
+                            : null);
                     const splitListCtxWithGap = splitWorkBand
-                        ? { ...vacancySplitListCtx, gapPositionName: splitWorkBand.positionName, gapBand: splitWorkBand.code }
+                        ? { ...vacancySplitListCtx, gapPositionName: splitWorkBand.positionName, gapBand: splitGapBand }
                         : vacancySplitListCtx;
-                    const splitExtCandidates = splitWorkBand && splitReferenceDate
-                        ? listExtensionCandidates(
-                            splitWorkBand.code,
+                    const splitWorkerPoolExt = splitWorkBand && splitReferenceDate
+                        ? listVacancySplitWorkersForDay(
                             splitReferenceDate,
                             selectedObjective,
                             employees,
@@ -12334,11 +12314,11 @@ export default function PlanificacionPage() {
                             pendingChanges,
                             [vacancyData?.employeeId].filter(Boolean),
                             splitListCtxWithGap,
+                            splitPlan ? [splitPlan.extBand] : [],
                         ).filter(c => !q || c.name.toLowerCase().includes(q))
                         : [];
-                    const splitAdelCandidates = splitWorkBand && splitReferenceDate
-                        ? listEarlyStartCandidates(
-                            splitWorkBand.code,
+                    const splitWorkerPoolAdel = splitWorkBand && splitReferenceDate
+                        ? listVacancySplitWorkersForDay(
                             splitReferenceDate,
                             selectedObjective,
                             employees,
@@ -12346,6 +12326,7 @@ export default function PlanificacionPage() {
                             pendingChanges,
                             [vacancyData?.employeeId, vacancySplitExtId].filter(Boolean),
                             splitListCtxWithGap,
+                            splitPlan ? [splitPlan.adelBand] : [],
                         ).filter(c => !q || c.name.toLowerCase().includes(q))
                         : [];
                     const splitFrancoPreview = (vacancySplitExtId && vacancySplitAdelId)
@@ -12396,7 +12377,12 @@ export default function PlanificacionPage() {
                                     mode: 'split',
                                     extEmpId: vacancySplitExtId,
                                     adelEmpId: vacancySplitAdelId,
-                                    gapBand: tit.code,
+                                    gapBand: alignVacancyGapBand(
+                                        tit.code,
+                                        tit.positionName,
+                                        effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
+                                        tit.rawShift,
+                                    ),
                                     gapPosition: tit.positionName,
                                 };
                                 applied++;
@@ -12792,43 +12778,55 @@ export default function PlanificacionPage() {
                                                     />
                                                 </div>
                                                 <div>
-                                                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1.5">
-                                                        Extensión — turno {splitPlan?.extBand} ({splitPlan?.extSegment})
+                                                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                                        1.er tramo — extensión ({splitPlan?.extSegment})
                                                     </label>
-                                                    <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
-                                                        {splitExtCandidates.length === 0 ? (
+                                                    <p className="text-[9px] text-slate-400 font-bold mb-1.5">
+                                                        Elegí quien ya trabaja ese día (sugerido banda {splitPlan?.extBand}). No hace falta que sea E3: el titular en vacaciones no aparece.
+                                                    </p>
+                                                    <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
+                                                        {splitWorkerPoolExt.length === 0 ? (
                                                             <p className="text-[10px] text-slate-400 px-2 py-3 text-center">
-                                                                Sin guardias en banda {splitNeighbors?.extensionBand} ese día.
+                                                                No hay guardias con turno laboral ese día en el objetivo.
                                                             </p>
-                                                        ) : splitExtCandidates.map(c => (
+                                                        ) : splitWorkerPoolExt.map(c => (
                                                             <button
                                                                 key={c.id}
                                                                 type="button"
                                                                 onClick={() => setVacancySplitExtId(c.id)}
-                                                                className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border transition-colors ${vacancySplitExtId === c.id ? 'bg-violet-100 border-violet-400 text-violet-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                                                                className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border transition-colors ${vacancySplitExtId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
                                                             >
                                                                 {c.name} · {c.code} · {c.positionName}
+                                                                {splitPlan?.extBand === c.code && (
+                                                                    <span className="ml-1 text-[9px] font-black text-red-600">sugerido</span>
+                                                                )}
                                                             </button>
                                                         ))}
                                                     </div>
                                                 </div>
                                                 <div>
-                                                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1.5">
-                                                        Adelanto — turno {splitPlan?.adelBand} ({splitPlan?.adelSegment})
+                                                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                                        2.º tramo — cierre ({splitPlan?.adelSegment})
                                                     </label>
-                                                    <div className="space-y-1 max-h-32 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
-                                                        {splitAdelCandidates.length === 0 ? (
+                                                    <p className="text-[9px] text-slate-400 font-bold mb-1.5">
+                                                        Otro guardia distinto (sugerido banda {splitPlan?.adelBand}, ej. E2 07:00–16:00 extendido).
+                                                    </p>
+                                                    <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
+                                                        {splitWorkerPoolAdel.length === 0 ? (
                                                             <p className="text-[10px] text-slate-400 px-2 py-3 text-center">
-                                                                Sin guardias en banda {splitNeighbors?.earlyStartBand} ese día.
+                                                                Elegí primero el 1.er tramo o no hay más guardias con turno ese día.
                                                             </p>
-                                                        ) : splitAdelCandidates.map(c => (
+                                                        ) : splitWorkerPoolAdel.map(c => (
                                                             <button
                                                                 key={c.id}
                                                                 type="button"
                                                                 onClick={() => setVacancySplitAdelId(c.id)}
-                                                                className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border transition-colors ${vacancySplitAdelId === c.id ? 'bg-violet-100 border-violet-400 text-violet-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                                                                className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border transition-colors ${vacancySplitAdelId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
                                                             >
                                                                 {c.name} · {c.code} · {c.positionName}
+                                                                {splitPlan?.adelBand === c.code && (
+                                                                    <span className="ml-1 text-[9px] font-black text-red-600">sugerido</span>
+                                                                )}
                                                             </button>
                                                         ))}
                                                     </div>

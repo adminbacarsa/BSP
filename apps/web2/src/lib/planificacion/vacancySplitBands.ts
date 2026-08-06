@@ -262,6 +262,44 @@ export function vacancySecondSegmentIsTailExtension(targetBand: string): boolean
   return !CCT_BANDS.has(normCode(targetBand));
 }
 
+export function alignVacancyGapBand(
+  workCode: string,
+  positionName: string | undefined | null,
+  positionStructure: VacancyPositionSla[] | undefined,
+  shiftLike?: { startTime?: unknown; code?: unknown },
+): string {
+  const ordered = orderedBandsForVacancyGap(positionStructure, positionName);
+  if (!ordered.length) return normCode(workCode);
+  const codes = ordered.map((s) => s.code);
+  const c = normCode(workCode);
+  if (codes.includes(c)) return c;
+
+  let startMin: number | null = null;
+  const rawStart = shiftLike?.startTime;
+  if (typeof rawStart === 'string') {
+    startMin = parseTimeToMinutes(rawStart);
+  }
+
+  if (startMin != null) {
+    for (const s of ordered) {
+      const w = shiftTimeWindowFromSla(s);
+      if (w.startMin === startMin) return s.code;
+    }
+  }
+
+  let best = ordered[0].code;
+  let bestDist = Infinity;
+  for (const s of ordered) {
+    const w = shiftTimeWindowFromSla(s);
+    const dist = startMin != null ? Math.abs(w.startMin - startMin) : 0;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = s.code;
+    }
+  }
+  return best;
+}
+
 export type VacancySplitListContext = {
   positionStructure?: VacancyPositionSla[];
   gapPositionName?: string | null;
