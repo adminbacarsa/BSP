@@ -178,9 +178,17 @@ import {
     vacancyDayHasCoverage,
     resolveTitularVacancyWorkShift,
     describeVacancySplitPlan,
+    resolveVacancySplitSegmentTimes,
+    vacancySplitUsesManualExtraHours,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
+import {
+    listVacancyGapBandOptions,
+    inferTitularGapBandFromHistory,
+    resolveEffectiveVacancyGapTitular,
+    buildTitularVacancyFromGapOption,
+} from '@/lib/planificacion/vacancyGapBands';
 import { resolveCellSecondBlock, slaBlocksForPositionShift } from '@/lib/planificacion/splitShiftDisplay';
 import {
     listExtensionCandidates,
@@ -1234,6 +1242,9 @@ export default function PlanificacionPage() {
     const [vacancySplitAdelId, setVacancySplitAdelId] = useState('');
     const [vacancyApplyToAllSelected, setVacancyApplyToAllSelected] = useState(true);
     const [vacancyFrancoAuthApproved, setVacancyFrancoAuthApproved] = useState(false);
+    const [vacancyGapBandOverride, setVacancyGapBandOverride] = useState<string | null>(null);
+    const [vacancySplitExtExtraHours, setVacancySplitExtExtraHours] = useState<number | null>(null);
+    const [vacancySplitSecondExtraHours, setVacancySplitSecondExtraHours] = useState<number | null>(null);
     const vacancyReplacementPanelRef = React.useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -1262,6 +1273,9 @@ export default function PlanificacionPage() {
         setVacancySplitExtId('');
         setVacancySplitAdelId('');
         setVacancyFrancoAuthApproved(false);
+        setVacancyGapBandOverride(null);
+        setVacancySplitExtExtraHours(null);
+        setVacancySplitSecondExtraHours(null);
     }, [vacancyData]);
 
     useEffect(() => {
@@ -5744,6 +5758,8 @@ export default function PlanificacionPage() {
                         extHomePosition: extShift?.positionName,
                         extBaseCode: extShift?.code,
                         adelBaseCode: adelShift?.code,
+                        extExtraHours: resolved.extExtraHours,
+                        secondExtExtraHours: resolved.secondExtExtraHours,
                     },
                 };
             }
@@ -12104,6 +12120,7 @@ export default function PlanificacionPage() {
                                     : 'Podés asignar cobertura por día o dejar vacante.';
                     const sortedActiveDates = [...vacancyActiveDates].sort();
                     const candidateDate = vacancyEditingDay || sortedActiveDates[0] || vacancyData?.startDate;
+                    const splitReferenceDate = vacancyEditingDay || candidateDate || '';
                     const isBulkCoverageMode = vacancyReplacementOpen && !vacancyEditingDay;
                     const vacancyEmployeesById: Record<string, any> = {};
                     employees.forEach((e: any) => { if (e.id) vacancyEmployeesById[e.id] = e; });
@@ -12182,16 +12199,54 @@ export default function PlanificacionPage() {
                             setVacancyPickerTab('split');
                             setVacancySplitExtId(existing.extEmpId);
                             setVacancySplitAdelId(existing.adelEmpId);
+                            setVacancySplitExtExtraHours(existing.extExtraHours ?? null);
+                            setVacancySplitSecondExtraHours(existing.secondExtExtraHours ?? null);
                         } else {
                             setVacancyPickerTab('substitute');
                             setVacancySplitExtId('');
                             setVacancySplitAdelId('');
+                            setVacancySplitExtExtraHours(null);
+                            setVacancySplitSecondExtraHours(null);
                         }
                     };
+                    const vacancyPosSla = effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[];
+                    const vacancyGapPreferredPosition =
+                        activePosition
+                        || (splitReferenceDate ? resolveTitularShiftForDay(splitReferenceDate)?.positionName : null)
+                        || effectivePosStructure[0]?.positionName
+                        || null;
+                    const vacancyGapBandOptions = listVacancyGapBandOptions(vacancyPosSla, vacancyGapPreferredPosition);
+                    const resolveEffectiveTitularForDay = (dateStr: string) => {
+                        const raw = resolveTitularShiftForDay(dateStr);
+                        const prefPos = activePosition || raw?.positionName || vacancyGapPreferredPosition;
+                        const options = listVacancyGapBandOptions(vacancyPosSla, prefPos);
+                        const hist = inferTitularGapBandFromHistory(
+                            vacancyData?.employeeId || '',
+                            vacancyData?.startDate,
+                            vacancyPosSla,
+                            prefPos,
+                            shiftsMap,
+                            pendingChanges,
+                        );
+                        const inferred = hist
+                            ? buildTitularVacancyFromGapOption(
+                                hist,
+                                'history_inferred',
+                                'Patrón previo al bloque (cronograma)',
+                                raw?.rawShift,
+                            )
+                            : null;
+                        return resolveEffectiveVacancyGapTitular(
+                            inferred || raw,
+                            vacancyGapBandOverride,
+                            options,
+                            vacancyPosSla,
+                        );
+                    };
                     const resolveTitularForCoverageDay = (dateStr: string, refDate?: string) =>
-                        resolveTitularShiftForDay(dateStr)
-                        || (refDate ? resolveTitularShiftForDay(refDate) : null)
-                        || (sortedActiveDates[0] ? resolveTitularShiftForDay(sortedActiveDates[0]) : null);
+                        resolveEffectiveTitularForDay(dateStr)
+                        || (refDate ? resolveEffectiveTitularForDay(refDate) : null)
+                        || (sortedActiveDates[0] ? resolveEffectiveTitularForDay(sortedActiveDates[0]) : null);
                     const shouldApplyCoverageToAllDays = () =>
                         isBulkCoverageMode
                         || (vacancyApplyToAllSelected && sortedActiveDates.length > 1);
@@ -12220,6 +12275,8 @@ export default function PlanificacionPage() {
                                     adelEmpId: template.adelEmpId,
                                     gapBand: tit.code,
                                     gapPosition: tit.positionName,
+                                    extExtraHours: template.extExtraHours,
+                                    secondExtExtraHours: template.secondExtExtraHours,
                                 };
                             }
                         }
@@ -12284,8 +12341,22 @@ export default function PlanificacionPage() {
                         positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
                         preferSamePosition: true,
                     };
-                    const splitReferenceDate = vacancyEditingDay || candidateDate || '';
-                    const splitTitularShift = splitReferenceDate ? resolveTitularShiftForDay(splitReferenceDate) : null;
+                    const splitTitularShift = (() => {
+                        if (splitReferenceDate) {
+                            return resolveEffectiveTitularForDay(splitReferenceDate);
+                        }
+                        if (vacancyGapBandOverride) {
+                            const opt = vacancyGapBandOptions.find((o) => o.code === vacancyGapBandOverride);
+                            if (opt) {
+                                return buildTitularVacancyFromGapOption(
+                                    opt,
+                                    'user_selected',
+                                    'Turno a cubrir elegido manualmente',
+                                );
+                            }
+                        }
+                        return null;
+                    })();
                     const splitWorkBand = splitTitularShift
                         ? { code: splitTitularShift.code, positionName: splitTitularShift.positionName }
                         : null;
@@ -12329,6 +12400,32 @@ export default function PlanificacionPage() {
                             splitPlan ? [splitPlan.adelBand] : [],
                         ).filter(c => !q || c.name.toLowerCase().includes(q))
                         : [];
+                    const splitManualExtraHours = vacancySplitUsesManualExtraHours({
+                        extExtraHours: vacancySplitExtExtraHours,
+                        secondExtExtraHours: vacancySplitSecondExtraHours,
+                    });
+                    const splitDualPreview = (() => {
+                        if (!splitWorkBand || !vacancySplitExtId || !vacancySplitAdelId) return null;
+                        const extC = splitWorkerPoolExt.find((c) => c.id === vacancySplitExtId)
+                            || splitWorkerPoolAdel.find((c) => c.id === vacancySplitExtId);
+                        const adelC = splitWorkerPoolAdel.find((c) => c.id === vacancySplitAdelId);
+                        if (!extC || !adelC) return null;
+                        return resolveVacancySplitSegmentTimes(
+                            vacancyPosSla,
+                            splitGapBand,
+                            splitWorkBand.positionName,
+                            { positionName: extC.positionName, code: extC.code },
+                            { positionName: adelC.positionName, code: adelC.code },
+                            vacancySplitExtExtraHours,
+                            vacancySplitSecondExtraHours,
+                        );
+                    })();
+                    const splitExtSegmentLabel = splitDualPreview
+                        ? `${splitDualPreview.first.from}–${splitDualPreview.first.to}`
+                        : (splitPlan?.extSegment ?? '—');
+                    const splitSecondSegmentLabel = splitDualPreview
+                        ? `${splitDualPreview.second.from}–${splitDualPreview.second.to}`
+                        : (splitPlan?.adelSegment ?? '—');
                     const splitFrancoPreview = (vacancySplitExtId && vacancySplitAdelId)
                         ? (() => {
                             const previewDays = shouldApplyCoverageToAllDays()
@@ -12377,13 +12474,14 @@ export default function PlanificacionPage() {
                                     mode: 'split',
                                     extEmpId: vacancySplitExtId,
                                     adelEmpId: vacancySplitAdelId,
-                                    gapBand: alignVacancyGapBand(
-                                        tit.code,
-                                        tit.positionName,
-                                        effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
-                                        tit.rawShift,
-                                    ),
+                                    gapBand: tit.code,
                                     gapPosition: tit.positionName,
+                                    ...(splitManualExtraHours
+                                        ? {
+                                            extExtraHours: vacancySplitExtExtraHours,
+                                            secondExtExtraHours: vacancySplitSecondExtraHours,
+                                        }
+                                        : {}),
                                 };
                                 applied++;
                             }
@@ -12587,7 +12685,7 @@ export default function PlanificacionPage() {
                                                     <span className="flex-1 min-w-0">
                                                         <span className="block truncate font-bold text-slate-700">{resolveDayCoverageLabel(d)}</span>
                                                         {(() => {
-                                                            const tit = resolveTitularShiftForDay(d);
+                                                            const tit = resolveEffectiveTitularForDay(d);
                                                             return tit ? (
                                                                 <span className="block truncate text-[9px] font-bold text-amber-700 mt-0.5">
                                                                     Cubrir: {renderTitularChipLine(tit)}
@@ -12634,11 +12732,34 @@ export default function PlanificacionPage() {
                                 {(vacancyEditingDay || isBulkCoverageMode) && splitTitularShift && (
                                     <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/90 px-3 py-3">
                                         <div className="text-[10px] font-black uppercase text-amber-900 mb-1.5 flex items-center gap-1">
-                                            <Clock size={11} /> Turno del titular a cubrir
+                                            <Clock size={11} /> Hueco de cobertura (turno SLA)
                                             {isBulkCoverageMode && splitReferenceDate && (
                                                 <span className="normal-case font-bold text-amber-700/80 ml-1">· ref. {formatShortDay(splitReferenceDate)}</span>
                                             )}
                                         </div>
+                                        {vacancyGapBandOptions.length > 0 && (
+                                            <label className="block mb-2">
+                                                <span className="text-[9px] font-black uppercase text-amber-800/90">¿Qué turno cubrir?</span>
+                                                <select
+                                                    className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-800 shadow-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-400"
+                                                    value={vacancyGapBandOverride ?? splitTitularShift.code}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value.trim().toUpperCase();
+                                                        const autoCode = splitTitularShift.code.toUpperCase();
+                                                        setVacancyGapBandOverride(v && v !== autoCode ? v : null);
+                                                    }}
+                                                >
+                                                    {vacancyGapBandOptions.map((opt) => (
+                                                        <option key={`${opt.positionName}__${opt.code}`} value={opt.code}>
+                                                            {opt.code} · {opt.positionName} · {opt.scheduleLabel} ({opt.hours}h)
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <span className="text-[9px] font-bold text-amber-800/80 mt-1 block">
+                                                    Si el cronograma muestra otro código (ej. S), elegí la banda real del SLA (ej. E3 14:00–20:00).
+                                                </span>
+                                            </label>
+                                        )}
                                         <div className="text-sm font-black text-slate-800 flex flex-wrap items-center gap-1.5">
                                             <span className="font-mono bg-white px-2 py-0.5 rounded-lg border border-amber-300 text-amber-900">{splitTitularShift.code}</span>
                                             {splitTitularShift.bandLabel !== splitTitularShift.code && (
@@ -12678,9 +12799,25 @@ export default function PlanificacionPage() {
                                         )}
                                     </div>
                                 )}
-                                {(vacancyEditingDay || isBulkCoverageMode) && !splitTitularShift && (
-                                    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[10px] font-bold text-rose-700">
-                                        No se pudo inferir el turno laboral del titular. Revisá el cronograma previo a la licencia o usá suplente manual.
+                                {(vacancyEditingDay || isBulkCoverageMode) && vacancyGapBandOptions.length > 0 && !splitTitularShift && (
+                                    <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-3">
+                                        <label className="block">
+                                            <span className="text-[10px] font-black uppercase text-amber-900 flex items-center gap-1 mb-1">
+                                                <Clock size={11} /> Elegí el turno SLA a cubrir
+                                            </span>
+                                            <select
+                                                className="w-full rounded-xl border border-amber-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-800 shadow-sm"
+                                                value={vacancyGapBandOverride ?? ''}
+                                                onChange={(e) => setVacancyGapBandOverride(e.target.value.trim().toUpperCase() || null)}
+                                            >
+                                                <option value="">— Seleccionar banda (ej. E3 14:00–20:00) —</option>
+                                                {vacancyGapBandOptions.map((opt) => (
+                                                    <option key={`${opt.positionName}__${opt.code}`} value={opt.code}>
+                                                        {opt.code} · {opt.positionName} · {opt.scheduleLabel}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
                                     </div>
                                 )}
                                 {(vacancyEditingDay || isBulkCoverageMode) && (
@@ -12779,7 +12916,7 @@ export default function PlanificacionPage() {
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
-                                                        1.er tramo — extensión ({splitPlan?.extSegment})
+                                                        1.er tramo — extensión ({splitExtSegmentLabel})
                                                     </label>
                                                     <p className="text-[9px] text-slate-400 font-bold mb-1.5">
                                                         Elegí quien ya trabaja ese día (sugerido banda {splitPlan?.extBand}). No hace falta que sea E3: el titular en vacaciones no aparece.
@@ -12806,7 +12943,7 @@ export default function PlanificacionPage() {
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
-                                                        2.º tramo — cierre ({splitPlan?.adelSegment})
+                                                        2.º tramo — cierre ({splitSecondSegmentLabel})
                                                     </label>
                                                     <p className="text-[9px] text-slate-400 font-bold mb-1.5">
                                                         Otro guardia distinto (sugerido banda {splitPlan?.adelBand}, ej. E2 07:00–16:00 extendido).
@@ -12830,6 +12967,89 @@ export default function PlanificacionPage() {
                                                             </button>
                                                         ))}
                                                     </div>
+                                                </div>
+                                                <div className="rounded-xl border border-violet-200 bg-violet-50/80 px-3 py-2.5 space-y-2">
+                                                    <div className="text-[10px] font-black uppercase text-violet-900">Horas de extensión</div>
+                                                    <p className="text-[9px] font-bold text-violet-800/90">
+                                                        {splitManualExtraHours
+                                                            ? `Manual: +${vacancySplitExtExtraHours}h y +${vacancySplitSecondExtraHours}h sobre el fin SLA de cada guardia.`
+                                                            : 'Auto: tramos según hueco SLA (corte entre bandas).'}
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setVacancySplitExtExtraHours(null);
+                                                                setVacancySplitSecondExtraHours(null);
+                                                            }}
+                                                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border ${!splitManualExtraHours ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-violet-300'}`}
+                                                        >
+                                                            Auto SLA
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setVacancySplitExtExtraHours(2);
+                                                                setVacancySplitSecondExtraHours(4);
+                                                            }}
+                                                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border ${splitManualExtraHours && vacancySplitExtExtraHours === 2 && vacancySplitSecondExtraHours === 4 ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-200 hover:border-red-200'}`}
+                                                        >
+                                                            +2h / +4h
+                                                        </button>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <label className="text-[9px] font-bold text-slate-600">
+                                                            1.er guardia (+h)
+                                                            <input
+                                                                type="number"
+                                                                min={0}
+                                                                max={12}
+                                                                step={0.5}
+                                                                className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
+                                                                placeholder="Auto"
+                                                                value={vacancySplitExtExtraHours ?? ''}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value.trim();
+                                                                    if (!raw) {
+                                                                        setVacancySplitExtExtraHours(null);
+                                                                        return;
+                                                                    }
+                                                                    const n = Number(raw);
+                                                                    setVacancySplitExtExtraHours(Number.isFinite(n) ? n : null);
+                                                                }}
+                                                            />
+                                                        </label>
+                                                        <label className="text-[9px] font-bold text-slate-600">
+                                                            2.º guardia (+h)
+                                                            <input
+                                                                type="number"
+                                                                min={0}
+                                                                max={12}
+                                                                step={0.5}
+                                                                className="mt-0.5 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-bold"
+                                                                placeholder="Auto"
+                                                                value={vacancySplitSecondExtraHours ?? ''}
+                                                                onChange={(e) => {
+                                                                    const raw = e.target.value.trim();
+                                                                    if (!raw) {
+                                                                        setVacancySplitSecondExtraHours(null);
+                                                                        return;
+                                                                    }
+                                                                    const n = Number(raw);
+                                                                    setVacancySplitSecondExtraHours(Number.isFinite(n) ? n : null);
+                                                                }}
+                                                            />
+                                                        </label>
+                                                    </div>
+                                                    {splitDualPreview && (
+                                                        <div className="text-[9px] font-bold text-violet-900 pt-1 border-t border-violet-200/80">
+                                                            Hueco {splitDualPreview.gap.from}–{splitDualPreview.gap.to}
+                                                            {' · '}
+                                                            1.º {splitDualPreview.first.from}–{splitDualPreview.first.to}
+                                                            {' · '}
+                                                            2.º {splitDualPreview.second.from}–{splitDualPreview.second.to}
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 {splitFrancoPreview.length > 0 && (
                                                     <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5 text-[10px] font-bold text-amber-900">

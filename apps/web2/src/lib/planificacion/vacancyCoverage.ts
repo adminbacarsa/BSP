@@ -8,6 +8,10 @@ import {
   type VacancyPositionSla,
 } from './vacancySplitBands';
 import {
+  resolveVacancyDualExtensionPlan,
+  type VacancyDualExtensionPlan,
+} from './vacancyDualExtension';
+import {
   buildRecompositionPendingUpdates,
   collectSplitFrancoConflicts,
   isPlannedFrancoShift,
@@ -53,7 +57,7 @@ export type TitularVacancyWorkShift = {
   positionName: string;
   scheduleLabel: string;
   hours: number;
-  source: 'saved_day' | 'adjacent_day' | 'weekday_pattern' | 'month_typical';
+  source: 'saved_day' | 'adjacent_day' | 'weekday_pattern' | 'month_typical' | 'history_inferred' | 'user_selected';
   sourceLabel: string;
   rawShift?: Record<string, any>;
 };
@@ -232,6 +236,9 @@ export type VacancyDayCoverage =
       adelEmpId: string;
       gapBand: string;
       gapPosition: string;
+      /** Horas extra sobre fin SLA del 1.er guardia; ambos definidos = manual (+N h). */
+      extExtraHours?: number | null;
+      secondExtExtraHours?: number | null;
     };
 
 export type VacancyDayCoverageInput =
@@ -246,6 +253,8 @@ export type VacancyDayCoverageInput =
       extHomePosition?: string;
       extBaseCode?: string;
       adelBaseCode?: string;
+      extExtraHours?: number | null;
+      secondExtExtraHours?: number | null;
     };
 
 export function listDateRangeInclusive(startYmd: unknown, endYmd?: unknown): string[] {
@@ -293,6 +302,37 @@ function stripCoverageMeta(shift: Record<string, any> | null | undefined): Recor
   return { ...rest, isExtended: false, isEarlyStart: false };
 }
 
+export function vacancySplitUsesManualExtraHours(coverage: {
+  extExtraHours?: number | null;
+  secondExtExtraHours?: number | null;
+}): boolean {
+  return coverage.extExtraHours != null
+    && coverage.secondExtExtraHours != null
+    && Number.isFinite(coverage.extExtraHours)
+    && Number.isFinite(coverage.secondExtExtraHours);
+}
+
+export function resolveVacancySplitSegmentTimes(
+  positionStructure: VacancyPositionSla[] | undefined,
+  gapBand: string,
+  gapPosition: string,
+  extWorker: { positionName?: string; code?: string } | null,
+  secondWorker: { positionName?: string; code?: string } | null,
+  extExtraHours?: number | null,
+  secondExtExtraHours?: number | null,
+): VacancyDualExtensionPlan {
+  const manual = vacancySplitUsesManualExtraHours({ extExtraHours, secondExtExtraHours });
+  return resolveVacancyDualExtensionPlan(
+    positionStructure,
+    gapPosition,
+    gapBand,
+    extWorker,
+    secondWorker,
+    manual ? extExtraHours! : null,
+    manual ? secondExtExtraHours! : null,
+  );
+}
+
 /** Resuelve cobertura efectiva de un día (override por día o suplente por defecto). */
 export function resolveVacancyDayCoverage(
   dateStr: string,
@@ -316,6 +356,9 @@ export function formatVacancyDayCoverageLabel(
   }
   const extName = (employeesById[coverage.extEmpId]?.name || '—').split(',')[0];
   const adelName = (employeesById[coverage.adelEmpId]?.name || '—').split(',')[0];
+  if (vacancySplitUsesManualExtraHours(coverage)) {
+    return `${extName} ext +${coverage.extExtraHours}h · ${adelName} ext +${coverage.secondExtExtraHours}h`;
+  }
   return `${extName} ext + ${adelName} adel`;
 }
 
@@ -518,6 +561,8 @@ export function applyVacancyCoverageToChanges(
                 adelEmpId: coverage.adelEmpId,
                 gapBand: coverage.gapBand,
                 gapPosition: coverage.gapPosition,
+                extExtraHours: coverage.extExtraHours,
+                secondExtExtraHours: coverage.secondExtExtraHours,
               },
               input.employeesById,
             )
@@ -569,7 +614,24 @@ export function applyVacancyCoverageToChanges(
         label: `${titularName} · ${coverage.gapPosition || workShift.positionName} · ${gapBand}`,
         kind: 'absence',
       };
-      const splitTimes = input.defaultSplitForBand(gapBand, coverage.gapPosition || workShift.positionName);
+      const extShift = resolveEmployeeShift(coverage.extEmpId, dateStr, input.shiftsMap, newChanges);
+      const adelShift = resolveEmployeeShift(coverage.adelEmpId, dateStr, input.shiftsMap, newChanges);
+      const dualPlan = resolveVacancySplitSegmentTimes(
+        input.positionStructure,
+        gapBand,
+        coverage.gapPosition || workShift.positionName || input.activePosition || 'General',
+        {
+          positionName: extShift?.positionName || coverage.extHomePosition,
+          code: extShift?.code || coverage.extBaseCode,
+        },
+        {
+          positionName: adelShift?.positionName,
+          code: adelShift?.code || coverage.adelBaseCode,
+        },
+        coverage.extExtraHours,
+        coverage.secondExtExtraHours,
+      );
+      const splitTimes = { ext: dualPlan.first, adel: dualPlan.second };
       const pkg = buildVacancySplitPackage(input, dateStr, coverage, target, splitTimes);
       try {
         const updates = buildRecompositionPendingUpdates(pkg, {
