@@ -15,7 +15,7 @@ import {
     BadgePercent, ArrowLeftRight, CalendarSearch, CheckSquare, XCircle, Search as SearchIcon, RefreshCcw, UserCheck, Split, Ban,
     FastForward, Rewind, AlertOctagon, Siren, FileText, Fingerprint, CalendarCheck, HelpCircle, MousePointerClick, Check, Database, Activity,
     PowerOff, LockKeyhole, Ghost, Maximize2, Maximize, Minimize2, Copy, ClipboardPaste, Scissors, Wand2, BarChart3, BarChart2, PanelLeft, LayoutList,
-    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle
+    ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer
 } from 'lucide-react';
 
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
@@ -215,6 +215,8 @@ import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
 import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageModal';
 import PlanningRecompositionModal from '@/components/planificacion/PlanningRecompositionModal';
 import PlanningSlaGapCloseModal, { type SlaGapCloseModalData } from '@/components/planificacion/PlanningSlaGapCloseModal';
+import PlanningShiftExtendModal, { type ShiftExtendModalData } from '@/components/planificacion/PlanningShiftExtendModal';
+import { isShiftEligibleForExtension } from '@/lib/planificacion/shiftExtensionApply';
 import PlanningCronogramasOverviewModal from '@/components/planificacion/PlanningCronogramasOverviewModal';
 import { touchPlanificacionEstadoActivity } from '@/lib/planificacion/planningCronogramaOverview';
 import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
@@ -917,6 +919,7 @@ export default function PlanificacionPage() {
         y: number;
     } | null>(null);
     const [slaGapCloseModal, setSlaGapCloseModal] = useState<SlaGapCloseModalData | null>(null);
+    const [shiftExtendModal, setShiftExtendModal] = useState<ShiftExtendModalData | null>(null);
     const [showCoverageDiagnostic, setShowCoverageDiagnostic] = useState(false);
     const [columnSelectMode, setColumnSelectMode] = useState(false);
     const [columnSelectSource, setColumnSelectSource] = useState<number | null>(null);
@@ -9237,6 +9240,26 @@ export default function PlanificacionPage() {
                     </div>
                 </div>
             )}
+            {shiftExtendModal && selectedObjective && (
+                <PlanningShiftExtendModal
+                    data={shiftExtendModal}
+                    objectiveId={selectedObjective}
+                    clientId={selectedClient || undefined}
+                    employees={displayedEmployees}
+                    shiftsMap={shiftsMap}
+                    pendingChanges={pendingChanges}
+                    positionStructure={effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[]}
+                    onApply={(changes) => {
+                        setPendingChanges(changes);
+                        setSelectedCell(null);
+                        toast.success('Extensión aplicada en borrador — guardá el cronograma.');
+                    }}
+                    onClose={() => setShiftExtendModal(null)}
+                    onRequestSupervisorAuth={(conflicts, onAuthorized) => {
+                        requestSupervisorFrancoAuth(conflicts, onAuthorized, 'extensión de jornada');
+                    }}
+                />
+            )}
             {slaGapCloseModal && selectedObjective && (
                 <PlanningSlaGapCloseModal
                     data={slaGapCloseModal}
@@ -11874,6 +11897,28 @@ export default function PlanificacionPage() {
                                             );
                                         })()}
                                         <div className={`flex flex-col gap-2 mb-4 ${isServiceLocked ? 'opacity-50 pointer-events-none' : ''}`}>
+                                            {(() => {
+                                                const extKey = `${selectedCell.empId}_${selectedCell.dateStr}`;
+                                                const extShift = pendingChanges[extKey]?.isDeleted
+                                                    ? null
+                                                    : (pendingChanges[extKey] || selectedCell.currentShift);
+                                                const canExtendCell = isShiftEligibleForExtension(extShift) && !isConsolidated;
+                                                return canExtendCell ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setShiftExtendModal({
+                                                                empId: selectedCell.empId,
+                                                                empName: employeeName,
+                                                                dateStr: selectedCell.dateStr,
+                                                            });
+                                                        }}
+                                                        className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-red-200 bg-red-50 text-red-800 hover:bg-red-100 flex items-center justify-center gap-2"
+                                                    >
+                                                        <Timer size={14} /> Extender jornada (+horas)
+                                                    </button>
+                                                ) : null;
+                                            })()}
                                             <button
                                                 type="button"
                                                 onClick={() => setRecompositionModalOpen(true)}
