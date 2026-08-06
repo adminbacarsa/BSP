@@ -389,18 +389,37 @@ export default function ServiciosSLAPage() {
     [monthlyBreakdown]
   );
 
-  const positionContractHoursMap = useMemo(() => {
+  const { positionContractHoursMap, positionHoursMonthLabel } = useMemo(() => {
     const map: Record<string, number> = {};
-    if (!form.startDate?.trim() || !form.endDate?.trim()) return map;
-    for (const pos of form.positions) {
-      map[pos.id] = calculatePositionContractTotalHours(
-        pos,
-        form.startDate,
-        form.endDate,
-        form.excludedDates,
-      );
+    if (!form.startDate?.trim() || !form.endDate?.trim()) return { positionContractHoursMap: map, positionHoursMonthLabel: '' };
+
+    const today = new Date();
+    const y = today.getFullYear();
+    const mo = today.getMonth();
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const curMonthStart = `${y}-${pad2(mo + 1)}-01`;
+    const curMonthEnd = `${y}-${pad2(mo + 1)}-${pad2(new Date(y, mo + 1, 0).getDate())}`;
+
+    let from = curMonthStart > form.startDate ? curMonthStart : form.startDate;
+    let to = curMonthEnd < form.endDate ? curMonthEnd : form.endDate;
+    let refDate = today;
+
+    if (from > to) {
+      // Mes en curso fuera del contrato — usar primer mes del contrato
+      const cs = new Date(form.startDate + 'T12:00:00');
+      const cy = cs.getFullYear();
+      const cm = cs.getMonth();
+      from = form.startDate;
+      const firstMonthEnd = `${cy}-${pad2(cm + 1)}-${pad2(new Date(cy, cm + 1, 0).getDate())}`;
+      to = firstMonthEnd < form.endDate ? firstMonthEnd : form.endDate;
+      refDate = cs;
     }
-    return map;
+
+    const label = refDate.toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+    for (const pos of form.positions) {
+      map[pos.id] = calculatePositionContractTotalHours(pos, from, to, form.excludedDates);
+    }
+    return { positionContractHoursMap: map, positionHoursMonthLabel: label };
   }, [form.positions, form.startDate, form.endDate, form.excludedDates]);
 
   // Historial combinado: meses de versiones anteriores + meses del form actual
@@ -2345,9 +2364,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                 {form.startDate && form.endDate ? (
                                   <span
                                     className="text-[10px] font-black text-emerald-800 dark:text-emerald-200 bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800"
-                                    title={`Subtotal horas vendidas de «${pos.name}» en el rango del contrato (${form.startDate} → ${form.endDate}), ${pos.quantity} pax incluido`}
+                                    title={`Horas de «${pos.name}» en ${positionHoursMonthLabel} (${pos.quantity} pax)`}
                                   >
-                                    {(positionContractHoursMap[pos.id] ?? 0).toLocaleString('es-AR')} hs
+                                    {(positionContractHoursMap[pos.id] ?? 0).toLocaleString('es-AR')} hs/mes
                                   </span>
                                 ) : null}
                               </div>
