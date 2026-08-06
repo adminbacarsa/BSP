@@ -11429,21 +11429,32 @@ export default function PlanificacionPage() {
 
                                             {/* Acciones */}
                                             {canEdit && !previewIsPublished && (
-                                                <div className="flex gap-2">
-                                                    <button
-                                                        onClick={() => setCellEditMode(true)}
-                                                        disabled={isServiceLocked}
-                                                        className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-black transition-colors"
-                                                    >
-                                                        <Edit3 size={14}/> Cambiar
-                                                    </button>
-                                                    <button
-                                                        onClick={handleDelete}
-                                                        disabled={isServiceLocked}
-                                                        className="flex items-center justify-center gap-2 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-500 px-4 py-2.5 rounded-xl text-sm font-black transition-colors border border-rose-200"
-                                                    >
-                                                        <Trash2 size={14}/>
-                                                    </button>
+                                                <div className="flex flex-col gap-2">
+                                                    <div className="flex gap-2">
+                                                        <button
+                                                            onClick={() => setCellEditMode(true)}
+                                                            disabled={isServiceLocked}
+                                                            className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-black transition-colors"
+                                                        >
+                                                            <Edit3 size={14}/> Cambiar
+                                                        </button>
+                                                        <button
+                                                            onClick={handleDelete}
+                                                            disabled={isServiceLocked}
+                                                            className="flex items-center justify-center gap-2 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-500 px-4 py-2.5 rounded-xl text-sm font-black transition-colors border border-rose-200"
+                                                        >
+                                                            <Trash2 size={14}/>
+                                                        </button>
+                                                    </div>
+                                                    {isFrancoShift && isSuperAdmin && (
+                                                        <button
+                                                            onClick={() => { setFrancoMode('FT_SELECTION'); setCellEditMode(true); }}
+                                                            disabled={isServiceLocked}
+                                                            className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-black transition-colors"
+                                                        >
+                                                            <ArrowRightCircle size={14}/> Asignar FT (Franco Trabajado)
+                                                        </button>
+                                                    )}
                                                 </div>
                                             )}
                                             {/* Publicado: acciones contextuales según tipo de turno */}
