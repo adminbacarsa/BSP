@@ -31,8 +31,8 @@
 | **F7** | Publicación en stores | `PENDIENTE` | 12 | 0/12 | — |
 | | **TOTAL** | | **88** | **32/88** | |
 
-**Fase activa recomendada:** F5 (UX) · F4-08 prueba E2E permutas · F3-06/12 push nativo  
-**Última actualización:** 2026-08-03  
+**Fase activa recomendada:** F4-08 E2E permutas (Paso 1 roadmap) → F5-07 + EAS preview  
+**Última actualización:** 2026-08-04  
 **Última tarea completada:** F5-05/06 UX offline, errores y loading temático
 
 ---
@@ -281,6 +281,33 @@ npm run dev:mobile
 | F4-06 | Confirmar / cancelar | `confirmSwapRequest` → `PENDING_SUPERVISOR` | ✅ Hecha | 2026-08-03 |
 | F4-07 | Notificación de permuta | `user_notifications` en cada paso | ✅ Hecha | 2026-08-03 |
 | F4-08 | Prueba E2E permuta | Dos guardias + supervisor (`approveSwapRequest`) | ⬜ Pendiente | — |
+
+### Checklist E2E F4-08 (lab)
+
+**Preparación (emulador)**
+
+1. `npm run emulators` + `npm run dev` (web `:3001`) + `npm run dev:mobile` (Expo).
+2. `npm run seed` luego `npm run seed:swap-peer` (Guardia A hoy + Guardia B mañana, mismo `obj_lab_guardia`).
+3. Móvil `.env` con `EXPO_PUBLIC_USE_EMULATOR=true` y misma IP que `web2` si no es localhost.
+
+**Actores**
+
+| Rol | Credenciales lab |
+|-----|------------------|
+| Solicitante (app) | `guardia@bacarsa.com.ar` / `guardia1234` |
+| Compañero (web o app) | `guardia2@bacarsa.com.ar` / `guardia1234` |
+| Supervisor | `admin@bacarsa.com.ar` / `admin1234` → empresa Bacar |
+
+**Pasos**
+
+1. **App** — Login Guardia A → Permutas → elegir turno hoy → candidato María (mañana) → Enviar.
+2. **Web** — Login Guardia B → dashboard → aceptar permuta (`PENDING_PEER`).
+3. **App** — Guardia A → Confirmar permuta → estado `PENDING_SUPERVISOR`.
+4. **Web admin** — Planificación → banner ámbar «Permutas pendientes» → **Autorizar**.
+5. **Verificación Firestore** — En `turnos`, los dos `seed_shift_*` deben tener `employeeId` cruzado, `isSwap: true`, `swapAuthorized: true`.
+6. **Opcional cross-client** — Repetir paso 2 en app (Guardia B) o paso 1 en web (Guardia A).
+
+**Criterio de aprobación Paso 1 roadmap:** los 5 pasos sin error; bitácora + marcar F4-08 y F4 COMPLETA.
 
 ---
 
