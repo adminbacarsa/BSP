@@ -296,6 +296,13 @@ export function buildPlanningPositionStructure(
       const normalizedShifts = hasShifts
         ? normalizePlanningShifts(shiftList)
         : defaultShifts.map((s) => ({ ...s }));
+      const posCoverageType = String(pos.coverageType ?? srv.coverageType ?? '24hs');
+      // Para puestos 24hs, D12 y N12 siempre deben estar disponibles en el modal aunque no figuren en el SLA
+      if (posCoverageType === '24hs') {
+        const existingCodes = new Set(normalizedShifts.map((s) => s.code));
+        if (!existingCodes.has('D12')) normalizedShifts.push({ code: 'D12', hours: 12 });
+        if (!existingCodes.has('N12')) normalizedShifts.push({ code: 'N12', hours: 12 });
+      }
       // Días excluidos: SLA-nivel aplica a todos; posición-nivel solo a este puesto
       const slaExcluded: string[] = Array.isArray((srv as any).excludedDates) ? (srv as any).excludedDates : [];
       const posExcluded: string[] = Array.isArray(pos.excludedDates) ? (pos.excludedDates as string[]) : [];
@@ -305,7 +312,7 @@ export function buildPlanningPositionStructure(
         shifts: normalizedShifts,
         qty: parsePlanningPositionQty(pos),
         activeDays: derivePlanningPositionActiveDays(pos.activeDays as string[] | undefined, normalizedShifts),
-        coverageType: String(pos.coverageType ?? srv.coverageType ?? '24hs'),
+        coverageType: posCoverageType,
         ...(pos.preferenciaGenero ? { preferenciaGenero: String(pos.preferenciaGenero) } : {}),
         ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),
         _serviceId: srv.id,
@@ -317,12 +324,18 @@ export function buildPlanningPositionStructure(
   let usedSlaFallback = false;
   if (structure.length === 0 && slaActive) {
     usedSlaFallback = true;
+    const fallbackCoverage = String(srv?.coverageType ?? '24hs');
+    const fallbackShifts = defaultShifts.map((s) => ({ ...s })) as PlanningPositionShiftRow[];
+    if (fallbackCoverage === '24hs') {
+      fallbackShifts.push({ code: 'D12', hours: 12 });
+      fallbackShifts.push({ code: 'N12', hours: 12 });
+    }
     structure.push({
       positionName: 'General',
-      shifts: defaultShifts,
+      shifts: fallbackShifts,
       qty: 1,
       activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
-      coverageType: String(srv?.coverageType ?? '24hs'),
+      coverageType: fallbackCoverage,
       ...(srv?.id ? { _serviceId: srv.id } : {}),
       ...(srv ? { _serviceRange: slaServiceRangeLabel(srv) } : {}),
     });

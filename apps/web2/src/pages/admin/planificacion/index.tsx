@@ -670,6 +670,15 @@ function filterShiftsForPlanningDay(
     cycles?: string[],
 ): any[] {
     if (!shifts?.length) return [];
+    // Para puestos 24hs se muestran todas las bandas (M/T/N y D12/N12) siempre, sin filtrar por ciclo
+    if (String(pos?.coverageType ?? '').toLowerCase() === '24hs') {
+        return shifts.filter((s: any) => {
+            const code = String(s.code || '').toUpperCase();
+            if (PLANNING_REST_SHIFT_CODES.has(code)) return true;
+            if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
+            return true;
+        });
+    }
     const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
     const effCodes = new Set(eff.map((s) => String(s.code || '').toUpperCase()));
     return shifts.filter((s: any) => {
