@@ -362,6 +362,7 @@ export function positionSchemeLabelForDay(
     pos: { coverageType?: string; shifts?: Array<{ code?: string; hours?: number }> },
     dayLetter: string,
     cycles?: string[],
+    dateStr?: string,
 ): string {
     const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
     const allShifts = Array.isArray(pos?.shifts) ? pos.shifts : [];
@@ -379,7 +380,7 @@ export function positionSchemeLabelForDay(
         if (p12) return p12;
         return 'M+T+N o D12+N12';
     }
-    const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles);
+    const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles, dateStr);
     const codes = eff.map(s => String(s.code || '').toUpperCase()).filter(Boolean);
     if (codes.length > 0) return codes.join('+');
     const fallback = allShifts.map(s => String(s.code || '').toUpperCase()).filter(Boolean);
@@ -398,9 +399,10 @@ export function countPositionClosedUnitsFromShifts(
     codeCounts: Record<string, number>,
     cycles?: string[],
     isActiveOnDay = true,
+    dateStr?: string,
 ): PositionCoverageUnitResult {
     const qty = Math.max(1, Number(pos.qty) || 1);
-    const schemeLabel = positionSchemeLabelForDay(pos, dayLetter, cycles);
+    const schemeLabel = positionSchemeLabelForDay(pos, dayLetter, cycles, dateStr);
     if (!isActiveOnDay) return { closed: 0, required: 0, schemeLabel };
 
     const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
@@ -427,7 +429,7 @@ export function countPositionClosedUnitsFromShifts(
         return { closed, required: qty, schemeLabel };
     }
 
-    const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles);
+    const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles, dateStr);
     let bandCodes = eff.map(s => String(s.code || '').toUpperCase()).filter(Boolean);
     if (bandCodes.length === 0) {
         bandCodes = allShifts.map(s => String(s.code || '').toUpperCase()).filter(Boolean);

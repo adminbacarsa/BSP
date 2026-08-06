@@ -10,6 +10,8 @@ import {
     shiftBandHours,
 } from './positionCoverageUnits';
 
+import type { PlanningPositionLike, PositionActiveOnDayFn } from './objectiveCoverageDemand';
+
 export interface BandGap {
     code: string;
     missing: number;
@@ -100,8 +102,8 @@ function get24hsBandSets(pos: PlanningPositionLike): { bands8: string[]; bands12
     };
 }
 
-function getCustomBandCodes(pos: PlanningPositionLike, dayLetter: string, cycles?: string[]): string[] {
-    const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles);
+function getCustomBandCodes(pos: PlanningPositionLike, dayLetter: string, cycles?: string[], dateStr?: string): string[] {
+    const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles, dateStr);
     let codes = eff.map(s => normCode(s.code)).filter(Boolean);
     if (codes.length === 0) {
         codes = (pos.shifts || []).map(s => normCode(s.code)).filter(Boolean);
@@ -116,14 +118,15 @@ export function analyzePositionDayGap(
     codeCounts: Record<string, number>,
     cycles?: string[],
     isActiveOnDay = true,
+    dateStr?: string,
 ): PositionDayGap | null {
     const posName = String(pos.positionName || 'General');
     const qty = Math.max(1, Number(pos.qty) || 1);
-    const schemeLabel = positionSchemeLabelForDay(pos, dayLetter, cycles);
+    const schemeLabel = positionSchemeLabelForDay(pos, dayLetter, cycles, dateStr);
 
     if (!isActiveOnDay) return null;
 
-    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true);
+    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr);
     if (units.closed >= units.required) return null;
 
     const missingUnits = units.required - units.closed;
@@ -165,7 +168,7 @@ export function analyzePositionDayGap(
             }
         }
     } else {
-        const bandCodes = getCustomBandCodes(pos, dayLetter, cycles);
+        const bandCodes = getCustomBandCodes(pos, dayLetter, cycles, dateStr);
         primaryScheme = bandCodes.join('+') || schemeLabel;
         missingBandsPrimary = missingBandsForScheme(qty, codeCounts, bandCodes);
     }
@@ -203,9 +206,9 @@ export function analyzeDayCoverageGaps(
     dayLetter: string,
     codeCountsByPosition: Record<string, Record<string, number>>,
     cycles?: string[],
-    isPosActiveOnDay?: (pos: PlanningPositionLike, dayLetter: string) => boolean,
+    isPosActiveOnDay?: PositionActiveOnDayFn,
 ): DayCoverageGapReport {
-    const checkActive = isPosActiveOnDay ?? ((pos, letter) => {
+    const checkActive = isPosActiveOnDay ?? ((pos, letter, ds) => {
         const days = pos.activeDays;
         if (!days || days.length === 0) return true;
         return days.includes(letter);
@@ -217,7 +220,7 @@ export function analyzeDayCoverageGaps(
 
     for (const pos of positions) {
         const posName = String(pos.positionName || 'General');
-        if (!checkActive(pos, dayLetter)) continue;
+        if (!checkActive(pos, dayLetter, dateStr)) continue;
 
         const units = countPositionClosedUnitsFromShifts(
             pos,
@@ -225,6 +228,7 @@ export function analyzeDayCoverageGaps(
             codeCountsByPosition[posName] || {},
             cycles,
             true,
+            dateStr,
         );
         closed += units.closed;
         required += units.required;
@@ -235,6 +239,7 @@ export function analyzeDayCoverageGaps(
             codeCountsByPosition[posName] || {},
             cycles,
             true,
+            dateStr,
         );
         if (gap) positionGaps.push(gap);
     }
@@ -254,7 +259,7 @@ export function analyzeObjectiveCoverageGaps(
     days: Array<{ dateStr: string; dayLetter: string }>,
     codeCountsByDay: Record<string, Record<string, Record<string, number>>>,
     cycles?: string[],
-    isPosActiveOnDay?: (pos: PlanningPositionLike, dayLetter: string) => boolean,
+    isPosActiveOnDay?: PositionActiveOnDayFn,
 ): ObjectiveCoverageGapReport {
     const byDay: Record<string, DayCoverageGapReport> = {};
     const aggregateMissingPrimary: Record<string, number> = {};

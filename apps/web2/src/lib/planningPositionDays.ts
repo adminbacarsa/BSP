@@ -32,9 +32,19 @@ function collectShiftDaysUnion(shifts: Array<{ days?: string[] }>): string[] {
 /** Días operativos del puesto: prioriza activeDays explícito; si no, unión de shift.days. */
 export function derivePlanningPositionActiveDays(
   posActiveDays: string[] | undefined,
-  shifts: Array<{ days?: string[] }>,
+  shifts: Array<{ days?: string[]; specificDates?: string[] }>,
 ): string[] {
-  const shiftUnion = collectShiftDaysUnion(shifts);
+  const weekdayShifts = shifts.filter(
+    (s) => !(Array.isArray(s.specificDates) && s.specificDates.length > 0),
+  );
+  const hasSpecificDateShifts = shifts.some(
+    (s) => Array.isArray(s.specificDates) && s.specificDates.length > 0,
+  );
+  if (hasSpecificDateShifts && collectShiftDaysUnion(weekdayShifts).length === 0) {
+    return [];
+  }
+
+  const shiftUnion = collectShiftDaysUnion(weekdayShifts);
   const posDays = normalizeDayLetters(posActiveDays);
 
   if (posDays.length > 0 && posDays.length < 7) {

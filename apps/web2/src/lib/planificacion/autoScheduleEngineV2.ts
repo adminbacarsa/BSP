@@ -877,18 +877,26 @@ export function positionIsActiveOn(pos: V2PositionDef, dayLetter: string, dateSt
 
     if (is24hsCoverage(pos)) return true;
 
-    // Turnos de fechas específicas activan el puesto solo en esas fechas
-    if (dateStr && (pos.shifts || []).some(
-        (s) => !isFrancoCode(s.code) && Array.isArray(s.specificDates) && s.specificDates.length > 0 && s.specificDates.includes(dateStr)
-    )) return true;
+    const shifts = pos.shifts || [];
+    const specificDateShifts = shifts.filter(
+        (s) => !isFrancoCode(s.code) && Array.isArray(s.specificDates) && s.specificDates.length > 0,
+    );
+    const weekdayShifts = shifts.filter(
+        (s) => !isFrancoCode(s.code) && !(Array.isArray(s.specificDates) && s.specificDates.length > 0),
+    );
 
-    if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) {
+    if (dateStr && specificDateShifts.some((s) => s.specificDates!.includes(dateStr))) {
+        return true;
+    }
+
+    if (specificDateShifts.length > 0 && weekdayShifts.length === 0) {
+        return false;
+    }
+
+    if (Array.isArray(pos.activeDays) && pos.activeDays.length > 0 && pos.activeDays.length < 7) {
         return pos.activeDays.includes(dayLetter);
     }
-    // Excluir turnos de fechas específicas del cálculo de días-de-semana
-    const workingShifts = (pos.shifts || []).filter(
-        (s) => !isFrancoCode(s.code) && !(Array.isArray(s.specificDates) && s.specificDates!.length > 0)
-    );
+    const workingShifts = weekdayShifts;
     const withDays = workingShifts.filter((s) => Array.isArray(s.days) && s.days!.length > 0);
     if (withDays.length === 0 || withDays.length < workingShifts.length) return true;
     return withDays.some((s) => s.days!.includes(dayLetter));

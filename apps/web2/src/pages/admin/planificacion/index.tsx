@@ -673,20 +673,23 @@ const posAsEngineDef = (pos: any) => ({
     excludedDates: pos?.excludedDates,
 });
 
-const isPosActiveOnDay = (pos: any, dayLetter: string): boolean =>
-    positionIsActiveOn(posAsEngineDef(pos), dayLetter);
+const isPosActiveOnDay = (pos: any, dayLetter: string, dateStr?: string): boolean =>
+    positionIsActiveOn(posAsEngineDef(pos), dayLetter, dateStr);
 
 const PLANNING_REST_SHIFT_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC']);
 
-/** Horas SLA del día según bandas activas (respeta shift.days, ej. RE L–S + DO solo domingo). */
-function dailyCoverageHoursTargetForPos(pos: any, dayLetter: string, cycles?: string[]): number {
+/** Horas SLA del día según bandas activas (respeta shift.days y fechas específicas). */
+function dailyCoverageHoursTargetForPos(pos: any, dayLetter: string, cycles?: string[], dateStr?: string): number {
     const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
     if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') return 24;
-    const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles);
+    const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
     if (eff.length > 0) {
         return eff.reduce((acc, s) => acc + (Number(s.hours) || 8), 0);
     }
     const dayShifts = (pos?.shifts || []).filter((s: any) => {
+        if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
+            return dateStr ? s.specificDates.includes(dateStr) : false;
+        }
         if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
         return true;
     });
@@ -708,6 +711,9 @@ function filterShiftsForPlanningDay(
         return shifts.filter((s: any) => {
             const code = String(s.code || '').toUpperCase();
             if (PLANNING_REST_SHIFT_CODES.has(code)) return true;
+            if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
+                return dateStr ? s.specificDates.includes(dateStr) : false;
+            }
             if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
             return true;
         });
@@ -2571,7 +2577,7 @@ export default function PlanificacionPage() {
                 if (!day) continue;
                 const dateStr = getDateKey(day);
                 const dayLetter = getDayLetter(dateStr);
-                if (!isPosActiveOnDay(posCfg, dayLetter) || isPosExcludedOnDate(posCfg, dateStr)) {
+                if (!isPosActiveOnDay(posCfg, dayLetter, dateStr) || isPosExcludedOnDate(posCfg, dateStr)) {
                     lastReason = 'Puesto sin servicio ese día';
                     continue;
                 }
@@ -2594,7 +2600,7 @@ export default function PlanificacionPage() {
                     assigned.push({ code: sc, hours: resolveBandHours(sc, shift, posCfg.shifts || []) });
                 });
 
-                const units = countPositionClosedUnitsFromShifts(posCfg, dayLetter, codeCounts, cycles, true);
+                const units = countPositionClosedUnitsFromShifts(posCfg, dayLetter, codeCounts, cycles, true, dateStr);
                 if (units.required > 0 && units.closed >= units.required) {
                     lastReason = 'Cobertura SLA completa';
                     continue;
@@ -2777,7 +2783,7 @@ export default function PlanificacionPage() {
         const dayLetter = getDayLetter(dateStr);
 
         // Si el puesto no está activo hoy → bloquear todos los turnos laborales
-        if (!isPosActiveOnDay(posConfig, dayLetter)) {
+        if (!isPosActiveOnDay(posConfig, dayLetter, dateStr)) {
             uniqueSLAShifts.forEach((s: any) => {
                 const code = String(s.code || '').toUpperCase();
                 if (isWorking(code)) disabled.add(code);
@@ -2839,10 +2845,14 @@ export default function PlanificacionPage() {
             }
         }
 
-        // Shift-level: bloquear cada turno que tenga days[] y no incluya el día actual
+        // Shift-level: bloquear cada turno que tenga days[] o fechas específicas fuera del día actual
         uniqueSLAShifts.forEach((s: any) => {
             const code = String(s.code || '').toUpperCase();
             if (!isWorking(code)) return;
+            if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
+                if (!s.specificDates.includes(dateStr)) disabled.add(code);
+                return;
+            }
             if (Array.isArray(s.days) && s.days.length > 0 && !s.days.includes(dayLetter)) {
                 disabled.add(code);
             }
@@ -2890,6 +2900,7 @@ export default function PlanificacionPage() {
                 codeCounts,
                 autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles,
                 true,
+                dateStr,
             );
             const schemeFull = units.required > 0 && units.closed >= units.required;
             uniqueSLAShifts.forEach((s: any) => {
@@ -3037,10 +3048,10 @@ export default function PlanificacionPage() {
         // Meta diaria: 24hs = 24h/pax; custom = solo bandas activas ese día (shift.days).
         let dailyHoursTarget = 24;
         if (coverageType !== '24hs') {
-            dailyHoursTarget = dailyCoverageHoursTargetForPos(posConfig, dayLetter, cycles);
+            dailyHoursTarget = dailyCoverageHoursTargetForPos(posConfig, dayLetter, cycles, dateStr);
         }
 
-        const isDayActive = isPosActiveOnDay(posConfig, dayLetter);
+        const isDayActive = isPosActiveOnDay(posConfig, dayLetter, dateStr);
         const isDayExcluded = isPosExcludedOnDate(posConfig, dateStr);
         
         const target = isDayActive && !isDayExcluded ? (pax * dailyHoursTarget) : 0;
@@ -3091,7 +3102,7 @@ export default function PlanificacionPage() {
         structureForDominant?: any[],
     ): { closed: number; required: number; schemeLabel: string } => {
         const covObjId = objectiveId ?? selectedObjective;
-        if (!isPosActiveOnDay(pos, dayLetter)) return { closed: 0, required: 0, schemeLabel: '' };
+        if (!isPosActiveOnDay(pos, dayLetter, dateStr)) return { closed: 0, required: 0, schemeLabel: '' };
         if (isPosExcludedOnDate(pos, dateStr)) return { closed: 0, required: 0, schemeLabel: 'EXCL' };
 
         const structDom = structureForDominant?.length ? structureForDominant : (positionStructure || []);
@@ -3141,7 +3152,7 @@ export default function PlanificacionPage() {
             codeCounts[bandCode] = (codeCounts[bandCode] || 0) + n;
         }
 
-        return countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles);
+        return countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr);
     };
 
     // 🛑 MEMOIZACIÓN CRÍTICA PARA EL MODAL
@@ -3226,7 +3237,7 @@ export default function PlanificacionPage() {
             for (const objId of selectedGrupo.objectiveIds) {
                 const structure = grupoSlaMap[objId] || [];
                 for (const pos of structure) {
-                    if (!isPosActiveOnDay(pos, dayLetter)) continue;
+                    if (!isPosActiveOnDay(pos, dayLetter, dateStr)) continue;
                     if (isPosExcludedOnDate(pos, dateStr)) continue;
                     const codeCounts: Record<string, number> = {};
                     dotacionBaseEmployees.forEach((emp: any) => {
@@ -3243,7 +3254,7 @@ export default function PlanificacionPage() {
                         if (shiftPos !== pos.positionName) return;
                         codeCounts[code] = (codeCounts[code] || 0) + 1;
                     });
-                    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts);
+                    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, undefined, true, dateStr);
                     requiredPax += units.required;
                     closedPax += units.closed;
                 }
@@ -5921,9 +5932,10 @@ export default function PlanificacionPage() {
                 const posCfg = (empStructure || []).find((p: any) => p.positionName === posName) || empStructure[0];
                 if (!posCfg) return false;
                 const dayLetter = getDayLetter(dateStr);
-                if (!isPosActiveOnDay(posCfg, dayLetter)) return true;
+                if (!isPosActiveOnDay(posCfg, dayLetter, dateStr)) return true;
                 if (isPosExcludedOnDate(posCfg, dateStr)) return true;
                 const shiftRow = (posCfg.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === String(code).toUpperCase());
+                if (Array.isArray(shiftRow?.specificDates) && shiftRow.specificDates.length > 0 && !shiftRow.specificDates.includes(dateStr)) return true;
                 if (Array.isArray(shiftRow?.days) && shiftRow.days.length > 0 && !shiftRow.days.includes(dayLetter)) return true;
 
                 const pax = Math.max(1, Number(posCfg.qty) || 1);
@@ -5934,6 +5946,7 @@ export default function PlanificacionPage() {
                     codeCounts,
                     cyclesForBulk,
                     true,
+                    dateStr,
                 );
                 if (units.required > 0 && units.closed >= units.required) return true;
 
@@ -6219,11 +6232,11 @@ export default function PlanificacionPage() {
             const isBlocked = (dateStr: string, code: string, hours: number, changes: Record<string, any>) => {
                 if (!isPlanningWorkShiftCode(code)) return false;
                 const dayLetter = getDayLetter(dateStr);
-                if (!isPosActiveOnDay(pos, dayLetter)) return true;
+                if (!isPosActiveOnDay(pos, dayLetter, dateStr)) return true;
                 if (isPosExcludedOnDate(pos, dateStr)) return true;
                 const pax = Math.max(1, Number(pos.qty) || 1);
                 const { codeCounts, assigned } = collectCodeCounts(dateStr, changes);
-                const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForBulk, true);
+                const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForBulk, true, dateStr);
                 if (units.required > 0 && units.closed >= units.required) return true;
                 const upper = String(code).toUpperCase();
                 if ((codeCounts[upper] || 0) >= pax) return true;
@@ -9056,7 +9069,7 @@ export default function PlanificacionPage() {
                             selectedGrupo.objectiveIds.forEach((objId: string) => {
                                 const structure = grupoSlaMap[objId] || [];
                                 structure.forEach((pos: any) => {
-                                    if (!isPosActiveOnDay(pos, dayLetter)) return;
+                                    if (!isPosActiveOnDay(pos, dayLetter, dateStr)) return;
                                     if (isPosExcludedOnDate(pos, dateStr)) return;
                                     const codeCounts: Record<string, number> = {};
                                     dotacionBaseEmployees.forEach((emp: any) => {
@@ -9073,7 +9086,7 @@ export default function PlanificacionPage() {
                                         if (shiftPos !== pos.positionName) return;
                                         codeCounts[code] = (codeCounts[code] || 0) + 1;
                                     });
-                                    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForCoverage);
+                                    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForCoverage, true, dateStr);
                                     requiredPax += units.required;
                                     closedPax += units.closed;
                                 });

@@ -31,24 +31,26 @@ function is24hsCoverage(pos: PlannerPositionDef): boolean {
 function positionIsActiveOnPlanner(pos: PlannerPositionDef, dayLetter: string, dateStr?: string): boolean {
     if (dateStr && pos.excludedDates?.includes(dateStr)) return false;
     if (is24hsCoverage(pos)) return true;
-    if (
-        dateStr &&
-        (pos.shifts || []).some(
-            (s) =>
-                !isFrancoCode(s.code) &&
-                Array.isArray(s.specificDates) &&
-                s.specificDates.length > 0 &&
-                s.specificDates.includes(dateStr),
-        )
-    ) {
-        return true;
-    }
-    if (Array.isArray(pos.activeDays) && pos.activeDays.length < 7) {
-        return pos.activeDays.includes(dayLetter);
-    }
-    const workingShifts = (pos.shifts || []).filter(
+
+    const shifts = pos.shifts || [];
+    const specificDateShifts = shifts.filter(
+        (s) => !isFrancoCode(s.code) && Array.isArray(s.specificDates) && s.specificDates.length > 0,
+    );
+    const weekdayShifts = shifts.filter(
         (s) => !isFrancoCode(s.code) && !(Array.isArray(s.specificDates) && s.specificDates.length > 0),
     );
+
+    if (dateStr && specificDateShifts.some((s) => s.specificDates!.includes(dateStr))) {
+        return true;
+    }
+    if (specificDateShifts.length > 0 && weekdayShifts.length === 0) {
+        return false;
+    }
+
+    if (Array.isArray(pos.activeDays) && pos.activeDays.length > 0 && pos.activeDays.length < 7) {
+        return pos.activeDays.includes(dayLetter);
+    }
+    const workingShifts = weekdayShifts;
     const withDays = workingShifts.filter((s) => Array.isArray(s.days) && s.days.length > 0);
     if (withDays.length === 0 || withDays.length < workingShifts.length) return true;
     return withDays.some((s) => s.days!.includes(dayLetter));
@@ -61,8 +63,8 @@ function dayLetterFromDateStr(dateStr: string): string {
     return days[date.getDay()];
 }
 
-function isPosActiveOnDay(pos: PlannerPositionDef, dayLetter: string): boolean {
-    return positionIsActiveOnPlanner(pos, dayLetter);
+function isPosActiveOnDay(pos: PlannerPositionDef, dayLetter: string, dateStr?: string): boolean {
+    return positionIsActiveOnPlanner(pos, dayLetter, dateStr);
 }
 
 function isPosExcludedOnDate(pos: { excludedDates?: unknown }, dateStr: string): boolean {
@@ -147,7 +149,7 @@ export function applyRotationsForMonth(
                         if (positionStructure?.length && ent.positionName) {
                             const pCfg = findPositionCfg(positionStructure, ent.positionName);
                             if (pCfg) {
-                                if (!isPosActiveOnDay(pCfg as object, dayLetter)) continue;
+                                if (!isPosActiveOnDay(pCfg as object, dayLetter, dateStr)) continue;
                                 if (isPosExcludedOnDate(pCfg as object, dateStr)) continue;
                             }
                         }
@@ -214,7 +216,7 @@ export function applyRotationsForMonth(
                         if (positionStructure?.length && csEmp.positionName) {
                             const pCfg = findPositionCfg(positionStructure, csEmp.positionName);
                             if (pCfg) {
-                                if (!isPosActiveOnDay(pCfg as object, dayLetter)) continue;
+                                if (!isPosActiveOnDay(pCfg as object, dayLetter, dateStr)) continue;
                                 if (isPosExcludedOnDate(pCfg as object, dateStr)) continue;
                             }
                         }
@@ -329,7 +331,7 @@ export function applyRotationsForMonth(
                             if (positionStructure?.length && rrRot.positionName) {
                                 const posCfg = findPositionCfg(positionStructure, rrRot.positionName);
                                 if (posCfg) {
-                                    if (!isPosActiveOnDay(posCfg as object, dayLetter)) continue;
+                                    if (!isPosActiveOnDay(posCfg as object, dayLetter, dateStr)) continue;
                                     if (isPosExcludedOnDate(posCfg as object, dateStr)) continue;
                                 }
                             }
@@ -389,7 +391,7 @@ export function applyRotationsForMonth(
                     if (positionStructure?.length && entry.positionName) {
                         const posCfg = findPositionCfg(positionStructure, entry.positionName);
                         if (posCfg) {
-                            if (!isPosActiveOnDay(posCfg as object, dayLetter)) continue;
+                            if (!isPosActiveOnDay(posCfg as object, dayLetter, dateStr)) continue;
                             if (isPosExcludedOnDate(posCfg as object, dateStr)) continue;
                         }
                     }

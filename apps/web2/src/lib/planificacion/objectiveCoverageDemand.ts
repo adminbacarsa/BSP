@@ -5,7 +5,7 @@
  *   3. Input para generador / preflight AUTO
  */
 
-import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
+import { effectiveShiftsForPositionDay, positionIsActiveOn } from './autoScheduleEngineV2';
 import {
     positionSchemeLabelForDay,
     shiftBandHours,
@@ -59,11 +59,14 @@ export interface ObjectiveCoveragePreflight {
     canPlan: boolean;
 }
 
-const DEFAULT_IS_ACTIVE = (pos: PlanningPositionLike, dayLetter: string) => {
-    const days = pos.activeDays;
-    if (!days || days.length === 0) return true;
-    return days.includes(dayLetter);
-};
+export type PositionActiveOnDayFn = (
+    pos: PlanningPositionLike,
+    dayLetter: string,
+    dateStr?: string,
+) => boolean;
+
+const DEFAULT_IS_ACTIVE: PositionActiveOnDayFn = (pos, dayLetter, dateStr) =>
+    positionIsActiveOn(pos as any, dayLetter, dateStr);
 
 function bandSetsForPosition(pos: PlanningPositionLike): { bands8: string[]; bands12: string[] } {
     const allShifts = Array.isArray(pos.shifts) ? pos.shifts : [];
@@ -156,7 +159,7 @@ function buildBandSlotsForPositionDay(
         return { primary, alternate, hours: qty * 24 };
     }
 
-    const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles);
+    const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles, dateStr);
     const bands = eff.length > 0
         ? eff.map(s => String(s.code || '').toUpperCase()).filter(Boolean)
         : (pos.shifts || []).map(s => String(s.code || '').toUpperCase()).filter(Boolean);
@@ -175,7 +178,7 @@ export function buildObjectiveCoverageDemand(
     positions: PlanningPositionLike[],
     days: Array<{ dateStr: string; dayLetter: string }>,
     cycles?: string[],
-    isPosActiveOnDay: (pos: PlanningPositionLike, dayLetter: string) => boolean = DEFAULT_IS_ACTIVE,
+    isPosActiveOnDay: PositionActiveOnDayFn = DEFAULT_IS_ACTIVE,
     apretarCronoDays?: string[] | Set<string>,
 ): ObjectiveDayDemand[] {
     return days.map(({ dateStr, dayLetter }) => {
@@ -185,7 +188,7 @@ export function buildObjectiveCoverageDemand(
         let hoursRequired = 0;
 
         for (const pos of positions) {
-            if (!isPosActiveOnDay(pos, dayLetter)) continue;
+            if (!isPosActiveOnDay(pos, dayLetter, dateStr)) continue;
             const qty = Math.max(1, Number(pos.qty) || 1);
             const built = buildBandSlotsForPositionDay(pos, dayLetter, cycles, dateStr, apretarCronoDays);
             const schemeLabel = built.schemeLabel || positionSchemeLabelForDay(pos, dayLetter, cycles);
@@ -238,7 +241,7 @@ export function buildObjectiveCoveragePreflight(opts: {
     slaVendidas: number;
     cycles?: string[];
     objectiveId?: string;
-    isPosActiveOnDay?: (pos: PlanningPositionLike, dayLetter: string) => boolean;
+    isPosActiveOnDay?: PositionActiveOnDayFn;
     /** Días YYYY-MM-DD con esquema D12+N12 (apretar crono → liberar RET). */
     apretarCronoDays?: string[];
 }): ObjectiveCoveragePreflight {
