@@ -17,6 +17,7 @@
     "afip:secrets": "powershell -ExecutionPolicy Bypass -File scripts/setup-afip-secrets.ps1 -CertDir scripts/afip-csr-20217563519 -Production true",
     "afip:secrets:homo": "powershell -ExecutionPolicy Bypass -File scripts/setup-afip-secrets.ps1 -CertDir scripts/afip-csr-20217563519 -Production false",
     "seed:lab": "node scripts/seed-lab.js",
+    "seed:swap-peer": "node scripts/seed-swap-peer.js",
     "docs:capturas": "node scripts/capture-tutorial-screens.cjs",
     "docs:capturas-flujo": "node scripts/capture-tutorial-flows.cjs",
     "docs:capturas-all": "npm run docs:capturas && npm run docs:capturas-flujo",

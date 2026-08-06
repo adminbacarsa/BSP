@@ -18,6 +18,7 @@
     "eval:case-01-oficina": "npx tsx scripts/eval-case-01-oficina.ts",
     "eval:case-02-deposito-mt": "npx tsx scripts/eval-case-02-deposito-mt.ts",
     "eval:obrador-postprocess": "npx tsx scripts/eval-obrador-postprocess.ts",
+    "eval:obrador-malagueno-17": "npx tsx scripts/eval-obrador-malagueno-17.ts",
     "eval:obrador-sla-infer": "npx tsx scripts/eval-obrador-sla-infer.ts",
     "eval:volante-custom": "npx tsx scripts/eval-volante-custom.ts",
     "eval:objective-roster": "npx tsx scripts/eval-objective-roster.ts",
@@ -31,6 +32,10 @@
     "eval:sla-active-days": "npx tsx scripts/eval-sla-active-days.ts",
     "eval:franco-streak": "npx tsx scripts/eval-franco-streak-guard.ts",
     "eval:coverage-wisdom": "npx tsx scripts/eval-coverage-wisdom.ts",
+    "eval:compare-months": "npx tsx scripts/eval-compare-objective-months.ts",
+    "eval:pool-cycle-autolab": "npx tsx scripts/eval-pool-cycle-autolab.ts",
+    "eval:planning-roster-24hs": "npx tsx scripts/eval-planning-roster-24hs.ts",
+    "eval:pure-24hs-bands": "npx tsx scripts/eval-pure-24hs-bands.ts",
     "auto-lab:snapshot": "node scripts/snapshot-auto-lab-version.js",
     "auto-lab:restore": "node scripts/restore-auto-lab-version.js",
     "auto-lab:versions": "node scripts/list-auto-lab-versions.js"

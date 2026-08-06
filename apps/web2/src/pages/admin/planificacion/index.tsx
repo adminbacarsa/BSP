@@ -506,6 +506,19 @@ function isShiftAtOtherObjective(
     return String(obj) !== String(selectedObjective);
 }
 
+/** Turno guardado en Firestore de otro objetivo (solo visualización en el crono activo). */
+function pickCrossObjectiveSavedShift(
+    rawS: any,
+    selectedObjective: string | undefined | null,
+): any | null {
+    if (!rawS || !selectedObjective) return null;
+    if (isOperationalOriginShift(rawS)) return null;
+    const obj = rawS.objectiveId;
+    if (obj == null || obj === '') return null;
+    if (String(obj) === String(selectedObjective)) return null;
+    return rawS;
+}
+
 /** Turno visible en celda del crono para el objetivo activo (pending o publicado). */
 function resolveCellShiftAtObjective(
     empId: string,
@@ -545,7 +558,8 @@ function resolveCellShiftDisplay(
     const rawS = shiftsMap[key];
 
     if (rawP?.isDeleted) {
-        return { s: rawS ?? null, p: rawP };
+        const crossAfterDelete = pickCrossObjectiveSavedShift(rawS, selectedObjective);
+        return { s: crossAfterDelete ?? rawS ?? null, p: rawP };
     }
 
     if (selectedGrupo && grupoUnifiedMode) {
@@ -569,11 +583,29 @@ function resolveCellShiftDisplay(
     }
 
     const resolved = resolveCellShiftAtObjective(empId, dateStr, selectedObjective, pendingChanges, shiftsMap);
-    if (!resolved) return { s: null, p: null };
-    if (rawP && !rawP.isDeleted) {
-        return { s: rawS ?? null, p: rawP };
+    if (resolved) {
+        if (rawP && !rawP.isDeleted) {
+            return { s: rawS ?? null, p: rawP };
+        }
+        return { s: resolved, p: null };
     }
-    return { s: resolved, p: null };
+
+    const crossSaved = pickCrossObjectiveSavedShift(rawS, selectedObjective);
+    if (crossSaved) {
+        return { s: crossSaved, p: null };
+    }
+
+    if (rawP && !rawP.isDeleted) {
+        const pObj = rawP.objectiveId;
+        if (
+            pObj != null && pObj !== '' && String(pObj) !== String(selectedObjective) &&
+            !isOperationalOriginShift(rawP)
+        ) {
+            return { s: rawP, p: null };
+        }
+    }
+
+    return { s: null, p: null };
 }
 
 const getDateKey = (dateInput: any) => {
@@ -6748,6 +6780,18 @@ export default function PlanificacionPage() {
                 const effectiveShift = pendingChanges[key]?.isDeleted
                     ? null
                     : ((cellP && !cellP.isDeleted ? cellP : cellS) || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
+                const effObjId = effectiveShift?.objectiveId;
+                if (
+                    effectiveShift &&
+                    selectedObjective &&
+                    effObjId != null &&
+                    effObjId !== '' &&
+                    String(effObjId) !== String(selectedObjective) &&
+                    !(selectedGrupo && grupoUnifiedMode)
+                ) {
+                    toast.message(`Turno en ${getObjectiveName(effObjId)} — solo lectura en este cronograma.`);
+                    return;
+                }
                 const empPreferred = empDefaultPos[`${emp.id}___${selectedObjective}`];
                 const defaultPos = effectiveShift?.positionName || empPreferred || dominantPosition.positionName;
                 setActivePosition(defaultPos);

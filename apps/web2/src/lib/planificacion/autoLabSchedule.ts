@@ -30,7 +30,7 @@ import {
 } from './externalRetCoverage';
 import { applySurplusRetAbsentSubstitution, buildSurplusEmployeePool } from './surplusAbsentSubstitution';
 import { resolveOpeningSlotByEmpForPostProcess } from './openingSlotResolver';
-import { finalizeAutoLabSurplusSchedule, recomputeScheduleStatsFromAssignments } from './autoLabSurplusFinalize';
+import { finalizeAutoLabSurplusSchedule, recomputeScheduleStatsFromAssignments, enforceSurplusPoolStandbyPolicy, stripSurplusStandbyAssignments } from './autoLabSurplusFinalize';
 import { applyBalancedLdNineHourRetCctTopUp, recomputeRetPotentialStats } from './customCoverCycle';
 import { resolveMonthStartGlobalDayIndex } from './surplusRetCycle';
 import type { AutoLabRunResult } from './autoLabRuntime';
@@ -528,7 +528,12 @@ function postProcessAutoLabSchedule(
 
     let coveragePolicyBalance = analyzeCoveragePolicyBalance(ctx, assignments);
 
-    if (!coveragePolicyBalance.ok && coveragePolicyBalance.underSlotCount > 0 && surplusPool.length > 0) {
+    if (
+        !pure24RotativeBaseline
+        && !coveragePolicyBalance.ok
+        && coveragePolicyBalance.underSlotCount > 0
+        && surplusPool.length > 0
+    ) {
         if (surplusStandbyMode) {
             const lastSub = applySurplusRetAbsentSubstitution({
                 assignments,
@@ -666,15 +671,38 @@ function postProcessAutoLabSchedule(
         apretarCronoDays: modo12DaysForCoverage,
     };
 
-    const slaReconcile = reconcileScheduleToSlaTargets({
-        ctx: coverageCtxPre,
-        assignments,
-        stats: statsWithSurplus,
-        surplusPool: expandSlaGapFillPool(coverageCtxPre, statsWithSurplus, surplusPool),
-        maxRounds: 8,
-        rotativeSafe: ctx.preserveRotativeIntegrity === true,
-    });
+    const slaReconcile = pure24RotativeBaseline
+        ? {
+            assignments,
+            coverageReport: verifyScheduleCoverage(
+                coverageCtxPre,
+                assignments,
+                generation.stats,
+                { inferModo12TCoverage: true },
+            ),
+            balanceReport: analyzeCoveragePolicyBalance(coverageCtxPre, assignments, {
+                inferModo12TCoverage: true,
+            }),
+            rounds: 0,
+            converged: true,
+            messages: ['Puro 24hs baseline: cronograma del floater sin reconciliación SLA.'],
+        }
+        : reconcileScheduleToSlaTargets({
+            ctx: coverageCtxPre,
+            assignments,
+            stats: statsWithSurplus,
+            surplusPool: expandSlaGapFillPool(coverageCtxPre, statsWithSurplus, surplusPool),
+            maxRounds: 8,
+            rotativeSafe: ctx.preserveRotativeIntegrity === true,
+        });
     assignments = slaReconcile.assignments;
+
+    if (pure24RotativeBaseline && surplusPool.length > 0) {
+        const emptyAllowance = new Set<string>();
+        const pg = generation.stats.positionGroups;
+        enforceSurplusPoolStandbyPolicy(assignments, surplusPool, emptyAllowance, ctx.positions, pg);
+        stripSurplusStandbyAssignments(assignments, surplusPool, emptyAllowance, ctx.positions, pg);
+    }
 
     const coverageCtx: V2EngineContext = coverageCtxPre;
 
@@ -789,7 +817,7 @@ export { is24hsPosition } from './scheduleObjectiveFlags';
 
 export function buildAutoLabGenContext(
     caseDef: AutoLabCaseDefinition,
-    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'calendarDaysInVigencia' | 'serviceExcludedDates' | 'positions' | 'slaVendidas' | 'absences'>,
+    run: Pick<AutoLabRunResult, 'brain' | 'employees' | 'daysInMonth' | 'calendarDaysInVigencia' | 'serviceExcludedDates' | 'positions' | 'slaVendidas' | 'absences' | 'rosterSurplus'>,
     brain: AutoPlanningBrainResult,
 ): V2EngineContext {
     const objectiveId = run.objectiveId;
@@ -807,6 +835,12 @@ export function buildAutoLabGenContext(
         ...(rosterSeedByEmp || {}),
         ...(caseDef.defaultPositionByEmp || {}),
     };
+    for (const idleId of new Set([
+        ...(run.rosterSurplus?.idleEmployeeIds ?? []),
+        ...(run.rosterSurplus?.retDesigneeId ? [run.rosterSurplus.retDesigneeId] : []),
+    ])) {
+        delete defaultPositionByEmp[idleId];
+    }
     const defaultShiftByEmp: Record<string, string> = { ...(caseDef.defaultShiftByEmp || {}) };
     const scheduleFlags = resolveObjectiveScheduleFlags(run.positions);
     const cronogramRules = resolveCronogramPlanningRules(run.positions);
