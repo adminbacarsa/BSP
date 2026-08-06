@@ -294,14 +294,14 @@ const SHIFT_STYLES: any = {
     'E':   'bg-white text-rose-700 border-rose-400 font-black',
     'AA':  'bg-white text-amber-700 border-amber-400',
     'LT':  'bg-orange-50 text-orange-700 border-orange-400 font-black',
-    'RET': 'bg-white text-slate-500 border border-slate-300 font-bold',
+    'RET': 'bg-slate-100 text-slate-700 border border-slate-400 font-bold',
     'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
     'RFZ': 'bg-red-500 text-white border-red-600 font-black',
     'TURA': 'bg-red-600 text-white border-red-700 font-black',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
     'PG':  'bg-white text-blue-700 border-blue-400 font-black',
     'LOCKED': 'bg-slate-200 text-slate-500 border-slate-300 pattern-grid',
-    'PAST':   'bg-gray-100 text-gray-300 border-gray-200 cursor-not-allowed',
+    'PAST':   'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed',
     'C':   'bg-white text-slate-600 border-slate-400 font-bold opacity-90',
     'FT':  'bg-violet-600 text-white border-violet-700 font-black shadow-sm',
     'FF':  'bg-green-600 text-white border-green-700 font-black shadow-sm',
@@ -3917,7 +3917,6 @@ export default function PlanificacionPage() {
         const rotacionesActivas = (activeSlaServiceRotations as any[]).filter(r => !mesRotacionesDesactivadas.has(r.id));
         if (!rotacionesActivas.length) return;
         autoRotAppliedRef.current = periodKey;
-        console.log('[ROT-APPLY] Aplicando rotación automática para', periodKey);
         // Generar entradas de rotación para todo el mes (respeta shiftsMap vacío)
         const rotAdditions = applyRotationsForMonth(
             rotacionesActivas, {}, shiftsMap, year, month, positionStructure,
@@ -5115,7 +5114,6 @@ export default function PlanificacionPage() {
                                 : `Asignó ${change.code} a ${empName} el ${dateStr}`;
 
                     const allExistingIds = jobAllShiftIds[key] ?? (existing?.id ? [existing.id] : []);
-                    console.log('[SAVE-DBG] key:', key, '| code:', change.code, '| deletingIds:', allExistingIds, '| existingCode:', existing?.code ?? 'none');
                     const deleteAllExisting = () => {
                         for (const docId of allExistingIds) {
                             batch.delete(doc(db, 'turnos', docId));
@@ -5285,7 +5283,6 @@ export default function PlanificacionPage() {
                 }
 
                 await flushBatch();
-                console.log('[SAVE-DBG] batch committed OK, changes:', jobCount);
 
                 if (empresaId && selectedObjective) {
                     const touchYear = currentDate.getFullYear();
