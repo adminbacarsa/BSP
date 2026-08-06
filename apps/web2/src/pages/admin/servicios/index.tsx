@@ -27,6 +27,7 @@ import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 import {
   analyzeShiftComposition,
   calculateMonthlyBreakdown,
+  calculatePositionContractTotalHours,
   computePositionDayComposition,
   parseYmdToLocalDate,
   WEEK_DAY_CODES,
@@ -387,6 +388,20 @@ export default function ServiciosSLAPage() {
     () => Math.round(monthlyBreakdown.reduce((acc, curr) => acc + curr.weekendHours, 0)),
     [monthlyBreakdown]
   );
+
+  const positionContractHoursMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (!form.startDate?.trim() || !form.endDate?.trim()) return map;
+    for (const pos of form.positions) {
+      map[pos.id] = calculatePositionContractTotalHours(
+        pos,
+        form.startDate,
+        form.endDate,
+        form.excludedDates,
+      );
+    }
+    return map;
+  }, [form.positions, form.startDate, form.endDate, form.excludedDates]);
 
   // Historial combinado: meses de versiones anteriores + meses del form actual
   const combinedMonthlyBreakdown = useMemo(() => {
@@ -2327,6 +2342,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                 <span className="text-[10px] font-black text-amber-800 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800" title="Horas de cobertura por día (un puesto). Rango si cambia según el día de la semana.">
                                   {formatPositionDailyCoverageLabel(pos)}
                                 </span>
+                                {form.startDate && form.endDate ? (
+                                  <span
+                                    className="text-[10px] font-black text-emerald-800 dark:text-emerald-200 bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800"
+                                    title={`Subtotal horas vendidas de «${pos.name}» en el rango del contrato (${form.startDate} → ${form.endDate}), ${pos.quantity} pax incluido`}
+                                  >
+                                    {(positionContractHoursMap[pos.id] ?? 0).toLocaleString('es-AR')} hs
+                                  </span>
+                                ) : null}
                               </div>
                            </div>
                            <div className="flex gap-1 flex-wrap justify-end max-w-xs items-center">

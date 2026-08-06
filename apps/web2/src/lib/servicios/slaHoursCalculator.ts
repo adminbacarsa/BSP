@@ -239,6 +239,17 @@ export function calculateMonthlyBreakdown(
   return Object.values(monthAccumulator).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
 }
 
+/** Horas vendidas de un solo puesto en el rango del contrato (respeta exclusiones y fechas específicas). */
+export function calculatePositionContractTotalHours(
+  pos: ServicePosition,
+  startStr: string,
+  endStr: string,
+  excludedDates?: string[],
+): number {
+  const breakdown = calculateMonthlyBreakdown([pos], startStr, endStr, excludedDates);
+  return Math.round(breakdown.reduce((acc, m) => acc + m.totalHours, 0));
+}
+
 export function serviceOverlapsMonth(startDate: string, endDate: string, year: number, month: number): boolean {
   const mStart = new Date(year, month, 1);
   const mEnd = new Date(year, month + 1, 0);
