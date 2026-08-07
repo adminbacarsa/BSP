@@ -10,6 +10,7 @@ const os = require('os');
 const { execSync, execFile, spawn } = require('child_process');
 const path = require('path');
 const { pipeline } = require('stream/promises');
+const { waitForFirestoreEmulator } = require('./emulator-firestore-ready');
 
 let _importProgress = { active: false, done: 0, total: 0, col: '', phase: '', error: null };
 
@@ -55,10 +56,18 @@ async function importBackupFile(req, res) {
       return;
     }
 
+    try {
+      await waitForFirestoreEmulator({ maxWaitMs: 45_000 });
+    } catch (e) {
+      res.writeHead(503);
+      res.end(JSON.stringify({ error: e.message }));
+      return;
+    }
+
     const scriptPath = path.join(__dirname, 'seed-from-backup-file.js');
     const args = [scriptPath, tmpPath];
     if (mode === 'full') args.push('--full');
-    else { args.push('--empresa', empresaId); args.push('--clear-all'); }
+    else args.push('--empresa', empresaId);
     if (devMode) args.push('--dev');
 
     _importProgress = { active: true, done: 0, total: 0, col: '', phase: 'Preparando...', error: null };
@@ -115,9 +124,13 @@ async function importBackupFile(req, res) {
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, fileName, written, output }));
   } catch (e) {
-    console.error('[emulator-bridge] import-backup-file', e.message);
+    const msg = e.message.slice(0, 2000);
+    console.error('[emulator-bridge] import-backup-file', msg);
+    const hint = /8080|UNAVAILABLE|ECONNRESET|offline|emulador/i.test(msg)
+      ? ' Si el navegador muestra Firestore offline, reiniciá npm run lab:restart e importá de nuevo sin otras pestañas escribiendo.'
+      : '';
     res.writeHead(500);
-    res.end(JSON.stringify({ error: e.message.slice(0, 2000) }));
+    res.end(JSON.stringify({ error: msg + hint }));
   } finally {
     _importProgress.active = false;
     try { fs.unlinkSync(tmpPath); } catch { /* omit */ }

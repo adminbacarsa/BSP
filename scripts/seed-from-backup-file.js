@@ -17,9 +17,10 @@ const http = require('http');
 const { initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore, Timestamp, FieldPath } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
+const { waitForFirestoreEmulator, sleep } = require('./emulator-firestore-ready');
 
 const PROJECT_ID = 'comtroldata';
-const BATCH_SIZE = 400;
+const BATCH_SIZE = 250;
 const DEFAULT_PASSWORD = 'admin1234';
 
 // Sincronizado con backup.service.ts y restore.service.ts
@@ -53,7 +54,7 @@ const DEV_SKIP_COLS = new Set(['audit_logs', 'user_notifications', 'assistant_in
 const args = process.argv.slice(2);
 const fullMode = args.includes('--full');
 const devMode = args.includes('--dev');
-const clearAll = args.includes('--clear-all'); // limpia todo vía REST antes de importar empresa
+const clearAll = args.includes('--clear-all'); // legacy CLI: ya no borra todo el emulador (usar --full)
 const empresaIdx = args.indexOf('--empresa');
 const empresaId = empresaIdx >= 0 ? String(args[empresaIdx + 1] || '').trim() : 'bacarsa';
 const fileArg = args.find(a => !a.startsWith('--') && a !== empresaId);
@@ -91,6 +92,22 @@ function deserialize(obj) {
   return result;
 }
 
+async function commitBatchWithRetry(batch, label = '') {
+  const maxAttempts = 6;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await commitBatchWithRetry(batch, colName);
+      return;
+    } catch (e) {
+      const msg = e?.message || String(e);
+      if (attempt >= maxAttempts) throw e;
+      process.stdout.write(`\nSTATUS:Reintentando escritura${label ? ` (${label})` : ''} (${attempt}/${maxAttempts})...\n`);
+      await sleep(400 * attempt);
+      await waitForFirestoreEmulator({ maxWaitMs: 45_000 });
+    }
+  }
+}
+
 async function deleteCollectionWhereEmpresa(colName, empId) {
   let deleted = 0;
   while (true) {
@@ -98,7 +115,7 @@ async function deleteCollectionWhereEmpresa(colName, empId) {
     if (snap.empty) break;
     const batch = db.batch();
     snap.docs.forEach(d => batch.delete(d.ref));
-    await batch.commit();
+    await commitBatchWithRetry(batch, colName);
     deleted += snap.size;
   }
   if (empId === 'bacarsa') {
@@ -107,7 +124,7 @@ async function deleteCollectionWhereEmpresa(colName, empId) {
       if (snap.empty) break;
       const batch = db.batch();
       snap.docs.forEach(d => batch.delete(d.ref));
-      await batch.commit();
+      await commitBatchWithRetry(batch, colName);
       deleted += snap.size;
     }
   }
@@ -133,7 +150,12 @@ async function clearEmulatorFull() {
     req.on('error', () => resolve(false));
     req.end();
   });
-  if (ok) { console.log('OK'); return; }
+  if (ok) {
+    console.log('OK');
+    await sleep(2000);
+    await waitForFirestoreEmulator({ maxWaitMs: 60_000 });
+    return;
+  }
   // Fallback: borrar colección por colección
   console.log('fallback — borrando por colección...');
   const allCols = [...EMPRESA_SCOPED_COLS, 'empresas', 'system_config', 'feriados_nacionales'];
@@ -144,7 +166,7 @@ async function clearEmulatorFull() {
       if (snap.empty) break;
       const batch = db.batch();
       snap.docs.forEach(d => batch.delete(d.ref));
-      await batch.commit();
+      await commitBatchWithRetry(batch, colName);
       deleted += snap.size;
     }
     if (deleted) process.stdout.write(`  ${col}: ${deleted} docs\n`);
@@ -153,13 +175,22 @@ async function clearEmulatorFull() {
 }
 
 async function clearEmpresa(empId) {
-  process.stdout.write(`Limpiando datos de ${empId} (paralelo)... `);
-  // Todas las colecciones en paralelo — mucho más rápido que en serie.
-  const tasks = [...EMPRESA_SCOPED_COLS].map(col =>
-    deleteCollectionWhereEmpresa(col, empId).catch(() => 0),
-  );
-  const counts = await Promise.all(tasks);
-  let deleted = counts.reduce((a, b) => a + b, 0);
+  process.stdout.write(`Limpiando datos de ${empId} (por colección)... `);
+  let deleted = 0;
+  for (const col of EMPRESA_SCOPED_COLS) {
+    try {
+      deleted += await deleteCollectionWhereEmpresa(col, empId);
+    } catch (e) {
+      console.warn(`\n  WARN limpiar ${col}: ${e.message}`);
+      await sleep(800);
+      try {
+        deleted += await deleteCollectionWhereEmpresa(col, empId);
+      } catch {
+        /* omit */
+      }
+    }
+    await sleep(40);
+  }
   try {
     const empRef = db.collection('empresas').doc(empId);
     const snap = await empRef.get();
@@ -256,9 +287,10 @@ async function seedFirestore(collections, empId, isFull, isDev) {
         if (!_id) return;
         batch.set(db.collection(col).doc(_id), deserialize(fields), { merge: false });
       });
-      await batch.commit();
+      await commitBatchWithRetry(batch, colName);
       written += Math.min(BATCH_SIZE, filtered.length - i);
       process.stdout.write(`\nPROGRESS:${written}:${grandTotal}:${col}`);
+      if (((i / BATCH_SIZE) + 1) % 4 === 0) await sleep(50);
     }
     process.stdout.write('\n');
     console.log('OK');
@@ -267,6 +299,7 @@ async function seedFirestore(collections, empId, isFull, isDev) {
 }
 
 async function run() {
+  await waitForFirestoreEmulator({ maxWaitMs: 30_000 });
   console.log(`\nLeyendo ${filePath}...`);
   const raw = fs.readFileSync(filePath, 'utf8');
   const data = JSON.parse(raw);
