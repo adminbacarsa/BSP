@@ -94,6 +94,7 @@ export function applySingleShiftExtension(
     coverageStatus: input.coversBandCode ? 'PARTIAL' : undefined,
     coversBandCode: input.coversBandCode || undefined,
     coversPositionName: input.coversPositionName || base.positionName,
+    extExtraHours: input.extraHours,
     coverageNote: input.coversBandCode
       ? `Ext +${input.extraHours}h (${segFrom}–${segTo}) · aporte banda ${input.coversBandCode}`
       : `Extensión +${input.extraHours}h (${segFrom}–${segTo})`,

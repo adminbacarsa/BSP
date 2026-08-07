@@ -251,6 +251,7 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
+import { shiftCoverageExtensionExtraHours } from '@/lib/planificacion/planningScheduledHours';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'SGS', 'SUS']);
 
@@ -451,17 +452,19 @@ const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): numb
     if (!shift) return 0;
     const code = String(shift.code || '').toUpperCase();
     if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return 0;
+    const extensionExtra = shiftCoverageExtensionExtraHours(shift);
     // Códigos CCT estándar: tabla canónica siempre gana (M=8, T=8, N=8, D12=12, etc.)
     const fromLookup = SHIFT_HOURS_LOOKUP[code];
-    if (fromLookup !== undefined) return fromLookup;
+    if (fromLookup !== undefined) return fromLookup + extensionExtra;
     // Códigos custom: definición actual del SLA tiene prioridad sobre lo almacenado
-    if (slaHoursHint?.[code] !== undefined) return slaHoursHint[code];
+    if (slaHoursHint?.[code] !== undefined) return slaHoursHint[code] + extensionExtra;
     // Fallback: valor explícito guardado en el turno
     const stored = Number(shift.hours);
-    if (stored > 0) return stored;
+    if (stored > 0) return stored + extensionExtra;
     // Firestore Timestamp
     if (shift.startTime?.seconds && shift.endTime?.seconds) {
-        return Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600, 24));
+        const dur = Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600, 24));
+        return dur + extensionExtra;
     }
     // String times "HH:MM" → "HH:MM" (shifts generados por el motor automático)
     if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
@@ -470,10 +473,10 @@ const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): numb
         if (s !== null && e !== null) {
             let dur = e - s;
             if (dur <= 0) dur += 24;
-            return Math.max(0, Math.min(dur, 24));
+            return Math.max(0, Math.min(dur, 24)) + extensionExtra;
         }
     }
-    return 8;
+    return 8 + extensionExtra;
 };
 
 /** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
@@ -5266,6 +5269,9 @@ export default function PlanificacionPage() {
                         }
                         if (change.isExtended && typeof change.adjustedEndTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedEndTime)) {
                             turnoPayload.extensionEndTime = change.adjustedEndTime;
+                        }
+                        if (change.extExtraHours != null && Number.isFinite(Number(change.extExtraHours))) {
+                            turnoPayload.extExtraHours = Number(change.extExtraHours);
                         }
                         if (change.shiftGroupId) turnoPayload.shiftGroupId = change.shiftGroupId;
                         if (change.isSecondBlock) turnoPayload.isSecondBlock = true;
