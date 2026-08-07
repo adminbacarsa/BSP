@@ -10842,9 +10842,9 @@ export default function PlanificacionPage() {
                                                                         startTime: s.startTime,
                                                                         endTime: s.endTime,
                                                                     }, { onlyEmpId: emp.id })}
-                                                                    disabled={isServiceLocked || needsPos || isBulkCovBlocked(emp.id, activePos, (s as any).code)}
-                                                                    title={isBulkCovBlocked(emp.id, activePos, (s as any).code) ? 'Cobertura: turno no permitido para este empleado' : needsPos ? 'Elegí puesto (paleta) primero' : `${emp.name} · ${activePos || 'puesto'} → ${s.code}`}
-                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${(needsPos || isBulkCovBlocked(emp.id, activePos, (s as any).code)) ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                                                    disabled={isServiceLocked || needsPos || isBulkCovBlocked(emp.id, activePos, (s as any).code) || bulkMonoDisabledCodes.has(String((s as any).code || '').toUpperCase())}
+                                                                    title={isBulkCovBlocked(emp.id, activePos, (s as any).code) ? 'Cobertura: turno no permitido para este empleado' : bulkMonoDisabledCodes.has(String((s as any).code || '').toUpperCase()) ? `Cupo completo: ${bulkMonoDisabledCodes.get(String((s as any).code || '').toUpperCase())}` : needsPos ? 'Elegí puesto (paleta) primero' : `${emp.name} · ${activePos || 'puesto'} → ${s.code}`}
+                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${(needsPos || isBulkCovBlocked(emp.id, activePos, (s as any).code) || bulkMonoDisabledCodes.has(String((s as any).code || '').toUpperCase())) ? 'opacity-30 cursor-not-allowed' : ''}`}
                                                                 >
                                                                     {s.code}
                                                                 </button>
