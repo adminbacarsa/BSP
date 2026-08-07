@@ -44,7 +44,7 @@ export function shiftCoverageExtensionExtraHours(shift: any): number {
   const toRaw = shift.segmentToTime
     || (shift.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
 
-  if (segFrom && segTo) {
+  if (fromRaw && toRaw) {
     const from = String(fromRaw).slice(0, 5);
     const to = String(toRaw).slice(0, 5);
     const h = hoursBetweenClockTimes(from, to);
