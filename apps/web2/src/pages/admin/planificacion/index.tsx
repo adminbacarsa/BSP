@@ -9014,7 +9014,7 @@ export default function PlanificacionPage() {
                                         const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
                                         const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
                                         const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
-                                        const _cellIsRetAtOtherObj = _rawOtherObj && String(cellCode || content || '').toUpperCase() === 'RET';
+                                        const _cellIsRetAtOtherObj = _rawOtherObj && shiftPlanningCodeUpper(activeShift) === 'RET';
                                         const isOtherObjectiveShift = _rawOtherObj
                                             && !_cellIsRetAtOtherObj
                                             && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
