@@ -423,7 +423,9 @@ export default function ServiciosSLAPage() {
   }, [form.positions, form.startDate, form.endDate, form.excludedDates]);
 
   // Historial combinado: meses de versiones anteriores + meses del form actual
+  // Solo se computa cuando el formulario está abierto (view === 'form')
   const combinedMonthlyBreakdown = useMemo(() => {
+    if (view !== 'form') return [];
     const map: Record<string, { name: string; days: number; totalHours: number; nightHours: number; weekendHours: number; isCurrent: boolean; sortKey: string; serviceId?: string }> = {};
 
     // Otras versiones del mismo cliente+objetivo (excluir el form actual)
@@ -443,7 +445,7 @@ export default function ServiciosSLAPage() {
     });
 
     return Object.values(map).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  }, [services, form.clientId, form.objectiveId, form.id, form.startDate, monthlyBreakdown]);
+  }, [view, services, form.clientId, form.objectiveId, form.id, form.startDate, monthlyBreakdown]);
 
   const serviceTotals = useMemo(() => {
     const map = new Map<string, number>();
@@ -1377,7 +1379,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     [getServiceHoursForKpiMonth, kpiMonth, kpiYear],
   );
 
-  const clientGroups = buildClientGroups(groupedServices, getServiceHoursForKpiMonth);
+  const clientGroups = useMemo(
+    () => buildClientGroups(groupedServices, getServiceHoursForKpiMonth),
+    [groupedServices, getServiceHoursForKpiMonth],
+  );
 
   return (
     <DashboardLayout>

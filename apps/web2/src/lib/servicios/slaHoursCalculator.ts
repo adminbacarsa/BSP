@@ -104,21 +104,28 @@ export function parseYmdToLocalDate(dateStr: string): Date | null {
 export function analyzeShiftComposition(start: string, end: string) {
   const [h1, m1] = start.split(':').map(Number);
   const [h2, m2] = end.split(':').map(Number);
-  let startMin = h1 * 60 + m1;
-  let endMin = h2 * 60 + m2;
-  if (endMin < startMin) endMin += 24 * 60;
-  const durationMin = endMin - startMin;
-  let nightMinutes = 0;
-  const NIGHT_START = 21 * 60;
-  const NIGHT_END = 6 * 60;
-  for (let t = startMin; t < endMin; t++) {
-    const modT = t % 1440;
-    if (modT < NIGHT_END || modT >= NIGHT_START) nightMinutes++;
+  let s = h1 * 60 + m1;
+  let e = h2 * 60 + m2;
+  if (e <= s) e += 1440; // turno nocturno cruza medianoche
+  const durationMin = e - s;
+
+  // Período nocturno: [0, 360) = 00:00–06:00 y [1260, 1440) = 21:00–24:00.
+  // Cálculo O(1) por intersección de intervalos (sin loop minuto a minuto).
+  const NIGHT: [number, number][] = [[0, 360], [1260, 1440]];
+  let nightMin = 0;
+  for (const [a, b] of NIGHT) {
+    nightMin += Math.max(0, Math.min(e, b) - Math.max(s, a));
+    if (e > 1440) {
+      // La parte [1440, e) del turno equivale a [0, e-1440) en el día siguiente
+      const wrap = e - 1440;
+      nightMin += Math.max(0, Math.min(wrap, b) - a);
+    }
   }
+
   return {
     total: parseFloat((durationMin / 60).toFixed(2)),
-    night: parseFloat((nightMinutes / 60).toFixed(2)),
-    day: parseFloat(((durationMin - nightMinutes) / 60).toFixed(2)),
+    night: parseFloat((nightMin / 60).toFixed(2)),
+    day: parseFloat(((durationMin - nightMin) / 60).toFixed(2)),
   };
 }
 
