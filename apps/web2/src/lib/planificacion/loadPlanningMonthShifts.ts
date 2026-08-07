@@ -1,4 +1,4 @@
-import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
+import { collection, getDocs, query, Timestamp, where, type Query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { belongsToEmpresaView, empresaCollectionQuery } from '@/lib/multiempresa';
 import type { PlanningAbsenceRecord, PlanningShiftCell } from './planningCoverageWisdom';
@@ -8,6 +8,68 @@ import {
     iterateCalendarDateRange,
     toCalendarDateStr,
 } from './absenceCodes';
+
+/** Rango del mes calendario (month = 1..12). */
+export function planningMonthBounds(year: number, month: number): { firstDay: Date; lastDay: Date } {
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay = new Date(year, month, 0, 23, 59, 59, 999);
+    return { firstDay, lastDay };
+}
+
+/** Listener/getDocs: solo turnos del mes (no toda la colección). */
+export function buildPlanningMonthTurnosQuery(params: {
+    empresaId: string;
+    scopeEmpresa?: boolean;
+    year: number;
+    month: number;
+}): Query {
+    const { empresaId, scopeEmpresa = true, year, month } = params;
+    const { firstDay, lastDay } = planningMonthBounds(year, month);
+    const startTs = Timestamp.fromDate(firstDay);
+    const endTs = Timestamp.fromDate(lastDay);
+    const col = collection(db, 'turnos');
+    const id = String(empresaId ?? '').trim();
+    if (scopeEmpresa && id && id.toLowerCase() !== 'bacarsa') {
+        return query(
+            col,
+            where('empresaId', '==', id),
+            where('startTime', '>=', startTs),
+            where('startTime', '<=', endTs),
+        );
+    }
+    return query(col, where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+}
+
+/** RFZ con campo fecha (sin startTime Firestore) dentro del mes. */
+export function buildPlanningMonthRfzQuery(params: {
+    empresaId: string;
+    scopeEmpresa?: boolean;
+    year: number;
+    month: number;
+}): Query {
+    const { empresaId, scopeEmpresa = true, year, month } = params;
+    const monthStr = String(month).padStart(2, '0');
+    const monthStart = `${year}-${monthStr}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const monthEnd = `${year}-${monthStr}-${String(lastDay).padStart(2, '0')}`;
+    const col = collection(db, 'turnos');
+    const id = String(empresaId ?? '').trim();
+    if (scopeEmpresa && id && id.toLowerCase() !== 'bacarsa') {
+        return query(
+            col,
+            where('empresaId', '==', id),
+            where('code', '==', 'RFZ'),
+            where('fecha', '>=', monthStart),
+            where('fecha', '<=', monthEnd),
+        );
+    }
+    return query(
+        col,
+        where('code', '==', 'RFZ'),
+        where('fecha', '>=', monthStart),
+        where('fecha', '<=', monthEnd),
+    );
+}
 
 function isOperationalOriginShift(data: Record<string, unknown>): boolean {
     const o = String(data?.origin || '').toUpperCase();
@@ -93,21 +155,12 @@ export async function fetchPlanningMonthShifts(params: {
         publishedOnly = false,
     } = params;
 
-    const firstDay = new Date(year, month - 1, 1);
-    const lastDay = new Date(year, month, 0, 23, 59, 59, 999);
-
-    const turnosQ = scopeEmpresa
-        ? query(
-            collection(db, 'turnos'),
-            where('empresaId', '==', empresaId),
-            where('startTime', '>=', Timestamp.fromDate(firstDay)),
-            where('startTime', '<=', Timestamp.fromDate(lastDay)),
-        )
-        : query(
-            collection(db, 'turnos'),
-            where('startTime', '>=', Timestamp.fromDate(firstDay)),
-            where('startTime', '<=', Timestamp.fromDate(lastDay)),
-        );
+    const turnosQ = buildPlanningMonthTurnosQuery({
+        empresaId,
+        scopeEmpresa,
+        year,
+        month,
+    });
 
     const snap = await getDocs(turnosQ);
     const cells: PlanningShiftCell[] = [];

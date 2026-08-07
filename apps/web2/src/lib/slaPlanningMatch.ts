@@ -314,6 +314,7 @@ export function buildPlanningPositionStructure(
         activeDays: derivePlanningPositionActiveDays(pos.activeDays as string[] | undefined, normalizedShifts),
         coverageType: posCoverageType,
         ...(pos.preferenciaGenero ? { preferenciaGenero: String(pos.preferenciaGenero) } : {}),
+        ...(posExcluded.length > 0 ? { positionExcludedDates: [...posExcluded] } : {}),
         ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),
         _serviceId: srv.id,
         _serviceRange: slaServiceRangeLabel(srv),
