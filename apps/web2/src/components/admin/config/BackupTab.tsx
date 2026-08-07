@@ -535,8 +535,8 @@ export default function BackupTab() {
         phase: `Importando en servidor (${sizeMb} MB — puede tardar varios minutos)…`,
       });
       toast.message(
-        'Importación en curso: no cierres esta pestaña. Si Firestore se desconecta, reiniciá el lab (npm run lab:restart) e intentá de nuevo.',
-        { duration: 12_000 },
+        'Importación en curso: cerrá pestañas de Planificación/Operaciones si podés (reducen carga en Firestore). No cierres esta pestaña. Si ves «offline», reiniciá npm run lab:restart e intentá de nuevo.',
+        { duration: 14_000 },
       );
 
       const controller = new AbortController();

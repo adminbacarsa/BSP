@@ -96,10 +96,9 @@ async function commitBatchWithRetry(batch, label = '') {
   const maxAttempts = 6;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await commitBatchWithRetry(batch, colName);
+      await batch.commit();
       return;
     } catch (e) {
-      const msg = e?.message || String(e);
       if (attempt >= maxAttempts) throw e;
       process.stdout.write(`\nSTATUS:Reintentando escritura${label ? ` (${label})` : ''} (${attempt}/${maxAttempts})...\n`);
       await sleep(400 * attempt);
@@ -166,7 +165,7 @@ async function clearEmulatorFull() {
       if (snap.empty) break;
       const batch = db.batch();
       snap.docs.forEach(d => batch.delete(d.ref));
-      await commitBatchWithRetry(batch, colName);
+      await commitBatchWithRetry(batch, col);
       deleted += snap.size;
     }
     if (deleted) process.stdout.write(`  ${col}: ${deleted} docs\n`);
@@ -174,28 +173,64 @@ async function clearEmulatorFull() {
   console.log('Limpieza completa (fallback OK)');
 }
 
-async function clearEmpresa(empId) {
-  process.stdout.write(`Limpiando datos de ${empId} (por colección)... `);
+function collectionsToClearForEmpresaImport(collections) {
+  const keys = new Set(['empresas']);
+  for (const col of Object.keys(collections)) {
+    if (col === '_meta' || col === '_auth_users') continue;
+    if (!Array.isArray(collections[col])) continue;
+    if (EMPRESA_SCOPED_COLS.has(col) || DOC_ID_IS_EMPRESA.has(col) || col === 'empresas') {
+      keys.add(col);
+    }
+  }
+  return keys;
+}
+
+async function clearEmpresa(empId, collections) {
+  const cols = collectionsToClearForEmpresaImport(collections);
+  process.stdout.write(`Limpiando datos de ${empId} (${cols.size} colecciones del backup)... `);
   let deleted = 0;
-  for (const col of EMPRESA_SCOPED_COLS) {
+  for (const col of cols) {
+    if (DOC_ID_IS_EMPRESA.has(col)) {
+      try {
+        const ref = db.collection(col).doc(empId);
+        const snap = await ref.get();
+        if (snap.exists) {
+          await ref.delete();
+          deleted += 1;
+        }
+      } catch (e) {
+        console.warn(`\n  WARN limpiar ${col}/${empId}: ${e.message}`);
+      }
+      await sleep(40);
+      continue;
+    }
+    if (col === 'empresas') {
+      try {
+        const empRef = db.collection('empresas').doc(empId);
+        const snap = await empRef.get();
+        if (snap.exists) {
+          await empRef.delete();
+          deleted += 1;
+        }
+      } catch (e) {
+        console.warn(`\n  WARN limpiar empresas/${empId}: ${e.message}`);
+      }
+      await sleep(40);
+      continue;
+    }
     try {
       deleted += await deleteCollectionWhereEmpresa(col, empId);
     } catch (e) {
       console.warn(`\n  WARN limpiar ${col}: ${e.message}`);
-      await sleep(800);
+      await sleep(1200);
       try {
         deleted += await deleteCollectionWhereEmpresa(col, empId);
-      } catch {
-        /* omit */
+      } catch (e2) {
+        console.warn(`\n  WARN limpiar ${col} (2º intento): ${e2.message}`);
       }
     }
-    await sleep(40);
+    await sleep(80);
   }
-  try {
-    const empRef = db.collection('empresas').doc(empId);
-    const snap = await empRef.get();
-    if (snap.exists) { await empRef.delete(); deleted += 1; }
-  } catch { /* omit */ }
   console.log(`${deleted} docs borrados`);
 }
 
@@ -287,7 +322,7 @@ async function seedFirestore(collections, empId, isFull, isDev) {
         if (!_id) return;
         batch.set(db.collection(col).doc(_id), deserialize(fields), { merge: false });
       });
-      await commitBatchWithRetry(batch, colName);
+      await commitBatchWithRetry(batch, col);
       written += Math.min(BATCH_SIZE, filtered.length - i);
       process.stdout.write(`\nPROGRESS:${written}:${grandTotal}:${col}`);
       if (((i / BATCH_SIZE) + 1) % 4 === 0) await sleep(50);
@@ -312,10 +347,10 @@ async function run() {
 
   console.log(`Backup: ${meta.exportedAt || '?'} — ${meta.totalDocs || '?'} docs — alcance import: ${scope}${devNote}\n`);
 
-  if (isFull || clearAll) {
+  if (isFull) {
     await clearEmulatorFull();
   } else {
-    await clearEmpresa(empresaId);
+    await clearEmpresa(empresaId, collections);
   }
 
   const authUsers = Array.isArray(_auth_users) && _auth_users.length > 0

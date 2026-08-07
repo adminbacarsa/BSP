@@ -106,8 +106,10 @@ async function importBackupFile(req, res) {
       child.on('close', (code) => {
         clearTimeout(killTimer);
         _importProgress.active = false;
-        if (code !== 0) reject(new Error(stderr.trim() || `Exit code ${code}`));
-        else resolve(`${stdout}\n${stderr}`.trim());
+        if (code !== 0) {
+          const detail = (stderr.trim() || stdout.trim() || `Exit code ${code}`).slice(0, 3000);
+          reject(new Error(detail));
+        } else resolve(`${stdout}\n${stderr}`.trim());
       });
       child.on('error', (err) => {
         clearTimeout(killTimer);
