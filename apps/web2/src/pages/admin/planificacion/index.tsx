@@ -5973,6 +5973,7 @@ export default function PlanificacionPage() {
                     },
                     positionStructure: effectivePosStructure,
                     authorizeFrancoTrabajado: authorizeFranco,
+                    fallbackGapBand: vacancyGapBandOverride || resolveSuggestedGapBandForPosition(activeDays[0] || '', activePosition || '') || undefined,
                 });
                 const vd = vacancyData;
                 const absCode = days.length ? (changes[`${vd.employeeId}_${days[0].dateStr}`]?.code || '—') : '—';

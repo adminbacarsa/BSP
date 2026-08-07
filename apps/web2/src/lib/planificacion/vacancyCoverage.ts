@@ -439,6 +439,8 @@ export type ProcessVacancyInput = {
   };
   positionStructure?: VacancyPositionSla[];
   authorizeFrancoTrabajado?: boolean;
+  /** Banda SLA a cubrir cuando el titular no tiene turno asignado (override manual del modal). */
+  fallbackGapBand?: string;
 };
 
 export function collectVacancyFrancoConflicts(
@@ -514,6 +516,43 @@ function buildVacancySplitPackage(
   };
 }
 
+/**
+ * Cuando el titular no tiene turno asignado, construye un shift sintético usando
+ * el fallbackGapBand del modal o el primer turno disponible en positionStructure.
+ */
+function deriveFallbackWorkShift(
+  input: ProcessVacancyInput,
+): { code: string; hours: number; startTime: string; positionName: string; objectiveId?: string } | null {
+  const code = input.fallbackGapBand?.toUpperCase();
+  const activePos = String(input.activePosition || '').trim();
+  const pos = input.positionStructure?.find(p => String(p.positionName || '') === activePos)
+    ?? input.positionStructure?.[0];
+
+  if (code) {
+    const shift = pos?.shifts?.find(s => String(s.code || '').toUpperCase() === code);
+    return {
+      code,
+      hours: Number(shift?.hours) || 8,
+      startTime: shift?.startTime || '00:00',
+      positionName: String(pos?.positionName || activePos || 'General'),
+      objectiveId: input.selectedObjective,
+    };
+  }
+  // Fallback: primer turno laboral de la posición activa
+  const firstShift = pos?.shifts?.find(s => {
+    const c = String(s.code || '').toUpperCase();
+    return c && !VACANCY_NON_WORK_CODES.has(c);
+  });
+  if (!firstShift) return null;
+  return {
+    code: String(firstShift.code || '').toUpperCase(),
+    hours: Number(firstShift.hours) || 8,
+    startTime: firstShift.startTime || '00:00',
+    positionName: String(pos?.positionName || activePos || 'General'),
+    objectiveId: input.selectedObjective,
+  };
+}
+
 export function applyVacancyCoverageToChanges(
   baseChanges: Record<string, any>,
   input: ProcessVacancyInput,
@@ -549,6 +588,8 @@ export function applyVacancyCoverageToChanges(
       { absenceBlockStart: input.vacancyData.startDate },
     );
     const workShift = workInfo?.rawShift ?? input.getTypicalShift(titularId);
+    // Cuando el titular no tiene turno, usar la banda elegida en el modal como fallback
+    const effectiveWorkShift = workShift ?? deriveFallbackWorkShift(input);
 
     const coveredByLabel =
       coverage.mode === 'substitute' && coverage.employeeName
@@ -578,7 +619,7 @@ export function applyVacancyCoverageToChanges(
       coveredBy: coveredByLabel || undefined,
     };
 
-    if (coverage.mode === 'substitute' && coverage.employeeId && workShift) {
+    if (coverage.mode === 'substitute' && coverage.employeeId && effectiveWorkShift) {
       const suplenteKey = `${coverage.employeeId}_${dateStr}`;
       const suplBase = resolveEmployeeShift(coverage.employeeId, dateStr, input.shiftsMap, newChanges);
       const suplOnFranco = isPlannedFrancoShift(suplBase);
@@ -586,32 +627,33 @@ export function applyVacancyCoverageToChanges(
         throw new Error(`FRANCO_COVERAGE:suplente en franco ${dateStr}`);
       }
       newChanges[suplenteKey] = {
-        code: workShift.code,
-        name: workShift.code,
+        code: effectiveWorkShift.code,
+        name: effectiveWorkShift.code,
         isTemp: true,
-        objectiveId: workShift.objectiveId || input.selectedObjective,
-        hours: workShift.hours || 8,
-        startTime: workShift.startTime || '00:00',
-        positionName: workShift.positionName || input.activePosition || 'General',
+        objectiveId: effectiveWorkShift.objectiveId || input.selectedObjective,
+        hours: effectiveWorkShift.hours || 8,
+        startTime: effectiveWorkShift.startTime || '00:00',
+        positionName: effectiveWorkShift.positionName || input.activePosition || 'General',
         isFrancoTrabajado: suplOnFranco || undefined,
         isFranco: suplOnFranco ? false : undefined,
         comments: coverageCommentForTitular(titularName, input.vacancyData.type),
       };
       covered++;
-    } else if (coverage.mode === 'split' && coverage.extEmpId && coverage.adelEmpId && workShift) {
+    } else if (coverage.mode === 'split' && coverage.extEmpId && coverage.adelEmpId && effectiveWorkShift) {
       const gapBand = coverage.gapBand
         || alignVacancyGapBand(
-          String(workShift?.code || workInfo?.code || 'M'),
-          coverage.gapPosition || workShift?.positionName,
+          String(effectiveWorkShift.code || workInfo?.code || 'M'),
+          coverage.gapPosition || effectiveWorkShift.positionName,
           input.positionStructure,
-          workShift,
+          effectiveWorkShift as any,
         );
+      const gapPositionName = coverage.gapPosition || effectiveWorkShift.positionName || input.activePosition || 'General';
       const target: RecompositionTarget = {
         employeeId: titularId,
         dateStr,
-        positionName: coverage.gapPosition || workShift.positionName || input.activePosition || 'General',
+        positionName: gapPositionName,
         code: gapBand,
-        label: `${titularName} · ${coverage.gapPosition || workShift.positionName} · ${gapBand}`,
+        label: `${titularName} · ${gapPositionName} · ${gapBand}`,
         kind: 'absence',
       };
       const extShift = resolveEmployeeShift(coverage.extEmpId, dateStr, input.shiftsMap, newChanges);
@@ -619,7 +661,7 @@ export function applyVacancyCoverageToChanges(
       const dualPlan = resolveVacancySplitSegmentTimes(
         input.positionStructure,
         gapBand,
-        coverage.gapPosition || workShift.positionName || input.activePosition || 'General',
+        gapPositionName,
         {
           positionName: extShift?.positionName || coverage.extHomePosition,
           code: extShift?.code || coverage.extBaseCode,
