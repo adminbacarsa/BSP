@@ -587,7 +587,9 @@ export function applyVacancyCoverageToChanges(
       undefined,
       { absenceBlockStart: input.vacancyData.startDate },
     );
-    const workShift = workInfo?.rawShift ?? input.getTypicalShift(titularId);
+    // workInfo ya filtró códigos no-laborales; no usar getTypicalShift como fallback porque
+    // puede devolver F/E del titular (RRHH) y bloquear deriveFallbackWorkShift
+    const workShift = workInfo?.rawShift ?? null;
     // Cuando el titular no tiene turno, usar la banda elegida en el modal como fallback
     const effectiveWorkShift = workShift ?? deriveFallbackWorkShift(input);
 
