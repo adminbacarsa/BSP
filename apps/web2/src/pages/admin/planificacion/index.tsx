@@ -151,6 +151,7 @@ import { applySlaContractDotacion, buildPositionAssignmentsByEmp, buildSlaRotati
 import { applyRotationsForMonth } from '@/lib/planificacion/slaRotationMonthPlanner';
 import {
     countPositionClosedUnitsFromShifts,
+    is24hsSinglePaxBandMixBlocked,
     PLANNING_NON_BILLABLE_CODES,
     buildCodeCountsByPositionForDay,
     collectSplitBandCreditsForDay,
@@ -2717,13 +2718,8 @@ export default function PlanificacionPage() {
                 }
                 if (is24hCoverageType(posCfg)) {
                     const bandH = resolveBandHours(code, { hours: SHIFT_HOURS_LOOKUP[code] || 8 }, posCfg.shifts || []);
-                    const is8h = isShortBandHours(bandH);
-                    const a8 = assigned.filter(a => isShortBandHours(a.hours));
-                    const a12 = assigned.filter(a => !isShortBandHours(a.hours));
-                    if (a8.length > 0 && !is8h) { lastReason = 'Ya hay turnos 8h en el puesto'; continue; }
-                    if (a12.length > 0 && is8h) { lastReason = 'Ya hay turnos 12h en el puesto'; continue; }
-                    if (pax === 1 && assigned.some(a => a.code === code)) {
-                        lastReason = `${code} ya asignado`;
+                    if (is24hsSinglePaxBandMixBlocked(pax, code, assigned, bandH)) {
+                        lastReason = 'Esquema 24hs: no mezclar 8h y 12h en el mismo pax';
                         continue;
                     }
                 }
@@ -2873,7 +2869,7 @@ export default function PlanificacionPage() {
         [enforcePlanningClosureRules],
     );
 
-    // Bloqueo por puesto/día: no mezclar 8h con 12h; solo permitir turnos del mismo grupo; cap 24h/día por PAX.
+    // Bloqueo por puesto/día: mono-pax 24hs no mezcla 8h con 12h; multi-pax permite un esquema por unidad; cap por código.
     const shiftButtonDisabledMap = useMemo(() => {
         const disabled = new Set<string>();
         if (!selectedCell?.dateStr || !selectedObjective || !uniqueSLAShifts.length) return disabled;
@@ -3021,8 +3017,6 @@ export default function PlanificacionPage() {
             return disabled;
         }
 
-        const assigned8h = assigned.filter(a => isShortBandHours(a.hours)).map(a => a.code);
-        const assigned12h = assigned.filter(a => !isShortBandHours(a.hours)).map(a => a.code);
         const shifts8h = uniqueSLAShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShiftsForBand)));
         const shifts12h = uniqueSLAShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShiftsForBand)));
         // 24hs: M+T+N (8h) o D12+N12 (12h); cada código hasta pax
@@ -3032,18 +3026,12 @@ export default function PlanificacionPage() {
         uniqueSLAShifts.forEach((s: any) => {
             const code = String(s.code || '').toUpperCase();
             const hours = resolveBandHours(code, s, posShiftsForBand);
-            const is8h = isShortBandHours(hours);
 
-            if (pax === 1) {
-                // 1 pax: no mezclar M+T+N con D12+N12
-                if (assigned8h.length > 0 && assigned12h.length > 0) { disabled.add(code); return; }
-                if (assigned8h.length > 0 && !is8h) { disabled.add(code); return; }
-                if (assigned12h.length > 0 && is8h) { disabled.add(code); return; }
-                if (assigned8h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
-                if (assigned12h.filter(c => c === code).length >= 1) { disabled.add(code); return; }
-            } else {
-                if (assigned8h.length > 0 && !is8h) { disabled.add(code); return; }
-                if (assigned12h.length > 0 && is8h) { disabled.add(code); return; }
+            if (is24hsSinglePaxBandMixBlocked(pax, code, assigned, hours)) {
+                disabled.add(code);
+                return;
+            }
+            if (pax > 1) {
                 const codeCount = assigned.filter(a => a.code === code).length;
                 if (codeCount >= pax) { disabled.add(code); return; }
                 if (assigned.length >= max8hSlots + max12hSlots) { disabled.add(code); return; }
@@ -6108,22 +6096,12 @@ export default function PlanificacionPage() {
                 if (!is24hCoverageType(posCfg)) return false;
 
                 const bandH = resolveBandHours(upper, { hours }, posCfg.shifts);
-                const is8h = isShortBandHours(bandH);
-                const assigned8h = assigned.filter(a => isShortBandHours(a.hours));
-                const assigned12h = assigned.filter(a => !isShortBandHours(a.hours));
-                const posShifts = posCfg.shifts || [];
-                const shifts8h = posShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShifts)));
-                const shifts12h = posShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShifts)));
-                const maxSlots = shifts8h.length * pax + shifts12h.length * pax;
-
-                if (pax === 1) {
-                    if (assigned8h.length > 0 && assigned12h.length > 0) return true;
-                    if (assigned8h.length > 0 && !is8h) return true;
-                    if (assigned12h.length > 0 && is8h) return true;
-                    if (assigned.filter(a => a.code === upper).length >= 1) return true;
-                } else {
-                    if (assigned8h.length > 0 && !is8h) return true;
-                    if (assigned12h.length > 0 && is8h) return true;
+                if (is24hsSinglePaxBandMixBlocked(pax, upper, assigned, bandH)) return true;
+                if (pax > 1) {
+                    const posShifts = posCfg.shifts || [];
+                    const shifts8h = posShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShifts)));
+                    const shifts12h = posShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShifts)));
+                    const maxSlots = shifts8h.length * pax + shifts12h.length * pax;
                     if (assigned.length >= maxSlots && maxSlots > 0) return true;
                 }
                 return false;
@@ -6406,18 +6384,7 @@ export default function PlanificacionPage() {
                 if ((codeCounts[upper] || 0) >= pax) return true;
                 if (!is24hCoverageType(pos)) return false;
                 const bandH = resolveBandHours(upper, { hours }, pos.shifts);
-                const is8h = isShortBandHours(bandH);
-                const a8 = assigned.filter(a => isShortBandHours(a.hours));
-                const a12 = assigned.filter(a => !isShortBandHours(a.hours));
-                if (pax === 1) {
-                    if (a8.length > 0 && a12.length > 0) return true;
-                    if (a8.length > 0 && !is8h) return true;
-                    if (a12.length > 0 && is8h) return true;
-                    if (assigned.filter(a => a.code === upper).length >= 1) return true;
-                } else {
-                    if (a8.length > 0 && !is8h) return true;
-                    if (a12.length > 0 && is8h) return true;
-                }
+                if (is24hsSinglePaxBandMixBlocked(pax, upper, assigned, bandH)) return true;
                 return false;
             };
 

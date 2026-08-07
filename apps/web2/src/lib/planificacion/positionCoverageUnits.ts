@@ -427,6 +427,28 @@ export interface DayCoverageTotals {
     positions: Array<{ positionName: string } & PositionCoverageUnitResult>;
 }
 
+/**
+ * Puesto 24hs con qty=1: no mezclar esquema 8h (M+T+N) con 12h (D12+N12) el mismo día.
+ * Con qty>1 cada unidad puede usar un esquema distinto (ver countPositionClosedUnitsFromShifts).
+ */
+export function is24hsSinglePaxBandMixBlocked(
+    pax: number,
+    code: string,
+    assigned: Array<{ code: string; hours: number }>,
+    bandHours: number,
+): boolean {
+    if (pax !== 1) return false;
+    const is8h = bandHours < 12;
+    const a8 = assigned.filter((a) => a.hours < 12);
+    const a12 = assigned.filter((a) => a.hours >= 12);
+    const upper = String(code || '').toUpperCase();
+    if (a8.length > 0 && a12.length > 0) return true;
+    if (a8.length > 0 && !is8h) return true;
+    if (a12.length > 0 && is8h) return true;
+    if (assigned.some((a) => a.code === upper)) return true;
+    return false;
+}
+
 /** 1 puesto cerrado = cada banda del esquema SLA cubierta (min de conteos por código). */
 export function closedUnitsFromBandScheme(
     codeCounts: Record<string, number>,

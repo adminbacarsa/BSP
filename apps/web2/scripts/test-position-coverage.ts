@@ -159,6 +159,17 @@ console.log('Detalle 24hs M+T sin N:', `${u24.closed}/${u24.required} (${u24.sch
 const u16 = countPositionClosedUnitsFromShifts(POSITIONS[1], DAY, { M: 2, T: 0 }, CYCLES);
 console.log('Detalle 16hs 2M 0T:', `${u16.closed}/${u16.required} (${u16.schemeLabel})`);
 
+const pos24x2 = { ...POSITIONS[0], qty: 2 };
+const uMix = countPositionClosedUnitsFromShifts(
+    pos24x2,
+    DAY,
+    { M: 1, T: 1, N: 1, D12: 1, N12: 1 },
+    CYCLES,
+);
+const mixOk = uMix.closed === 2 && uMix.required === 2;
+if (!mixOk) failed++;
+console.log(`${mixOk ? '✓' : '✗'} 24hs qty=2 M+T+N + D12+N12: ${uMix.closed}/${uMix.required}`);
+
 if (failed > 0) {
     console.error(`\n${failed} escenario(s) fallaron`);
     process.exit(1);
