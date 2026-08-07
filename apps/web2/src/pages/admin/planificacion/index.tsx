@@ -2435,6 +2435,10 @@ export default function PlanificacionPage() {
         const base = deduped.length > 0 ? deduped : uniqueSLAShifts;
         const hasStandard = base.some((s: any) => STANDARD_CODES.has(String(s.code || '').toUpperCase()));
         if (hasStandard) return base;
+        // No inyectar estándar si todos los puestos del SLA son custom (evita M/T/N en SLAs custom-only)
+        const allCustomCoverage = sourcePositions.length > 0
+            && sourcePositions.every((p: any) => p.coverageType === 'custom');
+        if (allCustomCoverage) return base;
         const existingCodes = new Set(base.map((s: any) => String(s.code || '').toUpperCase()));
         const missing = STANDARD_SHIFTS_BASE.filter(s => !existingCodes.has(s.code));
         return [...missing, ...base];
