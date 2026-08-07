@@ -153,7 +153,45 @@ export function calcPlanningBillableShiftHours(
     if (stored > 0 && stored > codeBase + 0.25) return Math.min(stored, 24);
   }
 
+  const bandHint = slaHoursHint?.[code] ?? SHIFT_HOURS_LOOKUP[code];
+  const coverageLike = isCoverageAdjust
+    || !!shift.coversPositionName
+    || !!shift.coverageSegmentRole
+    || !!shift.coveragePackageId;
+
+  if (bandHint != null && bandHint > 0 && coverageLike) {
+    const storedH = Number(shift.hours);
+    const extraPart = Math.max(
+      extra,
+      (Number.isFinite(storedH) && storedH > 0 && storedH < bandHint - 0.5) ? storedH : 0,
+    );
+    const baseBand = codeBase >= bandHint - 0.5 ? codeBase : bandHint;
+    return Math.round((baseBand + extraPart) * 100) / 100;
+  }
+
+  if (
+    bandHint != null
+    && bandHint >= 8
+    && codeBase > 0
+    && codeBase < bandHint - 0.5
+    && (shift.isExtended || shift.isEarlyStart || shift.extExtraHours != null)
+  ) {
+    const extraPart = Math.max(extra, codeBase);
+    return Math.round((bandHint + extraPart) * 100) / 100;
+  }
+
   return Math.round((codeBase + extra) * 100) / 100;
+}
+
+/** Desglose jornada facturable (base SLA + tramo ext/adel). */
+export function planningShiftBillableBreakdown(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): { gross: number; base: number; extra: number } {
+  const gross = calcPlanningBillableShiftHours(shift, slaHoursHint);
+  const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
+  const base = Math.max(0, Math.round((gross - extra) * 100) / 100);
+  return { gross, base, extra: Math.round(extra * 100) / 100 };
 }
 
 /**

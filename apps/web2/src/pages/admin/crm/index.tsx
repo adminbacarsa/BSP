@@ -108,7 +108,7 @@ import {
 import type { ClientRef } from '@/lib/crm/clientDataMatch';
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
-import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
+import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   applyRefuerzoHorasVendidasToGrids,
   applyRefuerzoHorasVendidasToBreakdown,
@@ -1327,7 +1327,7 @@ export default function CRMPage() {
         target.byObjective[oKey].positions[pKey].byDay[dateKey] = (target.byObjective[oKey].positions[pKey].byDay[dateKey] || 0) + hours;
       };
 
-      const plannedCells = new Map<string, { hrs: number; objectiveName: string; positionName: string; dateKey: string }>();
+      const plannedCellGroups = new Map<string, { rows: any[]; objectiveName: string; positionName: string; dateKey: string }>();
 
       turnosList.forEach((t) => {
         if (!isCrmPlannedEligibleShift(t, slaExclusion)) return;
@@ -1344,13 +1344,13 @@ export default function CRMPage() {
         const positionName = (t.positionName || 'Sin puesto').toString().trim();
 
         if (plannedStart && plannedStart >= start && plannedStart <= end) {
-          const hrs = resolveCrmPlannedShiftHours(t, plannedStart, plannedEnd, slaCodeHoursHint);
-          if (hrs > 0) {
-            const objId = String(t.objectiveId || objectiveName);
-            const empId = String(t.employeeId || 'unknown');
-            const dateKey = getDateKeyInTimezone(plannedStart);
-            plannedCells.set(`${objId}_${empId}_${dateKey}`, { hrs, objectiveName, positionName, dateKey });
-          }
+          const objId = String(t.objectiveId || objectiveName);
+          const empId = String(t.employeeId || 'unknown');
+          const dateKey = getDateKeyInTimezone(plannedStart);
+          const cellKey = `${objId}_${empId}_${dateKey}`;
+          const bucket = plannedCellGroups.get(cellKey) || { rows: [], objectiveName, positionName, dateKey };
+          bucket.rows.push(t);
+          plannedCellGroups.set(cellKey, bucket);
         }
 
         if (realStart && realStart >= start && realStart <= end) {
@@ -1365,7 +1365,10 @@ export default function CRMPage() {
         }
       });
 
-      plannedCells.forEach(({ hrs, objectiveName, positionName, dateKey }) => {
+      plannedCellGroups.forEach(({ rows, objectiveName, positionName, dateKey }) => {
+        const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
+        const hrs = resolveCrmPlannedShiftHours(merged, undefined, undefined, slaCodeHoursHint);
+        if (hrs <= 0) return;
         planned.total += hrs;
         add(planned, objectiveName, positionName, dateKey, hrs);
       });

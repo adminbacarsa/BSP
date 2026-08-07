@@ -4,6 +4,7 @@ import {
   calcPlanificadorShiftHours,
   isPlanificadorPlannedHoursShift,
 } from '@/lib/planificacion/planningScheduledHours';
+import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
 import type { SlaExclusionContext } from './slaExclusionForPlanned';
 import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
@@ -88,6 +89,21 @@ export function resolveCrmPlannedShiftHours(
   return calcPlanificadorShiftHours(t, slaCodeHoursHint);
 }
 
+function pushTurnoIntoPlanningCellGroups(
+  groups: Map<string, any[]>,
+  t: any,
+  range: PlannedHoursRange,
+  keyBuilder: (t: any, dateKey: string) => string,
+): void {
+  const plannedStart = toDateSafe(t.startTime);
+  if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) return;
+  const dateKey = getDateKeyInTimezone(plannedStart);
+  const key = keyBuilder(t, dateKey);
+  const list = groups.get(key) || [];
+  list.push(t);
+  groups.set(key, list);
+}
+
 export type PlannedHoursRange = { start: Date | null; end: Date | null };
 
 export function shiftPlannedStartInRange(plannedStart: Date, range: PlannedHoursRange): boolean {
@@ -125,26 +141,29 @@ function turnoMatchesAnyClientObjective(t: any, client: ClientRef): boolean {
   return false;
 }
 
-/** Una celda emp+día por objetivo (último turno gana, como shiftsMap del planificador). */
 export function sumPlannedHoursForObjective(
   turnos: any[],
   objectiveId: string,
   range: PlannedHoursRange,
   slaExclusion?: SlaExclusionContext,
+  slaCodeHoursHint?: Record<string, number>,
 ): number {
-  const cells = new Map<string, number>();
+  const groups = new Map<string, any[]>();
   for (const t of turnos) {
     if (!turnoBelongsToObjective(t, objectiveId)) continue;
     if (!isCrmPlannedEligibleShift(t, slaExclusion)) continue;
-    const plannedStart = toDateSafe(t.startTime);
-    if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
-    const hrs = calcPlanificadorShiftHours(t);
-    if (hrs <= 0) continue;
-    const empId = String(t.employeeId || 'unknown');
-    const dateKey = getDateKeyInTimezone(plannedStart);
-    cells.set(`${empId}_${dateKey}`, hrs);
+    pushTurnoIntoPlanningCellGroups(groups, t, range, (_t, dateKey) => {
+      const empId = String(_t.employeeId || 'unknown');
+      return `${empId}_${dateKey}`;
+    });
   }
-  return [...cells.values()].reduce((a, b) => a + b, 0);
+  let total = 0;
+  for (const rows of groups.values()) {
+    const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
+    const hrs = calcPlanificadorShiftHours(merged, slaCodeHoursHint);
+    if (hrs > 0) total += hrs;
+  }
+  return total;
 }
 
 export function sumPlannedHoursForClient(
@@ -154,36 +173,42 @@ export function sumPlannedHoursForClient(
   slaExclusion?: SlaExclusionContext,
   slaCodeHoursHint?: Record<string, number>,
 ): number {
-  const cells = new Map<string, number>();
+  const groups = new Map<string, any[]>();
   for (const t of turnos) {
     if (!turnoMatchesAnyClientObjective(t, client)) continue;
     if (!isCrmPlannedEligibleShift(t, slaExclusion)) continue;
-    const plannedStart = toDateSafe(t.startTime);
-    if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
-    const hrs = calcPlanificadorShiftHours(t, slaCodeHoursHint);
-    if (hrs <= 0) continue;
-    const objId = String(t.objectiveId || t.objectiveName || 'sin-obj');
-    const empId = String(t.employeeId || 'unknown');
-    const dateKey = getDateKeyInTimezone(plannedStart);
-    cells.set(`${objId}_${empId}_${dateKey}`, hrs);
+    pushTurnoIntoPlanningCellGroups(groups, t, range, (row, dateKey) => {
+      const objId = String(row.objectiveId || row.objectiveName || 'sin-obj');
+      const empId = String(row.employeeId || 'unknown');
+      return `${objId}_${empId}_${dateKey}`;
+    });
   }
-  return [...cells.values()].reduce((a, b) => a + b, 0);
+  let total = 0;
+  for (const rows of groups.values()) {
+    const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
+    const hrs = calcPlanificadorShiftHours(merged, slaCodeHoursHint);
+    if (hrs > 0) total += hrs;
+  }
+  return total;
 }
 
-export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange): number {
-  const cells = new Map<string, number>();
+export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange, slaCodeHoursHint?: Record<string, number>): number {
+  const groups = new Map<string, any[]>();
   for (const t of turnos) {
     if (!isCrmPlannedEligibleShift(t)) continue;
-    const plannedStart = toDateSafe(t.startTime);
-    if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
-    const hrs = calcPlanificadorShiftHours(t);
-    if (hrs <= 0) continue;
-    const objId = String(t.objectiveId || 'sin-obj');
-    const empId = String(t.employeeId || 'unknown');
-    const dateKey = getDateKeyInTimezone(plannedStart);
-    cells.set(`${objId}_${empId}_${dateKey}`, hrs);
+    pushTurnoIntoPlanningCellGroups(groups, t, range, (row, dateKey) => {
+      const objId = String(row.objectiveId || 'sin-obj');
+      const empId = String(row.employeeId || 'unknown');
+      return `${objId}_${empId}_${dateKey}`;
+    });
   }
-  return [...cells.values()].reduce((a, b) => a + b, 0);
+  let total = 0;
+  for (const rows of groups.values()) {
+    const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
+    const hrs = calcPlanificadorShiftHours(merged, slaCodeHoursHint);
+    if (hrs > 0) total += hrs;
+  }
+  return total;
 }
 
 export function resolveClientIdForTurno(

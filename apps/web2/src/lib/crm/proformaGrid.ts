@@ -3,6 +3,7 @@ import {
   calcPlanificadorShiftHours,
   isPlanificadorPlannedHoursShift,
 } from '@/lib/planificacion/planningScheduledHours';
+import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   type ObjectiveMeta,
   resolveCanonicalObjectiveId,
@@ -231,11 +232,32 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
 
   const useExecuted = opts.mode === 'executed' || (opts.mode === 'auto' && opts.useExecutedForAuto);
   const aliases = opts.objectiveAliases || {};
+  const hint = opts.slaCodeHoursHint;
+
+  const cellGroups = new Map<string, ProformaTurnoInput[]>();
 
   for (const t of opts.turnos) {
     if (!isPlanificadorPlannedHoursShift(t)) continue;
     if (isProformaVacancyShift(t)) continue;
     if (opts.slaExclusion && isTurnoOnSlaExcludedSlot(t, opts.slaExclusion)) continue;
+
+    const plannedStart = toDateSafe(t.startTime);
+    if (!plannedStart) continue;
+    if (plannedStart < opts.start || plannedStart > opts.end) continue;
+
+    const dateKey = getDateKeyInTimezone(plannedStart);
+    const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId || opts.clientId };
+    const objId = resolveCanonicalObjectiveId(rowCtx, aliases) || String(t.objectiveId || 'sin-id');
+    const empId = String(t.employeeId || 'unknown');
+    const gKey = `${objId}_${empId}_${dateKey}`;
+    const list = cellGroups.get(gKey) || [];
+    list.push(t);
+    cellGroups.set(gKey, list);
+  }
+
+  for (const [, groupTurnos] of cellGroups) {
+    const t = coalescePlannedTurnosForCell(groupTurnos, hint) as ProformaTurnoInput;
+    if (!t) continue;
 
     const code = String(t.code || t.type || '').trim().toUpperCase();
     const plannedStart = toDateSafe(t.startTime);
@@ -245,9 +267,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
 
     const start = useExecuted ? realStart : plannedStart;
     if (!start) continue;
-    if (start < opts.start || start > opts.end) continue;
 
-    const hint = opts.slaCodeHoursHint;
     let hrs = calcPlanificadorShiftHours(t, hint);
     if (useExecuted && SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
     if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
