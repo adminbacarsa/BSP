@@ -1,4 +1,4 @@
-import { PLANNING_NON_BILLABLE_CODES } from './positionCoverageUnits';
+import { normalizePlanningPositionName, PLANNING_NON_BILLABLE_CODES } from './positionCoverageUnits';
 import { isDeploymentOrPoolShift, normalizeDeploymentShiftCode, shiftCountsForEmployeeCronoHours } from './deploymentRoles';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
@@ -154,6 +154,73 @@ export function calcPlanningBillableShiftHours(
   }
 
   return Math.round((codeBase + extra) * 100) / 100;
+}
+
+/**
+ * Horas del tramo en el puesto cubierto (ext/adel): primero o después del turno “casa”.
+ * Usa segmentFrom→segmentTo del paquete split o extensión de celda.
+ */
+export function shiftCoverageSegmentBillableHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift || shift.isDeleted) return 0;
+  const cover = normalizePlanningPositionName(shift.coversPositionName || '');
+  if (!cover) return 0;
+
+  const isSegment = shift.isExtended
+    || shift.isEarlyStart
+    || shift.coverageSegmentRole === 'EXTENSION'
+    || shift.coverageSegmentRole === 'EARLY_START'
+    || shift.coveragePackageId;
+  if (!isSegment) return 0;
+
+  const fromRaw = shift.segmentFromTime
+    ?? (shift.isEarlyStart ? shift.adjustedStartTime : null);
+  const toRaw = shift.segmentToTime
+    ?? (shift.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
+
+  if (fromRaw && toRaw) {
+    const h = hoursBetweenClockTimes(String(fromRaw).slice(0, 5), String(toRaw).slice(0, 5));
+    if (h != null && h > 0) return Math.round(h * 100) / 100;
+  }
+
+  const explicit = Number(shift.extExtraHours ?? shift.extensionExtraHours);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(explicit, 12);
+
+  return shiftCoverageExtensionExtraHours(shift, slaHoursHint);
+}
+
+/**
+ * Imputación por puesto: tramo de cobertura → coversPositionName; jornada base → positionName.
+ * Totales por legajo siguen usando calcPlanningBillableShiftHours (sin doble conteo global).
+ */
+export function calcPlanningBillableHoursAttributedToPosition(
+  shift: any,
+  positionName: string,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift) return 0;
+  const code = String(shift.code || shift.type || '').toUpperCase();
+  if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
+
+  const target = normalizePlanningPositionName(positionName);
+  const home = normalizePlanningPositionName(shift.positionName || '');
+  const cover = normalizePlanningPositionName(shift.coversPositionName || '');
+  const total = calcPlanningBillableShiftHours(shift, slaHoursHint);
+
+  const crossCover = !!cover && cover !== home;
+  if (!crossCover) {
+    if (!home) return total;
+    return home === target ? total : 0;
+  }
+
+  const atCover = shiftCoverageSegmentBillableHours(shift, slaHoursHint);
+  const atHome = Math.max(0, Math.round((total - atCover) * 100) / 100);
+
+  if (target === cover) return atCover;
+  if (home && target === home) return atHome;
+  return 0;
 }
 
 export function calcPlanificadorShiftHours(

@@ -251,7 +251,11 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
-import { shiftCoverageExtensionExtraHours, calcPlanningBillableShiftHours } from '@/lib/planificacion/planningScheduledHours';
+import {
+    shiftCoverageExtensionExtraHours,
+    calcPlanningBillableShiftHours,
+    calcPlanningBillableHoursAttributedToPosition,
+} from '@/lib/planificacion/planningScheduledHours';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'SGS', 'SUS']);
 
@@ -3078,12 +3082,18 @@ export default function PlanificacionPage() {
                 ? String(explicitObj)
                 : (resolveNativeObjectiveInGrupo(emp) || (emp.preferredObjectiveId === covObjId || slaIdToObjId[emp.preferredObjectiveId] === covObjId ? covObjId : null));
             if (String(effectiveObjId || '') !== String(covObjId)) return;
-            let shiftPos = shift.positionName || dominant?.positionName || 'General';
-            if (shiftPos === positionName && !OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) {
-                const code = String(shift.code || '').toUpperCase();
-                if (validWorkCodes.size > 0 && isPlanningWorkShiftCode(code) && !validWorkCodes.has(code)) return;
-                current += calcShiftHours(shift, slaCodeHoursHint);
-            }
+            const code = String(shift.code || '').toUpperCase();
+            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+            const homePos = shift.positionName || dominant?.positionName || 'General';
+            const attributed = calcPlanningBillableHoursAttributedToPosition(
+                { ...shift, positionName: homePos },
+                positionName,
+                slaCodeHoursHint,
+            );
+            if (attributed <= 0) return;
+            const isHomePos = String(homePos) === String(positionName);
+            if (isHomePos && validWorkCodes.size > 0 && isPlanningWorkShiftCode(code) && !validWorkCodes.has(code)) return;
+            current += attributed;
         });
         return { current, target, pax, isActiveDay: isDayActive && !isDayExcluded, isExcludedDay: isDayExcluded };
     };
@@ -8487,12 +8497,22 @@ export default function PlanificacionPage() {
                 const shiftObjective = activeShift.objectiveId || (pending ? selectedObjective : '');
                 if (!shiftObjective || shiftObjective !== selectedObjective) return;
                 if (!isWorkingCode(activeShift.code)) return;
-                const pos = (activeShift.positionName || activePosition || dominantPosition?.positionName || 'General').toString();
-                map[pos] = (map[pos] || 0) + calcShiftHours(activeShift);
+                const homePos = (activeShift.positionName || dominantPosition?.positionName || 'General').toString();
+                const posNames = positionStructure.length > 0
+                    ? positionStructure.map((p: any) => String(p.positionName || '').trim()).filter(Boolean)
+                    : [homePos];
+                for (const posName of posNames) {
+                    const h = calcPlanningBillableHoursAttributedToPosition(
+                        { ...activeShift, positionName: homePos },
+                        posName,
+                        slaCodeHoursHint,
+                    );
+                    if (h > 0) map[posName] = (map[posName] || 0) + h;
+                }
             });
         });
         return map;
-    }, [daysInMonth, displayedEmployees, pendingChanges, shiftsMap, selectedObjective, activePosition, dominantPosition]);
+    }, [daysInMonth, displayedEmployees, pendingChanges, shiftsMap, selectedObjective, dominantPosition, positionStructure, slaCodeHoursHint]);
 
     const excludedPositionsByDate = useMemo(() => {
         const raw = buildExcludedPositionsByDate(positionStructure);
