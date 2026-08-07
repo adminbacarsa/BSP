@@ -415,8 +415,23 @@ export async function updateDocForEmpresa(
   empresaId: string,
   migracionCompleta: boolean,
 ): Promise<void> {
-  await assertDocBelongsToEmpresa(colName, docId, empresaId, migracionCompleta);
-  await updateDoc(doc(db, colName, docId), stampEmpresaId(data, empresaId));
+  let exists = true;
+  try {
+    await assertDocBelongsToEmpresa(colName, docId, empresaId, migracionCompleta);
+  } catch (e) {
+    if (e instanceof Error && e.message === 'Documento no encontrado') {
+      exists = false;
+    } else {
+      throw e;
+    }
+  }
+  const stamped = stampEmpresaId(data, empresaId);
+  if (exists) {
+    await updateDoc(doc(db, colName, docId), stamped);
+  } else {
+    // El documento no existe (inconsistencia emulador / cache local). Recrear con setDoc.
+    await setDoc(doc(db, colName, docId), stamped);
+  }
 }
 
 export async function deleteEmployeeForEmpresa(
