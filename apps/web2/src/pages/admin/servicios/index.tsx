@@ -3804,7 +3804,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                       const hxg = guardsMin > 0 ? Math.round(avgH / guardsMin) : 0;
                       return (
                         <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800 rounded-xl p-4">
-                          <p className="text-[9px] font-black uppercase text-indigo-400 mb-3">Cálculo CCT 422/05 — por puesto (PAX: {positionForm.quantity})</p>
+                          <p className="text-[9px] font-black uppercase text-indigo-400 mb-3">Cálculo CCT 422/05 — por puesto ({formatPositionPaxLabel(positionForm)})</p>
                           <div className="grid grid-cols-3 gap-3 text-center">
                             <div>
                               <p className="text-xl font-black text-indigo-700 dark:text-indigo-300">{Math.round(avgH)}</p>

@@ -140,7 +140,7 @@ export function computePositionDayComposition(pos: ServicePosition, dayCode: str
   const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);
 
   const addVariant = (v: ShiftVariant) => {
-    const q = hasPerShiftQty ? (v.quantity ?? 1) : 1;
+    const q = hasPerShiftQty ? (v.quantity ?? pos.quantity ?? 1) : 1;
     const timeBlocks =
       Array.isArray(v.blocks) && v.blocks.length >= 2
         ? v.blocks
