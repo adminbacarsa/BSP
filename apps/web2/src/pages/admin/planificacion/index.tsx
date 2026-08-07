@@ -506,6 +506,10 @@ function turnoCuentaParaCronoPlanificado(data: any, objectiveId: string | undefi
 const OTHER_OBJECTIVE_CELL_STYLE =
     'bg-slate-700 text-slate-200 border-slate-600 ring-2 ring-slate-500 ring-offset-2 dark:ring-offset-slate-900 font-bold opacity-90';
 
+function shiftPlanningCodeUpper(shift: any): string {
+    return String(shift?.code || shift?.type || '').toUpperCase();
+}
+
 function isShiftAtOtherObjective(
     s: any,
     p: any,
@@ -518,6 +522,20 @@ function isShiftAtOtherObjective(
     const obj = active.objectiveId;
     if (obj == null || obj === '') return false;
     return String(obj) !== String(selectedObjective);
+}
+
+/** Turno de otro objetivo: solo lectura en este crono, salvo RET (stand-by local / EXT). */
+function isCrossObjectivePlanningReadOnly(
+    shift: any,
+    selectedObjective: string | null | undefined,
+): boolean {
+    if (!shift || !selectedObjective) return false;
+    if (isOperationalOriginShift(shift)) return true;
+    const obj = shift.objectiveId;
+    if (obj == null || obj === '') return false;
+    if (String(obj) === String(selectedObjective)) return false;
+    if (shiftPlanningCodeUpper(shift) === 'RET') return false;
+    return true;
 }
 
 /** Turno guardado en Firestore de otro objetivo (solo visualización en el crono activo). */
@@ -6086,7 +6104,9 @@ export default function PlanificacionPage() {
                 const dateStr = getDateKey(day);
                 const key = `${emp.id}_${dateStr}`;
                 const existing = shiftsMap[key];
-                if (isShiftConsolidated(existing)) continue;
+                const pendingCell = newChanges[key] ?? pendingChanges[key];
+                const effectiveExisting = pendingCell && !pendingCell.isDeleted ? pendingCell : existing;
+                if (isShiftConsolidated(effectiveExisting)) continue;
                 if (shiftConfig === null) {
                     newChanges[key] = { isDeleted: true };
                     count++;
@@ -6095,6 +6115,17 @@ export default function PlanificacionPage() {
 
                 const { resolveAssignPos, shiftDefFor, isCoverageBlocked, empStructure } = rowHelpers!;
                 const codeUpper = String(shiftConfig.code || '').toUpperCase();
+                if (
+                    codeUpper === 'RET' &&
+                    effectiveExisting &&
+                    effectiveExisting.objectiveId != null &&
+                    effectiveExisting.objectiveId !== '' &&
+                    covObjId &&
+                    String(effectiveExisting.objectiveId) !== String(covObjId) &&
+                    shiftPlanningCodeUpper(effectiveExisting) !== 'RET'
+                ) {
+                    continue;
+                }
                 const assignPos = resolveAssignPos(emp, codeUpper, shiftConfig.positionName || null);
                 const posCfg = empStructure.find((p: any) => p.positionName === assignPos);
                 if (isPosExcludedOnDate(posCfg, dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) {
@@ -6125,7 +6156,7 @@ export default function PlanificacionPage() {
                     startTime: def?.startTime || shiftConfig.startTime,
                     endTime: def?.endTime || shiftConfig.endTime,
                     isTemp: true,
-                    oldObjectiveId: existing?.objectiveId,
+                    oldObjectiveId: effectiveExisting?.objectiveId,
                     isFrancoTrabajado: cellIsFT,
                     positionName: assignPos,
                     objectiveId: covObjId || undefined,
@@ -6570,7 +6601,32 @@ export default function PlanificacionPage() {
         const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
         const existing = selectedCell.currentShift;
         const isFT = !correctionMode && francoMode === 'FT_SELECTION';
-        if (existing && existing.objectiveId !== selectedObjective && !existing.isFranco && !isFT) { const objName = getObjectiveName(existing.objectiveId); if(!confirm(`⚠️ ALERTA DE TRANSFERENCIA\n\nEl empleado ya tiene turno en "${objName}".\n\n¿Desea moverlo a este objetivo?`)) return; applyToPending({ ...shiftConfig, oldObjectiveId: existing.objectiveId, positionName }); return; }
+        const newAssignCode = String(shiftConfig.code || '').toUpperCase();
+        if (
+            existing &&
+            existing.objectiveId != null &&
+            existing.objectiveId !== '' &&
+            String(existing.objectiveId) !== String(selectedObjective) &&
+            !existing.isFranco &&
+            !isFT
+        ) {
+            const existingObjCode = shiftPlanningCodeUpper(existing);
+            if (existingObjCode === 'RET') {
+                applyToPending({ ...shiftConfig, positionName, objectiveId: selectedObjective });
+                return;
+            }
+            if (newAssignCode === 'RET') {
+                toast.error(
+                    `Ese día tiene turno en ${getObjectiveName(existing.objectiveId)}. No podés asignar RET en este objetivo sin mover el turno laboral.`,
+                    { duration: 9000 },
+                );
+                return;
+            }
+            const objName = getObjectiveName(existing.objectiveId);
+            if (!confirm(`⚠️ ALERTA DE TRANSFERENCIA\n\nEl empleado ya tiene turno en "${objName}".\n\n¿Desea moverlo a este objetivo?`)) return;
+            applyToPending({ ...shiftConfig, oldObjectiveId: existing.objectiveId, positionName });
+            return;
+        }
         if (!correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F' && !isFT) { if(!confirm(`⚠️ ATENCIÓN: ESTÁ ELIMINANDO UN FRANCO\n\n¿Seguro que desea eliminar el Franco?`)) return; }
         if (correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { if(!confirm(`⚠️ MODO CORRECCIÓN: Vas a reemplazar un Franco publicado.\n\n¿Confirmar corrección directa?`)) return; }
         const [y, m, d] = selectedCell.dateStr.split('-').map(Number); const targetDate = new Date(y, m-1, d); const hours = shiftConfig.hours != null ? shiftConfig.hours : 8;
@@ -6862,10 +6918,8 @@ export default function PlanificacionPage() {
                 if (
                     effectiveShift &&
                     selectedObjective &&
-                    effObjId != null &&
-                    effObjId !== '' &&
-                    String(effObjId) !== String(selectedObjective) &&
-                    !(selectedGrupo && grupoUnifiedMode)
+                    !(selectedGrupo && grupoUnifiedMode) &&
+                    isCrossObjectivePlanningReadOnly(effectiveShift, selectedObjective)
                 ) {
                     toast.message(`Turno en ${getObjectiveName(effObjId)} — solo lectura en este cronograma.`);
                     return;
@@ -8956,12 +9010,16 @@ export default function PlanificacionPage() {
                                         const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
                                         const _rawOtherObj = isShiftAtOtherObjective(s, p, selectedObjective);
                                         const _activeShiftObjId = ((p && !p.isDeleted) ? p : s)?.objectiveId;
-                                        const isOtherObjectiveShift = _rawOtherObj && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
+                                        const _cellIsRetAtOtherObj = _rawOtherObj && String(cellCode || content || '').toUpperCase() === 'RET';
+                                        const isOtherObjectiveShift = _rawOtherObj
+                                            && !_cellIsRetAtOtherObj
+                                            && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
                                         if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (isOtherObjectiveShift && content != null) {
-                                            style = String(content).toUpperCase() === 'RET'
-                                                ? SHIFT_STYLES['RET']
-                                                : OTHER_OBJECTIVE_CELL_STYLE;
+                                            style = OTHER_OBJECTIVE_CELL_STYLE;
+                                        }
+                                        if (_cellIsRetAtOtherObj && content != null) {
+                                            style = `${SHIFT_STYLES['RET']} ring-1 ring-amber-400/80`;
                                         }
                                         const isCoverageSplitCell = !!(
                                             !isFT
