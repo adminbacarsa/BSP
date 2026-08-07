@@ -732,6 +732,31 @@ function dailyCoverageHoursTargetForPos(pos: any, dayLetter: string, cycles?: st
     return sum > 0 ? sum : 8;
 }
 
+/** Horas SLA del día con PAX por turno. Para custom: suma shift.quantity × shift.hours; fallback globalPax × suma. */
+function dailyCoverageHoursTargetWithPerShiftPax(pos: any, globalPax: number, dayLetter: string, cycles?: string[], dateStr?: string): number {
+    const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
+    if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') return 24 * globalPax;
+    const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
+    const shifts: any[] = eff.length > 0 ? eff : (pos?.shifts || []).filter((s: any) => {
+        if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
+            return dateStr ? s.specificDates.includes(dateStr) : false;
+        }
+        if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
+        return true;
+    });
+    if (shifts.length === 0) return globalPax * 8;
+    const hasPerShiftPax = shifts.some((s: any) => (s as any).quantity != null && Number((s as any).quantity) > 0);
+    if (!hasPerShiftPax) {
+        const sum = shifts.reduce((acc: number, s: any) => acc + (Number(s.hours) || 8), 0);
+        return globalPax * (sum > 0 ? sum : 8);
+    }
+    return shifts.reduce((acc: number, s: any) => {
+        const sq = (s as any).quantity;
+        const sp = (sq != null && Number(sq) > 0) ? Math.floor(Number(sq)) : globalPax;
+        return acc + sp * (Number(s.hours) || 8);
+    }, 0);
+}
+
 function filterShiftsForPlanningDay(
     shifts: any[],
     pos: any,
@@ -3142,16 +3167,11 @@ export default function PlanificacionPage() {
         const dayLetter = getDayLetter(dateStr);
         const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
 
-        // Meta diaria: 24hs = 24h/pax; custom = solo bandas activas ese día (shift.days).
-        let dailyHoursTarget = 24;
-        if (coverageType !== '24hs') {
-            dailyHoursTarget = dailyCoverageHoursTargetForPos(posConfig, dayLetter, cycles, dateStr);
-        }
-
         const isDayActive = isPosActiveOnDay(posConfig, dayLetter, dateStr);
         const isDayExcluded = isPosExcludedOnDate(posConfig, dateStr);
-        
-        const target = isDayActive && !isDayExcluded ? (pax * dailyHoursTarget) : 0;
+        const target = isDayActive && !isDayExcluded
+            ? dailyCoverageHoursTargetWithPerShiftPax(posConfig, pax, dayLetter, cycles, dateStr)
+            : 0;
 
         const validWorkCodes = new Set(
             effectiveShiftsForPositionDay(posAsEngineDef(posConfig), dayLetter, cycles, dateStr)
@@ -11940,7 +11960,7 @@ export default function PlanificacionPage() {
                                                     const excludedToday = isPosExcludedOnDate(p, selectedCell.dateStr);
                                                     return (
                                                     <option key={p.positionName} value={p.positionName} disabled={excludedToday}>
-                                                        {p.positionName}{preferenciaGeneroOptionSuffix(p.preferenciaGenero)}{excludedToday ? ' — EXCLUIDO este día' : ''} ({p.qty} pax - Meta: {p.qty * (p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday ? (String(p.coverageType || '').toLowerCase() === '24hs' ? 24 : dailyCoverageHoursTargetForPos(p, getDayLetter(selectedCell.dateStr), autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles)) : 0)}h)
+                                                        {p.positionName}{preferenciaGeneroOptionSuffix(p.preferenciaGenero)}{excludedToday ? ' — EXCLUIDO este día' : ''} ({p.qty} pax - Meta: {(p.activeDays?.includes(getDayLetter(selectedCell.dateStr)) && !excludedToday) ? dailyCoverageHoursTargetWithPerShiftPax(p, Number(p.qty) || 1, getDayLetter(selectedCell.dateStr), autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles, selectedCell.dateStr) : 0}h)
                                                     </option>
                                                     );
                                                 })}
