@@ -115,13 +115,20 @@ export function calcPlanningBillableShiftHours(
   const code = String(shift.code || shift.type || '').toUpperCase();
   if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
 
+  const isCoverageAdjust = !!(
+    shift.isExtended
+    || shift.isEarlyStart
+    || shift.coveragePackageId
+    || shift.extExtraHours != null
+  );
+
   let codeBase = 0;
   const fromLookup = SHIFT_HOURS_LOOKUP[code];
   if (fromLookup !== undefined) codeBase = fromLookup;
   else if (slaHoursHint?.[code] !== undefined) codeBase = slaHoursHint[code];
   else {
-    const stored = Number(shift.hours);
-    if (stored > 0) codeBase = Math.min(stored, 24);
+    const storedForBase = Number(shift.hours);
+    if (storedForBase > 0 && !isCoverageAdjust) codeBase = Math.min(storedForBase, 24);
     else if (shift.startTime?.seconds && shift.endTime?.seconds) {
       codeBase = Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600000, 24));
     } else if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
@@ -140,16 +147,13 @@ export function calcPlanningBillableShiftHours(
     if (codeBase <= 0) codeBase = 8;
   }
 
-  const stored = Number(shift.hours);
   const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
-  if (stored > 0 && stored > codeBase + 0.25 && extra > 0) {
-    return Math.min(stored, 24);
-  }
-  if (stored > 0 && stored > codeBase + 0.25 && !shift.isExtended && !shift.isEarlyStart) {
-    return Math.min(stored, 24);
+  if (!isCoverageAdjust && extra <= 0) {
+    const stored = Number(shift.hours);
+    if (stored > 0 && stored > codeBase + 0.25) return Math.min(stored, 24);
   }
 
-  return codeBase + extra;
+  return Math.round((codeBase + extra) * 100) / 100;
 }
 
 export function calcPlanificadorShiftHours(
