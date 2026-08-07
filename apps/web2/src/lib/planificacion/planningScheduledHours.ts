@@ -29,7 +29,10 @@ export function hoursBetweenClockTimes(from: string, to: string): number | null 
  * Horas billables adicionales por extensión o adelanto de cobertura (split / cierre SLA).
  * El código base (E1, M, etc.) ya se suma aparte; esto es el tramo extra (segmentFrom→segmentTo).
  */
-export function shiftCoverageExtensionExtraHours(shift: any): number {
+export function shiftCoverageExtensionExtraHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
   if (!shift || shift.isDeleted) return 0;
 
   const explicit = Number(shift.extExtraHours ?? shift.extensionExtraHours);
@@ -50,11 +53,15 @@ export function shiftCoverageExtensionExtraHours(shift: any): number {
     const h = hoursBetweenClockTimes(from, to);
     if (h != null && h > 0) {
       const code = String(shift.code || '').toUpperCase();
-      const lookupBase = SHIFT_HOURS_LOOKUP[code];
-      if (lookupBase !== undefined && h >= lookupBase - 0.5) {
-        return Math.max(0, h - lookupBase);
+      const codeBase = SHIFT_HOURS_LOOKUP[code] ?? slaHoursHint?.[code];
+      if (codeBase !== undefined && h >= codeBase - 0.5) {
+        return Math.max(0, Math.min(h - codeBase, 12));
       }
-      return h;
+      if (h <= 5) return h;
+      if (codeBase !== undefined) {
+        return Math.max(0, Math.min(h - codeBase, 12));
+      }
+      return 0;
     }
   }
 
@@ -134,7 +141,7 @@ export function calcPlanningBillableShiftHours(
   }
 
   const stored = Number(shift.hours);
-  const extra = shiftCoverageExtensionExtraHours(shift);
+  const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
   if (stored > 0 && stored > codeBase + 0.25 && extra > 0) {
     return Math.min(stored, 24);
   }
