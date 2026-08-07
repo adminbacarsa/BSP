@@ -8,7 +8,8 @@ import {
   resolveCanonicalObjectiveId,
   resolveObjectiveDisplayName,
 } from './objectiveIdentity';
-import { getDateKeyInTimezone } from './crmDateUtils';
+import { resolveEmployeeMeta } from './proformaEnrichment';
+import { getDateKeyInTimezone, resolveTurnoScheduleDateKey } from './crmDateUtils';
 import { isProformaVacancyEmployee, isProformaVacancyShift } from './proformaVacancy';
 import type { SlaExclusionContext } from './slaExclusionForPlanned';
 import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
@@ -210,13 +211,20 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   for (const t of opts.turnos) {
     if (!isPlanificadorPlannedHoursShift(t)) continue;
     if (isProformaVacancyShift(t)) continue;
-    if (opts.slaExclusion && isTurnoOnSlaExcludedSlot(t, opts.slaExclusion)) continue;
-
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart) continue;
     if (plannedStart < opts.start || plannedStart > opts.end) continue;
 
-    const dateKey = getDateKeyInTimezone(plannedStart);
+    const dateKey = resolveTurnoScheduleDateKey(t as Record<string, unknown>) || getDateKeyInTimezone(plannedStart);
+    if (
+      opts.slaExclusion
+      && isTurnoOnSlaExcludedSlot(t, opts.slaExclusion, {
+        scheduleDateKey: dateKey,
+        positionName: String(t.positionName ?? ''),
+      })
+    ) {
+      continue;
+    }
     const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId || opts.clientId };
     const objId = resolveCanonicalObjectiveId(rowCtx, aliases) || String(t.objectiveId || 'sin-id');
     const empId = String(t.employeeId || 'unknown');
@@ -247,7 +255,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const end = resolveShiftEndForProforma(t, start, plannedEndResolved, hrs);
     if (!end) continue;
 
-    const dateKey = getDateKeyInTimezone(start);
+    const dateKey = resolveTurnoScheduleDateKey(t as Record<string, unknown>) || getDateKeyInTimezone(start);
     const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId || opts.clientId };
     const objId = resolveCanonicalObjectiveId(rowCtx, aliases) || String(t.objectiveId || 'sin-id');
     const objName = resolveObjectiveDisplayName(rowCtx, aliases);
@@ -259,9 +267,9 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     if (objName !== 'Objetivo sin nombre') byObjective[objId].objectiveName = objName;
 
     const empId = String(t.employeeId || 'unknown');
-    const meta = opts.empMeta[empId];
-    const empName = meta?.name || String(t.employeeName || 'Sin nombre').trim();
-    const legajo = meta?.legajo || '—';
+    const meta = resolveEmployeeMeta(opts.empMeta, empId, t.employeeName);
+    const empName = meta.name || 'Sin nombre';
+    const legajo = meta.legajo || '—';
     if (isProformaVacancyEmployee({ employeeId: empId, name: empName })) continue;
 
     byObjective[objId].employees[empId] ||= {
@@ -291,7 +299,13 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     };
   }
 
-  return Object.values(byObjective).map((obj) => {
+  return Object.values(byObjective)
+    .filter((obj) => {
+      const hasRows = Object.keys(obj.employees).length > 0;
+      if (hasRows) return true;
+      return obj.objectiveName !== 'Objetivo sin nombre' && !obj.objectiveName.includes('…');
+    })
+    .map((obj) => {
     const employees = Object.values(obj.employees)
       .map((e) => {
         let totalHours = 0;

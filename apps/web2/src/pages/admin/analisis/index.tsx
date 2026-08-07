@@ -945,7 +945,17 @@ export default function AnalisisPage() {
     turnos.forEach((t: any) => {
       if (!isPlanificadorPlannedHoursShift(t)) return;
       if (isProformaVacancyShift(t)) return;
-      if (isTurnoOnSlaExcludedSlot(t, slaExclusionCtx)) return;
+      const plannedStart = t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null;
+      if (!plannedStart) return;
+      const scheduleDateKey = getDateKeyInTimezone(plannedStart);
+      if (
+        isTurnoOnSlaExcludedSlot(t, slaExclusionCtx, {
+          scheduleDateKey,
+          positionName: String(t.positionName ?? ''),
+        })
+      ) {
+        return;
+      }
       const dur = calcPlanificadorShiftHours(t);
       if (dur <= 0) return;
       const code = String(t.code || '').trim().toUpperCase() || '—';
@@ -956,8 +966,6 @@ export default function AnalisisPage() {
         empNameU === 'VACANTE' ||
         empNameU.startsWith('VACANTE:') ||
         !!t.isUnassigned;
-      const plannedStart = t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null;
-      if (!plannedStart) return;
       const empId = String(t.employeeId || 'unknown');
       const empName = empNameMap.get(t.employeeId) || t.employeeName || empId;
       const dateKey = getDateKeyInTimezone(plannedStart);

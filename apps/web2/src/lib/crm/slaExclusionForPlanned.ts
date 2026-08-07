@@ -1,4 +1,4 @@
-import { getDateKeyInTimezone, toDateSafe } from './crmDateUtils';
+import { getDateKeyInTimezone, resolveTurnoScheduleDateKey, toDateSafe } from './crmDateUtils';
 import { objectiveKeyForSla, pickVigenteSlasForPeriod } from './slaObjectiveHours';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
 import type { ServicePosition } from '@/services/slaService';
@@ -10,6 +10,13 @@ export type ObjectiveExclusionRules = {
 
 export type SlaExclusionContext = {
   byObjective: Map<string, ObjectiveExclusionRules>;
+};
+
+export type SlaExclusionSlotOptions = {
+  /** Fecha de columna del cronograma (YYYY-MM-DD). Prioriza sobre startTime. */
+  scheduleDateKey?: string;
+  /** Puesto del legajo / celda (si el turno no trae positionName). */
+  positionName?: string;
 };
 
 function normKey(value: unknown): string {
@@ -24,12 +31,12 @@ function normPositionName(value: unknown): string {
   return normKey(value).replace(/^puesto\s+/, '');
 }
 
+/** Coincidencia estricta de puesto SLA (sin substring: evita que «Sala principal» herede exclusiones de «Sala»). */
 function positionNamesMatch(turnoPos: string, slaPos: string): boolean {
   const a = normPositionName(turnoPos);
   const b = normPositionName(slaPos);
   if (!a || !b) return false;
-  if (a === b) return true;
-  return a.includes(b) || b.includes(a);
+  return a === b;
 }
 
 function registerObjectiveRules(
@@ -101,22 +108,35 @@ function resolveObjectiveRules(
   return undefined;
 }
 
+function resolveScheduleDateKey(
+  t: { startTime?: unknown },
+  opts?: SlaExclusionSlotOptions,
+): string | null {
+  const fromOpt = String(opts?.scheduleDateKey ?? '').trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fromOpt)) return fromOpt;
+  const fromTurno = resolveTurnoScheduleDateKey(t as Record<string, unknown>);
+  if (fromTurno) return fromTurno;
+  const plannedStart = toDateSafe(t.startTime);
+  if (!plannedStart) return null;
+  return getDateKeyInTimezone(plannedStart);
+}
+
 /** true si el turno cae en día/puesto excluido del SLA (no cuenta como planificado vs contrato). */
 export function isTurnoOnSlaExcludedSlot(
   t: { startTime?: unknown; objectiveId?: unknown; objectiveName?: unknown; positionName?: unknown },
   ctx: SlaExclusionContext | undefined,
+  opts?: SlaExclusionSlotOptions,
 ): boolean {
   if (!ctx) return false;
   const rules = resolveObjectiveRules(t, ctx);
   if (!rules) return false;
 
-  const plannedStart = toDateSafe(t.startTime);
-  if (!plannedStart) return false;
-  const dateKey = getDateKeyInTimezone(plannedStart);
+  const dateKey = resolveScheduleDateKey(t, opts);
+  if (!dateKey) return false;
 
   if (rules.contractExcluded.has(dateKey)) return true;
 
-  const posName = String(t.positionName ?? '').trim();
+  const posName = String(opts?.positionName ?? t.positionName ?? '').trim();
   if (!posName) return false;
   for (const pos of rules.positions) {
     if (positionNamesMatch(posName, pos.name) && pos.excludedDates.has(dateKey)) return true;

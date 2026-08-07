@@ -1,5 +1,5 @@
 import { clientRowMatchesClient, type ClientRef } from './clientDataMatch';
-import { getDateKeyInTimezone, toDateSafe as toDateSafeCore } from './crmDateUtils';
+import { getDateKeyInTimezone, resolveTurnoScheduleDateKey, toDateSafe as toDateSafeCore } from './crmDateUtils';
 import { isProformaVacancyShift } from './proformaVacancy';
 import {
   calcPlanificadorShiftHours,
@@ -61,7 +61,19 @@ export function isCrmWorkingShiftCode(code: string): boolean {
 export function isCrmPlannedEligibleShift(t: any, slaExclusion?: SlaExclusionContext): boolean {
   if (!isPlanificadorPlannedHoursShift(t)) return false;
   if (isProformaVacancyShift(t)) return false;
-  if (slaExclusion && isTurnoOnSlaExcludedSlot(t, slaExclusion)) return false;
+  if (slaExclusion) {
+    const plannedStart = toDateSafeCore(t.startTime);
+    const scheduleDateKey =
+      resolveTurnoScheduleDateKey(t) || (plannedStart ? getDateKeyInTimezone(plannedStart) : undefined);
+    if (
+      isTurnoOnSlaExcludedSlot(t, slaExclusion, {
+        scheduleDateKey,
+        positionName: String(t.positionName ?? ''),
+      })
+    ) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -92,7 +104,7 @@ function pushTurnoIntoPlanningCellGroups(
 ): void {
   const plannedStart = toDateSafe(t.startTime);
   if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) return;
-  const dateKey = getDateKeyInTimezone(plannedStart);
+  const dateKey = resolveTurnoScheduleDateKey(t) || getDateKeyInTimezone(plannedStart);
   const key = keyBuilder(t, dateKey);
   const list = groups.get(key) || [];
   list.push(t);

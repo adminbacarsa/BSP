@@ -20,3 +20,15 @@ export function getDateKeyInTimezone(date: Date): string {
   const year = parts.find((p) => p.type === 'year')?.value;
   return `${year}-${month}-${day}`;
 }
+
+/** Fecha de celda del cronograma (columna del mes). Prioriza scheduleDate guardado al asignar. */
+export function resolveTurnoScheduleDateKey(t: Record<string, unknown> | null | undefined): string | null {
+  if (!t) return null;
+  for (const field of ['scheduleDate', 'planningDate', 'fecha']) {
+    const raw = String(t[field] ?? '').trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  }
+  const st = toDateSafe(t.startTime);
+  if (!st) return null;
+  return getDateKeyInTimezone(st);
+}

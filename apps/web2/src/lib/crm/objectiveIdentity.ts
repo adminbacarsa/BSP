@@ -22,7 +22,7 @@ export function buildObjectiveAliasMap(
   const aliases: Record<string, ObjectiveMeta> = {};
 
   for (const obj of objetivos) {
-    const canonicalId = String(obj.id || obj.name || '').trim();
+    const canonicalId = String(obj.id || (obj as { objectiveId?: string }).objectiveId || obj.name || '').trim();
     if (!canonicalId) continue;
     const name = String(obj.name || canonicalId).trim();
     const meta: ObjectiveMeta = { canonicalId, name, clientId };
@@ -97,7 +97,12 @@ export function resolveObjectiveDisplayName(
   }
   const name = String(row.objectiveName ?? '').trim();
   if (name) return name;
-  const oid = resolveCanonicalObjectiveId(row, aliases);
-  if (oid && aliases[oid]?.name) return aliases[oid].name;
+  const rawOid = String(row.objectiveId ?? '').trim();
+  if (rawOid && aliases[rawOid]?.name) return aliases[rawOid].name;
+  const canonicalOid = resolveCanonicalObjectiveId(row, aliases);
+  if (canonicalOid && aliases[canonicalOid]?.name) return aliases[canonicalOid].name;
+  if (canonicalOid && canonicalOid !== rawOid && rawOid) {
+    return rawOid.length > 12 ? `${rawOid.slice(0, 10)}…` : rawOid;
+  }
   return 'Objetivo sin nombre';
 }

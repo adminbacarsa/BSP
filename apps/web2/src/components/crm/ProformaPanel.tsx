@@ -211,7 +211,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                 </span>
               )}
               <span className="text-[10px] font-bold text-slate-400">
-                Plan: {proformaTotals.planned} hs · Ejec: {proformaTotals.executed} hs · Incluye borradores
+                Plan: {proformaTotals.planned} hs · Ejec: {proformaTotals.executed} hs · Facturable SLA (sin días 🚫 ni vacantes)
               </span>
             </div>
           </div>

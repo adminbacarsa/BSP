@@ -83,8 +83,15 @@ import {
 } from 'lucide-react';
 import ProformaPanel from '@/components/crm/ProformaPanel';
 import { formatMoney } from '@/lib/crm/proformaFormat';
-import { buildObjectiveAliasMap, resolveObjectiveDisplayName } from '@/lib/crm/objectiveIdentity';
+import { resolveObjectiveDisplayName } from '@/lib/crm/objectiveIdentity';
+import {
+  buildProformaObjectiveAliases,
+  enrichTurnosForProforma,
+  normalizeClientObjetivo,
+  registerEmployeeMetaAliases,
+} from '@/lib/crm/proformaEnrichment';
 import { loadClientSlaForClient, loadClientTurnosForClient } from '@/lib/crm/clientDataMatch';
+import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
@@ -1330,15 +1337,18 @@ export default function CRMPage() {
         ? { start: proformaStartDate, end: proformaEndDate }
         : monthRangeYmd(proformaYear, proformaMonth);
 
-      const objetivoStubs = (selectedClient.objetivos || []).map((o: any) => ({
-        objectiveId: o.id,
-        objectiveName: o.name,
-        startDate: periodYmd.start,
-        endDate: periodYmd.end,
-      }));
+      const objetivoStubs = (selectedClient.objetivos || []).map((o: any) => {
+        const { id, name } = normalizeClientObjetivo(o);
+        return {
+          objectiveId: id,
+          objectiveName: name,
+          startDate: periodYmd.start,
+          endDate: periodYmd.end,
+        };
+      });
       const slaInRange = [...servicesForProforma, ...objetivoStubs];
 
-      const objectiveAliases = buildObjectiveAliasMap(
+      const objectiveAliases = buildProformaObjectiveAliases(
         selectedClient.id,
         selectedClient.objetivos || [],
         slaInRange,
@@ -1348,6 +1358,11 @@ export default function CRMPage() {
       const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(servicesForProforma);
 
       const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa });
+      const turnosEnriched = enrichTurnosForProforma(turnosList, {
+        clientId: selectedClient.id,
+        objetivos: selectedClient.objetivos || [],
+        slas: servicesForProforma,
+      });
       const solicitudesRefuerzo = await solicitudRefuerzoService.getByClient(selectedClient.id);
       const billedSolicitudIds = solicitudIdsBilledInRange(solicitudesRefuerzo, { start, end });
       const planned = { total: 0, byObjective: {} as any };
@@ -1366,7 +1381,7 @@ export default function CRMPage() {
 
       const plannedCellGroups = new Map<string, { rows: any[]; objectiveName: string; positionName: string; dateKey: string }>();
 
-      turnosList.forEach((t) => {
+      turnosEnriched.forEach((t) => {
         if (!isCrmPlannedEligibleShift(t, slaExclusion)) return;
         if (t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
@@ -1383,7 +1398,7 @@ export default function CRMPage() {
         if (plannedStart && plannedStart >= start && plannedStart <= end) {
           const objId = String(t.objectiveId || objectiveName);
           const empId = String(t.employeeId || 'unknown');
-          const dateKey = getDateKeyInTimezone(plannedStart);
+          const dateKey = resolveTurnoScheduleDateKey(t) || getDateKeyInTimezone(plannedStart);
           const cellKey = `${objId}_${empId}_${dateKey}`;
           const bucket = plannedCellGroups.get(cellKey) || { rows: [], objectiveName, positionName, dateKey };
           bucket.rows.push(t);
@@ -1441,17 +1456,15 @@ export default function CRMPage() {
       empSnap.docs.forEach((d) => {
         const data = d.data() as any;
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-        empMeta[d.id] = {
-          legajo: data.fileNumber || data.legajo || '',
-          name: data.name || `${data.lastName || ''} ${data.firstName || ''}`.trim(),
-        };
+        registerEmployeeMetaAliases(empMeta, d.id, data);
       });
       setEmpMetaMap(empMeta);
 
-      const turnos = turnosList.filter((t) =>
+      const turnosRaw = turnosEnriched.filter((t) =>
         isCrmPlannedEligibleShift(t, slaExclusion) &&
         !(t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))),
       ) as any[];
+      const turnos = turnosRaw;
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
       const baseGrids = buildProformaObjectiveGrids({
         turnos,

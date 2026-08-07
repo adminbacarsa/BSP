@@ -534,6 +534,10 @@ export default function BackupTab() {
         total: 0,
         phase: `Importando en servidor (${sizeMb} MB — puede tardar varios minutos)…`,
       });
+      toast.message(
+        'Importación en curso: no cierres esta pestaña. Si Firestore se desconecta, reiniciá el lab (npm run lab:restart) e intentá de nuevo.',
+        { duration: 12_000 },
+      );
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 13 * 60 * 1000); // 13 min
