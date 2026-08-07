@@ -541,9 +541,27 @@ export function countPositionClosedUnitsFromShifts(
     }
 
     const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles, dateStr);
-    let bandCodes = eff.map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+    const effBands: Array<{ code: string; quantity?: number }> = (eff.length > 0 ? eff : allShifts.filter(s => {
+        if (Array.isArray((s as any).specificDates) && (s as any).specificDates.length > 0) {
+            return dateStr ? (s as any).specificDates.includes(dateStr) : false;
+        }
+        if (Array.isArray((s as any).days) && (s as any).days.length > 0) return (s as any).days.includes(dayLetter);
+        return true;
+    })).map(s => ({ code: String((s as any).code || '').toUpperCase(), quantity: (s as any).quantity }));
+    const bandCodes = effBands.map(b => b.code).filter(Boolean);
     if (bandCodes.length === 0) {
-        bandCodes = allShifts.map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+        const fallback = allShifts.map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+        const closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, fallback));
+        return { closed, required: qty, schemeLabel };
+    }
+    // Custom con PAX por turno: 1 unidad cerrada = todos los turnos en su PAX individual.
+    const hasPerShiftPax = effBands.some(b => b.quantity != null && Number(b.quantity) > 0);
+    if (hasPerShiftPax) {
+        const allFull = effBands.every(b => {
+            const pax = (b.quantity != null && Number(b.quantity) > 0) ? Math.max(1, Math.floor(Number(b.quantity))) : qty;
+            return (codeCounts[b.code] || 0) >= pax;
+        });
+        return { closed: allFull ? 1 : 0, required: 1, schemeLabel };
     }
     const closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, bandCodes));
     return { closed, required: qty, schemeLabel };
