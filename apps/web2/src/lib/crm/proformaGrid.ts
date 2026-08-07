@@ -9,6 +9,8 @@ import {
   resolveCanonicalObjectiveId,
   resolveObjectiveDisplayName,
 } from './objectiveIdentity';
+import { getDateKeyInTimezone } from './crmDateUtils';
+import { isProformaVacancyEmployee, isProformaVacancyShift } from './proformaVacancy';
 import type { SlaExclusionContext } from './slaExclusionForPlanned';
 import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
 
@@ -55,26 +57,14 @@ function getDurationHours(start: Date, end: Date): number {
   return 8;
 }
 
-function toDateSafe(val: any): Date | null {
+function toDateSafe(val: unknown): Date | null {
   if (!val) return null;
-  if (typeof val?.toDate === 'function') return val.toDate();
-  if (typeof val?.seconds === 'number') return new Date(val.seconds * 1000);
+  const v = val as { toDate?: () => Date; seconds?: number };
+  if (typeof v.toDate === 'function') return v.toDate();
+  if (typeof v.seconds === 'number') return new Date(v.seconds * 1000);
   if (val instanceof Date) return val;
-  const d = new Date(val);
+  const d = new Date(val as string | number);
   return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function getDateKeyInTimezone(date: Date): string {
-  const parts = new Intl.DateTimeFormat('es-AR', {
-    timeZone: 'America/Argentina/Cordoba',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const day = parts.find((p) => p.type === 'day')?.value;
-  const month = parts.find((p) => p.type === 'month')?.value;
-  const year = parts.find((p) => p.type === 'year')?.value;
-  return `${year}-${month}-${day}`;
 }
 
 function listDatesInRange(start: Date, end: Date): string[] {
@@ -176,24 +166,6 @@ export type ProformaTurnoInput = {
   extExtraHours?: number;
   positionName?: string;
 };
-
-export function isProformaVacancyShift(shift: Pick<ProformaTurnoInput, 'employeeId' | 'employeeName' | 'isUnassigned'>): boolean {
-  if (shift.isUnassigned === true) return true;
-  const eid = String(shift.employeeId ?? '').trim();
-  const empName = String(shift.employeeName ?? '').trim().toUpperCase();
-  if (empName === 'VACANTE' || empName.startsWith('VACANTE:')) return true;
-  if (eid === 'VACANTE') return true;
-  if ((!eid || eid === 'unknown') && (empName === 'VACANTE' || empName === 'SIN NOMBRE')) return true;
-  return false;
-}
-
-export function isProformaVacancyEmployee(row: { employeeId: string; name: string }): boolean {
-  const name = String(row.name || '').trim().toUpperCase();
-  const eid = String(row.employeeId || '').trim();
-  if (name === 'VACANTE' || name.startsWith('VACANTE:')) return true;
-  if (eid === 'VACANTE') return true;
-  return false;
-}
 
 export type BuildProformaGridsOpts = {
   turnos: ProformaTurnoInput[];
@@ -383,6 +355,6 @@ export function buildPeriodLabel(start: Date, end: Date): string {
   return `${getDateKeyInTimezone(start)} — ${getDateKeyInTimezone(end)}`;
 }
 
-export {  getDateKeyInTimezone,
-  shortDayHeader,
-};
+export { getDateKeyInTimezone } from './crmDateUtils';
+export { isProformaVacancyEmployee, isProformaVacancyShift } from './proformaVacancy';
+export { shortDayHeader };

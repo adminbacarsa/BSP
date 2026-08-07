@@ -1,5 +1,4 @@
-import { getDateKeyInTimezone } from './proformaGrid';
-import { toDateSafe } from './plannedHours';
+import { getDateKeyInTimezone, toDateSafe } from './crmDateUtils';
 import { objectiveKeyForSla, pickVigenteSlasForPeriod } from './slaObjectiveHours';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
 import type { ServicePosition } from '@/services/slaService';

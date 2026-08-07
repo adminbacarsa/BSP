@@ -85,6 +85,7 @@ import ProformaPanel from '@/components/crm/ProformaPanel';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { buildObjectiveAliasMap, resolveObjectiveDisplayName } from '@/lib/crm/objectiveIdentity';
 import { loadClientSlaForClient, loadClientTurnosForClient } from '@/lib/crm/clientDataMatch';
+import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
@@ -1367,7 +1368,7 @@ export default function CRMPage() {
 
       plannedCellGroups.forEach(({ rows, objectiveName, positionName, dateKey }) => {
         const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
-        const hrs = resolveCrmPlannedShiftHours(merged, undefined, undefined, slaCodeHoursHint);
+        const hrs = resolveCrmPlannedShiftHours(merged, undefined, undefined, slaCodeHoursHint, slaExclusion);
         if (hrs <= 0) return;
         planned.total += hrs;
         add(planned, objectiveName, positionName, dateKey, hrs);
@@ -1457,7 +1458,7 @@ export default function CRMPage() {
       console.error(e);
       setProformaTotals((p) => ({ ...p, loading: false }));
       setProformaBundle(null);
-      toast.error('Error al calcular turnos');
+      toast.error(`Error al calcular turnos${e instanceof Error && e.message ? `: ${e.message}` : ''}`);
     }
   };
 

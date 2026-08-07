@@ -1,5 +1,6 @@
 import { clientRowMatchesClient, type ClientRef } from './clientDataMatch';
-import { getDateKeyInTimezone, isProformaVacancyShift } from './proformaGrid';
+import { getDateKeyInTimezone, toDateSafe as toDateSafeCore } from './crmDateUtils';
+import { isProformaVacancyShift } from './proformaVacancy';
 import {
   calcPlanificadorShiftHours,
   isPlanificadorPlannedHoursShift,
@@ -64,14 +65,7 @@ export function isCrmPlannedEligibleShift(t: any, slaExclusion?: SlaExclusionCon
   return true;
 }
 
-export const toDateSafe = (val: any): Date | null => {
-  if (!val) return null;
-  if (typeof val?.toDate === 'function') return val.toDate();
-  if (typeof val?.seconds === 'number') return new Date(val.seconds * 1000);
-  if (val instanceof Date) return val;
-  const d = new Date(val);
-  return Number.isNaN(d.getTime()) ? null : d;
-};
+export const toDateSafe = toDateSafeCore;
 
 export const getDurationHours = (start: Date, end: Date) => {
   const diff = (end.getTime() - start.getTime()) / 3600000;
@@ -84,8 +78,9 @@ export function resolveCrmPlannedShiftHours(
   _plannedStart?: Date,
   _plannedEnd?: Date,
   slaCodeHoursHint?: Record<string, number>,
+  slaExclusion?: SlaExclusionContext,
 ): number {
-  if (!isCrmPlannedEligibleShift(t)) return 0;
+  if (!isCrmPlannedEligibleShift(t, slaExclusion)) return 0;
   return calcPlanificadorShiftHours(t, slaCodeHoursHint);
 }
 

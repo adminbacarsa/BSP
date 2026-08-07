@@ -115,11 +115,12 @@ export function calcPlanningBillableShiftHours(
   const code = String(shift.code || shift.type || '').toUpperCase();
   if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
 
+  const explicitExt = Number(shift.extExtraHours ?? shift.extensionExtraHours);
   const isCoverageAdjust = !!(
     shift.isExtended
     || shift.isEarlyStart
     || shift.coveragePackageId
-    || shift.extExtraHours != null
+    || (Number.isFinite(explicitExt) && explicitExt > 0)
   );
 
   let codeBase = 0;
@@ -155,9 +156,7 @@ export function calcPlanningBillableShiftHours(
 
   const bandHint = slaHoursHint?.[code] ?? SHIFT_HOURS_LOOKUP[code];
   const coverageLike = isCoverageAdjust
-    || !!shift.coversPositionName
-    || !!shift.coverageSegmentRole
-    || !!shift.coveragePackageId;
+    || !!shift.coverageSegmentRole;
 
   if (bandHint != null && bandHint > 0 && coverageLike) {
     const storedH = Number(shift.hours);
@@ -174,7 +173,7 @@ export function calcPlanningBillableShiftHours(
     && bandHint >= 8
     && codeBase > 0
     && codeBase < bandHint - 0.5
-    && (shift.isExtended || shift.isEarlyStart || shift.extExtraHours != null)
+    && (shift.isExtended || shift.isEarlyStart || (Number.isFinite(explicitExt) && explicitExt > 0))
   ) {
     const extraPart = Math.max(extra, codeBase);
     return Math.round((bandHint + extraPart) * 100) / 100;
