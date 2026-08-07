@@ -1387,6 +1387,7 @@ export default function CRMPage() {
         const code = String((t.code || t.type || '')).trim().toUpperCase();
 
         const plannedStart = toDateSafe(t.startTime);
+        if (!plannedStart) return;
         const plannedEnd = toDateSafe(t.endTime);
         const realStart = toDateSafe(t.realStartTime);
         const realEnd = toDateSafe(t.realEndTime);
@@ -1395,10 +1396,12 @@ export default function CRMPage() {
         const objectiveName = resolveObjectiveDisplayName(rowCtx, objectiveAliases);
         const positionName = (t.positionName || 'Sin puesto').toString().trim();
 
-        if (plannedStart && plannedStart >= start && plannedStart <= end) {
+        const dateKey = resolveTurnoScheduleDateKey(t) || getDateKeyInTimezone(plannedStart!);
+        const periodStartKey = getDateKeyInTimezone(start);
+        const periodEndKey = getDateKeyInTimezone(end);
+        if (dateKey >= periodStartKey && dateKey <= periodEndKey) {
           const objId = String(t.objectiveId || objectiveName);
           const empId = String(t.employeeId || 'unknown');
-          const dateKey = resolveTurnoScheduleDateKey(t) || getDateKeyInTimezone(plannedStart);
           const cellKey = `${objId}_${empId}_${dateKey}`;
           const bucket = plannedCellGroups.get(cellKey) || { rows: [], objectiveName, positionName, dateKey };
           bucket.rows.push(t);

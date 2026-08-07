@@ -191,6 +191,16 @@ function slaOverlapsRange(sla: { startDate?: string; endDate?: string }, start: 
   return sd <= rangeEnd && ed >= rangeStart;
 }
 
+function turnoScheduleDateInRange(t: Record<string, unknown>, start: Date, end: Date): boolean {
+  const st = toDateSafe(t.startTime);
+  const dateKey =
+    resolveTurnoScheduleDateKey(t) || (st ? getDateKeyInTimezone(st) : null);
+  if (!dateKey) return false;
+  const rangeStart = getDateKeyInTimezone(start);
+  const rangeEnd = getDateKeyInTimezone(end);
+  return dateKey >= rangeStart && dateKey <= rangeEnd;
+}
+
 export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): ProformaObjectiveGrid[] {
   const dateColumns = listDatesInRange(opts.start, opts.end);
   const dayLabels: Record<string, string> = {};
@@ -213,7 +223,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     if (isProformaVacancyShift(t)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart) continue;
-    if (plannedStart < opts.start || plannedStart > opts.end) continue;
+    if (!turnoScheduleDateInRange(t as Record<string, unknown>, opts.start, opts.end)) continue;
 
     const dateKey = resolveTurnoScheduleDateKey(t as Record<string, unknown>) || getDateKeyInTimezone(plannedStart);
     if (

@@ -1,6 +1,7 @@
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { empresaCollectionQuery, getClientIdAliases } from '@/lib/multiempresa';
+import { getDateKeyInTimezone, resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 
 export type ClientRef = {
   id: string;
@@ -109,9 +110,17 @@ export async function loadClientTurnosForClient(
   const byId = new Map<string, any>();
   const aliases = getClientIdAliases(client.id);
 
+  const rangeStartKey = getDateKeyInTimezone(start);
+  const rangeEndKey = getDateKeyInTimezone(end);
+
   const addIfInRange = (id: string, data: Record<string, unknown>) => {
     const st = toDateSafe(data.startTime);
-    if (!st || st < start || st > end) return;
+    const scheduleKey =
+      resolveTurnoScheduleDateKey(data as Record<string, unknown>) || (st ? getDateKeyInTimezone(st) : null);
+    const inRangeByStart = !!st && st >= start && st <= end;
+    const inRangeBySchedule =
+      !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
+    if (!inRangeByStart && !inRangeBySchedule) return;
     byId.set(id, { id, ...data, clientId: client.id });
   };
 
@@ -136,7 +145,7 @@ export async function loadClientTurnosForClient(
   snap.docs.forEach((d) => {
     const data = d.data() as Record<string, unknown>;
     if (!clientRowMatchesClient(data, client)) return;
-    byId.set(d.id, { id: d.id, ...data, clientId: client.id });
+    addIfInRange(d.id, data);
   });
 
   return [...byId.values()];
