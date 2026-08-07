@@ -2097,6 +2097,42 @@ export default function PlanificacionPage() {
         return Math.round(extra * 10) / 10;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
+    /** Horas base del mes (misma regla que cierre vs vendidas SLA — sin tramos ext/adel). */
+    const objectiveMonthSlaBaseHours = useMemo(() => {
+        let base = 0;
+        const _grupoObjIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
+        displayedEmployees.forEach((emp: any) => {
+            daysInMonth.forEach(day => {
+                const dateStr = getDateKey(day);
+                const key = `${emp.id}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const existing = shiftsMap[key];
+                let activeShift: any = null;
+                if (_grupoObjIds) {
+                    if (pending?.isDeleted) return;
+                    activeShift = pending && !pending.isDeleted ? pending : existing;
+                    if (!activeShift) return;
+                    if (pending && !pending.isDeleted) {
+                        if (activeShift.objectiveId != null && activeShift.objectiveId !== '') {
+                            if (!_grupoObjIds.includes(String(activeShift.objectiveId))) return;
+                        }
+                    } else {
+                        if (!activeShift || isOperationalOriginShift(activeShift)) return;
+                        if (!activeShift.objectiveId || !_grupoObjIds.includes(String(activeShift.objectiveId))) return;
+                    }
+                } else {
+                    activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
+                    if (!activeShift) return;
+                }
+                const shiftPos = String(activeShift.positionName || emp.assignedPosition || '').trim();
+                if (isShiftExcludedFromSlaBillable(activeShift, dateStr, shiftPos)) return;
+                if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
+                base += calcPlanningSlaReconciliationHours(activeShift, slaCodeHoursHint);
+            });
+        });
+        return Math.round(base * 10) / 10;
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+
     // Días RET por empleado (0 h planificadas — sobrante disponible en otro objetivo).
     const empRetDays = useMemo(() => {
         const result: Record<string, number> = {};
@@ -3344,8 +3380,14 @@ export default function PlanificacionPage() {
             const key = `${empId}_${ds}`;
             const pending = pendingChanges[key];
             if (pending?.isDeleted) return { isDeleted: true };
-            const shift = pending ? pending : shiftsMap[key];
-            return shift ?? null;
+            const raw = pending ? pending : shiftsMap[key];
+            if (!raw) return null;
+            // Normalizar slaId→objId para que shiftBelongsToObjective matchee correctamente
+            const rawObjId = raw.objectiveId;
+            if (rawObjId && slaIdToObjId[rawObjId] && rawObjId !== slaIdToObjId[rawObjId]) {
+                return { ...raw, objectiveId: slaIdToObjId[rawObjId] };
+            }
+            return raw;
         },
         {
             selectedObjective,
@@ -5626,7 +5668,7 @@ export default function PlanificacionPage() {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
-        const slaClosePlanned = Math.round((totalPlanned - objectiveMonthCoverageExtraHours) * 10) / 10;
+        const slaClosePlanned = objectiveMonthSlaBaseHours;
         const plannedRounded = Math.round(slaClosePlanned);
         const slaRounded = Math.round(slaVendidas);
         const slaHoursMismatch = slaVendidas > 0 && plannedRounded !== slaRounded;
@@ -5684,7 +5726,7 @@ export default function PlanificacionPage() {
         const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
         const publishDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
         const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
-        const slaClosePlanned = Math.round((totalPlanned - objectiveMonthCoverageExtraHours) * 10) / 10;
+        const slaClosePlanned = objectiveMonthSlaBaseHours;
         const slaHoursMismatch = slaVendidas > 0 && Math.round(slaClosePlanned) !== Math.round(slaVendidas);
         const coverageGapDays = objectiveCoverageGapReport
             ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
@@ -10002,7 +10044,7 @@ export default function PlanificacionPage() {
                                             <button
                                                 onClick={openPublishConfirm}
                                                 disabled={isPublishing}
-                                                title={isSuperAdmin && (slaVendidas > 0 && Math.round(Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0)) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
+                                                title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
                                                     ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
                                                     : undefined}
                                                 className={`flex items-center gap-1.5 disabled:opacity-60 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : isSuperAdmin ? 'bg-indigo-600 hover:bg-indigo-700 ring-1 ring-indigo-300/50' : 'bg-indigo-600 hover:bg-indigo-700'}`}
@@ -11027,9 +11069,8 @@ export default function PlanificacionPage() {
                     ) : (() => {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
-                    const slaCloseHours = hoursMode === 'mes'
-                        ? Math.round((totalHrs - objectiveMonthCoverageExtraHours) * 10) / 10
-                        : totalHrs;
+                    const slaCloseHours = hoursMode === 'mes' ? objectiveMonthSlaBaseHours : totalHrs;
+                    const facturableCrmHrs = hoursMode === 'mes' ? totalHrs : totalHrs;
                     const nativeAssignedHours = displayedEmployees
                         .filter((emp: any) => isEmployeeNativeToObjective(emp))
                         .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
@@ -11037,10 +11078,13 @@ export default function PlanificacionPage() {
                     const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
                     const effectiveSlaVendidas = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
                     const slaMismatch = effectiveSlaVendidas > 0 && Math.round(slaCloseHours) !== Math.round(effectiveSlaVendidas);
-                    const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
+                    const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : (effectiveSlaVendidas > 0 ? 'Hs. SLA' : 'Hs. Plan.');
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/REF/ESC/francos/licencias.'
-                        : 'Suma facturable por legajo (= Pre-factura CRM). El cierre contra Vendidas usa la base del mes sin tramos ext/adel (línea +ext). Días 🚫 sin servicio no suman aunque el código siga en la grilla.';
+                        : effectiveSlaVendidas > 0
+                            ? 'Horas base del cronograma que cierran contra Vendidas (sin ext/adel de cobertura). La cobertura «días OK» mira puestos/bandas; si hay mucho E1/E2, puede haber hueco de horas SLA aunque no haya días vacíos.'
+                            : 'Suma facturable por legajo (= Pre-factura CRM). Días 🚫 sin servicio no suman.';
+                    const displayPlanHrs = hoursMode === 'mes' && effectiveSlaVendidas > 0 ? slaCloseHours : totalHrs;
                     // Extras del mes (RFZ + TURA) de este objetivo — se facturan en CRM aparte del SLA base.
                     const monthPrefixExtras = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                     const extrasList = [
@@ -11060,10 +11104,15 @@ export default function PlanificacionPage() {
                                 {hsLabel}
                                 {hoursMode === 'cct' && <span className="text-[7px] text-indigo-500">CCT</span>}
                             </p>
-                            <p className={`text-sm font-black leading-tight ${slaMismatch ? 'text-rose-600' : 'text-indigo-600'}`}>{totalHrs.toFixed(0)}</p>
+                            <p className={`text-sm font-black leading-tight ${slaMismatch ? 'text-rose-600' : 'text-indigo-600'}`}>{displayPlanHrs.toFixed(0)}</p>
+                            {hoursMode === 'mes' && effectiveSlaVendidas > 0 && Math.round(facturableCrmHrs) !== Math.round(slaCloseHours) && (
+                                <p className="text-[8px] font-bold text-slate-500 leading-none mt-0.5" title="Incluye ext/adel de cobertura; no suma al cierre SLA">
+                                    CRM {facturableCrmHrs.toFixed(0)}h fact.
+                                </p>
+                            )}
                             {hoursMode === 'mes' && effectiveSlaVendidas > 0 && (
-                                <p className="text-[8px] font-bold text-slate-500 leading-none mt-0.5" title="Jornada vendida del contrato (sin ext/adel de cobertura)">
-                                    Base SLA {slaCloseHours.toFixed(0)}
+                                <p className="text-[8px] font-bold text-teal-700 leading-none mt-0.5" title="Horas vendidas del contrato SLA del mes">
+                                    vs {effectiveSlaVendidas} vend.
                                 </p>
                             )}
                             {slaMismatch && effectiveSlaVendidas > 0 && (
