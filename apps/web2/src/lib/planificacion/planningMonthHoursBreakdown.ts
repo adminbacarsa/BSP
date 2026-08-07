@@ -1,7 +1,10 @@
+import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
-  calcPlanningBillableShiftHours,
-  calcPlanningSlaReconciliationHours,
-} from '@/lib/planificacion/planningScheduledHours';
+  billableHoursForPlanningCell,
+  slaBaseHoursForPlanningCell,
+} from '@/lib/planificacion/planningEmployeeCellHours';
+import type { PlanningCellHoursContext } from '@/lib/planificacion/planningEmployeeCellHours';
+import { shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deploymentRoles';
 
 export type EmployeeMonthHoursRow = {
   empId: string;
@@ -23,22 +26,18 @@ export type PlanningMonthHoursBreakdown = {
 };
 
 export function computePlanningMonthHoursBreakdown(params: {
-  displayedEmployees: Array<{ id: string; name?: string }>;
+  displayedEmployees: Array<{ id: string; name?: string; assignedPosition?: string }>;
   daysInMonth: Date[];
   getDateKey: (day: Date) => string;
-  resolveActiveShift: (empId: string, dateStr: string) => any | null;
-  isExcludedFromBillable: (shift: any, dateStr: string, shiftPos: string) => boolean;
-  countsForEmployeeHours: (shift: any) => boolean;
-  slaCodeHoursHint?: Record<string, number>;
+  resolveCellTurnos: (empId: string, dateStr: string) => any[];
+  cellHoursCtxForEmp: (emp: { id: string; assignedPosition?: string }) => PlanningCellHoursContext;
 }): PlanningMonthHoursBreakdown {
   const {
     displayedEmployees,
     daysInMonth,
     getDateKey,
-    resolveActiveShift,
-    isExcludedFromBillable,
-    countsForEmployeeHours,
-    slaCodeHoursHint,
+    resolveCellTurnos,
+    cellHoursCtxForEmp,
   } = params;
 
   const byEmployeeMap = new Map<string, EmployeeMonthHoursRow>();
@@ -66,27 +65,43 @@ export function computePlanningMonthHoursBreakdown(params: {
   };
 
   displayedEmployees.forEach((emp) => {
+    const ctx = cellHoursCtxForEmp(emp);
     daysInMonth.forEach((day) => {
       const dateStr = getDateKey(day);
-      const activeShift = resolveActiveShift(emp.id, dateStr);
-      if (!activeShift) return;
-      if (!countsForEmployeeHours(activeShift)) return;
+      const turnos = resolveCellTurnos(emp.id, dateStr);
+      if (!turnos.length) return;
 
-      const shiftPos = String(activeShift.positionName || (emp as { assignedPosition?: string }).assignedPosition || '').trim();
-      const code = String(activeShift.code || activeShift.type || '').trim().toUpperCase() || '—';
-      const billable = calcPlanningBillableShiftHours(activeShift, slaCodeHoursHint);
-      if (billable <= 0) return;
-
+      const billable = billableHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
       const row = ensureEmp(emp);
 
-      if (isExcludedFromBillable(activeShift, dateStr, shiftPos)) {
-        excludedBillable += billable;
-        row.excludedBillable += billable;
+      if (billable <= 0) {
+        const excludedOnly = turnos.filter((t) => {
+          if (!shiftCountsForEmployeeCronoHours(t)) return false;
+          const shiftPos = String(t.positionName || emp.assignedPosition || '').trim();
+          return ctx.isExcludedFromBillable(t, dateStr, shiftPos);
+        });
+        if (excludedOnly.length) {
+          const exH = billableHoursForPlanningCell(
+            excludedOnly,
+            dateStr,
+            emp.id,
+            { ...ctx, isExcludedFromBillable: () => false },
+          );
+          if (exH > 0) {
+            excludedBillable += exH;
+            row.excludedBillable += exH;
+          }
+        }
         return;
       }
 
-      const base = calcPlanningSlaReconciliationHours(activeShift, slaCodeHoursHint);
+      const base = slaBaseHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
       const extra = Math.max(0, Math.round((billable - base) * 100) / 100);
+      const merged = coalescePlannedTurnosForCell(
+        turnos.filter((t) => shiftCountsForEmployeeCronoHours(t)),
+        ctx.slaCodeHoursHint,
+      );
+      const code = String(merged?.code || merged?.type || '').trim().toUpperCase() || '—';
 
       gross += billable;
       baseSla += base;

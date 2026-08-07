@@ -1,8 +1,54 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { belongsToEmpresaView } from '@/lib/multiempresa';
 
+function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
+    const data = d.data();
+    return {
+        id: d.id,
+        ...data,
+        code: data.code || data.type,
+        objectiveId: data.objectiveId,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        realStartTime: data.realStartTime,
+        status: data.status,
+        isPresent: data.isPresent || false,
+        isAbsent: data.isAbsent || false,
+        isExtended: data.isExtended,
+        isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
+        isFrancoTrabajado: data.isFrancoTrabajado || false,
+        isFrancoCompensatorio: data.isFrancoCompensatorio || false,
+        swapWith: data.swapWith,
+        swapDate: data.swapDate,
+        hasNovedad: data.hasNovedad,
+        plannedNovedad: data.plannedNovedad,
+        positionName: data.positionName,
+        coveredBy: data.coveredBy,
+        coveragePackageId: data.coveragePackageId,
+        coverageSegmentRole: data.coverageSegmentRole,
+        coversPositionName: data.coversPositionName,
+        coversEmployeeId: data.coversEmployeeId,
+        coversBandCode: data.coversBandCode,
+        coverageStatus: data.coverageStatus,
+        coverageNote: data.coverageNote,
+        deploymentRole: data.deploymentRole,
+        deploymentBand: data.deploymentBand,
+        surplusIntent: data.surplusIntent,
+        countsForCoverage: data.countsForCoverage,
+        isRefuerzo: data.isRefuerzo,
+        isEscuela: data.isEscuela,
+        isSecondBlock: data.isSecondBlock,
+        scheduleDate: data.scheduleDate,
+        planningDate: data.planningDate,
+        extExtraHours: data.extExtraHours,
+        extensionExtraHours: data.extensionExtraHours,
+    };
+}
+
 export type PlanningTurnosIngestResult = {
     shiftsMap: Record<string, any>;
+    /** Todos los docs de turno por empId_fecha (incl. segundo bloque / ext en doc aparte). */
+    cellTurnosMap: Record<string, any[]>;
     allShiftIds: Record<string, string[]>;
     turaMap: Record<string, any>;
     secondBlockMap: Record<string, { startTime: any; endTime: any }>;
@@ -19,6 +65,7 @@ export function ingestPlanningTurnosSnapshot(
     opts?: { rfzOnly?: boolean },
 ): PlanningTurnosIngestResult {
     const map: Record<string, any> = {};
+    const cellTurnos: Record<string, any[]> = {};
     const allIds: Record<string, string[]> = {};
     const turaM: Record<string, any> = {};
     const secondBlocksMap: Record<string, { startTime: any; endTime: any }> = {};
@@ -50,50 +97,20 @@ export function ingestPlanningTurnosSnapshot(
             const key = `${data.employeeId}_${dateKey}`;
             if (!allIds[key]) allIds[key] = [];
             allIds[key].push(d.id);
+            const normalized = normalizePlanningShiftDoc(d);
+            if (!cellTurnos[key]) cellTurnos[key] = [];
+            cellTurnos[key].push(normalized);
             if (data.isSecondBlock) {
                 secondBlocksMap[key] = { startTime: data.startTime, endTime: data.endTime };
                 return;
             }
-            map[key] = {
-                id: d.id,
-                ...data,
-                code: data.code || data.type,
-                objectiveId: data.objectiveId,
-                startTime: data.startTime,
-                endTime: data.endTime,
-                realStartTime: data.realStartTime,
-                status: data.status,
-                isPresent: data.isPresent || false,
-                isAbsent: data.isAbsent || false,
-                isExtended: data.isExtended,
-                isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
-                isFrancoTrabajado: data.isFrancoTrabajado || false,
-                isFrancoCompensatorio: data.isFrancoCompensatorio || false,
-                swapWith: data.swapWith,
-                swapDate: data.swapDate,
-                hasNovedad: data.hasNovedad,
-                plannedNovedad: data.plannedNovedad,
-                positionName: data.positionName,
-                coveredBy: data.coveredBy,
-                coveragePackageId: data.coveragePackageId,
-                coverageSegmentRole: data.coverageSegmentRole,
-                coversPositionName: data.coversPositionName,
-                coversEmployeeId: data.coversEmployeeId,
-                coversBandCode: data.coversBandCode,
-                coverageStatus: data.coverageStatus,
-                coverageNote: data.coverageNote,
-                deploymentRole: data.deploymentRole,
-                deploymentBand: data.deploymentBand,
-                surplusIntent: data.surplusIntent,
-                countsForCoverage: data.countsForCoverage,
-                isRefuerzo: data.isRefuerzo,
-                isEscuela: data.isEscuela,
-            };
+            map[key] = normalized;
         }
     });
 
     return {
         shiftsMap: map,
+        cellTurnosMap: cellTurnos,
         allShiftIds: allIds,
         turaMap: turaM,
         secondBlockMap: secondBlocksMap,

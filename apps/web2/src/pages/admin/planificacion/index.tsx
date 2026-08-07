@@ -265,6 +265,12 @@ import {
     planningShiftBillableBreakdown,
 } from '@/lib/planificacion/planningScheduledHours';
 import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
+import {
+    billableHoursForPlanningCell,
+    resolveTurnosForPlanningCellKey,
+    slaBaseHoursForPlanningCell,
+    type PlanningCellHoursContext,
+} from '@/lib/planificacion/planningEmployeeCellHours';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'SGS', 'SUS']);
 
@@ -933,6 +939,7 @@ export default function PlanificacionPage() {
     const [employees, setEmployees] = useState<any[]>([]);
     const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
     const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
+    const [cellTurnosMap, setCellTurnosMap] = useState<Record<string, any[]>>({});
     const [shiftsMapLoaded, setShiftsMapLoaded] = useState(false);
     const [turaMap, setTuraMap] = useState<Record<string, any>>({});       // parentShiftId → turno TURA
     const [rfzVacantes, setRfzVacantes] = useState<any[]>([]);             // RFZ sin guardia asignado
@@ -2028,112 +2035,97 @@ export default function PlanificacionPage() {
         const _grupoObjIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
         displayedEmployees.forEach((emp: any) => {
             let total = 0;
+            const assignedPos = String(emp.assignedPosition || '').trim();
+            const ctx: PlanningCellHoursContext = {
+                selectedObjective,
+                grupoObjectiveIds: _grupoObjIds,
+                slaCodeHoursHint,
+                isExcludedFromBillable: isShiftExcludedFromSlaBillable,
+                assignedPositionForEmp: () => assignedPos,
+            };
             daysInMonth.forEach(day => {
                 const dateStr = getDateKey(day);
                 const key = `${emp.id}_${dateStr}`;
-                const pending = pendingChanges[key];
-                const existing = shiftsMap[key];
-                let activeShift: any = null;
-                if (_grupoObjIds) {
-                    if (pending?.isDeleted) return;
-                    activeShift = pending && !pending.isDeleted ? pending : existing;
-                    if (!activeShift) return;
-                    if (pending && !pending.isDeleted) {
-                        if (activeShift.objectiveId != null && activeShift.objectiveId !== '') {
-                            const _ao = String(activeShift.objectiveId);
-                            if (!_grupoObjIds.includes(_ao)) return;
-                        }
-                    } else {
-                        if (!activeShift || isOperationalOriginShift(activeShift)) return;
-                        if (!activeShift.objectiveId || !_grupoObjIds.includes(String(activeShift.objectiveId))) return;
-                    }
-                } else {
-                    activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
-                    if (!activeShift) return;
-                }
-                const shiftPos = String(activeShift.positionName || emp.assignedPosition || '').trim();
-                if (isShiftExcludedFromSlaBillable(activeShift, dateStr, shiftPos)) return;
-                if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
-                total += calcPlanningBillableShiftHours(activeShift, slaCodeHoursHint);
+                const turnos = resolveTurnosForPlanningCellKey({
+                    empId: emp.id,
+                    dateStr,
+                    pending: pendingChanges[key],
+                    cellTurnos: cellTurnosMap[key],
+                    resolveSingleAtObjective: () =>
+                        resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap),
+                    ctx,
+                });
+                total += billableHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
             });
             result[emp.id] = total;
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
     /** Tramos ext/adel del mes (no cierran contra horas vendidas SLA). */
     const objectiveMonthCoverageExtraHours = useMemo(() => {
         let extra = 0;
         const _grupoObjIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
         displayedEmployees.forEach((emp: any) => {
+            const assignedPos = String(emp.assignedPosition || '').trim();
+            const ctx: PlanningCellHoursContext = {
+                selectedObjective,
+                grupoObjectiveIds: _grupoObjIds,
+                slaCodeHoursHint,
+                isExcludedFromBillable: isShiftExcludedFromSlaBillable,
+                assignedPositionForEmp: () => assignedPos,
+            };
             daysInMonth.forEach(day => {
                 const dateStr = getDateKey(day);
                 const key = `${emp.id}_${dateStr}`;
-                const pending = pendingChanges[key];
-                const existing = shiftsMap[key];
-                let activeShift: any = null;
-                if (_grupoObjIds) {
-                    if (pending?.isDeleted) return;
-                    activeShift = pending && !pending.isDeleted ? pending : existing;
-                    if (!activeShift) return;
-                    if (pending && !pending.isDeleted) {
-                        if (activeShift.objectiveId != null && activeShift.objectiveId !== '') {
-                            if (!_grupoObjIds.includes(String(activeShift.objectiveId))) return;
-                        }
-                    } else {
-                        if (!activeShift || isOperationalOriginShift(activeShift)) return;
-                        if (!activeShift.objectiveId || !_grupoObjIds.includes(String(activeShift.objectiveId))) return;
-                    }
-                } else {
-                    activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
-                    if (!activeShift) return;
-                }
-                const shiftPos = String(activeShift.positionName || emp.assignedPosition || '').trim();
-                if (isShiftExcludedFromSlaBillable(activeShift, dateStr, shiftPos)) return;
-                if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
-                const gross = calcPlanningBillableShiftHours(activeShift, slaCodeHoursHint);
-                const net = calcPlanningSlaReconciliationHours(activeShift, slaCodeHoursHint);
+                const turnos = resolveTurnosForPlanningCellKey({
+                    empId: emp.id,
+                    dateStr,
+                    pending: pendingChanges[key],
+                    cellTurnos: cellTurnosMap[key],
+                    resolveSingleAtObjective: () =>
+                        resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap),
+                    ctx,
+                });
+                const gross = billableHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
+                if (gross <= 0) return;
+                const net = slaBaseHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
                 extra += Math.max(0, gross - net);
             });
         });
         return Math.round(extra * 10) / 10;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
     /** Horas base del mes (misma regla que cierre vs vendidas SLA — sin tramos ext/adel). */
     const objectiveMonthSlaBaseHours = useMemo(() => {
         let base = 0;
         const _grupoObjIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
         displayedEmployees.forEach((emp: any) => {
+            const assignedPos = String(emp.assignedPosition || '').trim();
+            const ctx: PlanningCellHoursContext = {
+                selectedObjective,
+                grupoObjectiveIds: _grupoObjIds,
+                slaCodeHoursHint,
+                isExcludedFromBillable: isShiftExcludedFromSlaBillable,
+                assignedPositionForEmp: () => assignedPos,
+            };
             daysInMonth.forEach(day => {
                 const dateStr = getDateKey(day);
                 const key = `${emp.id}_${dateStr}`;
-                const pending = pendingChanges[key];
-                const existing = shiftsMap[key];
-                let activeShift: any = null;
-                if (_grupoObjIds) {
-                    if (pending?.isDeleted) return;
-                    activeShift = pending && !pending.isDeleted ? pending : existing;
-                    if (!activeShift) return;
-                    if (pending && !pending.isDeleted) {
-                        if (activeShift.objectiveId != null && activeShift.objectiveId !== '') {
-                            if (!_grupoObjIds.includes(String(activeShift.objectiveId))) return;
-                        }
-                    } else {
-                        if (!activeShift || isOperationalOriginShift(activeShift)) return;
-                        if (!activeShift.objectiveId || !_grupoObjIds.includes(String(activeShift.objectiveId))) return;
-                    }
-                } else {
-                    activeShift = resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap);
-                    if (!activeShift) return;
-                }
-                const shiftPos = String(activeShift.positionName || emp.assignedPosition || '').trim();
-                if (isShiftExcludedFromSlaBillable(activeShift, dateStr, shiftPos)) return;
-                if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
-                base += calcPlanningSlaReconciliationHours(activeShift, slaCodeHoursHint);
+                const turnos = resolveTurnosForPlanningCellKey({
+                    empId: emp.id,
+                    dateStr,
+                    pending: pendingChanges[key],
+                    cellTurnos: cellTurnosMap[key],
+                    resolveSingleAtObjective: () =>
+                        resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap),
+                    ctx,
+                });
+                base += slaBaseHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
             });
         });
         return Math.round(base * 10) / 10;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
     const planningMonthHoursBreakdown = useMemo(() => {
         const _grupoObjIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
@@ -2141,31 +2133,33 @@ export default function PlanificacionPage() {
             displayedEmployees,
             daysInMonth,
             getDateKey,
-            resolveActiveShift: (empId, dateStr) => {
+            resolveCellTurnos: (empId, dateStr) => {
                 const key = `${empId}_${dateStr}`;
-                const pending = pendingChanges[key];
-                const existing = shiftsMap[key];
-                if (_grupoObjIds) {
-                    if (pending?.isDeleted) return null;
-                    const activeShift = pending && !pending.isDeleted ? pending : existing;
-                    if (!activeShift) return null;
-                    if (pending && !pending.isDeleted) {
-                        if (activeShift.objectiveId != null && activeShift.objectiveId !== '') {
-                            if (!_grupoObjIds.includes(String(activeShift.objectiveId))) return null;
-                        }
-                    } else {
-                        if (!activeShift || isOperationalOriginShift(activeShift)) return null;
-                        if (!activeShift.objectiveId || !_grupoObjIds.includes(String(activeShift.objectiveId))) return null;
-                    }
-                    return activeShift;
-                }
-                return resolveCellShiftAtObjective(empId, dateStr, selectedObjective, pendingChanges, shiftsMap);
+                const ctx: PlanningCellHoursContext = {
+                    selectedObjective,
+                    grupoObjectiveIds: _grupoObjIds,
+                    slaCodeHoursHint,
+                    isExcludedFromBillable: isShiftExcludedFromSlaBillable,
+                };
+                return resolveTurnosForPlanningCellKey({
+                    empId,
+                    dateStr,
+                    pending: pendingChanges[key],
+                    cellTurnos: cellTurnosMap[key],
+                    resolveSingleAtObjective: () =>
+                        resolveCellShiftAtObjective(empId, dateStr, selectedObjective, pendingChanges, shiftsMap),
+                    ctx,
+                });
             },
-            isExcludedFromBillable: isShiftExcludedFromSlaBillable,
-            countsForEmployeeHours: shiftCountsForEmployeeCronoHours,
-            slaCodeHoursHint,
+            cellHoursCtxForEmp: (emp) => ({
+                selectedObjective,
+                grupoObjectiveIds: _grupoObjIds,
+                slaCodeHoursHint,
+                isExcludedFromBillable: isShiftExcludedFromSlaBillable,
+                assignedPositionForEmp: () => String(emp.assignedPosition || '').trim(),
+            }),
         });
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
     // Días RET por empleado (0 h planificadas — sobrante disponible en otro objetivo).
     const empRetDays = useMemo(() => {
@@ -4420,6 +4414,7 @@ export default function PlanificacionPage() {
     useEffect(() => {
         if (!empresaId) {
             setShiftsMap({});
+            setCellTurnosMap({});
             setShiftsMapLoaded(false);
             return;
         }
@@ -4444,6 +4439,7 @@ export default function PlanificacionPage() {
                 getDateKey,
             );
             setShiftsMap(ingested.shiftsMap);
+            setCellTurnosMap(ingested.cellTurnosMap);
             setAllShiftIds(ingested.allShiftIds);
             setTuraMap(ingested.turaMap);
             setSecondBlockMap(ingested.secondBlockMap);
