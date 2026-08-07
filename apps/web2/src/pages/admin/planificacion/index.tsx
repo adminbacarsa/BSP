@@ -264,6 +264,7 @@ import {
     calcPlanningSlaReconciliationHours,
     planningShiftBillableBreakdown,
 } from '@/lib/planificacion/planningScheduledHours';
+import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
 
 const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'SGS', 'SUS']);
 
@@ -1232,6 +1233,7 @@ export default function PlanificacionPage() {
         slaHoursClosed?: boolean;
     } | null>(null);
     const [showCapacityModal, setShowCapacityModal] = useState(false);
+    const [showHoursBreakdownModal, setShowHoursBreakdownModal] = useState(false);
     // Reporte de verificación de cobertura post-generación (V2)
     const [autoV2Coverage, setAutoV2Coverage] = useState<import('@/lib/planificacion/coverageVerification').CoverageVerificationReport | null>(null);
     const [autoV2FormReport, setAutoV2FormReport] = useState<import('@/lib/planificacion/scheduleFormValidator').ScheduleFormValidationReport | null>(null);
@@ -2132,6 +2134,38 @@ export default function PlanificacionPage() {
         });
         return Math.round(base * 10) / 10;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+
+    const planningMonthHoursBreakdown = useMemo(() => {
+        const _grupoObjIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
+        return computePlanningMonthHoursBreakdown({
+            displayedEmployees,
+            daysInMonth,
+            getDateKey,
+            resolveActiveShift: (empId, dateStr) => {
+                const key = `${empId}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const existing = shiftsMap[key];
+                if (_grupoObjIds) {
+                    if (pending?.isDeleted) return null;
+                    const activeShift = pending && !pending.isDeleted ? pending : existing;
+                    if (!activeShift) return null;
+                    if (pending && !pending.isDeleted) {
+                        if (activeShift.objectiveId != null && activeShift.objectiveId !== '') {
+                            if (!_grupoObjIds.includes(String(activeShift.objectiveId))) return null;
+                        }
+                    } else {
+                        if (!activeShift || isOperationalOriginShift(activeShift)) return null;
+                        if (!activeShift.objectiveId || !_grupoObjIds.includes(String(activeShift.objectiveId))) return null;
+                    }
+                    return activeShift;
+                }
+                return resolveCellShiftAtObjective(empId, dateStr, selectedObjective, pendingChanges, shiftsMap);
+            },
+            isExcludedFromBillable: isShiftExcludedFromSlaBillable,
+            countsForEmployeeHours: shiftCountsForEmployeeCronoHours,
+            slaCodeHoursHint,
+        });
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
     // Días RET por empleado (0 h planificadas — sobrante disponible en otro objetivo).
     const empRetDays = useMemo(() => {
@@ -11184,6 +11218,17 @@ export default function PlanificacionPage() {
                                 <p className="text-sm font-black text-teal-600 leading-tight">{effectiveSlaVendidas}</p>
                             </div>
                         )}
+                        {hoursMode === 'mes' && selectedObjective && (
+                            <button
+                                type="button"
+                                onClick={() => setShowHoursBreakdownModal(true)}
+                                className="text-center px-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded-lg transition-colors border border-indigo-100 dark:border-indigo-900"
+                                title="Desglose: columna legajo, base SLA, ext/adel y exclusiones por guardia"
+                            >
+                                <p className="text-[8px] font-black text-indigo-500 uppercase leading-none">Horas</p>
+                                <p className="text-sm font-black text-indigo-600 leading-tight underline decoration-dotted">Desglose</p>
+                            </button>
+                        )}
                         <button onClick={() => { setStatsBarCollapsed(true); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '1'); }} className="shrink-0 ml-2 flex items-center gap-1 px-2 py-1 text-[9px] font-black text-slate-400 hover:text-slate-600 border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors" title="Ocultar estadísticas"><ChevronDown size={10}/></button>
                     </div>
                     );
@@ -13643,6 +13688,124 @@ export default function PlanificacionPage() {
                                     {authLoading ? <RefreshCw size={16} className="animate-spin"/> : <ShieldCheck size={16}/>}
                                     AUTORIZAR
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                , document.body)}
+
+                {showHoursBreakdownModal && selectedObjective && createPortal(
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm no-print" onClick={() => setShowHoursBreakdownModal(false)}>
+                        <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col mx-4" onClick={(e) => e.stopPropagation()}>
+                            <div className="p-4 border-b bg-slate-50 dark:bg-slate-800 flex justify-between items-start gap-3">
+                                <div>
+                                    <h3 className="font-black text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                                        <BarChart2 className="text-indigo-600" size={20}/>
+                                        Desglose de horas — {getObjectiveName(selectedObjective)}
+                                    </h3>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        Mes calendario · Misma lógica que pre-factura (facturable) y cierre SLA (base sin ext/adel).
+                                    </p>
+                                </div>
+                                <button type="button" onClick={() => setShowHoursBreakdownModal(false)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl"><X size={18}/></button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-sm">
+                                {(() => {
+                                    const b = planningMonthHoursBreakdown;
+                                    const legajoSum = Math.round(Object.values(empMonthlyHours).reduce((a: number, v: number) => a + (v || 0), 0));
+                                    const vend = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
+                                    const delta = vend > 0 ? Math.round(b.baseSla - vend) : 0;
+                                    const codes = Object.entries(b.byCodeGross).sort((a, c) => c[1] - a[1]);
+                                    return (
+                                        <>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                                <div className="rounded-xl border border-slate-200 p-3 bg-white dark:bg-slate-800">
+                                                    <p className="text-[9px] font-black uppercase text-slate-400">Col. legajo (CRM)</p>
+                                                    <p className="text-xl font-black text-slate-800 dark:text-slate-100">{legajoSum}h</p>
+                                                    <p className="text-[10px] text-slate-500">Suma filas de la grilla</p>
+                                                </div>
+                                                <div className="rounded-xl border border-indigo-200 p-3 bg-indigo-50/50">
+                                                    <p className="text-[9px] font-black uppercase text-indigo-600">Facturable contado</p>
+                                                    <p className="text-xl font-black text-indigo-700">{b.gross}h</p>
+                                                    <p className="text-[10px] text-slate-500">Sin días 🚫 excluidos</p>
+                                                </div>
+                                                <div className="rounded-xl border border-teal-200 p-3 bg-teal-50/50">
+                                                    <p className="text-[9px] font-black uppercase text-teal-700">Base cierre SLA</p>
+                                                    <p className="text-xl font-black text-teal-800">{b.baseSla}h</p>
+                                                    <p className="text-[10px] text-slate-500">Sin ext/adel ({b.coverageExtra}h aparte)</p>
+                                                </div>
+                                                <div className={`rounded-xl border p-3 ${vend > 0 && delta !== 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200 bg-white'}`}>
+                                                    <p className="text-[9px] font-black uppercase text-slate-400">Vendidas SLA</p>
+                                                    <p className="text-xl font-black text-teal-700">{vend || '—'}h</p>
+                                                    {vend > 0 && (
+                                                        <p className={`text-[10px] font-bold ${delta < 0 ? 'text-rose-600' : delta > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                                            {delta === 0 ? 'Cierre OK' : delta < 0 ? `Faltan ${-delta}h base` : `+${delta}h sobre vendidas`}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            {b.excludedBillable > 0 && (
+                                                <p className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                                                    {b.excludedBillable}h en celdas con turno pero <b>excluidas del SLA</b> (día/puesto 🚫) — no suman a legajo ni a pre-factura.
+                                                </p>
+                                            )}
+                                            <p className="text-[11px] text-slate-600">
+                                                <b>Identidad:</b> facturable = base SLA + ext/adel ({b.baseSla} + {b.coverageExtra} = {Math.round((b.baseSla + b.coverageExtra) * 10) / 10}h).
+                                                {legajoSum !== Math.round(b.gross) && (
+                                                    <span className="text-amber-700"> Diferencia col. legajo vs facturable: {legajoSum - Math.round(b.gross)}h (revisar coalesce o turnos cross-objetivo).</span>
+                                                )}
+                                            </p>
+                                            {codes.length > 0 && (
+                                                <div>
+                                                    <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Por código (facturable)</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {codes.map(([code, hrs]) => (
+                                                            <span key={code} className="px-2 py-1 rounded-lg bg-slate-100 text-[11px] font-bold text-slate-700">{code}: {Math.round(hrs)}h</span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            <div className="border rounded-xl overflow-hidden">
+                                                <table className="w-full text-[11px]">
+                                                    <thead className="bg-slate-100 dark:bg-slate-800">
+                                                        <tr>
+                                                            <th className="text-left p-2 font-black">Guardia</th>
+                                                            <th className="text-right p-2 font-black">Col. legajo</th>
+                                                            <th className="text-right p-2 font-black">Facturable</th>
+                                                            <th className="text-right p-2 font-black">Base SLA</th>
+                                                            <th className="text-right p-2 font-black">Ext/adel</th>
+                                                            <th className="text-right p-2 font-black">Excl. 🚫</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {b.byEmployee.map((row) => {
+                                                            const colH = Math.round(empMonthlyHours[row.empId] || 0);
+                                                            return (
+                                                                <tr key={row.empId} className="border-t border-slate-100 hover:bg-slate-50/80">
+                                                                    <td className="p-2 font-bold text-slate-800 truncate max-w-[200px]" title={row.name}>{row.name}</td>
+                                                                    <td className="p-2 text-right font-mono">{colH}h</td>
+                                                                    <td className="p-2 text-right font-mono">{row.gross}h</td>
+                                                                    <td className="p-2 text-right font-mono text-teal-700">{row.baseSla}h</td>
+                                                                    <td className="p-2 text-right font-mono text-amber-700">{row.coverageExtra > 0 ? `+${row.coverageExtra}` : '—'}</td>
+                                                                    <td className="p-2 text-right font-mono text-rose-600">{row.excludedBillable > 0 ? row.excludedBillable : '—'}</td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                    <tfoot className="bg-slate-50 font-black border-t-2">
+                                                        <tr>
+                                                            <td className="p-2">Total</td>
+                                                            <td className="p-2 text-right font-mono">{legajoSum}h</td>
+                                                            <td className="p-2 text-right font-mono">{b.gross}h</td>
+                                                            <td className="p-2 text-right font-mono text-teal-700">{b.baseSla}h</td>
+                                                            <td className="p-2 text-right font-mono text-amber-700">+{b.coverageExtra}h</td>
+                                                            <td className="p-2 text-right font-mono text-rose-600">{b.excludedBillable || '—'}</td>
+                                                        </tr>
+                                                    </tfoot>
+                                                </table>
+                                            </div>
+                                        </>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </div>
