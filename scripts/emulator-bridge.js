@@ -36,7 +36,7 @@ const EXPORT_DOC_ID_IS_EMPRESA = new Set(['planning_rules']);
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Empresa-Id, X-Import-Mode, X-Import-Dev-Mode, X-File-Name');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Empresa-Id, X-Import-Mode, X-Import-Dev-Mode, X-Import-Clear-Before, X-File-Name');
   res.setHeader('Content-Type', 'application/json');
 }
 
@@ -69,6 +69,7 @@ async function importBackupFile(req, res) {
     if (mode === 'full') args.push('--full');
     else args.push('--empresa', empresaId);
     if (devMode) args.push('--dev');
+    if (req.headers['x-import-clear-before'] === '1') args.push('--clear-before');
 
     _importProgress = { active: true, done: 0, total: 0, col: '', phase: 'Preparando...', error: null };
     const output = await new Promise((resolve, reject) => {

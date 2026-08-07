@@ -13,7 +13,6 @@ process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
 
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
 const { initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore, Timestamp, FieldPath } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
@@ -21,6 +20,7 @@ const { waitForFirestoreEmulator, sleep } = require('./emulator-firestore-ready'
 
 const PROJECT_ID = 'comtroldata';
 const BATCH_SIZE = 250;
+const DELETE_BATCH_SIZE = 100;
 const DEFAULT_PASSWORD = 'admin1234';
 
 // Sincronizado con backup.service.ts y restore.service.ts
@@ -54,13 +54,13 @@ const DEV_SKIP_COLS = new Set(['audit_logs', 'user_notifications', 'assistant_in
 const args = process.argv.slice(2);
 const fullMode = args.includes('--full');
 const devMode = args.includes('--dev');
-const clearAll = args.includes('--clear-all'); // legacy CLI: ya no borra todo el emulador (usar --full)
+const clearBefore = args.includes('--clear-before');
 const empresaIdx = args.indexOf('--empresa');
 const empresaId = empresaIdx >= 0 ? String(args[empresaIdx + 1] || '').trim() : 'bacarsa';
 const fileArg = args.find(a => !a.startsWith('--') && a !== empresaId);
 
 if (!fileArg) {
-  console.error('Uso: node scripts/seed-from-backup-file.js <backup.json> [--empresa bacarsa] [--full] [--dev]');
+  console.error('Uso: node scripts/seed-from-backup-file.js <backup.json> [--empresa bacarsa] [--full] [--dev] [--clear-before]');
   process.exit(1);
 }
 
@@ -110,16 +110,17 @@ async function commitBatchWithRetry(batch, label = '') {
 async function deleteCollectionWhereEmpresa(colName, empId) {
   let deleted = 0;
   while (true) {
-    const snap = await db.collection(colName).where('empresaId', '==', empId).limit(BATCH_SIZE).get();
+    const snap = await db.collection(colName).where('empresaId', '==', empId).limit(DELETE_BATCH_SIZE).get();
     if (snap.empty) break;
     const batch = db.batch();
     snap.docs.forEach(d => batch.delete(d.ref));
     await commitBatchWithRetry(batch, colName);
     deleted += snap.size;
+    await sleep(50);
   }
   if (empId === 'bacarsa') {
     while (true) {
-      const snap = await db.collection(colName).where('empresaId', '==', '').limit(BATCH_SIZE).get();
+      const snap = await db.collection(colName).where('empresaId', '==', '').limit(DELETE_BATCH_SIZE).get();
       if (snap.empty) break;
       const batch = db.batch();
       snap.docs.forEach(d => batch.delete(d.ref));
@@ -130,47 +131,27 @@ async function deleteCollectionWhereEmpresa(colName, empId) {
   return deleted;
 }
 
-/** Limpia Firestore completo usando la REST API del emulador (instantáneo).
- *  Si el endpoint retorna 500 (bug conocido del emulador), borra colección por colección como fallback. */
+/** Limpia Firestore completo por colección (sin DELETE REST global: tumba clientes conectados). */
 async function clearEmulatorFull() {
-  process.stdout.write('\nSTATUS:Preparando emulador (limpiando datos)...\n');
-  process.stdout.write('Limpiando Firestore completo (REST API)... ');
-  const ok = await new Promise((resolve) => {
-    const req = http.request({
-      hostname: '127.0.0.1',
-      port: 8080,
-      path: `/emulator/v1/projects/${PROJECT_ID}/databases/(default)/documents`,
-      method: 'DELETE',
-    }, res => {
-      res.resume();
-      resolve(res.statusCode === 200 || res.statusCode === 204);
-    });
-    req.setTimeout(20000, () => { req.destroy(); resolve(false); });
-    req.on('error', () => resolve(false));
-    req.end();
-  });
-  if (ok) {
-    console.log('OK');
-    await sleep(2000);
-    await waitForFirestoreEmulator({ maxWaitMs: 60_000 });
-    return;
-  }
-  // Fallback: borrar colección por colección
-  console.log('fallback — borrando por colección...');
+  process.stdout.write('\nSTATUS:Preparando emulador (limpiando datos por colección)...\n');
+  console.log('Limpiando Firestore completo (por colección, sin wipe REST)...');
   const allCols = [...EMPRESA_SCOPED_COLS, 'empresas', 'system_config', 'feriados_nacionales'];
   for (const col of allCols) {
     let deleted = 0;
     while (true) {
-      const snap = await db.collection(col).limit(400).get();
+      const snap = await db.collection(col).limit(DELETE_BATCH_SIZE).get();
       if (snap.empty) break;
       const batch = db.batch();
       snap.docs.forEach(d => batch.delete(d.ref));
       await commitBatchWithRetry(batch, col);
       deleted += snap.size;
+      await sleep(60);
     }
     if (deleted) process.stdout.write(`  ${col}: ${deleted} docs\n`);
+    await sleep(120);
   }
-  console.log('Limpieza completa (fallback OK)');
+  await waitForFirestoreEmulator({ maxWaitMs: 60_000 });
+  console.log('Limpieza completa OK');
 }
 
 function collectionsToClearForEmpresaImport(collections) {
@@ -347,10 +328,12 @@ async function run() {
 
   console.log(`Backup: ${meta.exportedAt || '?'} — ${meta.totalDocs || '?'} docs — alcance import: ${scope}${devNote}\n`);
 
-  if (isFull) {
-    await clearEmulatorFull();
+  if (clearBefore) {
+    if (isFull) await clearEmulatorFull();
+    else await clearEmpresa(empresaId, collections);
   } else {
-    await clearEmpresa(empresaId, collections);
+    process.stdout.write('\nSTATUS:Sin borrado previo — sobrescribiendo documentos del backup...\n');
+    console.log('(Opcional: --clear-before o checkbox en UI para limpiar antes)\n');
   }
 
   const authUsers = Array.isArray(_auth_users) && _auth_users.length > 0

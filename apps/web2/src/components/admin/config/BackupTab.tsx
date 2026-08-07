@@ -471,6 +471,7 @@ export default function BackupTab() {
 
   const [localRestoreMode, setLocalRestoreMode] = useState<'empresa' | 'full'>('empresa');
   const [localDevMode, setLocalDevMode] = useState(true);
+  const [localClearBefore, setLocalClearBefore] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [scheduleHour, setScheduleHour] = useState(3);
   const [scheduleEnabled, setScheduleEnabled] = useState(true);
@@ -519,9 +520,10 @@ export default function BackupTab() {
           const detected = detectDominantEmpresaInPayload(backup);
           const sourceEmp = backupEmpId || detected.empresaId;
           if (sourceEmp && sourceEmp.toLowerCase() !== (empresaId || '').toLowerCase()) {
-            // Backup de otra empresa: cambiar automáticamente a modo completo
-            isEmpresaMode = false;
-            toast.info(`Backup de empresa «${sourceEmp}» importado en modo plataforma completa.`);
+            toast.warning(
+              `El backup parece ser de «${sourceEmp}» y tenés seleccionada «${empresaId}». Se importará solo la empresa del panel; si necesitás todo, usá modo plataforma completa.`,
+              { duration: 10_000 },
+            );
           }
         } catch { /* si no se puede parsear, continuar normalmente */ }
       }
@@ -550,6 +552,7 @@ export default function BackupTab() {
             'X-Empresa-Id': empresaId || 'bacarsa',
             'X-Import-Mode': isEmpresaMode ? 'empresa' : 'full',
             'X-Import-Dev-Mode': localDevMode ? '1' : '0',
+            'X-Import-Clear-Before': localClearBefore ? '1' : '0',
             'X-File-Name': encodeURIComponent(file.name),
           },
           body: file,
@@ -583,35 +586,10 @@ export default function BackupTab() {
 
       let written = Number(data.written ?? 0);
 
-      // Auto-retry en modo completo si empresa mode no encontró docs
-      if (written === 0 && isEmpresaMode) {
-        toast.info('Modo empresa sin documentos — reintentando en modo plataforma completa…');
-        setProgress({ done: 0, total: 0, phase: 'Reintentando en modo plataforma completa…' });
-        const controller2 = new AbortController();
-        const timeoutId2 = setTimeout(() => controller2.abort(), 13 * 60 * 1000);
-        try {
-          const res2 = await fetch(`${BRIDGE_URL}/import-backup-file`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Empresa-Id': empresaId || 'bacarsa',
-              'X-Import-Mode': 'full',
-              'X-Import-Dev-Mode': localDevMode ? '1' : '0',
-              'X-File-Name': encodeURIComponent(file.name),
-            },
-            body: file,
-            signal: controller2.signal,
-          });
-          const data2 = await res2.json().catch(() => ({})) as typeof data;
-          if (res2.ok) written = Number(data2.written ?? 0);
-        } finally {
-          clearTimeout(timeoutId2);
-        }
-        isEmpresaMode = false;
-      }
-
       if (written === 0) {
-        throw new Error('Importación terminó sin documentos. Verificá que el backup tenga documentos válidos.');
+        throw new Error(
+          'Importación terminó sin documentos. Verificá modo (empresa vs completo), empresa del panel y que el backup tenga datos para ese alcance.',
+        );
       }
 
       const version: LoadedVersion = {
@@ -1091,6 +1069,21 @@ export default function BackupTab() {
                 <span className="text-xs font-bold text-amber-800">
                   Modo dev — omitir audit_logs y notificaciones
                   <span className="font-normal text-amber-600 ml-1">(~13k docs menos, emulador más liviano)</span>
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer mb-3 select-none">
+                <input
+                  type="checkbox"
+                  checked={localClearBefore}
+                  onChange={e => setLocalClearBefore(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded accent-rose-500"
+                />
+                <span className="text-xs font-bold text-amber-900">
+                  Borrar datos antes de importar
+                  <span className="font-normal text-amber-700 ml-1">
+                    (más lento; cerrá Planificación/Operaciones. Por defecto solo sobrescribe docs del backup.)
+                  </span>
                 </span>
               </label>
 
