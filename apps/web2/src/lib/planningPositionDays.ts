@@ -11,6 +11,8 @@ export type PlanningPositionShiftRow = {
   blocks?: PlanningShiftTimeBlock[];
   days?: string[];
   specificDates?: string[];
+  /** PAX específico para este turno (ShiftVariant.quantity). Cuando está presente en cualquier turno del puesto, tiene precedencia sobre pos.qty global. */
+  quantity?: number;
   [key: string]: unknown;
 };
 
@@ -138,6 +140,9 @@ export function normalizePlanningShifts(shiftList: unknown): PlanningPositionShi
     if (days.length > 0) row.days = days;
     if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
       row.specificDates = s.specificDates.map((d) => String(d));
+    }
+    if (s.quantity != null && !isNaN(Number(s.quantity)) && Number(s.quantity) > 0) {
+      row.quantity = Math.floor(Number(s.quantity));
     }
     return row;
   });

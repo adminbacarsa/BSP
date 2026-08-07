@@ -2708,8 +2708,10 @@ export default function PlanificacionPage() {
                     lastReason = 'Cobertura SLA completa';
                     continue;
                 }
-                if ((codeCounts[code] || 0) >= pax) {
-                    lastReason = `Cupo ${code} completo (${pax} pax)`;
+                const shiftCfgBulk = (posCfg?.shifts as any[])?.find((sh: any) => String(sh.code || '').toUpperCase() === code);
+                const shiftPaxBulk = shiftCfgBulk?.quantity != null ? Math.max(1, Number(shiftCfgBulk.quantity)) : pax;
+                if ((codeCounts[code] || 0) >= shiftPaxBulk) {
+                    lastReason = `Cupo ${code} completo (${shiftPaxBulk} pax)`;
                     continue;
                 }
                 if (is24hCoverageType(posCfg)) {
@@ -3010,7 +3012,10 @@ export default function PlanificacionPage() {
                 const code = String(s.code || '').toUpperCase();
                 if (!isWorking(code)) return;
                 if (schemeFull) { disabled.add(code); return; }
-                if ((codeCounts[code] || 0) >= pax) disabled.add(code);
+                // Per-shift PAX: usar quantity del turno específico cuando está definido
+                const shiftCfg = (posConfig?.shifts as any[])?.find((sh: any) => String(sh.code || '').toUpperCase() === code);
+                const shiftPax = shiftCfg?.quantity != null ? Math.max(1, Number(shiftCfg.quantity)) : pax;
+                if ((codeCounts[code] || 0) >= shiftPax) disabled.add(code);
             });
             return disabled;
         }
