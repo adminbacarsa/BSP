@@ -6110,7 +6110,11 @@ export default function PlanificacionPage() {
                 if (units.required > 0 && units.closed >= units.required) return true;
 
                 const upper = String(code || '').toUpperCase();
-                const paxLeft = (codeCounts[upper] || 0) >= pax;
+                const shiftCfgBlock = (posCfg.shifts as any[])?.find((s: any) => String(s.code || '').toUpperCase() === upper);
+                const shiftPaxBlock = (shiftCfgBlock?.quantity != null && Number(shiftCfgBlock.quantity) > 0)
+                    ? Math.max(1, Math.floor(Number(shiftCfgBlock.quantity)))
+                    : pax;
+                const paxLeft = (codeCounts[upper] || 0) >= shiftPaxBlock;
                 if (paxLeft) return true;
 
                 if (!is24hCoverageType(posCfg)) return false;
