@@ -5,7 +5,7 @@ import {
   calcPlanificadorShiftHours,
   isPlanificadorPlannedHoursShift,
 } from '@/lib/planificacion/planningScheduledHours';
-import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
+import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import type { SlaExclusionContext } from './slaExclusionForPlanned';
 import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
@@ -154,8 +154,7 @@ export function sumPlannedHoursForObjective(
   }
   let total = 0;
   for (const rows of groups.values()) {
-    const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
-    const hrs = calcPlanificadorShiftHours(merged, slaCodeHoursHint);
+    const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
     if (hrs > 0) total += hrs;
   }
   return total;
@@ -180,8 +179,7 @@ export function sumPlannedHoursForClient(
   }
   let total = 0;
   for (const rows of groups.values()) {
-    const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
-    const hrs = calcPlanificadorShiftHours(merged, slaCodeHoursHint);
+    const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
     if (hrs > 0) total += hrs;
   }
   return total;
@@ -199,8 +197,7 @@ export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange
   }
   let total = 0;
   for (const rows of groups.values()) {
-    const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
-    const hrs = calcPlanificadorShiftHours(merged, slaCodeHoursHint);
+    const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
     if (hrs > 0) total += hrs;
   }
   return total;

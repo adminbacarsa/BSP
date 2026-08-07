@@ -1,9 +1,8 @@
 import type { ProformaDayCell, ProformaEmployeeRow, ProformaObjectiveGrid, ProformaExportBundle, ProformaSummaryRow } from './proformaTypes';
 import {
-  calcPlanificadorShiftHours,
   isPlanificadorPlannedHoursShift,
 } from '@/lib/planificacion/planningScheduledHours';
-import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
+import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   type ObjectiveMeta,
   resolveCanonicalObjectiveId,
@@ -240,7 +239,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const start = useExecuted ? realStart : plannedStart;
     if (!start) continue;
 
-    let hrs = calcPlanificadorShiftHours(t, hint);
+    let hrs = coalescePlannedCellBillableHours(groupTurnos, hint);
     if (useExecuted && SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
     if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
 

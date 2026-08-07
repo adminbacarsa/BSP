@@ -109,7 +109,7 @@ import {
 import type { ClientRef } from '@/lib/crm/clientDataMatch';
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
-import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
+import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   applyRefuerzoHorasVendidasToGrids,
   applyRefuerzoHorasVendidasToBreakdown,
@@ -1171,17 +1171,50 @@ export default function CRMPage() {
     }
   };
 
+  const parseSedeCoord = (raw: string): number => parseFloat(String(raw ?? '').trim().replace(',', '.'));
+
   const handleGeocodeSede = async () => {
-    if (!objectiveForm.address.trim()) return toast.error('Ingrese una dirección primero');
+    const addr = objectiveForm.address.trim();
+    const lat = parseSedeCoord(objectiveForm.lat);
+    const lng = parseSedeCoord(objectiveForm.lng);
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng)
+      && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+    if (!addr && !hasCoords) {
+      return toast.error('Ingrese una dirección o coordenadas válidas');
+    }
     setIsGeocodingSede(true);
-    const headers = { 'Accept-Language': 'es' };
+    const headers: Record<string, string> = {
+      'Accept-Language': 'es',
+      'User-Agent': 'COSP-v1/comtroldata.web.app',
+    };
     const nom = async (params: string) => {
       const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&${params}`, { headers });
       const d = await r.json();
       return d?.length > 0 ? d[0] : null;
     };
     try {
-      const addr = objectiveForm.address.trim();
+      if (!addr && hasCoords) {
+        const r = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}&zoom=18&addressdetails=1`,
+          { headers },
+        );
+        if (!r.ok) throw new Error(`Nominatim HTTP ${r.status}`);
+        const data = await r.json() as { display_name?: string };
+        const normalized = { lat: lat.toFixed(6), lng: lng.toFixed(6) };
+        if (data?.display_name) {
+          setObjectiveForm((f) => ({
+            ...f,
+            ...normalized,
+            address: data.display_name!,
+          }));
+          toast.success(`Dirección encontrada: ${data.display_name.split(',').slice(0, 2).join(',')}`);
+        } else {
+          setObjectiveForm((f) => ({ ...f, ...normalized }));
+          toast.success('Coordenadas confirmadas (sin dirección en el mapa)');
+        }
+        return;
+      }
+
       // Parseo para formato importado con comas
       const parts = addr.split(',').map((p: string) => p.trim()).filter(Boolean);
       const street = parts[0] || addr;
@@ -1193,6 +1226,9 @@ export default function CRMPage() {
       if (result) {
         setObjectiveForm(f => ({ ...f, lat: parseFloat(result.lat).toFixed(6), lng: parseFloat(result.lon).toFixed(6) }));
         toast.success(`Coordenadas encontradas: ${result.display_name.split(',').slice(0,2).join(',')}`);
+      } else if (hasCoords) {
+        setObjectiveForm((f) => ({ ...f, lat: lat.toFixed(6), lng: lng.toFixed(6) }));
+        toast.warning('No se encontró la dirección. Se mantienen las coordenadas ingresadas.');
       } else {
         toast.error('No se encontró la dirección. Ingresá las coordenadas manualmente desde Google Maps.');
       }
@@ -1368,8 +1404,8 @@ export default function CRMPage() {
 
       plannedCellGroups.forEach(({ rows, objectiveName, positionName, dateKey }) => {
         const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
-        const hrs = resolveCrmPlannedShiftHours(merged, undefined, undefined, slaCodeHoursHint, slaExclusion);
-        if (hrs <= 0) return;
+        const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
+        if (!merged || hrs <= 0) return;
         planned.total += hrs;
         add(planned, objectiveName, positionName, dateKey, hrs);
       });
@@ -2924,7 +2960,7 @@ export default function CRMPage() {
                             <button
                               onClick={handleGeocodeSede}
                               disabled={isGeocodingSede}
-                              title="Geolocalizar por dirección"
+                              title="Geolocalizar por dirección o coordenadas"
                               className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl flex items-center gap-1 text-[10px] font-black disabled:opacity-50 transition-colors whitespace-nowrap"
                             >
                               {isGeocodingSede ? <Loader2 size={14} className="animate-spin" /> : <Navigation size={14} />}
@@ -3074,7 +3110,7 @@ export default function CRMPage() {
                                     <button
                                       onClick={handleGeocodeSede}
                                       disabled={isGeocodingSede}
-                                      title="Geolocalizar por dirección"
+                                      title="Geolocalizar por dirección o coordenadas"
                                       className="px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl flex items-center gap-1 text-[10px] font-black disabled:opacity-50 transition-colors"
                                     >
                                       {isGeocodingSede ? <Loader2 size={14} className="animate-spin" /> : <Navigation size={14} />}

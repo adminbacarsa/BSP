@@ -1,5 +1,14 @@
 import { calcPlanningBillableShiftHours } from './planningScheduledHours';
 
+function turnoContributesCoverageMerge(t: any): boolean {
+  if (!t) return false;
+  if (t.isExtended || t.isEarlyStart) return true;
+  const role = String(t.coverageSegmentRole || '').toUpperCase();
+  if (role === 'EXTENSION' || role === 'EARLY_START') return true;
+  const ex = Number(t.extExtraHours ?? t.extensionExtraHours);
+  return Number.isFinite(ex) && ex > 0;
+}
+
 /** Fusiona varios turnos del mismo emp/obj/día (p. ej. ext + base en docs distintos). */
 export function coalescePlannedTurnosForCell(
   turnos: any[],
@@ -18,6 +27,7 @@ export function coalescePlannedTurnosForCell(
   }
   const merged: any = { ...primary };
   for (const t of turnos) {
+    if (!turnoContributesCoverageMerge(t)) continue;
     merged.isExtended = merged.isExtended || t.isExtended;
     merged.isEarlyStart = merged.isEarlyStart || t.isEarlyStart;
     merged.coveragePackageId = merged.coveragePackageId || t.coveragePackageId;
@@ -34,4 +44,21 @@ export function coalescePlannedTurnosForCell(
     }
   }
   return merged;
+}
+
+/** Horas facturables de la celda sin contaminar el turno base con metadatos de docs fantasma. */
+export function coalescePlannedCellBillableHours(
+  turnos: any[],
+  slaCodeHoursHint?: Record<string, number>,
+): number {
+  if (!turnos.length) return 0;
+  let maxH = 0;
+  for (const t of turnos) {
+    const h = calcPlanningBillableShiftHours(t, slaCodeHoursHint);
+    if (h > maxH) maxH = h;
+  }
+  const merged = coalescePlannedTurnosForCell(turnos, slaCodeHoursHint);
+  if (!merged) return maxH;
+  const mergedH = calcPlanningBillableShiftHours(merged, slaCodeHoursHint);
+  return Math.max(maxH, mergedH);
 }

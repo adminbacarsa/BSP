@@ -52,12 +52,13 @@ export function shiftCoverageExtensionExtraHours(
     const to = String(toRaw).slice(0, 5);
     const h = hoursBetweenClockTimes(from, to);
     if (h != null && h > 0) {
+      if (h < 0.25) return 0;
       const code = String(shift.code || '').toUpperCase();
       const codeBase = SHIFT_HOURS_LOOKUP[code] ?? slaHoursHint?.[code];
       if (codeBase !== undefined && h >= codeBase - 0.5) {
         return Math.max(0, Math.min(h - codeBase, 12));
       }
-      if (h <= 5) return h;
+      if (h <= 5 && (shift.isExtended || shift.isEarlyStart)) return h;
       if (codeBase !== undefined) {
         return Math.max(0, Math.min(h - codeBase, 12));
       }
@@ -103,6 +104,26 @@ export function isPlanificadorPlannedHoursShift(t: any): boolean {
   return true;
 }
 
+function durationHoursFromShiftTimestamps(shift: any): number {
+  if (shift.startTime?.seconds && shift.endTime?.seconds) {
+    return Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600, 24));
+  }
+  if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+    const parseH = (t: string) => {
+      const m = t.match(/^(\d{1,2}):(\d{2})$/);
+      return m ? +m[1] + +m[2] / 60 : null;
+    };
+    const s = parseH(shift.startTime);
+    const e = parseH(shift.endTime);
+    if (s !== null && e !== null) {
+      let dur = e - s;
+      if (dur <= 0) dur += 24;
+      return Math.max(0, Math.min(dur, 24));
+    }
+  }
+  return 0;
+}
+
 /**
  * Horas billables de un turno planificado: código SLA + tramo extra de extensión/adelanto.
  * Misma regla que el pie «Hs. Plan.» del planificador (lookup CCT/custom antes que timestamps).
@@ -116,10 +137,13 @@ export function calcPlanningBillableShiftHours(
   if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
 
   const explicitExt = Number(shift.extExtraHours ?? shift.extensionExtraHours);
-  const isCoverageAdjust = !!(
+  const bandHint = slaHoursHint?.[code] ?? SHIFT_HOURS_LOOKUP[code];
+
+  const hasRealExtension = !!(
     shift.isExtended
     || shift.isEarlyStart
-    || shift.coveragePackageId
+    || shift.coverageSegmentRole === 'EXTENSION'
+    || shift.coverageSegmentRole === 'EARLY_START'
     || (Number.isFinite(explicitExt) && explicitExt > 0)
   );
 
@@ -129,54 +153,34 @@ export function calcPlanningBillableShiftHours(
   else if (slaHoursHint?.[code] !== undefined) codeBase = slaHoursHint[code];
   else {
     const storedForBase = Number(shift.hours);
-    if (storedForBase > 0 && !isCoverageAdjust) codeBase = Math.min(storedForBase, 24);
-    else if (shift.startTime?.seconds && shift.endTime?.seconds) {
-      codeBase = Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600000, 24));
-    } else if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
-      const parseH = (t: string) => {
-        const m = t.match(/^(\d{1,2}):(\d{2})$/);
-        return m ? +m[1] + +m[2] / 60 : null;
-      };
-      const s = parseH(shift.startTime);
-      const e = parseH(shift.endTime);
-      if (s !== null && e !== null) {
-        let dur = e - s;
-        if (dur <= 0) dur += 24;
-        codeBase = Math.max(0, Math.min(dur, 24));
-      }
+    if (storedForBase >= 0.5) codeBase = Math.min(storedForBase, 24);
+    else {
+      const dur = durationHoursFromShiftTimestamps(shift);
+      if (dur >= 0.5) codeBase = dur;
     }
-    if (codeBase <= 0) codeBase = 8;
+    if (codeBase <= 0 && bandHint != null && bandHint > 0) codeBase = bandHint;
+    else if (codeBase <= 0) codeBase = 8;
   }
 
   const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
-  if (!isCoverageAdjust && extra <= 0) {
-    const stored = Number(shift.hours);
-    if (stored > 0 && stored > codeBase + 0.25) return Math.min(stored, 24);
-  }
+  const extensionBillable = hasRealExtension || extra >= 0.25;
 
-  const bandHint = slaHoursHint?.[code] ?? SHIFT_HOURS_LOOKUP[code];
-  const coverageLike = isCoverageAdjust
-    || !!shift.coverageSegmentRole;
-
-  if (bandHint != null && bandHint > 0 && coverageLike) {
-    const storedH = Number(shift.hours);
+  if (extensionBillable && bandHint != null && bandHint > 0) {
+    const baseBand = codeBase >= bandHint - 0.5 ? codeBase : bandHint;
     const extraPart = Math.max(
       extra,
-      (Number.isFinite(storedH) && storedH > 0 && storedH < bandHint - 0.5) ? storedH : 0,
+      Number.isFinite(explicitExt) && explicitExt > 0 ? explicitExt : 0,
     );
-    const baseBand = codeBase >= bandHint - 0.5 ? codeBase : bandHint;
     return Math.round((baseBand + extraPart) * 100) / 100;
   }
 
-  if (
-    bandHint != null
-    && bandHint >= 8
-    && codeBase > 0
-    && codeBase < bandHint - 0.5
-    && (shift.isExtended || shift.isEarlyStart || (Number.isFinite(explicitExt) && explicitExt > 0))
-  ) {
-    const extraPart = Math.max(extra, codeBase);
-    return Math.round((bandHint + extraPart) * 100) / 100;
+  if (codeBase < 0.5 && bandHint != null && bandHint > 0) {
+    return Math.round((bandHint + extra) * 100) / 100;
+  }
+
+  const stored = Number(shift.hours);
+  if (!extensionBillable && stored > codeBase + 0.25) {
+    return Math.round(Math.min(stored, 24) * 100) / 100;
   }
 
   return Math.round((codeBase + extra) * 100) / 100;
