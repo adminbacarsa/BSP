@@ -16,6 +16,9 @@ export interface ShiftVariant {
   // Turno cortado: dos bloques separados en el día (ej. 09–13 y 18–22).
   // Si está presente, startTime/endTime corresponden al bloque 1 y se generan dos turnos en Firestore.
   blocks?: Array<{ startTime: string; endTime: string }>;
+  // PAX específico para este turno. Cuando está presente en cualquier turno del puesto,
+  // el cálculo usa este valor en lugar del pos.quantity global.
+  quantity?: number;
 }
 
 // Definición de Puesto

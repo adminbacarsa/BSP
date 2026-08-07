@@ -362,6 +362,16 @@ export default function ServiciosSLAPage() {
     ];
   };
 
+  const formatPositionPaxLabel = (pos: ServicePosition): string => {
+    const shiftQtys = pos.allowedShiftTypes
+      .map((s) => s.quantity)
+      .filter((q): q is number => q != null);
+    if (shiftQtys.length === 0) return `${pos.quantity} PAX`;
+    const mn = Math.min(...shiftQtys);
+    const mx = Math.max(...shiftQtys);
+    return mn === mx ? `${mn} PAX` : `${mn}–${mx} PAX`;
+  };
+
   const formatPositionDailyCoverageLabel = (pos: ServicePosition) => {
     const totals = WEEK_DAY_CODES.map((d) => computePositionDayComposition(pos, d).dayTotal);
     const min = Math.min(...totals);
@@ -1983,7 +1993,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                       <div key={pos.id} className="bg-white dark:bg-slate-800 p-3 rounded-xl border dark:border-slate-700 shadow-sm">
                         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                           <span className="font-black text-xs text-slate-800 dark:text-white uppercase">{pos.name}</span>
-                          <span className="bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300 px-1.5 py-0.5 rounded text-[8px] font-black">{pos.quantity} PAX</span>
+                          <span className="bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300 px-1.5 py-0.5 rounded text-[8px] font-black">{formatPositionPaxLabel(pos)}</span>
                           <span className="text-[8px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 rounded">{pos.coverageType === '24hs' ? '24 HS' : pos.coverageType.toUpperCase()}</span>
                         </div>
                         <div className="flex flex-wrap gap-1">
@@ -2358,7 +2368,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      {form.positions.map((pos) => (
                         <div key={pos.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border dark:border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
                            <div className="flex-1 text-left">
-                              <div className="flex items-center gap-3"><h4 className="font-bold text-slate-800 dark:text-white text-sm uppercase">{pos.name}</h4><span className="bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-black uppercase">{pos.quantity} PAX</span></div>
+                              <div className="flex items-center gap-3"><h4 className="font-bold text-slate-800 dark:text-white text-sm uppercase">{pos.name}</h4><span className="bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-black uppercase">{formatPositionPaxLabel(pos)}</span></div>
                               <div className="mt-1 flex items-center gap-2 flex-wrap">
                                 <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/50 px-2 rounded">{pos.coverageType === '24hs' ? '24 HS' : pos.coverageType.toUpperCase()}</span>
                                 {pos.preferenciaGenero === 'M' && <span className="text-[10px] font-black text-blue-700 bg-blue-100 px-2 py-0.5 rounded" title="Solo masculino">♂ M</span>}
@@ -3740,21 +3750,44 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                         </div>
                                     </div>
                                     {positionForm.coverageType === 'custom' && (
-                                        <div className="flex gap-1 shrink-0">
-                                            <button
-                                                onClick={() => startEditShift(v)}
-                                                className={`p-1.5 rounded-lg transition-colors ${isBeingEdited ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 hover:bg-indigo-50 text-slate-400 hover:text-indigo-500'}`}
-                                                title="Editar horarios del turno"
-                                            >
-                                                <Edit2 size={12}/>
-                                            </button>
-                                            <button
-                                                onClick={() => removeCustomVariant(v.code)}
-                                                className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-lg transition-colors"
-                                                title="Eliminar turno"
-                                            >
-                                                <X size={12}/>
-                                            </button>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            {/* PAX por turno */}
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span className="text-[8px] font-black uppercase text-slate-400">PAX</span>
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    max={99}
+                                                    value={v.quantity ?? positionForm.quantity ?? 1}
+                                                    title={`Guardias en turno ${v.code}`}
+                                                    className="w-12 h-7 text-center text-[11px] font-black rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                                                    onChange={e => {
+                                                        const val = Math.max(1, parseInt(e.target.value) || 1);
+                                                        setPositionForm(prev => ({
+                                                            ...prev,
+                                                            allowedShiftTypes: prev.allowedShiftTypes.map((x, i) =>
+                                                                i === vIdx ? { ...x, quantity: val } : x
+                                                            ),
+                                                        }));
+                                                    }}
+                                                />
+                                            </div>
+                                            <div className="flex gap-1">
+                                                <button
+                                                    onClick={() => startEditShift(v)}
+                                                    className={`p-1.5 rounded-lg transition-colors ${isBeingEdited ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 hover:bg-indigo-50 text-slate-400 hover:text-indigo-500'}`}
+                                                    title="Editar horarios del turno"
+                                                >
+                                                    <Edit2 size={12}/>
+                                                </button>
+                                                <button
+                                                    onClick={() => removeCustomVariant(v.code)}
+                                                    className="p-1.5 bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-500 rounded-lg transition-colors"
+                                                    title="Eliminar turno"
+                                                >
+                                                    <X size={12}/>
+                                                </button>
+                                            </div>
                                         </div>
                                     )}
                                 </div>

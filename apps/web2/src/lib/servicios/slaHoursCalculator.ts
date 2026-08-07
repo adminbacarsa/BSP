@@ -135,15 +135,20 @@ export function computePositionDayComposition(pos: ServicePosition, dayCode: str
   const activeDays = pos.activeDays?.length ? pos.activeDays : [...WEEK_DAY_CODES];
   if (!activeDays.includes(dayCode)) return { dayTotal: 0, dayNight: 0 };
 
+  // Si algún turno tiene quantity propio, usamos PAX por turno y NO aplicamos pos.quantity afuera.
+  // Si ninguno lo tiene, addVariant contribuye horas sin multiplicar y el llamador aplica pos.quantity.
+  const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);
+
   const addVariant = (v: ShiftVariant) => {
+    const q = hasPerShiftQty ? (v.quantity ?? 1) : 1;
     const timeBlocks =
       Array.isArray(v.blocks) && v.blocks.length >= 2
         ? v.blocks
         : [{ startTime: v.startTime, endTime: v.endTime }];
     for (const b of timeBlocks) {
       const comp = analyzeShiftComposition(b.startTime, b.endTime);
-      dayTotal += comp.total;
-      dayNight += comp.night;
+      dayTotal += comp.total * q;
+      dayNight += comp.night * q;
     }
   };
 
@@ -233,7 +238,10 @@ export function calculateMonthlyBreakdown(
       positions.forEach((pos) => {
         if (pos.excludedDates?.includes(dateStr)) return;
         const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode, dateStr);
-        const q = pos.quantity || 1;
+        // Si algún turno tiene quantity propio, dayTotal ya incluye PAX → q=1.
+        // Si no, aplicar el pos.quantity global como antes.
+        const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);
+        const q = hasPerShiftQty ? 1 : (pos.quantity || 1);
         monthAccumulator[monthKey].totalHours += dayTotal * q;
         monthAccumulator[monthKey].nightHours += dayNight * q;
         if (isWeekend) monthAccumulator[monthKey].weekendHours += dayTotal * q;
@@ -367,11 +375,12 @@ export function slaHoursForServiceOnDay(
   day: Date,
 ): number {
   if (!srv.startDate || !srv.endDate) return 0;
-  return (srv.positions || []).reduce(
-    (acc, pos) =>
-      acc + slaHoursForPositionOnDay(pos, day, srv.startDate!, srv.endDate!, srv.excludedDates) * (pos.quantity || 1),
-    0,
-  );
+  return (srv.positions || []).reduce((acc, pos) => {
+    const raw = slaHoursForPositionOnDay(pos, day, srv.startDate!, srv.endDate!, srv.excludedDates);
+    // Si hay PAX por turno, raw ya viene multiplicado; si no, aplicar pos.quantity global.
+    const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);
+    return acc + raw * (hasPerShiftQty ? 1 : (pos.quantity || 1));
+  }, 0);
 }
 
 /** Días del rango con al menos 1 hs de demanda SLA (mismo criterio que Servicios/CRM). */
