@@ -120,7 +120,10 @@ import {
     excludedPositionsCellLabel,
     excludedPositionsTooltip,
     resolvePlanningMonthSlaHours,
+    type SlaPlanningRow,
 } from '@/lib/slaPlanningMatch';
+import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
+import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { useAuth } from '@/context/AuthContext';
 import { Toaster, toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
@@ -1004,6 +1007,7 @@ export default function PlanificacionPage() {
     const [usersMap, setUsersMap] = useState<Record<string, string>>({}); 
 
     const [positionStructure, setPositionStructure] = useState<any[]>([]);
+    const [activePlanningSlaRow, setActivePlanningSlaRow] = useState<SlaPlanningRow | null>(null);
     const [slaVendidas, setSlaVendidas] = useState<number>(0);
     const [showDiagnostic, setShowDiagnostic] = useState<boolean>(false);
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, { publishedAt: any; publishedBy: string } | null>>({});
@@ -1978,6 +1982,32 @@ export default function PlanificacionPage() {
         return hint;
     }, [positionStructure]);
 
+    const planningSlaExclusion = useMemo(() => {
+        if (!activePlanningSlaRow) return undefined;
+        const y = currentDate.getFullYear();
+        const m = currentDate.getMonth();
+        return buildSlaExclusionContext(
+            [activePlanningSlaRow],
+            new Date(y, m, 1),
+            new Date(y, m + 1, 0, 23, 59, 59, 999),
+        );
+    }, [activePlanningSlaRow, currentDate]);
+
+    const isShiftExcludedFromSlaBillable = (shift: any, dateStr: string, shiftPos: string) => {
+        const scheduleDateKey = resolveTurnoScheduleDateKey(shift) || dateStr;
+        if (planningSlaExclusion) {
+            return isTurnoOnSlaExcludedSlot(shift, planningSlaExclusion, {
+                scheduleDateKey,
+                positionName: shiftPos,
+            });
+        }
+        const posConfig = shiftPos
+            ? positionStructure.find((p: any) => p.positionName === shiftPos)
+            : undefined;
+        if (posConfig?.positionExcludedDates?.includes(scheduleDateKey)) return true;
+        return false;
+    };
+
     /** Objetivos multi-puesto: ordenar dotación por puesto al entrar al cronograma. */
     useEffect(() => {
         if (!selectedObjective || positionStructure.length <= 1) return;
@@ -2017,17 +2047,14 @@ export default function PlanificacionPage() {
                     if (!activeShift) return;
                 }
                 const shiftPos = String(activeShift.positionName || emp.assignedPosition || '').trim();
-                const posConfig = shiftPos
-                    ? positionStructure.find((p: any) => p.positionName === shiftPos)
-                    : undefined;
-                if (posConfig && isPosExcludedOnDate(posConfig, dateStr)) return;
+                if (isShiftExcludedFromSlaBillable(activeShift, dateStr, shiftPos)) return;
                 if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
                 total += calcPlanningBillableShiftHours(activeShift, slaCodeHoursHint);
             });
             result[emp.id] = total;
         });
         return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
     /** Tramos ext/adel del mes (no cierran contra horas vendidas SLA). */
     const objectiveMonthCoverageExtraHours = useMemo(() => {
@@ -2057,10 +2084,7 @@ export default function PlanificacionPage() {
                     if (!activeShift) return;
                 }
                 const shiftPos = String(activeShift.positionName || emp.assignedPosition || '').trim();
-                const posConfig = shiftPos
-                    ? positionStructure.find((p: any) => p.positionName === shiftPos)
-                    : undefined;
-                if (posConfig && isPosExcludedOnDate(posConfig, dateStr)) return;
+                if (isShiftExcludedFromSlaBillable(activeShift, dateStr, shiftPos)) return;
                 if (!shiftCountsForEmployeeCronoHours(activeShift)) return;
                 const gross = calcPlanningBillableShiftHours(activeShift, slaCodeHoursHint);
                 const net = calcPlanningSlaReconciliationHours(activeShift, slaCodeHoursHint);
@@ -2068,7 +2092,7 @@ export default function PlanificacionPage() {
             });
         });
         return Math.round(extra * 10) / 10;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
     // Días RET por empleado (0 h planificadas — sobrante disponible en otro objetivo).
     const empRetDays = useMemo(() => {
@@ -3946,6 +3970,7 @@ export default function PlanificacionPage() {
     useEffect(() => {
         if (!selectedClient || !selectedObjective) {
             setPositionStructure([]);
+            setActivePlanningSlaRow(null);
             setHasActiveSLA(true);
             setSlaVendidas(0);
             setSlaPlanningHint('');
@@ -4009,6 +4034,7 @@ export default function PlanificacionPage() {
                 }
                 setHasActiveSLA(monthHasSla);
                 setPositionStructure(structure);
+                setActivePlanningSlaRow(srvForStructure ?? null);
                 setActiveSlaPositionAssignments(srvForStructure?.positionAssignments ?? null);
                 setActiveSlaServiceRules(srvForStructure?.serviceRules ?? null);
                 const _loadedRot = srvForStructure?.serviceRotations ?? null;
@@ -4022,6 +4048,7 @@ export default function PlanificacionPage() {
             } catch (e) {
                 console.error("CRONO SLA ERROR:", e);
                 setPositionStructure([{ positionName: 'ERROR', shifts: [], qty: 1 }]);
+                setActivePlanningSlaRow(null);
                 setHasActiveSLA(false);
                 setSlaVendidas(0);
                 setSlaPlanningHint('error al cargar contratos');
@@ -5338,6 +5365,7 @@ export default function PlanificacionPage() {
                             type: change.name||change.code,
                             startTime: Timestamp.fromDate(start),
                             endTime: Timestamp.fromDate(end),
+                            scheduleDate: dateStr,
                             isFranco: change.code==='F' || change.isFrancoCompensatorio || change.isFranco === true,
                             isFrancoTrabajado: change.isFrancoTrabajado || false,
                             isFrancoCompensatorio: change.isFrancoCompensatorio || false,
@@ -5587,7 +5615,8 @@ export default function PlanificacionPage() {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
-        const plannedRounded = Math.round(totalPlanned);
+        const slaClosePlanned = Math.round((totalPlanned - objectiveMonthCoverageExtraHours) * 10) / 10;
+        const plannedRounded = Math.round(slaClosePlanned);
         const slaRounded = Math.round(slaVendidas);
         const slaHoursMismatch = slaVendidas > 0 && plannedRounded !== slaRounded;
         const coverageGapDays = objectiveCoverageGapReport
@@ -5644,7 +5673,8 @@ export default function PlanificacionPage() {
         const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
         const publishDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
         const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
-        const slaHoursMismatch = slaVendidas > 0 && Math.round(totalPlanned) !== Math.round(slaVendidas);
+        const slaClosePlanned = Math.round((totalPlanned - objectiveMonthCoverageExtraHours) * 10) / 10;
+        const slaHoursMismatch = slaVendidas > 0 && Math.round(slaClosePlanned) !== Math.round(slaVendidas);
         const coverageGapDays = objectiveCoverageGapReport
             ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
             : 0;
@@ -5865,7 +5895,8 @@ export default function PlanificacionPage() {
             const freq: Record<string, { count: number; shift: any }> = {};
             for (let d = 1; d <= days; d++) {
                 const k = `${empId}_${yr}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                const s = shiftsMap[k];
+                const pending = pendingChanges[k];
+                const s = (pending && !pending.isDeleted) ? pending : shiftsMap[k];
                 if (s?.code && !VACANCY_NON_WORK_CODES.has(String(s.code).toUpperCase())) {
                     if (!freq[s.code]) freq[s.code] = { count: 0, shift: s };
                     freq[s.code].count++;
@@ -8959,7 +8990,7 @@ export default function PlanificacionPage() {
                                                         <span
                                                             title={hoursMode === 'cct'
                                                                 ? `${Math.round(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${Math.round(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`
-                                                                : `${Math.round(monthHours)}h planificadas en el mes calendario.\n${Math.round(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`}
+                                                                : `${Math.round(monthHours)}h facturables en el mes (= Pre-factura). Días 🚫 sin servicio SLA no suman aunque veas el código en la celda.\n${Math.round(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`}
                                                             className={`shrink-0 text-[8px] ${hoursColor}`}
                                                         >
                                                             {Math.round(displayHours)}h
@@ -10984,17 +11015,20 @@ export default function PlanificacionPage() {
                     ) : (() => {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
+                    const slaCloseHours = hoursMode === 'mes'
+                        ? Math.round((totalHrs - objectiveMonthCoverageExtraHours) * 10) / 10
+                        : totalHrs;
                     const nativeAssignedHours = displayedEmployees
                         .filter((emp: any) => isEmployeeNativeToObjective(emp))
                         .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
                     const empCount = planningDotacionEmployees.length;
                     const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
                     const effectiveSlaVendidas = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
-                    const slaMismatch = effectiveSlaVendidas > 0 && Math.round(totalHrs) !== Math.round(effectiveSlaVendidas);
+                    const slaMismatch = effectiveSlaVendidas > 0 && Math.round(slaCloseHours) !== Math.round(effectiveSlaVendidas);
                     const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : 'Hs. Plan.';
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/REF/ESC/francos/licencias.'
-                        : 'Suma de horas planificadas en el mes (banda SLA + ext/adel de cobertura). Compará con Vendidas. Pasá el mouse sobre celdas con “+” para ver el desglose.';
+                        : 'Suma facturable por legajo (= Pre-factura CRM). El cierre contra Vendidas usa la base del mes sin tramos ext/adel (línea +ext). Días 🚫 sin servicio no suman aunque el código siga en la grilla.';
                     // Extras del mes (RFZ + TURA) de este objetivo — se facturan en CRM aparte del SLA base.
                     const monthPrefixExtras = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                     const extrasList = [
@@ -11015,14 +11049,19 @@ export default function PlanificacionPage() {
                                 {hoursMode === 'cct' && <span className="text-[7px] text-indigo-500">CCT</span>}
                             </p>
                             <p className={`text-sm font-black leading-tight ${slaMismatch ? 'text-rose-600' : 'text-indigo-600'}`}>{totalHrs.toFixed(0)}</p>
+                            {hoursMode === 'mes' && effectiveSlaVendidas > 0 && (
+                                <p className="text-[8px] font-bold text-slate-500 leading-none mt-0.5" title="Jornada vendida del contrato (sin ext/adel de cobertura)">
+                                    Base SLA {slaCloseHours.toFixed(0)}
+                                </p>
+                            )}
                             {slaMismatch && effectiveSlaVendidas > 0 && (
                                 <p className="text-[8px] font-black text-rose-500 leading-none mt-0.5">
-                                    {Math.round(effectiveSlaVendidas - totalHrs) > 0 ? `−${Math.round(effectiveSlaVendidas - totalHrs)}h SLA` : `+${Math.round(totalHrs - effectiveSlaVendidas)}h SLA`}
+                                    {Math.round(effectiveSlaVendidas - slaCloseHours) > 0 ? `−${Math.round(effectiveSlaVendidas - slaCloseHours)}h SLA` : `+${Math.round(slaCloseHours - effectiveSlaVendidas)}h SLA`}
                                 </p>
                             )}
                             {hoursMode === 'mes' && objectiveMonthCoverageExtraHours > 0 && (
-                                <p className="text-[8px] font-bold text-amber-600 leading-none mt-0.5" title="Horas de extensión/adelanto (cobertura); no entran en el cierre contra vendidas SLA">
-                                    +{objectiveMonthCoverageExtraHours}h ext/adel
+                                <p className="text-[8px] font-bold text-amber-600 leading-none mt-0.5" title="Ya incluidas en Hs. Plan. (facturable). No se suman otra vez al cierre contra vendidas SLA.">
+                                    incl. +{objectiveMonthCoverageExtraHours}h ext/adel
                                 </p>
                             )}
                         </div>
@@ -12489,7 +12528,8 @@ export default function PlanificacionPage() {
                         const freq: Record<string, { count: number; shift: any }> = {};
                         for (let d = 1; d <= daysInMo; d++) {
                             const k = `${empId}_${yr}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                            const s = shiftsMap[k];
+                            const pending = pendingChanges[k];
+                            const s = (pending && !pending.isDeleted) ? pending : shiftsMap[k];
                             if (s?.code && !VACANCY_NON_WORK_CODES.has(String(s.code).toUpperCase())) {
                                 if (!freq[s.code]) freq[s.code] = { count: 0, shift: s };
                                 freq[s.code].count++;

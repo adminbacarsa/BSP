@@ -168,9 +168,41 @@ export function analyzePositionDayGap(
             }
         }
     } else {
-        const bandCodes = getCustomBandCodes(pos, dayLetter, cycles, dateStr);
+        // Custom: necesitamos PAX por turno (quantity) para el diagnóstico correcto
+        const eff = effectiveShiftsForPositionDay(pos as any, dayLetter, cycles, dateStr);
+        const allShiftsForDay = pos.shifts || [];
+        const effWithPax: Array<{ code: string; quantity?: number }> = eff.length > 0
+            ? eff.map(s => ({ code: normCode(s.code), quantity: (s as any).quantity }))
+            : allShiftsForDay
+                  .filter(s => {
+                      if (Array.isArray((s as any).specificDates) && (s as any).specificDates.length > 0) {
+                          return dateStr ? (s as any).specificDates.includes(dateStr) : false;
+                      }
+                      if (Array.isArray((s as any).days) && (s as any).days.length > 0) {
+                          return (s as any).days.includes(dayLetter);
+                      }
+                      return true;
+                  })
+                  .map(s => ({ code: normCode(s.code), quantity: (s as any).quantity }));
+
+        const bandCodes = effWithPax.map(b => b.code).filter(Boolean);
         primaryScheme = bandCodes.join('+') || schemeLabel;
-        missingBandsPrimary = missingBandsForScheme(qty, codeCounts, bandCodes);
+
+        const hasPerShiftPax = effWithPax.some(b => b.quantity != null && Number(b.quantity) > 0);
+        if (hasPerShiftPax) {
+            missingBandsPrimary = effWithPax
+                .filter(b => !!b.code)
+                .flatMap(b => {
+                    const bandPax = (b.quantity != null && Number(b.quantity) > 0)
+                        ? Math.max(1, Math.floor(Number(b.quantity)))
+                        : qty;
+                    const have = codeCounts[b.code] || 0;
+                    const missing = Math.max(0, bandPax - have);
+                    return missing > 0 ? [{ code: b.code, missing }] : [];
+                });
+        } else {
+            missingBandsPrimary = missingBandsForScheme(qty, codeCounts, bandCodes);
+        }
     }
 
     const parts: string[] = [];
