@@ -6,6 +6,44 @@ import {
 } from '@/lib/planificacion/planningScheduledHours';
 import type { SlaExclusionContext } from './slaExclusionForPlanned';
 import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
+import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
+import type { ServicePosition } from '@/services/slaService';
+
+/** Horas por código de turno desde SLA vigente (E1, E2, P4, etc.). */
+export function buildSlaCodeHoursHintFromServices(services: SlaPlanningRow[]): Record<string, number> {
+  const hint: Record<string, number> = {};
+  const parseH = (t: string) => {
+    const m = t.match(/^(\d{1,2}):(\d{2})$/);
+    return m ? +m[1] + +m[2] / 60 : null;
+  };
+  for (const srv of services) {
+    const rawPositions = Array.isArray(srv.positions)
+      ? srv.positions
+      : Object.values((srv.positions as Record<string, unknown>) || {});
+    for (const raw of rawPositions) {
+      const pos = raw as ServicePosition & { positionName?: string; shifts?: Array<{ code?: string; hours?: number; startTime?: string; endTime?: string }> };
+      for (const sh of pos.shifts || []) {
+        const code = String(sh.code || '').trim().toUpperCase();
+        if (!code) continue;
+        const n = Number(sh.hours);
+        if (n > 0) {
+          hint[code] = n;
+          continue;
+        }
+        if (typeof sh.startTime === 'string' && typeof sh.endTime === 'string') {
+          const s = parseH(sh.startTime);
+          const e = parseH(sh.endTime);
+          if (s != null && e != null) {
+            let dur = e - s;
+            if (dur <= 0) dur += 24;
+            if (dur > 0) hint[code] = dur;
+          }
+        }
+      }
+    }
+  }
+  return hint;
+}
 
 export const CRM_PLANNED_SHIFT_HOURS: Record<string, number> = {
   M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8,
@@ -40,9 +78,14 @@ export const getDurationHours = (start: Date, end: Date) => {
   return diff + 24;
 };
 
-export function resolveCrmPlannedShiftHours(t: any, _plannedStart?: Date, _plannedEnd?: Date): number {
+export function resolveCrmPlannedShiftHours(
+  t: any,
+  _plannedStart?: Date,
+  _plannedEnd?: Date,
+  slaCodeHoursHint?: Record<string, number>,
+): number {
   if (!isCrmPlannedEligibleShift(t)) return 0;
-  return calcPlanificadorShiftHours(t);
+  return calcPlanificadorShiftHours(t, slaCodeHoursHint);
 }
 
 export type PlannedHoursRange = { start: Date | null; end: Date | null };
@@ -109,6 +152,7 @@ export function sumPlannedHoursForClient(
   client: ClientRef,
   range: PlannedHoursRange,
   slaExclusion?: SlaExclusionContext,
+  slaCodeHoursHint?: Record<string, number>,
 ): number {
   const cells = new Map<string, number>();
   for (const t of turnos) {
@@ -116,7 +160,7 @@ export function sumPlannedHoursForClient(
     if (!isCrmPlannedEligibleShift(t, slaExclusion)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart || !shiftPlannedStartInRange(plannedStart, range)) continue;
-    const hrs = calcPlanificadorShiftHours(t);
+    const hrs = calcPlanificadorShiftHours(t, slaCodeHoursHint);
     if (hrs <= 0) continue;
     const objId = String(t.objectiveId || t.objectiveName || 'sin-obj');
     const empId = String(t.employeeId || 'unknown');

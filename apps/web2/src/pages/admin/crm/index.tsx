@@ -101,6 +101,7 @@ import {
   resolveClientIdForTurno,
   resolveCrmPlannedShiftHours,
   sumPlannedHoursForClient,
+  buildSlaCodeHoursHintFromServices,
   toDateSafe,
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
@@ -1307,6 +1308,7 @@ export default function CRMPage() {
       );
 
       const slaExclusion = buildSlaExclusionContext(servicesForProforma, start, end);
+      const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(servicesForProforma);
 
       const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa });
       const solicitudesRefuerzo = await solicitudRefuerzoService.getByClient(selectedClient.id);
@@ -1341,8 +1343,8 @@ export default function CRMPage() {
         const objectiveName = resolveObjectiveDisplayName(rowCtx, objectiveAliases);
         const positionName = (t.positionName || 'Sin puesto').toString().trim();
 
-        if (plannedStart && plannedEnd && plannedStart >= start && plannedStart <= end) {
-          const hrs = resolveCrmPlannedShiftHours(t, plannedStart, plannedEnd);
+        if (plannedStart && plannedStart >= start && plannedStart <= end) {
+          const hrs = resolveCrmPlannedShiftHours(t, plannedStart, plannedEnd, slaCodeHoursHint);
           if (hrs > 0) {
             const objId = String(t.objectiveId || objectiveName);
             const empId = String(t.employeeId || 'unknown');
@@ -1422,6 +1424,7 @@ export default function CRMPage() {
         end,
         mode: proformaDetailMode,
         useExecutedForAuto,
+        slaCodeHoursHint,
       });
       const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
       const summary = buildProformaSummary(grids);
@@ -1441,7 +1444,7 @@ export default function CRMPage() {
 
       const modeIsExecuted = proformaDetailMode === 'executed' || (proformaDetailMode === 'auto' && useExecutedForAuto);
       const gridTotal = Math.round(grids.reduce((a: number, g: any) => a + g.grandTotal.total, 0));
-      const plannedBase = Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end }, slaExclusion));
+      const plannedBase = Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end }, slaExclusion, slaCodeHoursHint));
       setProformaTotals({
         planned: plannedBase + Math.round(refuerzoHorasVendidas),
         executed: modeIsExecuted ? gridTotal + Math.round(refuerzoHorasVendidas) : Math.round(executed.total),

@@ -109,6 +109,27 @@ export function pdfDayLetter(ymd: string): string {
   return PDF_DAY_LETTER[dt.getDay()] || '';
 }
 
+function resolveShiftEndForProforma(
+  t: ProformaTurnoInput,
+  start: Date,
+  plannedEnd: Date | null,
+  hrs: number,
+): Date {
+  if (t.isExtended && (t.adjustedEndTime || t.extensionEndTime)) {
+    const raw = String(t.adjustedEndTime || t.extensionEndTime || '').slice(0, 5);
+    const m = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (m) {
+      const end = new Date(start);
+      end.setHours(Number(m[1]), Number(m[2]), 0, 0);
+      if (end <= start) end.setDate(end.getDate() + 1);
+      return end;
+    }
+  }
+  if (plannedEnd) return plannedEnd;
+  if (hrs > 0) return new Date(start.getTime() + Math.min(hrs, 24) * 3600000);
+  return new Date(start.getTime() + 8 * 3600000);
+}
+
 function emptyCell(date: string): ProformaDayCell {
   return { date, display: '', hours: 0, dayHours: 0, nightHours: 0 };
 }
@@ -145,6 +166,14 @@ export type ProformaTurnoInput = {
   realStartTime?: any;
   realEndTime?: any;
   hours?: number;
+  isExtended?: boolean;
+  isEarlyStart?: boolean;
+  segmentFromTime?: string;
+  segmentToTime?: string;
+  adjustedEndTime?: string;
+  extensionEndTime?: string;
+  extExtraHours?: number;
+  positionName?: string;
 };
 
 export function isProformaVacancyShift(shift: Pick<ProformaTurnoInput, 'employeeId' | 'employeeName' | 'isUnassigned'>): boolean {
@@ -176,6 +205,7 @@ export type BuildProformaGridsOpts = {
   mode: 'auto' | 'planned' | 'executed';
   useExecutedForAuto: boolean;
   slaExclusion?: SlaExclusionContext;
+  slaCodeHoursHint?: Record<string, number>;
 };
 
 function slaOverlapsRange(sla: { startDate?: string; endDate?: string }, start: Date, end: Date): boolean {
@@ -214,9 +244,17 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const realEnd = toDateSafe(t.realEndTime);
 
     const start = useExecuted ? realStart : plannedStart;
-    const end = useExecuted ? (realEnd || plannedEnd) : plannedEnd;
-    if (!start || !end) continue;
+    if (!start) continue;
     if (start < opts.start || start > opts.end) continue;
+
+    const hint = opts.slaCodeHoursHint;
+    let hrs = calcPlanificadorShiftHours(t, hint);
+    if (useExecuted && SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
+    if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
+
+    const plannedEndResolved = useExecuted ? (realEnd || plannedEnd) : plannedEnd;
+    const end = resolveShiftEndForProforma(t, start, plannedEndResolved, hrs);
+    if (!end) continue;
 
     const dateKey = getDateKeyInTimezone(start);
     const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId || opts.clientId };
@@ -244,10 +282,6 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
       totalDay: 0,
       totalNight: 0,
     };
-
-    let hrs = calcPlanificadorShiftHours(t);
-    if (useExecuted && SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
-    if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
 
     const cell = cellFromShift(dateKey, code, start, end, hrs);
     const row = byObjective[objId].employees[empId];

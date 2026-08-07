@@ -42,14 +42,20 @@ export function shiftCoverageExtensionExtraHours(shift: any): number {
   const fromRaw = shift.segmentFromTime
     || (shift.isEarlyStart ? shift.adjustedStartTime : null);
   const toRaw = shift.segmentToTime
-    || (shift.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null)
-    || (shift.isEarlyStart ? shift.adjustedStartTime : null);
+    || (shift.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
 
-  if (fromRaw && toRaw) {
+  if (segFrom && segTo) {
     const from = String(fromRaw).slice(0, 5);
     const to = String(toRaw).slice(0, 5);
     const h = hoursBetweenClockTimes(from, to);
-    if (h != null && h > 0) return h;
+    if (h != null && h > 0) {
+      const code = String(shift.code || '').toUpperCase();
+      const lookupBase = SHIFT_HOURS_LOOKUP[code];
+      if (lookupBase !== undefined && h >= lookupBase - 0.5) {
+        return Math.max(0, h - lookupBase);
+      }
+      return h;
+    }
   }
 
   return 0;
@@ -90,38 +96,60 @@ export function isPlanificadorPlannedHoursShift(t: any): boolean {
   return true;
 }
 
-export function calcPlanificadorShiftHours(
+/**
+ * Horas billables de un turno planificado: código SLA + tramo extra de extensión/adelanto.
+ * Misma regla que el pie «Hs. Plan.» del planificador (lookup CCT/custom antes que timestamps).
+ */
+export function calcPlanningBillableShiftHours(
   shift: any,
   slaHoursHint?: Record<string, number>,
 ): number {
   if (!shift) return 0;
-  const code = String(shift.code || '').toUpperCase();
+  const code = String(shift.code || shift.type || '').toUpperCase();
   if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
-  let base = 0;
-  const stored = Number(shift.hours);
-  if (stored > 0) base = Math.min(stored, 24);
-  else if (shift.startTime?.seconds && shift.endTime?.seconds) {
-    base = Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600, 24));
-  } else if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
-    const parseH = (t: string) => {
-      const m = t.match(/^(\d{1,2}):(\d{2})$/);
-      return m ? +m[1] + +m[2] / 60 : null;
-    };
-    const s = parseH(shift.startTime);
-    const e = parseH(shift.endTime);
-    if (s !== null && e !== null) {
-      let dur = e - s;
-      if (dur <= 0) dur += 24;
-      base = Math.max(0, Math.min(dur, 24));
+
+  let codeBase = 0;
+  const fromLookup = SHIFT_HOURS_LOOKUP[code];
+  if (fromLookup !== undefined) codeBase = fromLookup;
+  else if (slaHoursHint?.[code] !== undefined) codeBase = slaHoursHint[code];
+  else {
+    const stored = Number(shift.hours);
+    if (stored > 0) codeBase = Math.min(stored, 24);
+    else if (shift.startTime?.seconds && shift.endTime?.seconds) {
+      codeBase = Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600000, 24));
+    } else if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+      const parseH = (t: string) => {
+        const m = t.match(/^(\d{1,2}):(\d{2})$/);
+        return m ? +m[1] + +m[2] / 60 : null;
+      };
+      const s = parseH(shift.startTime);
+      const e = parseH(shift.endTime);
+      if (s !== null && e !== null) {
+        let dur = e - s;
+        if (dur <= 0) dur += 24;
+        codeBase = Math.max(0, Math.min(dur, 24));
+      }
     }
+    if (codeBase <= 0) codeBase = 8;
   }
-  if (base <= 0) {
-    const fromLookup = SHIFT_HOURS_LOOKUP[code];
-    if (fromLookup !== undefined) base = fromLookup;
-    else if (slaHoursHint?.[code] !== undefined) base = slaHoursHint[code];
-    else base = 8;
+
+  const stored = Number(shift.hours);
+  const extra = shiftCoverageExtensionExtraHours(shift);
+  if (stored > 0 && stored > codeBase + 0.25 && extra > 0) {
+    return Math.min(stored, 24);
   }
-  return base + shiftCoverageExtensionExtraHours(shift);
+  if (stored > 0 && stored > codeBase + 0.25 && !shift.isExtended && !shift.isEarlyStart) {
+    return Math.min(stored, 24);
+  }
+
+  return codeBase + extra;
+}
+
+export function calcPlanificadorShiftHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  return calcPlanningBillableShiftHours(shift, slaHoursHint);
 }
 
 export function calcPlanningScheduledShiftHours(
