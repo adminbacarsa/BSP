@@ -230,6 +230,22 @@ export function calcPlanificadorShiftHours(
   return calcPlanningBillableShiftHours(shift, slaHoursHint);
 }
 
+/**
+ * Horas que cierran contra «vendidas» del SLA mensual: jornada/banda vendida sin tramos
+ * extra de extensión o adelanto (cobertura operativa dentro del mismo contrato).
+ * CRM / liquidación puede seguir usando calcPlanningBillableShiftHours (base + extra).
+ */
+export function calcPlanningSlaReconciliationHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift || shift.isDeleted) return 0;
+  const total = calcPlanningBillableShiftHours(shift, slaHoursHint);
+  const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
+  if (extra <= 0) return total;
+  return Math.max(0, Math.round((total - extra) * 100) / 100);
+}
+
 export function calcPlanningScheduledShiftHours(
   shift: any,
   slaHoursHint?: Record<string, number>,
