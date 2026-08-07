@@ -2618,13 +2618,25 @@ export default function PlanificacionPage() {
         if (posForShifts) {
             const fromPos = getShiftsForPosition(posForShifts, objId);
             if (fromPos.length > 0) return fromPos;
+            // posForShifts obsoleto (puesto renombrado/eliminado del SLA): caer como sin puesto
+        }
+        // Sin puesto asignado: si el SLA tiene un único puesto, usarlo para todos
+        const scopeStructure = (selectedGrupo && grupoUnifiedMode && objId && grupoSlaMap[objId]?.length)
+            ? grupoSlaMap[objId] : positionStructure;
+        if (scopeStructure?.length === 1 && (scopeStructure[0] as any)?.shifts?.length) {
+            const sp = scopeStructure[0] as any;
+            return (sp.shifts as any[]).map((s: any) => ({
+                code: s.code, name: s.name, hours: s.hours,
+                startTime: s.startTime, endTime: s.endTime,
+                positionName: sp.positionName,
+            }));
         }
         if (bulkPerEmpMode && selectedGrupo) return getShiftsForObjective(objId);
         return bulkMonoShifts;
     }, [
         getBulkEmpObjectiveId, empDefaultPos, resolveBulkPanelEmpPosition, bulkEmpPositionFilter,
         bulkBarPosition, getShiftsForPosition, bulkPerEmpMode, selectedGrupo,
-        getShiftsForObjective, bulkMonoShifts,
+        getShiftsForObjective, bulkMonoShifts, positionStructure, grupoSlaMap, grupoUnifiedMode,
     ]);
 
     /** Códigos apagados en barra mono: cupo lleno / esquema cerrado en todos los días de la selección. */
@@ -10746,14 +10758,17 @@ export default function PlanificacionPage() {
                                             const empShiftByCode = new Map(empShifts.map((s: any) => [String(s.code || '').toUpperCase(), s]));
                                             const panelStructure = bulkMonoPositionInfo.structure || bulkEffectiveStructure || positionStructure || [];
                                             const filterPos = bulkEmpPositionFilter[emp.id] || null;
-                                            const hasAssignPos = !!posName || !!filterPos || !!bulkBarPosition;
+                                            // posName válido solo si el puesto aún existe en el SLA actual (evita badge obsoleto)
+                                            const effectivePosName = posName && panelStructure.some((p: any) => p.positionName === posName) ? posName : null;
+                                            const isSinglePosSla = panelStructure.length === 1;
+                                            const hasAssignPos = !!effectivePosName || !!filterPos || !!bulkBarPosition || isSinglePosSla;
                                             return (
                                                 <div key={emp.id} className="flex items-center gap-1.5 rounded-lg bg-slate-900/50 px-1.5 py-1">
                                                     <span className="w-[148px] shrink-0 text-[9px] font-bold text-slate-200 truncate" title={emp.name}>{shortLabel}</span>
                                                     <div className="w-[88px] shrink-0 flex flex-wrap items-center gap-0.5 min-w-0">
-                                                        {posName ? (
-                                                            <span className="shrink-0 px-1.5 py-0.5 rounded bg-indigo-600 text-[8px] font-black text-white max-w-[84px] truncate" title={posName}>
-                                                                {abbrevPlanningPositionName(posName, 8)}
+                                                        {effectivePosName ? (
+                                                            <span className="shrink-0 px-1.5 py-0.5 rounded bg-indigo-600 text-[8px] font-black text-white max-w-[84px] truncate" title={effectivePosName}>
+                                                                {abbrevPlanningPositionName(effectivePosName, 8)}
                                                             </span>
                                                         ) : panelStructure.length > 1 ? (
                                                             panelStructure.filter((p: any) => {
@@ -10789,6 +10804,10 @@ export default function PlanificacionPage() {
                                                                     </button>
                                                                 );
                                                             })
+                                                        ) : isSinglePosSla ? (
+                                                            <span className="shrink-0 px-1.5 py-0.5 rounded bg-slate-600 text-[8px] font-black text-slate-300 max-w-[84px] truncate" title={panelStructure[0].positionName}>
+                                                                {abbrevPlanningPositionName(panelStructure[0].positionName, 8)}
+                                                            </span>
                                                         ) : (
                                                             <span className="text-[7px] text-amber-400 font-bold">Sin puesto</span>
                                                         )}
@@ -10808,6 +10827,7 @@ export default function PlanificacionPage() {
                                                             const s = empShiftByCode.get(code);
                                                             if (!s) return <span key={`${emp.id}_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
                                                             const needsPos = !hasAssignPos && code !== 'RET' && code !== 'F';
+                                                            const activePos = effectivePosName || filterPos || bulkBarPosition || (isSinglePosSla ? panelStructure[0]?.positionName : '') || '';
                                                             return (
                                                                 <button
                                                                     key={`${emp.id}_${code}`}
@@ -10819,9 +10839,9 @@ export default function PlanificacionPage() {
                                                                         startTime: s.startTime,
                                                                         endTime: s.endTime,
                                                                     }, { onlyEmpId: emp.id })}
-                                                                    disabled={isServiceLocked || needsPos || isBulkCovBlocked(emp.id, posName || filterPos || bulkBarPosition || '', (s as any).code)}
-                                                                    title={isBulkCovBlocked(emp.id, posName || filterPos || bulkBarPosition || '', (s as any).code) ? 'Cobertura: turno no permitido para este empleado' : needsPos ? 'Elegí puesto (paleta) primero' : `${emp.name} · ${posName || filterPos || bulkBarPosition || 'puesto'} → ${s.code}`}
-                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${(needsPos || isBulkCovBlocked(emp.id, posName || filterPos || bulkBarPosition || '', (s as any).code)) ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                                                    disabled={isServiceLocked || needsPos || isBulkCovBlocked(emp.id, activePos, (s as any).code)}
+                                                                    title={isBulkCovBlocked(emp.id, activePos, (s as any).code) ? 'Cobertura: turno no permitido para este empleado' : needsPos ? 'Elegí puesto (paleta) primero' : `${emp.name} · ${activePos || 'puesto'} → ${s.code}`}
+                                                                    className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(s.code)} ${(needsPos || isBulkCovBlocked(emp.id, activePos, (s as any).code)) ? 'opacity-30 cursor-not-allowed' : ''}`}
                                                                 >
                                                                     {s.code}
                                                                 </button>
