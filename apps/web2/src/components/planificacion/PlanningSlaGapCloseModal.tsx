@@ -1,10 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { X, Clock, ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   collectSplitFrancoConflicts,
+  listExtensionCandidates,
   listVacancySplitWorkersForDay,
   resolveEmployeeShift,
   type FrancoCoverageConflict,
+  type SegmentCandidateRow,
 } from '@/lib/planificacion/planningRecompositionApply';
 import { applyOperationalGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
 import {
@@ -64,6 +67,7 @@ export default function PlanningSlaGapCloseModal({
   onRequestSupervisorAuth,
 }: Props) {
   const [extId, setExtId] = useState('');
+  const [extApplyDate, setExtApplyDate] = useState('');
   const [secondId, setSecondId] = useState('');
   const [extExtraH, setExtExtraH] = useState<number | null>(null);
   const [secondExtraH, setSecondExtraH] = useState<number | null>(null);
@@ -77,22 +81,25 @@ export default function PlanningSlaGapCloseModal({
     () => describeVacancySplitPlan(titular, positionStructure),
     [titular, positionStructure],
   );
-  const listCtx = {
+  const listCtx = useMemo(() => ({
     positionStructure,
-    preferSamePosition: true,
+    preferSamePosition: false,
     gapPositionName: data.positionName,
     gapBand: data.gapBand,
-  };
-  const poolExt = listVacancySplitWorkersForDay(
-    data.dateStr,
-    objectiveId,
-    employees,
-    shiftsMap,
-    pendingChanges,
-    [],
-    listCtx,
-    splitPlan ? [splitPlan.extBand] : [],
-  ).filter((c) => !q || c.name.toLowerCase().includes(q));
+  }), [positionStructure, data.positionName, data.gapBand]);
+  const poolExt = useMemo(
+    () => listExtensionCandidates(
+      data.gapBand,
+      data.dateStr,
+      objectiveId,
+      employees,
+      shiftsMap,
+      pendingChanges,
+      [],
+      listCtx,
+    ).filter((c) => !q || c.name.toLowerCase().includes(q)),
+    [data.gapBand, data.dateStr, objectiveId, employees, shiftsMap, pendingChanges, listCtx, q],
+  );
   const poolSecond = listVacancySplitWorkersForDay(
     data.dateStr,
     objectiveId,
@@ -106,6 +113,7 @@ export default function PlanningSlaGapCloseModal({
 
   const manual = vacancySplitUsesManualExtraHours({ extExtraHours: extExtraH, secondExtExtraHours: secondExtraH });
   const extCand = poolExt.find((c) => c.id === extId);
+  const extShiftDate = extApplyDate || data.dateStr;
   const secondCand = poolSecond.find((c) => c.id === secondId);
   const preview = extId && secondId
     ? resolveVacancySplitSegmentTimes(
@@ -125,30 +133,51 @@ export default function PlanningSlaGapCloseModal({
   );
 
   const commit = (authorizeFranco: boolean) => {
-    if (!extId || !secondId || extId === secondId) return;
-    const extShift = resolveEmployeeShift(extId, data.dateStr, shiftsMap, pendingChanges);
-    const secondShift = resolveEmployeeShift(secondId, data.dateStr, shiftsMap, pendingChanges);
-    const changes = applyOperationalGapCloseToChanges(pendingChanges, {
-      objectiveId,
-      clientId,
-      dateStr: data.dateStr,
-      gapPosition: data.positionName,
-      gapBand: data.gapBand,
-      extEmpId: extId,
-      secondEmpId: secondId,
-      extHomePosition: extShift?.positionName,
-      extBaseCode: extShift?.code,
-      secondBaseCode: secondShift?.code,
-      extExtraHours: extExtraH,
-      secondExtExtraHours: secondExtraH,
-      positionStructure,
-      authorizeFrancoTrabajado: authorizeFranco,
-    }, {
-      shiftsMap,
-      employeesById,
-    });
-    onApply(changes);
-    onClose();
+    if (!extId || !secondId) {
+      toast.error('Elegí guardia para el 1.er y el 2.º tramo.');
+      return;
+    }
+    if (extId === secondId) {
+      toast.error('Los dos tramos deben ser guardias distintos.');
+      return;
+    }
+    try {
+      const extShift = resolveEmployeeShift(extId, extShiftDate, shiftsMap, pendingChanges);
+      const secondShift = resolveEmployeeShift(secondId, data.dateStr, shiftsMap, pendingChanges);
+      if (!extShift || extShift.isDeleted) {
+        toast.error('El guardia del 1.er tramo no tiene turno laboral ese día.');
+        return;
+      }
+      if (!secondShift || secondShift.isDeleted) {
+        toast.error('El guardia del 2.º tramo no tiene turno laboral ese día.');
+        return;
+      }
+      const changes = applyOperationalGapCloseToChanges(pendingChanges, {
+        objectiveId,
+        clientId,
+        dateStr: data.dateStr,
+        gapPosition: data.positionName,
+        gapBand: data.gapBand,
+        extEmpId: extId,
+        secondEmpId: secondId,
+        extHomePosition: extShift?.positionName,
+        extBaseCode: extShift?.code,
+        secondBaseCode: secondShift?.code,
+        extExtraHours: extExtraH,
+        secondExtExtraHours: secondExtraH,
+        positionStructure,
+        authorizeFrancoTrabajado: authorizeFranco,
+        extApplyDateStr: extShiftDate !== data.dateStr ? extShiftDate : undefined,
+      }, {
+        shiftsMap,
+        employeesById,
+      });
+      onApply(changes);
+      onClose();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'No se pudo cerrar la banda';
+      toast.error(msg);
+    }
   };
 
   const tryApply = () => {
@@ -169,8 +198,8 @@ export default function PlanningSlaGapCloseModal({
 
   const [, mo, dd] = data.dateStr.split('-');
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 backdrop-blur-sm p-4" onClick={onClose}>
+    return (
+    <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/45 backdrop-blur-sm p-4" onClick={onClose}>
       <div
         className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col border border-slate-200"
         onClick={(e) => e.stopPropagation()}
@@ -185,7 +214,14 @@ export default function PlanningSlaGapCloseModal({
               {dd}/{mo} · {data.positionName} · banda <span className="font-mono text-rose-700">{data.gapBand}</span>
               {titular.scheduleLabel !== '—' && <> · {titular.scheduleLabel}</>}
             </p>
-            <p className="text-[10px] text-slate-500 mt-0.5">Sin licencia en titular — solo extensiones de quien ya está en servicio.</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Sin licencia en titular — extensiones de quien ya está en servicio (cualquier puesto del objetivo).
+            </p>
+            {splitPlan && (
+              <p className="text-[9px] font-bold text-rose-800 mt-1">
+                Sugerido: ext banda <span className="font-mono">{splitPlan.extBand}</span> + 2.º banda <span className="font-mono">{splitPlan.adelBand}</span>
+              </p>
+            )}
           </div>
           <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-white/80 text-slate-500">
             <X size={18} />
@@ -205,11 +241,16 @@ export default function PlanningSlaGapCloseModal({
               1.er tramo {preview ? `(${preview.first.from}–${preview.first.to})` : splitPlan ? `(${splitPlan.extSegment})` : ''}
             </div>
             <div className="space-y-1 max-h-32 overflow-y-auto rounded-xl border border-slate-100 p-1">
-              {poolExt.map((c) => (
+              {poolExt.length === 0 ? (
+                <p className="text-[10px] font-bold text-amber-800 px-2 py-3">No hay guardias con turno ese día para el 1.er tramo.</p>
+              ) : poolExt.map((c: SegmentCandidateRow) => (
                 <button
-                  key={c.id}
+                  key={`${c.id}_${c.extensionApplyDate || data.dateStr}`}
                   type="button"
-                  onClick={() => setExtId(c.id)}
+                  onClick={() => {
+                    setExtId(c.id);
+                    setExtApplyDate(c.extensionApplyDate || data.dateStr);
+                  }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${extId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >
                   {c.name} · {c.code} · {c.positionName}

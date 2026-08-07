@@ -348,13 +348,30 @@ export function flattenDayGapsForUi(dayReport: DayCoverageGapReport): Array<{
                 });
             }
         } else if (pg.missingUnits > 0) {
+            const band = pg.missingBandsPrimary[0]?.code ?? pg.missingBandsAlternate[0]?.code;
             rows.push({
                 positionName: pg.positionName,
                 code: pg.primaryScheme + (pg.alternateScheme ? ` o ${pg.alternateScheme}` : ''),
+                gapBand: band,
                 missing: pg.missingUnits,
                 detail: pg.summary,
             });
         }
     }
     return rows;
+}
+
+/** Banda SLA a cerrar desde fila del tooltip (pie de cobertura). */
+export function inferGapBandForClose(row: {
+    gapBand?: string;
+    code?: string;
+    detail?: string;
+}): string | undefined {
+    if (row.gapBand) return String(row.gapBand).toUpperCase();
+    const fromDetail = row.detail?.match(/×\s*([A-Z][A-Z0-9]*)/i)?.[1];
+    if (fromDetail) return fromDetail.toUpperCase();
+    const code = String(row.code || '').trim();
+    const first = code.split(/\s+/)[0]?.toUpperCase();
+    if (/^(M|T|N|D12|N12|E\d+)$/.test(first)) return first;
+    return undefined;
 }

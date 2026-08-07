@@ -30,6 +30,8 @@ export interface RecompositionSegment {
   toTime: string;
   homePositionName?: string;
   baseCode?: string;
+  /** Celda del cronograma donde se aplica la extensión (ej. N del día anterior que cierra en la mañana del hueco). */
+  applyDateStr?: string;
 }
 
 export interface RecompositionTarget {

@@ -22,8 +22,10 @@ export type ShiftExtendModalData = {
   empId: string;
   empName: string;
   dateStr: string;
-  /** Banda SLA faltante (ej. E3) inferida del pie de cobertura */
+  /** Banda SLA faltante (ej. T, E3) inferida del pie de cobertura */
   suggestedGapBand?: string;
+  /** Puesto donde falta cerrar la banda (ej. 136), no el puesto “casa” del guardia */
+  gapPositionName?: string;
 };
 
 type Props = {
@@ -61,8 +63,9 @@ export default function PlanningShiftExtendModal({
   const [q, setQ] = useState('');
 
   const shift = resolveEmployeeShift(data.empId, data.dateStr, shiftsMap, pendingChanges);
-  const positionName = String(shift?.positionName || positionStructure[0]?.positionName || 'General');
-  const gapOptions = listVacancyGapBandOptions(positionStructure, positionName);
+  const homePosition = String(shift?.positionName || positionStructure[0]?.positionName || 'General');
+  const gapPositionName = String(data.gapPositionName || homePosition);
+  const gapOptions = listVacancyGapBandOptions(positionStructure, gapPositionName);
   /** Banda SLA a cerrar (hueco del día). No confundir con el turno base E1/E2 del guardia. */
   const slaGapBand = gapBand || data.suggestedGapBand || '';
   const uiBand = slaGapBand || gapOptions[0]?.code || '';
@@ -74,7 +77,7 @@ export default function PlanningShiftExtendModal({
     ? {
       code: uiBand,
       bandLabel: uiBand,
-      positionName,
+      positionName: gapPositionName,
       scheduleLabel: gapOptions.find((o) => o.code === uiBand)?.scheduleLabel || '—',
       hours: 8,
       source: 'user_selected',
@@ -86,7 +89,7 @@ export default function PlanningShiftExtendModal({
   const listCtx = {
     positionStructure,
     preferSamePosition: true,
-    gapPositionName: positionName,
+    gapPositionName,
     gapBand: uiBand,
   };
   const poolSecond = useMemo(
@@ -135,7 +138,7 @@ export default function PlanningShiftExtendModal({
         secondEmpId: secondId || null,
         secondExtraHours: secondId ? secondExtraH : null,
         gapBand: bandForMeta,
-        gapPosition: positionName,
+        gapPosition: gapPositionName,
         positionStructure,
         shiftsMap,
         employeesById,
@@ -166,6 +169,11 @@ export default function PlanningShiftExtendModal({
       commit(conflicts.length > 0);
       return;
     }
+    if (uiBand) {
+      toast.message('Solo extendiste a este guardia', {
+        description: `Para cerrar banda ${uiBand} en ${gapPositionName}, elegí un 2.º guardia abajo o usá «Cerrar banda» en el pie del día.`,
+      });
+    }
     commit(false);
   };
 
@@ -173,7 +181,7 @@ export default function PlanningShiftExtendModal({
   const code = String(shift?.code || '').toUpperCase();
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/45 backdrop-blur-sm p-4" onClick={onClose}>
       <div
         className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col border border-slate-200"
         onClick={(e) => e.stopPropagation()}
@@ -217,7 +225,13 @@ export default function PlanningShiftExtendModal({
             <div className="text-[10px] font-black uppercase text-slate-600 flex items-center gap-1">
               <Clock size={11} /> Cerrar banda SLA (opcional 2.º guardia)
             </div>
-            <p className="text-[9px] text-slate-500">Sin 2.º guardia solo extendés a este empleado. Con 2.º guardia cerrás el hueco del día (ej. E3).</p>
+            <p className="text-[9px] text-slate-500">
+              Puesto a cerrar: <span className="font-black text-slate-800">{gapPositionName}</span>
+              {homePosition !== gapPositionName && (
+                <span className="text-amber-700"> · guardia en {homePosition}</span>
+              )}
+            </p>
+            <p className="text-[9px] text-slate-500">Sin 2.º guardia no se acredita la banda SLA. Con 2.º guardia cerrás el hueco (ej. T en puesto 136).</p>
             {gapOptions.length > 0 && (
               <select
                 className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold"

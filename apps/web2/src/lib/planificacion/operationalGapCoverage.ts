@@ -26,6 +26,8 @@ export type OperationalGapCloseInput = {
   secondExtExtraHours?: number | null;
   positionStructure?: VacancyPositionSla[];
   authorizeFrancoTrabajado?: boolean;
+  /** Día de la celda del guardia de extensión (default: dateStr del hueco). */
+  extApplyDateStr?: string;
 };
 
 export function buildOperationalGapRecompositionPackage(
@@ -58,6 +60,9 @@ export function buildOperationalGapRecompositionPackage(
       toTime: splitTimes.ext.to,
       homePositionName: input.extHomePosition,
       baseCode: input.extBaseCode,
+      applyDateStr: input.extApplyDateStr && input.extApplyDateStr !== input.dateStr
+        ? input.extApplyDateStr
+        : undefined,
     },
     earlyStart: {
       employeeId: input.secondEmpId,

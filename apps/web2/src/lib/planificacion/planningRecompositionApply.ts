@@ -25,6 +25,22 @@ function shiftKey(empId: string, dateStr: string) {
   return `${empId}_${dateStr}`;
 }
 
+export function previousCalendarDayStr(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const t = new Date(y, m - 1, d);
+  t.setDate(t.getDate() - 1);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+
+export type SegmentCandidateRow = {
+  id: string;
+  name: string;
+  code: string;
+  positionName: string;
+  /** Si la extensión se aplica en otra celda (ej. N del día anterior). */
+  extensionApplyDate?: string;
+};
+
 function empDisplayName(emp: { name?: string; apellido?: string; nombre?: string; firstName?: string; lastName?: string } | undefined, id: string) {
   if (!emp) return id;
   return (
@@ -211,14 +227,15 @@ export function buildRecompositionPendingUpdates(
   }
 
   // ── Extensión (G1) ──
-  const extKey = shiftKey(pkg.extension.employeeId, pkg.dateStr);
-  const extBase = getShift(pkg.extension.employeeId, pkg.dateStr);
+  const extDateStr = pkg.extension.applyDateStr || pkg.dateStr;
+  const extKey = shiftKey(pkg.extension.employeeId, extDateStr);
+  const extBase = getShift(pkg.extension.employeeId, extDateStr);
   if (!extBase || extBase.isDeleted) {
-    throw new Error('El guardia de extensión no tiene turno ese día');
+    throw new Error(`El guardia de extensión no tiene turno el ${extDateStr.split('-').reverse().slice(0, 2).join('/')}`);
   }
   const extOnFranco = isPlannedFrancoShift(extBase);
   if (extOnFranco && !ctx.authorizeFrancoTrabajado) {
-    throw new Error(`FRANCO_COVERAGE:${extName} tiene franco planificado (${extBase.code}) el ${pkg.dateStr} — requiere PIN de supervisor (FT / costo extra).`);
+    throw new Error(`FRANCO_COVERAGE:${extName} tiene franco planificado (${extBase.code}) el ${extDateStr} — requiere PIN de supervisor (FT / costo extra).`);
   }
   updates[extKey] = mergeShift(extBase, {
     isFrancoTrabajado: extOnFranco ? true : (extBase.isFrancoTrabajado || false),
@@ -475,7 +492,7 @@ export function listVacancySplitWorkersForDay(
   ];
 }
 
-/** Extensión: guardias de la banda **anterior** (ej. cubrir M → turnos N). */
+/** Extensión: guardias de la banda **anterior** (ej. cubrir M → turnos N). Incluye N del día anterior si cubre madrugada del hueco. */
 export function listExtensionCandidates(
   targetBand: string,
   dateStr: string,
@@ -485,12 +502,13 @@ export function listExtensionCandidates(
   pendingChanges: Record<string, any>,
   excludeIds: string[] = [],
   listCtx?: VacancySplitListContext,
-) {
+): SegmentCandidateRow[] {
   const positionName = listCtx?.gapPositionName ?? null;
   const { extensionBand } = listCtx?.positionStructure?.length
     ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
     : neighborBandsForTarget(targetBand);
-  return listSegmentCandidatesWithBandFallback(
+  const ctx = { ...listCtx, gapBand: targetBand, gapPositionName: positionName ?? listCtx?.gapPositionName };
+  let rows: SegmentCandidateRow[] = listSegmentCandidatesWithBandFallback(
     dateStr,
     objectiveId,
     employees,
@@ -498,8 +516,35 @@ export function listExtensionCandidates(
     pendingChanges,
     excludeIds,
     extensionBand,
-    { ...listCtx, gapBand: targetBand, gapPositionName: positionName ?? listCtx?.gapPositionName },
+    ctx,
   );
+  const target = String(targetBand || '').toUpperCase();
+  const extBand = String(extensionBand || '').toUpperCase();
+  if (target === 'M' || extBand === 'N') {
+    const prev = previousCalendarDayStr(dateStr);
+    const prevRows = listSegmentCandidatesWithBandFallback(
+      prev,
+      objectiveId,
+      employees,
+      shiftsMap,
+      pendingChanges,
+      excludeIds,
+      extensionBand,
+      ctx,
+    );
+    const ids = new Set(rows.map((r) => r.id));
+    for (const r of prevRows) {
+      if (ids.has(r.id)) continue;
+      const [, mo, dd] = prev.split('-');
+      rows.unshift({
+        ...r,
+        name: `${r.name} · N ${dd}/${mo}→`,
+        extensionApplyDate: prev,
+      });
+      ids.add(r.id);
+    }
+  }
+  return rows;
 }
 
 /** Adelanto: guardias de la banda **siguiente** (ej. cubrir M → turnos T). */

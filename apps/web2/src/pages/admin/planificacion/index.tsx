@@ -160,6 +160,7 @@ import {
     analyzeDayCoverageGaps,
     analyzeObjectiveCoverageGaps,
     flattenDayGapsForUi,
+    inferGapBandForClose,
 } from '@/lib/planificacion/coverageGapAnalysis';
 import {
     buildObjectiveCoveragePreflight,
@@ -335,6 +336,21 @@ const SHIFT_STYLES: any = {
 
 const GRUPO_COLOR_HEX = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
+/** Mantiene tooltips/modales del pie de cobertura dentro del viewport. */
+function clampPlanifFloatingPos(clientX: number, clientY: number, panelW = 320, panelH = 220): { left: number; top: number } {
+    if (typeof window === 'undefined') return { left: clientX, top: clientY };
+    const pad = 24;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = clientX + 12;
+    let top = clientY + 12;
+    if (left + panelW > vw - pad) left = Math.max(pad, vw - panelW - pad);
+    if (left < pad) left = pad;
+    if (top + panelH > vh - pad) top = Math.max(pad, clientY - panelH - 16);
+    if (top < pad) top = pad;
+    return { left, top };
+}
+
 const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'M': 'Turno Mañana (Estándar)',
     'T': 'Turno Tarde (Estándar)',
@@ -361,7 +377,7 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'FF': 'Franco x Franco (Devolución)',
     'SWAP': 'Intercambio de Turno',
     'SWAP_PENDING': 'Intercambio pendiente de autorización',
-    'EXTENDED': 'Turno extendido (cobertura / horas extra)',
+    'EXTENDED': 'Turno extendido o adelantado (cobertura / horas extra)',
 };
 
 const SHIFT_RANGES: Record<string, string> = {
@@ -917,6 +933,7 @@ export default function PlanificacionPage() {
         if (!selectedGrupo) return new Map();
         return new Map(selectedGrupo.objectiveIds.map((id, i) => [id, GRUPO_COLOR_HEX[i % GRUPO_COLOR_HEX.length]]));
     }, [selectedGrupo]);
+    const planningObjectiveIdForModals = selectedObjective || selectedGrupo?.objectiveIds?.[0] || '';
     const longPressTimer = useRef<any>(null);
     const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>({});
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
@@ -3304,6 +3321,22 @@ export default function PlanificacionPage() {
         const code = gapRow?.code;
         if (code && !code.includes(' o ')) return code;
         return undefined;
+    };
+
+    const resolveSuggestedGapPositionForDay = (dateStr: string, fallback: string): string => {
+        const dayReport = buildDayCoverageReport(dateStr);
+        if (!dayReport) return fallback;
+        const gapRows = flattenDayGapsForUi(dayReport);
+        const active = String(activePosition || '').trim();
+        if (active && active !== 'General' && active !== 'Retén') {
+            if (gapRows.some((g) => g.positionName === active) || dayReport.positions.some((p) => p.positionName === active && p.missingUnits > 0)) {
+                return active;
+            }
+        }
+        const firstOpen = dayReport.positions.find((p) => p.missingUnits > 0);
+        if (firstOpen?.positionName) return firstOpen.positionName;
+        const fromGap = gapRows.find((g) => g.positionName)?.positionName;
+        return fromGap || fallback;
     };
 
     const renderDayCoverageClosures = (dateStr: string, opts?: { compact?: boolean }) => {
@@ -8913,7 +8946,6 @@ export default function PlanificacionPage() {
                                         if (content === 'REF' || content === 'ESC') {
                                             content = cellLabelForDeployment(String(content), _deployBand);
                                         }
-                                        if (isEarly) { style += ' ring-2 ring-cyan-500 z-10'; }
                                         if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; }
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
@@ -8931,15 +8963,21 @@ export default function PlanificacionPage() {
                                                 ? SHIFT_STYLES['RET']
                                                 : OTHER_OBJECTIVE_CELL_STYLE;
                                         }
-                                        if (
-                                            isExtended
-                                            && !isFT
+                                        const isCoverageSplitCell = !!(
+                                            !isFT
                                             && !isFF
                                             && !absence
                                             && !isOtherObjectiveShift
                                             && content != null
                                             && !(activeShift?.id && turaMap[activeShift.id])
-                                        ) {
+                                            && (
+                                                isExtended
+                                                || isEarly
+                                                || covRole === 'EXTENSION'
+                                                || covRole === 'EARLY_START'
+                                            )
+                                        );
+                                        if (isCoverageSplitCell) {
                                             style = `${SHIFT_STYLES['EXTENDED']} z-10`;
                                         }
                                         if (compareChangedKeys?.has(key)) {
@@ -8976,8 +9014,13 @@ export default function PlanificacionPage() {
                                             ? String(absence.inferredCode || inferAbsenceCode(absence) || content || '').toUpperCase()
                                             : String(cellCode || '').toUpperCase();
                                         const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
-                                        const _covHint = covNote ? `\n📋 ${covNote}` : '';
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly) && <div className="absolute -top-1 -right-1 text-[8px] bg-slate-800 text-white px-1 rounded-full">+</div>}{covRole === 'EXTENSION' && !isExtended && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded">EXT</div>}{covRole === 'EARLY_START' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-cyan-600 text-white px-0.5 rounded">ADEL</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{covRole === 'TARGET' && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-indigo-600 text-white px-0.5 rounded">✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                        const _covSegHint = isEarly || covRole === 'EARLY_START'
+                                            ? '\n⏩ Adelanto (cobertura)'
+                                            : (isExtended || covRole === 'EXTENSION')
+                                                ? '\n⏱ Extensión (cobertura)'
+                                                : '';
+                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint;
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{covRole === 'TARGET' && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-indigo-600 text-white px-0.5 rounded">✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -9008,6 +9051,9 @@ export default function PlanificacionPage() {
                                             else {
                                                 content = snapShift.code;
                                                 style = getDefaultStyle(snapShift.code);
+                                            }
+                                            if (snapShift.isExtended || snapShift.isEarlyStart) {
+                                                style = SHIFT_STYLES['EXTENDED'];
                                             }
                                         }
                                         if (compareChangedKeys?.has(key)) {
@@ -9203,6 +9249,25 @@ export default function PlanificacionPage() {
         ? ((clients.find(c => c.id === selectedClient)?.objetivos || []).find((o: any) => (o.id || o.name) === selectedObjective)?.name || selectedObjective)
         : '';
 
+    const coverageTooltipLayout = useMemo(() => {
+        if (!coverageTooltip) return null;
+        const estH = 56 + coverageTooltip.gaps.length * 92;
+        return clampPlanifFloatingPos(coverageTooltip.x, coverageTooltip.y, 320, estH);
+    }, [coverageTooltip]);
+
+    const openSlaGapCloseFromPie = useCallback((
+        dateStr: string,
+        gap: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string },
+    ) => {
+        const gapBand = inferGapBandForClose(gap);
+        if (!gapBand) {
+            toast.error('No se pudo determinar la banda SLA a cerrar. Usá Tratamiento o Extender jornada.');
+            return;
+        }
+        setCoverageTooltip(null);
+        setSlaGapCloseModal({ dateStr, positionName: gap.positionName, gapBand });
+    }, []);
+
     return (
         <DashboardLayout>
             <Head><title>Planificador</title></Head>
@@ -9217,11 +9282,12 @@ export default function PlanificacionPage() {
             <div className="no-print px-2 max-w-[1600px] mx-auto">
                 <SwapSupervisorQueue empresaId={empresaId} />
             </div>
-            {coverageTooltip && (
+            {coverageTooltip && coverageTooltipLayout && typeof document !== 'undefined' && createPortal(
                 <div
                     className="fixed z-[9999]"
-                    style={{ left: Math.min(coverageTooltip.x + 8, window.innerWidth - 220), top: coverageTooltip.y + 10 }}
+                    style={{ left: coverageTooltipLayout.left, top: coverageTooltipLayout.top }}
                     onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => e.stopPropagation()}
                 >
                     <div className="bg-slate-900 text-white text-[10px] font-black px-3 py-2 rounded-lg shadow-sm flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
                         <div className="text-rose-300 text-[9px] uppercase tracking-wide mb-0.5">Puestos sin cerrar · {coverageTooltip.dateStr.slice(8)}</div>
@@ -9234,22 +9300,26 @@ export default function PlanificacionPage() {
                                 {'detail' in g && g.detail && (
                                     <span className="text-[9px] text-slate-400 font-medium leading-snug">{g.detail}</span>
                                 )}
-                                {g.gapBand && (
+                                {(() => {
+                                    const closeBand = inferGapBandForClose(g);
+                                    return closeBand ? (
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            setSlaGapCloseModal({
-                                                dateStr: coverageTooltip.dateStr,
-                                                positionName: g.positionName,
-                                                gapBand: g.gapBand!,
-                                            });
-                                            setCoverageTooltip(null);
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            openSlaGapCloseFromPie(coverageTooltip.dateStr, g);
                                         }}
-                                        className="mt-0.5 w-full py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[9px] font-black uppercase tracking-wide"
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                        }}
+                                        className="mt-0.5 w-full py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[9px] font-black uppercase tracking-wide pointer-events-auto"
                                     >
-                                        Cerrar banda {g.gapBand}
+                                        Cerrar banda {closeBand}
                                     </button>
-                                )}
+                                    ) : null;
+                                })()}
                             </div>
                         ))}
                         <button
@@ -9260,12 +9330,13 @@ export default function PlanificacionPage() {
                             Cerrar
                         </button>
                     </div>
-                </div>
+                </div>,
+                document.body,
             )}
-            {shiftExtendModal && selectedObjective && (
+            {shiftExtendModal && planningObjectiveIdForModals && typeof document !== 'undefined' && createPortal(
                 <PlanningShiftExtendModal
                     data={shiftExtendModal}
-                    objectiveId={selectedObjective}
+                    objectiveId={planningObjectiveIdForModals}
                     clientId={selectedClient || undefined}
                     employees={displayedEmployees}
                     shiftsMap={shiftsMap}
@@ -9280,12 +9351,13 @@ export default function PlanificacionPage() {
                     onRequestSupervisorAuth={(conflicts, onAuthorized) => {
                         requestSupervisorFrancoAuth(conflicts, onAuthorized, 'extensión de jornada');
                     }}
-                />
+                />,
+                document.body,
             )}
-            {slaGapCloseModal && selectedObjective && (
+            {slaGapCloseModal && planningObjectiveIdForModals && typeof document !== 'undefined' && createPortal(
                 <PlanningSlaGapCloseModal
                     data={slaGapCloseModal}
-                    objectiveId={selectedObjective}
+                    objectiveId={planningObjectiveIdForModals}
                     clientId={selectedClient || undefined}
                     employees={displayedEmployees}
                     shiftsMap={shiftsMap}
@@ -9299,7 +9371,8 @@ export default function PlanificacionPage() {
                     onRequestSupervisorAuth={(conflicts, onAuthorized) => {
                         requestSupervisorFrancoAuth(conflicts, onAuthorized, 'cierre hueco SLA');
                     }}
-                />
+                />,
+                document.body,
             )}
             {shiftTooltip && (
                 <div
@@ -11930,12 +12003,14 @@ export default function PlanificacionPage() {
                                                         type="button"
                                                         onClick={() => {
                                                             const dateStr = selectedCell.dateStr;
-                                                            const posForGap = String(extShift?.positionName || activePosition || 'General');
+                                                            const homePos = String(extShift?.positionName || activePosition || 'General');
+                                                            const gapPos = resolveSuggestedGapPositionForDay(dateStr, homePos);
                                                             setShiftExtendModal({
                                                                 empId: selectedCell.empId,
                                                                 empName: employeeName,
                                                                 dateStr,
-                                                                suggestedGapBand: resolveSuggestedGapBandForPosition(dateStr, posForGap),
+                                                                gapPositionName: gapPos,
+                                                                suggestedGapBand: resolveSuggestedGapBandForPosition(dateStr, gapPos),
                                                             });
                                                         }}
                                                         className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-red-200 bg-red-50 text-red-800 hover:bg-red-100 flex items-center justify-center gap-2"
