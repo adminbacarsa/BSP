@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { X, Clock, Timer } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   collectSplitFrancoConflicts,
   listVacancySplitWorkersForDay,
@@ -62,17 +63,19 @@ export default function PlanningShiftExtendModal({
   const shift = resolveEmployeeShift(data.empId, data.dateStr, shiftsMap, pendingChanges);
   const positionName = String(shift?.positionName || positionStructure[0]?.positionName || 'General');
   const gapOptions = listVacancyGapBandOptions(positionStructure, positionName);
-  const effectiveGapBand = gapBand || data.suggestedGapBand || gapOptions[0]?.code || '';
+  /** Banda SLA a cerrar (hueco del día). No confundir con el turno base E1/E2 del guardia. */
+  const slaGapBand = gapBand || data.suggestedGapBand || '';
+  const uiBand = slaGapBand || gapOptions[0]?.code || '';
 
   const slaEnd = slaEndForShift(shift, positionStructure);
   const primaryEnd = endTimeAfterExtraHours(slaEnd, primaryExtraH);
 
-  const titularStub: TitularVacancyWorkShift | null = effectiveGapBand
+  const titularStub: TitularVacancyWorkShift | null = uiBand
     ? {
-      code: effectiveGapBand,
-      bandLabel: effectiveGapBand,
+      code: uiBand,
+      bandLabel: uiBand,
       positionName,
-      scheduleLabel: gapOptions.find((o) => o.code === effectiveGapBand)?.scheduleLabel || '—',
+      scheduleLabel: gapOptions.find((o) => o.code === uiBand)?.scheduleLabel || '—',
       hours: 8,
       source: 'user_selected',
       sourceLabel: 'Banda SLA',
@@ -84,10 +87,10 @@ export default function PlanningShiftExtendModal({
     positionStructure,
     preferSamePosition: true,
     gapPositionName: positionName,
-    gapBand: effectiveGapBand,
+    gapBand: uiBand,
   };
   const poolSecond = useMemo(
-    () => (effectiveGapBand
+    () => (uiBand
       ? listVacancySplitWorkersForDay(
         data.dateStr,
         objectiveId,
@@ -99,7 +102,7 @@ export default function PlanningShiftExtendModal({
         splitPlan ? [splitPlan.adelBand] : [],
       ).filter((c) => !q || c.name.toLowerCase().includes(q))
       : []),
-    [data.dateStr, data.empId, effectiveGapBand, employees, listCtx, pendingChanges, q, splitPlan, objectiveId, shiftsMap],
+    [data.dateStr, data.empId, uiBand, employees, listCtx, pendingChanges, q, splitPlan, objectiveId, shiftsMap],
   );
 
   const employeesById = useMemo(
@@ -119,23 +122,31 @@ export default function PlanningShiftExtendModal({
   }
 
   const commit = (authorizeFranco: boolean) => {
-    const changes = applyShiftExtensionFromCell(pendingChanges, {
-      objectiveId,
-      clientId,
-      dateStr: data.dateStr,
-      primaryEmpId: data.empId,
-      primaryExtraHours: primaryExtraH,
-      secondEmpId: secondId || null,
-      secondExtraHours: secondId ? secondExtraH : null,
-      gapBand: effectiveGapBand || gapBand || null,
-      gapPosition: positionName,
-      positionStructure,
-      shiftsMap,
-      employeesById,
-      authorizeFrancoTrabajado: authorizeFranco,
-    });
-    onApply(changes);
-    onClose();
+    const bandForMeta = secondId
+      ? uiBand
+      : (data.suggestedGapBand || gapBand || null);
+    try {
+      const changes = applyShiftExtensionFromCell(pendingChanges, {
+        objectiveId,
+        clientId,
+        dateStr: data.dateStr,
+        primaryEmpId: data.empId,
+        primaryExtraHours: primaryExtraH,
+        secondEmpId: secondId || null,
+        secondExtraHours: secondId ? secondExtraH : null,
+        gapBand: bandForMeta,
+        gapPosition: positionName,
+        positionStructure,
+        shiftsMap,
+        employeesById,
+        authorizeFrancoTrabajado: authorizeFranco,
+      });
+      onApply(changes);
+      onClose();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'No se pudo aplicar la extensión';
+      toast.error(msg);
+    }
   };
 
   const tryApply = () => {
@@ -210,7 +221,7 @@ export default function PlanningShiftExtendModal({
             {gapOptions.length > 0 && (
               <select
                 className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold"
-                value={effectiveGapBand}
+                value={uiBand}
                 onChange={(e) => setGapBand(e.target.value)}
               >
                 {gapOptions.map((o) => (

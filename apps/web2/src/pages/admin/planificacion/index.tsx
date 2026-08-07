@@ -3295,17 +3295,30 @@ export default function PlanificacionPage() {
     }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId]);
 
     const buildDayCoverageReport = (dateStr: string) => {
-        if (!positionStructure?.length) return null;
+        const structure = effectivePosStructure.length > 0 ? effectivePosStructure : positionStructure;
+        if (!structure?.length) return null;
         const dayLetter = getDayLetter(dateStr);
         const codeCounts = buildDayCodeCountsByPosition(dateStr);
         return analyzeDayCoverageGaps(
-            positionStructure,
+            structure,
             dateStr,
             dayLetter,
             codeCounts,
             coverageCyclesForObjective,
             isPosActiveOnDay,
         );
+    };
+
+    const resolveSuggestedGapBandForPosition = (dateStr: string, positionName: string): string | undefined => {
+        const dayReport = buildDayCoverageReport(dateStr);
+        if (!dayReport) return undefined;
+        const gapRows = flattenDayGapsForUi(dayReport);
+        const gapRow = gapRows.find((g) => g.positionName === positionName)
+            || gapRows.find((g) => g.gapBand);
+        if (gapRow?.gapBand) return gapRow.gapBand;
+        const code = gapRow?.code;
+        if (code && !code.includes(' o ')) return code;
+        return undefined;
     };
 
     const renderDayCoverageClosures = (dateStr: string, opts?: { compact?: boolean }) => {
@@ -11908,25 +11921,12 @@ export default function PlanificacionPage() {
                                                         type="button"
                                                         onClick={() => {
                                                             const dateStr = selectedCell.dateStr;
-                                                            const dayLetter = getDayLetter(dateStr);
                                                             const posForGap = String(extShift?.positionName || activePosition || 'General');
-                                                            const codeCounts = buildDayCodeCountsByPosition(dateStr);
-                                                            const dayReport = analyzeDayCoverageGaps(
-                                                                positionStructure || [],
-                                                                dateStr,
-                                                                dayLetter,
-                                                                codeCounts,
-                                                                cyclesForCoverage,
-                                                                isPosActiveOnDay,
-                                                            );
-                                                            const gapRows = flattenDayGapsForUi(dayReport);
-                                                            const gapRow = gapRows.find((g) => g.positionName === posForGap)
-                                                                || gapRows.find((g) => g.gapBand);
                                                             setShiftExtendModal({
                                                                 empId: selectedCell.empId,
                                                                 empName: employeeName,
                                                                 dateStr,
-                                                                suggestedGapBand: gapRow?.gapBand || gapRow?.code,
+                                                                suggestedGapBand: resolveSuggestedGapBandForPosition(dateStr, posForGap),
                                                             });
                                                         }}
                                                         className="w-full py-2.5 rounded-xl text-xs font-black border-2 border-red-200 bg-red-50 text-red-800 hover:bg-red-100 flex items-center justify-center gap-2"

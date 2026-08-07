@@ -113,6 +113,7 @@ export function synchronizeDualExtensionPackage(
   empId: string,
   gapBand: string,
   gapPosition: string,
+  shiftsMap?: Record<string, any>,
 ): Record<string, any> {
   const key = `${empId}_${dateStr}`;
   const cur = changes[key];
@@ -123,8 +124,23 @@ export function synchronizeDualExtensionPackage(
   let partnerKey: string | null = null;
   let sharedPkg: string | undefined = cur.coveragePackageId;
 
-  for (const [k, sh] of Object.entries(changes)) {
+  const candidateKeys = new Set<string>(Object.keys(changes));
+  if (shiftsMap) {
+    for (const k of Object.keys(shiftsMap)) {
+      if (k.endsWith(`_${dateStr}`)) candidateKeys.add(k);
+    }
+  }
+
+  const readShift = (k: string): Record<string, any> | null => {
+    const pending = changes[k];
+    if (pending?.isDeleted) return null;
+    if (pending) return pending;
+    return shiftsMap?.[k] || null;
+  };
+
+  for (const k of candidateKeys) {
     if (!k.endsWith(`_${dateStr}`) || k === key) continue;
+    const sh = readShift(k);
     if (!sh || sh.isDeleted || !sh.isExtended || sh.isEarlyStart) continue;
     const shPos = normalizePlanningPositionName(sh.coversPositionName || sh.positionName || '');
     if (shPos !== posNorm) continue;
@@ -148,8 +164,11 @@ export function synchronizeDualExtensionPackage(
 
   const patch: Record<string, any> = { ...changes };
   patch[key] = { ...cur, ...sharedMeta };
-  if (partnerKey && patch[partnerKey]) {
-    patch[partnerKey] = { ...patch[partnerKey], ...sharedMeta, coverageStatus: 'COVERED' };
+  if (partnerKey) {
+    const partner = readShift(partnerKey);
+    if (partner) {
+      patch[partnerKey] = { ...partner, ...sharedMeta, coverageStatus: 'COVERED', isTemp: true };
+    }
   }
   return patch;
 }
@@ -217,6 +236,7 @@ export function applyShiftExtensionFromCell(
       opts.primaryEmpId,
       opts.gapBand,
       opts.gapPosition,
+      opts.shiftsMap,
     );
   }
   return changes;

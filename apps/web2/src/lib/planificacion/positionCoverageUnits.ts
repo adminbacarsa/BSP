@@ -99,6 +99,12 @@ function resolveSplitBandCode(
         resolveOriginalShift?: (employeeId: string) => PlanningShiftSlice | null | undefined;
     },
 ): string | null {
+    const extOnly = rows.filter((r) => r.isExtended && !r.isEarlyStart);
+    if (extOnly.length >= 2) {
+        const inferred = inferDualExtensionTargetBand(rows as ShiftRow[]);
+        if (inferred) return inferred;
+    }
+
     const withBand = rows.find(r => r.coversBandCode);
     if (withBand?.coversBandCode) return normBandCode(withBand.coversBandCode);
 
@@ -287,12 +293,16 @@ function collectDualExtensionOrphanGroups(
     const groups: ShiftRow[][] = [];
     for (const rows of byPos.values()) {
         if (rows.length < 2) continue;
-        let band = rows.map((r) => normBandCode(r.coversBandCode)).find((b) => !!b) || '';
-        if (!band) band = inferDualExtensionTargetBand(rows);
+        const inferredBand = inferDualExtensionTargetBand(rows);
+        let band = inferredBand
+            || rows.map((r) => normBandCode(r.coversBandCode)).find((b) => !!b)
+            || '';
         if (!band) continue;
-        const enriched = rows.map((r) => (
-            r.coversBandCode ? r : { ...r, coversBandCode: band, coverageStatus: 'COVERED' as const }
-        ));
+        const enriched = rows.map((r) => ({
+            ...r,
+            coversBandCode: band,
+            coverageStatus: 'COVERED' as const,
+        }));
         if (assessSplitPackageStatus(enriched) !== 'COVERED') continue;
         groups.push(enriched);
     }
