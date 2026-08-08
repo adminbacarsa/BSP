@@ -32,7 +32,12 @@ export type OperationalGapCloseInput = {
 
 export function buildOperationalGapRecompositionPackage(
   input: OperationalGapCloseInput,
-  splitTimes: { ext: { from: string; to: string }; adel: { from: string; to: string } },
+  splitTimes: {
+    ext: { from: string; to: string };
+    adel: { from: string; to: string };
+    extExtraHours?: number;
+    adelExtraHours?: number;
+  },
 ): RecompositionPackage {
   const gapBand = String(input.gapBand || '').toUpperCase();
   return {
@@ -60,6 +65,7 @@ export function buildOperationalGapRecompositionPackage(
       toTime: splitTimes.ext.to,
       homePositionName: input.extHomePosition,
       baseCode: input.extBaseCode,
+      extraHours: splitTimes.extExtraHours,
       applyDateStr: input.extApplyDateStr && input.extApplyDateStr !== input.dateStr
         ? input.extApplyDateStr
         : undefined,
@@ -71,6 +77,7 @@ export function buildOperationalGapRecompositionPackage(
       fromTime: splitTimes.adel.from,
       toTime: splitTimes.adel.to,
       baseCode: input.secondBaseCode,
+      extraHours: splitTimes.adelExtraHours,
     },
   };
 }
@@ -96,7 +103,12 @@ export function applyOperationalGapCloseToChanges(
     manual ? input.extExtraHours : null,
     manual ? input.secondExtExtraHours : null,
   );
-  const splitTimes = { ext: dualPlan.first, adel: dualPlan.second };
+  const splitTimes = {
+    ext: dualPlan.first,
+    adel: dualPlan.second,
+    extExtraHours: dualPlan.firstExtraHours,
+    adelExtraHours: dualPlan.secondExtraHours,
+  };
   const pkg = buildOperationalGapRecompositionPackage(input, splitTimes);
   const updates = buildRecompositionPendingUpdates(pkg, {
     shiftsMap: ctx.shiftsMap,

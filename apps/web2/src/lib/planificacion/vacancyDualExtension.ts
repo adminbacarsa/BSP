@@ -110,22 +110,25 @@ export function resolveVacancyDualExtensionPlan(
   if (firstEndMin != null) firstEndMin += Math.round(firstExtraHours! * 60);
   else firstEndMin = parseMin(auto.first.to) ?? gapStart + Math.round(firstExtraHours! * 60);
 
-  let secondEndMin = parseMin(end2);
-  if (secondEndMin != null) secondEndMin += Math.round(secondExtraHours! * 60);
-  else secondEndMin = parseMin(auto.second.to) ?? gapEnd;
-
   firstEndMin = Math.max(firstEndMin, gapStart);
-  secondEndMin = Math.max(secondEndMin, firstEndMin);
-  secondEndMin = Math.min(secondEndMin, gapEnd);
+  firstEndMin = Math.min(firstEndMin, gapEnd);
   if (firstEndMin <= gapStart) firstEndMin = Math.min(gapEnd, gapStart + Math.round(firstExtraHours! * 60));
+
+  // El segundo guardia hace early-start: cubre desde (gapEnd - secondExtraHours) hasta gapEnd.
+  // No se usa end2 porque para turnos nocturnos end2 < gapStart (día siguiente) y la aritmética
+  // se desfasa. El tramo always termina en gapEnd.
+  const secondStartMin = Math.max(
+    gapEnd - Math.round(secondExtraHours! * 60),
+    firstEndMin,
+  );
 
   const first: VacancySegmentTimes = {
     from: auto.gap.from,
     to: minutesToHHmm(firstEndMin),
   };
   const second: VacancySegmentTimes = {
-    from: first.to,
-    to: minutesToHHmm(secondEndMin),
+    from: minutesToHHmm(secondStartMin),
+    to: minutesToHHmm(gapEnd),
   };
 
   return {

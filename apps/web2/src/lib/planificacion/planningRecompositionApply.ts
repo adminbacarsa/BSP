@@ -243,6 +243,9 @@ export function buildRecompositionPendingUpdates(
     code: extOnFranco ? (pkg.extension.baseCode || extBase.code) : extBase.code,
     isExtended: true,
     isEarlyStart: false,
+    ...(pkg.extension.extraHours != null && pkg.extension.extraHours > 0
+      ? { extExtraHours: pkg.extension.extraHours }
+      : {}),
     ...baseMeta('EXTENSION', {
       adjustedEndTime: pkg.extension.toTime,
       segmentFromTime: pkg.extension.fromTime,
@@ -262,6 +265,9 @@ export function buildRecompositionPendingUpdates(
     throw new Error(`FRANCO_COVERAGE:${adelName} tiene franco planificado (${adelBase.code}) el ${pkg.dateStr} — requiere PIN de supervisor (FT / costo extra).`);
   }
   const tailExtension = vacancySecondSegmentIsTailExtension(String(pkg.target.code || ''));
+  const adelExtraHoursField = pkg.earlyStart.extraHours != null && pkg.earlyStart.extraHours > 0
+    ? { extExtraHours: pkg.earlyStart.extraHours }
+    : {};
   if (tailExtension) {
     updates[adelKey] = mergeShift(adelBase, {
       isFrancoTrabajado: adelOnFranco ? true : (adelBase.isFrancoTrabajado || false),
@@ -269,6 +275,7 @@ export function buildRecompositionPendingUpdates(
       code: adelOnFranco ? (pkg.earlyStart.baseCode || adelBase.code) : adelBase.code,
       isExtended: true,
       isEarlyStart: false,
+      ...adelExtraHoursField,
       ...baseMeta('EXTENSION', {
         adjustedEndTime: pkg.earlyStart.toTime,
         segmentFromTime: pkg.earlyStart.fromTime,
@@ -284,6 +291,7 @@ export function buildRecompositionPendingUpdates(
     isEarlyStart: true,
     isExtended: false,
     adjustedStartTime: pkg.earlyStart.fromTime,
+    ...adelExtraHoursField,
     ...baseMeta('EARLY_START', {
       segmentFromTime: pkg.earlyStart.fromTime,
       segmentToTime: pkg.earlyStart.toTime,

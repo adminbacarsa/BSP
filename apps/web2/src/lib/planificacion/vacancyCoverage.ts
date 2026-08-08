@@ -483,7 +483,12 @@ function buildVacancySplitPackage(
   dateStr: string,
   coverage: Extract<VacancyDayCoverageInput, { mode: 'split' }>,
   target: RecompositionTarget,
-  splitTimes: { ext: { from: string; to: string }; adel: { from: string; to: string } },
+  splitTimes: {
+    ext: { from: string; to: string };
+    adel: { from: string; to: string };
+    extExtraHours?: number;
+    adelExtraHours?: number;
+  },
 ): RecompositionPackage {
   const gapPos = coverage.gapPosition || target.positionName;
   return {
@@ -504,6 +509,7 @@ function buildVacancySplitPackage(
       toTime: splitTimes.ext.to,
       homePositionName: coverage.extHomePosition,
       baseCode: coverage.extBaseCode,
+      extraHours: splitTimes.extExtraHours,
     },
     earlyStart: {
       employeeId: coverage.adelEmpId,
@@ -512,6 +518,7 @@ function buildVacancySplitPackage(
       fromTime: splitTimes.adel.from,
       toTime: splitTimes.adel.to,
       baseCode: coverage.adelBaseCode,
+      extraHours: splitTimes.adelExtraHours,
     },
   };
 }
@@ -675,7 +682,12 @@ export function applyVacancyCoverageToChanges(
         coverage.extExtraHours,
         coverage.secondExtExtraHours,
       );
-      const splitTimes = { ext: dualPlan.first, adel: dualPlan.second };
+      const splitTimes = {
+        ext: dualPlan.first,
+        adel: dualPlan.second,
+        extExtraHours: dualPlan.firstExtraHours,
+        adelExtraHours: dualPlan.secondExtraHours,
+      };
       const pkg = buildVacancySplitPackage(input, dateStr, coverage, target, splitTimes);
       try {
         const updates = buildRecompositionPendingUpdates(pkg, {

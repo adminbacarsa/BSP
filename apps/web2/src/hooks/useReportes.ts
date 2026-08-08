@@ -20,6 +20,7 @@ import {
     isRegularLiquidationWorkShift,
 } from '@/lib/planificacion/deploymentRoles';
 import { RET_STANDBY_REFERENCE_HOURS } from '@/lib/planificacion/constants';
+import { getCctPayrollPeriodByOffset } from '@/lib/cctPayrollPeriod';
 
 // --- CONSTANTES Y HELPERS ---
 // Francos/licencias/retÃ©n: no computan horas de liquidaciÃ³n del empleado.
@@ -529,6 +530,20 @@ export function resolveShiftDurationHours(
         duration = lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
     }
     if (isFT && duration >= 23.5) duration = resolveFtLiquidationHours(shift, PAID_DAY_DEFAULT_HOURS);
+
+    // Si el shift tiene extensión/adelanto pero los timestamps no fueron actualizados,
+    // sumar las horas extra del tramo de cobertura.
+    const shiftAny = shift as any;
+    if (shiftAny.isExtended || shiftAny.isEarlyStart) {
+        const extExtra = Number(shiftAny.extExtraHours ?? shiftAny.extensionExtraHours ?? 0);
+        if (Number.isFinite(extExtra) && extExtra > 0) {
+            const codeLookup = lookup[rawCode] || 0;
+            if (codeLookup > 0 && Math.abs(duration - codeLookup) < 0.5) {
+                duration += extExtra;
+            }
+        }
+    }
+
     return duration;
 }
 
@@ -938,11 +953,11 @@ export const useReportes = (forcedClientId?: string | null) => {
     );
     const [loading, setLoading] = useState(false);
 
-    // Inicializamos fechas locales
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-
-    const [dateRange, setDateRange] = useState({ start: todayStr, end: todayStr });
+    const initialCctPeriod = getCctPayrollPeriodByOffset(0);
+    const [dateRange, setDateRange] = useState({
+        start: initialCctPeriod.start,
+        end: initialCctPeriod.end,
+    });
     
     const [employeeReport, setEmployeeReport] = useState<any[]>([]);
     const [objectiveReport, setObjectiveReport] = useState<any[]>([]);
