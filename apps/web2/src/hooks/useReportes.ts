@@ -494,8 +494,14 @@ export function resolveLiquidationPlannedWindow(
     const billable = liquidationBillableHoursForShift(shift, slaHoursHint);
     let spanH = Math.max(0, (dispEnd.getTime() - dispStart.getTime()) / 3600000);
     if (billable > spanH + 0.1) {
-        dispEnd = new Date(dispStart.getTime() + billable * 3600000);
-        spanH = billable;
+        if (preBandAdelanto || (isEarly && !isExt)) {
+            // Adelanto + banda publicada: fin = egreso planificado (ej. 06:00), no start + horas CCT
+            dispEnd = new Date(bandEnd);
+            spanH = Math.max(0, (dispEnd.getTime() - dispStart.getTime()) / 3600000);
+        } else {
+            dispEnd = new Date(dispStart.getTime() + billable * 3600000);
+            spanH = billable;
+        }
     }
 
     const hasCoverageAdjust =
