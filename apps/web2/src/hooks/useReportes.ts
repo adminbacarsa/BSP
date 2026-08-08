@@ -429,21 +429,53 @@ function applyHHmmToShiftDate(base: Date, hhmm: string): Date {
     return d;
 }
 
+function hhmmToMinutes(hhmm: string): number | null {
+    const m = String(hhmm).trim().slice(0, 5).match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** Tramo de cobertura que cierra antes del inicio de banda (ej. 18–22 antes de NO 22–06) → adelanto, no extensión al final. */
+function coverageSegmentIsPreBandAdelanto(shift: any, bandStart: Date): boolean {
+    const segFrom = shift?.segmentFromTime
+        || (shift?.isEarlyStart ? shift.adjustedStartTime : null);
+    const segTo = shift?.segmentToTime
+        || (shift?.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
+    if (!segFrom || !segTo) return false;
+    const bandMin = bandStart.getHours() * 60 + bandStart.getMinutes();
+    const fromM = hhmmToMinutes(String(segFrom));
+    const toM = hhmmToMinutes(String(segTo));
+    if (fromM == null || toM == null) return false;
+    const tol = 35;
+    if (Math.abs(toM - bandMin) <= tol) return true;
+    if (fromM < bandMin && toM <= bandMin && toM > fromM) return true;
+    return false;
+}
+
 /** Horario mostrado en liquidación: banda publicada + adelanto/extensión (alineado a CRM/planificador). */
 export function resolveLiquidationPlannedWindow(
     shift: any,
     plannedStart: Date,
     plannedEnd: Date,
     slaHoursHint: Record<string, number> = SHIFT_HOURS_LOOKUP,
-): { start: Date; end: Date; bandStart: Date; bandEnd: Date; hasCoverageAdjust: boolean } {
+): {
+    start: Date;
+    end: Date;
+    bandStart: Date;
+    bandEnd: Date;
+    hasCoverageAdjust: boolean;
+    isEarlyDisplay: boolean;
+    isExtDisplay: boolean;
+} {
     const bandStart = new Date(plannedStart);
     const bandEnd = new Date(plannedEnd);
     let dispStart = new Date(plannedStart);
     let dispEnd = new Date(plannedEnd);
 
     const role = String(shift?.coverageSegmentRole || '').toUpperCase();
-    const isEarly = shift?.isEarlyStart === true || role === 'EARLY_START';
-    const isExt = shift?.isExtended === true || role === 'EXTENSION';
+    const preBandAdelanto = coverageSegmentIsPreBandAdelanto(shift, bandStart);
+    const isEarly = shift?.isEarlyStart === true || role === 'EARLY_START' || preBandAdelanto;
+    const isExt = (shift?.isExtended === true || role === 'EXTENSION') && !preBandAdelanto;
 
     if (isEarly) {
         const from = shift.adjustedStartTime || shift.segmentFromTime;
@@ -460,11 +492,10 @@ export function resolveLiquidationPlannedWindow(
     }
 
     const billable = liquidationBillableHoursForShift(shift, slaHoursHint);
-    const spanH = Math.max(0, (dispEnd.getTime() - dispStart.getTime()) / 3600000);
+    let spanH = Math.max(0, (dispEnd.getTime() - dispStart.getTime()) / 3600000);
     if (billable > spanH + 0.1) {
         dispEnd = new Date(dispStart.getTime() + billable * 3600000);
-    } else if (isEarly && billable > spanH + 0.1) {
-        dispStart = new Date(dispEnd.getTime() - billable * 3600000);
+        spanH = billable;
     }
 
     const hasCoverageAdjust =
@@ -474,7 +505,15 @@ export function resolveLiquidationPlannedWindow(
         || Math.abs(dispEnd.getTime() - bandEnd.getTime()) > 60_000
         || billable > spanH + 0.1;
 
-    return { start: dispStart, end: dispEnd, bandStart, bandEnd, hasCoverageAdjust };
+    return {
+        start: dispStart,
+        end: dispEnd,
+        bandStart,
+        bandEnd,
+        hasCoverageAdjust,
+        isEarlyDisplay: isEarly,
+        isExtDisplay: isExt,
+    };
 }
 
 function effectiveEndForBillableDuration(start: Date, plannedEnd: Date, billableHours: number): Date {
