@@ -25,7 +25,7 @@ import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { shouldScopeQueriesToEmpresa, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 import { slaService } from '@/services/slaService';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, type ReportPublishFilter, type ReportFetchScope } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, collapseShiftsByEmployeeDayForLiquidation, liquidationBillableHoursForShift, type ReportPublishFilter, type ReportFetchScope } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -1166,9 +1166,12 @@ export default function ReportsPage() {
         const NON_WORK_CODES_DETAIL = new Set(['F','FF','V','L','PG','A','E','AA','FP']);
 
         // — Opciones para dropdowns —
-        const baseShifts = dedupeShiftsByAbsencePriority(
-            propagateFrancoTrabajadoFlags(detailItem.rawShifts || [], { usePlannedHours }),
-            { usePlannedHours },
+        const baseShifts = collapseShiftsByEmployeeDayForLiquidation(
+            dedupeShiftsByAbsencePriority(
+                propagateFrancoTrabajadoFlags(detailItem.rawShifts || [], { usePlannedHours }),
+                { usePlannedHours },
+            ),
+            SHIFT_HOURS_LOOKUP,
         );
         const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(baseShifts, { usePlannedHours });
         const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || '').filter(Boolean))].sort();
@@ -1272,14 +1275,23 @@ export default function ReportsPage() {
                 // Diurnas/nocturnas: reales si hay fichada; planificadas si usePlannedHours
                 const activeStart = rStart ?? start;
                 const activeEnd = rEnd ?? end;
-                const night = zeroHours || (!rStart && !rEnd && !usePlannedHours) ? 0 : getNightDuration(activeStart, activeEnd);
                 const effectiveDur = rDur ?? ((isFT || usePlannedHours) && duration > 0 ? duration : 0);
-                const day = Math.max(0, effectiveDur - night);
+                const billableForRow = usePlannedHours
+                    ? liquidationBillableHoursForShift(s, SHIFT_HOURS_LOOKUP)
+                    : (effectiveDur > 0 ? effectiveDur : duration);
+                const plannedSpanH = Math.max(0, (activeEnd.getTime() - activeStart.getTime()) / 3600000);
+                const dayNightEnd = billableForRow > plannedSpanH + 0.15
+                    ? new Date(activeStart.getTime() + billableForRow * 3600000)
+                    : activeEnd;
+                const night = zeroHours || (!rStart && !rEnd && !usePlannedHours)
+                    ? 0
+                    : getNightDuration(activeStart, dayNightEnd);
+                const day = Math.max(0, billableForRow - night);
 
                 const dateKey = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
                 const hFeriado = holidaysData[dateKey] ? (rDur ?? ((isFT || usePlannedHours) && duration > 0 ? duration : 0)) : 0;
                 const horasTrabajadas = (usePlannedHours && !isUnjustAbsentDetail && !francoDocSkipIds.has(s.id) && !isNonWork)
-                    ? (rDur ?? duration)
+                    ? liquidationBillableHoursForShift(s, SHIFT_HOURS_LOOKUP)
                     : resolveLiquidationWorkedHours(s, {
                         rDur,
                         duration,

@@ -22,6 +22,11 @@ import {
 import { RET_STANDBY_REFERENCE_HOURS } from '@/lib/planificacion/constants';
 import { getCctPayrollPeriodByOffset } from '@/lib/cctPayrollPeriod';
 import {
+    coalescePlannedCellBillableHours,
+    coalescePlannedTurnosForCell,
+} from '@/lib/planificacion/planningTurnoCoalesce';
+import { calcPlanningBillableShiftHours } from '@/lib/planificacion/planningScheduledHours';
+import {
     fetchReportAjustesHoras,
     fetchReportAusencias,
     fetchReportPlanificacionEstados,
@@ -369,6 +374,59 @@ function shiftCalendarDateKey(shift: any): string {
     return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
 }
 
+/** Misma regla que CRM/proforma: varios docs mismo legajo/día (base + ext/adelanto) → una jornada billable. */
+export function collapseShiftsByEmployeeDayForLiquidation(
+    shifts: any[],
+    slaHoursHint: Record<string, number> = SHIFT_HOURS_LOOKUP,
+): any[] {
+    const singles: any[] = [];
+    const groups = new Map<string, any[]>();
+    for (const s of shifts) {
+        const emp = String(s.employeeId ?? '').trim();
+        const dk = shiftCalendarDateKey(s);
+        if (!emp || !dk) {
+            singles.push(s);
+            continue;
+        }
+        const key = `${emp}__${dk}`;
+        const list = groups.get(key) || [];
+        list.push(s);
+        groups.set(key, list);
+    }
+    const out: any[] = [...singles];
+    for (const group of groups.values()) {
+        if (group.length === 1) {
+            out.push(group[0]);
+            continue;
+        }
+        const merged = coalescePlannedTurnosForCell(group, slaHoursHint);
+        const billable = coalescePlannedCellBillableHours(group, slaHoursHint);
+        out.push({
+            ...merged,
+            id: merged?.id || group.map((g) => g.id).join('_'),
+            _liquidationCoalescedIds: group.map((g) => g.id),
+            _liquidationBillableHours: billable,
+        });
+    }
+    return out;
+}
+
+export function liquidationBillableHoursForShift(
+    shift: any,
+    slaHoursHint: Record<string, number> = SHIFT_HOURS_LOOKUP,
+): number {
+    if (typeof shift?._liquidationBillableHours === 'number' && shift._liquidationBillableHours > 0) {
+        return shift._liquidationBillableHours;
+    }
+    return calcPlanningBillableShiftHours(shift, slaHoursHint);
+}
+
+function effectiveEndForBillableDuration(start: Date, plannedEnd: Date, billableHours: number): Date {
+    const plannedDur = Math.max(0, (plannedEnd.getTime() - start.getTime()) / 3600000);
+    if (billableHours <= plannedDur + 0.15) return plannedEnd;
+    return new Date(start.getTime() + billableHours * 3600000);
+}
+
 const REPORT_VIRTUAL_VACANCY_ORIGINS = new Set(['SLA_VIRTUAL', 'INTERRUPTION']);
 
 export function isReportVacancyShift(shift: any, empMap: Record<string, string>): boolean {
@@ -537,17 +595,9 @@ export function resolveShiftDurationHours(
     if (isFT && duration >= 23.5) duration = resolveFtLiquidationHours(shift, PAID_DAY_DEFAULT_HOURS);
 
     // Si el shift tiene extensión/adelanto pero los timestamps no fueron actualizados,
-    // sumar las horas extra del tramo de cobertura.
-    const shiftAny = shift as any;
-    if (shiftAny.isExtended || shiftAny.isEarlyStart) {
-        const extExtra = Number(shiftAny.extExtraHours ?? shiftAny.extensionExtraHours ?? 0);
-        if (Number.isFinite(extExtra) && extExtra > 0) {
-            const codeLookup = lookup[rawCode] || 0;
-            if (codeLookup > 0 && Math.abs(duration - codeLookup) < 0.5) {
-                duration += extExtra;
-            }
-        }
-    }
+    // sumar las horas extra del tramo de cobertura (misma regla que planificador/CRM).
+    const billable = calcPlanningBillableShiftHours(shift, lookup);
+    if (billable > duration + 0.1) return billable;
 
     return duration;
 }
@@ -589,7 +639,9 @@ const getNightDuration = (start: Date, end: Date) => {
 const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>, opts?: { usePlannedHours?: boolean }) => {
     const usePlannedHours = opts?.usePlannedHours ?? false;
     const validShifts = shifts.filter(s => s.startTime && s.endTime && s.startTime.seconds && s.endTime.seconds);
-    const sortedDocs = [...validShifts].sort((a, b) => a.startTime.seconds - b.startTime.seconds);
+    const sortedDocs = collapseShiftsByEmployeeDayForLiquidation(
+        [...validShifts].sort((a, b) => a.startTime.seconds - b.startTime.seconds),
+    );
     const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(sortedDocs, { usePlannedHours });
 
     let hoursTotalOperativas = 0; // teÃ³ricas
@@ -637,9 +689,12 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 if (duration < 0 || duration > 24 || isNaN(duration)) {
                     duration = SHIFT_HOURS_LOOKUP[rawCode] || 8;
                 }
+                const billable = liquidationBillableHoursForShift(d);
+                if (billable > duration + 0.1) duration = billable;
             }
 
-            const night = getNightDuration(start, end);
+            const statsEnd = effectiveEndForBillableDuration(start, end, duration);
+            const night = getNightDuration(start, statsEnd);
             const day = Math.max(0, duration - night);
             const dateKey = getArgentinaDate(d.startTime);
             const isFeriado = holidaysMap[dateKey];
@@ -695,7 +750,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             } else if (isRet) {
                 worked = duration; // Fix 5: RET sin fichada usa horas referenciales
             } else if (usePlannedHours) {
-                worked = Math.min(Math.max(0, duration), 24);
+                worked = liquidationBillableHoursForShift(d);
+                if (worked <= 0) worked = Math.min(Math.max(0, duration), 24);
                 turnosConDatosReales++;
             }
             // Fix 1: acumular horas FT reales (solo trabajadas)
@@ -704,7 +760,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             // Acumular diurnas/nocturnas basado en horas reales trabajadas
             if (worked > 0) {
                 const effS = rStart || start;
-                const effE = rEnd || new Date(effS.getTime() + worked * 3600000);
+                const effE = rEnd || effectiveEndForBillableDuration(effS, end, worked);
                 const nightWorked = getNightDuration(effS, effE);
                 totalNocturnas += nightWorked;
                 totalDiurnas += Math.max(0, worked - nightWorked);
