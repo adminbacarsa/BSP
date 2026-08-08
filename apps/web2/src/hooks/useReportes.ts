@@ -21,6 +21,11 @@ import {
 } from '@/lib/planificacion/deploymentRoles';
 import { RET_STANDBY_REFERENCE_HOURS } from '@/lib/planificacion/constants';
 import { getCctPayrollPeriodByOffset } from '@/lib/cctPayrollPeriod';
+import {
+    fetchReportAjustesHoras,
+    fetchReportAusencias,
+    fetchReportPlanificacionEstados,
+} from '@/lib/reportFirestoreQueries';
 
 // --- CONSTANTES Y HELPERS ---
 // Francos/licencias/retÃ©n: no computan horas de liquidaciÃ³n del empleado.
@@ -1129,12 +1134,37 @@ export const useReportes = (forcedClientId?: string | null) => {
 
             // Consulta acotada por alcance (empleado > objetivo > cliente > empresa + fechas)
             const q = buildReportTurnosQuery(startDate, endDate, empresaId, scopeEmpresa, fetchScope);
+            const scopeEmpId = String(fetchScope?.employeeId ?? '').trim();
+            const scopeObjId = String(fetchScope?.objectiveId ?? '').trim();
+            const rangeStartYmd = dateRange.start;
+            const rangeEndYmd = dateRange.end;
 
-            const planifSnap = await getDocs(
-                empresaScopedQuery('planificacion_estados', empresaId, scopeEmpresa) as ReturnType<typeof query>,
-            );
+            const [planifDocs, shiftsSnap, ausDocs, ajustesDocs] = await Promise.all([
+                fetchReportPlanificacionEstados(
+                    empresaId,
+                    scopeEmpresa,
+                    rangeStartYmd,
+                    rangeEndYmd,
+                    scopeObjId || undefined,
+                ),
+                getDocs(q),
+                fetchReportAusencias(
+                    empresaId,
+                    scopeEmpresa,
+                    rangeStartYmd,
+                    rangeEndYmd,
+                    scopeEmpId || undefined,
+                ),
+                fetchReportAjustesHoras(
+                    empresaId,
+                    rangeStartYmd,
+                    rangeEndYmd,
+                    scopeEmpId || undefined,
+                ),
+            ]);
+
             const publishStatusMap: Record<string, boolean> = {};
-            planifSnap.docs.forEach(d => {
+            planifDocs.forEach(d => {
                 if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
                 const parsed = parsePlanificacionEstadoDocId(d.id);
                 if (parsed) {
@@ -1143,8 +1173,6 @@ export const useReportes = (forcedClientId?: string | null) => {
                 publishStatusMap[d.id] = true;
             });
 
-            const shiftsSnap = await getDocs(q);
-            
             // Base sin publishFilter: necesario para detectar FT (el turno F puede ser borrador)
             const allShiftsBase = shiftsSnap.docs
                 .map(doc => ({ id: doc.id, ...doc.data() }))
@@ -1176,12 +1204,9 @@ export const useReportes = (forcedClientId?: string | null) => {
                 isShiftEligibleForReports(d, publishStatusMap, publishFilter)
             );
 
-            const ausSnap = await getDocs(
-                empresaScopedQuery('ausencias', empresaId, scopeEmpresa) as ReturnType<typeof query>,
-            );
             const absenceById: Record<string, any> = {};
             const absenceByEmpDate: Record<string, any> = {};
-            ausSnap.docs.forEach(d => {
+            ausDocs.forEach(d => {
                 const data = d.data();
                 if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
                 const absDoc = { id: d.id, ...data };
@@ -1360,11 +1385,8 @@ export const useReportes = (forcedClientId?: string | null) => {
             });
 
             // Ajustes de horas manuales â€” sumar/restar del total teÃ³rico del empleado
-            const ajustesSnap = await getDocs(
-                query(collection(db, 'ajustes_horas'), where('empresaId', '==', empresaId))
-            );
             const ajustesByEmp: Record<string, number> = {};
-            ajustesSnap.docs.forEach(d => {
+            ajustesDocs.forEach(d => {
                 const data = d.data();
                 if (data.tipo !== 'AJUSTE_HORAS') return;
                 const fechaDate = data.fecha?.toDate ? data.fecha.toDate() : null;

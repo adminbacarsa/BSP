@@ -54,6 +54,14 @@
       "collectionGroup": "ausencias",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "employeeId", "order": "ASCENDING" },
+        { "fieldPath": "startDate",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ausencias",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "status",  "order": "ASCENDING" },
         { "fieldPath": "endDate", "order": "ASCENDING" }
       ]
@@ -221,6 +229,14 @@
       "fields": [
         { "fieldPath": "empresaId", "order": "ASCENDING" },
         { "fieldPath": "startDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ajustes_horas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "fecha", "order": "ASCENDING" }
       ]
     },
     {

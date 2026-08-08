@@ -9,6 +9,7 @@ import {
 import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import {
     ReportClearButton,
+    ReportEmployeeLookup,
     ReportFilterSection,
     ReportSearchSelect,
     ReportSelectField,
@@ -28,6 +29,13 @@ import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, 
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import {
+    formatCctPeriodLabel,
+    formatCctPeriodRangeDisplay,
+    getCctPayrollPeriodByOffset,
+    getCctPayrollPeriodContaining,
+    isSameCctPeriod,
+} from '@/lib/cctPayrollPeriod';
 
 // --- ESTILOS DE IMPRESIÓN (MANTENIDOS) ---
 const PrintStyles = () => (
@@ -144,6 +152,9 @@ export default function ReportsPage() {
     } = useReportes(assignedClientId);
 
     const [empSortBy, setEmpSortBy] = useState<'name' | 'legajo'>('name');
+    const [liqQueryEmployeeId, setLiqQueryEmployeeId] = useState('');
+    const [liqQueryEmployeeSearch, setLiqQueryEmployeeSearch] = useState('');
+    const [liqTableSearch, setLiqTableSearch] = useState('');
 
     const [activeTab, setActiveTab] = useState<'EMPLOYEE' | 'OBJECTIVE' | 'AUDIT' | 'SHIFTS' | 'PLANIFICADO' | 'SERVICIOS'>('EMPLOYEE');
     const [selectedDetailEmployee, setSelectedDetailEmployee] = useState<string>('');
@@ -177,6 +188,8 @@ export default function ReportsPage() {
     const [planDetailCollapsed, setPlanDetailCollapsed] = useState(false);
     const [planEmployeeSearch, setPlanEmployeeSearch] = useState('');
     const [detailObjectiveSearch, setDetailObjectiveSearch] = useState('');
+    const [detailDaySearch, setDetailDaySearch] = useState('');
+    const [detailAdvancedOpen, setDetailAdvancedOpen] = useState(false);
     const [auditActorSearch, setAuditActorSearch] = useState('');
     const [objFilterClientSearch, setObjFilterClientSearch] = useState('');
     const [auditFilterActor, setAuditFilterActor] = useState<string>('');
@@ -222,6 +235,21 @@ export default function ReportsPage() {
         if (auth.currentUser) setCurrentUserName(auth.currentUser.displayName || auth.currentUser.email || "Usuario");
     }, []);
 
+    const liqCatalogEmployees = useMemo(() => {
+        return Object.entries(empMap)
+            .map(([id, name]) => ({
+                id,
+                name,
+                legajo: empMetaMap[id]?.legajo || '',
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    }, [empMap, empMetaMap]);
+
+    const cctPeriodForSelectedRange = useMemo(
+        () => getCctPayrollPeriodContaining(new Date(`${dateRange.end}T12:00:00`)),
+        [dateRange.end],
+    );
+
     const sortedEmployeeReport = useMemo(() => {
         const list = [...employeeReport];
         if (empSortBy === 'legajo') {
@@ -238,8 +266,13 @@ export default function ReportsPage() {
         } else {
             list.sort((a, b) => a.name.localeCompare(b.name));
         }
-        return list;
-    }, [employeeReport, empSortBy]);
+        const q = liqTableSearch.trim().toLowerCase();
+        if (!q) return list;
+        return list.filter((row) => {
+            const hay = `${row.name} ${row.legajo || ''}`.toLowerCase();
+            return hay.includes(q);
+        });
+    }, [employeeReport, empSortBy, liqTableSearch]);
 
     const shiftObjectiveName = useCallback((s: any) =>
         String(s.objectiveName || objMap[s.objectiveId] || '').trim(),
@@ -469,8 +502,12 @@ export default function ReportsPage() {
             generateReports(scope);
             return;
         }
+        if (activeTab === 'EMPLOYEE' && liqQueryEmployeeId) {
+            generateReports({ employeeId: liqQueryEmployeeId });
+            return;
+        }
         generateReports();
-    }, [activeTab, buildPlanFetchScope, generateReports, loadAudit, clearPlanFilters]);
+    }, [activeTab, buildPlanFetchScope, generateReports, loadAudit, clearPlanFilters, liqQueryEmployeeId]);
 
     const planDetailMeta = useMemo(() => {
         if (!objectiveReport.length) {
@@ -783,7 +820,13 @@ export default function ReportsPage() {
 
     const renderEmployeeTable = () => {
         const rows = sortedEmployeeReport;
-        const grandTotal = employeeReport.reduce((acc, curr) => ({
+        const sourceRows = liqTableSearch.trim()
+            ? employeeReport.filter((row) => {
+                const q = liqTableSearch.trim().toLowerCase();
+                return `${row.name} ${row.legajo || ''}`.toLowerCase().includes(q);
+            })
+            : employeeReport;
+        const grandTotal = sourceRows.reduce((acc, curr) => ({
             shifts: acc.shifts + curr.shifts,
             total: acc.total + curr.total,
             horasReales: acc.horasReales + (curr.horasReales ?? 0),
@@ -796,16 +839,30 @@ export default function ReportsPage() {
         }), { shifts: 0, total: 0, horasReales: 0, horasExtra: 0, diurnas: 0, nocturnas: 0, extra50: 0, extra100: 0, plusFeriado: 0 });
 
         return (
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
-                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap justify-between items-center gap-3 bg-slate-50 dark:bg-slate-700/50 no-print">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap justify-between items-center gap-3 bg-gradient-to-r from-slate-50 to-indigo-50/40 dark:from-slate-800 dark:to-indigo-950/20 no-print">
                     <div>
-                        <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Users size={16}/> Liquidación de Horas</h3>
-                        <p className="text-[10px] text-slate-400 mt-1">
-                            Filtro: {publishFilter === 'published' ? 'Solo cronos publicados' : publishFilter === 'unpublished' ? 'Solo borradores / no publicados' : 'Todos los turnos (publicados y borrador)'}
-                            {usePlannedHours && <span className="ml-2 text-slate-900 dark:text-slate-100 font-bold">· Horas planificadas (sin fichada)</span>}
+                        <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Users size={16}/> Liquidación de sueldos</h3>
+                        <p className="text-[10px] text-slate-500 mt-1 max-w-xl">
+                            Por legajo · toda la plantilla · sin desglose por cliente.
+                            {' '}Período CCT: <span className="font-bold text-slate-700 dark:text-slate-200">{formatCctPeriodRangeDisplay(cctPeriodForSelectedRange)}</span>
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                            Cronograma: {publishFilter === 'published' ? 'solo publicados' : publishFilter === 'unpublished' ? 'solo borrador' : 'publicados + borrador'}
+                            {usePlannedHours && <span className="ml-2 text-indigo-600 dark:text-indigo-400 font-bold">· Horas planificadas</span>}
                         </p>
                     </div>
-                    <div className="flex flex-wrap gap-2 items-center">
+                    <div className="flex flex-wrap gap-2 items-center w-full sm:w-auto">
+                        <div className="relative flex-1 min-w-[200px] sm:min-w-[220px]">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" aria-hidden />
+                            <input
+                                type="search"
+                                value={liqTableSearch}
+                                onChange={(e) => setLiqTableSearch(e.target.value)}
+                                placeholder="Buscar en la grilla (nombre o legajo)…"
+                                className={`${RPT_SEARCH_INPUT} pl-9`}
+                            />
+                        </div>
                         <select
                             value={empSortBy}
                             onChange={e => setEmpSortBy(e.target.value as 'name' | 'legajo')}
@@ -855,7 +912,7 @@ export default function ReportsPage() {
                             {rows.map(row => {
                                 const horasReales = row.horasReales ?? 0;
                                 return (
-                                <tr key={row.id} className="hover:bg-indigo-50/30 cursor-pointer group" onClick={() => { setDetailItem(row); setDetailFilterTimeFrom(''); setDetailFilterTimeTo(''); setDetailFilterEmployee(''); setDetailFilterObjective(''); setDetailFilterStatus(''); }}>
+                                <tr key={row.id} className="hover:bg-indigo-50/30 cursor-pointer group" onClick={() => { setDetailItem(row); setDetailFilterTimeFrom(''); setDetailFilterTimeTo(''); setDetailFilterEmployee(''); setDetailFilterObjective(''); setDetailFilterStatus(''); setDetailDaySearch(''); setDetailAdvancedOpen(false); }}>
                                     <td className="p-4 font-mono text-xs text-slate-500">{row.legajo || '—'}</td>
                                     <td className="p-4 font-bold text-slate-700">
                                         {row.name}
@@ -1108,38 +1165,58 @@ export default function ReportsPage() {
 
         const NON_WORK_CODES_DETAIL = new Set(['F','FF','V','L','PG','A','E','AA','FP']);
 
-        const LEAVE_DETAIL_CODES = new Set(['V', 'L', 'PG', 'E', 'A', 'AA']);
-
         // — Opciones para dropdowns —
         const baseShifts = dedupeShiftsByAbsencePriority(
             propagateFrancoTrabajadoFlags(detailItem.rawShifts || [], { usePlannedHours }),
             { usePlannedHours },
         );
         const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(baseShifts, { usePlannedHours });
-        const allStatuses = [...new Set(baseShifts.map((s:any) => s.status).filter(Boolean))].sort();
         const allObjectivesDetail = [...new Set(baseShifts.map((s:any) => s.objectiveName || objMap[s.objectiveId] || '').filter(Boolean))].sort();
         const objectivesForSelect = detailObjectiveSearch.trim()
             ? allObjectivesDetail.filter(o => o.toLowerCase().includes(detailObjectiveSearch.trim().toLowerCase()))
             : allObjectivesDetail;
 
+        const shiftDetailStatusKey = (s: any): string => {
+            const rawCode = String(s.code || '').trim().toUpperCase();
+            if (rawCode === 'V') return 'VACACIONES';
+            if (rawCode === 'L') return 'LICENCIA';
+            if (rawCode === 'PG') return 'PERM_GREMIAL';
+            if (rawCode === 'E') return 'ENFERMEDAD';
+            if (rawCode === 'A') return 'ART';
+            if (rawCode === 'AA') return 'AUS_INJUST';
+            if (rawCode === 'F' || rawCode === 'FF' || rawCode === 'FP') return 'FRANCO';
+            const st = String(s.status || '').toUpperCase();
+            if (st === 'COMPLETED' || s.isCompleted) return 'COMPLETADO';
+            if (st === 'PRESENT' || s.isPresent) return 'PRESENTE';
+            if (s.isAbsent || st === 'ABSENT') return 'AUSENTE';
+            return 'PENDIENTE';
+        };
+
+        const detailStatusOptions: { value: string; label: string }[] = [
+            { value: 'PENDIENTE', label: 'Pendiente' },
+            { value: 'COMPLETADO', label: 'Completado' },
+            { value: 'PRESENTE', label: 'Presente' },
+            { value: 'AUSENTE', label: 'Ausente' },
+            { value: 'FRANCO', label: 'Franco' },
+            { value: 'VACACIONES', label: 'Vacaciones' },
+            { value: 'LICENCIA', label: 'Licencia' },
+            { value: 'ENFERMEDAD', label: 'Enfermedad' },
+            { value: 'ART', label: 'ART' },
+            { value: 'PERM_GREMIAL', label: 'Permiso gremial' },
+            { value: 'AUS_INJUST', label: 'Aus. injustificada' },
+        ];
+
+        const daySearchQ = detailDaySearch.trim().toLowerCase();
+
         // — Aplicar filtros a los turnos crudos —
-        const now = new Date();
         const filteredRawShifts = baseShifts.filter((s:any) => {
             const startSec = s.startTime?.seconds ?? s.startTime?._seconds ?? 0;
             const start = new Date(startSec * 1000);
 
-            const code = String(s.code || '').toUpperCase();
-            const hasRealStatus = s.isCompleted || s.isPresent
-                || s.checkInTime?.seconds || s.realStartTime?.seconds
-                || (s.status || '').toUpperCase() === 'COMPLETED'
-                || (s.status || '').toUpperCase() === 'PRESENT'
-                || LEAVE_DETAIL_CODES.has(code) || s.type === 'NOVEDAD';
-            if (start > now && !hasRealStatus && !usePlannedHours) return false;
-
             const hhmm = `${String(start.getHours()).padStart(2,'0')}:${String(start.getMinutes()).padStart(2,'0')}`;
             if (detailFilterTimeFrom && hhmm < detailFilterTimeFrom) return false;
             if (detailFilterTimeTo && hhmm > detailFilterTimeTo) return false;
-            if (detailFilterStatus && s.status !== detailFilterStatus) return false;
+            if (detailFilterStatus && shiftDetailStatusKey(s) !== detailFilterStatus) return false;
             if (detailFilterObjective) {
                 const objName = s.objectiveName || objMap[s.objectiveId] || '';
                 if (objName !== detailFilterObjective) return false;
@@ -1148,6 +1225,12 @@ export default function ReportsPage() {
                 if (!objName.includes(detailObjectiveSearch.trim().toLowerCase())) return false;
             }
             if (detailFilterEmployee && s.employeeName !== detailFilterEmployee) return false;
+            if (daySearchQ) {
+                const dateLbl = start.toLocaleDateString('es-AR').toLowerCase();
+                const code = String(s.code || '').toLowerCase();
+                const obj = String(s.objectiveName || objMap[s.objectiveId] || '').toLowerCase();
+                if (!dateLbl.includes(daySearchQ) && !code.includes(daySearchQ) && !obj.includes(daySearchQ)) return false;
+            }
             return true;
         });
 
@@ -1254,30 +1337,74 @@ export default function ReportsPage() {
         const permisoGremialDias  = rowsWithData.filter((r: any) => r.code === 'PG').length;
 
         return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm no-print" onClick={() => { setDetailItem(null); setLeavePopoverId(null); }}>
-                <div className="bg-white w-full max-w-[95vw] rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-                    <div className="p-6 bg-slate-50 border-b">
-                        <div className="flex justify-between items-start mb-4">
-                            <div>
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">DETALLE DE HORAS</p>
-                                <h2 className="text-2xl font-black text-slate-800 uppercase flex items-center gap-2">
-                                    <Users size={24} className="text-indigo-600"/> {detailItem.name}
-                                </h2>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/80 backdrop-blur-sm no-print" onClick={() => { setDetailItem(null); setLeavePopoverId(null); }}>
+                <div className="bg-white dark:bg-slate-900 w-full max-w-6xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh] border border-slate-200 dark:border-slate-700 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                    <div className="px-5 py-4 sm:px-6 sm:py-5 bg-gradient-to-br from-indigo-600 to-slate-900 text-white shrink-0">
+                        <div className="flex justify-between items-start gap-4">
+                            <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200 mb-1">Detalle de liquidación</p>
+                                <h2 className="text-xl sm:text-2xl font-black uppercase leading-tight truncate">{detailItem.name}</h2>
+                                <p className="text-xs text-indigo-100 mt-2 flex flex-wrap gap-x-2 gap-y-1">
+                                    <span>Legajo <span className="font-mono font-bold text-white">{detailItem.legajo || '—'}</span></span>
+                                    <span className="text-indigo-300 hidden sm:inline">·</span>
+                                    <span>{formatCctPeriodRangeDisplay(cctPeriodForSelectedRange)}</span>
+                                    <span className="text-indigo-300 hidden sm:inline">·</span>
+                                    <span>{baseShifts.length} días en período</span>
+                                </p>
                             </div>
-                            <button onClick={() => { setDetailItem(null); setLeavePopoverId(null); }} className="p-2 bg-white rounded-full border hover:bg-slate-100"><X size={20}/></button>
+                            <button type="button" onClick={() => { setDetailItem(null); setLeavePopoverId(null); }} className="p-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 shrink-0" aria-label="Cerrar detalle"><X size={20}/></button>
                         </div>
-                        {/* Filtros */}
-                        <div className="flex flex-wrap gap-2 items-end">
-                            {allObjectivesDetail.length > 1 && (
-                                <div className="flex flex-col gap-1 min-w-[180px]">
-                                    <span className="text-[10px] font-black text-slate-400 uppercase">Objetivo</span>
-                                    <input
-                                        type="search"
-                                        placeholder="Buscar objetivo..."
-                                        value={detailObjectiveSearch}
-                                        onChange={e => setDetailObjectiveSearch(e.target.value)}
-                                        className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                    />
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+                            {[
+                                { label: 'Hs. liquidación', value: totalSum.horasTrabajadas.toFixed(1), accent: 'text-emerald-300' },
+                                { label: 'Diurnas', value: totalSum.day.toFixed(1), accent: 'text-amber-200' },
+                                { label: 'Nocturnas', value: totalSum.night.toFixed(1), accent: 'text-violet-200' },
+                                { label: 'Al 50%', value: excedente > 0 ? excedente.toFixed(1) : '—', accent: 'text-orange-200' },
+                            ].map((k) => (
+                                <div key={k.label} className="rounded-2xl bg-white/10 border border-white/15 px-3 py-2 shadow-sm">
+                                    <p className="text-[9px] font-black uppercase text-indigo-200">{k.label}</p>
+                                    <p className={`text-lg font-black tabular-nums ${k.accent}`}>{k.value}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="px-4 sm:px-5 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 shrink-0 space-y-2">
+                        <div className="flex flex-wrap gap-2 items-center">
+                            <div className="relative flex-1 min-w-[200px]">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-500 pointer-events-none" aria-hidden />
+                                <input
+                                    type="search"
+                                    value={detailDaySearch}
+                                    onChange={(e) => setDetailDaySearch(e.target.value)}
+                                    placeholder="Buscar fecha, código o puesto…"
+                                    className={`${RPT_SEARCH_INPUT} pl-10 h-10 w-full`}
+                                />
+                            </div>
+                            <select
+                                value={detailFilterStatus}
+                                onChange={e => setDetailFilterStatus(e.target.value)}
+                                className="h-10 px-3 rounded-2xl border-2 border-slate-100 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 min-w-[140px]"
+                            >
+                                <option value="">Todos los estados</option>
+                                {detailStatusOptions.map((o) => (
+                                    <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                onClick={() => setDetailAdvancedOpen((v) => !v)}
+                                className="h-10 px-3 rounded-2xl border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 hover:border-indigo-300"
+                            >
+                                {detailAdvancedOpen ? 'Menos filtros' : 'Más filtros'}
+                            </button>
+                            <span className="text-[10px] font-bold text-slate-500 tabular-nums px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-700">
+                                {rowsWithData.length} / {baseShifts.length} filas
+                            </span>
+                        </div>
+                        {detailAdvancedOpen && (
+                            <div className="flex flex-wrap gap-2 items-end pt-1 border-t border-slate-200/80 dark:border-slate-700">
+                                {allObjectivesDetail.length > 1 && (
                                     <select
                                         value={detailFilterObjective}
                                         onChange={e => {
@@ -1285,53 +1412,66 @@ export default function ReportsPage() {
                                             setDetailFilterObjective(v);
                                             if (v) setDetailObjectiveSearch(v);
                                         }}
-                                        className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                        className="h-9 px-2 rounded-xl border border-slate-200 text-xs font-bold min-w-[180px]"
                                     >
-                                        <option value="">Todos los objetivos</option>
+                                        <option value="">Todos los puestos</option>
                                         {objectivesForSelect.map((o:string) => <option key={o} value={o}>{o}</option>)}
                                     </select>
+                                )}
+                                <div className="flex items-center gap-1">
+                                    <span className="text-[10px] font-black text-slate-400 uppercase">Hora inicio</span>
+                                    <input type="time" value={detailFilterTimeFrom} onChange={e => setDetailFilterTimeFrom(e.target.value)}
+                                        className="text-xs border border-slate-200 rounded-xl px-2 py-1.5 bg-white"/>
+                                    <span className="text-slate-400 text-xs">—</span>
+                                    <input type="time" value={detailFilterTimeTo} onChange={e => setDetailFilterTimeTo(e.target.value)}
+                                        className="text-xs border border-slate-200 rounded-xl px-2 py-1.5 bg-white"/>
                                 </div>
-                            )}
-                            <div className="flex items-center gap-1">
-                                <span className="text-[10px] font-black text-slate-400 uppercase">Hora:</span>
-                                <input type="time" value={detailFilterTimeFrom} onChange={e => setDetailFilterTimeFrom(e.target.value)}
-                                    className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
-                                <span className="text-slate-400 text-xs">—</span>
-                                <input type="time" value={detailFilterTimeTo} onChange={e => setDetailFilterTimeTo(e.target.value)}
-                                    className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+                                {(detailFilterTimeFrom || detailFilterTimeTo || detailFilterObjective || detailFilterStatus || detailDaySearch) && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setDetailFilterTimeFrom('');
+                                            setDetailFilterTimeTo('');
+                                            setDetailFilterObjective('');
+                                            setDetailObjectiveSearch('');
+                                            setDetailFilterStatus('');
+                                            setDetailDaySearch('');
+                                        }}
+                                        className="text-[10px] font-black uppercase text-rose-600 px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100"
+                                    >
+                                        Limpiar
+                                    </button>
+                                )}
                             </div>
-                            <select value={detailFilterStatus} onChange={e => setDetailFilterStatus(e.target.value)}
-                                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                                <option value="">Todos los estados</option>
-                                {allStatuses.map((st:string) => <option key={st} value={st}>{st}</option>)}
-                            </select>
-                            {(detailFilterTimeFrom || detailFilterTimeTo || detailFilterObjective || detailObjectiveSearch || detailFilterStatus) && (
-                                <button onClick={() => { setDetailFilterTimeFrom(''); setDetailFilterTimeTo(''); setDetailFilterObjective(''); setDetailObjectiveSearch(''); setDetailFilterStatus(''); }}
-                                    className="text-[10px] font-black text-rose-500 hover:text-rose-700 px-2 py-1.5 border border-rose-200 rounded-lg bg-rose-50 hover:bg-rose-100">
-                                    Limpiar filtros
-                                </button>
-                            )}
-                            <span className="text-[10px] text-slate-400 ml-auto">{rowsWithData.length} turnos</span>
-                        </div>
+                        )}
+                        {usePlannedHours && (
+                            <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">Modo horas planificadas activo en el reporte.</p>
+                        )}
                     </div>
-                    <div className="flex-1 overflow-auto bg-slate-50 p-3">
-                        <table className="w-full min-w-[820px] text-xs text-left border-collapse bg-white shadow-sm rounded-xl overflow-hidden">
-                            <thead className="text-[10px] font-black text-slate-500 uppercase border-b border-slate-200 bg-slate-100">
+
+                    <div className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-950 p-3 sm:p-4 min-h-0">
+                        {rowsWithData.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-slate-300 bg-white dark:bg-slate-900 p-10 text-center text-slate-500 text-sm font-medium">
+                                No hay filas con los filtros actuales. Probá limpiar la búsqueda o ampliar el período del reporte.
+                            </div>
+                        ) : (
+                        <table className="w-full min-w-[720px] text-xs text-left border-collapse bg-white dark:bg-slate-900 shadow-sm rounded-2xl overflow-hidden">
+                            <thead className="text-[10px] font-black text-slate-500 uppercase border-b border-slate-200 bg-slate-50 dark:bg-slate-800 sticky top-0 z-10">
                                 <tr>
-                                    <th className="py-2 px-2">Fecha</th>
-                                    <th className="py-2 px-2">Planificado</th>
-                                    <th className="py-2 px-2">Real</th>
-                                    <th className="py-2 px-2 text-center">Tipo</th>
-                                    <th className="py-2 px-2 text-center border-l border-slate-200 text-slate-400">Hs. Teór.</th>
-                                    <th className="py-2 px-2 text-center text-indigo-600">Hs. Reales</th>
-                                    <th className="py-2 px-2 text-center text-amber-500">Diurnas</th>
-                                    <th className="py-2 px-2 text-center text-violet-600">Nocturnas</th>
-                                    <th className="py-2 px-2 text-center text-rose-600 border-l border-slate-200">Al 100% (FT)</th>
-                                    <th className="py-2 px-2 text-center text-emerald-600">Plus Feriado</th>
-                                    <th className="py-2 px-2 text-center">Estado</th>
+                                    <th className="py-2.5 px-3">Fecha</th>
+                                    <th className="py-2.5 px-3">Planificado</th>
+                                    <th className="py-2.5 px-3">{usePlannedHours ? 'Horas (plan.)' : 'Fichada'}</th>
+                                    <th className="py-2.5 px-2 text-center">Cód.</th>
+                                    <th className="py-2.5 px-2 text-center border-l border-slate-200 text-slate-400">Teór.</th>
+                                    <th className="py-2.5 px-2 text-center text-indigo-600">Liq.</th>
+                                    <th className="py-2.5 px-2 text-center text-amber-600">Día</th>
+                                    <th className="py-2.5 px-2 text-center text-violet-600">Noche</th>
+                                    <th className="py-2.5 px-2 text-center text-rose-600">100%</th>
+                                    <th className="py-2.5 px-2 text-center text-emerald-600">Feriado</th>
+                                    <th className="py-2.5 px-3 text-center">Estado</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100">
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                                 {rowsWithData.map((row:any) => {
                                     const fmt = (d: Date) => d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false});
                                     const isLicenciaRow = ['L','PG','E','A'].includes(row.code);
@@ -1349,8 +1489,10 @@ export default function ReportsPage() {
                                             {row.isLeaveDay ? <span className="text-slate-300">—</span> : `${fmt(row.date)}${row.endDate ? `–${fmt(row.endDate)}` : ''}`}
                                         </td>
                                         <td className="py-2 px-2 font-mono whitespace-nowrap">
-                                            {row.rStart && row.rEnd
-                                                ? <span className={row.hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-500'}>{fmt(row.rStart)}–{fmt(row.rEnd)}</span>
+                                            {usePlannedHours && !row.isLeaveDay
+                                                ? <span className="text-indigo-600 font-bold">{row.total > 0 ? `${row.total.toFixed(1)} h` : '—'}</span>
+                                                : row.rStart && row.rEnd
+                                                ? <span className={row.hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-600'}>{fmt(row.rStart)}–{fmt(row.rEnd)}</span>
                                                 : <span className="text-slate-300">—</span>}
                                         </td>
                                         <td className="py-2 px-2 text-center relative">
@@ -1417,55 +1559,53 @@ export default function ReportsPage() {
                                     );
                                 })}
                             </tbody>
-                            <tfoot className="bg-slate-900 text-white font-bold text-xs">
+                            <tfoot className="bg-slate-800 text-white font-bold text-xs">
                                 <tr>
-                                    <td colSpan={4} className="py-3 px-3 text-right uppercase tracking-wider">Acumulado:</td>
-                                    <td className="py-3 px-3 text-center text-slate-400 border-l border-slate-700">{totalSum.total.toFixed(1)}</td>
-                                    <td className="py-3 px-3 text-center font-black text-emerald-400">{totalSum.horasTrabajadas.toFixed(1)}</td>
-                                    <td className="py-3 px-3 text-center text-amber-400">{totalSum.day.toFixed(1)}</td>
-                                    <td className="py-3 px-3 text-center text-violet-300">{totalSum.night.toFixed(1)}</td>
-                                    <td className="py-3 px-3 text-center text-rose-400 font-black border-l border-slate-700">{totalSum.h100.toFixed(1)}</td>
-                                    <td className="py-3 px-3 text-center text-emerald-400 font-black">{totalSum.hFeriado > 0 ? totalSum.hFeriado.toFixed(1) : '—'}</td>
-                                    <td></td>
-                                </tr>
-                                <tr className="bg-slate-800 border-t border-slate-700">
-                                    <td colSpan={4} className="py-3 px-3 text-right uppercase text-amber-400">Liquidación (204hs):</td>
-                                    <td colSpan={7} className="py-3 px-3">
-                                        <div className="flex justify-around items-center">
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[9px] text-slate-400 uppercase">Normales</span>
-                                                <span className="text-white font-mono text-lg">{horasSimples.toFixed(1)}</span>
-                                            </div>
-                                            <div className="h-8 w-px bg-slate-600"/>
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[9px] text-rose-400 uppercase">Ausencias</span>
-                                                <span className={`font-mono text-lg font-black ${ausenciasCount > 0 ? 'text-rose-400' : 'text-slate-600'}`}>{ausenciasCount > 0 ? ausenciasCount : '—'}</span>
-                                            </div>
-                                            <div className="h-8 w-px bg-slate-600"/>
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[9px] text-emerald-400 uppercase">Vacaciones</span>
-                                                <span className={`font-mono text-lg font-black ${vacacionesDias > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>{vacacionesDias > 0 ? `${vacacionesDias}d` : '—'}</span>
-                                            </div>
-                                            <div className="h-8 w-px bg-slate-600"/>
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[9px] text-blue-400 uppercase">Enfermedad</span>
-                                                <span className={`font-mono text-lg font-black ${enfermedadDias > 0 ? 'text-blue-400' : 'text-slate-600'}`}>{enfermedadDias > 0 ? `${enfermedadDias}d` : '—'}</span>
-                                            </div>
-                                            <div className="h-8 w-px bg-slate-600"/>
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[9px] text-orange-400 uppercase">ART</span>
-                                                <span className={`font-mono text-lg font-black ${artDias > 0 ? 'text-orange-400' : 'text-slate-600'}`}>{artDias > 0 ? `${artDias}d` : '—'}</span>
-                                            </div>
-                                            <div className="h-8 w-px bg-slate-600"/>
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[9px] text-violet-400 uppercase">P. Gremial</span>
-                                                <span className={`font-mono text-lg font-black ${permisoGremialDias > 0 ? 'text-violet-400' : 'text-slate-600'}`}>{permisoGremialDias > 0 ? `${permisoGremialDias}d` : '—'}</span>
-                                            </div>
-                                        </div>
-                                    </td>
+                                    <td colSpan={4} className="py-2.5 px-3 text-right uppercase tracking-wide text-slate-300">Subtotal visible</td>
+                                    <td className="py-2.5 px-2 text-center text-slate-400">{totalSum.total.toFixed(1)}</td>
+                                    <td className="py-2.5 px-2 text-center font-black text-emerald-400">{totalSum.horasTrabajadas.toFixed(1)}</td>
+                                    <td className="py-2.5 px-2 text-center text-amber-300">{totalSum.day.toFixed(1)}</td>
+                                    <td className="py-2.5 px-2 text-center text-violet-300">{totalSum.night.toFixed(1)}</td>
+                                    <td className="py-2.5 px-2 text-center text-rose-300">{totalSum.h100 > 0 ? totalSum.h100.toFixed(1) : '—'}</td>
+                                    <td className="py-2.5 px-2 text-center text-emerald-300">{totalSum.hFeriado > 0 ? totalSum.hFeriado.toFixed(1) : '—'}</td>
+                                    <td />
                                 </tr>
                             </tfoot>
                         </table>
+                        )}
+                    </div>
+
+                    <div className="shrink-0 border-t border-slate-200 dark:border-slate-700 bg-slate-900 text-white px-4 sm:px-5 py-4">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Resumen liquidación (bolsa 200 h)</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                            <div className="rounded-2xl bg-slate-800 border border-slate-700 px-3 py-2 text-center">
+                                <p className="text-[9px] uppercase text-slate-400">Normales</p>
+                                <p className="text-lg font-black tabular-nums">{horasSimples.toFixed(1)}</p>
+                            </div>
+                            <div className="rounded-2xl bg-slate-800 border border-slate-700 px-3 py-2 text-center">
+                                <p className="text-[9px] uppercase text-orange-400">Al 50%</p>
+                                <p className="text-lg font-black tabular-nums text-orange-300">{excedente > 0 ? excedente.toFixed(1) : '—'}</p>
+                            </div>
+                            <div className="rounded-2xl bg-slate-800 border border-slate-700 px-3 py-2 text-center">
+                                <p className="text-[9px] uppercase text-rose-400">Ausencias</p>
+                                <p className="text-lg font-black tabular-nums">{ausenciasCount > 0 ? ausenciasCount : '—'}</p>
+                            </div>
+                            <div className="rounded-2xl bg-slate-800 border border-slate-700 px-3 py-2 text-center">
+                                <p className="text-[9px] uppercase text-emerald-400">Vacaciones</p>
+                                <p className="text-lg font-black tabular-nums">{vacacionesDias > 0 ? `${vacacionesDias}d` : '—'}</p>
+                            </div>
+                            <div className="rounded-2xl bg-slate-800 border border-slate-700 px-3 py-2 text-center">
+                                <p className="text-[9px] uppercase text-sky-400">Enfermedad</p>
+                                <p className="text-lg font-black tabular-nums">{enfermedadDias > 0 ? `${enfermedadDias}d` : '—'}</p>
+                            </div>
+                            <div className="rounded-2xl bg-slate-800 border border-slate-700 px-3 py-2 text-center">
+                                <p className="text-[9px] uppercase text-violet-400">ART / P. gremial</p>
+                                <p className="text-lg font-black tabular-nums text-sm leading-tight mt-1">
+                                    {artDias > 0 ? `ART ${artDias}d` : '—'}
+                                    {permisoGremialDias > 0 ? ` · PG ${permisoGremialDias}d` : ''}
+                                </p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1750,7 +1890,7 @@ export default function ReportsPage() {
                 <div className="no-print">
                     <PageHeader
                         title="Centro de Reportes"
-                        subtitle="Liquidación CCT 507/07"
+                        subtitle="Liquidación CCT 507/07 · período 26 al 25"
                         icon={BarChart3}
                     />
                     <TabBar
@@ -1783,21 +1923,21 @@ export default function ReportsPage() {
                     <div className="w-full flex flex-wrap gap-2 items-center border-t border-slate-100 dark:border-slate-700 pt-3 mt-1">
                         <span className="text-[10px] font-black text-slate-400 uppercase shrink-0">Período:</span>
                         {[0, 1, 2, 3].map(offset => {
-                            const d = new Date();
-                            d.setMonth(d.getMonth() - offset);
-                            const ms = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`;
-                            const me = new Date(d.getFullYear(), d.getMonth()+1, 0);
-                            const mes = `${me.getFullYear()}-${String(me.getMonth()+1).padStart(2,'0')}-${String(me.getDate()).padStart(2,'0')}`;
-                            const lbl = d.toLocaleDateString('es-AR', { month: 'short', year: '2-digit' });
-                            const isActive = dateRange.start === ms && dateRange.end === mes;
+                            const period = getCctPayrollPeriodByOffset(offset);
+                            const lbl = formatCctPeriodLabel(period);
+                            const isActive = isSameCctPeriod(dateRange, period);
                             return (
-                                <button key={offset}
-                                    onClick={() => setDateRange({ start: ms, end: mes })}
+                                <button
+                                    key={offset}
+                                    type="button"
+                                    title={`${formatCctPeriodRangeDisplay(period)} (26 al 25)`}
+                                    onClick={() => setDateRange({ start: period.start, end: period.end })}
                                     className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${isActive ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:hover:bg-slate-600'}`}>
                                     {lbl}
                                 </button>
                             );
                         })}
+                        <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">CCT 26→25</span>
                         {(['Q1','Q2','Q3','Q4'] as const).map(q => {
                             const year = new Date().getFullYear();
                             const qm: Record<string,[number,number]> = { Q1:[1,3], Q2:[4,6], Q3:[7,9], Q4:[10,12] };
@@ -1815,6 +1955,24 @@ export default function ReportsPage() {
                             );
                         })}
                     </div>
+
+                    {activeTab === 'EMPLOYEE' && (
+                        <ReportFilterSection
+                            title="Empleado"
+                            subtitle="Opcional: un legajo acota la consulta en Firebase antes de generar."
+                        >
+                            <ReportEmployeeLookup
+                                label="Buscar empleado"
+                                hint={`Plantilla activa: ${liqCatalogEmployees.length} legajos. Sin selección = todos.`}
+                                employees={liqCatalogEmployees}
+                                selectedId={liqQueryEmployeeId}
+                                onSelectedIdChange={setLiqQueryEmployeeId}
+                                searchText={liqQueryEmployeeSearch}
+                                onSearchTextChange={setLiqQueryEmployeeSearch}
+                                placeholder="Escribí nombre o legajo…"
+                            />
+                        </ReportFilterSection>
+                    )}
 
                     {activeTab === 'SHIFTS' && (
                         <ReportFilterSection title="Filtros del detalle" subtitle="Refinan el reporte ya generado">
@@ -2134,7 +2292,38 @@ export default function ReportsPage() {
                 {/* ── KPI Resumen Ejecutivo ── */}
                 {(employeeReport.length > 0 || objectiveReport.length > 0) && (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
-                        {[
+                        {(activeTab === 'EMPLOYEE'
+                            ? [
+                                {
+                                    label: 'Legajos',
+                                    value: employeeReport.length,
+                                    sub: liqQueryEmployeeId ? 'consulta individual' : 'en el período',
+                                    icon: '👤',
+                                    color: 'from-indigo-500 to-indigo-600',
+                                },
+                                {
+                                    label: 'Hs. Teóricas',
+                                    value: employeeReport.reduce((a, c) => a + (c.total || 0), 0).toFixed(1),
+                                    sub: 'planificadas',
+                                    icon: '🕐',
+                                    color: 'from-sky-500 to-sky-600',
+                                },
+                                {
+                                    label: 'Hs. Reales',
+                                    value: employeeReport.reduce((a, c) => a + (c.horasReales ?? 0), 0).toFixed(1),
+                                    sub: 'liquidación',
+                                    icon: '✅',
+                                    color: 'from-emerald-500 to-emerald-600',
+                                },
+                                {
+                                    label: 'Al 50%',
+                                    value: employeeReport.reduce((a, c) => a + (c.extra50 || 0), 0).toFixed(1),
+                                    sub: 'excedente CCT',
+                                    icon: '⚡',
+                                    color: 'from-orange-500 to-orange-600',
+                                },
+                            ]
+                            : [
                             {
                                 label: 'Empleados',
                                 value: employeeReport.length,
@@ -2163,7 +2352,7 @@ export default function ReportsPage() {
                                 icon: '🏢',
                                 color: 'from-violet-500 to-violet-600',
                             },
-                        ].map(kpi => (
+                        ]).map(kpi => (
                             <div key={kpi.label} className="relative overflow-hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 shadow-sm">
                                 <div className={`absolute inset-0 bg-gradient-to-br ${kpi.color} opacity-5 dark:opacity-10`}/>
                                 <div className="relative flex items-start gap-3">
