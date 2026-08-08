@@ -106,3 +106,13 @@ export function resolveObjectiveDisplayName(
   }
   return 'Objetivo sin nombre';
 }
+
+/** Etiqueta visible en pre-factura cuando no hay nombre en CRM (varios objectiveId distintos). */
+export function formatProformaObjectiveLabel(objectiveId: string, objectiveName: string): string {
+  const name = String(objectiveName ?? '').trim();
+  if (name && name !== 'Objetivo sin nombre') return name;
+  const id = String(objectiveId ?? '').trim();
+  if (!id) return 'Objetivo sin nombre';
+  const short = id.length > 16 ? `${id.slice(0, 14)}…` : id;
+  return `Objetivo sin nombre · ${short}`;
+}

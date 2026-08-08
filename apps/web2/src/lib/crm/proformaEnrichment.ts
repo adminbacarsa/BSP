@@ -69,6 +69,29 @@ export function resolveEmployeeMeta(
   return { legajo: '—', name: 'Sin nombre' };
 }
 
+/** Resuelve legajos referenciados solo en turnos (inactivos, otro índice, etc.). */
+export async function hydrateEmployeeMetaFromTurnoIds(
+  index: Record<string, EmpMetaEntry>,
+  employeeIds: Iterable<string>,
+  loadEmployee: (docId: string) => Promise<Record<string, unknown> | null>,
+  maxLookups = 120,
+): Promise<void> {
+  const pending: string[] = [];
+  for (const raw of employeeIds) {
+    const eid = String(raw ?? '').trim();
+    if (!eid || eid === 'unknown' || eid === 'VACANTE') continue;
+    if (!index[eid]) pending.push(eid);
+  }
+  const unique = [...new Set(pending)].slice(0, maxLookups);
+  await Promise.all(
+    unique.map(async (eid) => {
+      const data = await loadEmployee(eid);
+      if (!data) return;
+      registerEmployeeMetaAliases(index, eid, data as Parameters<typeof registerEmployeeMetaAliases>[2]);
+    }),
+  );
+}
+
 export function findClientObjectiveForTurno(
   row: { objectiveId?: unknown; objectiveName?: unknown },
   objetivos: ClientObjetivoRef[],
@@ -85,6 +108,29 @@ export function findClientObjectiveForTurno(
     }
     if (oname && name && (oname === name || normKey(oname) === normKey(name))) {
       return { id: id || oid, name };
+    }
+  }
+  return null;
+}
+
+/** objectiveId en turno suele ser el doc id del SLA o un objectiveId legacy. */
+export function findSlaObjectiveForTurno(
+  row: { objectiveId?: unknown; objectiveName?: unknown },
+  slas: Array<{ id?: string; objectiveId?: string; objectiveName?: string }>,
+): { id: string; name: string } | null {
+  const oid = String(row.objectiveId ?? '').trim();
+  const oname = String(row.objectiveName ?? '').trim();
+  for (const sla of slas) {
+    const slaId = String(sla.id ?? '').trim();
+    const slaOid = String(sla.objectiveId ?? '').trim();
+    const slaName = String(sla.objectiveName ?? '').trim();
+    if (oid && (oid === slaId || oid === slaOid)) {
+      const id = slaOid || oid;
+      const name = slaName || oname || id;
+      if (name) return { id, name };
+    }
+    if (oname && slaName && normKey(oname) === normKey(slaName)) {
+      return { id: slaOid || slaId || oid, name: slaName };
     }
   }
   return null;
@@ -114,11 +160,17 @@ export function enrichTurnosForProforma<T extends Record<string, unknown>>(
       t.objectiveId = fromClient.id;
       t.objectiveName = fromClient.name;
     } else {
+      const fromSla = findSlaObjectiveForTurno(t, opts.slas);
+      if (fromSla) {
+        t.objectiveId = fromSla.id;
+        t.objectiveName = fromSla.name;
+      } else {
       const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId };
       const canonical = resolveCanonicalObjectiveId(rowCtx, aliases);
       const display = resolveObjectiveDisplayName(rowCtx, aliases);
       if (canonical) t.objectiveId = canonical;
       if (display !== 'Objetivo sin nombre') t.objectiveName = display;
+      }
     }
 
     const oid = String(t.objectiveId ?? '').trim();

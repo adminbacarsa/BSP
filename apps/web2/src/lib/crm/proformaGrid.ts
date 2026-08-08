@@ -7,6 +7,7 @@ import {
   type ObjectiveMeta,
   resolveCanonicalObjectiveId,
   resolveObjectiveDisplayName,
+  formatProformaObjectiveLabel,
 } from './objectiveIdentity';
 import { resolveEmployeeMeta } from './proformaEnrichment';
 import { getDateKeyInTimezone, resolveTurnoScheduleDateKey } from './crmDateUtils';
@@ -268,13 +269,13 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const dateKey = resolveTurnoScheduleDateKey(t as Record<string, unknown>) || getDateKeyInTimezone(start);
     const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId || opts.clientId };
     const objId = resolveCanonicalObjectiveId(rowCtx, aliases) || String(t.objectiveId || 'sin-id');
-    const objName = resolveObjectiveDisplayName(rowCtx, aliases);
+    const objName = formatProformaObjectiveLabel(objId, resolveObjectiveDisplayName(rowCtx, aliases));
     byObjective[objId] ||= {
       objectiveId: objId,
       objectiveName: objName,
       employees: {},
     };
-    if (objName !== 'Objetivo sin nombre') byObjective[objId].objectiveName = objName;
+    if (!objName.startsWith('Objetivo sin nombre')) byObjective[objId].objectiveName = objName;
 
     const empId = String(t.employeeId || 'unknown');
     const meta = resolveEmployeeMeta(opts.empMeta, empId, t.employeeName);
@@ -304,7 +305,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     if (!objId || byObjective[objId]) continue;
     byObjective[objId] = {
       objectiveId: objId,
-      objectiveName: resolveObjectiveDisplayName(rowCtx, aliases),
+      objectiveName: formatProformaObjectiveLabel(objId, resolveObjectiveDisplayName(rowCtx, aliases)),
       employees: {},
     };
   }
@@ -313,7 +314,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     .filter((obj) => {
       const hasRows = Object.keys(obj.employees).length > 0;
       if (hasRows) return true;
-      return obj.objectiveName !== 'Objetivo sin nombre' && !obj.objectiveName.includes('…');
+      return !obj.objectiveName.startsWith('Objetivo sin nombre') && !obj.objectiveName.includes('…');
     })
     .map((obj) => {
     const employees = Object.values(obj.employees)

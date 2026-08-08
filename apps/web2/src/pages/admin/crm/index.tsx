@@ -83,10 +83,11 @@ import {
 } from 'lucide-react';
 import ProformaPanel from '@/components/crm/ProformaPanel';
 import { formatMoney } from '@/lib/crm/proformaFormat';
-import { resolveObjectiveDisplayName } from '@/lib/crm/objectiveIdentity';
+import { resolveObjectiveDisplayName, formatProformaObjectiveLabel } from '@/lib/crm/objectiveIdentity';
 import {
   buildProformaObjectiveAliases,
   enrichTurnosForProforma,
+  hydrateEmployeeMetaFromTurnoIds,
   normalizeClientObjetivo,
   registerEmployeeMetaAliases,
 } from '@/lib/crm/proformaEnrichment';
@@ -1393,7 +1394,10 @@ export default function CRMPage() {
         const realEnd = toDateSafe(t.realEndTime);
 
         const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: selectedClient.id };
-        const objectiveName = resolveObjectiveDisplayName(rowCtx, objectiveAliases);
+        const objectiveName = formatProformaObjectiveLabel(
+          String(t.objectiveId || ''),
+          resolveObjectiveDisplayName(rowCtx, objectiveAliases),
+        );
         const positionName = (t.positionName || 'Sin puesto').toString().trim();
 
         const dateKey = resolveTurnoScheduleDateKey(t) || getDateKeyInTimezone(plannedStart!);
@@ -1460,6 +1464,11 @@ export default function CRMPage() {
         const data = d.data() as any;
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
         registerEmployeeMetaAliases(empMeta, d.id, data);
+      });
+      const turnoEmpIds = turnosEnriched.map((t) => String(t.employeeId ?? ''));
+      await hydrateEmployeeMetaFromTurnoIds(empMeta, turnoEmpIds, async (eid) => {
+        const snap = await getDoc(doc(db, 'empleados', eid));
+        return snap.exists() ? (snap.data() as Record<string, unknown>) : null;
       });
       setEmpMetaMap(empMeta);
 

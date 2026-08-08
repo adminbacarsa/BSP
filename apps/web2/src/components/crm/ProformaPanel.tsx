@@ -335,9 +335,19 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                       onClick={() => toggleGrid(grid.objectiveId)}
                       className="w-full px-6 py-3 flex flex-wrap items-center justify-between gap-2 text-left hover:bg-slate-50 transition-colors"
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        {isOpen ? <ChevronUp size={16} className="text-slate-400 shrink-0" /> : <ChevronDown size={16} className="text-slate-400 shrink-0" />}
-                        <p className="text-sm font-black text-slate-800 uppercase truncate">{grid.objectiveName}</p>
+                      <div className="flex flex-col gap-0.5 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isOpen ? <ChevronUp size={16} className="text-slate-400 shrink-0" /> : <ChevronDown size={16} className="text-slate-400 shrink-0" />}
+                          <p className="text-sm font-black text-slate-800 uppercase truncate">{grid.objectiveName}</p>
+                        </div>
+                        {grid.objectiveName.startsWith('Objetivo sin nombre') && (
+                          <p
+                            className="text-[9px] font-mono text-amber-800 pl-6 truncate max-w-md"
+                            title={`Copiar objectiveId para Firestore: ${grid.objectiveId}`}
+                          >
+                            objectiveId: {grid.objectiveId}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 shrink-0 text-[10px] font-bold">
                         <span className="text-slate-500">{periodLabel}</span>
