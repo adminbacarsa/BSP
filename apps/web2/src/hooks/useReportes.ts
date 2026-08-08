@@ -421,6 +421,62 @@ export function liquidationBillableHoursForShift(
     return calcPlanningBillableShiftHours(shift, slaHoursHint);
 }
 
+function applyHHmmToShiftDate(base: Date, hhmm: string): Date {
+    const m = String(hhmm).trim().slice(0, 5).match(/^(\d{1,2}):(\d{2})$/);
+    const d = new Date(base);
+    if (!m) return d;
+    d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+    return d;
+}
+
+/** Horario mostrado en liquidación: banda publicada + adelanto/extensión (alineado a CRM/planificador). */
+export function resolveLiquidationPlannedWindow(
+    shift: any,
+    plannedStart: Date,
+    plannedEnd: Date,
+    slaHoursHint: Record<string, number> = SHIFT_HOURS_LOOKUP,
+): { start: Date; end: Date; bandStart: Date; bandEnd: Date; hasCoverageAdjust: boolean } {
+    const bandStart = new Date(plannedStart);
+    const bandEnd = new Date(plannedEnd);
+    let dispStart = new Date(plannedStart);
+    let dispEnd = new Date(plannedEnd);
+
+    const role = String(shift?.coverageSegmentRole || '').toUpperCase();
+    const isEarly = shift?.isEarlyStart === true || role === 'EARLY_START';
+    const isExt = shift?.isExtended === true || role === 'EXTENSION';
+
+    if (isEarly) {
+        const from = shift.adjustedStartTime || shift.segmentFromTime;
+        if (from) dispStart = applyHHmmToShiftDate(plannedStart, String(from));
+    }
+    if (isExt) {
+        const to = shift.adjustedEndTime || shift.extensionEndTime || shift.segmentToTime;
+        if (to) {
+            dispEnd = applyHHmmToShiftDate(plannedEnd, String(to));
+            if (dispEnd.getTime() <= dispStart.getTime()) {
+                dispEnd.setDate(dispEnd.getDate() + 1);
+            }
+        }
+    }
+
+    const billable = liquidationBillableHoursForShift(shift, slaHoursHint);
+    const spanH = Math.max(0, (dispEnd.getTime() - dispStart.getTime()) / 3600000);
+    if (billable > spanH + 0.1) {
+        dispEnd = new Date(dispStart.getTime() + billable * 3600000);
+    } else if (isEarly && billable > spanH + 0.1) {
+        dispStart = new Date(dispEnd.getTime() - billable * 3600000);
+    }
+
+    const hasCoverageAdjust =
+        isEarly
+        || isExt
+        || Math.abs(dispStart.getTime() - bandStart.getTime()) > 60_000
+        || Math.abs(dispEnd.getTime() - bandEnd.getTime()) > 60_000
+        || billable > spanH + 0.1;
+
+    return { start: dispStart, end: dispEnd, bandStart, bandEnd, hasCoverageAdjust };
+}
+
 function effectiveEndForBillableDuration(start: Date, plannedEnd: Date, billableHours: number): Date {
     const plannedDur = Math.max(0, (plannedEnd.getTime() - start.getTime()) / 3600000);
     if (billableHours <= plannedDur + 0.15) return plannedEnd;

@@ -25,7 +25,7 @@ import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { shouldScopeQueriesToEmpresa, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 import { slaService } from '@/services/slaService';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, collapseShiftsByEmployeeDayForLiquidation, liquidationBillableHoursForShift, type ReportPublishFilter, type ReportFetchScope } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, collapseShiftsByEmployeeDayForLiquidation, liquidationBillableHoursForShift, resolveLiquidationPlannedWindow, type ReportPublishFilter, type ReportFetchScope } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -1272,20 +1272,19 @@ export default function ReportsPage() {
                 if (rStart && rEnd) { const rd = (rEnd.getTime()-rStart.getTime())/3600000; rDur = rd >= 0 && rd <= 36 ? rd : null; }
 
                 const isRetentionShift = s.isRetention === true;
-                // Diurnas/nocturnas: reales si hay fichada; planificadas si usePlannedHours
-                const activeStart = rStart ?? start;
-                const activeEnd = rEnd ?? end;
+                const plannedWindow = resolveLiquidationPlannedWindow(s, start, end, SHIFT_HOURS_LOOKUP);
+                const planStart = plannedWindow.start;
+                const planEnd = plannedWindow.end;
+                // Diurnas/nocturnas: reales si hay fichada; planificadas con ventana de adelanto/extensión
+                const activeStart = rStart ?? (usePlannedHours ? planStart : start);
+                const activeEnd = rEnd ?? (usePlannedHours ? planEnd : end);
                 const effectiveDur = rDur ?? ((isFT || usePlannedHours) && duration > 0 ? duration : 0);
                 const billableForRow = usePlannedHours
                     ? liquidationBillableHoursForShift(s, SHIFT_HOURS_LOOKUP)
                     : (effectiveDur > 0 ? effectiveDur : duration);
-                const plannedSpanH = Math.max(0, (activeEnd.getTime() - activeStart.getTime()) / 3600000);
-                const dayNightEnd = billableForRow > plannedSpanH + 0.15
-                    ? new Date(activeStart.getTime() + billableForRow * 3600000)
-                    : activeEnd;
                 const night = zeroHours || (!rStart && !rEnd && !usePlannedHours)
                     ? 0
-                    : getNightDuration(activeStart, dayNightEnd);
+                    : getNightDuration(activeStart, activeEnd);
                 const day = Math.max(0, billableForRow - night);
 
                 const dateKey = `${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`;
@@ -1304,6 +1303,13 @@ export default function ReportsPage() {
                     id: s.id,
                     date: start,
                     endDate: end,
+                    planDisplayStart: planStart,
+                    planDisplayEnd: planEnd,
+                    bandStart: plannedWindow.bandStart,
+                    bandEnd: plannedWindow.bandEnd,
+                    hasCoverageAdjust: plannedWindow.hasCoverageAdjust,
+                    isEarlyStartRow: s.isEarlyStart === true || String(s.coverageSegmentRole || '').toUpperCase() === 'EARLY_START',
+                    isExtendedRow: s.isExtended === true || String(s.coverageSegmentRole || '').toUpperCase() === 'EXTENSION',
                     code: isFT && rawCode !== 'FT' ? 'FT' : rawCode,
                     swapWith: s.swapWith,
                     isOp: !isNonWork,
@@ -1497,12 +1503,27 @@ export default function ReportsPage() {
                                 return (
                                     <tr key={row.id} className={`hover:bg-indigo-50/50 ${isLicenciaRow ? 'bg-blue-50/40 border-l-4 border-l-blue-300' : ''} ${row.hasOvertime ? 'bg-orange-50/30' : ''}`}>
                                         <td className="py-2 px-2 font-bold text-slate-700 whitespace-nowrap">{formatDate({seconds: row.date.getTime()/1000})}</td>
-                                        <td className="py-2 px-2 text-slate-500 font-mono whitespace-nowrap">
-                                            {row.isLeaveDay ? <span className="text-slate-300">—</span> : `${fmt(row.date)}${row.endDate ? `–${fmt(row.endDate)}` : ''}`}
+                                        <td className="py-2 px-2 text-slate-600 font-mono whitespace-nowrap">
+                                            {row.isLeaveDay ? (
+                                                <span className="text-slate-300">—</span>
+                                            ) : (
+                                                <div className="flex flex-col gap-0.5">
+                                                    <span className={row.hasCoverageAdjust ? 'text-indigo-700 font-bold' : 'text-slate-600'}>
+                                                        {fmt(row.planDisplayStart)}–{fmt(row.planDisplayEnd)}
+                                                    </span>
+                                                    {row.hasCoverageAdjust && (
+                                                        <span className="text-[9px] text-slate-400 font-sans normal-case font-medium">
+                                                            Banda {fmt(row.bandStart)}–{fmt(row.bandEnd)}
+                                                            {row.isEarlyStartRow ? ' · adelanto' : ''}
+                                                            {row.isExtendedRow ? ' · extensión' : ''}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="py-2 px-2 font-mono whitespace-nowrap">
                                             {usePlannedHours && !row.isLeaveDay
-                                                ? <span className="text-indigo-600 font-bold">{row.total > 0 ? `${row.total.toFixed(1)} h` : '—'}</span>
+                                                ? <span className="text-indigo-600 font-bold">{row.horasTrabajadas > 0 ? `${row.horasTrabajadas.toFixed(1)} h` : (row.total > 0 ? `${row.total.toFixed(1)} h` : '—')}</span>
                                                 : row.rStart && row.rEnd
                                                 ? <span className={row.hasOvertime ? 'text-orange-600 font-bold' : 'text-slate-600'}>{fmt(row.rStart)}–{fmt(row.rEnd)}</span>
                                                 : <span className="text-slate-300">—</span>}
@@ -1520,6 +1541,12 @@ export default function ReportsPage() {
                                             ) : (
                                                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase border ${detailCodeStyle}`}>
                                                     {row.code}
+                                                    {row.isEarlyStartRow && (
+                                                        <span className="ml-1 text-[8px] font-bold text-emerald-700 normal-case">adel.</span>
+                                                    )}
+                                                    {row.isExtendedRow && (
+                                                        <span className="ml-1 text-[8px] font-bold text-violet-700 normal-case">ext.</span>
+                                                    )}
                                                 </span>
                                             )}
                                             {leavePopoverId === row.id && (
