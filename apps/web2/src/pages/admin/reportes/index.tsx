@@ -7,6 +7,16 @@ import {
     Shield, CheckCircle2, Minus, RotateCw, Zap, Search
 } from 'lucide-react';
 import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
+import {
+    ReportClearButton,
+    ReportFilterSection,
+    ReportSearchSelect,
+    ReportSelectField,
+    RPT_FIELD_LABEL,
+    RPT_INPUT,
+    RPT_SEARCH_INPUT,
+    RPT_SELECT,
+} from '@/components/admin/reportes/ReportFilterFields';
 import { db } from '@/lib/firebase'; // Necesario para el log de descarga
 import { getAuth } from 'firebase/auth'; 
 import { collection, addDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
@@ -14,7 +24,7 @@ import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { shouldScopeQueriesToEmpresa, filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 import { slaService } from '@/services/slaService';
-import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, type ReportPublishFilter } from '@/hooks/useReportes';
+import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, mapAbsenceStatusLabel, LEAVE_REPORT_CODES, isLeaveReportShift, isReportVacancyShift, buildPayrollExportPayload, shouldBillShiftToObjective, isFrancoTrabajadoShift, propagateFrancoTrabajadoFlags, buildFrancoDocLiquidationSkipIds, resolveLiquidationWorkedHours, liquidacion200FromWorkedHours, type ReportPublishFilter, type ReportFetchScope } from '@/hooks/useReportes';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -64,6 +74,54 @@ const getNightDuration = (start: Date, end: Date) => {
     return durationMins / 60;
 };
 
+type PlanEmpMeta = {
+    name: string;
+    legajo: string;
+    preferredObjectiveId?: string;
+    experienciaObjetivos?: Record<string, unknown>;
+    planificacionDotacion?: Record<string, unknown>;
+};
+
+function collectEmployeeObjectiveKeys(
+    meta: PlanEmpMeta | undefined,
+    objectiveAliases: Record<string, { canonicalId: string; name: string; clientId: string }>,
+): Set<string> {
+    const keys = new Set<string>();
+    if (!meta) return keys;
+    const pref = String(meta.preferredObjectiveId ?? '').trim();
+    if (pref) {
+        keys.add(pref);
+        const m = objectiveAliases[pref];
+        if (m?.canonicalId) keys.add(m.canonicalId);
+        if (m?.name) keys.add(m.name);
+    }
+    Object.keys(meta.experienciaObjetivos || {}).forEach((k) => keys.add(String(k)));
+    Object.keys(meta.planificacionDotacion || {}).forEach((k) => keys.add(String(k)));
+    return keys;
+}
+
+function employeeMatchesPlanObjective(
+    empId: string,
+    objectiveId: string,
+    empMetaMap: Record<string, PlanEmpMeta>,
+    objectiveAliases: Record<string, { canonicalId: string; name: string; clientId: string }>,
+): boolean {
+    const target = String(objectiveId).trim();
+    if (!target) return true;
+    const empKeys = collectEmployeeObjectiveKeys(empMetaMap[empId], objectiveAliases);
+    if (empKeys.has(target)) return true;
+    const targetMeta = objectiveAliases[target];
+    if (!targetMeta) {
+        return [...empKeys].some((k) => k === target);
+    }
+    for (const k of empKeys) {
+        if (k === targetMeta.canonicalId || k === targetMeta.name) return true;
+        const km = objectiveAliases[k];
+        if (km && km.canonicalId === targetMeta.canonicalId) return true;
+    }
+    return false;
+}
+
 const DICTIONARY: Record<string, string> = {
     'MANUAL_CHECKIN': 'Fichada Manual', 'CHECKIN': 'Entrada', 'CHECKOUT': 'Salida',
     'ASIGNACION_TURNO': 'Asignación', 'ELIMINACION_TURNO': 'Eliminación',
@@ -82,7 +140,7 @@ export default function ReportsPage() {
         usePlannedHours, setUsePlannedHours,
         generateReports, loadAudit,
         employeeReport, objectiveReport, auditLogs,
-        objMap, empMap, holidaysData, SHIFT_HOURS_LOOKUP, OPERATIVE_CODES
+        objMap, empMap, empMetaMap, clientMap, objectiveAliases, holidaysData, SHIFT_HOURS_LOOKUP, OPERATIVE_CODES
     } = useReportes(assignedClientId);
 
     const [empSortBy, setEmpSortBy] = useState<'name' | 'legajo'>('name');
@@ -109,7 +167,12 @@ export default function ReportsPage() {
     const [planFilterObjective, setPlanFilterObjective] = useState<string>('');
     const [planFilterEmployee, setPlanFilterEmployee] = useState<string>('');
     const [planFilterDate, setPlanFilterDate] = useState<string>('');
+    const [planQueryClientId, setPlanQueryClientId] = useState('');
+    const [planQueryObjectiveId, setPlanQueryObjectiveId] = useState('');
+    const [planQueryEmployeeId, setPlanQueryEmployeeId] = useState('');
     const [planObjectiveSearch, setPlanObjectiveSearch] = useState('');
+    const [planClientSearch, setPlanClientSearch] = useState('');
+    const [planQueryEmployeeSearch, setPlanQueryEmployeeSearch] = useState('');
     const [planVsRealCollapsed, setPlanVsRealCollapsed] = useState(false);
     const [planDetailCollapsed, setPlanDetailCollapsed] = useState(false);
     const [planEmployeeSearch, setPlanEmployeeSearch] = useState('');
@@ -250,6 +313,165 @@ export default function ReportsPage() {
             && s.resolvedBy !== 'OPERACIONES';
     }, []);
 
+    const planCatalogClients = useMemo(() => {
+        return Object.entries(clientMap)
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    }, [clientMap]);
+
+    const planCatalogObjectives = useMemo(() => {
+        const seen = new Set<string>();
+        const list: { id: string; name: string; clientId: string; clientName: string }[] = [];
+        Object.values(objectiveAliases).forEach((meta) => {
+            const id = meta.canonicalId;
+            if (!id || seen.has(id)) return;
+            seen.add(id);
+            if (planQueryClientId && meta.clientId !== planQueryClientId) return;
+            list.push({
+                id,
+                name: meta.name,
+                clientId: meta.clientId,
+                clientName: clientMap[meta.clientId] || meta.client || '—',
+            });
+        });
+        return list.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    }, [objectiveAliases, clientMap, planQueryClientId]);
+
+    const planCatalogEmployees = useMemo(() => {
+        const clientObjectiveIds = planQueryClientId
+            ? new Set(planCatalogObjectives.map((o) => o.id))
+            : null;
+
+        return Object.entries(empMap)
+            .filter(([id]) => {
+                if (!planQueryClientId && !planQueryObjectiveId) return true;
+                if (planQueryObjectiveId) {
+                    return employeeMatchesPlanObjective(id, planQueryObjectiveId, empMetaMap, objectiveAliases);
+                }
+                if (clientObjectiveIds && clientObjectiveIds.size > 0) {
+                    for (const objId of clientObjectiveIds) {
+                        if (employeeMatchesPlanObjective(id, objId, empMetaMap, objectiveAliases)) return true;
+                    }
+                    return false;
+                }
+                return true;
+            })
+            .map(([id, name]) => ({
+                id,
+                name,
+                legajo: empMetaMap[id]?.legajo || '',
+            }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    }, [
+        empMap,
+        empMetaMap,
+        objectiveAliases,
+        planCatalogObjectives,
+        planQueryClientId,
+        planQueryObjectiveId,
+    ]);
+
+    const filteredPlanCatalogClients = useMemo(() => {
+        const q = planClientSearch.trim().toLowerCase();
+        if (!q) return planCatalogClients;
+        return planCatalogClients.filter((c) => c.name.toLowerCase().includes(q));
+    }, [planCatalogClients, planClientSearch]);
+
+    const planScopedObjectives = useMemo(() => {
+        if (planQueryEmployeeId) return [];
+        if (!planQueryClientId) return [];
+        return planCatalogObjectives;
+    }, [planCatalogObjectives, planQueryClientId, planQueryEmployeeId]);
+
+    const filteredPlanCatalogObjectives = useMemo(() => {
+        const q = planObjectiveSearch.trim().toLowerCase();
+        return planScopedObjectives.filter((o) => {
+            if (!q) return true;
+            return o.name.toLowerCase().includes(q) || o.clientName.toLowerCase().includes(q);
+        });
+    }, [planScopedObjectives, planObjectiveSearch]);
+
+    const filteredPlanCatalogEmployees = useMemo(() => {
+        const q = planQueryEmployeeSearch.trim().toLowerCase();
+        if (!q) return planCatalogEmployees;
+        return planCatalogEmployees.filter((e) => {
+            const hay = `${e.name} ${e.legajo}`.toLowerCase();
+            return hay.includes(q);
+        });
+    }, [planCatalogEmployees, planQueryEmployeeSearch]);
+
+    useEffect(() => {
+        if (!planQueryObjectiveId) return;
+        if (planQueryClientId) {
+            const ok = planCatalogObjectives.some((o) => o.id === planQueryObjectiveId);
+            if (!ok) {
+                setPlanQueryObjectiveId('');
+                setPlanObjectiveSearch('');
+            }
+        }
+    }, [planQueryClientId, planQueryObjectiveId, planCatalogObjectives]);
+
+    useEffect(() => {
+        if (!planQueryEmployeeId) return;
+        const ok = planCatalogEmployees.some((e) => e.id === planQueryEmployeeId);
+        if (!ok) setPlanQueryEmployeeId('');
+    }, [planQueryEmployeeId, planCatalogEmployees]);
+
+    const objCatalogClientNames = useMemo(
+        () => Object.values(clientMap).filter(Boolean).sort((a, b) => a.localeCompare(b, 'es')),
+        [clientMap],
+    );
+
+    const filteredObjCatalogClientNames = useMemo(() => {
+        const q = objFilterClientSearch.trim().toLowerCase();
+        if (!q) return objCatalogClientNames;
+        return objCatalogClientNames.filter((c) => c.toLowerCase().includes(q));
+    }, [objCatalogClientNames, objFilterClientSearch]);
+
+    const buildPlanFetchScope = useCallback((): ReportFetchScope | undefined => {
+        const scope: ReportFetchScope = {};
+        if (planQueryEmployeeId) scope.employeeId = planQueryEmployeeId;
+        else if (planQueryObjectiveId) scope.objectiveId = planQueryObjectiveId;
+        else if (planQueryClientId) scope.clientId = planQueryClientId;
+        return Object.keys(scope).length ? scope : undefined;
+    }, [planQueryClientId, planQueryObjectiveId, planQueryEmployeeId]);
+
+    const clearPlanFilters = useCallback(() => {
+        setPlanFilterObjective('');
+        setPlanObjectiveSearch('');
+        setPlanFilterEmployee('');
+        setPlanEmployeeSearch('');
+        setPlanFilterDate('');
+    }, []);
+
+    const clearPlanQuery = useCallback(() => {
+        setPlanQueryClientId('');
+        setPlanQueryObjectiveId('');
+        setPlanQueryEmployeeId('');
+        setPlanObjectiveSearch('');
+        setPlanClientSearch('');
+        setPlanQueryEmployeeSearch('');
+        clearPlanFilters();
+    }, [clearPlanFilters]);
+
+    const handleGenerateReport = useCallback(() => {
+        if (activeTab === 'AUDIT') {
+            loadAudit();
+            return;
+        }
+        if (activeTab === 'PLANIFICADO') {
+            const scope = buildPlanFetchScope();
+            if (!scope) {
+                toast.error('Elegí al menos un cliente, un objetivo o un empleado antes de generar.');
+                return;
+            }
+            clearPlanFilters();
+            generateReports(scope);
+            return;
+        }
+        generateReports();
+    }, [activeTab, buildPlanFetchScope, generateReports, loadAudit, clearPlanFilters]);
+
     const planDetailMeta = useMemo(() => {
         if (!objectiveReport.length) {
             return { assignedShifts: [] as any[], objectiveOptions: [] as string[], employeeOptions: [] as string[] };
@@ -294,14 +516,6 @@ export default function ReportsPage() {
         if (!q) return allClients;
         return allClients.filter(c => c.toLowerCase().includes(q));
     }, [objectiveReport, objFilterClientSearch]);
-
-    const clearPlanFilters = () => {
-        setPlanFilterObjective('');
-        setPlanObjectiveSearch('');
-        setPlanFilterEmployee('');
-        setPlanEmployeeSearch('');
-        setPlanFilterDate('');
-    };
 
     useEffect(() => {
         if (!planFilterEmployee) return;
@@ -390,42 +604,8 @@ export default function ReportsPage() {
 
         return (
             <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
-                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap gap-3 items-center bg-slate-50 dark:bg-slate-700/50 no-print">
-                    <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white flex-1 min-w-[150px]"><Building size={16}/> Costos por Objetivo</h3>
-                    <div className="flex flex-col gap-1 min-w-[160px]">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">Cliente</span>
-                        <input
-                            type="search"
-                            placeholder="Buscar cliente..."
-                            value={objFilterClientSearch}
-                            onChange={e => setObjFilterClientSearch(e.target.value)}
-                            className="px-2 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white"
-                        />
-                        <select
-                            value={objFilterClient}
-                            onChange={e => setObjFilterClient(e.target.value)}
-                            className="px-3 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white"
-                        >
-                            <option value="">Todos los clientes</option>
-                            {filteredObjClients.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                    </div>
-                    <div className="flex flex-col gap-1 min-w-[160px]">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase">Objetivo</span>
-                        <input
-                            type="search"
-                            placeholder="Buscar objetivo..."
-                            value={objFilterName}
-                            onChange={e => setObjFilterName(e.target.value)}
-                            className="px-2 py-1.5 border rounded-lg text-xs font-bold text-slate-600 bg-white"
-                        />
-                    </div>
-                    {(objFilterClient || objFilterClientSearch || objFilterName) && (
-                        <button type="button" onClick={() => { setObjFilterClient(''); setObjFilterClientSearch(''); setObjFilterName(''); }}
-                            className="self-end text-[10px] font-black text-rose-500 px-2 py-1.5 border border-rose-200 rounded-lg bg-rose-50">
-                            Limpiar
-                        </button>
-                    )}
+                <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex flex-wrap gap-3 items-center justify-between bg-slate-50 dark:bg-slate-700/50 no-print">
+                    <h3 className="font-black text-sm uppercase flex gap-2 text-slate-800 dark:text-white"><Building size={16}/> Costos por Objetivo</h3>
                     <div className="flex gap-2">
                         <button onClick={() => downloadCSV(filtered, 'reporte_objetivos')} aria-label="Descargar CSV de objetivos" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
                         <button onClick={() => window.print()} aria-label="Imprimir reporte de objetivos" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
@@ -1297,7 +1477,8 @@ export default function ReportsPage() {
             return (
                 <div className="p-10 text-center bg-white rounded-xl border border-dashed border-slate-300 text-slate-400 animate-in fade-in">
                     <CalendarDays size={48} className="mx-auto mb-2 opacity-20"/>
-                    <p className="font-bold uppercase text-sm">Generá el reporte para ver la planificación</p>
+                    <p className="font-bold uppercase text-sm">Elegí cliente, objetivo o empleado y el rango de fechas</p>
+                    <p className="text-xs mt-2 max-w-md mx-auto">Luego presioná <strong>Generar reporte</strong>. Solo se consultan los turnos del alcance elegido (no se carga toda la empresa).</p>
                 </div>
             );
         }
@@ -1586,14 +1767,16 @@ export default function ReportsPage() {
                     />
                 </div>
 
-                <ContentCard padding={false} className="p-4 flex flex-wrap gap-4 items-end no-print">
-                    <div className="flex-1 min-w-[150px]">
-                        <label htmlFor="rpt-date-desde" className="text-[10px] font-bold text-slate-400 uppercase">Desde</label>
-                        <input id="rpt-date-desde" type="date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className="w-full p-2 border rounded-xl font-bold text-sm"/>
-                    </div>
-                    <div className="flex-1 min-w-[150px]">
-                        <label htmlFor="rpt-date-hasta" className="text-[10px] font-bold text-slate-400 uppercase">Hasta</label>
-                        <input id="rpt-date-hasta" type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className="w-full p-2 border rounded-xl font-bold text-sm"/>
+                <ContentCard padding={false} className="p-5 flex flex-col gap-4 no-print shadow-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label htmlFor="rpt-date-desde" className={RPT_FIELD_LABEL}>Desde</label>
+                            <input id="rpt-date-desde" type="date" value={dateRange.start} onChange={e => setDateRange({...dateRange, start: e.target.value})} className={`${RPT_INPUT} mt-1.5`}/>
+                        </div>
+                        <div>
+                            <label htmlFor="rpt-date-hasta" className={RPT_FIELD_LABEL}>Hasta</label>
+                            <input id="rpt-date-hasta" type="date" value={dateRange.end} onChange={e => setDateRange({...dateRange, end: e.target.value})} className={`${RPT_INPUT} mt-1.5`}/>
+                        </div>
                     </div>
 
                     {/* ── Chips de mes rápido ── */}
@@ -1633,82 +1816,65 @@ export default function ReportsPage() {
                         })}
                     </div>
 
-                    {activeTab === 'SHIFTS' && (<>
-                        <div className="min-w-[240px] flex flex-col gap-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">1. Objetivo</label>
-                            <input
-                                type="search"
-                                value={shiftsObjectiveSearch}
-                                onChange={e => setShiftsObjectiveSearch(e.target.value)}
-                                placeholder="Buscar objetivo..."
-                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-500"
-                            />
-                            <select
-                                value={shiftsFilterObjective}
-                                onChange={e => {
-                                    const v = e.target.value;
+                    {activeTab === 'SHIFTS' && (
+                        <ReportFilterSection title="Filtros del detalle" subtitle="Refinan el reporte ya generado">
+                            <ReportSearchSelect
+                                step="1"
+                                label="Objetivo"
+                                searchValue={shiftsObjectiveSearch}
+                                onSearchChange={setShiftsObjectiveSearch}
+                                searchPlaceholder="Buscar objetivo…"
+                                selectValue={shiftsFilterObjective}
+                                onSelectChange={(v) => {
                                     setShiftsFilterObjective(v);
                                     if (v) setShiftsObjectiveSearch(v);
                                     setSelectedDetailEmployee('');
                                     setShiftsEmployeeSearch('');
                                 }}
-                                className="w-full p-2.5 border-2 border-indigo-100 bg-indigo-50/30 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"
+                                emptyLabel={`Todos los objetivos (${shiftsDetailMeta.objectiveOptions.length})`}
+                                accentSelect
                             >
-                                <option value="">Todos los objetivos ({shiftsDetailMeta.objectiveOptions.length})</option>
-                                {filteredObjectiveOptions.map(o => (
+                                {filteredObjectiveOptions.map((o) => (
                                     <option key={o} value={o}>{o}</option>
                                 ))}
-                            </select>
-                        </div>
-                        <div className="min-w-[240px] flex flex-col gap-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">
-                                2. Empleado
-                                {shiftsFilterObjective && (
-                                    <span className="font-normal text-indigo-500 normal-case ml-1">en {shiftsFilterObjective}</span>
-                                )}
-                            </label>
-                            <input
-                                type="search"
-                                value={shiftsEmployeeSearch}
-                                onChange={e => setShiftsEmployeeSearch(e.target.value)}
-                                placeholder="Buscar por nombre o legajo..."
-                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-500"
-                            />
-                            <select
-                                value={selectedDetailEmployee}
-                                onChange={e => {
-                                    const v = e.target.value;
+                            </ReportSearchSelect>
+                            <ReportSearchSelect
+                                step="2"
+                                label="Empleado"
+                                hint={shiftsFilterObjective ? `En ${shiftsFilterObjective}` : undefined}
+                                searchValue={shiftsEmployeeSearch}
+                                onSearchChange={setShiftsEmployeeSearch}
+                                searchPlaceholder="Nombre o legajo…"
+                                selectValue={selectedDetailEmployee}
+                                onSelectChange={(v) => {
                                     setSelectedDetailEmployee(v);
                                     if (v) {
-                                        const emp = shiftsDetailMeta.employeeOptions.find(x => x.id === v);
+                                        const emp = shiftsDetailMeta.employeeOptions.find((x) => x.id === v);
                                         if (emp) setShiftsEmployeeSearch(emp.legajo ? `${emp.legajo} ${emp.name}` : emp.name);
                                     }
                                 }}
-                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"
+                                emptyLabel={`Todos (${shiftsDetailMeta.employeeOptions.length})`}
                             >
-                                <option value="">Todos los empleados ({shiftsDetailMeta.employeeOptions.length})</option>
-                                {filteredEmployeeOptions.map(emp => (
+                                {filteredEmployeeOptions.map((emp) => (
                                     <option key={emp.id} value={emp.id}>
                                         {emp.legajo ? `[${emp.legajo}] ` : ''}{emp.name}
                                     </option>
                                 ))}
-                            </select>
-                        </div>
-                        <div className="min-w-[200px]">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Hora inicio</label>
-                            <div className="flex items-center gap-1">
-                                <input type="time" value={shiftsFilterTimeFrom} onChange={e => setShiftsFilterTimeFrom(e.target.value)}
-                                    className="flex-1 p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"/>
-                                <span className="text-slate-400 text-xs font-bold">—</span>
-                                <input type="time" value={shiftsFilterTimeTo} onChange={e => setShiftsFilterTimeTo(e.target.value)}
-                                    className="flex-1 p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm outline-none focus:border-indigo-500"/>
+                            </ReportSearchSelect>
+                            <div className="flex flex-col gap-1.5">
+                                <span className={RPT_FIELD_LABEL}>Hora inicio</span>
+                                <div className="flex items-center gap-2">
+                                    <input type="time" value={shiftsFilterTimeFrom} onChange={e => setShiftsFilterTimeFrom(e.target.value)} className={`${RPT_INPUT} flex-1`}/>
+                                    <span className="text-slate-400 text-xs font-bold">—</span>
+                                    <input type="time" value={shiftsFilterTimeTo} onChange={e => setShiftsFilterTimeTo(e.target.value)} className={`${RPT_INPUT} flex-1`}/>
+                                </div>
                             </div>
-                        </div>
-                        <div className="min-w-[140px]">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Estado</label>
-                            <select value={shiftsFilterStatus} onChange={e => setShiftsFilterStatus(e.target.value)}
-                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500">
-                                <option value="">Todos los estados</option>
+                            <ReportSelectField
+                                label="Estado del turno"
+                                value={shiftsFilterStatus}
+                                onChange={setShiftsFilterStatus}
+                                emptyLabel="Todos los estados"
+                            >
                                 <option value="COMPLETADO">Completado</option>
                                 <option value="PRESENTE">Presente</option>
                                 <option value="AUSENTE">Ausente injustificada</option>
@@ -1720,111 +1886,226 @@ export default function ReportsPage() {
                                 <option value="PERM. GREMIAL">Perm. Gremial</option>
                                 <option value="FRANCO">Franco</option>
                                 <option value="PENDIENTE">Pendiente</option>
-                            </select>
-                        </div>
-                        {(shiftsFilterObjective || shiftsObjectiveSearch || selectedDetailEmployee || shiftsEmployeeSearch || shiftsFilterTimeFrom || shiftsFilterTimeTo || shiftsFilterStatus) && (
-                            <button
-                                type="button"
-                                onClick={clearShiftsFilters}
-                                className="self-end text-[10px] font-black text-rose-500 hover:text-rose-700 px-3 py-2.5 border border-rose-200 rounded-xl bg-rose-50 hover:bg-rose-100"
-                            >
-                                Limpiar filtros
-                            </button>
-                        )}
-                    </>)}
-
-                    {activeTab === 'PLANIFICADO' && (<>
-                        <div className="min-w-[240px] flex flex-col gap-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">1. Objetivo</label>
-                            <input
-                                type="search"
-                                value={planObjectiveSearch}
-                                onChange={e => setPlanObjectiveSearch(e.target.value)}
-                                placeholder="Buscar objetivo..."
-                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-500"
-                            />
-                            <select
-                                value={planFilterObjective}
-                                onChange={e => {
-                                    const v = e.target.value;
-                                    setPlanFilterObjective(v);
-                                    if (v) setPlanObjectiveSearch(v);
-                                    setPlanFilterEmployee('');
-                                    setPlanEmployeeSearch('');
-                                }}
-                                className="w-full p-2.5 border-2 border-indigo-100 bg-indigo-50/30 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"
-                            >
-                                <option value="">Todos ({planDetailMeta.objectiveOptions.length})</option>
-                                {filteredPlanObjectiveOptions.map(o => <option key={o} value={o}>{o}</option>)}
-                            </select>
-                        </div>
-                        <div className="min-w-[240px] flex flex-col gap-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">
-                                2. Empleado
-                                {planFilterObjective && <span className="font-normal text-indigo-500 normal-case ml-1">en {planFilterObjective}</span>}
-                            </label>
-                            <input
-                                type="search"
-                                value={planEmployeeSearch}
-                                onChange={e => setPlanEmployeeSearch(e.target.value)}
-                                placeholder="Buscar empleado..."
-                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-500"
-                            />
-                            <select
-                                value={planFilterEmployee}
-                                onChange={e => {
-                                    const v = e.target.value;
-                                    setPlanFilterEmployee(v);
-                                    if (v) setPlanEmployeeSearch(v);
-                                }}
-                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"
-                            >
-                                <option value="">Todos ({planDetailMeta.employeeOptions.length})</option>
-                                {filteredPlanEmployeeOptions.map(e => <option key={e} value={e}>{e}</option>)}
-                            </select>
-                        </div>
-                        <div className="min-w-[140px] flex flex-col gap-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Fecha</label>
-                            <input type="date" value={planFilterDate} onChange={e => setPlanFilterDate(e.target.value)}
-                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500"/>
-                        </div>
-                        {(planFilterObjective || planObjectiveSearch || planFilterEmployee || planEmployeeSearch || planFilterDate) && (
-                            <button type="button" onClick={clearPlanFilters}
-                                className="self-end text-[10px] font-black text-rose-500 hover:text-rose-700 px-3 py-2.5 border border-rose-200 rounded-xl bg-rose-50 hover:bg-rose-100">
-                                Limpiar filtros
-                            </button>
-                        )}
-                    </>)}
-
-                    {activeTab === 'AUDIT' && auditLogs.length > 0 && (
-                        <div className="min-w-[200px] flex flex-col gap-1">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase">Actor</label>
-                            <input type="search" placeholder="Buscar actor..." value={auditActorSearch}
-                                onChange={e => setAuditActorSearch(e.target.value)}
-                                className="w-full p-2 border-2 border-slate-100 rounded-xl text-sm outline-none focus:border-indigo-500"/>
-                            <select value={auditFilterActor} onChange={e => {
-                                const v = e.target.value;
-                                setAuditFilterActor(v);
-                                if (v) setAuditActorSearch(v);
-                            }}
-                                className="w-full p-2.5 border-2 border-slate-100 rounded-xl font-bold text-sm text-slate-700 outline-none focus:border-indigo-500">
-                                <option value="">Todos los actores</option>
-                                {[...new Set(auditLogs.map((l: any) => l.actorName || 'Sistema').filter(Boolean))].sort()
-                                    .filter(a => !auditActorSearch.trim() || a.toLowerCase().includes(auditActorSearch.trim().toLowerCase()))
-                                    .map(a => (
-                                    <option key={a} value={a}>{a}</option>
-                                ))}
-                            </select>
-                        </div>
+                            </ReportSelectField>
+                            {(shiftsFilterObjective || shiftsObjectiveSearch || selectedDetailEmployee || shiftsEmployeeSearch || shiftsFilterTimeFrom || shiftsFilterTimeTo || shiftsFilterStatus) && (
+                                <div className="flex items-end md:col-span-2 xl:col-span-3">
+                                    <ReportClearButton onClick={clearShiftsFilters} />
+                                </div>
+                            )}
+                        </ReportFilterSection>
                     )}
 
-                    <div className="flex-1 min-w-[200px]">
-                        <label htmlFor="rpt-publish-filter" className="text-[10px] font-bold text-slate-400 uppercase">Cronograma</label>
+                    {activeTab === 'PLANIFICADO' && (
+                        <>
+                            <ReportFilterSection
+                                title="Alcance del reporte"
+                                subtitle="Elegí al menos cliente, objetivo o empleado · luego Generar"
+                            >
+                                <ReportSearchSelect
+                                    step="1"
+                                    label="Cliente"
+                                    searchValue={planClientSearch}
+                                    onSearchChange={(v) => {
+                                        setPlanClientSearch(v);
+                                        if (!v.trim()) {
+                                            setPlanQueryClientId('');
+                                            setPlanQueryObjectiveId('');
+                                            setPlanQueryEmployeeId('');
+                                        }
+                                    }}
+                                    searchPlaceholder="Buscar cliente…"
+                                    selectValue={planQueryClientId}
+                                    onSelectChange={(v) => {
+                                        setPlanQueryClientId(v);
+                                        setPlanQueryObjectiveId('');
+                                        setPlanQueryEmployeeId('');
+                                        setPlanObjectiveSearch('');
+                                        setPlanQueryEmployeeSearch('');
+                                        const name = planCatalogClients.find((c) => c.id === v)?.name || '';
+                                        setPlanClientSearch(name);
+                                    }}
+                                    disabled={!!planQueryEmployeeId}
+                                    searchDisabled={!!planQueryEmployeeId}
+                                    emptyLabel="Seleccioná un cliente"
+                                >
+                                    {filteredPlanCatalogClients.map((c) => (
+                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                    ))}
+                                </ReportSearchSelect>
+                                <ReportSearchSelect
+                                    step="2"
+                                    label="Objetivo"
+                                    searchValue={planObjectiveSearch}
+                                    onSearchChange={setPlanObjectiveSearch}
+                                    searchPlaceholder="Buscar objetivo…"
+                                    selectValue={planQueryObjectiveId}
+                                    onSelectChange={(v) => {
+                                        setPlanQueryObjectiveId(v);
+                                        setPlanQueryEmployeeId('');
+                                        setPlanQueryEmployeeSearch('');
+                                        const obj = planCatalogObjectives.find((o) => o.id === v);
+                                        if (obj) setPlanObjectiveSearch(obj.name);
+                                    }}
+                                    disabled={!!planQueryEmployeeId || !planQueryClientId}
+                                    searchDisabled={!!planQueryEmployeeId || !planQueryClientId}
+                                    emptyLabel={planQueryClientId ? 'Todos los objetivos del cliente' : 'Primero elegí cliente'}
+                                    accentSelect
+                                    hint={!planQueryClientId ? 'Habilitado al elegir cliente en la lista.' : undefined}
+                                >
+                                    {filteredPlanCatalogObjectives.map((o) => (
+                                        <option key={o.id} value={o.id}>{o.name}</option>
+                                    ))}
+                                </ReportSearchSelect>
+                                <ReportSearchSelect
+                                    step="3"
+                                    label="Empleado"
+                                    hint={
+                                        planQueryEmployeeId
+                                            ? 'Modo legajo: ignora cliente y objetivo en la consulta.'
+                                            : planQueryObjectiveId
+                                                ? 'Solo guardias vinculados a este objetivo (puesto / experiencia).'
+                                                : planQueryClientId
+                                                    ? 'Guardias de los objetivos del cliente. Elegí un objetivo para acotar más.'
+                                                    : 'Elegí cliente (y opcionalmente objetivo) o buscá un legajo directo.'
+                                    }
+                                    searchValue={planQueryEmployeeSearch}
+                                    onSearchChange={setPlanQueryEmployeeSearch}
+                                    searchPlaceholder="Nombre o legajo…"
+                                    selectValue={planQueryEmployeeId}
+                                    onSelectChange={(v) => {
+                                        setPlanQueryEmployeeId(v);
+                                        if (v) {
+                                            setPlanQueryClientId('');
+                                            setPlanQueryObjectiveId('');
+                                            setPlanClientSearch('');
+                                            setPlanObjectiveSearch('');
+                                        }
+                                    }}
+                                    emptyLabel={
+                                        planQueryObjectiveId
+                                            ? `Todos del objetivo (${filteredPlanCatalogEmployees.length})`
+                                            : planQueryClientId
+                                                ? `Todos del cliente (${filteredPlanCatalogEmployees.length})`
+                                                : 'Buscar legajo directo'
+                                    }
+                                >
+                                    {filteredPlanCatalogEmployees.map((e) => (
+                                        <option key={e.id} value={e.id}>
+                                            {e.legajo ? `${e.legajo} · ` : ''}{e.name}
+                                        </option>
+                                    ))}
+                                </ReportSearchSelect>
+                            </ReportFilterSection>
+                            {objectiveReport.length > 0 && (
+                                <ReportFilterSection title="Refinar resultados" subtitle="Solo en pantalla · sin nueva consulta">
+                                    <ReportSelectField
+                                        label="Objetivo"
+                                        value={planFilterObjective}
+                                        onChange={setPlanFilterObjective}
+                                        emptyLabel={`Todos (${planDetailMeta.objectiveOptions.length})`}
+                                    >
+                                        {filteredPlanObjectiveOptions.map((o) => (
+                                            <option key={o} value={o}>{o}</option>
+                                        ))}
+                                    </ReportSelectField>
+                                    <ReportSelectField
+                                        label="Empleado"
+                                        value={planFilterEmployee}
+                                        onChange={setPlanFilterEmployee}
+                                        emptyLabel={`Todos (${planDetailMeta.employeeOptions.length})`}
+                                    >
+                                        {filteredPlanEmployeeOptions.map((e) => (
+                                            <option key={e} value={e}>{e}</option>
+                                        ))}
+                                    </ReportSelectField>
+                                    <div className="flex flex-col gap-1.5">
+                                        <span className={RPT_FIELD_LABEL}>Día puntual</span>
+                                        <input type="date" value={planFilterDate} onChange={e => setPlanFilterDate(e.target.value)} className={RPT_INPUT}/>
+                                    </div>
+                                </ReportFilterSection>
+                            )}
+                            {(planQueryClientId || planQueryObjectiveId || planQueryEmployeeId || planFilterObjective || planFilterEmployee || planFilterDate) && (
+                                <div className="flex justify-end">
+                                    <ReportClearButton onClick={clearPlanQuery} label="Limpiar selección" />
+                                </div>
+                            )}
+                        </>
+                    )}
+
+                    {activeTab === 'OBJECTIVE' && (
+                        <ReportFilterSection title="Filtros por objetivo" subtitle="Aplican al reporte generado">
+                            <ReportSearchSelect
+                                step="1"
+                                label="Cliente"
+                                searchValue={objFilterClientSearch}
+                                onSearchChange={setObjFilterClientSearch}
+                                searchPlaceholder="Buscar cliente…"
+                                selectValue={objFilterClient}
+                                onSelectChange={(v) => {
+                                    setObjFilterClient(v);
+                                    if (v) setObjFilterClientSearch(v);
+                                }}
+                                emptyLabel="Todos los clientes"
+                            >
+                                {filteredObjCatalogClientNames.map((c) => (
+                                    <option key={c} value={c}>{c}</option>
+                                ))}
+                            </ReportSearchSelect>
+                            <div className="flex flex-col gap-1.5 min-w-0">
+                                <label className="flex items-center gap-2">
+                                    <span className="text-[10px] font-black text-indigo-600">2</span>
+                                    <span className={RPT_FIELD_LABEL}>Objetivo</span>
+                                </label>
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" aria-hidden />
+                                    <input
+                                        type="search"
+                                        value={objFilterName}
+                                        onChange={(e) => setObjFilterName(e.target.value)}
+                                        placeholder="Filtrar por nombre de objetivo…"
+                                        className={RPT_SEARCH_INPUT}
+                                    />
+                                </div>
+                            </div>
+                            {(objFilterClient || objFilterClientSearch || objFilterName) && (
+                                <div className="flex items-end">
+                                    <ReportClearButton onClick={() => { setObjFilterClient(''); setObjFilterClientSearch(''); setObjFilterName(''); }} />
+                                </div>
+                            )}
+                        </ReportFilterSection>
+                    )}
+
+                    {activeTab === 'AUDIT' && auditLogs.length > 0 && (
+                        <ReportFilterSection title="Auditoría" subtitle="Filtrar por actor">
+                            <ReportSearchSelect
+                                label="Actor"
+                                searchValue={auditActorSearch}
+                                onSearchChange={setAuditActorSearch}
+                                searchPlaceholder="Buscar actor…"
+                                selectValue={auditFilterActor}
+                                onSelectChange={(v) => {
+                                    setAuditFilterActor(v);
+                                    if (v) setAuditActorSearch(v);
+                                }}
+                                emptyLabel="Todos los actores"
+                            >
+                                {[...new Set(auditLogs.map((l: any) => l.actorName || 'Sistema').filter(Boolean))].sort()
+                                    .filter((a) => !auditActorSearch.trim() || a.toLowerCase().includes(auditActorSearch.trim().toLowerCase()))
+                                    .map((a) => (
+                                        <option key={a} value={a}>{a}</option>
+                                    ))}
+                            </ReportSearchSelect>
+                        </ReportFilterSection>
+                    )}
+
+                    <div className="w-full flex flex-col lg:flex-row gap-4 items-stretch lg:items-end border-t border-slate-100 dark:border-slate-700 pt-4">
+                    <div className="flex-1 min-w-[220px]">
+                        <label htmlFor="rpt-publish-filter" className={RPT_FIELD_LABEL}>Cronograma</label>
                         <select
                             id="rpt-publish-filter"
                             value={publishFilter}
                             onChange={e => setPublishFilter(e.target.value as ReportPublishFilter)}
-                            className="w-full p-2 border rounded-xl font-bold text-sm text-slate-700 bg-white"
+                            className={`${RPT_SELECT} mt-1.5`}
                         >
                             <option value="all">Todos (publicados + borrador draft)</option>
                             <option value="published">Solo publicados (liquidación oficial)</option>
@@ -1840,10 +2121,14 @@ export default function ReportsPage() {
                             <span className={`text-[10px] font-bold transition-colors ${usePlannedHours ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400'}`}>Usar horas planificadas (sin fichada real)</span>
                         </label>
                     </div>
-
-                    <button onClick={() => activeTab === 'AUDIT' ? loadAudit() : generateReports()} className="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-black text-xs uppercase hover:bg-slate-800 transition-colors">
-                        {loading ? 'Procesando...' : 'Generar Reporte'}
+                    <button
+                        type="button"
+                        onClick={handleGenerateReport}
+                        className="h-11 px-8 rounded-2xl bg-slate-900 dark:bg-indigo-600 text-white font-black text-xs uppercase tracking-wide hover:bg-slate-800 dark:hover:bg-indigo-500 transition-colors shadow-lg shrink-0"
+                    >
+                        {loading ? 'Procesando…' : 'Generar reporte'}
                     </button>
+                    </div>
                 </ContentCard>
 
                 {/* ── KPI Resumen Ejecutivo ── */}

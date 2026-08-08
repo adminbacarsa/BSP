@@ -234,6 +234,13 @@ export function liquidacion200FromWorkedHours(totalTrabajado: number) {
 /** Misma regla que operaciones: planificado sin publicar no entra a liquidaciÃ³n salvo fichada real u origen ops. */
 export type ReportPublishFilter = 'published' | 'unpublished' | 'all';
 
+/** Alcance para acotar consulta Firestore (pestaña Planificado). */
+export type ReportFetchScope = {
+    clientId?: string;
+    objectiveId?: string;
+    employeeId?: string;
+};
+
 export function isShiftPublishedForReports(shift: any, publishStatusMap: Record<string, boolean>): boolean {
     const start = shift?.startTime?.toDate?.();
     if (!start || !shift?.objectiveId) return false;
@@ -869,6 +876,59 @@ export function buildPayrollExportPayload(
     };
 }
 
+function buildReportTurnosQuery(
+    startDate: Date,
+    endDate: Date,
+    empresaId: string,
+    scopeEmpresa: boolean,
+    fetchScope?: ReportFetchScope,
+) {
+    const startTs = Timestamp.fromDate(startDate);
+    const endTs = Timestamp.fromDate(endDate);
+    const col = collection(db, 'turnos');
+    const empId = String(fetchScope?.employeeId ?? '').trim();
+    const objId = String(fetchScope?.objectiveId ?? '').trim();
+    const cliId = String(fetchScope?.clientId ?? '').trim();
+
+    if (empId) {
+        return query(col, where('employeeId', '==', empId), where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+    }
+    if (objId) {
+        return query(col, where('objectiveId', '==', objId), where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+    }
+    if (cliId) {
+        return query(col, where('clientId', '==', cliId), where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+    }
+    if (scopeEmpresa) {
+        return query(col, where('empresaId', '==', empresaId), where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+    }
+    return query(col, where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+}
+
+function shiftMatchesFetchScope(
+    shift: any,
+    fetchScope: ReportFetchScope | undefined,
+    objectiveAliases: Record<string, ObjectiveMeta>,
+): boolean {
+    if (!fetchScope) return true;
+    const empId = String(fetchScope.employeeId ?? '').trim();
+    const objId = String(fetchScope.objectiveId ?? '').trim();
+    const cliId = String(fetchScope.clientId ?? '').trim();
+    if (empId && String(shift.employeeId ?? '') !== empId) return false;
+    if (cliId && String(shift.clientId ?? '') !== cliId) return false;
+    if (objId) {
+        const shiftObj = String(shift.objectiveId ?? '').trim();
+        if (!shiftObj) return false;
+        if (shiftObj === objId) return true;
+        const picked = objectiveAliases[objId];
+        const shiftMeta = objectiveAliases[shiftObj];
+        if (picked && shiftMeta && picked.canonicalId === shiftMeta.canonicalId) return true;
+        if (picked && (shiftObj === picked.name || shiftObj === picked.canonicalId)) return true;
+        return false;
+    }
+    return true;
+}
+
 export const useReportes = (forcedClientId?: string | null) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
@@ -889,7 +949,13 @@ export const useReportes = (forcedClientId?: string | null) => {
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
     
     const [empMap, setEmpMap] = useState<Record<string, string>>({});
-    const [empMetaMap, setEmpMetaMap] = useState<Record<string, { name: string; legajo: string }>>({});
+    const [empMetaMap, setEmpMetaMap] = useState<Record<string, {
+        name: string;
+        legajo: string;
+        preferredObjectiveId?: string;
+        experienciaObjetivos?: Record<string, unknown>;
+        planificacionDotacion?: Record<string, unknown>;
+    }>>({});
     const [publishFilter, setPublishFilter] = useState<ReportPublishFilter>('all');
     const [usePlannedHours, setUsePlannedHours] = useState(false);
     const [objMap, setObjMap] = useState<Record<string, string>>({});
@@ -908,7 +974,13 @@ export const useReportes = (forcedClientId?: string | null) => {
                 ]);
                 
                 const emps: any = {};
-                const empsMeta: Record<string, { name: string; legajo: string }> = {};
+                const empsMeta: Record<string, {
+                    name: string;
+                    legajo: string;
+                    preferredObjectiveId?: string;
+                    experienciaObjetivos?: Record<string, unknown>;
+                    planificacionDotacion?: Record<string, unknown>;
+                }> = {};
                 s.forEach(d => {
                     const data = d.data();
                     const name = data.name || (data.firstName ? `${data.lastName}, ${data.firstName}` : 'Sin Nombre');
@@ -916,6 +988,9 @@ export const useReportes = (forcedClientId?: string | null) => {
                     empsMeta[d.id] = {
                         name,
                         legajo: String(data.fileNumber || data.legajo || '').trim(),
+                        preferredObjectiveId: data.preferredObjectiveId ? String(data.preferredObjectiveId) : undefined,
+                        experienciaObjetivos: (data.experienciaObjetivos || {}) as Record<string, unknown>,
+                        planificacionDotacion: (data.planificacionDotacion || {}) as Record<string, unknown>,
                     };
                 });
                 setEmpMap(emps);
@@ -966,7 +1041,7 @@ export const useReportes = (forcedClientId?: string | null) => {
         loadCatalogs();
     }, [empresaId, scopeEmpresa]);
 
-    const generateReports = async () => {
+    const generateReports = async (fetchScope?: ReportFetchScope) => {
         if (!dateRange.start || !dateRange.end) return toast.error("Seleccione un rango de fechas");
         setLoading(true);
         setEmployeeReport([]);
@@ -1037,19 +1112,8 @@ export const useReportes = (forcedClientId?: string | null) => {
                 registerObjectiveMetaAliases(aliasLookup, meta, [...matchKeys, d.id]);
             });
 
-            // Consulta SIN indices complejos (filtrado en memoria si es necesario, o bÃ¡sico por fecha)
-            const q = scopeEmpresa
-                ? query(
-                    collection(db, 'turnos'),
-                    where('empresaId', '==', empresaId),
-                    where('startTime', '>=', Timestamp.fromDate(startDate)),
-                    where('startTime', '<=', Timestamp.fromDate(endDate)),
-                  )
-                : query(
-                    collection(db, 'turnos'),
-                    where('startTime', '>=', Timestamp.fromDate(startDate)),
-                    where('startTime', '<=', Timestamp.fromDate(endDate)),
-                  );
+            // Consulta acotada por alcance (empleado > objetivo > cliente > empresa + fechas)
+            const q = buildReportTurnosQuery(startDate, endDate, empresaId, scopeEmpresa, fetchScope);
 
             const planifSnap = await getDocs(
                 empresaScopedQuery('planificacion_estados', empresaId, scopeEmpresa) as ReturnType<typeof query>,
@@ -1076,6 +1140,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     if (!hasPlanned && !hasReal) return false;
                     if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return false;
                     if (forcedClientId && d.clientId !== forcedClientId) return false;
+                    if (!shiftMatchesFetchScope(d, fetchScope, aliasLookup)) return false;
                     return true;
                 });
             // Pre-computar flags FT sobre el set completo (antes del filtro de publicacion)
@@ -1463,6 +1528,9 @@ export const useReportes = (forcedClientId?: string | null) => {
         auditLogs,
         objMap,
         empMap,
+        empMetaMap,
+        clientMap,
+        objectiveAliases,
         holidaysData,
         SHIFT_HOURS_LOOKUP,
         OPERATIVE_CODES,
