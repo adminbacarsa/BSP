@@ -36,10 +36,8 @@ function slaOverlapsDateRange(
   rangeStart: Date,
   rangeEnd: Date,
 ): boolean {
-  const startRaw = toYyyyMmDd(sla.startDate);
-  const endRaw = toYyyyMmDd(sla.endDate);
-  const sd = parseYmdToLocalDate(startRaw || '1970-01-01');
-  const ed = parseYmdToLocalDate(endRaw || '2099-12-31');
+  const sd = parseYmdToLocalDate(toYyyyMmDd(sla.startDate));
+  const ed = parseYmdToLocalDate(toYyyyMmDd(sla.endDate));
   if (!sd || !ed) return false;
   const rs = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
   const re = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate());
@@ -82,11 +80,7 @@ export function slaHoursForServiceInRange(
   rangeStart: Date | null,
   rangeEnd: Date | null,
 ): number {
-  const positions = (
-    Array.isArray(srv.positions)
-      ? srv.positions
-      : Object.values((srv.positions as Record<string, unknown>) || {})
-  ) as ServicePosition[];
+  const positions = (Array.isArray(srv.positions) ? srv.positions : []) as ServicePosition[];
   if (!positions.length || !rangeStart || !rangeEnd) {
     if (!rangeStart && !rangeEnd) {
       return Math.round(

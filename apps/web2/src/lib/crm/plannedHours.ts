@@ -1,4 +1,4 @@
-import { clientRowMatchesClient, resolveCanonicalClientIdFromList, type ClientRef } from './clientDataMatch';
+import { clientRowMatchesClient, type ClientRef } from './clientDataMatch';
 import { getDateKeyInTimezone, resolveTurnoScheduleDateKey, toDateSafe as toDateSafeCore } from './crmDateUtils';
 import { isProformaVacancyShift } from './proformaVacancy';
 import {
@@ -219,8 +219,11 @@ export function resolveClientIdForTurno(
   t: Record<string, unknown>,
   clients: ClientRef[],
 ): string | null {
-  const canon = resolveCanonicalClientIdFromList(t.clientId, clients);
-  if (canon) return canon;
+  const direct = String(t.clientId ?? '').trim();
+  if (direct) {
+    const byId = clients.find((c) => c.id === direct);
+    if (byId) return byId.id;
+  }
   for (const c of clients) {
     if (clientRowMatchesClient(t, c)) return c.id;
   }

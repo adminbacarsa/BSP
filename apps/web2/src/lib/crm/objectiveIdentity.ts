@@ -74,7 +74,8 @@ function collectDistinctMetas(aliases: Record<string, ObjectiveMeta>): Objective
   return [...byCanon.values()];
 }
 
-function resolveFuzzyObjectiveMeta(
+/** Solo para etiquetas UI — no usar para agrupar horas facturables. */
+function resolveFuzzyObjectiveMetaForDisplay(
   objectiveId: string,
   aliases: Record<string, ObjectiveMeta>,
 ): ObjectiveMeta | null {
@@ -119,18 +120,13 @@ export function buildObjectiveAliasMap(
     if (!canonicalId && sla.id) canonicalId = sla.id;
     if (!canonicalId) continue;
 
-    const byName = objName ? findMetaByObjectiveName(aliases, objName) : undefined;
-    const existing = byName || aliases[canonicalId] || (oid ? aliases[oid] : undefined);
+    const existing = aliases[canonicalId] || (oid ? aliases[oid] : undefined);
     const meta: ObjectiveMeta = existing ?? {
-      canonicalId: byName?.canonicalId || canonicalId,
-      name: objName || byName?.name || canonicalId,
+      canonicalId,
+      name: objName || canonicalId,
       clientId: cid || clientId,
     };
     if (objName && meta.name === canonicalId) meta.name = objName;
-    if (byName) {
-      meta.canonicalId = byName.canonicalId;
-      meta.name = byName.name || meta.name;
-    }
     registerAlias(aliases, meta, canonicalId);
     if (oid) registerAlias(aliases, meta, oid);
     if (objName) registerAlias(aliases, meta, objName);
@@ -157,6 +153,7 @@ export function objectiveMatchCandidates(row: {
   return keys;
 }
 
+/** Id de agrupación en pre-factura: solo alias exactos; no fusiona sedes ni ids fuzzy. */
 export function resolveCanonicalObjectiveId(
   row: { objectiveId?: unknown; objectiveName?: unknown; clientId?: unknown },
   aliases: Record<string, ObjectiveMeta>,
@@ -164,16 +161,10 @@ export function resolveCanonicalObjectiveId(
   for (const key of objectiveMatchCandidates(row)) {
     if (aliases[key]) return aliases[key].canonicalId;
   }
-  const name = String(row.objectiveName ?? '').trim();
-  if (name) {
-    const byName = findMetaByObjectiveName(aliases, name);
-    if (byName) return byName.canonicalId;
-  }
   const oid = String(row.objectiveId ?? '').trim();
-  const fuzzy = oid ? resolveFuzzyObjectiveMeta(oid, aliases) : null;
-  if (fuzzy) return fuzzy.canonicalId;
   if (oid) return oid;
   const cid = String(row.clientId ?? '').trim();
+  const name = String(row.objectiveName ?? '').trim();
   if (cid && name) return fallbackObjectiveKey(cid, name);
   if (name) return name;
   return null;
@@ -194,14 +185,27 @@ export function resolveObjectiveDisplayName(
   }
   const rawOid = String(row.objectiveId ?? '').trim();
   if (rawOid && aliases[rawOid]?.name) return aliases[rawOid].name;
-  const fuzzy = rawOid ? resolveFuzzyObjectiveMeta(rawOid, aliases) : null;
+  if (rawOid && aliases[rawOid.toLowerCase()]?.name) return aliases[rawOid.toLowerCase()].name;
+  const fuzzy = rawOid ? resolveFuzzyObjectiveMetaForDisplay(rawOid, aliases) : null;
   if (fuzzy?.name) return fuzzy.name;
-  const canonicalOid = resolveCanonicalObjectiveId(row, aliases);
-  if (canonicalOid && aliases[canonicalOid]?.name) return aliases[canonicalOid].name;
-  if (canonicalOid && canonicalOid !== rawOid && rawOid) {
+  if (canonicalOidFromExactAlias(row, aliases)) {
+    const c = canonicalOidFromExactAlias(row, aliases)!;
+    if (aliases[c]?.name) return aliases[c].name;
+  }
+  if (rawOid) {
     return rawOid.length > 12 ? `${rawOid.slice(0, 10)}…` : rawOid;
   }
   return 'Objetivo sin nombre';
+}
+
+function canonicalOidFromExactAlias(
+  row: { objectiveId?: unknown; objectiveName?: unknown; clientId?: unknown },
+  aliases: Record<string, ObjectiveMeta>,
+): string | null {
+  for (const key of objectiveMatchCandidates(row)) {
+    if (aliases[key]) return aliases[key].canonicalId;
+  }
+  return null;
 }
 
 /** Etiqueta visible en pre-factura cuando no hay nombre en CRM (varios objectiveId distintos). */
