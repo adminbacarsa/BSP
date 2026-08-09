@@ -650,6 +650,11 @@ const KNOWN_ORPHAN_CLIENT_IDS: Record<string, string> = {
   FzAowOV93fHQcxZhHfjN: 'NS0UBtf6zkHsm2iRRo9W',
 };
 
+/** Misma entidad comercial con más de un doc `clients` (turnos repartidos entre ids). */
+const CLIENT_DUPLICATE_GROUPS: string[][] = [
+  ['2YzI0f3ZWcwdOmG3Vlc1', '8rr2FePfgQ6xY2jH0gyk'],
+];
+
 /** IDs de documento clients + huérfanos legacy que apuntan al mismo cliente. */
 export function getClientIdAliases(canonicalId: string): string[] {
   const id = String(canonicalId ?? '').trim();
@@ -660,6 +665,16 @@ export function getClientIdAliases(canonicalId: string): string[] {
   }
   for (const [orphan, target] of Object.entries(KNOWN_ORPHAN_CLIENT_IDS)) {
     if (orphan === id) ids.add(target);
+  }
+  for (const group of CLIENT_DUPLICATE_GROUPS) {
+    if (!group.includes(id)) continue;
+    for (const sibling of group) ids.add(sibling);
+  }
+  for (const sibling of [...ids]) {
+    for (const [orphan, target] of Object.entries(KNOWN_ORPHAN_CLIENT_IDS)) {
+      if (target === sibling) ids.add(orphan);
+      if (orphan === sibling) ids.add(target);
+    }
   }
   return [...ids];
 }

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -16,6 +16,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  Timestamp,
   updateDoc,
   where,
   writeBatch,
@@ -45,6 +46,7 @@ import {
   countClientRelatedDocsOtherTenant,
   dedupeClientsById,
   tenantEmpresaIdsMatch,
+  getClientIdAliases,
   collectTurnoIdsForSlaDelete,
   deleteSlaWithRelatedDataForEmpresa,
 } from '@/lib/multiempresa';
@@ -91,7 +93,15 @@ import {
   normalizeClientObjetivo,
   registerEmployeeMetaAliases,
 } from '@/lib/crm/proformaEnrichment';
-import { loadClientSlaForClient, loadClientTurnosForClient } from '@/lib/crm/clientDataMatch';
+import {
+  fetchSlaRowsForCrmDashboard,
+  loadClientSlaForClient,
+  loadClientTurnosForClient,
+  indexSlaRowsByClients,
+  collectClientIdAliases,
+  clientRowMatchesClient,
+  type ClientRef,
+} from '@/lib/crm/clientDataMatch';
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
@@ -114,7 +124,6 @@ import {
   toDateSafe,
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
-import type { ClientRef } from '@/lib/crm/clientDataMatch';
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
@@ -125,6 +134,116 @@ import {
 } from '@/lib/refuerzo/refuerzoProforma';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+type ClientListSort = 'name' | 'burn_desc' | 'sla_desc' | 'plan_gap';
+type ClientListFilter = 'all' | 'activos' | 'con_sla' | 'burn_alerta';
+
+function crmBurnVisual(burnRate: number) {
+  const burn = Math.round(burnRate || 0);
+  const hex = burn >= 110 ? '#ef4444' : burn >= 90 ? '#f59e0b' : '#10b981';
+  const textCls = burn >= 110 ? 'text-rose-600' : burn >= 90 ? 'text-amber-500' : 'text-emerald-600';
+  const badgeCls = burn >= 110
+    ? 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800'
+    : burn >= 90
+      ? 'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800'
+      : 'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800';
+  return { burn, hex, textCls, badgeCls };
+}
+
+function crmEjecLabel(real: number, sla: number, planned: number): string {
+  const r = Math.round(real || 0);
+  if (r > 0) return `${r} hs`;
+  if ((sla || 0) > 0 || (planned || 0) > 0) return 'Sin fichadas';
+  return '0 hs';
+}
+
+/** Firestore / imports legacy: ACTIVE, activo, etc. → etiqueta UI en español. */
+function formatClientStatusLabel(status: unknown): string {
+  const u = String(status ?? 'ACTIVO').trim().toUpperCase();
+  if (u === 'ACTIVE' || u === 'ACTIVO') return 'ACTIVO';
+  if (u === 'INACTIVE' || u === 'INACTIVO') return 'INACTIVO';
+  return u || 'ACTIVO';
+}
+
+function isClientStatusActivo(status: unknown): boolean {
+  const u = String(status ?? 'ACTIVO').trim().toUpperCase();
+  return u === 'ACTIVO' || u === 'ACTIVE';
+}
+
+function resolveCanonicalClientIdForCrmRow(
+  rowClientId: unknown,
+  clientList: { id: string }[],
+): string | null {
+  const cid = String(rowClientId ?? '').trim();
+  if (!cid) return null;
+  for (const c of clientList) {
+    if (c.id === cid) return c.id;
+    if (getClientIdAliases(c.id).includes(cid)) return c.id;
+  }
+  return null;
+}
+
+function turnoInCrmDashboardRange(
+  t: Record<string, unknown>,
+  rangeStart: Date | null,
+  rangeEnd: Date | null,
+): boolean {
+  if (!rangeStart || !rangeEnd) return true;
+  const padStart = new Date(rangeStart);
+  const padEnd = new Date(rangeEnd);
+  padStart.setDate(padStart.getDate() - 2);
+  padEnd.setDate(padEnd.getDate() + 2);
+  padEnd.setHours(23, 59, 59, 999);
+  const rangeStartKey = getDateKeyInTimezone(padStart);
+  const rangeEndKey = getDateKeyInTimezone(padEnd);
+  const st = toDateSafe(t.startTime);
+  const scheduleKey = resolveTurnoScheduleDateKey(t) || (st ? getDateKeyInTimezone(st) : null);
+  const inRangeByStart = !!st && st >= padStart && st <= padEnd;
+  const inRangeBySchedule =
+    !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
+  return inRangeByStart || inRangeBySchedule;
+}
+
+async function fetchCrmDashboardTurnos(
+  empresaId: string,
+  scopeEmpresa: boolean,
+  rangeStart: Date | null,
+  rangeEnd: Date | null,
+  clientRefs: ClientRef[],
+): Promise<any[]> {
+  const start = rangeStart ? new Date(rangeStart) : new Date(2000, 0, 1);
+  const end = rangeEnd ? new Date(rangeEnd) : new Date(2099, 11, 31, 23, 59, 59, 999);
+  start.setDate(start.getDate() - 2);
+  end.setDate(end.getDate() + 2);
+  end.setHours(23, 59, 59, 999);
+  const col = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
+  const ranged = query(
+    col as ReturnType<typeof query>,
+    where('startTime', '>=', Timestamp.fromDate(start)),
+    where('startTime', '<=', Timestamp.fromDate(end)),
+  );
+  const mapRows = (docs: { id: string; data: () => Record<string, unknown> }[]) =>
+    docs.map((d) => ({ id: d.id, ...d.data() as any }));
+
+  try {
+    const snap = await getDocs(ranged);
+    if (snap.docs.length > 0) return mapRows(snap.docs);
+  } catch (e) {
+    console.warn('CRM dashboard: consulta turnos por rango falló', e);
+  }
+
+  const byId = new Map<string, any>();
+  const aliases = collectClientIdAliases(clientRefs);
+  for (let i = 0; i < aliases.length; i += 10) {
+    const chunk = aliases.slice(i, i + 10);
+    const snap = await getDocs(query(col as ReturnType<typeof query>, where('clientId', 'in', chunk)));
+    mapRows(snap.docs).forEach((t) => {
+      if (!turnoInCrmDashboardRange(t, rangeStart, rangeEnd)) return;
+      byId.set(t.id, t);
+    });
+  }
+  return [...byId.values()];
+}
 
 const SHIFT_CODE_HOURS = CRM_PLANNED_SHIFT_HOURS;
 const isWorkingCode = isCrmWorkingShiftCode;
@@ -194,6 +313,11 @@ export default function CRMPage() {
   const [rangeMode, setRangeMode] = useState<RangeMode>('month');
   const [rangeMonth, setRangeMonth] = useState(new Date().getMonth());
   const [rangeYear, setRangeYear] = useState(new Date().getFullYear());
+  const [clientListSort, setClientListSort] = useState<ClientListSort>('name');
+  const [clientListFilter, setClientListFilter] = useState<ClientListFilter>('all');
+  const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null);
+  const metricsRunRef = useRef(0);
+  const clientsFetchGenRef = useRef(0);
 
   const [clients, setClients] = useState<any[]>([]);
   const [selectedClient, setSelectedClient] = useState<any>(null);
@@ -284,15 +408,9 @@ export default function CRMPage() {
   useEffect(() => {
     setSelectedClient(null);
     setView('list');
-    setClients([]);
-    fetchClients();
+    void fetchClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [empresaId]);
-
-  useEffect(() => {
-    fetchClients();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [migracionCompleta]);
+  }, [empresaId, migracionCompleta]);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
@@ -472,31 +590,34 @@ export default function CRMPage() {
   };
 
   const fetchClients = async () => {
-    setLoadingClients(true);
+    const gen = ++clientsFetchGenRef.current;
+    const showBlockingLoader = clients.length === 0;
+    if (showBlockingLoader) setLoadingClients(true);
     try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
       let snap;
-      try {
-        snap = scopeEmpresa
-          ? await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId), orderBy('name')))
-          : await getDocs(query(collection(db, 'clients'), orderBy('name')));
-      } catch {
-        snap = scopeEmpresa
-          ? await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId)))
-          : await getDocs(collection(db, 'clients'));
+      if (scopeEmpresa) {
+        snap = await getDocs(query(collection(db, 'clients'), where('empresaId', '==', empresaId)));
+      } else {
+        try {
+          snap = await getDocs(query(collection(db, 'clients'), orderBy('name')));
+        } catch {
+          snap = await getDocs(collection(db, 'clients'));
+        }
       }
       const data = dedupeClientsById(
         snap.docs
           .map((x) => ({ ...x.data(), id: x.id }))
           .filter((c) => canManageClientInTenant(c, empresaId, migracionCompleta, tenantAccess)),
-      );
+      ).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+      if (gen !== clientsFetchGenRef.current) return;
       setClients(data);
     } catch (e) {
       console.error(e);
-      setClients([]);
+      if (gen === clientsFetchGenRef.current) setClients([]);
       toast.error('Error al cargar clientes');
     } finally {
-      setLoadingClients(false);
+      if (gen === clientsFetchGenRef.current) setLoadingClients(false);
     }
   };
 
@@ -547,7 +668,7 @@ export default function CRMPage() {
   const getRangeLabel = () => {
     if (rangeMode === 'all') return 'Todo el histórico';
     if (rangeMode === 'year') return `Año ${rangeYear}`;
-    return `${MONTHS_ES[rangeMonth]} ${rangeYear}`;
+    return `${MONTHS_ES[rangeMonth]} ${rangeYear} (1–${new Date(rangeYear, rangeMonth + 1, 0).getDate()})`;
   };
 
   const getRangeDates = () => {
@@ -557,26 +678,39 @@ export default function CRMPage() {
   };
 
   const calculateDashboardMetrics = async () => {
+    const runId = ++metricsRunRef.current;
     setCalculatingMetrics(true);
     try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
       const tenantClientIds = new Set(clients.map((c) => c.id));
-      const [{ start, end }, sSla, sTurnos, sContracts, sEmployees] = await Promise.all([
-        Promise.resolve(getRangeDates()),
-        getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
-        getDocs(empresaCollectionQuery('turnos', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+      const clientRefs: ClientRef[] = clients.map((c) => ({
+        id: c.id,
+        name: c.name,
+        legalName: c.legalName,
+        objetivos: c.objetivos || [],
+      }));
+      const { start, end } = getRangeDates();
+      const [slaRows, turnosRaw, sContracts, sEmployees] = await Promise.all([
+        fetchSlaRowsForCrmDashboard(clientRefs, {
+          empresaId,
+          scopeEmpresa,
+          migracionCompleta,
+        }),
+        fetchCrmDashboardTurnos(empresaId, scopeEmpresa, start, end, clientRefs),
         getDocs(collection(db, 'contracts')),
         getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
       ]);
+      if (runId !== metricsRunRef.current) return;
+
+      const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
+
+      const slaDocsByClient = indexSlaRowsByClients(slaRows, clientRefs);
 
       const validEmp: Record<string, boolean> = {};
       sEmployees.forEach((d) => {
         const e = d.data() as any;
         if (!belongsToEmpresaView(e, empresaId, migracionCompleta)) return;
-        const fileNumber = String(e.fileNumber || '').trim();
-        const dni = String(e.dni || '').trim();
-        const cuil = String(e.cuil || '').trim();
-        if (fileNumber && (dni || cuil)) validEmp[d.id] = true;
+        validEmp[d.id] = true;
       });
 
       const slaByClient: Record<string, number> = {};
@@ -584,26 +718,7 @@ export default function CRMPage() {
       const executedByClient: Record<string, number> = {};
       const contractedByClient: Record<string, number> = {};
       const closedByClient: Record<string, number> = {};
-      const clientRefs: ClientRef[] = clients.map((c) => ({
-        id: c.id,
-        name: c.name,
-        legalName: c.legalName,
-        objetivos: c.objetivos || [],
-      }));
       const plannedRange: PlannedHoursRange = { start, end };
-
-      const slaDocsByClient = new Map<string, any[]>();
-      sSla.forEach((d) => {
-        const s = d.data() as any;
-        const slaOk = scopeEmpresa
-          ? slaBelongsToEmpresa(s, empresaId, true, tenantClientIds)
-          : belongsToEmpresaView(s, empresaId, migracionCompleta);
-        if (!slaOk || !s.clientId) return;
-        const cid = String(s.clientId).trim();
-        const arr = slaDocsByClient.get(cid) || [];
-        arr.push({ id: d.id, ...s });
-        slaDocsByClient.set(cid, arr);
-      });
 
       clientRefs.forEach((clientRef) => {
         const clientSlas = slaDocsByClient.get(clientRef.id) || [];
@@ -617,7 +732,9 @@ export default function CRMPage() {
       sContracts.forEach((d) => {
         const c = d.data() as any;
         if (!c.clientId) return;
-        const cid = String(c.clientId).trim();
+        const canonical = resolveCanonicalClientIdForCrmRow(c.clientId, clients);
+        if (!canonical) return;
+        const cid = canonical;
         if (scopeEmpresa) {
           if (!tenantClientIds.has(cid)) return;
           const docEmp = String(c.empresaId ?? '').trim();
@@ -637,8 +754,13 @@ export default function CRMPage() {
         if (c.type === 'cerrado') closedByClient[cid] = (closedByClient[cid] || 0) + totalHours;
       });
 
-      const allTurnos = sTurnos.docs.map((d) => ({ id: d.id, ...d.data() as any }))
-        .filter((t) => belongsToEmpresaView(t, empresaId, migracionCompleta));
+      const allTurnos = turnosRaw.filter((t) => {
+        if (!scopeEmpresa) return true;
+        const cid = String(t.clientId ?? '').trim();
+        if (cid && tenantAliasSet.has(cid)) return true;
+        if (clientRefs.some((c) => clientRowMatchesClient(t, c))) return true;
+        return belongsToEmpresaView(t, empresaId, migracionCompleta);
+      });
 
       clientRefs.forEach((clientRef) => {
         const clientSlas = slaDocsByClient.get(clientRef.id) || [];
@@ -705,6 +827,7 @@ export default function CRMPage() {
 
       setClientMetricsMap(metrics);
       setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
+      setMetricsUpdatedAt(new Date());
     } catch (e) {
       console.error(e);
       toast.error('Error al calcular métricas');
@@ -1067,9 +1190,42 @@ export default function CRMPage() {
   };
 
   useEffect(() => {
-    if (clients.length > 0) calculateDashboardMetrics();
+    if (clients.length === 0) {
+      setClientMetricsMap({});
+      setGlobalMetrics({ totalSold: 0, totalPlanned: 0, totalExecuted: 0, criticalClients: [] });
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void calculateDashboardMetrics();
+    }, 150);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clients, rangeMode, rangeMonth, rangeYear]);
+  }, [clients, rangeMode, rangeMonth, rangeYear, empresaId, migracionCompleta]);
+
+  const clientsForList = useMemo(() => {
+    let list = [...clients];
+    if (clientListFilter === 'activos') {
+      list = list.filter((c) => isClientStatusActivo(c.status));
+    } else if (clientListFilter === 'con_sla') {
+      list = list.filter((c) => (clientMetricsMap[c.id]?.sla || 0) > 0);
+    } else if (clientListFilter === 'burn_alerta') {
+      list = list.filter((c) => (clientMetricsMap[c.id]?.burnRate || 0) >= 90);
+    }
+    const nameOf = (c: { name?: string }) => String(c.name || '').toLocaleLowerCase('es-AR');
+    list.sort((a, b) => {
+      const ma = clientMetricsMap[a.id] || {};
+      const mb = clientMetricsMap[b.id] || {};
+      if (clientListSort === 'burn_desc') return (mb.burnRate || 0) - (ma.burnRate || 0);
+      if (clientListSort === 'sla_desc') return (mb.sla || 0) - (ma.sla || 0);
+      if (clientListSort === 'plan_gap') {
+        const ga = (ma.planned || 0) - (ma.sla || 0);
+        const gb = (mb.planned || 0) - (mb.sla || 0);
+        return gb - ga;
+      }
+      return nameOf(a).localeCompare(nameOf(b), 'es');
+    });
+    return list;
+  }, [clients, clientMetricsMap, clientListFilter, clientListSort]);
 
 
   const resetObjectiveForm = () => {
@@ -1607,9 +1763,13 @@ export default function CRMPage() {
           subtitle="Gestión comercial y contratos"
           icon={Building2}
           iconColor="bg-indigo-600"
-          items={clients as ClientItem[]}
-          loading={loadingClients}
-          emptyText="Sin clientes para mostrar."
+          items={clientsForList as ClientItem[]}
+          loading={loadingClients && clients.length === 0}
+          emptyText={
+            clientListFilter === 'con_sla'
+              ? 'Ningún cliente con horas SLA en este período. Elegí otro mes o usá filtro «Todos».'
+              : 'Sin clientes para mostrar.'
+          }
           searchPlaceholder="Buscar cliente..."
           searchFn={(c, q) => (c.name || '').toLowerCase().includes(q)}
           action={
@@ -1620,7 +1780,7 @@ export default function CRMPage() {
               <Plus size={13} /> Cliente
             </button>
           }
-          accentFn={c => (c.status || '').toUpperCase() === 'INACTIVO' ? 'bg-slate-300' : 'bg-indigo-700'}
+          accentFn={c => !isClientStatusActivo(c.status) ? 'bg-slate-300' : 'bg-indigo-700'}
           topContent={
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
@@ -1629,9 +1789,9 @@ export default function CRMPage() {
                   Resumen global · {getRangeLabel()}
                   {calculatingMetrics && <Loader2 className="animate-spin ml-1" size={12} />}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
                   <select aria-label="Período del resumen" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={rangeMode} onChange={(e) => setRangeMode(e.target.value as RangeMode)}>
-                    <option value="month">Mes</option>
+                    <option value="month">Mes calendario (1–30/31)</option>
                     <option value="year">Año</option>
                     <option value="all">Todo</option>
                   </select>
@@ -1647,6 +1807,11 @@ export default function CRMPage() {
                   )}
                 </div>
               </div>
+              {metricsUpdatedAt && (
+                <p className="px-5 py-1.5 text-[9px] font-bold text-slate-400 border-b border-slate-100 dark:border-slate-700">
+                  Actualizado {metricsUpdatedAt.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </p>
+              )}
               <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-slate-100 dark:divide-slate-700">
                 <div className="p-5 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-indigo-100 text-indigo-500">
@@ -1673,6 +1838,9 @@ export default function CRMPage() {
                   <div>
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Ejecutado</p>
                     <p className="text-3xl font-black text-slate-800 dark:text-white leading-none">{globalMetrics.totalExecuted}<span className="text-base font-black text-slate-300 ml-1">hs</span></p>
+                    {globalMetrics.totalExecuted === 0 && (globalMetrics.totalSold > 0 || globalMetrics.totalPlanned > 0) && (
+                      <p className="text-[9px] font-bold text-amber-600 mt-1">Sin fichadas en el período</p>
+                    )}
                   </div>
                 </div>
                 {(() => {
@@ -1690,15 +1858,45 @@ export default function CRMPage() {
                   );
                 })()}
               </div>
+              {!calculatingMetrics && clients.length > 0
+                && globalMetrics.totalSold === 0
+                && globalMetrics.totalPlanned === 0
+                && globalMetrics.totalExecuted === 0 && (
+                <p className="px-5 py-2.5 text-[10px] font-bold text-amber-800 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-100 dark:border-amber-900/40">
+                  Sin horas en {getRangeLabel()}. Elegí el mes donde el SLA y los turnos tienen datos (mismo criterio que pre-factura).
+                </p>
+              )}
+              <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-x-4 gap-y-2 text-[9px] font-bold text-slate-500">
+                <span className="font-black uppercase text-slate-400">Burn (ejec. ÷ SLA)</span>
+                <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> &lt; 90%</span>
+                <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500" /> 90–109%</span>
+                <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-rose-500" /> ≥ 110%</span>
+              </div>
+              <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-2">
+                <span className="text-[9px] font-black uppercase text-slate-400 mr-1">Listado</span>
+                <select aria-label="Filtrar clientes" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={clientListFilter} onChange={(e) => setClientListFilter(e.target.value as ClientListFilter)}>
+                  <option value="all">Todos ({clients.length})</option>
+                  <option value="activos">Solo activos</option>
+                  <option value="con_sla">Con SLA en período ({clients.filter((c) => (clientMetricsMap[c.id]?.sla || 0) > 0).length})</option>
+                  <option value="burn_alerta">Burn ≥ 90%</option>
+                </select>
+                <select aria-label="Ordenar clientes" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={clientListSort} onChange={(e) => setClientListSort(e.target.value as ClientListSort)}>
+                  <option value="name">Nombre A–Z</option>
+                  <option value="burn_desc">Mayor burn</option>
+                  <option value="sla_desc">Mayor SLA</option>
+                  <option value="plan_gap">Mayor Δ plan − SLA</option>
+                </select>
+              </div>
             </div>
           }
           renderCardSummary={c => {
             const m = clientMetricsMap[c.id] || {};
-            const burn = Math.round(m.burnRate || 0);
-            const burnHex = burn >= 110 ? '#ef4444' : burn >= 90 ? '#f59e0b' : '#10b981';
-            const burnTextCls = burn >= 110 ? 'text-rose-600' : burn >= 90 ? 'text-amber-500' : 'text-emerald-600';
-            const status = (c as any).status || 'ACTIVO';
-            const statusCls = status === 'ACTIVO'
+            const { burn, hex: burnHex, textCls: burnTextCls } = crmBurnVisual(m.burnRate || 0);
+            const planGap = (m.planned || 0) - (m.sla || 0);
+            const ejecLabel = crmEjecLabel(m.real || 0, m.sla || 0, m.planned || 0);
+            const ejecMuted = Math.round(m.real || 0) === 0 && ((m.sla || 0) > 0 || (m.planned || 0) > 0);
+            const statusLabel = formatClientStatusLabel((c as any).status);
+            const statusCls = isClientStatusActivo((c as any).status)
               ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800'
               : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:border-slate-600';
             return (
@@ -1719,20 +1917,29 @@ export default function CRMPage() {
                   <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full border uppercase shrink-0 ${statusCls}`}>{status}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {([['SLA', `${m.sla || 0} hs`, false], ['Plan.', `${m.planned || 0} hs`, false], ['Ejec.', `${m.real || 0} hs`, false], ['Burn', `${burn}%`, true]] as [string, string, boolean][]).map(([label, val, isBurn]) => (
-                    <div key={label} className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
-                      <p className="text-[8px] font-black text-slate-400 uppercase">{label}</p>
-                      <p className={`font-black text-sm ${isBurn ? burnTextCls : 'text-slate-700 dark:text-white'}`}>{val}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[8px] font-black text-slate-400 uppercase">
-                    <span>Burn Rate</span>
-                    <span style={{ color: burnHex }}>{burn}%</span>
+                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
+                    <p className="text-[8px] font-black text-slate-400 uppercase">SLA</p>
+                    <p className="font-black text-sm text-slate-700 dark:text-white">{m.sla || 0} hs</p>
                   </div>
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border, #e2e8f0)' }}>
-                    <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(100, burn)}%`, backgroundColor: burnHex }}/>
+                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
+                    <p className="text-[8px] font-black text-slate-400 uppercase">Plan.</p>
+                    <p className="font-black text-sm text-slate-700 dark:text-white">{m.planned || 0} hs</p>
+                    {planGap !== 0 && (m.sla || 0) > 0 && (
+                      <p className={`text-[8px] font-bold mt-0.5 ${planGap > 0 ? 'text-amber-600' : 'text-indigo-600'}`}>
+                        Δ {planGap > 0 ? '+' : ''}{planGap} vs SLA
+                      </p>
+                    )}
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
+                    <p className="text-[8px] font-black text-slate-400 uppercase">Ejec.</p>
+                    <p className={`font-black text-sm ${ejecMuted ? 'text-amber-600' : 'text-slate-700 dark:text-white'}`}>{ejecLabel}</p>
+                  </div>
+                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
+                    <p className="text-[8px] font-black text-slate-400 uppercase">Burn</p>
+                    <p className={`font-black text-sm ${burnTextCls}`}>{burn}%</p>
+                    <div className="h-1 rounded-full overflow-hidden mt-1.5" style={{ backgroundColor: 'var(--border, #e2e8f0)' }}>
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, burn)}%`, backgroundColor: burnHex }} />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1740,9 +1947,7 @@ export default function CRMPage() {
           }}
           renderRowSummary={c => {
             const m = clientMetricsMap[c.id] || {};
-            const burn = Math.round(m.burnRate || 0);
-            const burnHex = burn >= 110 ? '#ef4444' : burn >= 90 ? '#f59e0b' : '#10b981';
-            const burnCls = burn >= 110 ? 'bg-rose-50 text-rose-600 border-rose-100 dark:bg-rose-900/20 dark:text-rose-400 dark:border-rose-800' : burn >= 90 ? 'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800' : 'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800';
+            const { burn, hex: burnHex, badgeCls: burnCls } = crmBurnVisual(m.burnRate || 0);
             return (
               <div className="flex items-center gap-4">
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-xs shrink-0" style={{ backgroundColor: burnHex }}>
@@ -1763,7 +1968,7 @@ export default function CRMPage() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${burnCls}`}>Burn {burn}%</span>
-                  <span className="hidden lg:block text-[10px] font-black text-slate-400">{m.sla || 0} hs SLA</span>
+                  <span className="hidden lg:block text-[10px] font-black text-slate-400">{m.sla || 0} hs SLA · {crmEjecLabel(m.real || 0, m.sla || 0, m.planned || 0)}</span>
                 </div>
               </div>
             );

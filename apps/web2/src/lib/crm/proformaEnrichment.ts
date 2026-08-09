@@ -17,6 +17,39 @@ function normKey(value: unknown): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+function isLikelyFirestoreDocId(value: string): boolean {
+  const s = String(value ?? '').trim();
+  return s.length >= 15 && s.length <= 28 && /^[a-zA-Z0-9]+$/.test(s);
+}
+
+function levenshteinIds(a: string, b: string): number {
+  const s = a.toLowerCase();
+  const t = b.toLowerCase();
+  if (s === t) return 0;
+  if (!s.length) return t.length;
+  if (!t.length) return s.length;
+  const row = new Array<number>(t.length + 1);
+  for (let j = 0; j <= t.length; j += 1) row[j] = j;
+  for (let i = 1; i <= s.length; i += 1) {
+    let prev = i - 1;
+    row[0] = i;
+    for (let j = 1; j <= t.length; j += 1) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      const next = Math.min(row[j] + 1, row[j - 1] + 1, prev + cost);
+      prev = row[j];
+      row[j] = next;
+    }
+  }
+  return row[t.length];
+}
+
+function fuzzyMatchObjectiveId(oid: string, id: string): boolean {
+  if (!oid || !id) return false;
+  if (oid === id || normKey(oid) === normKey(id)) return true;
+  if (!isLikelyFirestoreDocId(oid) || !isLikelyFirestoreDocId(id)) return false;
+  return levenshteinIds(oid, id) <= 3;
+}
+
 export function normalizeClientObjetivo(o: ClientObjetivoRef): { id: string; name: string } {
   const id = String(o.id ?? o.objectiveId ?? '').trim();
   const name = String(o.name ?? '').trim();
@@ -103,7 +136,7 @@ export function findClientObjectiveForTurno(
   for (const raw of objetivos) {
     const { id, name } = normalizeClientObjetivo(raw);
     if (!id && !name) continue;
-    if (oid && (oid === id || oid === name || normKey(oid) === normKey(id) || normKey(oid) === normKey(name))) {
+    if (oid && (oid === id || oid === name || normKey(oid) === normKey(id) || normKey(oid) === normKey(name) || fuzzyMatchObjectiveId(oid, id))) {
       return { id: id || oid, name: name || oname || id };
     }
     if (oname && name && (oname === name || normKey(oname) === normKey(name))) {

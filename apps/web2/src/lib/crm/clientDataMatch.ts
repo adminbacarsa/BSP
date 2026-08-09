@@ -1,6 +1,6 @@
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { empresaCollectionQuery, getClientIdAliases } from '@/lib/multiempresa';
+import { belongsToEmpresaView, empresaCollectionQuery, getClientIdAliases } from '@/lib/multiempresa';
 import { getDateKeyInTimezone, resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 
 export type ClientRef = {
@@ -48,6 +48,106 @@ export function clientRowMatchesClient(row: Record<string, unknown>, client: Cli
     .filter(Boolean);
 
   return rowNames.some((rn) => clientNames.some((cn) => rn === cn || rn.includes(cn) || cn.includes(rn)));
+}
+
+export function resolveCanonicalClientIdFromList(
+  rowClientId: unknown,
+  clients: ClientRef[],
+): string | null {
+  const cid = String(rowClientId ?? '').trim();
+  if (!cid) return null;
+  for (const c of clients) {
+    if (c.id === cid) return c.id;
+    if (getClientIdAliases(c.id).includes(cid)) return c.id;
+  }
+  return null;
+}
+
+/** Una lectura de servicios_sla + misma lógica de match que loadClientSlaForClient (sin N×Firestore). */
+export function indexSlaRowsByClients(
+  slaRows: any[],
+  clients: ClientRef[],
+): Map<string, any[]> {
+  const map = new Map<string, any[]>();
+  const add = (clientId: string, row: any) => {
+    const arr = map.get(clientId);
+    if (!arr) return;
+    if (!arr.some((r) => r.id === row.id)) arr.push(row);
+  };
+  for (const c of clients) {
+    map.set(c.id, []);
+  }
+  for (const s of slaRows) {
+    const canon = resolveCanonicalClientIdFromList(s.clientId, clients);
+    if (canon) {
+      add(canon, s);
+      continue;
+    }
+    for (const c of clients) {
+      if (!clientRowMatchesClient(s, c)) continue;
+      add(c.id, s);
+    }
+  }
+  return map;
+}
+
+export function collectClientIdAliases(clients: ClientRef[]): string[] {
+  const aliasSet = new Set<string>();
+  for (const c of clients) {
+    for (const a of getClientIdAliases(c.id)) aliasSet.add(a);
+  }
+  return [...aliasSet];
+}
+
+async function fetchRowsByClientIdInBatches(
+  collectionName: string,
+  aliases: string[],
+  onRow: (id: string, data: Record<string, unknown>) => void,
+): Promise<void> {
+  if (aliases.length === 0) return;
+  for (let i = 0; i < aliases.length; i += 10) {
+    const chunk = aliases.slice(i, i + 10);
+    const snap = await getDocs(query(collection(db, collectionName), where('clientId', 'in', chunk)));
+    snap.docs.forEach((d) => onRow(d.id, d.data() as Record<string, unknown>));
+  }
+}
+
+/**
+ * SLA del dashboard: una lectura tenant (+ `in` por clientId solo si hace falta).
+ */
+export async function fetchSlaRowsForCrmDashboard(
+  clients: ClientRef[],
+  opts: { empresaId: string; scopeEmpresa: boolean; migracionCompleta: boolean },
+): Promise<any[]> {
+  const { empresaId, scopeEmpresa, migracionCompleta } = opts;
+  const byId = new Map<string, any>();
+  const tenantAliasSet = new Set(collectClientIdAliases(clients));
+
+  const ingest = (id: string, data: Record<string, unknown>) => {
+    const row = { id, ...data };
+    if (scopeEmpresa) {
+      const cid = String(row.clientId ?? '').trim();
+      const linkedToTenant = !!cid && tenantAliasSet.has(cid);
+      const matchedByClient = clients.some((c) => clientRowMatchesClient(row, c));
+      if (!linkedToTenant && !matchedByClient && !belongsToEmpresaView(row, empresaId, migracionCompleta)) {
+        return;
+      }
+    }
+    byId.set(id, row);
+  };
+
+  const baseSnap = await getDocs(
+    empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>,
+  );
+  baseSnap.docs.forEach((d) => ingest(d.id, d.data() as Record<string, unknown>));
+
+  const empKey = String(empresaId ?? '').trim().toLowerCase();
+  const needsAliasSupplement = scopeEmpresa && empKey !== 'bacarsa' && clients.length > 0;
+  if (needsAliasSupplement) {
+    await fetchRowsByClientIdInBatches('servicios_sla', [...tenantAliasSet], ingest);
+  }
+
+  return [...byId.values()];
 }
 
 async function queryByClientIdAliases<T extends Record<string, unknown>>(

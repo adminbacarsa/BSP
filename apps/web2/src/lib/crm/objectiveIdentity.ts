@@ -8,10 +8,89 @@ export function fallbackObjectiveKey(clientId: string, objectiveName: string): s
   return `${clientId}_${objectiveName}`;
 }
 
+function normObjectiveNameKey(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function isLikelyFirestoreDocId(value: string): boolean {
+  const s = String(value ?? '').trim();
+  return s.length >= 15 && s.length <= 28 && /^[a-zA-Z0-9]+$/.test(s);
+}
+
+function levenshtein(a: string, b: string): number {
+  const s = a.toLowerCase();
+  const t = b.toLowerCase();
+  if (s === t) return 0;
+  if (!s.length) return t.length;
+  if (!t.length) return s.length;
+  const row = new Array<number>(t.length + 1);
+  for (let j = 0; j <= t.length; j += 1) row[j] = j;
+  for (let i = 1; i <= s.length; i += 1) {
+    let prev = i - 1;
+    row[0] = i;
+    for (let j = 1; j <= t.length; j += 1) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      const next = Math.min(row[j] + 1, row[j - 1] + 1, prev + cost);
+      prev = row[j];
+      row[j] = next;
+    }
+  }
+  return row[t.length];
+}
+
 function registerAlias(aliases: Record<string, ObjectiveMeta>, meta: ObjectiveMeta, key: string) {
   const k = String(key || '').trim();
   if (!k) return;
   aliases[k] = meta;
+  const lower = k.toLowerCase();
+  if (lower !== k && !aliases[lower]) aliases[lower] = meta;
+}
+
+function findMetaByObjectiveName(
+  aliases: Record<string, ObjectiveMeta>,
+  objectiveName: string,
+): ObjectiveMeta | undefined {
+  const needle = normObjectiveNameKey(objectiveName);
+  if (!needle) return undefined;
+  const seen = new Set<string>();
+  for (const meta of Object.values(aliases)) {
+    if (!meta?.canonicalId || seen.has(meta.canonicalId)) continue;
+    seen.add(meta.canonicalId);
+    if (normObjectiveNameKey(meta.name) === needle) return meta;
+  }
+  return undefined;
+}
+
+function collectDistinctMetas(aliases: Record<string, ObjectiveMeta>): ObjectiveMeta[] {
+  const byCanon = new Map<string, ObjectiveMeta>();
+  for (const meta of Object.values(aliases)) {
+    if (!meta?.canonicalId) continue;
+    if (!byCanon.has(meta.canonicalId)) byCanon.set(meta.canonicalId, meta);
+  }
+  return [...byCanon.values()];
+}
+
+function resolveFuzzyObjectiveMeta(
+  objectiveId: string,
+  aliases: Record<string, ObjectiveMeta>,
+): ObjectiveMeta | null {
+  const oid = String(objectiveId ?? '').trim();
+  if (!oid || !isLikelyFirestoreDocId(oid)) return null;
+  const lower = oid.toLowerCase();
+  let best: { meta: ObjectiveMeta; dist: number } | null = null;
+  for (const meta of collectDistinctMetas(aliases)) {
+    const cid = meta.canonicalId;
+    if (!isLikelyFirestoreDocId(cid)) continue;
+    if (cid.toLowerCase() === lower) return meta;
+    const dist = levenshtein(lower, cid);
+    if (dist > 3) continue;
+    if (!best || dist < best.dist) best = { meta, dist };
+  }
+  return best?.meta ?? null;
 }
 
 export function buildObjectiveAliasMap(
@@ -40,13 +119,18 @@ export function buildObjectiveAliasMap(
     if (!canonicalId && sla.id) canonicalId = sla.id;
     if (!canonicalId) continue;
 
-    const existing = aliases[canonicalId] || (oid ? aliases[oid] : undefined);
+    const byName = objName ? findMetaByObjectiveName(aliases, objName) : undefined;
+    const existing = byName || aliases[canonicalId] || (oid ? aliases[oid] : undefined);
     const meta: ObjectiveMeta = existing ?? {
-      canonicalId,
-      name: objName || canonicalId,
+      canonicalId: byName?.canonicalId || canonicalId,
+      name: objName || byName?.name || canonicalId,
       clientId: cid || clientId,
     };
     if (objName && meta.name === canonicalId) meta.name = objName;
+    if (byName) {
+      meta.canonicalId = byName.canonicalId;
+      meta.name = byName.name || meta.name;
+    }
     registerAlias(aliases, meta, canonicalId);
     if (oid) registerAlias(aliases, meta, oid);
     if (objName) registerAlias(aliases, meta, objName);
@@ -67,6 +151,7 @@ export function objectiveMatchCandidates(row: {
   const name = String(row.objectiveName ?? '').trim();
   const keys: string[] = [];
   if (oid) keys.push(oid);
+  if (oid) keys.push(oid.toLowerCase());
   if (name) keys.push(name);
   if (cid && name) keys.push(fallbackObjectiveKey(cid, name));
   return keys;
@@ -79,10 +164,16 @@ export function resolveCanonicalObjectiveId(
   for (const key of objectiveMatchCandidates(row)) {
     if (aliases[key]) return aliases[key].canonicalId;
   }
+  const name = String(row.objectiveName ?? '').trim();
+  if (name) {
+    const byName = findMetaByObjectiveName(aliases, name);
+    if (byName) return byName.canonicalId;
+  }
   const oid = String(row.objectiveId ?? '').trim();
+  const fuzzy = oid ? resolveFuzzyObjectiveMeta(oid, aliases) : null;
+  if (fuzzy) return fuzzy.canonicalId;
   if (oid) return oid;
   const cid = String(row.clientId ?? '').trim();
-  const name = String(row.objectiveName ?? '').trim();
   if (cid && name) return fallbackObjectiveKey(cid, name);
   if (name) return name;
   return null;
@@ -96,9 +187,15 @@ export function resolveObjectiveDisplayName(
     if (aliases[key]?.name) return aliases[key].name;
   }
   const name = String(row.objectiveName ?? '').trim();
-  if (name) return name;
+  if (name) {
+    const byName = findMetaByObjectiveName(aliases, name);
+    if (byName?.name) return byName.name;
+    return name;
+  }
   const rawOid = String(row.objectiveId ?? '').trim();
   if (rawOid && aliases[rawOid]?.name) return aliases[rawOid].name;
+  const fuzzy = rawOid ? resolveFuzzyObjectiveMeta(rawOid, aliases) : null;
+  if (fuzzy?.name) return fuzzy.name;
   const canonicalOid = resolveCanonicalObjectiveId(row, aliases);
   if (canonicalOid && aliases[canonicalOid]?.name) return aliases[canonicalOid].name;
   if (canonicalOid && canonicalOid !== rawOid && rawOid) {
