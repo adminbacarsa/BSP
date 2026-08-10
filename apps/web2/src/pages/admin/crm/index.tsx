@@ -1538,19 +1538,32 @@ export default function CRMPage() {
       });
       const slaInRange = [...servicesForProforma, ...objetivoStubs];
 
+      const tenantObjetivoRefs = clients.flatMap((c: any) =>
+        (c.objetivos || []).map((o: any) => {
+          const { id, name } = normalizeClientObjetivo(o);
+          return id && name ? { id, name } : null;
+        }).filter(Boolean) as { id: string; name: string }[],
+      );
       const objectiveAliases = buildProformaObjectiveAliases(
         selectedClient.id,
         selectedClient.objetivos || [],
         slaInRange,
+        { extraObjetivos: tenantObjetivoRefs },
       );
 
       const slaExclusion = buildSlaExclusionContext(servicesForProforma, start, end);
       const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(servicesForProforma);
 
       const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa });
+      const objetivosForEnrich = [
+        ...(selectedClient.objetivos || []),
+        ...tenantObjetivoRefs.filter(
+          (o) => !(selectedClient.objetivos || []).some((x: any) => normalizeClientObjetivo(x).id === o.id),
+        ),
+      ];
       const turnosEnriched = enrichTurnosForProforma(turnosList, {
         clientId: selectedClient.id,
-        objetivos: selectedClient.objetivos || [],
+        objetivos: objetivosForEnrich,
         slas: servicesForProforma,
       });
       const solicitudesRefuerzo = await solicitudRefuerzoService.getByClient(selectedClient.id);

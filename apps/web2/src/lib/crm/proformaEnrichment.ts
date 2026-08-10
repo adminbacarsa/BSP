@@ -1,6 +1,8 @@
 import type { ObjectiveMeta } from './objectiveIdentity';
 import {
   buildObjectiveAliasMap,
+  fallbackObjectiveKey,
+  isLikelyFirestoreDocId,
   resolveObjectiveDisplayName,
 } from './objectiveIdentity';
 
@@ -114,19 +116,24 @@ export function findClientObjectiveForTurno(
 
 /** objectiveId en turno suele ser el doc id del SLA o un objectiveId legacy. */
 export function findSlaObjectiveForTurno(
-  row: { objectiveId?: unknown; objectiveName?: unknown },
-  slas: Array<{ id?: string; objectiveId?: string; objectiveName?: string }>,
+  row: { objectiveId?: unknown; objectiveName?: unknown; clientId?: unknown },
+  slas: Array<{ id?: string; objectiveId?: string; objectiveName?: string; clientId?: string }>,
 ): { id: string; name: string } | null {
   const oid = String(row.objectiveId ?? '').trim();
   const oname = String(row.objectiveName ?? '').trim();
+  const rowCid = String(row.clientId ?? '').trim();
   for (const sla of slas) {
     const slaId = String(sla.id ?? '').trim();
     const slaOid = String(sla.objectiveId ?? '').trim();
     const slaName = String(sla.objectiveName ?? '').trim();
+    const slaCid = String(sla.clientId ?? rowCid).trim();
     if (oid && (oid === slaId || oid === slaOid)) {
       const id = slaOid || oid;
-      const name = slaName || oname || id;
+      const name = slaName || (oname && !isLikelyFirestoreDocId(oname) ? oname : '') || id;
       if (name) return { id, name };
+    }
+    if (oid && slaCid && slaName && oid === fallbackObjectiveKey(slaCid, slaName)) {
+      return { id: slaOid || oid, name: slaName };
     }
     if (oname && slaName && normKey(oname) === normKey(slaName)) {
       return { id: oid || slaOid || slaId, name: slaName };
@@ -159,7 +166,10 @@ export function enrichTurnosForProforma<T extends Record<string, unknown>>(
       t.objectiveId = fromClient.id;
       t.objectiveName = fromClient.name;
     } else {
-      const fromSla = findSlaObjectiveForTurno(t, opts.slas);
+      const fromSla = findSlaObjectiveForTurno(
+        { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId },
+        opts.slas,
+      );
       if (fromSla) {
         t.objectiveId = fromSla.id;
         t.objectiveName = fromSla.name;
@@ -184,10 +194,21 @@ export function buildProformaObjectiveAliases(
   clientId: string,
   objetivos: ClientObjetivoRef[],
   slas: Array<{ id?: string; objectiveId?: string; objectiveName?: string; clientId?: string }>,
+  options?: { extraObjetivos?: ClientObjetivoRef[] },
 ): Record<string, ObjectiveMeta> {
-  const normalized = (objetivos || []).map((o) => {
-    const { id, name } = normalizeClientObjetivo(o);
-    return { id: id || name, name: name || id };
-  });
+  const mergedRaw = [...(objetivos || []), ...(options?.extraObjetivos || [])];
+  const seen = new Set<string>();
+  const normalized = mergedRaw
+    .map((o) => {
+      const { id, name } = normalizeClientObjetivo(o);
+      return { id: id || name, name: name || id };
+    })
+    .filter((o) => {
+      const key = `${o.id}::${o.name}`;
+      if (!o.id && !o.name) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   return buildObjectiveAliasMap(clientId, normalized, slas);
 }

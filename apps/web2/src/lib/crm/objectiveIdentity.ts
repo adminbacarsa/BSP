@@ -16,7 +16,7 @@ function normObjectiveNameKey(value: unknown): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
-function isLikelyFirestoreDocId(value: string): boolean {
+export function isLikelyFirestoreDocId(value: string): boolean {
   const s = String(value ?? '').trim();
   return s.length >= 15 && s.length <= 28 && /^[a-zA-Z0-9]+$/.test(s);
 }
@@ -178,7 +178,7 @@ export function resolveObjectiveDisplayName(
     if (aliases[key]?.name) return aliases[key].name;
   }
   const name = String(row.objectiveName ?? '').trim();
-  if (name) {
+  if (name && !isLikelyFirestoreDocId(name)) {
     const byName = findMetaByObjectiveName(aliases, name);
     if (byName?.name) return byName.name;
     return name;
@@ -193,7 +193,7 @@ export function resolveObjectiveDisplayName(
     if (aliases[c]?.name) return aliases[c].name;
   }
   if (rawOid) {
-    return rawOid.length > 12 ? `${rawOid.slice(0, 10)}…` : rawOid;
+    return 'Objetivo sin nombre';
   }
   return 'Objetivo sin nombre';
 }
