@@ -84,6 +84,8 @@ import {
   X,
 } from 'lucide-react';
 import ProformaPanel from '@/components/crm/ProformaPanel';
+import CrmDashboardSummary from '@/components/crm/CrmDashboardSummary';
+import CrmClientListCard from '@/components/crm/CrmClientListCard';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { resolveObjectiveDisplayName, formatProformaObjectiveLabel } from '@/lib/crm/objectiveIdentity';
 import {
@@ -1750,6 +1752,11 @@ export default function CRMPage() {
     return baseHours * hourly;
   }, [baseHours, proformaHourlyValue]);
 
+  const conSlaCount = useMemo(
+    () => clients.filter((c) => (clientMetricsMap[c.id]?.sla || 0) > 0).length,
+    [clients, clientMetricsMap],
+  );
+
   type ClientItem = { id: string } & Record<string, any>;
 
   return (
@@ -1780,195 +1787,75 @@ export default function CRMPage() {
               <Plus size={13} /> Cliente
             </button>
           }
-          accentFn={c => !isClientStatusActivo(c.status) ? 'bg-slate-300' : 'bg-indigo-700'}
+          accentFn={(c) => (!isClientStatusActivo(c.status) ? 'bg-slate-400' : 'bg-indigo-600')}
           topContent={
-            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
-              <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400">
-                  <BarChart3 size={14} />
-                  Resumen global · {getRangeLabel()}
-                  {calculatingMetrics && <Loader2 className="animate-spin ml-1" size={12} />}
-                </div>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <select aria-label="Período del resumen" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={rangeMode} onChange={(e) => setRangeMode(e.target.value as RangeMode)}>
-                    <option value="month">Mes calendario (1–30/31)</option>
-                    <option value="year">Año</option>
-                    <option value="all">Todo</option>
-                  </select>
-                  {rangeMode !== 'all' && (
-                    <select aria-label="Año del período" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={rangeYear} onChange={(e) => setRangeYear(Number(e.target.value))}>
-                      {[rangeYear - 2, rangeYear - 1, rangeYear, rangeYear + 1].map((y) => <option key={y} value={y}>{y}</option>)}
-                    </select>
-                  )}
-                  {rangeMode === 'month' && (
-                    <select aria-label="Mes del período" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={rangeMonth} onChange={(e) => setRangeMonth(Number(e.target.value))}>
-                      {MONTHS_ES.map((m, idx) => <option key={m} value={idx}>{m}</option>)}
-                    </select>
-                  )}
-                </div>
-              </div>
-              {metricsUpdatedAt && (
-                <p className="px-5 py-1.5 text-[9px] font-bold text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                  Actualizado {metricsUpdatedAt.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                </p>
-              )}
-              <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-slate-100 dark:divide-slate-700">
-                <div className="p-5 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-indigo-100 text-indigo-500">
-                    <ShieldCheck size={18} aria-hidden="true"/>
-                  </div>
-                  <div>
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Solicitado (SLA)</p>
-                    <p className="text-3xl font-black text-indigo-600 leading-none">{globalMetrics.totalSold}<span className="text-base font-black text-indigo-300 ml-1">hs</span></p>
-                  </div>
-                </div>
-                <div className="p-5 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-slate-100 text-slate-500">
-                    <Calendar size={18} aria-hidden="true"/>
-                  </div>
-                  <div>
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Planificado</p>
-                    <p className="text-3xl font-black text-slate-800 dark:text-white leading-none">{globalMetrics.totalPlanned}<span className="text-base font-black text-slate-300 ml-1">hs</span></p>
-                  </div>
-                </div>
-                <div className="p-5 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-100 text-emerald-500">
-                    <CheckCircle size={18} aria-hidden="true"/>
-                  </div>
-                  <div>
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Ejecutado</p>
-                    <p className="text-3xl font-black text-slate-800 dark:text-white leading-none">{globalMetrics.totalExecuted}<span className="text-base font-black text-slate-300 ml-1">hs</span></p>
-                    {globalMetrics.totalExecuted === 0 && (globalMetrics.totalSold > 0 || globalMetrics.totalPlanned > 0) && (
-                      <p className="text-[9px] font-bold text-amber-600 mt-1">Sin fichadas en el período</p>
-                    )}
-                  </div>
-                </div>
-                {(() => {
-                  const br = globalMetrics.totalSold > 0 ? Math.round((globalMetrics.totalExecuted / globalMetrics.totalSold) * 100) : 0;
-                  return (
-                    <div className="p-5 flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${br >= 110 ? 'bg-rose-100 text-rose-500' : br >= 90 ? 'bg-amber-100 text-amber-500' : 'bg-emerald-100 text-emerald-500'}`}>
-                        <TrendingUp size={18} />
-                      </div>
-                      <div>
-                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Burn Rate Global</p>
-                        <p className={`text-3xl font-black leading-none ${br >= 110 ? 'text-rose-600' : br >= 90 ? 'text-amber-600' : 'text-slate-800 dark:text-white'}`}>{br}<span className="text-base font-black text-slate-300 ml-0.5">%</span></p>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-              {!calculatingMetrics && clients.length > 0
-                && globalMetrics.totalSold === 0
-                && globalMetrics.totalPlanned === 0
-                && globalMetrics.totalExecuted === 0 && (
-                <p className="px-5 py-2.5 text-[10px] font-bold text-amber-800 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-100 dark:border-amber-900/40">
-                  Sin horas en {getRangeLabel()}. Elegí el mes donde el SLA y los turnos tienen datos (mismo criterio que pre-factura).
-                </p>
-              )}
-              <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-x-4 gap-y-2 text-[9px] font-bold text-slate-500">
-                <span className="font-black uppercase text-slate-400">Burn (ejec. ÷ SLA)</span>
-                <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> &lt; 90%</span>
-                <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500" /> 90–109%</span>
-                <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-rose-500" /> ≥ 110%</span>
-              </div>
-              <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-2">
-                <span className="text-[9px] font-black uppercase text-slate-400 mr-1">Listado</span>
-                <select aria-label="Filtrar clientes" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={clientListFilter} onChange={(e) => setClientListFilter(e.target.value as ClientListFilter)}>
-                  <option value="all">Todos ({clients.length})</option>
-                  <option value="activos">Solo activos</option>
-                  <option value="con_sla">Con SLA en período ({clients.filter((c) => (clientMetricsMap[c.id]?.sla || 0) > 0).length})</option>
-                  <option value="burn_alerta">Burn ≥ 90%</option>
-                </select>
-                <select aria-label="Ordenar clientes" className="text-[10px] font-black uppercase border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }} value={clientListSort} onChange={(e) => setClientListSort(e.target.value as ClientListSort)}>
-                  <option value="name">Nombre A–Z</option>
-                  <option value="burn_desc">Mayor burn</option>
-                  <option value="sla_desc">Mayor SLA</option>
-                  <option value="plan_gap">Mayor Δ plan − SLA</option>
-                </select>
-              </div>
-            </div>
+            <CrmDashboardSummary
+              rangeLabel={getRangeLabel()}
+              rangeMode={rangeMode}
+              rangeMonth={rangeMonth}
+              rangeYear={rangeYear}
+              onRangeModeChange={setRangeMode}
+              onRangeMonthChange={setRangeMonth}
+              onRangeYearChange={setRangeYear}
+              totalSold={globalMetrics.totalSold}
+              totalPlanned={globalMetrics.totalPlanned}
+              totalExecuted={globalMetrics.totalExecuted}
+              calculatingMetrics={calculatingMetrics}
+              metricsUpdatedAt={metricsUpdatedAt}
+              clientsCount={clients.length}
+              conSlaCount={conSlaCount}
+              clientListFilter={clientListFilter}
+              clientListSort={clientListSort}
+              onClientListFilterChange={setClientListFilter}
+              onClientListSortChange={setClientListSort}
+              clients={clients}
+              clientMetricsMap={clientMetricsMap}
+            />
           }
-          renderCardSummary={c => {
+          renderCardSummary={(c) => {
             const m = clientMetricsMap[c.id] || {};
-            const { burn, hex: burnHex, textCls: burnTextCls } = crmBurnVisual(m.burnRate || 0);
+            const { burn, textCls: burnTextCls } = crmBurnVisual(m.burnRate || 0);
             const planGap = (m.planned || 0) - (m.sla || 0);
             const ejecLabel = crmEjecLabel(m.real || 0, m.sla || 0, m.planned || 0);
             const ejecMuted = Math.round(m.real || 0) === 0 && ((m.sla || 0) > 0 || (m.planned || 0) > 0);
-            const statusLabel = formatClientStatusLabel((c as any).status);
-            const statusCls = isClientStatusActivo((c as any).status)
-              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800'
-              : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-700 dark:text-slate-400 dark:border-slate-600';
             return (
-              <div className="flex flex-col gap-3 h-full" style={{ borderTop: `2px solid ${burnHex}`, marginTop: '-1px', paddingTop: '12px' }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm shrink-0" style={{ backgroundColor: burnHex }}>
-                    {(c.name || '?').charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="font-black text-sm text-slate-800 dark:text-white truncate">{c.name}</h3>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase">
-                      {c.taxId || 'S/C'}
-                      {isSuperAdmin && c.empresaId ? (
-                        <span className="ml-2 text-indigo-500">· {String(c.empresaId)}</span>
-                      ) : null}
-                    </p>
-                  </div>
-                  <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full border uppercase shrink-0 ${statusCls}`}>{status}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
-                    <p className="text-[8px] font-black text-slate-400 uppercase">SLA</p>
-                    <p className="font-black text-sm text-slate-700 dark:text-white">{m.sla || 0} hs</p>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
-                    <p className="text-[8px] font-black text-slate-400 uppercase">Plan.</p>
-                    <p className="font-black text-sm text-slate-700 dark:text-white">{m.planned || 0} hs</p>
-                    {planGap !== 0 && (m.sla || 0) > 0 && (
-                      <p className={`text-[8px] font-bold mt-0.5 ${planGap > 0 ? 'text-amber-600' : 'text-indigo-600'}`}>
-                        Δ {planGap > 0 ? '+' : ''}{planGap} vs SLA
-                      </p>
-                    )}
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
-                    <p className="text-[8px] font-black text-slate-400 uppercase">Ejec.</p>
-                    <p className={`font-black text-sm ${ejecMuted ? 'text-amber-600' : 'text-slate-700 dark:text-white'}`}>{ejecLabel}</p>
-                  </div>
-                  <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-2">
-                    <p className="text-[8px] font-black text-slate-400 uppercase">Burn</p>
-                    <p className={`font-black text-sm ${burnTextCls}`}>{burn}%</p>
-                    <div className="h-1 rounded-full overflow-hidden mt-1.5" style={{ backgroundColor: 'var(--border, #e2e8f0)' }}>
-                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, burn)}%`, backgroundColor: burnHex }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <CrmClientListCard
+                name={c.name}
+                taxId={c.taxId}
+                empresaId={c.empresaId}
+                statusLabel={formatClientStatusLabel((c as any).status)}
+                statusActivo={isClientStatusActivo((c as any).status)}
+                showEmpresaId={isSuperAdmin}
+                metric={m}
+                ejecLabel={ejecLabel}
+                ejecMuted={ejecMuted}
+                burnPct={burn}
+                burnTextCls={burnTextCls}
+                planGap={planGap}
+              />
             );
           }}
-          renderRowSummary={c => {
+          defaultView="list"
+          renderRowSummary={(c) => {
             const m = clientMetricsMap[c.id] || {};
-            const { burn, hex: burnHex, badgeCls: burnCls } = crmBurnVisual(m.burnRate || 0);
+            const { burn, textCls: burnTextCls } = crmBurnVisual(m.burnRate || 0);
             return (
-              <div className="flex items-center gap-4">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-black text-xs shrink-0" style={{ backgroundColor: burnHex }}>
-                  {(c.name || '?').charAt(0).toUpperCase()}
+              <div className="flex items-center gap-4 w-full">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center shrink-0 text-indigo-600">
+                  <Building2 size={16} aria-hidden />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="font-black text-sm text-slate-800 dark:text-white">{c.name}</span>
-                    <span className="text-slate-300 dark:text-slate-600">·</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">{c.taxId || 'S/C'}</span>
+                <div className="flex-1 min-w-0 grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-1 lg:gap-6 items-center">
+                  <div>
+                    <span className="font-bold text-sm text-slate-900 dark:text-white">{c.name}</span>
+                    <span className="text-slate-300 mx-2">·</span>
+                    <span className="text-[10px] font-medium text-slate-500">{c.taxId || 'Sin CUIT'}</span>
                   </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <div className="w-20 h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border, #e2e8f0)' }}>
-                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, burn)}%`, backgroundColor: burnHex }}/>
-                    </div>
-                    <span className="text-[8px] font-black text-slate-400">{burn}% burn</span>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-semibold tabular-nums text-slate-600 dark:text-slate-300">
+                    <span><span className="text-slate-400">SLA</span> {(m.sla || 0).toLocaleString('es-AR')} hs</span>
+                    <span><span className="text-slate-400">Plan</span> {(m.planned || 0).toLocaleString('es-AR')} hs</span>
+                    <span><span className="text-slate-400">Ejec</span> {crmEjecLabel(m.real || 0, m.sla || 0, m.planned || 0)}</span>
+                    <span className={burnTextCls}>Burn {burn}%</span>
                   </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${burnCls}`}>Burn {burn}%</span>
-                  <span className="hidden lg:block text-[10px] font-black text-slate-400">{m.sla || 0} hs SLA · {crmEjecLabel(m.real || 0, m.sla || 0, m.planned || 0)}</span>
                 </div>
               </div>
             );

@@ -933,6 +933,7 @@ export default function PlanificacionPage() {
     const [toolbarMoreOpen, setToolbarMoreOpen] = useState(false);
     const [cronoFullscreen, setCronoFullscreen] = useState(false);
     const [statsBarCollapsed, setStatsBarCollapsed] = useState(false);
+    const [statsHoursView, setStatsHoursView] = useState<'total' | 'detalle'>('total');
 
     const [isDataSyncing, setIsDataSyncing] = useState(false);
     const dataSyncRef = useRef<{ employees: boolean; clients: boolean }>({ employees: false, clients: false });
@@ -1409,6 +1410,8 @@ export default function PlanificacionPage() {
     useEffect(() => {
         setToolbarCollapsed(localStorage.getItem('planif_toolbar_collapsed') === '1');
         setStatsBarCollapsed(localStorage.getItem('planif_stats_collapsed') === '1');
+        const hv = localStorage.getItem('planif_stats_hours_view');
+        if (hv === 'total' || hv === 'detalle') setStatsHoursView(hv);
     }, []);
 
     useEffect(() => {
@@ -11123,109 +11126,162 @@ export default function PlanificacionPage() {
                     ];
                     const extrasHrs = extrasList.reduce((a: number, t: any) => a + (Number(t.hours) || 0), 0);
                     const extrasCount = extrasList.length;
+                    const slaDelta = effectiveSlaVendidas > 0 ? Math.round(effectiveSlaVendidas - slaCloseHours) : 0;
+                    const showHoursToggle = hoursMode === 'mes' && effectiveSlaVendidas > 0;
+                    const persistStatsHoursView = (v: 'total' | 'detalle') => {
+                        setStatsHoursView(v);
+                        if (typeof window !== 'undefined') localStorage.setItem('planif_stats_hours_view', v);
+                    };
+                    const metricBox = 'rounded-lg border border-slate-200/90 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/50 px-3 py-2 min-w-[4.5rem]';
+                    const metricLabel = 'text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 leading-none';
+                    const metricValue = 'text-lg font-semibold tabular-nums text-slate-800 dark:text-slate-100 leading-tight';
                     return (
-                    <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2 flex items-center gap-3 divide-x divide-slate-100 dark:divide-slate-700" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                        <div className="text-center pr-3" title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva).">
-                            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Empl.</p>
-                            <p className="text-sm font-black text-slate-700 dark:text-slate-200 leading-tight">{empCount}</p>
+                    <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2.5 flex flex-wrap items-stretch gap-2" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                        <div className={`${metricBox} text-center`} title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva).">
+                            <p className={metricLabel}>Empl.</p>
+                            <p className={metricValue}>{empCount}</p>
                         </div>
-                        <div className="text-center px-3" title={hsTitle}>
-                            <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none flex items-center justify-center gap-1">
-                                {hsLabel}
-                                {hoursMode === 'cct' && <span className="text-[7px] text-indigo-500">CCT</span>}
-                            </p>
-                            <p className={`text-sm font-black leading-tight ${slaMismatch ? 'text-rose-600' : 'text-indigo-600'}`}>{displayPlanHrs.toFixed(0)}</p>
-                            {hoursMode === 'mes' && effectiveSlaVendidas > 0 && Math.round(facturableCrmHrs) !== Math.round(slaCloseHours) && (
-                                <p className="text-[8px] font-bold text-slate-500 leading-none mt-0.5" title="Incluye ext/adel de cobertura; no suma al cierre SLA">
-                                    CRM {facturableCrmHrs.toFixed(0)}h fact.
+                        <div
+                            className={`flex-1 min-w-[11rem] max-w-md rounded-lg border px-3 py-2 ${slaMismatch ? 'border-rose-300/80 bg-rose-50/40 dark:bg-rose-950/20' : 'border-slate-200/90 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/50'}`}
+                            title={hsTitle}
+                        >
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                                <p className={`${metricLabel} flex items-center gap-1`}>
+                                    {hsLabel}
+                                    {hoursMode === 'cct' && <span className="normal-case text-indigo-600">CCT</span>}
                                 </p>
-                            )}
-                            {hoursMode === 'mes' && effectiveSlaVendidas > 0 && (
-                                <p className="text-[8px] font-bold text-teal-700 leading-none mt-0.5" title="Horas vendidas del contrato SLA del mes">
-                                    vs {effectiveSlaVendidas} vend.
+                                {showHoursToggle && (
+                                    <div className="flex rounded-md border border-slate-200 dark:border-slate-600 p-0.5 bg-slate-100/90 dark:bg-slate-900/60 shrink-0" role="tablist" aria-label="Vista de horas">
+                                        <button
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={statsHoursView === 'total'}
+                                            onClick={() => persistStatsHoursView('total')}
+                                            className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${statsHoursView === 'total' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                        >
+                                            Total
+                                        </button>
+                                        <button
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={statsHoursView === 'detalle'}
+                                            onClick={() => persistStatsHoursView('detalle')}
+                                            className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${statsHoursView === 'detalle' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                        >
+                                            Desglose
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            {statsHoursView === 'total' || !showHoursToggle ? (
+                                <p className={`${metricValue} ${slaMismatch ? 'text-rose-700 dark:text-rose-400' : 'text-indigo-700 dark:text-indigo-300'}`}>
+                                    {displayPlanHrs.toFixed(0)}
+                                    <span className="text-sm font-medium text-slate-500 ml-0.5">h</span>
                                 </p>
-                            )}
-                            {slaMismatch && effectiveSlaVendidas > 0 && (
-                                <p className="text-[8px] font-black text-rose-500 leading-none mt-0.5">
-                                    {Math.round(effectiveSlaVendidas - slaCloseHours) > 0 ? `−${Math.round(effectiveSlaVendidas - slaCloseHours)}h SLA` : `+${Math.round(slaCloseHours - effectiveSlaVendidas)}h SLA`}
-                                </p>
-                            )}
-                            {hoursMode === 'mes' && objectiveMonthCoverageExtraHours > 0 && (
-                                <p className="text-[8px] font-bold text-amber-600 leading-none mt-0.5" title="Ya incluidas en Hs. Plan. (facturable). No se suman otra vez al cierre contra vendidas SLA.">
-                                    incl. +{objectiveMonthCoverageExtraHours}h ext/adel
-                                </p>
+                            ) : (
+                                <dl className="space-y-1 text-[11px] leading-snug">
+                                    <div className="flex justify-between gap-3">
+                                        <dt className="text-slate-500">Base cierre SLA</dt>
+                                        <dd className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{slaCloseHours.toFixed(0)} h</dd>
+                                    </div>
+                                    {Math.round(facturableCrmHrs) !== Math.round(slaCloseHours) && (
+                                        <div className="flex justify-between gap-3">
+                                            <dt className="text-slate-500">CRM facturable</dt>
+                                            <dd className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{facturableCrmHrs.toFixed(0)} h</dd>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between gap-3">
+                                        <dt className="text-slate-500">Vendidas contrato</dt>
+                                        <dd className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{effectiveSlaVendidas} h</dd>
+                                    </div>
+                                    {slaMismatch && (
+                                        <div className="flex justify-between gap-3 pt-0.5 border-t border-slate-200/80 dark:border-slate-600/80">
+                                            <dt className="text-slate-600 font-medium">Diferencia SLA</dt>
+                                            <dd className={`font-semibold tabular-nums ${slaDelta > 0 ? 'text-rose-600' : 'text-amber-700'}`}>
+                                                {slaDelta > 0 ? `−${slaDelta} h` : `+${Math.abs(slaDelta)} h`}
+                                            </dd>
+                                        </div>
+                                    )}
+                                    {objectiveMonthCoverageExtraHours > 0 && (
+                                        <div className="flex justify-between gap-3">
+                                            <dt className="text-slate-500" title="Incluidas en facturable; no suman otra vez al cierre SLA">Ext./adel. incl.</dt>
+                                            <dd className="font-semibold tabular-nums text-slate-600">+{objectiveMonthCoverageExtraHours} h</dd>
+                                        </div>
+                                    )}
+                                </dl>
                             )}
                         </div>
                         {empCountBillable > 0 && (
-                            <div className="text-center px-3" title={hoursMode === 'cct' ? 'Promedio de horas por empleado de dotación propia del objetivo en el ciclo CCT (excluye invitados/cobertura externa y guardias solo-RET).' : 'Promedio de horas por empleado de dotación propia del objetivo en el mes (excluye invitados/cobertura externa y guardias solo-RET).'}>
-                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Prom./Emp.</p>
-                                <p className="text-sm font-black text-slate-500 dark:text-slate-300 leading-tight">{Math.round(nativeAssignedHours / empCountBillable)}h</p>
+                            <div className={`${metricBox} text-center`} title={hoursMode === 'cct' ? 'Promedio de horas por empleado de dotación propia del objetivo en el ciclo CCT (excluye invitados/cobertura externa y guardias solo-RET).' : 'Promedio de horas por empleado de dotación propia del objetivo en el mes (excluye invitados/cobertura externa y guardias solo-RET).'}>
+                                <p className={metricLabel}>Prom./emp.</p>
+                                <p className={metricValue}>{Math.round(nativeAssignedHours / empCountBillable)}<span className="text-sm font-medium text-slate-500">h</span></p>
                             </div>
                         )}
                         {retCount > 0 && (
-                            <div className="text-center px-3" title="Días RET: guardia sobrante en el objetivo (0 h planificadas/liquidables). Disponible para cubrir otro servicio.">
-                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Retenes</p>
-                                <p className="text-sm font-black text-amber-600 leading-tight">{retCount} <span className="text-[9px] text-amber-500 font-bold">días</span></p>
+                            <div className={`${metricBox} text-center`} title="Días RET: guardia sobrante en el objetivo (0 h planificadas/liquidables). Disponible para cubrir otro servicio.">
+                                <p className={metricLabel}>Retenes</p>
+                                <p className={`${metricValue} text-amber-700`}>{retCount} <span className="text-xs font-medium text-amber-600">d</span></p>
                             </div>
                         )}
                         {retBufferHours > 0 && (
-                            <div className="text-center px-3" title="Colchón teórico: suma de horas que cabrían promoviendo cada RET a ~8h facturables sin pasar 200h/mes por persona (cupo calendario). No implica que exista alguien libre en la banda correcta ni que el convenio deje ese swap: la Verificación mira slots, descansos 12h/35h y licencias.">
-                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Colchón</p>
-                                <p className="text-sm font-black text-emerald-600 leading-tight">{retBufferHours}h</p>
+                            <div className={`${metricBox} text-center`} title="Colchón teórico: suma de horas que cabrían promoviendo cada RET a ~8h facturables sin pasar 200h/mes por persona (cupo calendario). No implica que exista alguien libre en la banda correcta ni que el convenio deje ese swap: la Verificación mira slots, descansos 12h/35h y licencias.">
+                                <p className={metricLabel}>Colchón</p>
+                                <p className={`${metricValue} text-emerald-700`}>{retBufferHours}h</p>
                             </div>
                         )}
                         {autoV2GenStats && autoCycles.length > 0 && (
-                            <div className="text-center px-3" title="Esquema(s) de ciclo aplicados en la generación automática.">
-                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Esquema</p>
-                                <p className="text-sm font-black text-slate-600 dark:text-slate-300 leading-tight">{autoCycles.join(' · ')}</p>
+                            <div className={`${metricBox} text-center`} title="Esquema(s) de ciclo aplicados en la generación automática.">
+                                <p className={metricLabel}>Esquema</p>
+                                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 leading-tight">{autoCycles.join(' · ')}</p>
                             </div>
                         )}
                         {autoV2GenStats?.excessPositionEmployees && autoV2GenStats.excessPositionEmployees.length > 0 && (
                             <div
-                                className="text-center px-3 cursor-default"
+                                className={`${metricBox} text-center cursor-default`}
                                 title={autoV2GenStats.excessPositionEmployees.map(e => `${e.positionName}: ${e.assigned} asignados, necesita ${e.needed} (sobran ${e.excess})`).join('\n')}
                             >
-                                <p className="text-[8px] font-black text-amber-500 uppercase leading-none">Personal</p>
-                                <p className="text-sm font-black text-amber-600 leading-tight">
-                                    +{autoV2GenStats.excessPositionEmployees.reduce((s, e) => s + e.excess, 0)} extra
+                                <p className={`${metricLabel} text-amber-600`}>Personal</p>
+                                <p className={`${metricValue} text-amber-700`}>
+                                    +{autoV2GenStats.excessPositionEmployees.reduce((s, e) => s + e.excess, 0)}
                                 </p>
                             </div>
                         )}
                         {autoV2GenStats && (
                             <button
+                                type="button"
                                 onClick={() => setShowCapacityModal(true)}
-                                className="text-center px-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded transition-colors"
+                                className={`${metricBox} text-center hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors`}
                                 title="Ver capacidad CCT por empleado: cuánto consumió cada uno del ciclo CCT (corte 25/26) en current y next."
                             >
-                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Cap. CCT</p>
-                                <p className="text-sm font-black text-indigo-600 leading-tight underline decoration-dotted">Ver</p>
+                                <p className={metricLabel}>Cap. CCT</p>
+                                <p className="text-sm font-semibold text-indigo-600 underline-offset-2 hover:underline">Ver</p>
                             </button>
                         )}
                         {extrasCount > 0 && (
-                            <div className="text-center px-3" title={`Refuerzos del mes (RFZ + TURA) de este objetivo: ${extrasCount} turno(s), ${extrasHrs.toFixed(0)}h. Se facturan en CRM/pre-factura aparte de las horas vendidas del SLA base; no entran en la validación de publicación.`}>
-                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Extras</p>
-                                <p className="text-sm font-black text-rose-600 leading-tight">+{extrasHrs.toFixed(0)}h</p>
-                                <p className="text-[8px] font-bold text-rose-400 leading-none mt-0.5">{extrasCount} ref.</p>
+                            <div className={`${metricBox} text-center`} title={`Refuerzos del mes (RFZ + TURA) de este objetivo: ${extrasCount} turno(s), ${extrasHrs.toFixed(0)}h. Se facturan en CRM/pre-factura aparte de las horas vendidas del SLA base; no entran en la validación de publicación.`}>
+                                <p className={metricLabel}>Extras</p>
+                                <p className={`${metricValue} text-rose-700`}>+{extrasHrs.toFixed(0)}h</p>
+                                <p className="text-[10px] font-medium text-slate-500">{extrasCount} ref.</p>
                             </div>
                         )}
-                        {effectiveSlaVendidas > 0 && (
-                            <div className={`text-center pl-3 ${slaMismatch ? 'rounded-lg bg-rose-50 px-2 py-0.5' : ''}`}>
-                                <p className="text-[8px] font-black text-slate-400 dark:text-slate-500 uppercase leading-none">Vendidas</p>
-                                <p className="text-sm font-black text-teal-600 leading-tight">{effectiveSlaVendidas}</p>
+                        {effectiveSlaVendidas > 0 && statsHoursView === 'total' && (
+                            <div className={`${metricBox} text-center ${slaMismatch ? 'border-teal-200/90' : ''}`}>
+                                <p className={metricLabel}>Vendidas</p>
+                                <p className={`${metricValue} text-teal-800 dark:text-teal-300`}>{effectiveSlaVendidas}</p>
                             </div>
                         )}
                         {hoursMode === 'mes' && selectedObjective && (
                             <button
                                 type="button"
                                 onClick={() => setShowHoursBreakdownModal(true)}
-                                className="text-center px-3 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 rounded-lg transition-colors border border-indigo-100 dark:border-indigo-900"
-                                title="Desglose: columna legajo, base SLA, ext/adel y exclusiones por guardia"
+                                className={`${metricBox} text-left hover:bg-indigo-50/80 dark:hover:bg-indigo-950/30 transition-colors border-indigo-200/70 dark:border-indigo-800`}
+                                title="Detalle por guardia: columna legajo, base SLA, ext/adel y exclusiones"
                             >
-                                <p className="text-[8px] font-black text-indigo-500 uppercase leading-none">Horas</p>
-                                <p className="text-sm font-black text-indigo-600 leading-tight underline decoration-dotted">Desglose</p>
+                                <p className={metricLabel}>Análisis</p>
+                                <p className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">Por guardia</p>
                             </button>
                         )}
-                        <button onClick={() => { setStatsBarCollapsed(true); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '1'); }} className="shrink-0 ml-2 flex items-center gap-1 px-2 py-1 text-[9px] font-black text-slate-400 hover:text-slate-600 border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors" title="Ocultar estadísticas"><ChevronDown size={10}/></button>
+                        <button type="button" onClick={() => { setStatsBarCollapsed(true); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '1'); }} className="shrink-0 self-center flex items-center justify-center w-8 h-8 text-slate-400 hover:text-slate-600 border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-600 rounded-lg transition-colors" title="Ocultar estadísticas"><ChevronDown size={14}/></button>
                     </div>
                     );
                     })() )}
