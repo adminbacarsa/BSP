@@ -538,7 +538,7 @@ function isShiftAtOtherObjective(
     return String(obj) !== String(selectedObjective);
 }
 
-/** Turno de otro objetivo: solo lectura en este crono, salvo RET (stand-by local / EXT). */
+/** Turno de otro objetivo: solo lectura en este crono, salvo RET y Franco (F/FF → flujo FT). */
 function isCrossObjectivePlanningReadOnly(
     shift: any,
     selectedObjective: string | null | undefined,
@@ -548,7 +548,9 @@ function isCrossObjectivePlanningReadOnly(
     const obj = shift.objectiveId;
     if (obj == null || obj === '') return false;
     if (String(obj) === String(selectedObjective)) return false;
-    if (shiftPlanningCodeUpper(shift) === 'RET') return false;
+    const code = shiftPlanningCodeUpper(shift);
+    if (code === 'RET') return false;
+    if (code === 'F' || code === 'FF') return false;
     return true;
 }
 
@@ -11861,6 +11863,7 @@ export default function PlanificacionPage() {
                                     const isFrancoLike = isFrancoShift || ['F','FF','FP','FT'].includes(code);
                                     const francoRestH = francoRestHModal;
                                     const hasDraft = shift.draft === true;
+                                    const isCrossObjectiveShift = shift.objectiveId && String(shift.objectiveId) !== String(selectedObjective);
                                     return (
                                         <>
                                             <div className="flex justify-between items-start mb-5">
@@ -11997,7 +12000,16 @@ export default function PlanificacionPage() {
                                             {correctionMode && previewIsPublished && renderDayCoverageClosures(selectedCell.dateStr)}
 
                                             {/* Acciones */}
-                                            {canEdit && !previewIsPublished && (
+                                            {isCrossObjectiveShift && isFrancoShift && (
+                                                <button
+                                                    onClick={() => { setFrancoMode('FT_SELECTION'); setCellEditMode(true); }}
+                                                    disabled={isServiceLocked}
+                                                    className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white px-4 py-2.5 rounded-xl text-sm font-black transition-colors"
+                                                >
+                                                    <ArrowRightCircle size={14}/> Traer como Franco Trabajado (FT)
+                                                </button>
+                                            )}
+                                            {canEdit && !previewIsPublished && !isCrossObjectiveShift && (
                                                 <div className="flex flex-col gap-2">
                                                     <div className="flex gap-2">
                                                         <button
