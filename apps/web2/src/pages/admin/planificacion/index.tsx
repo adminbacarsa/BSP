@@ -1000,6 +1000,7 @@ export default function PlanificacionPage() {
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
     const [grupoSlaMap, setGrupoSlaMap] = useState<Record<string, any[]>>({});
     const [grupoTotalVendidas, setGrupoTotalVendidas] = useState(0);
+    const [grupoVendidasByObjective, setGrupoVendidasByObjective] = useState<Record<string, number>>({});
     const dotacionMigratedRef = useRef(false);
     const objectiveSortAppliedRef = useRef<string | null>(null);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
@@ -2165,6 +2166,54 @@ export default function PlanificacionPage() {
             }),
         });
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+
+    /** Facturable por sede (grupo unificado): suma turnos con objectiveId de cada objetivo — debe cerrar con grupoTotalVendidas. */
+    const grupoObjectiveBillableHours = useMemo(() => {
+        if (!selectedGrupo || !grupoUnifiedMode) return null;
+        const acc: Record<string, number> = {};
+        for (const objId of selectedGrupo.objectiveIds) acc[objId] = 0;
+        displayedEmployees.forEach((emp: any) => {
+            const assignedPos = String(emp.assignedPosition || '').trim();
+            daysInMonth.forEach((day) => {
+                const dateStr = getDateKey(day);
+                const key = `${emp.id}_${dateStr}`;
+                for (const objId of selectedGrupo.objectiveIds) {
+                    const ctx: PlanningCellHoursContext = {
+                        selectedObjective: objId,
+                        grupoObjectiveIds: null,
+                        slaCodeHoursHint,
+                        isExcludedFromBillable: isShiftExcludedFromSlaBillable,
+                        assignedPositionForEmp: () => assignedPos,
+                    };
+                    const turnos = resolveTurnosForPlanningCellKey({
+                        empId: emp.id,
+                        dateStr,
+                        pending: pendingChanges[key],
+                        cellTurnos: cellTurnosMap[key],
+                        resolveSingleAtObjective: () =>
+                            resolveCellShiftAtObjective(emp.id, dateStr, objId, pendingChanges, shiftsMap),
+                        ctx,
+                    });
+                    acc[objId] += billableHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
+                }
+            });
+        });
+        const rounded: Record<string, number> = {};
+        for (const objId of selectedGrupo.objectiveIds) {
+            rounded[objId] = Math.round(acc[objId] * 10) / 10;
+        }
+        return rounded;
+    }, [
+        selectedGrupo,
+        grupoUnifiedMode,
+        displayedEmployees,
+        daysInMonth,
+        pendingChanges,
+        shiftsMap,
+        cellTurnosMap,
+        slaCodeHoursHint,
+        planningSlaExclusion,
+    ]);
 
     // Días RET por empleado (0 h planificadas — sobrante disponible en otro objetivo).
     const empRetDays = useMemo(() => {
@@ -4205,7 +4254,12 @@ export default function PlanificacionPage() {
 
     // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
     useEffect(() => {
-        if (!selectedGrupo || !grupoUnifiedMode || !selectedClient) { setGrupoSlaMap({}); setGrupoTotalVendidas(0); return; }
+        if (!selectedGrupo || !grupoUnifiedMode || !selectedClient) {
+            setGrupoSlaMap({});
+            setGrupoTotalVendidas(0);
+            setGrupoVendidasByObjective({});
+            return;
+        }
         const fetchGroupSlas = async () => {
             try {
                 const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
@@ -4216,6 +4270,7 @@ export default function PlanificacionPage() {
                 const viewYear = currentDate.getFullYear();
                 const viewMonth = currentDate.getMonth();
                 const result: Record<string, any[]> = {};
+                const vendidasByObj: Record<string, number> = {};
                 let totalVendidas = 0;
                 for (const objId of selectedGrupo.objectiveIds) {
                     const matching = filterSlasForPlanningContext(allDocs, selectedClient, objId, clients, slaIdToObjId);
@@ -4223,17 +4278,23 @@ export default function PlanificacionPage() {
                     const srvForStructure = srv ?? fallback;
                     const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
                     if (monthHasSla && srvForStructure) {
-                        totalVendidas += resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth);
+                        const objVend = resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth);
+                        vendidasByObj[objId] = objVend;
+                        totalVendidas += objVend;
+                    } else {
+                        vendidasByObj[objId] = 0;
                     }
                     const { structure } = buildPlanningPositionStructure(srvForStructure, { monthHasSla, hasExactMatch: !!hasExactMatch });
                     result[objId] = structure.length > 0 ? structure : [{ positionName: 'General', shifts: DEFAULT_PLANNING_SHIFTS.map((s: any) => ({ ...s })), qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' }];
                 }
                 setGrupoSlaMap(result);
                 setGrupoTotalVendidas(totalVendidas);
+                setGrupoVendidasByObjective(vendidasByObj);
             } catch (e) {
                 console.error('GRUPO SLA ERROR:', e);
                 setGrupoSlaMap({});
                 setGrupoTotalVendidas(0);
+                setGrupoVendidasByObjective({});
             }
         };
         fetchGroupSlas();
@@ -12010,7 +12071,7 @@ export default function PlanificacionPage() {
                                                     <ArrowRightCircle size={14}/> Traer como Franco Trabajado (FT)
                                                 </button>
                                             )}
-                                            {canEdit && !previewIsPublished && !isCrossObjectiveShift && (
+                                            {canEdit && !previewIsPublished && !(isCrossObjectiveShift && isFrancoShift) && (
                                                 <div className="flex flex-col gap-2">
                                                     <div className="flex gap-2">
                                                         <button
@@ -13747,7 +13808,9 @@ export default function PlanificacionPage() {
                                 <div>
                                     <h3 className="font-black text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
                                         <BarChart2 className="text-indigo-600" size={20}/>
-                                        Desglose de horas — {getObjectiveName(selectedObjective)}
+                                        Desglose de horas — {selectedGrupo && grupoUnifiedMode
+                                            ? `${selectedGrupo.nombre || 'Grupo'} (vista unificada)`
+                                            : getObjectiveName(selectedObjective)}
                                     </h3>
                                     <p className="text-xs text-slate-500 mt-1">
                                         Mes calendario · Misma lógica que pre-factura (facturable) y cierre SLA (base sin ext/adel).
@@ -13797,6 +13860,55 @@ export default function PlanificacionPage() {
                                                     )}
                                                 </div>
                                             </div>
+                                            {selectedGrupo && grupoUnifiedMode && grupoObjectiveBillableHours && (
+                                                <div className="border rounded-xl overflow-hidden">
+                                                    <p className="text-[10px] font-black uppercase text-slate-400 px-3 py-2 bg-slate-50 dark:bg-slate-800 border-b">
+                                                        Cierre por sede (grupo) — la suma de planificado debe igualar vendidas del grupo
+                                                    </p>
+                                                    <table className="w-full text-[11px]">
+                                                        <thead className="bg-slate-100 dark:bg-slate-800">
+                                                            <tr>
+                                                                <th className="text-left p-2 font-black">Objetivo</th>
+                                                                <th className="text-right p-2 font-black">Facturable</th>
+                                                                <th className="text-right p-2 font-black">Vendidas</th>
+                                                                <th className="text-right p-2 font-black">Δ</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {selectedGrupo.objectiveIds.map((objId: string) => {
+                                                                const plan = Math.round(grupoObjectiveBillableHours[objId] || 0);
+                                                                const vendObj = Math.round(grupoVendidasByObjective[objId] || 0);
+                                                                const d = vendObj > 0 ? vendObj - plan : 0;
+                                                                return (
+                                                                    <tr key={objId} className="border-t border-slate-100">
+                                                                        <td className="p-2 font-bold text-slate-800 truncate max-w-[220px]" title={getObjectiveName(objId)}>{getObjectiveName(objId)}</td>
+                                                                        <td className="p-2 text-right font-mono">{plan}h</td>
+                                                                        <td className="p-2 text-right font-mono text-teal-700">{vendObj > 0 ? `${vendObj}h` : '—'}</td>
+                                                                        <td className={`p-2 text-right font-mono font-bold ${d === 0 ? 'text-emerald-600' : d > 0 ? 'text-rose-600' : 'text-amber-600'}`}>
+                                                                            {vendObj <= 0 ? '—' : d === 0 ? 'OK' : d > 0 ? `−${d}h` : `+${-d}h`}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                        <tfoot className="bg-slate-50 font-black border-t-2">
+                                                            <tr>
+                                                                <td className="p-2">Total grupo</td>
+                                                                <td className="p-2 text-right font-mono">{Math.round(Object.values(grupoObjectiveBillableHours).reduce((a, v) => a + v, 0))}h</td>
+                                                                <td className="p-2 text-right font-mono text-teal-700">{grupoTotalVendidas}h</td>
+                                                                <td className="p-2 text-right font-mono text-rose-600">
+                                                                    {grupoTotalVendidas > 0 && Math.round(Object.values(grupoObjectiveBillableHours).reduce((a, v) => a + v, 0)) !== grupoTotalVendidas
+                                                                        ? `−${grupoTotalVendidas - Math.round(Object.values(grupoObjectiveBillableHours).reduce((a, v) => a + v, 0))}h`
+                                                                        : 'OK'}
+                                                                </td>
+                                                            </tr>
+                                                        </tfoot>
+                                                    </table>
+                                                    <p className="text-[10px] text-slate-500 px-3 py-2 border-t">
+                                                        Cobertura «días OK» mira puestos/bandas por día; puede estar completa aunque falten horas facturables vs el SLA del mes (p. ej. códigos con menos h que el contrato).
+                                                    </p>
+                                                </div>
+                                            )}
                                             {b.excludedBillable > 0 && (
                                                 <p className="text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
                                                     {b.excludedBillable}h en celdas con turno pero <b>excluidas del SLA</b> (día/puesto 🚫) — no suman a legajo ni a pre-factura.
