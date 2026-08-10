@@ -128,6 +128,9 @@ import {
 } from '@/lib/crm/plannedHours';
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
+import { buildCrmTrendBuckets, crmTrendChartTitle } from '@/lib/crm/crmDashboardBuckets';
+import { aggregateCrmPortfolioHours } from '@/lib/crm/crmDashboardAggregate';
+import type { CrmTrendPoint } from '@/components/crm/CrmDashboardSummary';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   applyRefuerzoHorasVendidasToGrids,
@@ -336,6 +339,7 @@ export default function CRMPage() {
 
   const [globalMetrics, setGlobalMetrics] = useState({ totalSold: 0, totalPlanned: 0, totalExecuted: 0, criticalClients: [] as any[] });
   const [clientMetricsMap, setClientMetricsMap] = useState<Record<string, any>>({});
+  const [crmTrendSeries, setCrmTrendSeries] = useState<CrmTrendPoint[]>([]);
 
   // --- INFO ---
   const [isEditingInfo, setIsEditingInfo] = useState(false);
@@ -691,14 +695,21 @@ export default function CRMPage() {
         legalName: c.legalName,
         objetivos: c.objetivos || [],
       }));
+      const buckets = buildCrmTrendBuckets(rangeMode, rangeMonth, rangeYear);
       const { start, end } = getRangeDates();
+      let turnoStart = start ?? buckets[0]?.start ?? new Date(2000, 0, 1);
+      let turnoEnd = end ?? buckets[buckets.length - 1]?.end ?? new Date(2099, 11, 31, 23, 59, 59, 999);
+      for (const b of buckets) {
+        if (b.start < turnoStart) turnoStart = b.start;
+        if (b.end > turnoEnd) turnoEnd = b.end;
+      }
       const [slaRows, turnosRaw, sContracts, sEmployees] = await Promise.all([
         fetchSlaRowsForCrmDashboard(clientRefs, {
           empresaId,
           scopeEmpresa,
           migracionCompleta,
         }),
-        fetchCrmDashboardTurnos(empresaId, scopeEmpresa, start, end, clientRefs),
+        fetchCrmDashboardTurnos(empresaId, scopeEmpresa, turnoStart, turnoEnd, clientRefs),
         getDocs(collection(db, 'contracts')),
         getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
       ]);
@@ -763,6 +774,25 @@ export default function CRMPage() {
         if (clientRefs.some((c) => clientRowMatchesClient(t, c))) return true;
         return belongsToEmpresaView(t, empresaId, migracionCompleta);
       });
+
+      const trendSeries: CrmTrendPoint[] = buckets.map((b) => {
+        const agg = aggregateCrmPortfolioHours(
+          clientRefs,
+          slaDocsByClient,
+          allTurnos,
+          validEmp,
+          b.start,
+          b.end,
+          tenantClientIds,
+        );
+        return {
+          label: b.label,
+          sla: agg.sla,
+          planificado: agg.planned,
+          ejecutado: agg.executed,
+        };
+      });
+      setCrmTrendSeries(trendSeries);
 
       clientRefs.forEach((clientRef) => {
         const clientSlas = slaDocsByClient.get(clientRef.id) || [];
@@ -1194,6 +1224,7 @@ export default function CRMPage() {
   useEffect(() => {
     if (clients.length === 0) {
       setClientMetricsMap({});
+      setCrmTrendSeries([]);
       setGlobalMetrics({ totalSold: 0, totalPlanned: 0, totalExecuted: 0, criticalClients: [] });
       return;
     }
@@ -1791,6 +1822,7 @@ export default function CRMPage() {
           topContent={
             <CrmDashboardSummary
               rangeLabel={getRangeLabel()}
+              trendTitle={crmTrendChartTitle(rangeMode, rangeMonth, rangeYear)}
               rangeMode={rangeMode}
               rangeMonth={rangeMonth}
               rangeYear={rangeYear}
@@ -1800,6 +1832,7 @@ export default function CRMPage() {
               totalSold={globalMetrics.totalSold}
               totalPlanned={globalMetrics.totalPlanned}
               totalExecuted={globalMetrics.totalExecuted}
+              trendSeries={crmTrendSeries}
               calculatingMetrics={calculatingMetrics}
               metricsUpdatedAt={metricsUpdatedAt}
               clientsCount={clients.length}
@@ -1808,8 +1841,6 @@ export default function CRMPage() {
               clientListSort={clientListSort}
               onClientListFilterChange={setClientListFilter}
               onClientListSortChange={setClientListSort}
-              clients={clients}
-              clientMetricsMap={clientMetricsMap}
             />
           }
           renderCardSummary={(c) => {

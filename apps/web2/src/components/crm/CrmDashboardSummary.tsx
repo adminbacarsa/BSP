@@ -1,34 +1,36 @@
 import React, { useMemo } from 'react';
 import {
-  Bar,
-  BarChart,
+  Area,
   CartesianGrid,
+  ComposedChart,
   Legend,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
 import { BarChart3, Calendar, CheckCircle, Loader2, ShieldCheck, TrendingUp } from 'lucide-react';
+import type { CrmRangeMode } from '@/lib/crm/crmDashboardBuckets';
 
 const MONTHS_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
-export type CrmRangeMode = 'month' | 'year' | 'all';
 export type ClientListFilter = 'all' | 'activos' | 'con_sla' | 'burn_alerta';
 export type ClientListSort = 'name' | 'burn_desc' | 'sla_desc' | 'plan_gap';
 
-export type CrmClientMetric = {
-  sla?: number;
-  planned?: number;
-  real?: number;
-  burnRate?: number;
+export type CrmTrendPoint = {
+  label: string;
+  sla: number;
+  planificado: number;
+  ejecutado: number;
 };
 
 type Props = {
   rangeLabel: string;
+  trendTitle: string;
   rangeMode: CrmRangeMode;
   rangeMonth: number;
   rangeYear: number;
@@ -38,6 +40,7 @@ type Props = {
   totalSold: number;
   totalPlanned: number;
   totalExecuted: number;
+  trendSeries: CrmTrendPoint[];
   calculatingMetrics: boolean;
   metricsUpdatedAt: Date | null;
   clientsCount: number;
@@ -46,19 +49,11 @@ type Props = {
   clientListSort: ClientListSort;
   onClientListFilterChange: (v: ClientListFilter) => void;
   onClientListSortChange: (v: ClientListSort) => void;
-  clients: Array<{ id: string; name?: string }>;
-  clientMetricsMap: Record<string, CrmClientMetric>;
 };
 
 function pct(num: number, den: number): number {
   if (!den || den <= 0) return 0;
   return Math.round((num / den) * 100);
-}
-
-function truncateLabel(name: string, max = 16): string {
-  const s = String(name || '').trim();
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1)}…`;
 }
 
 function ChartTooltip({
@@ -72,10 +67,10 @@ function ChartTooltip({
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg text-xs dark:border-slate-600 dark:bg-slate-800">
-      <p className="font-bold text-slate-700 dark:text-slate-200 mb-1.5 max-w-[200px] truncate">{label}</p>
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-lg text-xs dark:border-slate-600 dark:bg-slate-800">
+      <p className="font-bold text-slate-800 dark:text-slate-100 mb-2">{label}</p>
       {payload.map((p) => (
-        <p key={p.name} className="font-semibold text-slate-600 dark:text-slate-300" style={{ color: p.color }}>
+        <p key={p.name} className="font-semibold tabular-nums" style={{ color: p.color }}>
           {p.name}: {Math.round(Number(p.value) || 0).toLocaleString('es-AR')} hs
         </p>
       ))}
@@ -85,6 +80,7 @@ function ChartTooltip({
 
 export default function CrmDashboardSummary({
   rangeLabel,
+  trendTitle,
   rangeMode,
   rangeMonth,
   rangeYear,
@@ -94,6 +90,7 @@ export default function CrmDashboardSummary({
   totalSold,
   totalPlanned,
   totalExecuted,
+  trendSeries,
   calculatingMetrics,
   metricsUpdatedAt,
   clientsCount,
@@ -102,41 +99,20 @@ export default function CrmDashboardSummary({
   clientListSort,
   onClientListFilterChange,
   onClientListSortChange,
-  clients,
-  clientMetricsMap,
 }: Props) {
   const burn = pct(totalExecuted, totalSold);
   const planVsSla = pct(totalPlanned, totalSold);
   const execVsPlan = pct(totalExecuted, totalPlanned);
   const deltaPlanSla = totalPlanned - totalSold;
-
-  const portfolioChart = useMemo(
-    () => [{ key: 'Cartera', sla: totalSold, planificado: totalPlanned, ejecutado: totalExecuted }],
-    [totalSold, totalPlanned, totalExecuted],
-  );
-
-  const clientsChart = useMemo(() => {
-    return clients
-      .map((c) => {
-        const m = clientMetricsMap[c.id] || {};
-        const sla = Math.round(m.sla || 0);
-        const planificado = Math.round(m.planned || 0);
-        const ejecutado = Math.round(m.real || 0);
-        return {
-          name: truncateLabel(c.name || 'Sin nombre'),
-          sla,
-          planificado,
-          ejecutado,
-          weight: sla + planificado,
-        };
-      })
-      .filter((d) => d.weight > 0)
-      .sort((a, b) => b.weight - a.weight)
-      .slice(0, 8);
-  }, [clients, clientMetricsMap]);
+  const gapEjecSla = totalExecuted - totalSold;
 
   const burnTone =
     burn >= 110 ? 'text-rose-600' : burn >= 90 ? 'text-amber-600' : 'text-emerald-600';
+
+  const hasChartData = useMemo(
+    () => trendSeries.some((p) => p.sla > 0 || p.planificado > 0 || p.ejecutado > 0),
+    [trendSeries],
+  );
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-lg overflow-hidden dark:border-slate-700 dark:bg-slate-800">
@@ -202,101 +178,93 @@ export default function CrmDashboardSummary({
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-0 lg:divide-x divide-slate-100 dark:divide-slate-700">
-        <div className="lg:col-span-5 p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <KpiTile
-              icon={ShieldCheck}
-              label="SLA solicitado"
-              value={totalSold}
-              accent="text-indigo-600"
-              iconBg="bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40"
-            />
-            <KpiTile
-              icon={Calendar}
-              label="Planificado"
-              value={totalPlanned}
-              accent="text-slate-800 dark:text-white"
-              iconBg="bg-slate-100 text-slate-600 dark:bg-slate-700"
-              hint={
-                totalSold > 0
-                  ? `Δ ${deltaPlanSla >= 0 ? '+' : ''}${deltaPlanSla.toLocaleString('es-AR')} hs vs SLA`
-                  : undefined
-              }
-            />
-            <KpiTile
-              icon={CheckCircle}
-              label="Ejecutado (fichado)"
-              value={totalExecuted}
-              accent="text-emerald-700 dark:text-emerald-400"
-              iconBg="bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30"
-            />
-            <KpiTile
-              icon={TrendingUp}
-              label="Burn (ejec. ÷ SLA)"
-              value={burn}
-              suffix="%"
-              accent={burnTone}
-              iconBg="bg-slate-100 text-slate-600 dark:bg-slate-700"
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-2 pt-1">
-            <SecondaryKpi label="Plan ÷ SLA" value={`${planVsSla}%`} />
-            <SecondaryKpi label="Ejec. ÷ plan" value={`${execVsPlan}%`} />
-            <SecondaryKpi label="Con SLA" value={`${conSlaCount}/${clientsCount}`} />
-          </div>
-          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/40">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-              Totales del período (hs)
-            </p>
-            <div className="h-[140px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={portfolioChart} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="key" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Bar dataKey="sla" name="SLA" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={48} />
-                  <Bar dataKey="planificado" name="Planificado" fill="#64748b" radius={[4, 4, 0, 0]} maxBarSize={48} />
-                  <Bar dataKey="ejecutado" name="Ejecutado" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={48} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+      <div className="p-6 space-y-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <KpiCompact icon={ShieldCheck} label="SLA vendidas" value={totalSold} unit="hs" tone="text-indigo-600" />
+          <KpiCompact icon={Calendar} label="Planificadas" value={totalPlanned} unit="hs" tone="text-slate-800 dark:text-white" />
+          <KpiCompact icon={CheckCircle} label="Realizadas" value={totalExecuted} unit="hs" tone="text-emerald-600" />
+          <KpiCompact icon={TrendingUp} label="Burn" value={burn} unit="%" tone={burnTone} />
+          <KpiCompact label="Plan ÷ SLA" value={planVsSla} unit="%" tone="text-slate-700 dark:text-slate-200" />
+          <KpiCompact label="Real. ÷ plan" value={execVsPlan} unit="%" tone="text-slate-700 dark:text-slate-200" />
         </div>
 
-        <div className="lg:col-span-7 p-6">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3">
-            Principales clientes · SLA vs plan vs ejecutado (hs)
+        <div className="grid sm:grid-cols-3 gap-2 text-center">
+          <MiniStat
+            label="Δ plan − SLA"
+            value={`${deltaPlanSla >= 0 ? '+' : ''}${deltaPlanSla.toLocaleString('es-AR')} hs`}
+          />
+          <MiniStat
+            label="Δ real. − SLA"
+            value={`${gapEjecSla >= 0 ? '+' : ''}${gapEjecSla.toLocaleString('es-AR')} hs`}
+          />
+          <MiniStat label="Clientes con SLA" value={`${conSlaCount} / ${clientsCount}`} />
+        </div>
+
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 dark:border-slate-700 dark:bg-slate-900/30">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+            <TrendingUp size={12} className="text-indigo-500" />
+            {trendTitle}
           </p>
-          {clientsChart.length === 0 ? (
-            <div className="flex items-center justify-center h-[280px] rounded-xl border border-dashed border-slate-200 text-sm font-semibold text-slate-400 dark:border-slate-600">
-              Sin horas en este período para graficar
+          {!hasChartData ? (
+            <div className="flex items-center justify-center h-[300px] text-sm font-semibold text-slate-400">
+              Sin horas en el rango del gráfico
             </div>
           ) : (
-            <div className="h-[280px] w-full">
+            <div className="h-[300px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={clientsChart} margin={{ top: 8, right: 8, left: -12, bottom: 48 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <ComposedChart data={trendSeries} margin={{ top: 8, right: 12, left: -8, bottom: 4 }}>
+                  <defs>
+                    <linearGradient id="crmSlaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
                   <XAxis
-                    dataKey="name"
-                    tick={{ fontSize: 9, fill: '#64748b' }}
-                    angle={-32}
-                    textAnchor="end"
-                    height={56}
-                    interval={0}
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: '#64748b', fontWeight: 600 }}
+                    axisLine={false}
+                    tickLine={false}
                   />
-                  <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: '#64748b' }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={48}
+                  />
                   <Tooltip content={<ChartTooltip />} />
                   <Legend
-                    wrapperStyle={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}
+                    wrapperStyle={{ fontSize: 10, fontWeight: 700, paddingTop: 8 }}
                     iconType="circle"
                     iconSize={8}
                   />
-                  <Bar dataKey="sla" name="SLA" fill="#6366f1" radius={[3, 3, 0, 0]} maxBarSize={22} />
-                  <Bar dataKey="planificado" name="Planificado" fill="#94a3b8" radius={[3, 3, 0, 0]} maxBarSize={22} />
-                  <Bar dataKey="ejecutado" name="Ejecutado" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={22} />
-                </BarChart>
+                  <Area
+                    type="monotone"
+                    dataKey="sla"
+                    name="SLA (vendidas)"
+                    stroke="#4f46e5"
+                    fill="url(#crmSlaGrad)"
+                    strokeWidth={2.5}
+                    dot={{ r: 3, fill: '#4f46e5' }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="planificado"
+                    name="Planificadas"
+                    stroke="#64748b"
+                    strokeWidth={2}
+                    strokeDasharray="6 4"
+                    dot={{ r: 3, fill: '#64748b' }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="ejecutado"
+                    name="Realizadas"
+                    stroke="#059669"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: '#059669' }}
+                  />
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -333,57 +301,43 @@ export default function CrmDashboardSummary({
           <option value="sla_desc">Mayor SLA</option>
           <option value="plan_gap">Mayor Δ plan − SLA</option>
         </select>
-        <span className="text-[10px] text-slate-400 ml-auto hidden sm:inline">
-          Burn: <span className="text-emerald-600 font-bold">&lt;90%</span> ·{' '}
-          <span className="text-amber-600 font-bold">90–109%</span> ·{' '}
-          <span className="text-rose-600 font-bold">≥110%</span>
-        </span>
       </div>
     </div>
   );
 }
 
-function KpiTile({
+function KpiCompact({
   icon: Icon,
   label,
   value,
-  suffix = 'hs',
-  accent,
-  iconBg,
-  hint,
+  unit,
+  tone,
 }: {
-  icon: React.ElementType;
+  icon?: React.ElementType;
   label: string;
   value: number;
-  suffix?: string;
-  accent: string;
-  iconBg: string;
-  hint?: string;
+  unit: string;
+  tone: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
-      <div className="flex items-start gap-2.5">
-        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
-          <Icon size={17} aria-hidden />
-        </div>
-        <div className="min-w-0">
-          <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
-          <p className={`text-2xl font-black tabular-nums leading-tight ${accent}`}>
-            {value.toLocaleString('es-AR')}
-            {suffix && <span className="text-sm font-bold text-slate-300 ml-0.5">{suffix}</span>}
-          </p>
-          {hint && <p className="text-[9px] font-semibold text-slate-500 mt-0.5 truncate">{hint}</p>}
-        </div>
+    <div className="rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
+      <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+        {Icon ? <Icon size={12} className="text-indigo-500 shrink-0" aria-hidden /> : null}
+        <span className="truncate">{label}</span>
       </div>
+      <p className={`text-xl font-black tabular-nums mt-1 ${tone}`}>
+        {value.toLocaleString('es-AR')}
+        <span className="text-[10px] font-bold text-slate-400 ml-0.5">{unit}</span>
+      </p>
     </div>
   );
 }
 
-function SecondaryKpi({ label, value }: { label: string; value: string }) {
+function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-100 bg-white px-2 py-2 text-center dark:border-slate-700 dark:bg-slate-800/60">
-      <p className="text-[8px] font-bold uppercase text-slate-400 tracking-wide">{label}</p>
-      <p className="text-sm font-black text-slate-800 dark:text-white tabular-nums">{value}</p>
+    <div className="rounded-lg border border-slate-100 bg-white px-2 py-2 dark:border-slate-700 dark:bg-slate-800/50">
+      <p className="text-[8px] font-bold uppercase text-slate-400">{label}</p>
+      <p className="text-xs font-black text-slate-800 dark:text-white tabular-nums">{value}</p>
     </div>
   );
 }
