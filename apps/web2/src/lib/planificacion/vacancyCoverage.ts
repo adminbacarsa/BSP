@@ -97,7 +97,11 @@ function readWorkShift(
 ): Record<string, any> | null {
   const key = `${empId}_${dateStr}`;
   for (const src of [pendingChanges[key], shiftsMap[key]]) {
-    if (src && !src.isDeleted && isVacancyWorkCode(src.code)) return src;
+    if (!src || src.isDeleted) continue;
+    if (isVacancyWorkCode(src.code)) return src;
+    // Código original preservado cuando se aplicó ausencia sobre un turno planificado
+    const orig = String(src.originalCode || '').toUpperCase();
+    if (orig && isVacancyWorkCode(orig)) return { ...src, code: orig };
   }
   return null;
 }
@@ -618,6 +622,9 @@ export function applyVacancyCoverageToChanges(
             )
           : undefined;
 
+    // Preservar el código del turno planificado para que el modal de cobertura
+    // pueda recuperarlo si se reabre (savedDayCode solo cuando había turno ese día, no historial).
+    const savedDayCode = workInfo?.source === 'saved_day' ? workInfo.code : undefined;
     newChanges[titularKey] = {
       code: absCode,
       name: input.vacancyData.type,
@@ -626,6 +633,7 @@ export function applyVacancyCoverageToChanges(
       startTime: '00:00',
       comments: `${input.vacancyData.type} — gestionado desde planificador`,
       coveredBy: coveredByLabel || undefined,
+      ...(savedDayCode ? { originalCode: savedDayCode } : {}),
     };
 
     if (coverage.mode === 'substitute' && coverage.employeeId && effectiveWorkShift) {

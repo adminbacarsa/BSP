@@ -35,6 +35,9 @@ function readWorkShift(
     if (!src || src.isDeleted) continue;
     const c = normCode(src.code);
     if (c && !NON_WORK.has(c)) return src;
+    // Código original preservado cuando se aplicó ausencia sobre un turno planificado
+    const orig = normCode(src.originalCode);
+    if (orig && !NON_WORK.has(orig)) return { ...src, code: orig };
   }
   return null;
 }
