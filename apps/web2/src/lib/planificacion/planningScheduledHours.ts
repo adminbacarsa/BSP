@@ -187,25 +187,46 @@ export function calcPlanningBillableShiftHours(
   const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
   const extensionBillable = hasRealExtension || extra >= 0.25;
 
+  const finish = (base: number, ext: number) =>
+    Math.round((base + ext) * 100) / 100;
+
   if (extensionBillable && bandHint != null && bandHint > 0) {
     const baseBand = codeBase >= bandHint - 0.5 ? codeBase : bandHint;
     const extraPart = Math.max(
       extra,
       Number.isFinite(explicitExt) && explicitExt > 0 ? explicitExt : 0,
     );
-    return Math.round((baseBand + extraPart) * 100) / 100;
+    return finish(baseBand, extraPart);
   }
 
   if (codeBase < 0.5 && bandHint != null && bandHint > 0) {
-    return Math.round((bandHint + extra) * 100) / 100;
+    return finish(bandHint, extra);
   }
 
   const stored = Number(shift.hours);
+  if (!extensionBillable && bandHint != null && bandHint > 0) {
+    let base = Math.max(codeBase, bandHint);
+    if (stored >= 0.5) {
+      if (stored < bandHint && bandHint - stored < 0.75) {
+        base = bandHint;
+      } else if (stored > bandHint + 0.25) {
+        return Math.round(Math.min(stored, 24) * 100) / 100;
+      }
+    }
+    return finish(base, extra);
+  }
+
   if (!extensionBillable && stored > codeBase + 0.25) {
     return Math.round(Math.min(stored, 24) * 100) / 100;
   }
 
-  return Math.round((codeBase + extra) * 100) / 100;
+  if (!extensionBillable && bandHint != null && bandHint > 0 && codeBase + extra < bandHint - 0.05) {
+    if (bandHint - (codeBase + extra) < 0.75) {
+      return finish(bandHint, extra);
+    }
+  }
+
+  return finish(codeBase, extra);
 }
 
 /** Desglose jornada facturable (base SLA + tramo ext/adel). */

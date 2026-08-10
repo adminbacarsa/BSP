@@ -52,13 +52,18 @@ export function coalescePlannedCellBillableHours(
   slaCodeHoursHint?: Record<string, number>,
 ): number {
   if (!turnos.length) return 0;
+  const perTurno = turnos.map((t) => calcPlanningBillableShiftHours(t, slaCodeHoursHint));
   let maxH = 0;
-  for (const t of turnos) {
-    const h = calcPlanningBillableShiftHours(t, slaCodeHoursHint);
+  for (const h of perTurno) {
     if (h > maxH) maxH = h;
   }
   const merged = coalescePlannedTurnosForCell(turnos, slaCodeHoursHint);
-  if (!merged) return maxH;
+  if (!merged) return Math.round(maxH * 100) / 100;
   const mergedH = calcPlanningBillableShiftHours(merged, slaCodeHoursHint);
-  return Math.max(maxH, mergedH);
+  const splitCoverage = turnos.length > 1 && turnos.some(turnoContributesCoverageMerge);
+  if (splitCoverage) {
+    const sumH = perTurno.reduce((a, b) => a + b, 0);
+    return Math.round(Math.max(mergedH, sumH) * 100) / 100;
+  }
+  return Math.round(Math.max(maxH, mergedH) * 100) / 100;
 }

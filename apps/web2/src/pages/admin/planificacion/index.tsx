@@ -9050,6 +9050,10 @@ export default function PlanificacionPage() {
                                             const cctHours = empCctCurrentHours[emp.id] || 0;
                                             const retDays = empRetDays[emp.id] || 0;
                                             const displayHours = hoursMode === 'cct' ? cctHours : monthHours;
+                                            const formatLegajoHours = (h: number) => {
+                                                const r = Math.round(h * 10) / 10;
+                                                return Number.isInteger(r) ? String(r) : r.toFixed(1);
+                                            };
                                             const hoursColor = displayHours >= planningLimits.monthly ? 'text-red-600 font-black'
                                                 : displayHours >= 185 ? 'text-orange-500 font-bold'
                                                 : displayHours >= 160 ? 'text-amber-500'
@@ -9076,11 +9080,11 @@ export default function PlanificacionPage() {
                                                         {/* Horas mensuales planificadas (facturables) + días RET sobrantes */}
                                                         <span
                                                             title={hoursMode === 'cct'
-                                                                ? `${Math.round(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${Math.round(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`
-                                                                : `${Math.round(monthHours)}h facturables en el mes (= Pre-factura). Días 🚫 sin servicio SLA no suman aunque veas el código en la celda.\n${Math.round(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`}
+                                                                ? `${formatLegajoHours(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${formatLegajoHours(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`
+                                                                : `${formatLegajoHours(monthHours)}h facturables en el mes (= Pre-factura). Días 🚫 sin servicio SLA no suman aunque veas el código en la celda.\n${formatLegajoHours(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`}
                                                             className={`shrink-0 text-[8px] ${hoursColor}`}
                                                         >
-                                                            {Math.round(displayHours)}h
+                                                            {formatLegajoHours(displayHours)}h
                                                             {retDays > 0 && displayHours === 0 && <span className="ml-0.5 text-[7px] text-amber-700 font-bold" title={`${retDays} días RET (0 h planificadas)`}>+{retDays}RET</span>}
                                                             {hoursMode === 'cct' && <span className="ml-0.5 text-[7px] text-indigo-500 font-black">CCT</span>}
                                                         </span>
