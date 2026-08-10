@@ -11109,21 +11109,21 @@ export default function PlanificacionPage() {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
                     const slaCloseHours = hoursMode === 'mes' ? objectiveMonthSlaBaseHours : totalHrs;
-                    const facturableCrmHrs = hoursMode === 'mes' ? totalHrs : totalHrs;
+                    const facturableTotalHrs = totalHrs;
                     const nativeAssignedHours = displayedEmployees
                         .filter((emp: any) => isEmployeeNativeToObjective(emp))
                         .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
                     const empCount = planningDotacionEmployees.length;
                     const empCountBillable = objectiveMonthShiftMetrics.empCountBillable;
                     const effectiveSlaVendidas = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
-                    const slaMismatch = effectiveSlaVendidas > 0 && Math.round(slaCloseHours) !== Math.round(effectiveSlaVendidas);
-                    const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : (effectiveSlaVendidas > 0 ? 'Hs. SLA' : 'Hs. Plan.');
+                    const slaMismatch = effectiveSlaVendidas > 0 && Math.round(facturableTotalHrs) !== Math.round(effectiveSlaVendidas);
+                    const hsLabel = hoursMode === 'cct' ? 'Hs. CCT' : (effectiveSlaVendidas > 0 ? 'Hs. total' : 'Hs. Plan.');
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/REF/ESC/francos/licencias.'
                         : effectiveSlaVendidas > 0
-                            ? 'Horas base del cronograma que cierran contra Vendidas (sin ext/adel de cobertura). La cobertura «días OK» mira puestos/bandas; si hay mucho E1/E2, puede haber hueco de horas SLA aunque no haya días vacíos.'
+                            ? 'Horas facturables del mes (= suma columnas legajo): base del cronograma + extensiones/adelantos de cobertura. El cierre «base SLA» sin ext/adel se ve en Desglose o Análisis por guardia.'
                             : 'Suma facturable por legajo (= Pre-factura CRM). Días 🚫 sin servicio no suman.';
-                    const displayPlanHrs = hoursMode === 'mes' && effectiveSlaVendidas > 0 ? slaCloseHours : totalHrs;
+                    const displayPlanHrs = facturableTotalHrs;
                     // Extras del mes (RFZ + TURA) de este objetivo — se facturan en CRM aparte del SLA base.
                     const monthPrefixExtras = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
                     const extrasList = [
@@ -11132,7 +11132,8 @@ export default function PlanificacionPage() {
                     ];
                     const extrasHrs = extrasList.reduce((a: number, t: any) => a + (Number(t.hours) || 0), 0);
                     const extrasCount = extrasList.length;
-                    const slaDelta = effectiveSlaVendidas > 0 ? Math.round(effectiveSlaVendidas - slaCloseHours) : 0;
+                    const slaDelta = effectiveSlaVendidas > 0 ? Math.round(effectiveSlaVendidas - facturableTotalHrs) : 0;
+                    const extAdelBarHrs = hoursMode === 'mes' ? Math.max(0, Math.round((facturableTotalHrs - slaCloseHours) * 10) / 10) : 0;
                     const showHoursToggle = hoursMode === 'mes' && effectiveSlaVendidas > 0;
                     const persistStatsHoursView = (v: 'total' | 'detalle') => {
                         setStatsHoursView(v);
@@ -11145,7 +11146,7 @@ export default function PlanificacionPage() {
                         ? 'border-rose-300/80 bg-rose-50/40 dark:bg-rose-950/20'
                         : 'border-slate-200/90 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/50';
                     return (
-                    <div className="rounded-lg border shadow-sm shrink-0 no-print px-2 py-1 flex flex-nowrap items-center justify-center gap-1 overflow-x-auto max-w-full" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                    <div className="rounded-lg border shadow-sm shrink-0 no-print px-2 py-1 flex flex-nowrap items-center justify-center gap-1 overflow-x-auto max-w-full" data-planning-summary-bar onClick={(e) => e.stopPropagation()} style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                         <div className={`${metricBox} min-w-[2.25rem]`} title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva).">
                             <p className={metricLabel}>Empl.</p>
                             <p className={metricValue}>{empCount}</p>
@@ -11164,7 +11165,7 @@ export default function PlanificacionPage() {
                                         type="button"
                                         role="tab"
                                         aria-selected={statsHoursView === 'total'}
-                                        onClick={() => persistStatsHoursView('total')}
+                                        onClick={(e) => { e.stopPropagation(); persistStatsHoursView('total'); }}
                                         className={`px-1 py-px rounded-[3px] text-[7px] font-semibold leading-none transition-colors ${statsHoursView === 'total' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}
                                     >
                                         Total
@@ -11173,7 +11174,7 @@ export default function PlanificacionPage() {
                                         type="button"
                                         role="tab"
                                         aria-selected={statsHoursView === 'detalle'}
-                                        onClick={() => persistStatsHoursView('detalle')}
+                                        onClick={(e) => { e.stopPropagation(); persistStatsHoursView('detalle'); }}
                                         className={`px-1 py-px rounded-[3px] text-[7px] font-semibold leading-none transition-colors ${statsHoursView === 'detalle' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}
                                     >
                                         Desglose
@@ -11185,12 +11186,12 @@ export default function PlanificacionPage() {
                                     {displayPlanHrs.toFixed(0)}<span className="text-[9px] font-medium text-slate-500">h</span>
                                 </p>
                             ) : (
-                                <p className="text-[7px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap truncate tabular-nums leading-tight" title="Desglose SLA del mes">
+                                <p className="text-[7px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap truncate tabular-nums leading-tight" title="Base SLA (sin ext/adel) + extensiones = total facturable vs vendidas">
                                     Base {slaCloseHours.toFixed(0)}h
-                                    {Math.round(facturableCrmHrs) !== Math.round(slaCloseHours) ? ` · CRM ${facturableCrmHrs.toFixed(0)}h` : ''}
-                                    {` · Vend ${effectiveSlaVendidas}h`}
+                                    {extAdelBarHrs > 0 ? ` · +${extAdelBarHrs} ext` : ''}
+                                    {` · Tot ${facturableTotalHrs.toFixed(0)}h`}
+                                    {effectiveSlaVendidas > 0 ? ` · Vend ${effectiveSlaVendidas}h` : ''}
                                     {slaMismatch ? (slaDelta > 0 ? ` · Δ −${slaDelta}h` : ` · Δ +${Math.abs(slaDelta)}h`) : ''}
-                                    {objectiveMonthCoverageExtraHours > 0 ? ` · +${objectiveMonthCoverageExtraHours} ext` : ''}
                                 </p>
                             )}
                         </div>
@@ -11255,7 +11256,7 @@ export default function PlanificacionPage() {
                         {hoursMode === 'mes' && selectedObjective && (
                             <button
                                 type="button"
-                                onClick={() => setShowHoursBreakdownModal(true)}
+                                onClick={(e) => { e.stopPropagation(); setShowHoursBreakdownModal(true); }}
                                 className={`${metricBox} min-w-[2.75rem] hover:bg-indigo-50/80 dark:hover:bg-indigo-950/30 transition-colors border-indigo-200/70 dark:border-indigo-800`}
                                 title="Detalle por guardia: columna legajo, base SLA, ext/adel y exclusiones"
                             >
@@ -13740,7 +13741,7 @@ export default function PlanificacionPage() {
                 , document.body)}
 
                 {showHoursBreakdownModal && selectedObjective && createPortal(
-                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm no-print" onClick={() => setShowHoursBreakdownModal(false)}>
+                    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/50 backdrop-blur-sm no-print" onClick={() => setShowHoursBreakdownModal(false)}>
                         <div className="bg-white dark:bg-slate-900 w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col mx-4" onClick={(e) => e.stopPropagation()}>
                             <div className="p-4 border-b bg-slate-50 dark:bg-slate-800 flex justify-between items-start gap-3">
                                 <div>
@@ -13759,7 +13760,8 @@ export default function PlanificacionPage() {
                                     const b = planningMonthHoursBreakdown;
                                     const legajoSum = Math.round(Object.values(empMonthlyHours).reduce((a: number, v: number) => a + (v || 0), 0));
                                     const vend = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
-                                    const delta = vend > 0 ? Math.round(b.baseSla - vend) : 0;
+                                    const deltaBaseVsVend = vend > 0 ? Math.round(b.baseSla - vend) : 0;
+                                    const deltaFactVsVend = vend > 0 ? Math.round(b.gross - vend) : 0;
                                     const codes = Object.entries(b.byCodeGross).sort((a, c) => c[1] - a[1]);
                                     return (
                                         <>
@@ -13779,12 +13781,18 @@ export default function PlanificacionPage() {
                                                     <p className="text-xl font-black text-teal-800">{b.baseSla}h</p>
                                                     <p className="text-[10px] text-slate-500">Sin ext/adel ({b.coverageExtra}h aparte)</p>
                                                 </div>
-                                                <div className={`rounded-xl border p-3 ${vend > 0 && delta !== 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200 bg-white'}`}>
+                                                <div className={`rounded-xl border p-3 ${vend > 0 && deltaFactVsVend !== 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200 bg-white'}`}>
                                                     <p className="text-[9px] font-black uppercase text-slate-400">Vendidas SLA</p>
                                                     <p className="text-xl font-black text-teal-700">{vend || '—'}h</p>
                                                     {vend > 0 && (
-                                                        <p className={`text-[10px] font-bold ${delta < 0 ? 'text-rose-600' : delta > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                                            {delta === 0 ? 'Cierre OK' : delta < 0 ? `Faltan ${-delta}h base` : `+${delta}h sobre vendidas`}
+                                                        <p className={`text-[10px] font-bold ${deltaFactVsVend < 0 ? 'text-rose-600' : deltaFactVsVend > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                                            {deltaFactVsVend === 0
+                                                                ? (deltaBaseVsVend !== 0 && b.coverageExtra > 0
+                                                                    ? `Cierre OK (${b.baseSla}h base + ${b.coverageExtra}h ext)`
+                                                                    : 'Cierre OK')
+                                                                : deltaFactVsVend < 0
+                                                                    ? `Faltan ${-deltaFactVsVend}h facturables`
+                                                                    : `+${deltaFactVsVend}h sobre vendidas`}
                                                         </p>
                                                     )}
                                                 </div>
