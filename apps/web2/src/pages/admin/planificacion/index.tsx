@@ -11132,115 +11132,92 @@ export default function PlanificacionPage() {
                         setStatsHoursView(v);
                         if (typeof window !== 'undefined') localStorage.setItem('planif_stats_hours_view', v);
                     };
-                    const metricBox = 'rounded-lg border border-slate-200/90 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/50 px-3 py-2 min-w-[4.5rem]';
-                    const metricLabel = 'text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 leading-none';
-                    const metricValue = 'text-lg font-semibold tabular-nums text-slate-800 dark:text-slate-100 leading-tight';
+                    const metricBox = 'shrink-0 rounded-md border border-slate-200/90 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/50 px-1.5 py-0.5 flex flex-col items-center justify-center leading-none';
+                    const metricLabel = 'text-[7px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400';
+                    const metricValue = 'text-xs font-semibold tabular-nums text-slate-800 dark:text-slate-100';
+                    const hoursShell = slaMismatch
+                        ? 'border-rose-300/80 bg-rose-50/40 dark:bg-rose-950/20'
+                        : 'border-slate-200/90 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/50';
                     return (
-                    <div className="rounded-xl border shadow-sm shrink-0 no-print px-3 py-2.5 flex flex-wrap items-stretch gap-2" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
-                        <div className={`${metricBox} text-center`} title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva).">
+                    <div className="rounded-lg border shadow-sm shrink-0 no-print px-2 py-1 flex flex-nowrap items-center justify-center gap-1 overflow-x-auto max-w-full" data-planning-summary-bar style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                        <div className={`${metricBox} min-w-[2.25rem]`} title="Total guardias en dotación activa para este objetivo (sin REF/ESC de reserva).">
                             <p className={metricLabel}>Empl.</p>
                             <p className={metricValue}>{empCount}</p>
                         </div>
                         <div
-                            className={`flex-1 min-w-[11rem] max-w-md rounded-lg border px-3 py-2 ${slaMismatch ? 'border-rose-300/80 bg-rose-50/40 dark:bg-rose-950/20' : 'border-slate-200/90 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/50'}`}
+                            className={`shrink-0 flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 max-w-[min(100%,22rem)] ${hoursShell}`}
                             title={hsTitle}
                         >
-                            <div className="flex items-center justify-between gap-2 mb-1.5">
-                                <p className={`${metricLabel} flex items-center gap-1`}>
-                                    {hsLabel}
-                                    {hoursMode === 'cct' && <span className="normal-case text-indigo-600">CCT</span>}
-                                </p>
-                                {showHoursToggle && (
-                                    <div className="flex rounded-md border border-slate-200 dark:border-slate-600 p-0.5 bg-slate-100/90 dark:bg-slate-900/60 shrink-0" role="tablist" aria-label="Vista de horas">
-                                        <button
-                                            type="button"
-                                            role="tab"
-                                            aria-selected={statsHoursView === 'total'}
-                                            onClick={() => persistStatsHoursView('total')}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${statsHoursView === 'total' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                        >
-                                            Total
-                                        </button>
-                                        <button
-                                            type="button"
-                                            role="tab"
-                                            aria-selected={statsHoursView === 'detalle'}
-                                            onClick={() => persistStatsHoursView('detalle')}
-                                            className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${statsHoursView === 'detalle' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                        >
-                                            Desglose
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
+                            <p className={`${metricLabel} whitespace-nowrap shrink-0`}>
+                                {hsLabel}
+                                {hoursMode === 'cct' && <span className="normal-case text-indigo-600 ml-0.5">CCT</span>}
+                            </p>
+                            {showHoursToggle && (
+                                <div className="flex rounded border border-slate-200 dark:border-slate-600 p-px bg-slate-100/90 dark:bg-slate-900/60 shrink-0" role="tablist" aria-label="Vista de horas">
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={statsHoursView === 'total'}
+                                        onClick={() => persistStatsHoursView('total')}
+                                        className={`px-1 py-px rounded-[3px] text-[7px] font-semibold leading-none transition-colors ${statsHoursView === 'total' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}
+                                    >
+                                        Total
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={statsHoursView === 'detalle'}
+                                        onClick={() => persistStatsHoursView('detalle')}
+                                        className={`px-1 py-px rounded-[3px] text-[7px] font-semibold leading-none transition-colors ${statsHoursView === 'detalle' ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm' : 'text-slate-500'}`}
+                                    >
+                                        Desglose
+                                    </button>
+                                </div>
+                            )}
                             {statsHoursView === 'total' || !showHoursToggle ? (
-                                <p className={`${metricValue} ${slaMismatch ? 'text-rose-700 dark:text-rose-400' : 'text-indigo-700 dark:text-indigo-300'}`}>
-                                    {displayPlanHrs.toFixed(0)}
-                                    <span className="text-sm font-medium text-slate-500 ml-0.5">h</span>
+                                <p className={`${metricValue} whitespace-nowrap shrink-0 ${slaMismatch ? 'text-rose-700 dark:text-rose-400' : 'text-indigo-700 dark:text-indigo-300'}`}>
+                                    {displayPlanHrs.toFixed(0)}<span className="text-[9px] font-medium text-slate-500">h</span>
                                 </p>
                             ) : (
-                                <dl className="space-y-1 text-[11px] leading-snug">
-                                    <div className="flex justify-between gap-3">
-                                        <dt className="text-slate-500">Base cierre SLA</dt>
-                                        <dd className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{slaCloseHours.toFixed(0)} h</dd>
-                                    </div>
-                                    {Math.round(facturableCrmHrs) !== Math.round(slaCloseHours) && (
-                                        <div className="flex justify-between gap-3">
-                                            <dt className="text-slate-500">CRM facturable</dt>
-                                            <dd className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{facturableCrmHrs.toFixed(0)} h</dd>
-                                        </div>
-                                    )}
-                                    <div className="flex justify-between gap-3">
-                                        <dt className="text-slate-500">Vendidas contrato</dt>
-                                        <dd className="font-semibold tabular-nums text-slate-700 dark:text-slate-200">{effectiveSlaVendidas} h</dd>
-                                    </div>
-                                    {slaMismatch && (
-                                        <div className="flex justify-between gap-3 pt-0.5 border-t border-slate-200/80 dark:border-slate-600/80">
-                                            <dt className="text-slate-600 font-medium">Diferencia SLA</dt>
-                                            <dd className={`font-semibold tabular-nums ${slaDelta > 0 ? 'text-rose-600' : 'text-amber-700'}`}>
-                                                {slaDelta > 0 ? `−${slaDelta} h` : `+${Math.abs(slaDelta)} h`}
-                                            </dd>
-                                        </div>
-                                    )}
-                                    {objectiveMonthCoverageExtraHours > 0 && (
-                                        <div className="flex justify-between gap-3">
-                                            <dt className="text-slate-500" title="Incluidas en facturable; no suman otra vez al cierre SLA">Ext./adel. incl.</dt>
-                                            <dd className="font-semibold tabular-nums text-slate-600">+{objectiveMonthCoverageExtraHours} h</dd>
-                                        </div>
-                                    )}
-                                </dl>
+                                <p className="text-[7px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap truncate tabular-nums leading-tight" title="Desglose SLA del mes">
+                                    Base {slaCloseHours.toFixed(0)}h
+                                    {Math.round(facturableCrmHrs) !== Math.round(slaCloseHours) ? ` · CRM ${facturableCrmHrs.toFixed(0)}h` : ''}
+                                    {` · Vend ${effectiveSlaVendidas}h`}
+                                    {slaMismatch ? (slaDelta > 0 ? ` · Δ −${slaDelta}h` : ` · Δ +${Math.abs(slaDelta)}h`) : ''}
+                                    {objectiveMonthCoverageExtraHours > 0 ? ` · +${objectiveMonthCoverageExtraHours} ext` : ''}
+                                </p>
                             )}
                         </div>
                         {empCountBillable > 0 && (
-                            <div className={`${metricBox} text-center`} title={hoursMode === 'cct' ? 'Promedio de horas por empleado de dotación propia del objetivo en el ciclo CCT (excluye invitados/cobertura externa y guardias solo-RET).' : 'Promedio de horas por empleado de dotación propia del objetivo en el mes (excluye invitados/cobertura externa y guardias solo-RET).'}>
+                            <div className={`${metricBox} min-w-[2.5rem]`} title={hoursMode === 'cct' ? 'Promedio de horas por empleado de dotación propia del objetivo en el ciclo CCT (excluye invitados/cobertura externa y guardias solo-RET).' : 'Promedio de horas por empleado de dotación propia del objetivo en el mes (excluye invitados/cobertura externa y guardias solo-RET).'}>
                                 <p className={metricLabel}>Prom./emp.</p>
-                                <p className={metricValue}>{Math.round(nativeAssignedHours / empCountBillable)}<span className="text-sm font-medium text-slate-500">h</span></p>
+                                <p className={metricValue}>{Math.round(nativeAssignedHours / empCountBillable)}<span className="text-[9px] text-slate-500">h</span></p>
                             </div>
                         )}
                         {retCount > 0 && (
-                            <div className={`${metricBox} text-center`} title="Días RET: guardia sobrante en el objetivo (0 h planificadas/liquidables). Disponible para cubrir otro servicio.">
+                            <div className={`${metricBox} min-w-[2.25rem]`} title="Días RET: guardia sobrante en el objetivo (0 h planificadas/liquidables). Disponible para cubrir otro servicio.">
                                 <p className={metricLabel}>Retenes</p>
-                                <p className={`${metricValue} text-amber-700`}>{retCount} <span className="text-xs font-medium text-amber-600">d</span></p>
+                                <p className={`${metricValue} text-amber-700`}>{retCount}<span className="text-[8px] text-amber-600">d</span></p>
                             </div>
                         )}
                         {retBufferHours > 0 && (
-                            <div className={`${metricBox} text-center`} title="Colchón teórico: suma de horas que cabrían promoviendo cada RET a ~8h facturables sin pasar 200h/mes por persona (cupo calendario). No implica que exista alguien libre en la banda correcta ni que el convenio deje ese swap: la Verificación mira slots, descansos 12h/35h y licencias.">
+                            <div className={`${metricBox} min-w-[2.5rem]`} title="Colchón teórico RET → ~8h facturables (cupo calendario).">
                                 <p className={metricLabel}>Colchón</p>
                                 <p className={`${metricValue} text-emerald-700`}>{retBufferHours}h</p>
                             </div>
                         )}
                         {autoV2GenStats && autoCycles.length > 0 && (
-                            <div className={`${metricBox} text-center`} title="Esquema(s) de ciclo aplicados en la generación automática.">
+                            <div className={`${metricBox} max-w-[4rem]`} title="Esquema(s) de ciclo aplicados en la generación automática.">
                                 <p className={metricLabel}>Esquema</p>
-                                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 leading-tight">{autoCycles.join(' · ')}</p>
+                                <p className="text-[9px] font-semibold text-slate-700 dark:text-slate-200 truncate w-full text-center">{autoCycles.join('·')}</p>
                             </div>
                         )}
                         {autoV2GenStats?.excessPositionEmployees && autoV2GenStats.excessPositionEmployees.length > 0 && (
                             <div
-                                className={`${metricBox} text-center cursor-default`}
+                                className={`${metricBox} min-w-[2.25rem] cursor-default`}
                                 title={autoV2GenStats.excessPositionEmployees.map(e => `${e.positionName}: ${e.assigned} asignados, necesita ${e.needed} (sobran ${e.excess})`).join('\n')}
                             >
-                                <p className={`${metricLabel} text-amber-600`}>Personal</p>
+                                <p className={`${metricLabel} text-amber-600`}>Pers.</p>
                                 <p className={`${metricValue} text-amber-700`}>
                                     +{autoV2GenStats.excessPositionEmployees.reduce((s, e) => s + e.excess, 0)}
                                 </p>
@@ -11250,22 +11227,21 @@ export default function PlanificacionPage() {
                             <button
                                 type="button"
                                 onClick={() => setShowCapacityModal(true)}
-                                className={`${metricBox} text-center hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors`}
-                                title="Ver capacidad CCT por empleado: cuánto consumió cada uno del ciclo CCT (corte 25/26) en current y next."
+                                className={`${metricBox} min-w-[2.25rem] hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors`}
+                                title="Ver capacidad CCT por empleado."
                             >
-                                <p className={metricLabel}>Cap. CCT</p>
-                                <p className="text-sm font-semibold text-indigo-600 underline-offset-2 hover:underline">Ver</p>
+                                <p className={metricLabel}>CCT</p>
+                                <p className="text-[9px] font-semibold text-indigo-600">Ver</p>
                             </button>
                         )}
                         {extrasCount > 0 && (
-                            <div className={`${metricBox} text-center`} title={`Refuerzos del mes (RFZ + TURA) de este objetivo: ${extrasCount} turno(s), ${extrasHrs.toFixed(0)}h. Se facturan en CRM/pre-factura aparte de las horas vendidas del SLA base; no entran en la validación de publicación.`}>
+                            <div className={`${metricBox} min-w-[2.5rem]`} title={`Refuerzos RFZ+TURA: ${extrasCount} turno(s), ${extrasHrs.toFixed(0)}h.`}>
                                 <p className={metricLabel}>Extras</p>
                                 <p className={`${metricValue} text-rose-700`}>+{extrasHrs.toFixed(0)}h</p>
-                                <p className="text-[10px] font-medium text-slate-500">{extrasCount} ref.</p>
                             </div>
                         )}
                         {effectiveSlaVendidas > 0 && statsHoursView === 'total' && (
-                            <div className={`${metricBox} text-center ${slaMismatch ? 'border-teal-200/90' : ''}`}>
+                            <div className={`${metricBox} min-w-[2.5rem] ${slaMismatch ? 'border-teal-200/90' : ''}`}>
                                 <p className={metricLabel}>Vendidas</p>
                                 <p className={`${metricValue} text-teal-800 dark:text-teal-300`}>{effectiveSlaVendidas}</p>
                             </div>
@@ -11274,14 +11250,14 @@ export default function PlanificacionPage() {
                             <button
                                 type="button"
                                 onClick={() => setShowHoursBreakdownModal(true)}
-                                className={`${metricBox} text-left hover:bg-indigo-50/80 dark:hover:bg-indigo-950/30 transition-colors border-indigo-200/70 dark:border-indigo-800`}
+                                className={`${metricBox} min-w-[2.75rem] hover:bg-indigo-50/80 dark:hover:bg-indigo-950/30 transition-colors border-indigo-200/70 dark:border-indigo-800`}
                                 title="Detalle por guardia: columna legajo, base SLA, ext/adel y exclusiones"
                             >
                                 <p className={metricLabel}>Análisis</p>
-                                <p className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">Por guardia</p>
+                                <p className="text-[9px] font-semibold text-indigo-700 dark:text-indigo-300 whitespace-nowrap">Por guardia</p>
                             </button>
                         )}
-                        <button type="button" onClick={() => { setStatsBarCollapsed(true); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '1'); }} className="shrink-0 self-center flex items-center justify-center w-8 h-8 text-slate-400 hover:text-slate-600 border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-600 rounded-lg transition-colors" title="Ocultar estadísticas"><ChevronDown size={14}/></button>
+                        <button type="button" onClick={() => { setStatsBarCollapsed(true); if (typeof window !== 'undefined') localStorage.setItem('planif_stats_collapsed', '1'); }} className="shrink-0 flex items-center justify-center w-6 h-6 text-slate-400 hover:text-slate-600 border border-slate-200 hover:border-slate-300 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-600 rounded-md transition-colors" title="Ocultar estadísticas"><ChevronDown size={12}/></button>
                     </div>
                     );
                     })() )}
@@ -12737,7 +12713,9 @@ export default function PlanificacionPage() {
                         || (splitReferenceDate ? resolveTitularShiftForDay(splitReferenceDate)?.positionName : null)
                         || effectivePosStructure[0]?.positionName
                         || null;
-                    const vacancyGapBandOptions = listVacancyGapBandOptions(vacancyPosSla, vacancyGapPreferredPosition);
+                    // null → mostrar todas las bandas del SLA (no solo el puesto del titular);
+                    // vacancyGapPreferredPosition solo se usa para inferir la selección por defecto.
+                    const vacancyGapBandOptions = listVacancyGapBandOptions(vacancyPosSla, null);
                     const resolveEffectiveTitularForDay = (dateStr: string) => {
                         const raw = resolveTitularShiftForDay(dateStr);
                         const prefPos = activePosition || raw?.positionName || vacancyGapPreferredPosition;
@@ -12761,7 +12739,7 @@ export default function PlanificacionPage() {
                         return resolveEffectiveVacancyGapTitular(
                             inferred || raw,
                             vacancyGapBandOverride,
-                            options,
+                            vacancyGapBandOptions,
                             vacancyPosSla,
                         );
                     };
