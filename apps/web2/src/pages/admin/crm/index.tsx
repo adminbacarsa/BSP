@@ -111,7 +111,6 @@ import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
 import { turnoEligibleForProformaGrid, type ProformaDetailMode } from '@/lib/crm/proformaMode';
 import { isSinCoberturaShift } from '@/lib/crm/proformaVacancy';
-import { coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
 import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
