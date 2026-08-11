@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { X, Loader2, ChevronLeft, ChevronRight, Database, ExternalLink, RefreshCw } from 'lucide-react';
+import { X, Loader2, ChevronLeft, ChevronRight, Database, ExternalLink, RefreshCw, AlertTriangle } from 'lucide-react';
 import {
   CRONOGRAMA_ESTADO_LABEL,
   loadCronogramaOverview,
@@ -70,6 +70,7 @@ export default function PlanningCronogramasOverviewModal({
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<CronogramaOverviewRow[]>([]);
   const [filterEstado, setFilterEstado] = useState<CronogramaEstado | 'ALL'>('ALL');
+  const [filterOpenVacancies, setFilterOpenVacancies] = useState(false);
   const [search, setSearch] = useState('');
 
   const monthLabel = useMemo(
@@ -113,10 +114,14 @@ export default function PlanningCronogramasOverviewModal({
     return s;
   }, [rows]);
 
+  const totalOpenVacancies = useMemo(() => rows.reduce((acc, r) => acc + (r.openVacancies || 0), 0), [rows]);
+  const objectivesWithOpenVacancies = useMemo(() => rows.filter((r) => r.openVacancies > 0).length, [rows]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (filterEstado !== 'ALL' && r.estado !== filterEstado) return false;
+      if (filterOpenVacancies && !r.openVacancies) return false;
       if (!q) return true;
       return (
         r.clientName.toLowerCase().includes(q)
@@ -124,7 +129,7 @@ export default function PlanningCronogramasOverviewModal({
         || r.objectiveId.toLowerCase().includes(q)
       );
     });
-  }, [rows, filterEstado, search]);
+  }, [rows, filterEstado, filterOpenVacancies, search]);
 
   const grouped = useMemo(() => groupByClient(filtered), [filtered]);
 
@@ -211,6 +216,20 @@ export default function PlanningCronogramasOverviewModal({
                   {CRONOGRAMA_ESTADO_LABEL[est]} ({stats[est]})
                 </button>
               ))}
+              {objectivesWithOpenVacancies > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFilterOpenVacancies((v) => !v)}
+                  className={`text-[9px] font-black px-2.5 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5 ${
+                    filterOpenVacancies
+                      ? 'bg-orange-500 text-white border-orange-600 shadow-sm'
+                      : 'bg-orange-50 border-orange-300 text-orange-700 hover:border-orange-400'
+                  }`}
+                >
+                  <AlertTriangle size={10} />
+                  Coberturas abiertas ({objectivesWithOpenVacancies})
+                </button>
+              )}
             </div>
           </div>
 
@@ -260,6 +279,9 @@ export default function PlanningCronogramasOverviewModal({
                     </th>
                     <th className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[10%] bg-slate-100">
                       Turnos
+                    </th>
+                    <th className="text-center text-[9px] font-black uppercase tracking-wider text-orange-600 px-3 py-3 border-r border-slate-200 w-[8%] bg-orange-50/60">
+                      Cob. abiertas
                     </th>
                     <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
                       Publicado
@@ -336,6 +358,16 @@ export default function PlanningCronogramasOverviewModal({
                               </div>
                             )}
                           </td>
+                          <td className="px-3 py-2.5 border-r border-slate-100 text-center">
+                            {r.openVacancies > 0 ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-lg">
+                                <AlertTriangle size={9} />
+                                {r.openVacancies}
+                              </span>
+                            ) : (
+                              <span className="text-slate-200 text-[10px]">—</span>
+                            )}
+                          </td>
                           <td className="px-4 py-2.5 border-r border-slate-100 text-slate-600 text-[10px] font-medium">
                             {r.publishedBy ? (
                               <span className="line-clamp-2" title={r.publishedBy}>{r.publishedBy}</span>
@@ -389,9 +421,17 @@ export default function PlanningCronogramasOverviewModal({
         {/* Footer */}
         <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 shrink-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[10px] font-black text-slate-600">
-              {filtered.length} de {rows.length} objetivo(s) visibles
-            </p>
+            <div className="flex items-center gap-3">
+              <p className="text-[10px] font-black text-slate-600">
+                {filtered.length} de {rows.length} objetivo(s) visibles
+              </p>
+              {totalOpenVacancies > 0 && (
+                <span className="flex items-center gap-1 text-[10px] font-black text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-lg">
+                  <AlertTriangle size={9} />
+                  {totalOpenVacancies} ausencia(s) sin cobertura en {objectivesWithOpenVacancies} objetivo(s)
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap gap-3 text-[9px] font-bold text-slate-500">
               {(Object.keys(CRONOGRAMA_ESTADO_LABEL) as CronogramaEstado[]).map((est) => (
                 <span key={est} className="flex items-center gap-1">

@@ -25,6 +25,8 @@ export interface CronogramaOverviewRow {
   draftShifts: number;
   publishedShifts: number;
   totalShifts: number;
+  /** Ausencias sin cobertura asignada (sin coveredBy). */
+  openVacancies: number;
   publishedBy: string;
   publishedAt: Date | null;
   lastModifiedAt: Date | null;
@@ -80,7 +82,9 @@ export const CRONOGRAMA_ESTADO_LABEL: Record<CronogramaEstado, string> = {
   SIN_DATOS: 'Sin cronograma',
 };
 
-type ShiftCounts = { draft: number; published: number };
+const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'AA', 'PG']);
+
+type ShiftCounts = { draft: number; published: number; openVacancies: number };
 
 type ActivityMeta = { lastModifiedAt: Date | null; lastModifiedBy: string };
 
@@ -193,9 +197,15 @@ export async function loadCronogramaOverview(params: {
     if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
     const objId = String(data.objectiveId || '').trim();
     if (!objId || !turnoCuentaParaCrono(data, objId)) return;
-    const counts = shiftCountsByObjective.get(objId) || { draft: 0, published: 0 };
-    if (data.draft === true) counts.draft += 1;
-    else counts.published += 1;
+    const counts = shiftCountsByObjective.get(objId) || { draft: 0, published: 0, openVacancies: 0 };
+    const code = String(data.code || '').toUpperCase();
+    if (ABSENCE_CODES.has(code) && !data.coveredBy) {
+      counts.openVacancies += 1;
+    } else if (data.draft === true) {
+      counts.draft += 1;
+    } else {
+      counts.published += 1;
+    }
     shiftCountsByObjective.set(objId, counts);
 
     const createdAt = toDate(data.createdAt) ?? toDate(data.updatedAt);
@@ -215,7 +225,7 @@ export async function loadCronogramaOverview(params: {
       const objectiveName = String(obj.name || objectiveId);
       const lookupKey = planificacionPublishLookupKey(objectiveId, year, month);
       const pub = publishByLookup.get(lookupKey);
-      const counts = shiftCountsByObjective.get(objectiveId) || { draft: 0, published: 0 };
+      const counts = shiftCountsByObjective.get(objectiveId) || { draft: 0, published: 0, openVacancies: 0 };
       const shiftActivity = activityFromShifts.get(objectiveId);
       const mergedActivity = pickLaterActivity(
         {
@@ -238,6 +248,7 @@ export async function loadCronogramaOverview(params: {
         draftShifts: counts.draft,
         publishedShifts: counts.published,
         totalShifts: counts.draft + counts.published,
+        openVacancies: counts.openVacancies,
         publishedBy: pub?.publishedBy || '',
         publishedAt: pub?.publishedAt ?? null,
         lastModifiedAt: mergedActivity.lastModifiedAt,
