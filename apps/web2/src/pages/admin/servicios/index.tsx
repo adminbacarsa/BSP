@@ -34,6 +34,14 @@ import {
 } from '@/lib/servicios/slaHoursCalculator';
 
 import { toYyyyMmDd, slaCoversCalendarMonth } from '@/lib/firestoreDates';
+import {
+  applyServiciosCatalogFilters,
+  buildServiciosCatalogClientGroups,
+  buildServiciosObjectiveCatalog,
+  monthBoundsYmd,
+  type ServiciosCatalogFilter,
+  type ServiciosCatalogRow,
+} from '@/lib/servicios/serviciosObjectiveCatalog';
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
@@ -66,40 +74,6 @@ function formatHmLinear(linearMin: number): string {
 }
 
 type SrvGroupItem = { key: string; clientName: string; objectiveName: string; services: (ServiceSLA & { id: string })[] };
-type ClientGroupItem = { clientId: string; clientName: string; objectives: SrvGroupItem[]; totalActiveObjs: number; totalHoursKpi: number; totalPositions: number; hasActive: boolean };
-
-function buildClientGroups(
-  groupedServices: SrvGroupItem[],
-  getHours: (srv: ServiceSLA & { id: string }) => number
-): ClientGroupItem[] {
-  const map: Record<string, SrvGroupItem[]> = {};
-  groupedServices.forEach(g => {
-    const cid = g.services[0]?.clientId || g.clientName;
-    if (!map[cid]) map[cid] = [];
-    map[cid].push(g);
-  });
-  return Object.entries(map).map(([cid, objs]) => {
-    const totalHoursKpi = objs.reduce(
-      (s, g) => s + g.services.reduce((s2, srv) => s2 + getHours(srv), 0), 0
-    );
-    const totalPositions = objs.reduce((s, g) => {
-      const srv = g.services[0];
-      return s + (srv?.positions?.reduce((s2, p) => s2 + (p.quantity || 1), 0) || 0);
-    }, 0);
-    const totalActiveObjs = objs.filter(og =>
-      og.services.some(s => isSlaContractActive(s.status))
-    ).length;
-    return {
-      clientId: cid,
-      clientName: objs[0].clientName,
-      objectives: objs,
-      totalActiveObjs,
-      totalHoursKpi,
-      totalPositions,
-      hasActive: totalActiveObjs > 0,
-    };
-  }).sort((a, b) => a.clientName.localeCompare(b.clientName, 'es'));
-}
 
 export default function ServiciosSLAPage() {
   const { addToast } = useToast();
@@ -308,9 +282,6 @@ export default function ServiciosSLAPage() {
     setLoading(false);
   };
 
-  const clientNameById = useMemo(() => new Map(clients.map((c) => [c.id, c.name])), [clients]);
-
-
   // Auditoría en 'audit_logs'
   const registrarAuditoria = async (accion: string, detalle: string) => {
       try {
@@ -482,7 +453,7 @@ export default function ServiciosSLAPage() {
   // --- MODAL Y UTILS ---
   const openAddPositionModal = () => {
       setEditingShiftCode(null);
-      setNewCustomShift({ name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: [] });
+      setNewCustomShift({ name: '', start: '20:00', end: '05:00', code: '', days: ['V', 'S'], specificDates: [], hasBlock2: false, block2Start: '18:00', block2End: '22:00' });
       setCustomShiftDateMode('weekdays');
       // Usar freshForm directamente para evitar capturar positionForm stale (async setState)
       const freshForm: ServicePosition = {
@@ -1192,14 +1163,40 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   };
 
   const openNew = () => {
-    const t = new Date();
+    const { start, end } = monthBoundsYmd(kpiYear, kpiMonth);
     setForm({
         clientId: '', clientName: '', objectiveId: '', objectiveName: '',
-        startDate: new Date(t.getFullYear(), t.getMonth(), 1).toISOString().split('T')[0],
-        endDate: new Date(t.getFullYear(), t.getMonth() + 1, 0).toISOString().split('T')[0],
+        startDate: start,
+        endDate: end,
         positions: [], totalMonthlyHours: 0, status: 'active'
     });
+    setAvailableObjectives([]);
     setIsEditing(false); setView('form');
+  };
+
+  const openNewForObjective = (row: ServiciosCatalogRow) => {
+    const { start, end } = monthBoundsYmd(kpiYear, kpiMonth);
+    const client = clients.find((c) => c.id === row.clientId);
+    const clientObjs = client?.objectives || client?.objetivos || [];
+    const hasObj = clientObjs.some((o: { id?: string }) => String(o.id ?? '').trim() === row.objectiveId);
+    setForm({
+      clientId: row.clientId,
+      clientName: row.clientName,
+      objectiveId: row.objectiveId,
+      objectiveName: row.objectiveName,
+      startDate: start,
+      endDate: end,
+      positions: [],
+      totalMonthlyHours: 0,
+      status: 'active',
+    });
+    setAvailableObjectives(
+      hasObj || !row.objectiveId
+        ? clientObjs
+        : [...clientObjs, { id: row.objectiveId, name: row.objectiveName }],
+    );
+    setIsEditing(false);
+    setView('form');
   };
 
   // Nueva versión: copia los puestos del servicio origen, mes siguiente al endDate del origen
@@ -1248,10 +1245,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   const [kpiMonth, setKpiMonth] = useState(new Date().getMonth());
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
   const [srvSearch, setSrvSearch] = useState('');
-  const [srvStatusFilter, setSrvStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [srvCatalogFilter, setSrvCatalogFilter] = useState<ServiciosCatalogFilter>('all');
+  const [srvClientFilter, setSrvClientFilter] = useState<string>('all');
   const [srvFeatureFilter, setSrvFeatureFilter] = useState<'all' | 'rotaciones' | 'condiciones'>('all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [listMode, setListMode] = useState<'objectives' | 'clients'>('objectives');
+  const [listMode, setListMode] = useState<'objectives' | 'clients'>('clients');
   const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
   const toggleClient = (id: string) =>
     setExpandedClients(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -1265,30 +1263,43 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     setExpandedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
 
+  const rawCatalog = useMemo(
+    () =>
+      buildServiciosObjectiveCatalog(
+        clients,
+        services as (ServiceSLA & { id: string })[],
+        kpiYear,
+        kpiMonth,
+        { clientId: srvClientFilter, search: srvSearch },
+      ),
+    [clients, services, kpiYear, kpiMonth, srvClientFilter, srvSearch],
+  );
+
+  const objectiveCatalog = useMemo(
+    () =>
+      applyServiciosCatalogFilters(rawCatalog, {
+        catalogFilter: srvCatalogFilter,
+        featureFilter: srvFeatureFilter,
+      }),
+    [rawCatalog, srvCatalogFilter, srvFeatureFilter],
+  );
+
   const groupedServices = useMemo((): SrvGroupItem[] => {
-    const q = srvSearch.toLowerCase().trim();
-    const filtered = (services as (ServiceSLA & { id: string })[]).filter(s => {
-      if (q && !(s.clientName||'').toLowerCase().includes(q) && !(s.objectiveName||'').toLowerCase().includes(q)) return false;
-      // Filtro activo/inactivo: usa el mes seleccionado en los KPIs (kpiMonth 0-based)
-      if (srvStatusFilter === 'active' && !slaCoversCalendarMonth(s.startDate, s.endDate, kpiYear, kpiMonth)) return false;
-      if (srvStatusFilter === 'inactive' && slaCoversCalendarMonth(s.startDate, s.endDate, kpiYear, kpiMonth)) return false;
-      if (srvFeatureFilter === 'rotaciones' && !(s.serviceRotations?.length)) return false;
-      if (srvFeatureFilter === 'condiciones' && !(s.serviceRules?.length)) return false;
-      return true;
-    });
-    const map = new Map<string, (ServiceSLA & { id: string })[]>();
-    filtered.forEach(s => {
-      const key = s.objectiveId || `${s.clientId}_${s.objectiveName}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(s);
-    });
-    return Array.from(map.entries()).map(([key, items]) => ({
-      key,
-      clientName: items[0].clientName || clientNameById.get(items[0].clientId) || 'Sin cliente',
-      objectiveName: items[0].objectiveName || 'General',
-      services: items.sort((a, b) => (b.startDate||'').localeCompare(a.startDate||'')),
-    }));
-  }, [services, srvSearch, srvStatusFilter, srvFeatureFilter, clientNameById, kpiYear, kpiMonth]);
+    return objectiveCatalog
+      .filter((r) => r.hasSlaInMonth && r.allSlas.length > 0)
+      .map((r) => ({
+        key: r.key,
+        clientName: r.clientName,
+        objectiveName: r.objectiveName,
+        services: r.allSlas,
+      }));
+  }, [objectiveCatalog]);
+
+  const catalogStats = useMemo(() => ({
+    totalObjectives: rawCatalog.length,
+    withSla: rawCatalog.filter((r) => r.hasSlaInMonth).length,
+    withoutSla: rawCatalog.filter((r) => !r.hasSlaInMonth).length,
+  }), [rawCatalog]);
 
 
   const kpiHistory = useMemo(() => {
@@ -1334,13 +1345,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     const q = srvSearch.toLowerCase().trim();
     return (services as (ServiceSLA & { id: string })[]).filter((s) => {
       if (q && !(s.clientName || '').toLowerCase().includes(q) && !(s.objectiveName || '').toLowerCase().includes(q)) return false;
-      if (srvStatusFilter === 'active' && !slaCoversCalendarMonth(s.startDate, s.endDate, kpiYear, kpiMonth)) return false;
-      if (srvStatusFilter === 'inactive' && slaCoversCalendarMonth(s.startDate, s.endDate, kpiYear, kpiMonth)) return false;
+      if (srvClientFilter !== 'all' && s.clientId !== srvClientFilter) return false;
       if (srvFeatureFilter === 'rotaciones' && !(s.serviceRotations?.length)) return false;
       if (srvFeatureFilter === 'condiciones' && !(s.serviceRules?.length)) return false;
       return true;
     });
-  }, [services, srvSearch, srvStatusFilter, srvFeatureFilter, kpiYear, kpiMonth]);
+  }, [services, srvSearch, srvClientFilter, srvFeatureFilter]);
 
   const kpiCurrentFiltered = useMemo(() => {
     const y = kpiYear;
@@ -1385,7 +1395,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   }, [filteredServicesForKpi, kpiYear, kpiMonth]);
 
   const kpiCurrent = kpiHistory[kpiHistory.length - 1] ?? { active: 0, hours: 0, positions: 0, guards: 0, label: '' };
-  const kpiMetricsActive = Boolean(srvSearch.trim() || srvStatusFilter !== 'all' || srvFeatureFilter !== 'all');
+  const kpiMetricsActive = Boolean(srvSearch.trim() || srvCatalogFilter !== 'all' || srvFeatureFilter !== 'all' || srvClientFilter !== 'all');
   const kpiDisplay = kpiMetricsActive ? kpiCurrentFiltered : kpiCurrent;
   const kpiMaxHours = Math.max(...kpiHistory.map(m => m.hours), 1);
 
@@ -1445,10 +1455,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     [getServiceHoursForKpiMonth, kpiMonth, kpiYear],
   );
 
-  const clientGroups = useMemo(
-    () => buildClientGroups(groupedServices, getServiceHoursForKpiMonth),
-    [groupedServices, getServiceHoursForKpiMonth],
+  const catalogClientGroups = useMemo(
+    () => buildServiciosCatalogClientGroups(objectiveCatalog, getServiceHoursForKpiMonth),
+    [objectiveCatalog, getServiceHoursForKpiMonth],
   );
+
+  const clientGroups = catalogClientGroups;
 
   return (
     <DashboardLayout>
@@ -1470,27 +1482,43 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             )}
           </div>
 
-          {/* Búsqueda */}
-          <div className="relative">
-            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"/>
-            <input
-              type="text"
-              placeholder="Buscar cliente u objetivo..."
-              value={srvSearch}
-              onChange={e => setSrvSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-white placeholder-slate-400 outline-none focus:border-indigo-400"
-            />
+          {/* Búsqueda y filtro cliente */}
+          <div className="flex flex-col md:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+              <input
+                type="text"
+                placeholder="Buscar cliente u objetivo..."
+                value={srvSearch}
+                onChange={e => setSrvSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-700 dark:text-white placeholder-slate-400 outline-none focus:border-indigo-400"
+              />
+            </div>
+            <select
+              value={srvClientFilter}
+              onChange={(e) => setSrvClientFilter(e.target.value)}
+              className="md:w-64 px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-black uppercase text-slate-600 dark:text-slate-200 outline-none focus:border-indigo-400"
+            >
+              <option value="all">Todos los clientes</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
           </div>
 
           {/* Filtros rápidos */}
           <div className="flex flex-wrap gap-2">
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
-              {(['all', 'active', 'inactive'] as const).map(v => (
-                <button key={v} onClick={() => setSrvStatusFilter(v)}
-                  title={v === 'active' ? `Vigentes en ${kpiCurrent.label}` : v === 'inactive' ? `Sin cobertura en ${kpiCurrent.label}` : undefined}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${srvStatusFilter === v ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              {([
+                { v: 'all' as const, label: 'Todos' },
+                { v: 'with_sla' as const, label: '● Con servicio' },
+                { v: 'without_sla' as const, label: '○ Sin servicio' },
+              ]).map(({ v, label }) => (
+                <button key={v} onClick={() => setSrvCatalogFilter(v)}
+                  title={v === 'with_sla' ? `Con SLA vigente en ${kpiCurrent.label}` : v === 'without_sla' ? `Objetivos sin SLA en ${kpiCurrent.label}` : undefined}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${srvCatalogFilter === v ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                 >
-                  {v === 'all' ? 'Todos' : v === 'active' ? '● Activos' : '○ Sin cobertura'}
+                  {label}
                 </button>
               ))}
             </div>
@@ -1556,10 +1584,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           {/* Contador */}
           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">
             {listMode === 'clients'
-              ? `${clientGroups.length} cliente${clientGroups.length !== 1 ? 's' : ''} · ${groupedServices.length} objetivo${groupedServices.length !== 1 ? 's' : ''}`
-              : `${groupedServices.length} objetivo${groupedServices.length !== 1 ? 's' : ''}`}
+              ? `${clientGroups.length} cliente${clientGroups.length !== 1 ? 's' : ''} · ${objectiveCatalog.length} objetivo${objectiveCatalog.length !== 1 ? 's' : ''}`
+              : `${objectiveCatalog.length} objetivo${objectiveCatalog.length !== 1 ? 's' : ''}`}
+            {` · ${catalogStats.withSla} con servicio · ${catalogStats.withoutSla} sin servicio`}
             {srvSearch && ` · búsqueda: "${srvSearch}"`}
-            {srvStatusFilter !== 'all' && ` · ${srvStatusFilter === 'active' ? `activos en ${kpiCurrent.label}` : `sin cobertura en ${kpiCurrent.label}`}`}
+            {srvCatalogFilter !== 'all' && ` · ${srvCatalogFilter === 'with_sla' ? `con servicio en ${kpiCurrent.label}` : `sin servicio en ${kpiCurrent.label}`}`}
+            {srvClientFilter !== 'all' && ` · cliente filtrado`}
             {srvFeatureFilter !== 'all' && ` · con ${srvFeatureFilter}`}
           </p>
 
@@ -1596,9 +1626,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                           </div>
                           <div className="flex items-center gap-4 mt-1.5 flex-wrap">
                             <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
-                              <MapPin size={9}/> {cg.objectives.length} objetivo{cg.objectives.length !== 1 ? 's' : ''}
-                              {cg.totalActiveObjs > 0 && cg.totalActiveObjs < cg.objectives.length && (
-                                <span className="text-emerald-500">({cg.totalActiveObjs} activo{cg.totalActiveObjs !== 1 ? 's' : ''})</span>
+                              <MapPin size={9}/> {cg.rows.length} objetivo{cg.rows.length !== 1 ? 's' : ''}
+                              {cg.withSla > 0 && (
+                                <span className="text-emerald-500">({cg.withSla} con servicio)</span>
+                              )}
+                              {cg.withoutSla > 0 && (
+                                <span className="text-amber-500">({cg.withoutSla} sin servicio)</span>
                               )}
                             </span>
                             <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
@@ -1617,16 +1650,38 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                       {/* Objetivos expandidos */}
                       {isExp && (
                         <div className="border-t border-slate-100 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/60">
-                          {cg.objectives.map(group => {
-                            const srvCubreKpiMes = (srv: ServiceSLA & { id: string }) => {
-                              const mStart = new Date(kpiYear, kpiMonth, 1);
-                              const mEnd = new Date(kpiYear, kpiMonth + 1, 0);
-                              const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
-                              const sEnd = parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10));
-                              return !!sStart && !!sEnd && !(sStart > mEnd || sEnd < mStart);
+                          {cg.rows.map((row) => {
+                            if (!row.hasSlaInMonth || !row.activeSla) {
+                              return (
+                                <div key={row.key} className="px-4 py-3 flex items-center gap-3 bg-amber-50/40 dark:bg-amber-950/20 border-l-4 border-amber-400">
+                                  <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-amber-400"/>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-black text-slate-700 dark:text-white uppercase truncate flex items-center gap-1.5">
+                                      <MapPin size={9} className="text-amber-500 shrink-0"/>{row.objectiveName}
+                                    </p>
+                                    <p className="text-[9px] font-bold text-amber-700 dark:text-amber-400 mt-0.5">
+                                      Sin servicio SLA en {kpiDisplay.label}
+                                    </p>
+                                  </div>
+                                  {canCreateService && (
+                                    <button
+                                      onClick={() => openNewForObjective(row)}
+                                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[9px] font-black uppercase transition-colors shrink-0"
+                                    >
+                                      <Plus size={11}/> Agregar servicio
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            const group = {
+                              key: row.key,
+                              objectiveName: row.objectiveName,
+                              services: row.allSlas,
                             };
-                            const currentSrv = group.services.find(srvCubreKpiMes) || group.services[0];
-                            const hasObjActive = group.services.some(s => isSlaContractActive(s.status));
+                            const currentSrv = row.activeSla || row.allSlas[0];
+                            const hasObjActive = row.allSlas.some((s) => isSlaContractActive(s.status));
                             const slaR = getResolvedSlaForMargin(currentSrv);
                             const total = serviceTotals.get(serviceSlaRowKey(currentSrv)) ?? 0;
                             return (
@@ -1698,21 +1753,46 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               <RotateCw size={20} className="animate-spin mr-2"/> Cargando...
             </div>
           )}
-          {listMode === 'objectives' && !loading && groupedServices.length === 0 && (
-            <div className="text-center py-16 text-slate-400 text-sm font-bold">No se encontraron contratos.</div>
+          {listMode === 'objectives' && !loading && objectiveCatalog.length === 0 && (
+            <div className="text-center py-16 text-slate-400 text-sm font-bold">No se encontraron objetivos para este filtro.</div>
           )}
-          {listMode === 'objectives' && !loading && groupedServices.length > 0 && (
+          {listMode === 'objectives' && !loading && objectiveCatalog.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {groupedServices.map(group => {
-                // Contrato vigente en el mes mostrado (kpi) — si no hay, el más reciente.
-                const srvCubreKpiMes = (srv: ServiceSLA & { id: string }) => {
-                  const mStart = new Date(kpiYear, kpiMonth, 1);
-                  const mEnd = new Date(kpiYear, kpiMonth + 1, 0);
-                  const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
-                  const sEnd = parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10));
-                  return !!sStart && !!sEnd && !(sStart > mEnd || sEnd < mStart);
+              {objectiveCatalog.map((row) => {
+                if (!row.hasSlaInMonth || !row.activeSla) {
+                  return (
+                    <div key={row.key} className="bg-white dark:bg-slate-800 rounded-xl border border-amber-200 dark:border-amber-800 shadow-sm overflow-hidden">
+                      <div className="h-1 w-full bg-amber-400"/>
+                      <div className="p-4 space-y-3">
+                        <div>
+                          <h3 className="font-black text-sm text-slate-800 dark:text-white uppercase truncate">{row.clientName}</h3>
+                          <p className="text-xs font-bold text-amber-600 mt-0.5 flex items-center gap-1 truncate uppercase">
+                            <MapPin size={10}/> {row.objectiveName}
+                          </p>
+                        </div>
+                        <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
+                          Sin servicio SLA en {kpiDisplay.label}
+                        </p>
+                        {canCreateService && (
+                          <button
+                            onClick={() => openNewForObjective(row)}
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase transition-colors"
+                          >
+                            <Plus size={12}/> Agregar servicio
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                const group = {
+                  key: row.key,
+                  clientName: row.clientName,
+                  objectiveName: row.objectiveName,
+                  services: row.allSlas,
                 };
-                const currentSrv = group.services.find(srvCubreKpiMes) || group.services[0];
+                const currentSrv = row.activeSla || row.allSlas[0];
                 const orderedServices = currentSrv
                   ? [currentSrv, ...group.services.filter(s => s !== currentSrv)]
                   : group.services;

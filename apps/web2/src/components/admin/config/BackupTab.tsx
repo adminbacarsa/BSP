@@ -201,6 +201,24 @@ function backupVisibleInTab(
   return String(b.empresaId ?? '').trim().toLowerCase() === String(empresaId ?? '').trim().toLowerCase();
 }
 
+function formatLocalBackupImportError(raw: string): string {
+  const msg = String(raw ?? '').trim();
+  if (!msg) {
+    return 'Error al importar backup. Reiniciá el lab (npm run lab:restart) y volvé a intentar.';
+  }
+  if (/payload isn't valid|payload is not valid|invalid argument.*payload/i.test(msg)) {
+    return 'Payload inválido: el archivo no llegó completo al puente :3010 o el emulador está saturado. '
+      + 'Reiniciá npm run lab:restart, cerrá Planificación/Operaciones y seleccioná el .json de nuevo.';
+  }
+  if (/turnos saturada|lab:restart|Firestore emulador no acepta/i.test(msg)) {
+    return msg;
+  }
+  if (/archivo vacío|no recibido/i.test(msg)) {
+    return `${msg} Volvé a elegir el archivo .json (no refresques la pestaña durante la subida).`;
+  }
+  return msg;
+}
+
 export default function BackupTab() {
   const { isSuperAdmin } = useAuth();
   const { empresaId, empresa, empresas } = useEmpresa();
@@ -497,12 +515,13 @@ export default function BackupTab() {
   const backupJobUnsubRef = useRef<(() => void) | null>(null);
   const BACKUP_JOB_KEY = 'cosp_active_backup_job';
 
-  // Carga backup JSON al emulador vía API local (evita parsear JSON grande en el browser)
+  // Carga backup JSON al emulador vía puente :3010 (evita parsear JSON grande en el browser)
   const handleLoadLocalFile = async (file: File) => {
     if (loadingLocal) return;
     setLastResult(null);
     setLoadingLocal(true);
-    let isEmpresaMode = localRestoreMode === 'empresa' && !!empresaId;
+    const isEmpresaMode = localRestoreMode === 'empresa' && !!empresaId;
+    let uploadBody: Blob = file;
     setProgress({ done: 0, total: 0, phase: `Validando backup…` });
     await new Promise<void>(r => requestAnimationFrame(() => r()));
     try {
@@ -510,10 +529,12 @@ export default function BackupTab() {
         throw new Error('Seleccioná una empresa en el selector superior antes de importar.');
       }
 
-      // Pre-validación: si el archivo es manejable, detectar empresa del backup
+      // Pre-validación: si el archivo es manejable, detectar empresa del backup.
+      // Reutilizamos el mismo buffer para el POST (evita enviar File vacío tras file.text()).
       if (isEmpresaMode && file.size < 30 * 1024 * 1024) {
         try {
           const text = await file.text();
+          uploadBody = new Blob([text], { type: file.type || 'application/json' });
           const backup = JSON.parse(text) as Record<string, unknown>;
           const meta = (backup._meta ?? {}) as Record<string, unknown>;
           const backupEmpId = String(meta.empresaId ?? '').trim();
@@ -525,7 +546,11 @@ export default function BackupTab() {
               { duration: 10_000 },
             );
           }
-        } catch { /* si no se puede parsear, continuar normalmente */ }
+        } catch {
+          uploadBody = file.slice(0, file.size, file.type || 'application/json');
+        }
+      } else {
+        uploadBody = file.slice(0, file.size, file.type || 'application/json');
       }
 
       await assertBridgeReachable();
@@ -555,7 +580,7 @@ export default function BackupTab() {
             'X-Import-Clear-Before': localClearBefore ? '1' : '0',
             'X-File-Name': encodeURIComponent(file.name),
           },
-          body: file,
+          body: uploadBody,
           signal: controller.signal,
         });
       } catch (fetchErr: any) {
@@ -581,7 +606,7 @@ export default function BackupTab() {
         );
       }
       if (!res.ok) {
-        throw new Error(data.error || `Error HTTP ${res.status}`);
+        throw new Error(formatLocalBackupImportError(data.error || `Error HTTP ${res.status}`));
       }
 
       let written = Number(data.written ?? 0);
@@ -607,7 +632,7 @@ export default function BackupTab() {
       setLastResult({ ok: true, msg: okMsg });
       toast.success(okMsg);
     } catch (e: any) {
-      const msg = e?.message || 'Error al cargar el archivo';
+      const msg = formatLocalBackupImportError(e?.message || 'Error al cargar el archivo');
       setLastResult({ ok: false, msg });
       toast.error(msg);
     } finally {
