@@ -32,11 +32,23 @@ function objectiveIdsForClient(client: ClientRef): Set<string> {
 async function fetchTurnosByObjectiveIds(
   objectiveIds: string[],
   addIfInRange: (id: string, data: Record<string, unknown>) => void,
+  padStart?: Date,
+  padEnd?: Date,
 ): Promise<void> {
   const ids = [...new Set(objectiveIds.map((x) => String(x).trim()).filter(Boolean))];
   for (let i = 0; i < ids.length; i += 10) {
     const chunk = ids.slice(i, i + 10);
-    const snap = await getDocs(query(collection(db, 'turnos'), where('objectiveId', 'in', chunk)));
+    // Con rango de fechas disponible limitamos las lecturas al período relevante.
+    // Requiere índice compuesto en Firestore: objectiveId ASC, startTime ASC.
+    const q = padStart && padEnd
+      ? query(
+          collection(db, 'turnos'),
+          where('objectiveId', 'in', chunk),
+          where('startTime', '>=', Timestamp.fromDate(padStart)),
+          where('startTime', '<=', Timestamp.fromDate(padEnd)),
+        )
+      : query(collection(db, 'turnos'), where('objectiveId', 'in', chunk));
+    const snap = await getDocs(q);
     snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
   }
 }
@@ -298,7 +310,7 @@ export async function loadClientTurnosForClient(
   );
 
   if (objectiveIds.length > 0) {
-    await fetchTurnosByObjectiveIds(objectiveIds, addIfInRange);
+    await fetchTurnosByObjectiveIds(objectiveIds, addIfInRange, start, end);
   }
 
   const empresaId = String(opts?.empresaId ?? '').trim();
@@ -386,7 +398,7 @@ export async function fetchCrmDashboardTurnos(
   }
 
   if (objectiveIds.length > 0) {
-    batchQueries.push(fetchTurnosByObjectiveIds(objectiveIds, addIfInRange));
+    batchQueries.push(fetchTurnosByObjectiveIds(objectiveIds, addIfInRange, padStart, padEnd));
   }
 
   await Promise.all(batchQueries);

@@ -199,18 +199,18 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
-    // Contador que fuerza re-suscripción de listeners al volver de background, reconectar red, o cada 3 min
+    // Fuerza re-suscripción de listeners al volver de background o reconectar red.
+    // El intervalo periódico fue eliminado: Firestore gestiona la reconexión internamente
+    // y el onError del listener de turnos ya llama setRefreshKey ante fallos de red.
     const [refreshKey, setRefreshKey] = useState(0);
     useEffect(() => {
         const bump = () => setRefreshKey(k => k + 1);
         const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
         document.addEventListener('visibilitychange', onVisible);
         window.addEventListener('online', bump);
-        const periodicRefresh = setInterval(bump, 3 * 60 * 1000);
         return () => {
             document.removeEventListener('visibilitychange', onVisible);
             window.removeEventListener('online', bump);
-            clearInterval(periodicRefresh);
         };
     }, []);
 
@@ -309,11 +309,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
 
         // Refuerzos (RFZ) y turnos agregados (TURA): startTime/endTime son string ISO, así que el
-        // rango Timestamp del listener principal los excluye. Listener aparte por `code` (filtro de
-        // campo único → no requiere índice compuesto) y filtrado de empresa + ventana en memoria.
+        // rango Timestamp del listener principal los excluye. Listener aparte por `code`.
+        // Con scopeEmpresa=true agrega empresaId para reducir lecturas (requiere índice compuesto
+        // en Firestore: empresaId ASC, code ASC — crear desde la consola si aparece el error de índice).
         const startMs = start.getTime();
         const endMs = end.getTime();
-        const refuerzosQ = query(collection(db, 'turnos'), where('code', 'in', ['RFZ', 'TURA']));
+        const refuerzosQ = scopeEmpresa
+            ? query(empresaCollectionQuery('turnos', empresaId, true), where('code', 'in', ['RFZ', 'TURA']))
+            : query(collection(db, 'turnos'), where('code', 'in', ['RFZ', 'TURA']));
         const unsubRfz = onSnapshot(refuerzosQ, (snap) => {
             setRawRefuerzos(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))

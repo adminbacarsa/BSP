@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, Timestamp, orderBy, limit } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
@@ -1692,10 +1692,15 @@ export const useReportes = (forcedClientId?: string | null) => {
     const loadAudit = async () => {
         if (!empresaId) return;
         try {
+            const since90 = new Date();
+            since90.setDate(since90.getDate() - 90);
             const snap = await getDocs(
                 query(
                     collection(db, 'audit_logs'),
                     where('empresaId', '==', empresaId),
+                    where('timestamp', '>=', Timestamp.fromDate(since90)),
+                    orderBy('timestamp', 'desc'),
+                    limit(500),
                 )
             );
             const logs = snap.docs

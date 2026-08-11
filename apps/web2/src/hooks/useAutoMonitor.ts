@@ -50,10 +50,12 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
     const startWindow = new Date();
     startWindow.setDate(startWindow.getDate() - 1);
 
+    // Índice compuesto requerido: empresaId ASC, status ASC, startTime ASC
     const q = query(
       collection(db, 'turnos'),
+      where('empresaId', '==', empresaId),
+      where('status', '==', 'InProgress'),
       where('startTime', '>=', Timestamp.fromDate(startWindow)),
-      where('status', '==', 'InProgress')
     );
 
     const unsub = onSnapshotFresh(q, snap => {
