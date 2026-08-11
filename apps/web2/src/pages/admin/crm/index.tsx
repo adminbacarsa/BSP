@@ -646,9 +646,9 @@ export default function CRMPage() {
       setDashboardIsStale(true);
     }
     setCalculatingMetrics(true);
+    // C1 — snapshot Firestore (aislado: un fallo aquí no rompe el cálculo)
+    const snapRef = doc(db, 'crm_metrics_snapshot', cacheKey);
     try {
-      // C1 — snapshot persistido en Firestore (compartido entre usuarios y sesiones)
-      const snapRef = doc(db, 'crm_metrics_snapshot', cacheKey);
       const snapDoc = await getDoc(snapRef);
       if (snapDoc.exists()) {
         const snap = snapDoc.data();
@@ -663,10 +663,14 @@ export default function CRMPage() {
           setCrmTrendSeries(t);
           setMetricsUpdatedAt(computedAt);
           metricsCache.current.set(cacheKey, { metrics: m, trend: t, updatedAt: computedAt });
+          setCalculatingMetrics(false);
+          setDashboardIsStale(false);
           return;
         }
       }
+    } catch { /* snapshot no disponible — continúa con cálculo normal */ }
 
+    try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
       const tenantClientIds = new Set(clients.map((c) => c.id));
       const clientRefs: ClientRef[] = clients.map((c) => ({
