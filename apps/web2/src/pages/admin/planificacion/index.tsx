@@ -6111,7 +6111,7 @@ export default function PlanificacionPage() {
                     },
                     positionStructure: effectivePosStructure,
                     authorizeFrancoTrabajado: authorizeFranco,
-                    fallbackGapBand: vacancyGapBandOverride || resolveSuggestedGapBandForPosition(activeDays[0] || '', activePosition || '') || undefined,
+                    fallbackGapBand: (vacancyGapBandOverride ? vacancyGapBandOverride.split('__')[0] : null) || resolveSuggestedGapBandForPosition(activeDays[0] || '', activePosition || '') || undefined,
                 });
                 const vd = vacancyData;
                 const absCode = days.length ? (changes[`${vd.employeeId}_${days[0].dateStr}`]?.code || '—') : '—';
@@ -12924,7 +12924,12 @@ export default function PlanificacionPage() {
                             return resolveEffectiveTitularForDay(splitReferenceDate);
                         }
                         if (vacancyGapBandOverride) {
-                            const opt = vacancyGapBandOptions.find((o) => o.code === vacancyGapBandOverride);
+                            const parts = vacancyGapBandOverride.split('__');
+                            const code = parts[0].toUpperCase();
+                            const posName = parts.length > 1 ? parts.slice(1).join('__') : null;
+                            const opt = posName
+                                ? (vacancyGapBandOptions.find((o) => o.code === code && o.positionName === posName) || vacancyGapBandOptions.find((o) => o.code === code))
+                                : vacancyGapBandOptions.find((o) => o.code === code);
                             if (opt) {
                                 return buildTitularVacancyFromGapOption(
                                     opt,
@@ -13320,15 +13325,15 @@ export default function PlanificacionPage() {
                                                 <span className="text-[9px] font-black uppercase text-amber-800/90">¿Qué turno cubrir?</span>
                                                 <select
                                                     className="mt-1 w-full rounded-xl border border-amber-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-800 shadow-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-400"
-                                                    value={vacancyGapBandOverride ?? splitTitularShift.code}
+                                                    value={vacancyGapBandOverride ?? `${splitTitularShift.code}__${splitTitularShift.positionName}`}
                                                     onChange={(e) => {
-                                                        const v = e.target.value.trim().toUpperCase();
-                                                        const autoCode = splitTitularShift.code.toUpperCase();
-                                                        setVacancyGapBandOverride(v && v !== autoCode ? v : null);
+                                                        const v = e.target.value;
+                                                        const autoKey = `${splitTitularShift.code}__${splitTitularShift.positionName}`;
+                                                        setVacancyGapBandOverride(v && v !== autoKey ? v : null);
                                                     }}
                                                 >
                                                     {vacancyGapBandOptions.map((opt) => (
-                                                        <option key={`${opt.positionName}__${opt.code}`} value={opt.code}>
+                                                        <option key={`${opt.code}__${opt.positionName}`} value={`${opt.code}__${opt.positionName}`}>
                                                             {opt.code} · {opt.positionName} · {opt.scheduleLabel} ({opt.hours}h)
                                                         </option>
                                                     ))}
@@ -13386,11 +13391,11 @@ export default function PlanificacionPage() {
                                             <select
                                                 className="w-full rounded-xl border border-amber-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-800 shadow-sm"
                                                 value={vacancyGapBandOverride ?? ''}
-                                                onChange={(e) => setVacancyGapBandOverride(e.target.value.trim().toUpperCase() || null)}
+                                                onChange={(e) => setVacancyGapBandOverride(e.target.value || null)}
                                             >
                                                 <option value="">— Seleccionar banda (ej. E3 14:00–20:00) —</option>
                                                 {vacancyGapBandOptions.map((opt) => (
-                                                    <option key={`${opt.positionName}__${opt.code}`} value={opt.code}>
+                                                    <option key={`${opt.code}__${opt.positionName}`} value={`${opt.code}__${opt.positionName}`}>
                                                         {opt.code} · {opt.positionName} · {opt.scheduleLabel}
                                                     </option>
                                                 ))}

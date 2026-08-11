@@ -11,40 +11,80 @@ import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
 import type { ServicePosition } from '@/services/slaService';
 
-/** Horas por código de turno desde SLA vigente (E1, E2, P4, etc.). */
-export function buildSlaCodeHoursHintFromServices(services: SlaPlanningRow[]): Record<string, number> {
-  const hint: Record<string, number> = {};
-  const parseH = (t: string) => {
-    const m = t.match(/^(\d{1,2}):(\d{2})$/);
-    return m ? +m[1] + +m[2] / 60 : null;
-  };
+type SlaShiftVariant = { code?: string; hours?: number; startTime?: string; endTime?: string };
+
+function parseClockToHours(t: string): number | null {
+  const m = t.match(/^(\d{1,2}):(\d{2})$/);
+  return m ? +m[1] + +m[2] / 60 : null;
+}
+
+function shiftVariantsFromPosition(pos: unknown): SlaShiftVariant[] {
+  const raw = pos as ServicePosition & { shifts?: SlaShiftVariant[] };
+  const list = raw.allowedShiftTypes ?? raw.shifts;
+  return Array.isArray(list) ? list : [];
+}
+
+function applyShiftVariantToHint(hint: Record<string, number>, sh: SlaShiftVariant): void {
+  const code = String(sh.code || '').trim().toUpperCase();
+  if (!code) return;
+  const n = Number(sh.hours);
+  if (n > 0) {
+    hint[code] = n;
+    return;
+  }
+  if (typeof sh.startTime === 'string' && typeof sh.endTime === 'string') {
+    const s = parseClockToHours(sh.startTime);
+    const e = parseClockToHours(sh.endTime);
+    if (s != null && e != null) {
+      let dur = e - s;
+      if (dur <= 0) dur += 24;
+      if (dur > 0) hint[code] = dur;
+    }
+  }
+}
+
+function mergeSlaCodeHoursHints(
+  services: SlaPlanningRow[],
+  target: Record<string, number>,
+): void {
   for (const srv of services) {
     const rawPositions = Array.isArray(srv.positions)
       ? srv.positions
       : Object.values((srv.positions as Record<string, unknown>) || {});
     for (const raw of rawPositions) {
-      const pos = raw as ServicePosition & { positionName?: string; shifts?: Array<{ code?: string; hours?: number; startTime?: string; endTime?: string }> };
-      for (const sh of pos.shifts || []) {
-        const code = String(sh.code || '').trim().toUpperCase();
-        if (!code) continue;
-        const n = Number(sh.hours);
-        if (n > 0) {
-          hint[code] = n;
-          continue;
-        }
-        if (typeof sh.startTime === 'string' && typeof sh.endTime === 'string') {
-          const s = parseH(sh.startTime);
-          const e = parseH(sh.endTime);
-          if (s != null && e != null) {
-            let dur = e - s;
-            if (dur <= 0) dur += 24;
-            if (dur > 0) hint[code] = dur;
-          }
-        }
+      for (const sh of shiftVariantsFromPosition(raw)) {
+        applyShiftVariantToHint(target, sh);
       }
     }
   }
+}
+
+/** Horas por código de turno desde SLA vigente (E1, E2, P4, N custom 9h, etc.). */
+export function buildSlaCodeHoursHintFromServices(services: SlaPlanningRow[]): Record<string, number> {
+  const hint: Record<string, number> = {};
+  mergeSlaCodeHoursHints(services, hint);
   return hint;
+}
+
+/** Misma regla que buildSlaCodeHoursHintFromServices, pero por objectiveId (evita mezclar N 8h vs 9h entre sedes). */
+export function buildSlaCodeHoursHintByObjectiveId(
+  services: SlaPlanningRow[],
+): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  for (const srv of services) {
+    const objId = String(srv.objectiveId ?? '').trim();
+    if (!objId) continue;
+    const hint = out[objId] ?? (out[objId] = {});
+    const rawPositions = Array.isArray(srv.positions)
+      ? srv.positions
+      : Object.values((srv.positions as Record<string, unknown>) || {});
+    for (const raw of rawPositions) {
+      for (const sh of shiftVariantsFromPosition(raw)) {
+        applyShiftVariantToHint(hint, sh);
+      }
+    }
+  }
+  return out;
 }
 
 export const CRM_PLANNED_SHIFT_HOURS: Record<string, number> = {
@@ -178,6 +218,7 @@ export function sumPlannedHoursForClient(
   range: PlannedHoursRange,
   slaExclusion?: SlaExclusionContext,
   slaCodeHoursHint?: Record<string, number>,
+  slaCodeHoursHintByObjective?: Record<string, Record<string, number>>,
 ): number {
   const groups = new Map<string, any[]>();
   for (const t of turnos) {
@@ -191,7 +232,9 @@ export function sumPlannedHoursForClient(
   }
   let total = 0;
   for (const rows of groups.values()) {
-    const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
+    const objId = String(rows[0]?.objectiveId ?? '').trim();
+    const hint = (objId && slaCodeHoursHintByObjective?.[objId]) || slaCodeHoursHint;
+    const hrs = coalescePlannedCellBillableHours(rows, hint);
     if (hrs > 0) total += hrs;
   }
   return total;

@@ -147,8 +147,8 @@ function durationHoursFromShiftTimestamps(shift: any): number {
 }
 
 /**
- * Horas billables de un turno planificado: código SLA + tramo extra de extensión/adelanto.
- * Misma regla que el pie «Hs. Plan.» del planificador (lookup CCT/custom antes que timestamps).
+ * Horas billables de un turno planificado: primero lo guardado en el cronograma (hours / start→end),
+ * después banda SLA del objetivo, y por último lookup CCT. Extensiones/adelantos se suman aparte.
  */
 export function calcPlanningBillableShiftHours(
   shift: any,
@@ -159,7 +159,9 @@ export function calcPlanningBillableShiftHours(
   if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
 
   const explicitExt = Number(shift.extExtraHours ?? shift.extensionExtraHours);
-  const bandHint = slaHoursHint?.[code] ?? SHIFT_HOURS_LOOKUP[code];
+  const hintBand = slaHoursHint?.[code];
+  const cctBand = SHIFT_HOURS_LOOKUP[code];
+  const bandHint = hintBand ?? cctBand;
 
   const hasRealExtension = !!(
     shift.isExtended
@@ -169,19 +171,24 @@ export function calcPlanningBillableShiftHours(
     || (Number.isFinite(explicitExt) && explicitExt > 0)
   );
 
+  const storedForBase = Number(shift.hours);
+  const tsDur = durationHoursFromShiftTimestamps(shift);
+  const intrinsic =
+    storedForBase >= 0.5 ? Math.min(storedForBase, 24)
+      : tsDur >= 0.5 ? tsDur
+        : 0;
+
   let codeBase = 0;
-  const fromLookup = SHIFT_HOURS_LOOKUP[code];
-  if (fromLookup !== undefined) codeBase = fromLookup;
-  else if (slaHoursHint?.[code] !== undefined) codeBase = slaHoursHint[code];
-  else {
-    const storedForBase = Number(shift.hours);
-    if (storedForBase >= 0.5) codeBase = Math.min(storedForBase, 24);
-    else {
-      const dur = durationHoursFromShiftTimestamps(shift);
-      if (dur >= 0.5) codeBase = dur;
-    }
-    if (codeBase <= 0 && bandHint != null && bandHint > 0) codeBase = bandHint;
-    else if (codeBase <= 0) codeBase = 8;
+  if (intrinsic >= 0.5) {
+    codeBase = intrinsic;
+  } else if (hintBand !== undefined && hintBand > 0) {
+    codeBase = hintBand;
+  } else if (cctBand !== undefined) {
+    codeBase = cctBand;
+  } else if (bandHint != null && bandHint > 0) {
+    codeBase = bandHint;
+  } else {
+    codeBase = 8;
   }
 
   const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
@@ -204,6 +211,10 @@ export function calcPlanningBillableShiftHours(
   }
 
   const stored = Number(shift.hours);
+  if (!extensionBillable && intrinsic >= 0.5) {
+    return finish(intrinsic, extra);
+  }
+
   if (!extensionBillable && bandHint != null && bandHint > 0) {
     let base = Math.max(codeBase, bandHint);
     if (stored >= 0.5) {

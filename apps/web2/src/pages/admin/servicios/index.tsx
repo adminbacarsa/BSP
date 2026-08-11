@@ -1330,7 +1330,63 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     return result;
   }, [services, kpiYear, kpiMonth]);
 
+  const filteredServicesForKpi = useMemo(() => {
+    const q = srvSearch.toLowerCase().trim();
+    return (services as (ServiceSLA & { id: string })[]).filter((s) => {
+      if (q && !(s.clientName || '').toLowerCase().includes(q) && !(s.objectiveName || '').toLowerCase().includes(q)) return false;
+      if (srvStatusFilter === 'active' && !slaCoversCalendarMonth(s.startDate, s.endDate, kpiYear, kpiMonth)) return false;
+      if (srvStatusFilter === 'inactive' && slaCoversCalendarMonth(s.startDate, s.endDate, kpiYear, kpiMonth)) return false;
+      if (srvFeatureFilter === 'rotaciones' && !(s.serviceRotations?.length)) return false;
+      if (srvFeatureFilter === 'condiciones' && !(s.serviceRules?.length)) return false;
+      return true;
+    });
+  }, [services, srvSearch, srvStatusFilter, srvFeatureFilter, kpiYear, kpiMonth]);
+
+  const kpiCurrentFiltered = useMemo(() => {
+    const y = kpiYear;
+    const m = kpiMonth;
+    const mStart = new Date(y, m, 1);
+    const mEnd = new Date(y, m + 1, 0);
+    const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
+    const monthName = mStart.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+    let active = 0;
+    let hours = 0;
+    let positions = 0;
+    let guards = 0;
+    filteredServicesForKpi.forEach((srv) => {
+      if (!srv.startDate) return;
+      const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
+      const sEnd = srv.endDate
+        ? parseYmdToLocalDate((srv.endDate || '').trim().slice(0, 10))
+        : new Date(2099, 11, 31);
+      if (!sStart || !sEnd || sStart > mEnd || sEnd < mStart) return;
+      active++;
+      positions += (srv.positions || []).length;
+      (srv.positions || []).forEach((p) => {
+        calculateMonthlyBreakdown([p], srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
+          if (mb.monthKey === sk) {
+            const pax = p.quantity || 1;
+            const minRot = p.coverageType === '24hs' ? pax * 2 : pax;
+            guards += Math.max(minRot, Math.ceil(mb.totalHours / 200));
+          }
+        });
+      });
+      calculateMonthlyBreakdown(srv.positions, srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
+        if (mb.monthKey === sk) hours += mb.totalHours;
+      });
+    });
+    return {
+      label: monthName.charAt(0).toUpperCase() + monthName.slice(1),
+      active,
+      hours: Math.round(hours),
+      positions,
+      guards,
+    };
+  }, [filteredServicesForKpi, kpiYear, kpiMonth]);
+
   const kpiCurrent = kpiHistory[kpiHistory.length - 1] ?? { active: 0, hours: 0, positions: 0, guards: 0, label: '' };
+  const kpiMetricsActive = Boolean(srvSearch.trim() || srvStatusFilter !== 'all' || srvFeatureFilter !== 'all');
+  const kpiDisplay = kpiMetricsActive ? kpiCurrentFiltered : kpiCurrent;
   const kpiMaxHours = Math.max(...kpiHistory.map(m => m.hours), 1);
 
   const kpiPrevMonth = () => { if (kpiMonth === 0) { setKpiMonth(11); setKpiYear(y => y - 1); } else setKpiMonth(m => m - 1); };
@@ -1471,16 +1527,16 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Métricas por mes</p>
               <div className="flex items-center gap-1.5">
                 <button onClick={kpiPrevMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">‹</button>
-                <span className="text-[11px] font-black text-slate-700 dark:text-white uppercase min-w-[100px] text-center tracking-wide">{kpiCurrent.label}</span>
+                <span className="text-[11px] font-black text-slate-700 dark:text-white uppercase min-w-[100px] text-center tracking-wide">{kpiDisplay.label}</span>
                 <button onClick={kpiNextMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">›</button>
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {([
-                { icon: Shield, color: '#4f46e5', label: 'Servicios activos', value: kpiCurrent.active, unit: '' },
-                { icon: Clock,  color: '#059669', label: 'Horas del mes',      value: kpiCurrent.hours.toLocaleString('es-AR'), unit: 'hs' },
-                { icon: Layers, color: '#d97706', label: 'Puestos',             value: kpiCurrent.positions, unit: '' },
-                { icon: Users,  color: '#dc2626', label: 'Guardias',            value: kpiCurrent.guards, unit: '' },
+                { icon: Shield, color: '#4f46e5', label: 'Servicios activos', value: kpiDisplay.active, unit: '' },
+                { icon: Clock,  color: '#059669', label: 'Horas del mes',      value: kpiDisplay.hours.toLocaleString('es-AR'), unit: 'hs' },
+                { icon: Layers, color: '#d97706', label: 'Puestos',             value: kpiDisplay.positions, unit: '' },
+                { icon: Users,  color: '#dc2626', label: 'Guardias',            value: kpiDisplay.guards, unit: '' },
               ] as const).map(({ icon: Icon, color, label, value, unit }) => (
                 <div key={label} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm px-4 pt-3.5 pb-3">
                   <div className="flex items-center gap-2 mb-2">
@@ -1858,7 +1914,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Métricas por mes</p>
                 <div className="flex items-center gap-1.5">
                   <button onClick={kpiPrevMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">‹</button>
-                  <span className="text-[11px] font-black text-slate-700 dark:text-white uppercase min-w-[100px] text-center tracking-wide">{kpiCurrent.label}</span>
+                  <span className="text-[11px] font-black text-slate-700 dark:text-white uppercase min-w-[100px] text-center tracking-wide">{kpiDisplay.label}</span>
                   <button onClick={kpiNextMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">›</button>
                 </div>
               </div>
@@ -1866,10 +1922,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               {/* 4 KPI cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {([
-                  { icon: Shield, color: '#4f46e5', label: 'Servicios activos', value: kpiCurrent.active, unit: '' },
-                  { icon: Clock,  color: '#059669', label: 'Horas del mes',      value: kpiCurrent.hours.toLocaleString('es-AR'), unit: 'hs' },
-                  { icon: Layers, color: '#d97706', label: 'Puestos',             value: kpiCurrent.positions, unit: '' },
-                  { icon: Users,  color: '#dc2626', label: 'Guardias',            value: kpiCurrent.guards, unit: '' },
+                  { icon: Shield, color: '#4f46e5', label: 'Servicios activos', value: kpiDisplay.active, unit: '' },
+                  { icon: Clock,  color: '#059669', label: 'Horas del mes',      value: kpiDisplay.hours.toLocaleString('es-AR'), unit: 'hs' },
+                  { icon: Layers, color: '#d97706', label: 'Puestos',             value: kpiDisplay.positions, unit: '' },
+                  { icon: Users,  color: '#dc2626', label: 'Guardias',            value: kpiDisplay.guards, unit: '' },
                 ] as const).map(({ icon: Icon, color, label, value, unit }) => (
                   <div key={label} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm px-4 pt-3.5 pb-3">
                     <div className="flex items-center gap-2 mb-2">

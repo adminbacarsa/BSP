@@ -133,7 +133,7 @@ function cellFromShift(date: string, code: string, start: Date, end: Date, hours
   if (NON_WORK_CODES.has(code) && !SHIFT_CODE_HOURS[code]) {
     return { date, display: code, hours: 0, dayHours: 0, nightHours: 0 };
   }
-  const night = getNightDuration(start, end);
+  const night = Math.min(getNightDuration(start, end), hours);
   const day = Math.max(0, hours - night);
   return {
     date,
@@ -180,6 +180,7 @@ export type BuildProformaGridsOpts = {
   useExecutedForAuto: boolean;
   slaExclusion?: SlaExclusionContext;
   slaCodeHoursHint?: Record<string, number>;
+  slaCodeHoursHintByObjective?: Record<string, Record<string, number>>;
 };
 
 function slaOverlapsRange(sla: { startDate?: string; endDate?: string }, start: Date, end: Date): boolean {
@@ -216,6 +217,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   const useExecuted = opts.mode === 'executed' || (opts.mode === 'auto' && opts.useExecutedForAuto);
   const aliases = opts.objectiveAliases || {};
   const hint = opts.slaCodeHoursHint;
+  const hintByObjective = opts.slaCodeHoursHintByObjective;
 
   const cellGroups = new Map<string, ProformaTurnoInput[]>();
 
@@ -246,7 +248,16 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   }
 
   for (const [, groupTurnos] of cellGroups) {
-    const t = coalescePlannedTurnosForCell(groupTurnos, hint) as ProformaTurnoInput;
+    const rowCtxPreview = {
+      objectiveId: groupTurnos[0]?.objectiveId,
+      objectiveName: groupTurnos[0]?.objectiveName,
+      clientId: groupTurnos[0]?.clientId || opts.clientId,
+    };
+    const objIdForHint = resolveCanonicalObjectiveId(rowCtxPreview, aliases)
+      || String(groupTurnos[0]?.objectiveId || '');
+    const cellHint = (objIdForHint && hintByObjective?.[objIdForHint]) || hint;
+
+    const t = coalescePlannedTurnosForCell(groupTurnos, cellHint) as ProformaTurnoInput;
     if (!t) continue;
 
     const code = String(t.code || t.type || '').trim().toUpperCase();
@@ -258,8 +269,11 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const start = useExecuted ? realStart : plannedStart;
     if (!start) continue;
 
-    let hrs = coalescePlannedCellBillableHours(groupTurnos, hint);
-    if (useExecuted && SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
+    let hrs = coalescePlannedCellBillableHours(groupTurnos, cellHint);
+    if (useExecuted && realStart && realEnd) {
+      const realH = getDurationHours(realStart, realEnd);
+      if (realH >= 0.25 && realH <= 24) hrs = realH;
+    }
     if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
 
     const plannedEndResolved = useExecuted ? (realEnd || plannedEnd) : plannedEnd;

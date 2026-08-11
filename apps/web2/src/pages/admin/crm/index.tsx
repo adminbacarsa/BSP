@@ -123,6 +123,7 @@ import {
   resolveCrmPlannedShiftHours,
   sumPlannedHoursForClient,
   buildSlaCodeHoursHintFromServices,
+  buildSlaCodeHoursHintByObjectiveId,
   toDateSafe,
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
@@ -1546,6 +1547,7 @@ export default function CRMPage() {
 
       const slaExclusion = buildSlaExclusionContext(servicesForProforma, start, end);
       const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(servicesForProforma);
+      const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(servicesForProforma);
 
       const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa });
       const turnosEnriched = enrichTurnosForProforma(turnosList, {
@@ -1614,8 +1616,10 @@ export default function CRMPage() {
       });
 
       plannedCellGroups.forEach(({ rows, objectiveName, positionName, dateKey }) => {
-        const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
-        const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
+        const objId = String(rows[0]?.objectiveId ?? '').trim();
+        const cellHint = (objId && slaCodeHoursHintByObjective[objId]) || slaCodeHoursHint;
+        const merged = coalescePlannedTurnosForCell(rows, cellHint);
+        const hrs = coalescePlannedCellBillableHours(rows, cellHint);
         if (!merged || hrs <= 0) return;
         planned.total += hrs;
         add(planned, objectiveName, positionName, dateKey, hrs);
@@ -1679,6 +1683,7 @@ export default function CRMPage() {
         mode: proformaDetailMode,
         useExecutedForAuto,
         slaCodeHoursHint,
+        slaCodeHoursHintByObjective,
       });
       const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
       const summary = buildProformaSummary(grids);
@@ -1705,7 +1710,14 @@ export default function CRMPage() {
 
       const modeIsExecuted = proformaDetailMode === 'executed' || (proformaDetailMode === 'auto' && useExecutedForAuto);
       const gridTotal = Math.round(grids.reduce((a: number, g: any) => a + g.grandTotal.total, 0));
-      const plannedBase = Math.round(sumPlannedHoursForClient(turnosList, clientRef, { start, end }, slaExclusion, slaCodeHoursHint));
+      const plannedBase = Math.round(sumPlannedHoursForClient(
+        turnosList,
+        clientRef,
+        { start, end },
+        slaExclusion,
+        slaCodeHoursHint,
+        slaCodeHoursHintByObjective,
+      ));
       setProformaTotals({
         planned: plannedBase + Math.round(refuerzoHorasVendidas),
         executed: modeIsExecuted ? gridTotal + Math.round(refuerzoHorasVendidas) : Math.round(executed.total),

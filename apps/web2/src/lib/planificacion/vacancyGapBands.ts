@@ -168,7 +168,13 @@ export function resolveEffectiveVacancyGapTitular(
   positionStructure: VacancyPositionSla[] | undefined,
 ): TitularVacancyWorkShift | null {
   if (userBandCode) {
-    const opt = gapOptions.find((o) => o.code === normCode(userBandCode));
+    // Soporta clave compuesta "CODE__positionName" para distinguir puestos con el mismo código.
+    const parts = userBandCode.split('__');
+    const code = normCode(parts[0]);
+    const posName = parts.length > 1 ? parts.slice(1).join('__') : null;
+    const opt = posName
+      ? (gapOptions.find((o) => o.code === code && o.positionName === posName) || gapOptions.find((o) => o.code === code))
+      : gapOptions.find((o) => o.code === code);
     if (opt) {
       return buildTitularVacancyFromGapOption(
         opt,
