@@ -1147,7 +1147,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const [s, c, h] = await Promise.all([ 
                     getDocs(empresaScopedQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
                     getDocs(empresaScopedQuery('clients', empresaId, scopeEmpresa) as ReturnType<typeof query>),
-                    getDocs(collection(db, 'feriados'))
+                    getDocs(query(collection(db, 'feriados'), limit(400)))
                 ]);
                 
                 const emps: any = {};

@@ -254,11 +254,21 @@ export default function ServiciosSLAPage() {
   }, [empresaId, scopeEmpresa]);
 
   // Suscripción turnos RFZ/TURA — extras solicitados por cliente.
-  // Nota: se filtra el código en memoria (evita índice compuesto empresaId+code que no existe
-  // y que haría fallar la query silenciosamente, dejando la lista vacía).
+  // Acotado a mes anterior + mes siguiente para no leer toda la colección.
+  // Índice usado: (empresaId, startTime) — ya existe en firestore.indexes.json.
   useEffect(() => {
     if (!empresaId) return;
-    const q = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
+    const now = new Date();
+    const rangeStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59);
+    const q = scopeEmpresa
+      ? query(collection(db, 'turnos'),
+          where('empresaId', '==', empresaId),
+          where('startTime', '>=', Timestamp.fromDate(rangeStart)),
+          where('startTime', '<=', Timestamp.fromDate(rangeEnd)))
+      : query(collection(db, 'turnos'),
+          where('startTime', '>=', Timestamp.fromDate(rangeStart)),
+          where('startTime', '<=', Timestamp.fromDate(rangeEnd)));
     const unsub = onSnapshotFresh(q, snap => {
       const rows = snap.docs
         .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
@@ -606,12 +616,12 @@ export default function ServiciosSLAPage() {
     // Incluye todos los códigos presentes en bandas (cubre custom además de los estándar)
     const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'REF', 'ESC', 'FT', ...Object.keys(bandas)]);
     const desdeTs = Timestamp.fromDate(new Date(desde + 'T00:00:00'));
-    // Solo filtramos por objectiveId para evitar índice compuesto con rango;
-    // el filtro de fecha se aplica en JS.
+    // Índice (objectiveId, startTime) ya existe en firestore.indexes.json.
     const snap = await getDocs(
       query(
         collection(db, 'turnos'),
         where('objectiveId', '==', objectiveId),
+        where('startTime', '>=', desdeTs),
       ),
     );
 
