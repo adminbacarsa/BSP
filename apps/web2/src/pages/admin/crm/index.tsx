@@ -266,6 +266,7 @@ export default function CRMPage() {
   const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null);
   const metricsRunRef = useRef(0);
   const clientsFetchGenRef = useRef(0);
+  const metricsCache = useRef<Map<string, { metrics: any; trend: any[]; updatedAt: Date }>>(new Map());
 
   const [clients, setClients] = useState<any[]>([]);
   const [selectedClient, setSelectedClient] = useState<any>(null);
@@ -633,6 +634,13 @@ export default function CRMPage() {
 
   const calculateDashboardMetrics = async () => {
     const runId = ++metricsRunRef.current;
+    // Mostrar datos cacheados inmediatamente mientras se recalcula en background
+    const cacheKey = `${empresaId}__${rangeMode}__${rangeMonth}__${rangeYear}`;
+    const cached = metricsCache.current.get(cacheKey);
+    if (cached) {
+      setClientMetricsMap(cached.metrics);
+      setCrmTrendSeries(cached.trend);
+    }
     setCalculatingMetrics(true);
     try {
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
@@ -758,11 +766,21 @@ export default function CRMPage() {
 
       const turnosByClient = groupTurnosByClient(allTurnos, clientRefs, tenantClientIds);
 
+      // Pre-indexar turnos por mes para no iterar allTurnos N veces en el grafico
+      const turnosByBucketKey = new Map<string, any[]>();
+      for (const t of allTurnos) {
+        const rs = toDateSafe(t.realStartTime) ?? toDateSafe(t.startTime);
+        if (!rs) continue;
+        const bk = `${rs.getFullYear()}-${String(rs.getMonth() + 1).padStart(2, '0')}`;
+        if (!turnosByBucketKey.has(bk)) turnosByBucketKey.set(bk, []);
+        turnosByBucketKey.get(bk)!.push(t);
+      }
+
       const trendSeries: CrmTrendPoint[] = buckets.map((b) => {
         const agg = aggregateCrmPortfolioHours(
           clientRefs,
           slaDocsByClient,
-          allTurnos,
+          turnosByBucketKey.get(b.key) ?? [],
           validEmp,
           b.start,
           b.end,
@@ -853,7 +871,10 @@ export default function CRMPage() {
 
       setClientMetricsMap(metrics);
       setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
-      setMetricsUpdatedAt(new Date());
+      const now = new Date();
+      setMetricsUpdatedAt(now);
+      // Guardar en cache para mostrar stale data al volver al mismo rango
+      metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now });
     } catch (e) {
       console.error(e);
       toast.error('Error al calcular métricas');
@@ -1700,10 +1721,18 @@ export default function CRMPage() {
         registerEmployeeMetaAliases(empMeta, d.id, data);
       });
       const turnoEmpIds = turnosEnriched.map((t) => String(t.employeeId ?? ''));
-      await hydrateEmployeeMetaFromTurnoIds(empMeta, turnoEmpIds, async (eid) => {
-        const snap = await getDoc(doc(db, 'empleados', eid));
-        return snap.exists() ? (snap.data() as Record<string, unknown>) : null;
-      });
+      // Batch lookup: reemplaza hasta 120 getDoc individuales por queries de 10 en paralelo
+      const pendingEmpIds = [...new Set(turnoEmpIds.filter(
+        (eid) => eid && eid !== 'unknown' && eid !== 'VACANTE' && !empMeta[eid],
+      ))].slice(0, 120);
+      if (pendingEmpIds.length > 0) {
+        const chunks: string[][] = [];
+        for (let i = 0; i < pendingEmpIds.length; i += 10) chunks.push(pendingEmpIds.slice(i, i + 10));
+        await Promise.all(chunks.map(async (chunk) => {
+          const snap = await getDocs(query(collection(db, 'empleados'), where('__name__', 'in', chunk)));
+          snap.docs.forEach((d) => registerEmployeeMetaAliases(empMeta, d.id, d.data() as any));
+        }));
+      }
       setEmpMetaMap(empMeta);
 
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
@@ -1788,10 +1817,10 @@ export default function CRMPage() {
   }, [proformaActive, proformaMonth, proformaYear]);
 
   useEffect(() => {
-    if (!proformaActive || !selectedClient?.id || loadingClientData) return;
+    if (!proformaActive || !selectedClient?.id) return;
     calculateProformaTurnos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proformaActive, selectedClient?.id, loadingClientData, clientServices, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
+  }, [proformaActive, selectedClient?.id, clientServices, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
 
   const handleExportProformaPdf = () => {
     if (!proformaBundle) return;
