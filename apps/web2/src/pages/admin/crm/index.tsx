@@ -16,6 +16,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   Timestamp,
   updateDoc,
   where,
@@ -646,6 +647,26 @@ export default function CRMPage() {
     }
     setCalculatingMetrics(true);
     try {
+      // C1 — snapshot persistido en Firestore (compartido entre usuarios y sesiones)
+      const snapRef = doc(db, 'crm_metrics_snapshot', cacheKey);
+      const snapDoc = await getDoc(snapRef);
+      if (snapDoc.exists()) {
+        const snap = snapDoc.data();
+        const computedAt: Date = snap.computedAt?.toDate?.() ?? new Date(0);
+        const ageMs = Date.now() - computedAt.getTime();
+        if (ageMs < 2 * 3_600_000 && runId === metricsRunRef.current) {
+          const m = snap.clientMetricsMap ?? {};
+          const t = snap.trendSeries ?? [];
+          const g = snap.globalMetrics ?? { totalSold: 0, totalPlanned: 0, totalExecuted: 0 };
+          setClientMetricsMap(m);
+          setGlobalMetrics({ ...g, criticalClients: [] });
+          setCrmTrendSeries(t);
+          setMetricsUpdatedAt(computedAt);
+          metricsCache.current.set(cacheKey, { metrics: m, trend: t, updatedAt: computedAt });
+          return;
+        }
+      }
+
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
       const tenantClientIds = new Set(clients.map((c) => c.id));
       const clientRefs: ClientRef[] = clients.map((c) => ({
@@ -879,8 +900,15 @@ export default function CRMPage() {
       setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
       const now = new Date();
       setMetricsUpdatedAt(now);
-      // Guardar en cache para mostrar stale data al volver al mismo rango
+      // Guardar en cache en memoria y en Firestore (C1)
       metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now });
+      setDoc(snapRef, {
+        empresaId,
+        computedAt: serverTimestamp(),
+        globalMetrics: { totalSold, totalPlanned, totalExecuted },
+        clientMetricsMap: metrics,
+        trendSeries,
+      }).catch(() => { /* escritura no crítica */ });
     } catch (e) {
       console.error(e);
       toast.error('Error al calcular métricas');

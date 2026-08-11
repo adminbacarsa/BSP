@@ -573,6 +573,13 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    match /crm_metrics_snapshot/{docId} {
+      allow read:   if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
     match /grupos_objetivos/{grupoId} {
       allow read:   if tenantAdminRead();
       allow create: if tenantAdminCreate();
