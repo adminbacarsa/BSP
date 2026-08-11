@@ -16,7 +16,7 @@ import { empCanCoverPositionShift } from './positionAssignmentPolicy';
 import type { SurplusAbsentSubstitutionAction } from './surplusAbsentSubstitution';
 
 const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET']);
-const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'AA', 'PG']);
+const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'AA', 'PG', 'SUS', 'SGS']);
 const DAY_LETTERS = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
 
 export type CoverageSlotKey = {

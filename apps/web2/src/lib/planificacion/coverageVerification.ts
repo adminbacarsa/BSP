@@ -22,7 +22,7 @@ import { checkRestBetweenShiftsDetail, resolveWorkShiftStartTime, type Agreement
 import { SUVICO_POLICY } from './suvicoPolicy';
 
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
-const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA']);
+const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'PG', 'AA', 'SUS', 'SGS']);
 const NON_BILLABLE = new Set(['F', 'FF', 'FP', 'FT', 'RET']);
 const SHIFT_HRS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, EN: 9 };
 

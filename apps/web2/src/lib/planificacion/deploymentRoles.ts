@@ -134,7 +134,7 @@ export function isRegularLiquidationWorkShift(t: {
     if (!t || String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
     if (isDeploymentOrPoolShift(t)) return false;
     const code = normalizeDeploymentShiftCode(t.code || t.type);
-    const nonWork = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+    const nonWork = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'SUS', 'SGS']);
     return !nonWork.has(code);
 }
 
@@ -153,7 +153,7 @@ export function shiftCountsForEmployeeCronoHours(shift: {
     if (!shift || shift.isDeleted) return false;
     if (isDeploymentOrPoolShift(shift)) return false;
     const code = String(shift.code || '').toUpperCase();
-    const nonWork = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
+    const nonWork = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'SUS', 'SGS']);
     return !nonWork.has(code);
 }
 
