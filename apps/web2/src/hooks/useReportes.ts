@@ -1236,7 +1236,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             }
 
             // Cargar contratos de servicio para cruzar Hs. Vendidas por objetivo
-            const slaSnap = await getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>);
+            const slaSnap = await getDocs(query(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>, limit(500)));
             const slaMap: Record<string, number> = {};
             const slaSlotCapacity: Record<string, number> = {};
             const slaObjectiveMetas = new Map<string, ObjectiveMeta>();

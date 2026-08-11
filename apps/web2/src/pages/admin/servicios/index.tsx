@@ -6,7 +6,7 @@ import { useToast } from '@/context/ToastContext';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
-import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, writeBatch, doc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, writeBatch, doc, Timestamp, limit } from 'firebase/firestore';
 import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy, Zap,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
@@ -185,7 +185,7 @@ export default function ServiciosSLAPage() {
   // Empleados del objetivo activo (para la sección Cobertura)
   useEffect(() => {
     if (!form.objectiveId || view !== 'form') { setCoverageEmps([]); return; }
-    getDocs(query(collection(db, 'empleados'), where('preferredObjectiveId', '==', form.objectiveId)))
+    getDocs(query(collection(db, 'empleados'), where('empresaId', '==', empresaId), where('preferredObjectiveId', '==', form.objectiveId)))
       .then(snap => {
         const rows = snap.docs
           .map(d => ({ id: d.id, ...(d.data() as any) }))
@@ -217,7 +217,7 @@ export default function ServiciosSLAPage() {
 
         const q = scopeEmpresa
             ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
-            : query(collection(db, 'servicios_sla'));
+            : query(collection(db, 'servicios_sla'), limit(500));
 
         unsub = onSnapshotFresh(q, (snapshot) => {
             let adaptedData = snapshot.docs.map(doc => {

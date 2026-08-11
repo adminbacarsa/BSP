@@ -368,6 +368,14 @@
         { "fieldPath": "empresaId", "order": "ASCENDING" },
         { "fieldPath": "code",      "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "empleados",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId",            "order": "ASCENDING" },
+        { "fieldPath": "preferredObjectiveId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -302,9 +302,18 @@ export async function loadClientTurnosForClient(
     byId.set(id, { id, ...data, clientId: rowCid || client.id });
   };
 
+  // Índice (clientId, startTime) ya existe en firestore.indexes.json.
+  // Pad de 1 día para cubrir turnos nocturnos que empiezan fuera del rango exacto.
+  const padStart = new Date(start); padStart.setDate(padStart.getDate() - 1);
+  const padEnd   = new Date(end);   padEnd.setDate(padEnd.getDate() + 1);
   await Promise.all(
     aliases.map(async (cid) => {
-      const snap = await getDocs(query(collection(db, 'turnos'), where('clientId', '==', cid)));
+      const snap = await getDocs(query(
+        collection(db, 'turnos'),
+        where('clientId', '==', cid),
+        where('startTime', '>=', Timestamp.fromDate(padStart)),
+        where('startTime', '<=', Timestamp.fromDate(padEnd)),
+      ));
       snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
     }),
   );
