@@ -280,6 +280,7 @@ export default function CRMPage() {
   const [loadingClients, setLoadingClients] = useState(false);
   const [loadingClientData, setLoadingClientData] = useState(false);
   const [calculatingMetrics, setCalculatingMetrics] = useState(false);
+  const [dashboardIsStale, setDashboardIsStale] = useState(false);
 
   const [globalMetrics, setGlobalMetrics] = useState({ totalSold: 0, totalPlanned: 0, totalExecuted: 0, criticalClients: [] as any[] });
   const [clientMetricsMap, setClientMetricsMap] = useState<Record<string, any>>({});
@@ -640,6 +641,7 @@ export default function CRMPage() {
     if (cached) {
       setClientMetricsMap(cached.metrics);
       setCrmTrendSeries(cached.trend);
+      setDashboardIsStale(true);
     }
     setCalculatingMetrics(true);
     try {
@@ -879,7 +881,10 @@ export default function CRMPage() {
       console.error(e);
       toast.error('Error al calcular métricas');
     } finally {
-      if (runId === metricsRunRef.current) setCalculatingMetrics(false);
+      if (runId === metricsRunRef.current) {
+        setCalculatingMetrics(false);
+        setDashboardIsStale(false);
+      }
     }
   };
 
@@ -1929,6 +1934,7 @@ export default function CRMPage() {
               totalExecuted={globalMetrics.totalExecuted}
               trendSeries={crmTrendSeries}
               calculatingMetrics={calculatingMetrics}
+              isStale={dashboardIsStale}
               metricsUpdatedAt={metricsUpdatedAt}
               clientsCount={clients.length}
               conSlaCount={conSlaCount}

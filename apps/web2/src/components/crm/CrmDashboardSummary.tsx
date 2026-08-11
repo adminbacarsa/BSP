@@ -42,6 +42,7 @@ type Props = {
   totalExecuted: number;
   trendSeries: CrmTrendPoint[];
   calculatingMetrics: boolean;
+  isStale?: boolean;
   metricsUpdatedAt: Date | null;
   clientsCount: number;
   conSlaCount: number;
@@ -92,6 +93,7 @@ export default function CrmDashboardSummary({
   totalExecuted,
   trendSeries,
   calculatingMetrics,
+  isStale,
   metricsUpdatedAt,
   clientsCount,
   conSlaCount,
@@ -210,7 +212,13 @@ export default function CrmDashboardSummary({
               Sin horas en el rango del gráfico
             </div>
           ) : (
-            <div className="h-[300px] w-full">
+            <div className="relative h-[300px] w-full">
+              {isStale && (
+                <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50/90 px-2.5 py-1 shadow-sm backdrop-blur-sm dark:border-amber-700/50 dark:bg-amber-900/40">
+                  <Loader2 size={10} className="animate-spin text-amber-600 dark:text-amber-400" />
+                  <span className="text-[9px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">actualizando…</span>
+                </div>
+              )}
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={trendSeries} margin={{ top: 8, right: 12, left: -8, bottom: 4 }}>
                   <defs>
