@@ -98,6 +98,7 @@ import {
 import {
   fetchSlaRowsForCrmDashboard,
   fetchContractsForCrmDashboard,
+  fetchCrmDashboardTurnos,
   loadClientSlaForClient,
   loadClientTurnosForClient,
   indexSlaRowsByClients,
@@ -108,6 +109,9 @@ import {
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
+import { turnoEligibleForProformaGrid, type ProformaDetailMode } from '@/lib/crm/proformaMode';
+import { isSinCoberturaShift } from '@/lib/crm/proformaVacancy';
+import { coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
 import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
@@ -130,7 +134,7 @@ import {
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
-import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
+import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { buildCrmTrendBuckets, crmTrendChartTitle } from '@/lib/crm/crmDashboardBuckets';
 import { aggregateCrmPortfolioHours } from '@/lib/crm/crmDashboardAggregate';
 import type { CrmTrendPoint } from '@/components/crm/CrmDashboardSummary';
@@ -191,107 +195,6 @@ function resolveCanonicalClientIdForCrmRow(
   return null;
 }
 
-function turnoInCrmDashboardRange(
-  t: Record<string, unknown>,
-  rangeStart: Date | null,
-  rangeEnd: Date | null,
-): boolean {
-  if (!rangeStart || !rangeEnd) return true;
-  const padStart = new Date(rangeStart);
-  const padEnd = new Date(rangeEnd);
-  padStart.setDate(padStart.getDate() - 2);
-  padEnd.setDate(padEnd.getDate() + 2);
-  padEnd.setHours(23, 59, 59, 999);
-  const rangeStartKey = getDateKeyInTimezone(padStart);
-  const rangeEndKey = getDateKeyInTimezone(padEnd);
-  const st = toDateSafe(t.startTime);
-  const scheduleKey = resolveTurnoScheduleDateKey(t) || (st ? getDateKeyInTimezone(st) : null);
-  const inRangeByStart = !!st && st >= padStart && st <= padEnd;
-  const inRangeBySchedule =
-    !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
-  return inRangeByStart || inRangeBySchedule;
-}
-
-async function fetchCrmDashboardTurnos(
-  empresaId: string,
-  scopeEmpresa: boolean,
-  rangeStart: Date | null,
-  rangeEnd: Date | null,
-  clientRefs: ClientRef[],
-): Promise<any[]> {
-  const start = rangeStart ? new Date(rangeStart) : new Date(2000, 0, 1);
-  const end = rangeEnd ? new Date(rangeEnd) : new Date(2099, 11, 31, 23, 59, 59, 999);
-  start.setDate(start.getDate() - 2);
-  end.setDate(end.getDate() + 2);
-  end.setHours(23, 59, 59, 999);
-
-  const byId = new Map<string, any>();
-  const ingestDocs = (docs: { id: string; data: () => Record<string, unknown> }[]) => {
-    docs.forEach((d) => {
-      const row = { id: d.id, ...d.data() as any };
-      if (!turnoInCrmDashboardRange(row, rangeStart, rangeEnd)) return;
-      byId.set(d.id, row);
-    });
-  };
-
-  const col = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
-  const aliases = collectClientIdAliases(clientRefs);
-  const objectiveIds = [
-    ...new Set(
-      clientRefs.flatMap((c) =>
-        (c.objetivos || [])
-          .map((o) => String(o.id ?? '').trim())
-          .filter(Boolean),
-      ),
-    ),
-  ];
-
-  const rangedChunkQuery = (field: 'clientId' | 'objectiveId', values: string[]) =>
-    getDocs(
-      query(
-        col as ReturnType<typeof query>,
-        where(field, 'in', values),
-        where('startTime', '>=', Timestamp.fromDate(start)),
-        where('startTime', '<=', Timestamp.fromDate(end)),
-      ),
-    ).then((snap) => ingestDocs(snap.docs)).catch(() => {});
-
-  const batchPromises: Promise<void>[] = [];
-  for (let i = 0; i < aliases.length; i += 10) {
-    batchPromises.push(rangedChunkQuery('clientId', aliases.slice(i, i + 10)));
-  }
-  for (let i = 0; i < objectiveIds.length; i += 10) {
-    batchPromises.push(rangedChunkQuery('objectiveId', objectiveIds.slice(i, i + 10)));
-  }
-
-  if (batchPromises.length > 0) {
-    await Promise.all(batchPromises);
-    if (byId.size > 0) return [...byId.values()];
-  }
-
-  const ranged = query(
-    col as ReturnType<typeof query>,
-    where('startTime', '>=', Timestamp.fromDate(start)),
-    where('startTime', '<=', Timestamp.fromDate(end)),
-  );
-  try {
-    const snap = await getDocs(ranged);
-    if (snap.docs.length > 0) {
-      ingestDocs(snap.docs);
-      return [...byId.values()];
-    }
-  } catch (e) {
-    console.warn('CRM dashboard: consulta turnos por rango falló', e);
-  }
-
-  for (let i = 0; i < aliases.length; i += 10) {
-    const chunk = aliases.slice(i, i + 10);
-    const snap = await getDocs(query(col as ReturnType<typeof query>, where('clientId', 'in', chunk)));
-    ingestDocs(snap.docs);
-  }
-  return [...byId.values()];
-}
-
 const SHIFT_CODE_HOURS = CRM_PLANNED_SHIFT_HOURS;
 const isWorkingCode = isCrmWorkingShiftCode;
 
@@ -339,7 +242,6 @@ const clampDateRange = (start: Date | null, end: Date | null, min: Date | null, 
 
 type RangeMode = 'month' | 'year' | 'all';
 type ViewMode = 'grid' | 'list';
-type ProformaDetailMode = 'auto' | 'planned' | 'executed';
 type ProformaBase = 'requested' | 'planned' | 'executed';
 
 export default function CRMPage() {
@@ -446,7 +348,12 @@ export default function CRMPage() {
   const [proformaDetailMode, setProformaDetailMode] = useState<ProformaDetailMode>('auto');
   const [proformaBase, setProformaBase] = useState<ProformaBase>('requested');
   const [proformaHourlyValue, setProformaHourlyValue] = useState('');
-  const [proformaTotals, setProformaTotals] = useState({ planned: 0, executed: 0, loading: false });
+  const [proformaTotals, setProformaTotals] = useState({
+    planned: 0,
+    executed: 0,
+    sinCobertura: 0,
+    loading: false,
+  });
   const [proformaBreakdown, setProformaBreakdown] = useState<any[]>([]);
   const [proformaBundle, setProformaBundle] = useState<ProformaExportBundle | null>(null);
   const [proformaExporting, setProformaExporting] = useState(false);
@@ -878,8 +785,17 @@ export default function CRMPage() {
         const exStart = start ?? new Date(2000, 0, 1);
         const exEnd = end ?? new Date(2099, 11, 31);
         const slaExclusion = buildSlaExclusionContext(clientSlas, exStart, exEnd);
+        const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(clientSlas);
+        const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(clientSlas);
         plannedByClient[clientRef.id] = Math.round(
-          sumPlannedHoursForClient(clientTurnos, clientRef, plannedRange, slaExclusion),
+          sumPlannedHoursForClient(
+            clientTurnos,
+            clientRef,
+            plannedRange,
+            slaExclusion,
+            slaCodeHoursHint,
+            slaCodeHoursHintByObjective,
+          ),
         );
       });
 
@@ -1634,6 +1550,19 @@ export default function CRMPage() {
       const billedSolicitudIds = solicitudIdsBilledInRange(solicitudesRefuerzo, { start, end });
       const planned = { total: 0, byObjective: {} as any };
       const executed = { total: 0, byObjective: {} as any };
+      const sinCobertura = { total: 0, byObjective: {} as any };
+
+      const turnoPassesSlaExclusion = (t: any) => {
+        if (!slaExclusion) return true;
+        const plannedStart = toDateSafe(t.startTime);
+        const dateKey =
+          resolveTurnoScheduleDateKey(t) || (plannedStart ? getDateKeyInTimezone(plannedStart) : '');
+        if (!dateKey) return true;
+        return !isTurnoOnSlaExcludedSlot(t, slaExclusion, {
+          scheduleDateKey: dateKey,
+          positionName: String(t.positionName ?? ''),
+        });
+      };
 
       const normalize = (s: string) => String(s || '').trim().replace(/\s+/g, ' ').toUpperCase();
       const add = (target: any, objName: string, posName: string, dateKey: string, hours: number) => {
@@ -1700,10 +1629,48 @@ export default function CRMPage() {
         add(planned, objectiveName, positionName, dateKey, hrs);
       });
 
+      const sinCoberturaCellGroups = new Map<string, { rows: any[]; objectiveName: string; positionName: string; dateKey: string }>();
+      turnosEnriched.forEach((t) => {
+        if (!isSinCoberturaShift(t)) return;
+        if (!turnoPassesSlaExclusion(t)) return;
+        const plannedStart = toDateSafe(t.startTime);
+        if (!plannedStart) return;
+        const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: selectedClient.id };
+        const objectiveName = formatProformaObjectiveLabel(
+          String(t.objectiveId || ''),
+          resolveObjectiveDisplayName(rowCtx, objectiveAliases),
+        );
+        const positionName = (t.positionName || 'Sin puesto').toString().trim();
+        const dateKey = resolveTurnoScheduleDateKey(t) || getDateKeyInTimezone(plannedStart);
+        const periodStartKey = getDateKeyInTimezone(start);
+        const periodEndKey = getDateKeyInTimezone(end);
+        if (dateKey < periodStartKey || dateKey > periodEndKey) return;
+        const objId = String(t.objectiveId || objectiveName);
+        const empId = String(t.employeeId || 'SIN_COBERTURA');
+        const cellKey = `${objId}_${empId}_${dateKey}`;
+        const bucket = sinCoberturaCellGroups.get(cellKey) || { rows: [], objectiveName, positionName, dateKey };
+        bucket.rows.push(t);
+        sinCoberturaCellGroups.set(cellKey, bucket);
+      });
+      sinCoberturaCellGroups.forEach(({ rows, objectiveName, positionName, dateKey }) => {
+        const objId = String(rows[0]?.objectiveId ?? '').trim();
+        const cellHint = (objId && slaCodeHoursHintByObjective[objId]) || slaCodeHoursHint;
+        const hrs = coalescePlannedCellBillableHours(rows, cellHint);
+        if (hrs <= 0) return;
+        sinCobertura.total += hrs;
+        add(sinCobertura, objectiveName, positionName, dateKey, hrs);
+      });
+
       const refuerzoHorasVendidas = applyRefuerzoHorasVendidasToBreakdown(planned, solicitudesRefuerzo, { start, end }, normalize);
       applyRefuerzoHorasVendidasToBreakdown(executed, solicitudesRefuerzo, { start, end }, normalize);
 
-      const breakdownSource = proformaDetailMode === 'executed' ? executed : proformaDetailMode === 'planned' ? planned : (clientContracts || []).some((c) => c.type === 'abierto') ? executed : planned;
+      const breakdownSource = proformaDetailMode === 'sin_cobertura'
+        ? sinCobertura
+        : proformaDetailMode === 'executed'
+          ? executed
+          : proformaDetailMode === 'planned'
+            ? planned
+            : (clientContracts || []).some((c) => c.type === 'abierto') ? executed : planned;
       const breakdown = Object.values(breakdownSource.byObjective)
         .map((o: any) => ({
           ...o,
@@ -1740,12 +1707,14 @@ export default function CRMPage() {
       });
       setEmpMetaMap(empMeta);
 
-      const turnosRaw = turnosEnriched.filter((t) =>
-        isCrmPlannedEligibleShift(t, slaExclusion) &&
-        !(t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))),
-      ) as any[];
-      const turnos = turnosRaw;
       const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
+      const turnosRaw = turnosEnriched.filter((t) => {
+        if (t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))) return false;
+        if (!turnoEligibleForProformaGrid(t, proformaDetailMode, useExecutedForAuto)) return false;
+        if (proformaDetailMode === 'sin_cobertura') return turnoPassesSlaExclusion(t);
+        return isCrmPlannedEligibleShift(t, slaExclusion);
+      }) as any[];
+      const turnos = turnosRaw;
       const baseGrids = buildProformaObjectiveGrids({
         turnos,
         empMeta,
@@ -1784,6 +1753,7 @@ export default function CRMPage() {
       });
 
       const modeIsExecuted = proformaDetailMode === 'executed' || (proformaDetailMode === 'auto' && useExecutedForAuto);
+      const modeIsSinCobertura = proformaDetailMode === 'sin_cobertura';
       const gridTotal = Math.round(grids.reduce((a: number, g: any) => a + g.grandTotal.total, 0));
       const plannedBase = Math.round(sumPlannedHoursForClient(
         turnosList,
@@ -1795,7 +1765,10 @@ export default function CRMPage() {
       ));
       setProformaTotals({
         planned: plannedBase + Math.round(refuerzoHorasVendidas),
-        executed: modeIsExecuted ? gridTotal + Math.round(refuerzoHorasVendidas) : Math.round(executed.total),
+        executed: modeIsExecuted
+          ? gridTotal + Math.round(refuerzoHorasVendidas)
+          : Math.round(executed.total),
+        sinCobertura: modeIsSinCobertura ? gridTotal : Math.round(sinCobertura.total),
         loading: false,
       });
     } catch (e) {

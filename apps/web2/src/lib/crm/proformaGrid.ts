@@ -1,7 +1,4 @@
 import type { ProformaDayCell, ProformaEmployeeRow, ProformaObjectiveGrid, ProformaExportBundle, ProformaSummaryRow } from './proformaTypes';
-import {
-  isPlanificadorPlannedHoursShift,
-} from '@/lib/planificacion/planningScheduledHours';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   type ObjectiveMeta,
@@ -11,7 +8,13 @@ import {
 } from './objectiveIdentity';
 import { resolveEmployeeMeta } from './proformaEnrichment';
 import { getDateKeyInTimezone, resolveTurnoScheduleDateKey } from './crmDateUtils';
-import { isProformaVacancyEmployee, isProformaVacancyShift } from './proformaVacancy';
+import { isProformaVacancyEmployee } from './proformaVacancy';
+import {
+  proformaGridUsesExecutedTimes,
+  resolveProformaDetailMode,
+  turnoEligibleForProformaGrid,
+  type ProformaDetailMode,
+} from './proformaMode';
 import type { SlaExclusionContext } from './slaExclusionForPlanned';
 import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
 
@@ -176,7 +179,7 @@ export type BuildProformaGridsOpts = {
   slaInRange?: Array<{ objectiveId?: string; objectiveName?: string; startDate?: string; endDate?: string }>;
   start: Date;
   end: Date;
-  mode: 'auto' | 'planned' | 'executed';
+  mode: ProformaDetailMode;
   useExecutedForAuto: boolean;
   slaExclusion?: SlaExclusionContext;
   slaCodeHoursHint?: Record<string, number>;
@@ -214,7 +217,8 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     employees: Record<string, ProformaEmployeeRow>;
   }> = {};
 
-  const useExecuted = opts.mode === 'executed' || (opts.mode === 'auto' && opts.useExecutedForAuto);
+  const useExecuted = proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto);
+  const sinCoberturaMode = resolveProformaDetailMode(opts.mode, opts.useExecutedForAuto) === 'sin_cobertura';
   const aliases = opts.objectiveAliases || {};
   const hint = opts.slaCodeHoursHint;
   const hintByObjective = opts.slaCodeHoursHintByObjective;
@@ -222,8 +226,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   const cellGroups = new Map<string, ProformaTurnoInput[]>();
 
   for (const t of opts.turnos) {
-    if (!isPlanificadorPlannedHoursShift(t)) continue;
-    if (isProformaVacancyShift(t)) continue;
+    if (!turnoEligibleForProformaGrid(t, opts.mode, opts.useExecutedForAuto)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart) continue;
     if (!turnoScheduleDateInRange(t as Record<string, unknown>, opts.start, opts.end)) continue;
@@ -295,7 +298,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const meta = resolveEmployeeMeta(opts.empMeta, empId, t.employeeName);
     const empName = meta.name || 'Sin nombre';
     const legajo = meta.legajo || '—';
-    if (isProformaVacancyEmployee({ employeeId: empId, name: empName })) continue;
+    if (!sinCoberturaMode && isProformaVacancyEmployee({ employeeId: empId, name: empName })) continue;
 
     byObjective[objId].employees[empId] ||= {
       employeeId: empId,
@@ -343,7 +346,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
         });
         return { ...e, totalHours, totalDay, totalNight };
       })
-      .filter((e) => !isProformaVacancyEmployee(e))
+      .filter((e) => sinCoberturaMode || !isProformaVacancyEmployee(e))
       .filter((e) => e.totalHours > 0 || Object.values(e.days).some((c) => c.display === 'Frco'))
       .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 
@@ -394,5 +397,7 @@ export function buildPeriodLabel(start: Date, end: Date): string {
 }
 
 export { getDateKeyInTimezone } from './crmDateUtils';
-export { isProformaVacancyEmployee, isProformaVacancyShift } from './proformaVacancy';
+export { isProformaVacancyEmployee, isProformaVacancyShift, isSinCoberturaShift } from './proformaVacancy';
+export type { ProformaDetailMode } from './proformaMode';
+export { proformaDetailModeLabel, resolveProformaDetailMode } from './proformaMode';
 export { shortDayHeader };

@@ -12,6 +12,7 @@ import {
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { formatHoursColonTotal, shortDayHeader } from '@/lib/crm/proformaGrid';
+import type { ProformaDetailMode } from '@/lib/crm/proformaMode';
 
 export type ProformaPanelProps = {
   client: any;
@@ -20,10 +21,10 @@ export type ProformaPanelProps = {
   proformaYear: number;
   proformaStartDate: string;
   proformaEndDate: string;
-  proformaDetailMode: 'auto' | 'planned' | 'executed';
+  proformaDetailMode: ProformaDetailMode;
   proformaBase: 'requested' | 'planned' | 'executed';
   proformaHourlyValue: string;
-  proformaTotals: { planned: number; executed: number; loading: boolean };
+  proformaTotals: { planned: number; executed: number; sinCobertura: number; loading: boolean };
   proformaBreakdown: any[];
   proformaBundle: ProformaExportBundle | null;
   baseHours: number;
@@ -34,7 +35,7 @@ export type ProformaPanelProps = {
   onYearChange: (y: number) => void;
   onStartDateChange: (v: string) => void;
   onEndDateChange: (v: string) => void;
-  onDetailModeChange: (v: 'auto' | 'planned' | 'executed') => void;
+  onDetailModeChange: (v: ProformaDetailMode) => void;
   onBaseChange: (v: 'requested' | 'planned' | 'executed') => void;
   onHourlyValueChange: (v: string) => void;
   onRecalculate: () => void;
@@ -181,10 +182,11 @@ export default function ProformaPanel(props: ProformaPanelProps) {
             </div>
             <div>
               <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Detalle</label>
-              <select className="w-full p-2.5 rounded-lg border bg-white text-xs font-bold" value={proformaDetailMode} onChange={(e) => onDetailModeChange(e.target.value as any)}>
+              <select className="w-full p-2.5 rounded-lg border bg-white text-xs font-bold" value={proformaDetailMode} onChange={(e) => onDetailModeChange(e.target.value as ProformaDetailMode)}>
                 <option value="auto">Auto</option>
                 <option value="planned">Planificado</option>
-                <option value="executed">Ejecutado</option>
+                <option value="executed">Ejecutado (fichaje)</option>
+                <option value="sin_cobertura">Sin cobertura (ops)</option>
               </select>
             </div>
             <div>
@@ -211,7 +213,13 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                 </span>
               )}
               <span className="text-[10px] font-bold text-slate-400">
-                Plan: {proformaTotals.planned} hs · Ejec: {proformaTotals.executed} hs · Facturable SLA (sin días 🚫 ni vacantes)
+                {proformaDetailMode === 'sin_cobertura' ? (
+                  <>Sin cobertura (ops): {proformaTotals.sinCobertura} hs · huecos declarados en Operaciones</>
+                ) : proformaDetailMode === 'executed' ? (
+                  <>Ejecutado (fichaje): {proformaTotals.executed} hs · requiere realStart/realEnd del guardia</>
+                ) : (
+                  <>Plan: {proformaTotals.planned} hs · Ejec: {proformaTotals.executed} hs · Sin cob: {proformaTotals.sinCobertura} hs</>
+                )}
               </span>
             </div>
           </div>

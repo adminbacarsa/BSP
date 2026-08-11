@@ -1,6 +1,8 @@
 import type { ClientRef } from '@/lib/crm/clientDataMatch';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import {
+  buildSlaCodeHoursHintByObjectiveId,
+  buildSlaCodeHoursHintFromServices,
   CRM_PLANNED_SHIFT_HOURS,
   getDurationHours,
   isCrmWorkingShiftCode,
@@ -36,7 +38,16 @@ export function aggregateCrmPortfolioHours(
     sla += sumVigenteSlaHoursInRange(clientSlas, start, end, clientRef.id);
     const slaExclusion = buildSlaExclusionContext(clientSlas, start, end);
     const clientTurnos = turnosByClient?.get(clientRef.id) ?? allTurnos;
-    planned += sumPlannedHoursForClient(clientTurnos, clientRef, plannedRange, slaExclusion);
+    const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(clientSlas);
+    const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(clientSlas);
+    planned += sumPlannedHoursForClient(
+      clientTurnos,
+      clientRef,
+      plannedRange,
+      slaExclusion,
+      slaCodeHoursHint,
+      slaCodeHoursHintByObjective,
+    );
   }
 
   let executed = 0;

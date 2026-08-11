@@ -318,3 +318,94 @@ export async function loadClientTurnosForClient(
 
   return [...byId.values()];
 }
+
+function turnoInDashboardRange(
+  data: Record<string, unknown>,
+  rangeStart: Date | null,
+  rangeEnd: Date | null,
+): boolean {
+  if (!rangeStart || !rangeEnd) return true;
+  const padStart = new Date(rangeStart);
+  const padEnd = new Date(rangeEnd);
+  padStart.setDate(padStart.getDate() - 2);
+  padEnd.setDate(padEnd.getDate() + 2);
+  padEnd.setHours(23, 59, 59, 999);
+  const rangeStartKey = getDateKeyInTimezone(padStart);
+  const rangeEndKey = getDateKeyInTimezone(padEnd);
+  const st = toDateSafe(data.startTime);
+  const scheduleKey =
+    resolveTurnoScheduleDateKey(data) || (st ? getDateKeyInTimezone(st) : null);
+  const inRangeByStart = !!st && st >= padStart && st <= padEnd;
+  const inRangeBySchedule =
+    !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
+  return inRangeByStart || inRangeBySchedule;
+}
+
+/**
+ * Turnos del dashboard CRM — misma estrategia que pre-factura (clientId + objectiveId + rango),
+ * sin depender de índice compuesto clientId+startTime.
+ */
+export async function fetchCrmDashboardTurnos(
+  empresaId: string,
+  scopeEmpresa: boolean,
+  rangeStart: Date | null,
+  rangeEnd: Date | null,
+  clientRefs: ClientRef[],
+): Promise<any[]> {
+  const byId = new Map<string, any>();
+  const start = rangeStart ? new Date(rangeStart) : new Date(2000, 0, 1);
+  const end = rangeEnd ? new Date(rangeEnd) : new Date(2099, 11, 31, 23, 59, 59, 999);
+  const padStart = new Date(start);
+  const padEnd = new Date(end);
+  padStart.setDate(padStart.getDate() - 2);
+  padEnd.setDate(padEnd.getDate() + 2);
+  padEnd.setHours(23, 59, 59, 999);
+
+  const addIfInRange = (id: string, data: Record<string, unknown>) => {
+    if (!turnoInDashboardRange(data, rangeStart, rangeEnd)) return;
+    byId.set(id, { id, ...data });
+  };
+
+  const aliases = collectClientIdAliases(clientRefs);
+  const objectiveIds = [
+    ...new Set(clientRefs.flatMap((c) => [...objectiveIdsForClient(c)])),
+  ];
+
+  const col = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
+  const batchQueries: Promise<void>[] = [];
+
+  for (let i = 0; i < aliases.length; i += 10) {
+    const chunk = aliases.slice(i, i + 10);
+    batchQueries.push(
+      getDocs(query(col as ReturnType<typeof query>, where('clientId', 'in', chunk)))
+        .then((snap) => {
+          snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
+        })
+        .catch((err) => console.warn('CRM dashboard: turnos por clientId', err)),
+    );
+  }
+
+  if (objectiveIds.length > 0) {
+    batchQueries.push(fetchTurnosByObjectiveIds(objectiveIds, addIfInRange));
+  }
+
+  await Promise.all(batchQueries);
+
+  try {
+    const ranged = query(
+      col as ReturnType<typeof query>,
+      where('startTime', '>=', Timestamp.fromDate(padStart)),
+      where('startTime', '<=', Timestamp.fromDate(padEnd)),
+    );
+    const snap = await getDocs(ranged);
+    snap.docs.forEach((d) => {
+      const data = d.data() as Record<string, unknown>;
+      if (!clientRefs.some((c) => clientRowMatchesClient(data, c))) return;
+      addIfInRange(d.id, data);
+    });
+  } catch (err) {
+    console.warn('CRM dashboard: turnos por rango', err);
+  }
+
+  return [...byId.values()];
+}
