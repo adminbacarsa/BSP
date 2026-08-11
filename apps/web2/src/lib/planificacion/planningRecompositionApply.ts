@@ -409,6 +409,8 @@ export function listSegmentCandidates(
     if (shiftObj != null && shiftObj !== '' && String(shiftObj) !== String(objectiveId)) continue;
     const code = String(shift.code || '').toUpperCase();
     if (isPlannedFrancoShift(shift)) continue;
+    // Ya asignado como ext o adel en otra cobertura del día → no volver a usarlo
+    if (shift.isExtended || shift.isEarlyStart) continue;
     if (!WORK_CODES.has(code) && !isVacancySegmentWorkCode(code, positionStructure)) continue;
     if (band && code !== band) continue;
     rows.push({
