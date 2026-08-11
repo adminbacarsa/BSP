@@ -31,6 +31,8 @@ export type ProformaSummaryRow = {
   totalHours: number;
   dayHours: number;
   nightHours: number;
+  /** Horas SLA contratadas (vigente en el período); undefined si no se pudo resolver. */
+  slaHours?: number;
 };
 
 export type ProformaExportBundle = {

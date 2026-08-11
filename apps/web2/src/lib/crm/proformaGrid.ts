@@ -380,12 +380,16 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   .sort((a, b) => a.objectiveName.localeCompare(b.objectiveName, 'es'));
 }
 
-export function buildProformaSummary(objectives: ProformaObjectiveGrid[]): ProformaSummaryRow[] {
+export function buildProformaSummary(
+  objectives: ProformaObjectiveGrid[],
+  slaHoursByObjectiveId?: Record<string, number>,
+): ProformaSummaryRow[] {
   return objectives.map((o) => ({
     objectiveName: o.objectiveName,
     totalHours: o.grandTotal.total,
     dayHours: o.grandTotal.day,
     nightHours: o.grandTotal.night,
+    slaHours: slaHoursByObjectiveId?.[o.objectiveId],
   }));
 }
 

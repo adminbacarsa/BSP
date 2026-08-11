@@ -297,6 +297,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
               <thead>
                 <tr className="bg-slate-800 text-white text-[10px] uppercase">
                   <th className="text-left p-3 font-black">Objetivo</th>
+                  <th className="text-right p-3 font-black text-indigo-300">SLA</th>
                   <th className="text-right p-3 font-black">Totales</th>
                   <th className="text-right p-3 font-black">Diurnas</th>
                   <th className="text-right p-3 font-black">Nocturnas</th>
@@ -306,12 +307,35 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                 {proformaBundle.summary.map((s) => (
                   <tr key={s.objectiveName} className="hover:bg-slate-50">
                     <td className="p-3 font-bold text-slate-800">{s.objectiveName}</td>
+                    <td className="p-3 text-right font-mono font-bold text-indigo-500">
+                      {s.slaHours != null ? s.slaHours.toFixed(1) : '—'}
+                    </td>
                     <td className="p-3 text-right font-mono font-bold">{s.totalHours.toFixed(1)}</td>
                     <td className="p-3 text-right font-mono text-amber-700">{s.dayHours.toFixed(1)}</td>
                     <td className="p-3 text-right font-mono text-violet-700">{s.nightHours.toFixed(1)}</td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot>
+                {(() => {
+                  const totTotal = proformaBundle.summary.reduce((a, s) => a + s.totalHours, 0);
+                  const totDay = proformaBundle.summary.reduce((a, s) => a + s.dayHours, 0);
+                  const totNight = proformaBundle.summary.reduce((a, s) => a + s.nightHours, 0);
+                  const hasSla = proformaBundle.summary.some((s) => s.slaHours != null);
+                  const totSla = hasSla ? proformaBundle.summary.reduce((a, s) => a + (s.slaHours ?? 0), 0) : null;
+                  return (
+                    <tr className="bg-slate-100 text-[10px] font-black uppercase border-t-2 border-slate-300">
+                      <td className="p-3 text-slate-600">Subtotal</td>
+                      <td className="p-3 text-right font-mono text-indigo-600">
+                        {totSla != null ? totSla.toFixed(1) : '—'}
+                      </td>
+                      <td className="p-3 text-right font-mono text-slate-800">{totTotal.toFixed(1)}</td>
+                      <td className="p-3 text-right font-mono text-amber-700">{totDay.toFixed(1)}</td>
+                      <td className="p-3 text-right font-mono text-violet-700">{totNight.toFixed(1)}</td>
+                    </tr>
+                  );
+                })()}
+              </tfoot>
             </table>
           )}
         </div>

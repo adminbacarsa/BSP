@@ -133,7 +133,7 @@ import {
   toDateSafe,
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
-import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
+import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange, pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { buildCrmTrendBuckets, crmTrendChartTitle } from '@/lib/crm/crmDashboardBuckets';
 import { aggregateCrmPortfolioHours } from '@/lib/crm/crmDashboardAggregate';
@@ -1804,7 +1804,13 @@ export default function CRMPage() {
         slaCodeHoursHintByObjective,
       });
       const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
-      const summary = buildProformaSummary(grids);
+      const vigenteSlas = pickVigenteSlasForPeriod(servicesForProforma, start, end, selectedClient.id);
+      const slaHoursByObjectiveId: Record<string, number> = {};
+      for (const srv of vigenteSlas) {
+        const oid = String((srv as any).objectiveId ?? '').trim();
+        if (oid) slaHoursByObjectiveId[oid] = (slaHoursByObjectiveId[oid] || 0) + slaHoursForServiceInRange(srv, start, end);
+      }
+      const summary = buildProformaSummary(grids, slaHoursByObjectiveId);
       setProformaBundle({
         clientName: selectedClient.name || '',
         legalName: selectedClient.legalName || '',

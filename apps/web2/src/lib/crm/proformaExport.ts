@@ -33,19 +33,22 @@ function drawPdfHeaderBar(doc: jsPDF, left: string, center: string, right: strin
 }
 
 function summaryGrandTotals(bundle: ProformaExportBundle) {
+  const hasSla = bundle.summary.some((s) => s.slaHours != null);
   return {
     total: bundle.summary.reduce((a, s) => a + s.totalHours, 0),
     day: bundle.summary.reduce((a, s) => a + s.dayHours, 0),
     night: bundle.summary.reduce((a, s) => a + s.nightHours, 0),
+    sla: hasSla ? bundle.summary.reduce((a, s) => a + (s.slaHours ?? 0), 0) : null,
   };
 }
 
 function summaryFootRows(bundle: ProformaExportBundle): (string | number)[][] {
   const g = summaryGrandTotals(bundle);
+  const slaCell = g.sla != null ? formatHoursColonTotal(g.sla) : '—';
   return [
-    ['Totales', formatHoursColonTotal(g.total), formatHoursColonTotal(g.day), formatHoursColonTotal(g.night)],
-    ['Diurnas', '', formatHoursColonTotal(g.day), ''],
-    ['Nocturnas', '', '', formatHoursColonTotal(g.night)],
+    ['Totales', slaCell, formatHoursColonTotal(g.total), formatHoursColonTotal(g.day), formatHoursColonTotal(g.night)],
+    ['Diurnas', '', '', formatHoursColonTotal(g.day), ''],
+    ['Nocturnas', '', '', '', formatHoursColonTotal(g.night)],
   ];
 }
 
@@ -171,9 +174,10 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
 
   autoTable(doc, {
     startY: PDF_CONTENT_TOP,
-    head: [['Objetivo / Sede', 'Hs Totales', 'Diurnas', 'Nocturnas']],
+    head: [['Objetivo / Sede', 'SLA', 'Hs Totales', 'Diurnas', 'Nocturnas']],
     body: bundle.summary.map((s) => [
       s.objectiveName,
+      s.slaHours != null ? formatHoursColonTotal(s.slaHours) : '—',
       formatHoursColonTotal(s.totalHours),
       formatHoursColonTotal(s.dayHours),
       formatHoursColonTotal(s.nightHours),
@@ -182,6 +186,7 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold' },
     footStyles: { fillColor: [241, 245, 249], fontStyle: 'bold', fontSize: 7.5, textColor: [30, 41, 59] },
+    columnStyles: { 1: { textColor: [79, 70, 229] } },
     theme: 'grid',
     showFoot: 'lastPage',
   });
@@ -227,12 +232,18 @@ export function exportProformaCsv(bundle: ProformaExportBundle) {
   lines.push([esc('Cliente'), esc(bundle.clientName), esc('Periodo'), esc(bundle.periodLabel)].join(','));
   lines.push([esc('CUIT'), esc(bundle.taxId), esc('Razon Social'), esc(bundle.legalName)].join(','));
   lines.push('');
-  lines.push(['Objetivo', 'Hs Totales', 'Diurnas', 'Nocturnas'].map(esc).join(','));
+  lines.push(['Objetivo', 'SLA', 'Hs Totales', 'Diurnas', 'Nocturnas'].map(esc).join(','));
   bundle.summary.forEach((s) => {
-    lines.push([s.objectiveName, formatHoursColonTotal(s.totalHours), formatHoursColonTotal(s.dayHours), formatHoursColonTotal(s.nightHours)].map(esc).join(','));
+    lines.push([
+      s.objectiveName,
+      s.slaHours != null ? formatHoursColonTotal(s.slaHours) : '—',
+      formatHoursColonTotal(s.totalHours),
+      formatHoursColonTotal(s.dayHours),
+      formatHoursColonTotal(s.nightHours),
+    ].map(esc).join(','));
   });
   const g = summaryGrandTotals(bundle);
-  lines.push(['Totales', formatHoursColonTotal(g.total), formatHoursColonTotal(g.day), formatHoursColonTotal(g.night)].map(esc).join(','));
+  lines.push(['Totales', g.sla != null ? formatHoursColonTotal(g.sla) : '—', formatHoursColonTotal(g.total), formatHoursColonTotal(g.day), formatHoursColonTotal(g.night)].map(esc).join(','));
   lines.push('');
 
   bundle.objectives.forEach((grid) => {
@@ -259,16 +270,17 @@ export function exportProformaExcel(bundle: ProformaExportBundle) {
     ['Período', bundle.periodLabel],
     ['Emitido', bundle.issuedAt.toLocaleString('es-AR')],
     [],
-    ['Objetivo', 'Hs Totales', 'Diurnas', 'Nocturnas'],
+    ['Objetivo', 'SLA', 'Hs Totales', 'Diurnas', 'Nocturnas'],
     ...bundle.summary.map((s) => [
       s.objectiveName,
+      s.slaHours != null ? formatHoursColonTotal(s.slaHours) : '—',
       formatHoursColonTotal(s.totalHours),
       formatHoursColonTotal(s.dayHours),
       formatHoursColonTotal(s.nightHours),
     ]),
-    ['Totales', formatHoursColonTotal(g.total), formatHoursColonTotal(g.day), formatHoursColonTotal(g.night)],
-    ['Diurnas', '', formatHoursColonTotal(g.day), ''],
-    ['Nocturnas', '', '', formatHoursColonTotal(g.night)],
+    ['Totales', g.sla != null ? formatHoursColonTotal(g.sla) : '—', formatHoursColonTotal(g.total), formatHoursColonTotal(g.day), formatHoursColonTotal(g.night)],
+    ['Diurnas', '', '', formatHoursColonTotal(g.day), ''],
+    ['Nocturnas', '', '', '', formatHoursColonTotal(g.night)],
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Resumen');
 
