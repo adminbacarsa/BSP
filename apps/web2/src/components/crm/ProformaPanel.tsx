@@ -108,6 +108,17 @@ export default function ProformaPanel(props: ProformaPanelProps) {
     return map;
   }, [proformaBundle]);
 
+  const breakdownTotals = React.useMemo(() => {
+    let positions = 0, guards = 0, dayHours = 0, nightHours = 0, totalHours = 0;
+    proformaBreakdown.forEach((o) => {
+      positions += o.positions?.length ?? 0;
+      totalHours += o.totalHours ?? 0;
+      const st = objectiveStats.get(o.objectiveName);
+      if (st) { guards += st.guardCount; dayHours += st.dayHours; nightHours += st.nightHours; }
+    });
+    return { positions, guards, dayHours, nightHours, totalHours };
+  }, [proformaBreakdown, objectiveStats]);
+
   const toggleGrid = (id: string) => setOpenGrids((prev) => ({ ...prev, [id]: !prev[id] }));
   const expandAllGrids = () => {
     const next: Record<string, boolean> = {};
@@ -491,11 +502,20 @@ export default function ProformaPanel(props: ProformaPanelProps) {
           onClick={() => setOpenBreakdown((v) => !v)}
           className="w-full px-6 py-4 border-b bg-slate-50 flex items-center justify-between gap-2 text-left hover:bg-slate-100 transition-colors"
         >
-          <div>
+          <div className="flex-1 min-w-0">
             <p className="text-[10px] font-black uppercase text-slate-500">Detalle por objetivo y puesto</p>
-            <p className="text-xs font-bold text-slate-400 mt-0.5">{proformaBreakdown.length} objetivo(s)</p>
+            <p className="text-xs font-bold text-slate-400 mt-0.5">
+              {proformaBreakdown.length} objetivo(s) · {breakdownTotals.positions} puesto(s) · {breakdownTotals.guards} guardia(s)
+            </p>
           </div>
-          {openBreakdown ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+          {proformaBreakdown.length > 0 && (
+            <div className="flex items-center gap-3 shrink-0 text-xs font-bold">
+              <span className="text-amber-600">{breakdownTotals.dayHours.toFixed(0)} D</span>
+              <span className="text-violet-600">{breakdownTotals.nightHours.toFixed(0)} N</span>
+              <span className="text-slate-700">{breakdownTotals.totalHours.toFixed(0)} hs</span>
+            </div>
+          )}
+          {openBreakdown ? <ChevronUp size={18} className="text-slate-400 shrink-0" /> : <ChevronDown size={18} className="text-slate-400 shrink-0" />}
         </button>
         {openBreakdown && (
         <div className="p-6 space-y-3">
