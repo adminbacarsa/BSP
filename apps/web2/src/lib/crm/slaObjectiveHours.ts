@@ -31,6 +31,21 @@ export function objectiveKeyForSla(sla: {
   return `${cid}::${oid || name || 'sin-obj'}`;
 }
 
+/** Deduplica por objetivo dentro de un cliente (ignora alias distinto en `clientId` del doc). */
+export function objectiveKeyForClientScope(
+  sla: { objectiveId?: unknown; objectiveName?: unknown },
+  canonicalClientId: string,
+): string {
+  const oid = String(sla.objectiveId ?? '').trim();
+  const name = normObjectiveName(sla.objectiveName);
+  return `${canonicalClientId}::${oid || name || 'sin-obj'}`;
+}
+
+function normalizeServicePositions(srv: SlaPlanningRow): ServicePosition[] {
+  if (Array.isArray(srv.positions)) return srv.positions as ServicePosition[];
+  return Object.values((srv.positions as Record<string, unknown>) || {}) as ServicePosition[];
+}
+
 function slaOverlapsDateRange(
   sla: SlaPlanningRow,
   rangeStart: Date,
@@ -52,11 +67,14 @@ export function pickVigenteSlasForPeriod(
   services: SlaPlanningRow[],
   rangeStart: Date,
   rangeEnd: Date,
+  canonicalClientId?: string,
 ): SlaPlanningRow[] {
   const byKey = new Map<string, SlaPlanningRow[]>();
   for (const srv of services) {
     if (!isSlaContractActive(srv.status)) continue;
-    const key = objectiveKeyForSla(srv);
+    const key = canonicalClientId
+      ? objectiveKeyForClientScope(srv, canonicalClientId)
+      : objectiveKeyForSla(srv);
     const arr = byKey.get(key) || [];
     arr.push(srv);
     byKey.set(key, arr);
@@ -80,7 +98,7 @@ export function slaHoursForServiceInRange(
   rangeStart: Date | null,
   rangeEnd: Date | null,
 ): number {
-  const positions = (Array.isArray(srv.positions) ? srv.positions : []) as ServicePosition[];
+  const positions = normalizeServicePositions(srv);
   if (!positions.length || !rangeStart || !rangeEnd) {
     if (!rangeStart && !rangeEnd) {
       return Math.round(
@@ -136,11 +154,26 @@ export function sumVigenteSlaHoursInRange(
   services: SlaPlanningRow[],
   rangeStart: Date | null,
   rangeEnd: Date | null,
+  canonicalClientId?: string,
 ): number {
   if (!rangeStart || !rangeEnd) {
-    return services.reduce((acc, s) => acc + slaHoursForServiceInRange(s, null, null), 0);
+    const vigenteByObjective = new Map<string, SlaPlanningRow>();
+    for (const s of services) {
+      if (!isSlaContractActive(s.status)) continue;
+      const key = canonicalClientId
+        ? objectiveKeyForClientScope(s, canonicalClientId)
+        : objectiveKeyForSla(s);
+      const prev = vigenteByObjective.get(key);
+      if (!prev || toYyyyMmDd(s.startDate).localeCompare(toYyyyMmDd(prev.startDate)) > 0) {
+        vigenteByObjective.set(key, s);
+      }
+    }
+    return [...vigenteByObjective.values()].reduce(
+      (acc, s) => acc + slaHoursForServiceInRange(s, null, null),
+      0,
+    );
   }
-  return pickVigenteSlasForPeriod(services, rangeStart, rangeEnd).reduce(
+  return pickVigenteSlasForPeriod(services, rangeStart, rangeEnd, canonicalClientId).reduce(
     (acc, s) => acc + slaHoursForServiceInRange(s, rangeStart, rangeEnd),
     0,
   );

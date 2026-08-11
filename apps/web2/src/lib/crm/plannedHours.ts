@@ -272,3 +272,22 @@ export function resolveClientIdForTurno(
   }
   return null;
 }
+
+/** Agrupa turnos por cliente canónico (una pasada). */
+export function groupTurnosByClient(
+  turnos: any[],
+  clientRefs: ClientRef[],
+  tenantClientIds?: Set<string>,
+): Map<string, any[]> {
+  const map = new Map<string, any[]>();
+  for (const c of clientRefs) {
+    map.set(c.id, []);
+  }
+  for (const t of turnos) {
+    const cid = resolveClientIdForTurno(t, clientRefs);
+    if (!cid) continue;
+    if (tenantClientIds && !tenantClientIds.has(cid)) continue;
+    map.get(cid)?.push(t);
+  }
+  return map;
+}

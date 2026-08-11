@@ -1,6 +1,6 @@
 import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { belongsToEmpresaView, empresaCollectionQuery, getClientIdAliases } from '@/lib/multiempresa';
+import { belongsToEmpresaView, empresaCollectionQuery, getClientIdAliases, tenantEmpresaIdsMatch } from '@/lib/multiempresa';
 import { getDateKeyInTimezone, resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 
 export type ClientRef = {
@@ -75,30 +75,41 @@ export function resolveCanonicalClientIdFromList(
   return null;
 }
 
+/**
+ * Misma regla que `loadClientSlaForClient`: primero por `clientId` (aliases);
+ * si hay al menos uno, solo esos. Si no, match por objetivo/nombre del cliente.
+ */
+export function selectSlaRowsForClient(slaRows: any[], client: ClientRef): any[] {
+  const aliases = new Set(getClientIdAliases(client.id));
+  const byId = new Map<string, any>();
+
+  for (const s of slaRows) {
+    const rowCid = String(s.clientId ?? '').trim();
+    if (rowCid && aliases.has(rowCid)) {
+      byId.set(s.id, s);
+    }
+  }
+
+  if (byId.size > 0) {
+    return [...byId.values()];
+  }
+
+  for (const s of slaRows) {
+    if (!clientRowMatchesClient(s, client)) continue;
+    byId.set(s.id, s);
+  }
+
+  return [...byId.values()];
+}
+
 /** Una lectura de servicios_sla + misma lógica de match que loadClientSlaForClient (sin N×Firestore). */
 export function indexSlaRowsByClients(
   slaRows: any[],
   clients: ClientRef[],
 ): Map<string, any[]> {
   const map = new Map<string, any[]>();
-  const add = (clientId: string, row: any) => {
-    const arr = map.get(clientId);
-    if (!arr) return;
-    if (!arr.some((r) => r.id === row.id)) arr.push(row);
-  };
   for (const c of clients) {
-    map.set(c.id, []);
-  }
-  for (const s of slaRows) {
-    const canon = resolveCanonicalClientIdFromList(s.clientId, clients);
-    if (canon) {
-      add(canon, s);
-      continue;
-    }
-    for (const c of clients) {
-      if (!clientRowMatchesClient(s, c)) continue;
-      add(c.id, s);
-    }
+    map.set(c.id, selectSlaRowsForClient(slaRows, c));
   }
   return map;
 }
@@ -125,7 +136,8 @@ async function fetchRowsByClientIdInBatches(
 }
 
 /**
- * SLA del dashboard: una lectura tenant (+ `in` por clientId solo si hace falta).
+ * SLA del dashboard: consulta por `clientId` (aliases) en lotes — evita leer toda la colección.
+ * Respaldo por empresa solo para clientes sin ningún SLA por alias.
  */
 export async function fetchSlaRowsForCrmDashboard(
   clients: ClientRef[],
@@ -148,17 +160,58 @@ export async function fetchSlaRowsForCrmDashboard(
     byId.set(id, row);
   };
 
+  if (clients.length > 0 && tenantAliasSet.size > 0) {
+    await fetchRowsByClientIdInBatches('servicios_sla', [...tenantAliasSet], ingest);
+
+    const indexed = indexSlaRowsByClients([...byId.values()], clients);
+    const clientsWithoutSla = clients.filter((c) => (indexed.get(c.id)?.length || 0) === 0);
+    if (clientsWithoutSla.length > 0) {
+      const snap = await getDocs(
+        empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>,
+      );
+      snap.docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        if (!clientsWithoutSla.some((c) => clientRowMatchesClient(data, c))) return;
+        ingest(d.id, data);
+      });
+    }
+
+    return [...byId.values()];
+  }
+
   const baseSnap = await getDocs(
     empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>,
   );
   baseSnap.docs.forEach((d) => ingest(d.id, d.data() as Record<string, unknown>));
+  return [...byId.values()];
+}
 
-  const empKey = String(empresaId ?? '').trim().toLowerCase();
-  const needsAliasSupplement = scopeEmpresa && empKey !== 'bacarsa' && clients.length > 0;
-  if (needsAliasSupplement) {
-    await fetchRowsByClientIdInBatches('servicios_sla', [...tenantAliasSet], ingest);
-  }
+/** Contratos del dashboard: solo clientes visibles (por `clientId`), no toda la colección. */
+export async function fetchContractsForCrmDashboard(
+  clients: ClientRef[],
+  opts: { empresaId: string; scopeEmpresa: boolean },
+): Promise<any[]> {
+  const { empresaId, scopeEmpresa } = opts;
+  const tenantClientIds = new Set(clients.map((c) => c.id));
+  const byId = new Map<string, any>();
 
+  const ingest = (id: string, data: Record<string, unknown>) => {
+    const row = { id, ...data };
+    const cid = String(row.clientId ?? '').trim();
+    if (!cid) return;
+    const canonical = resolveCanonicalClientIdFromList(cid, clients);
+    if (!canonical || !tenantClientIds.has(canonical)) return;
+    if (scopeEmpresa) {
+      const docEmp = String(row.empresaId ?? '').trim();
+      if (docEmp && !tenantEmpresaIdsMatch(docEmp, empresaId)) return;
+    }
+    byId.set(id, row);
+  };
+
+  const aliases = collectClientIdAliases(clients);
+  if (aliases.length === 0) return [];
+
+  await fetchRowsByClientIdInBatches('contracts', aliases, ingest);
   return [...byId.values()];
 }
 
@@ -193,14 +246,8 @@ export async function loadClientSlaForClient(
     empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>,
   );
 
-  const byId = new Map<string, any>();
-  snap.docs.forEach((d) => {
-    const data = d.data() as Record<string, unknown>;
-    if (!clientRowMatchesClient(data, client)) return;
-    byId.set(d.id, { id: d.id, ...data });
-  });
-
-  return [...byId.values()];
+  const allRows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }));
+  return selectSlaRowsForClient(allRows, client);
 }
 
 function toDateSafe(val: unknown): Date | null {

@@ -1,5 +1,6 @@
 import { normalizePlanningPositionName, PLANNING_NON_BILLABLE_CODES } from './positionCoverageUnits';
 import { isDeploymentOrPoolShift, normalizeDeploymentShiftCode, shiftCountsForEmployeeCronoHours } from './deploymentRoles';
+import { isSinCoberturaShift } from '@/lib/crm/proformaVacancy';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
   M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, EN: 9,
@@ -118,6 +119,7 @@ export function isPlanningScheduledCoverageShift(t: any): boolean {
 /** Pie «Hs. Plan.» / CRM — misma elegibilidad que planificador (sin filtros extra de cobertura SLA). */
 export function isPlanificadorPlannedHoursShift(t: any): boolean {
   if (!t) return false;
+  if (isSinCoberturaShift(t)) return false;
   if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
   const status = String(t.status || '').toLowerCase();
   if (status.includes('cancel') || status.includes('delet')) return false;

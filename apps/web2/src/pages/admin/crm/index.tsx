@@ -97,6 +97,7 @@ import {
 } from '@/lib/crm/proformaEnrichment';
 import {
   fetchSlaRowsForCrmDashboard,
+  fetchContractsForCrmDashboard,
   loadClientSlaForClient,
   loadClientTurnosForClient,
   indexSlaRowsByClients,
@@ -122,6 +123,7 @@ import {
   resolveClientIdForTurno,
   resolveCrmPlannedShiftHours,
   sumPlannedHoursForClient,
+  groupTurnosByClient,
   buildSlaCodeHoursHintFromServices,
   buildSlaCodeHoursHintByObjectiveId,
   toDateSafe,
@@ -222,31 +224,70 @@ async function fetchCrmDashboardTurnos(
   start.setDate(start.getDate() - 2);
   end.setDate(end.getDate() + 2);
   end.setHours(23, 59, 59, 999);
+
+  const byId = new Map<string, any>();
+  const ingestDocs = (docs: { id: string; data: () => Record<string, unknown> }[]) => {
+    docs.forEach((d) => {
+      const row = { id: d.id, ...d.data() as any };
+      if (!turnoInCrmDashboardRange(row, rangeStart, rangeEnd)) return;
+      byId.set(d.id, row);
+    });
+  };
+
   const col = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
+  const aliases = collectClientIdAliases(clientRefs);
+  const objectiveIds = [
+    ...new Set(
+      clientRefs.flatMap((c) =>
+        (c.objetivos || [])
+          .map((o) => String(o.id ?? '').trim())
+          .filter(Boolean),
+      ),
+    ),
+  ];
+
+  const rangedChunkQuery = (field: 'clientId' | 'objectiveId', values: string[]) =>
+    getDocs(
+      query(
+        col as ReturnType<typeof query>,
+        where(field, 'in', values),
+        where('startTime', '>=', Timestamp.fromDate(start)),
+        where('startTime', '<=', Timestamp.fromDate(end)),
+      ),
+    ).then((snap) => ingestDocs(snap.docs)).catch(() => {});
+
+  const batchPromises: Promise<void>[] = [];
+  for (let i = 0; i < aliases.length; i += 10) {
+    batchPromises.push(rangedChunkQuery('clientId', aliases.slice(i, i + 10)));
+  }
+  for (let i = 0; i < objectiveIds.length; i += 10) {
+    batchPromises.push(rangedChunkQuery('objectiveId', objectiveIds.slice(i, i + 10)));
+  }
+
+  if (batchPromises.length > 0) {
+    await Promise.all(batchPromises);
+    if (byId.size > 0) return [...byId.values()];
+  }
+
   const ranged = query(
     col as ReturnType<typeof query>,
     where('startTime', '>=', Timestamp.fromDate(start)),
     where('startTime', '<=', Timestamp.fromDate(end)),
   );
-  const mapRows = (docs: { id: string; data: () => Record<string, unknown> }[]) =>
-    docs.map((d) => ({ id: d.id, ...d.data() as any }));
-
   try {
     const snap = await getDocs(ranged);
-    if (snap.docs.length > 0) return mapRows(snap.docs);
+    if (snap.docs.length > 0) {
+      ingestDocs(snap.docs);
+      return [...byId.values()];
+    }
   } catch (e) {
     console.warn('CRM dashboard: consulta turnos por rango falló', e);
   }
 
-  const byId = new Map<string, any>();
-  const aliases = collectClientIdAliases(clientRefs);
   for (let i = 0; i < aliases.length; i += 10) {
     const chunk = aliases.slice(i, i + 10);
     const snap = await getDocs(query(col as ReturnType<typeof query>, where('clientId', 'in', chunk)));
-    mapRows(snap.docs).forEach((t) => {
-      if (!turnoInCrmDashboardRange(t, rangeStart, rangeEnd)) return;
-      byId.set(t.id, t);
-    });
+    ingestDocs(snap.docs);
   }
   return [...byId.values()];
 }
@@ -704,21 +745,91 @@ export default function CRMPage() {
         if (b.start < turnoStart) turnoStart = b.start;
         if (b.end > turnoEnd) turnoEnd = b.end;
       }
-      const [slaRows, turnosRaw, sContracts, sEmployees] = await Promise.all([
+
+      const applyContractRowsToMaps = (
+        contractRows: any[],
+        contractedByClient: Record<string, number>,
+        closedByClient: Record<string, number>,
+      ) => {
+        contractRows.forEach((c) => {
+          if (!c.clientId) return;
+          const canonical = resolveCanonicalClientIdForCrmRow(c.clientId, clients);
+          if (!canonical) return;
+          const cid = canonical;
+          if (scopeEmpresa) {
+            if (!tenantClientIds.has(cid)) return;
+            const docEmp = String(c.empresaId ?? '').trim();
+            if (docEmp && !tenantEmpresaIdsMatch(docEmp, empresaId)) return;
+          }
+          const totalHours = Number(c.totalHours) || 0;
+          if (rangeMode === 'all') {
+            contractedByClient[cid] = (contractedByClient[cid] || 0) + totalHours;
+            if (c.type === 'cerrado') closedByClient[cid] = (closedByClient[cid] || 0) + totalHours;
+            return;
+          }
+          const cStart = c.startDate ? new Date(c.startDate) : null;
+          const cEnd = c.endDate ? new Date(c.endDate) : null;
+          const clamped = clampDateRange(cStart, cEnd, start, end);
+          if (!clamped && (cStart || cEnd)) return;
+          contractedByClient[cid] = (contractedByClient[cid] || 0) + totalHours;
+          if (c.type === 'cerrado') closedByClient[cid] = (closedByClient[cid] || 0) + totalHours;
+        });
+      };
+
+      const [slaRows, contractRows] = await Promise.all([
         fetchSlaRowsForCrmDashboard(clientRefs, {
           empresaId,
           scopeEmpresa,
           migracionCompleta,
         }),
+        fetchContractsForCrmDashboard(clientRefs, { empresaId, scopeEmpresa }),
+      ]);
+      if (runId !== metricsRunRef.current) return;
+
+      const slaDocsByClient = indexSlaRowsByClients(slaRows, clientRefs);
+      const slaByClient: Record<string, number> = {};
+      const contractedByClient: Record<string, number> = {};
+      const closedByClient: Record<string, number> = {};
+
+      clientRefs.forEach((clientRef) => {
+        const clientSlas = slaDocsByClient.get(clientRef.id) || [];
+        if (rangeMode === 'all') {
+          slaByClient[clientRef.id] = sumVigenteSlaHoursInRange(clientSlas, null, null, clientRef.id);
+        } else {
+          slaByClient[clientRef.id] = sumVigenteSlaHoursInRange(clientSlas, start, end, clientRef.id);
+        }
+      });
+
+      applyContractRowsToMaps(contractRows, contractedByClient, closedByClient);
+
+      let phase1Sold = 0;
+      setClientMetricsMap((prev) => {
+        const next: Record<string, any> = { ...prev };
+        clients.forEach((c) => {
+          const sla = Math.round(slaByClient[c.id] || 0);
+          const contracted = Math.round(contractedByClient[c.id] || 0);
+          const contractClosed = Math.round(closedByClient[c.id] || 0);
+          phase1Sold += sla;
+          next[c.id] = {
+            ...prev[c.id],
+            sla,
+            contracted,
+            contractClosed,
+            contractMismatch: contractClosed > 0 && contractClosed !== sla,
+            hasActivity: sla > 0 || (prev[c.id]?.planned || 0) > 0 || (prev[c.id]?.real || 0) > 0,
+          };
+        });
+        return next;
+      });
+      setGlobalMetrics((prev) => ({ ...prev, totalSold: phase1Sold }));
+
+      const [turnosRaw, sEmployees] = await Promise.all([
         fetchCrmDashboardTurnos(empresaId, scopeEmpresa, turnoStart, turnoEnd, clientRefs),
-        getDocs(collection(db, 'contracts')),
         getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
       ]);
       if (runId !== metricsRunRef.current) return;
 
       const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
-
-      const slaDocsByClient = indexSlaRowsByClients(slaRows, clientRefs);
 
       const validEmp: Record<string, boolean> = {};
       sEmployees.forEach((d) => {
@@ -727,46 +838,9 @@ export default function CRMPage() {
         validEmp[d.id] = true;
       });
 
-      const slaByClient: Record<string, number> = {};
       const plannedByClient: Record<string, number> = {};
       const executedByClient: Record<string, number> = {};
-      const contractedByClient: Record<string, number> = {};
-      const closedByClient: Record<string, number> = {};
       const plannedRange: PlannedHoursRange = { start, end };
-
-      clientRefs.forEach((clientRef) => {
-        const clientSlas = slaDocsByClient.get(clientRef.id) || [];
-        if (rangeMode === 'all') {
-          slaByClient[clientRef.id] = sumVigenteSlaHoursInRange(clientSlas, null, null);
-        } else {
-          slaByClient[clientRef.id] = sumVigenteSlaHoursInRange(clientSlas, start, end);
-        }
-      });
-
-      sContracts.forEach((d) => {
-        const c = d.data() as any;
-        if (!c.clientId) return;
-        const canonical = resolveCanonicalClientIdForCrmRow(c.clientId, clients);
-        if (!canonical) return;
-        const cid = canonical;
-        if (scopeEmpresa) {
-          if (!tenantClientIds.has(cid)) return;
-          const docEmp = String(c.empresaId ?? '').trim();
-          if (docEmp && !tenantEmpresaIdsMatch(docEmp, empresaId)) return;
-        }
-        const totalHours = Number(c.totalHours) || 0;
-        if (rangeMode === 'all') {
-          contractedByClient[cid] = (contractedByClient[cid] || 0) + totalHours;
-          if (c.type === 'cerrado') closedByClient[cid] = (closedByClient[cid] || 0) + totalHours;
-          return;
-        }
-        const cStart = c.startDate ? new Date(c.startDate) : null;
-        const cEnd = c.endDate ? new Date(c.endDate) : null;
-        const clamped = clampDateRange(cStart, cEnd, start, end);
-        if (!clamped && (cStart || cEnd)) return;
-        contractedByClient[cid] = (contractedByClient[cid] || 0) + totalHours;
-        if (c.type === 'cerrado') closedByClient[cid] = (closedByClient[cid] || 0) + totalHours;
-      });
 
       const allTurnos = turnosRaw.filter((t) => {
         if (!scopeEmpresa) return true;
@@ -775,6 +849,8 @@ export default function CRMPage() {
         if (clientRefs.some((c) => clientRowMatchesClient(t, c))) return true;
         return belongsToEmpresaView(t, empresaId, migracionCompleta);
       });
+
+      const turnosByClient = groupTurnosByClient(allTurnos, clientRefs, tenantClientIds);
 
       const trendSeries: CrmTrendPoint[] = buckets.map((b) => {
         const agg = aggregateCrmPortfolioHours(
@@ -785,6 +861,7 @@ export default function CRMPage() {
           b.start,
           b.end,
           tenantClientIds,
+          turnosByClient,
         );
         return {
           label: b.label,
@@ -797,11 +874,12 @@ export default function CRMPage() {
 
       clientRefs.forEach((clientRef) => {
         const clientSlas = slaDocsByClient.get(clientRef.id) || [];
+        const clientTurnos = turnosByClient.get(clientRef.id) || [];
         const exStart = start ?? new Date(2000, 0, 1);
         const exEnd = end ?? new Date(2099, 11, 31);
         const slaExclusion = buildSlaExclusionContext(clientSlas, exStart, exEnd);
         plannedByClient[clientRef.id] = Math.round(
-          sumPlannedHoursForClient(allTurnos, clientRef, plannedRange, slaExclusion),
+          sumPlannedHoursForClient(clientTurnos, clientRef, plannedRange, slaExclusion),
         );
       });
 
@@ -865,7 +943,7 @@ export default function CRMPage() {
       console.error(e);
       toast.error('Error al calcular métricas');
     } finally {
-      setCalculatingMetrics(false);
+      if (runId === metricsRunRef.current) setCalculatingMetrics(false);
     }
   };
 
@@ -1229,10 +1307,7 @@ export default function CRMPage() {
       setGlobalMetrics({ totalSold: 0, totalPlanned: 0, totalExecuted: 0, criticalClients: [] });
       return;
     }
-    const timer = window.setTimeout(() => {
-      void calculateDashboardMetrics();
-    }, 150);
-    return () => window.clearTimeout(timer);
+    void calculateDashboardMetrics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clients, rangeMode, rangeMonth, rangeYear, empresaId, migracionCompleta]);
 
@@ -1791,7 +1866,7 @@ export default function CRMPage() {
   const baseHours = useMemo(() => {
     if (!selectedClient) return 0;
     const { start, end } = getProformaRange();
-    const requested = Math.round(sumVigenteSlaHoursInRange(clientServices || [], start, end));
+    const requested = Math.round(sumVigenteSlaHoursInRange(clientServices || [], start, end, selectedClient.id));
     if (proformaBase === 'requested') return requested;
     if (proformaBase === 'planned') return proformaTotals.planned;
     return proformaTotals.executed;
@@ -2586,7 +2661,12 @@ export default function CRMPage() {
                           const cStart = c.startDate ? new Date(c.startDate) : null;
                           const cEnd = c.endDate ? new Date(c.endDate) : null;
                           const slaInRange = c.type === 'cerrado' ? Math.round(
-                            sumVigenteSlaHoursInRange(clientServices || [], cStart || new Date(0), cEnd || new Date()),
+                            sumVigenteSlaHoursInRange(
+                              clientServices || [],
+                              cStart || new Date(0),
+                              cEnd || new Date(),
+                              selectedClient.id,
+                            ),
                           ) : null;
                           const contractHours = Math.round(Number(c.totalHours) || 0);
                           const ok = slaInRange !== null ? contractHours === slaInRange : false;
@@ -2861,7 +2941,9 @@ export default function CRMPage() {
                       ) : (
                         <div className="space-y-3">
                           {sortedServices.map((s) => {
-                            const positions: any[] = Array.isArray(s.positions) ? s.positions : [];
+                            const positions: any[] = Array.isArray(s.positions)
+                              ? s.positions
+                              : Object.values((s.positions as Record<string, unknown>) || {});
                             const slaHs = sumContractSlaHours(s.positions, s.startDate, s.endDate, s.excludedDates, null, null, s.totalMonthlyHours);
                             const isExpanded = expandedServiceId === s.id;
 

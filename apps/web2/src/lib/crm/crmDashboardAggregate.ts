@@ -25,6 +25,7 @@ export function aggregateCrmPortfolioHours(
   start: Date,
   end: Date,
   tenantClientIds: Set<string>,
+  turnosByClient?: Map<string, any[]>,
 ): CrmPortfolioHours {
   let sla = 0;
   let planned = 0;
@@ -32,9 +33,10 @@ export function aggregateCrmPortfolioHours(
 
   for (const clientRef of clientRefs) {
     const clientSlas = slaDocsByClient.get(clientRef.id) || [];
-    sla += sumVigenteSlaHoursInRange(clientSlas, start, end);
+    sla += sumVigenteSlaHoursInRange(clientSlas, start, end, clientRef.id);
     const slaExclusion = buildSlaExclusionContext(clientSlas, start, end);
-    planned += sumPlannedHoursForClient(allTurnos, clientRef, plannedRange, slaExclusion);
+    const clientTurnos = turnosByClient?.get(clientRef.id) ?? allTurnos;
+    planned += sumPlannedHoursForClient(clientTurnos, clientRef, plannedRange, slaExclusion);
   }
 
   let executed = 0;
