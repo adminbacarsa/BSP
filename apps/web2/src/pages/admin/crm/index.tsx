@@ -267,6 +267,7 @@ export default function CRMPage() {
   const metricsRunRef = useRef(0);
   const clientsFetchGenRef = useRef(0);
   const metricsCache = useRef<Map<string, { metrics: any; trend: any[]; updatedAt: Date }>>(new Map());
+  const sharedEmpMetaRef = useRef<Record<string, { legajo?: string; name?: string }>>({});
 
   const [clients, setClients] = useState<any[]>([]);
   const [selectedClient, setSelectedClient] = useState<any>(null);
@@ -748,11 +749,14 @@ export default function CRMPage() {
       const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
 
       const validEmp: Record<string, boolean> = {};
+      const sharedMeta: Record<string, { legajo?: string; name?: string }> = {};
       sEmployees.forEach((d) => {
         const e = d.data() as any;
         if (!belongsToEmpresaView(e, empresaId, migracionCompleta)) return;
         validEmp[d.id] = true;
+        registerEmployeeMetaAliases(sharedMeta, d.id, e);
       });
+      sharedEmpMetaRef.current = sharedMeta;
 
       const plannedByClient: Record<string, number> = {};
       const executedByClient: Record<string, number> = {};
@@ -1714,17 +1718,22 @@ export default function CRMPage() {
 
       setProformaBreakdown(breakdown);
 
-      const empSnap = await getDocs(
-        scopeEmpresa
-          ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
-          : collection(db, 'empleados'),
-      );
-      const empMeta: Record<string, { legajo?: string; name?: string }> = {};
-      empSnap.docs.forEach((d) => {
-        const data = d.data() as any;
-        if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-        registerEmployeeMetaAliases(empMeta, d.id, data);
-      });
+      let empMeta: Record<string, { legajo?: string; name?: string }>;
+      if (Object.keys(sharedEmpMetaRef.current).length > 0) {
+        empMeta = { ...sharedEmpMetaRef.current };
+      } else {
+        const empSnap = await getDocs(
+          scopeEmpresa
+            ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
+            : collection(db, 'empleados'),
+        );
+        empMeta = {};
+        empSnap.docs.forEach((d) => {
+          const data = d.data() as any;
+          if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+          registerEmployeeMetaAliases(empMeta, d.id, data);
+        });
+      }
       const turnoEmpIds = turnosEnriched.map((t) => String(t.employeeId ?? ''));
       // Batch lookup: reemplaza hasta 120 getDoc individuales por queries de 10 en paralelo
       const pendingEmpIds = [...new Set(turnoEmpIds.filter(
