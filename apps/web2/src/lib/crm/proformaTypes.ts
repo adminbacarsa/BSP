@@ -45,4 +45,12 @@ export type ProformaExportBundle = {
   empresaName: string;
   summary: ProformaSummaryRow[];
   objectives: ProformaObjectiveGrid[];
+  /** Trazabilidad de lectura Firestore (solo UI pre-factura). */
+  sourceDebug?: {
+    clientId: string;
+    turnosLoaded: number;
+    turnosEligible: number;
+    objectiveBlocks: number;
+    catalogObjectives: number;
+  };
 };

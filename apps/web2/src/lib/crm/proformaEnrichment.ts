@@ -1,5 +1,6 @@
 import type { ObjectiveMeta } from './objectiveIdentity';
 import {
+  alignSlaAliasesToClientObjectives,
   buildObjectiveAliasMap,
   fallbackObjectiveKey,
   isLikelyFirestoreDocId,
@@ -194,21 +195,12 @@ export function buildProformaObjectiveAliases(
   clientId: string,
   objetivos: ClientObjetivoRef[],
   slas: Array<{ id?: string; objectiveId?: string; objectiveName?: string; clientId?: string }>,
-  options?: { extraObjetivos?: ClientObjetivoRef[] },
 ): Record<string, ObjectiveMeta> {
-  const mergedRaw = [...(objetivos || []), ...(options?.extraObjetivos || [])];
-  const seen = new Set<string>();
-  const normalized = mergedRaw
-    .map((o) => {
-      const { id, name } = normalizeClientObjetivo(o);
-      return { id: id || name, name: name || id };
-    })
-    .filter((o) => {
-      const key = `${o.id}::${o.name}`;
-      if (!o.id && !o.name) return false;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  return buildObjectiveAliasMap(clientId, normalized, slas);
+  const normalized = (objetivos || []).map((o) => {
+    const { id, name } = normalizeClientObjetivo(o);
+    return { id: id || name, name: name || id };
+  }).filter((o) => o.id || o.name);
+  const aliases = buildObjectiveAliasMap(clientId, normalized, slas);
+  alignSlaAliasesToClientObjectives(aliases, clientId, normalized, slas);
+  return aliases;
 }

@@ -137,6 +137,36 @@ export function buildObjectiveAliasMap(
   return aliases;
 }
 
+/** Enlaza ids de documento SLA → objetivo CRM cuando el nombre de sede coincide (evita bloques duplicados en pre-factura). */
+export function alignSlaAliasesToClientObjectives(
+  aliases: Record<string, ObjectiveMeta>,
+  clientId: string,
+  objetivos: Array<{ id?: string; name?: string }>,
+  slas: Array<{ id?: string; objectiveId?: string; objectiveName?: string }>,
+): void {
+  const byNorm = new Map<string, ObjectiveMeta>();
+  for (const obj of objetivos) {
+    const canonicalId = String(obj.id ?? '').trim();
+    const name = String(obj.name ?? '').trim();
+    if (!canonicalId || !name) continue;
+    const meta: ObjectiveMeta = aliases[canonicalId] ?? { canonicalId, name, clientId };
+    meta.name = name;
+    meta.canonicalId = canonicalId;
+    byNorm.set(normObjectiveNameKey(name), meta);
+    registerAlias(aliases, meta, canonicalId);
+  }
+  for (const sla of slas) {
+    const slaName = String(sla.objectiveName ?? '').trim();
+    if (!slaName) continue;
+    const meta = byNorm.get(normObjectiveNameKey(slaName));
+    if (!meta) continue;
+    const slaId = String(sla.id ?? '').trim();
+    const slaOid = String(sla.objectiveId ?? '').trim();
+    if (slaId) registerAlias(aliases, meta, slaId);
+    if (slaOid) registerAlias(aliases, meta, slaOid);
+  }
+}
+
 export function objectiveMatchCandidates(row: {
   objectiveId?: unknown;
   objectiveName?: unknown;

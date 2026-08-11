@@ -29,6 +29,18 @@ function objectiveIdsForClient(client: ClientRef): Set<string> {
   return ids;
 }
 
+async function fetchTurnosByObjectiveIds(
+  objectiveIds: string[],
+  addIfInRange: (id: string, data: Record<string, unknown>) => void,
+): Promise<void> {
+  const ids = [...new Set(objectiveIds.map((x) => String(x).trim()).filter(Boolean))];
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const snap = await getDocs(query(collection(db, 'turnos'), where('objectiveId', 'in', chunk)));
+    snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
+  }
+}
+
 export function clientRowMatchesClient(row: Record<string, unknown>, client: ClientRef): boolean {
   const aliases = new Set(getClientIdAliases(client.id));
   const rowCid = String(row.clientId ?? '').trim();
@@ -157,14 +169,13 @@ async function queryByClientIdAliases<T extends Record<string, unknown>>(
 ): Promise<T[]> {
   const byId = new Map<string, T>();
   const aliases = getClientIdAliases(client.id);
-
-  await Promise.all(
-    aliases.map(async (cid) => {
-      const snap = await getDocs(query(collection(db, collectionName), where('clientId', '==', cid)));
-      snap.docs.forEach((d) => byId.set(d.id, mapDoc(d.id, d.data() as Record<string, unknown>)));
-    }),
-  );
-
+  for (const cid of aliases) {
+    const snap = await getDocs(query(collection(db, collectionName), where('clientId', '==', cid)));
+    snap.docs.forEach((d) => {
+      const row = mapDoc(d.id, d.data() as Record<string, unknown>);
+      byId.set(d.id, row);
+    });
+  }
   return [...byId.values()];
 }
 
@@ -201,6 +212,12 @@ function toDateSafe(val: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * Turnos del período para pre-factura / CRM.
+ * 1) Por clientId (aliases legacy).
+ * 2) Por objectiveId de la ficha CRM (cronogramas con clientId viejo).
+ * 3) Respaldo por rango + match cliente/objetivo.
+ */
 export async function loadClientTurnosForClient(
   client: ClientRef,
   start: Date,
@@ -209,6 +226,7 @@ export async function loadClientTurnosForClient(
 ): Promise<any[]> {
   const byId = new Map<string, any>();
   const aliases = getClientIdAliases(client.id);
+  const objectiveIds = [...objectiveIdsForClient(client)];
 
   const rangeStartKey = getDateKeyInTimezone(start);
   const rangeEndKey = getDateKeyInTimezone(end);
@@ -221,7 +239,8 @@ export async function loadClientTurnosForClient(
     const inRangeBySchedule =
       !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
     if (!inRangeByStart && !inRangeBySchedule) return;
-    byId.set(id, { id, ...data, clientId: client.id });
+    const rowCid = String(data.clientId ?? '').trim();
+    byId.set(id, { id, ...data, clientId: rowCid || client.id });
   };
 
   await Promise.all(
@@ -231,7 +250,9 @@ export async function loadClientTurnosForClient(
     }),
   );
 
-  if (byId.size > 0) return [...byId.values()];
+  if (objectiveIds.length > 0) {
+    await fetchTurnosByObjectiveIds(objectiveIds, addIfInRange);
+  }
 
   const empresaId = String(opts?.empresaId ?? '').trim();
   const scopeEmpresa = opts?.scopeEmpresa === true && !!empresaId;

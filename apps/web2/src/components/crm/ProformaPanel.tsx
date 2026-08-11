@@ -253,6 +253,18 @@ export default function ProformaPanel(props: ProformaPanelProps) {
         </div>
       </div>
 
+      {proformaBundle?.sourceDebug && (
+        <p className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 leading-relaxed">
+          <span className="font-bold text-slate-600">Fuente pre-factura:</span>{' '}
+          cliente <span className="font-mono text-slate-700">{proformaBundle.sourceDebug.clientId}</span>
+          {' · '}{proformaBundle.sourceDebug.catalogObjectives} sedes en CRM
+          {' · '}{proformaBundle.sourceDebug.turnosLoaded} turnos leídos en el período
+          {' · '}{proformaBundle.sourceDebug.turnosEligible} facturables (planificador)
+          {' · '}{proformaBundle.sourceDebug.objectiveBlocks} bloques en grilla.
+          {' '}Solo turnos de este cliente (clientId + objectiveId de la ficha). Si faltan horas, revisá publicación del crono o objectiveId en Firestore.
+        </p>
+      )}
+
       {/* Resumen por objetivo (vista previa export) */}
       {proformaBundle && proformaBundle.summary.length > 0 && (
         <div className="border rounded-xl overflow-hidden bg-white shadow-sm">
