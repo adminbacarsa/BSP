@@ -95,6 +95,19 @@ export default function ProformaPanel(props: ProformaPanelProps) {
   const objectiveCount = proformaBundle?.objectives.length ?? 0;
   const gridOpenCount = Object.values(openGrids).filter(Boolean).length;
 
+  // Mapa objectiveName → stats para el detalle por puesto
+  const objectiveStats = React.useMemo(() => {
+    const map = new Map<string, { dayHours: number; nightHours: number; guardCount: number }>();
+    proformaBundle?.objectives.forEach((g) => {
+      map.set(g.objectiveName, {
+        dayHours: g.grandTotal.day,
+        nightHours: g.grandTotal.night,
+        guardCount: g.employees.length,
+      });
+    });
+    return map;
+  }, [proformaBundle]);
+
   const toggleGrid = (id: string) => setOpenGrids((prev) => ({ ...prev, [id]: !prev[id] }));
   const expandAllGrids = () => {
     const next: Record<string, boolean> = {};
@@ -491,6 +504,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
           ) : (
             proformaBreakdown.map((o) => {
               const objOpen = !!openObjectives[o.objectiveName];
+              const stats = objectiveStats.get(o.objectiveName);
               return (
               <div key={o.objectiveName} className="border rounded-xl overflow-hidden">
                 <button
@@ -498,14 +512,25 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                   onClick={() => toggleObjectiveBreakdown(o.objectiveName)}
                   className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 text-left transition-colors"
                 >
-                  <div className="flex items-center gap-2">
-                    {objOpen ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-                    <div>
-                      <p className="text-sm font-black text-slate-800">{o.objectiveName}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Objetivo · {o.positions.length} puesto(s)</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {objOpen ? <ChevronUp size={14} className="text-slate-400 shrink-0" /> : <ChevronDown size={14} className="text-slate-400 shrink-0" />}
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-slate-800 truncate">{o.objectiveName}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">
+                        Objetivo · {o.positions.length} puesto(s)
+                        {stats && <> · {stats.guardCount} guardia(s)</>}
+                      </p>
                     </div>
                   </div>
-                  <div className="text-sm font-black text-slate-700">{o.totalHours} hs</div>
+                  <div className="flex items-center gap-3 shrink-0 text-[10px] font-black">
+                    {stats && (
+                      <>
+                        <span className="text-amber-700">{stats.dayHours.toFixed(0)} D</span>
+                        <span className="text-violet-700">{stats.nightHours.toFixed(0)} N</span>
+                      </>
+                    )}
+                    <span className="text-slate-700 text-sm">{o.totalHours} hs</span>
+                  </div>
                 </button>
                 {objOpen && (
                 <div className="space-y-2 p-3 border-t">
