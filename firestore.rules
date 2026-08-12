@@ -586,5 +586,20 @@ service cloud.firestore {
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }
+
+    // Correcciones manuales de liquidación por ciclo y empleado.
+    match /ajustes_liquidacion/{docId} {
+      allow read:   if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
+    // API Keys de integraciones — solo lectura de metadata (no del hash).
+    // Escritura exclusivamente vía Admin SDK (callables createPayrollApiKey / revokePayrollApiKey).
+    match /integraciones_api/{keyId} {
+      allow read:  if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
+      allow write: if false;
+    }
   }
 }

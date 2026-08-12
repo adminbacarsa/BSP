@@ -1716,6 +1716,66 @@ export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 // =========================================================
 export { payrollApi } from './payroll-api/handler';
 
+// =========================================================
+// Payroll API Keys — gestión de claves desde el panel admin
+// =========================================================
+
+export const createPayrollApiKey = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 30, memory: '256MB' })
+    .https.onCall(async (data: any, context) => {
+        if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
+        const crypto = await import('crypto');
+        const { name, scopes, empresaId } = data || {};
+        if (!name || !empresaId) {
+            throw new functions.https.HttpsError('invalid-argument', 'name y empresaId son requeridos.');
+        }
+        const validScopes = ['payroll.read', 'payroll.close'];
+        const cleanScopes: string[] = Array.isArray(scopes)
+            ? scopes.filter((s: string) => validScopes.includes(s))
+            : ['payroll.read'];
+        if (cleanScopes.length === 0) cleanScopes.push('payroll.read');
+
+        const rawKey = 'csp_' + crypto.randomBytes(21).toString('base64url');
+        const prefix = rawKey.slice(0, 8);
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = crypto.createHash('sha256').update(salt + rawKey).digest('hex');
+
+        const db = admin.firestore();
+        const ref = db.collection('integraciones_api').doc();
+        await ref.set({
+            name: String(name).slice(0, 80),
+            empresaId: String(empresaId),
+            scopes: cleanScopes,
+            status: 'active',
+            apiKeyPrefix: prefix,
+            apiKeyHash: hash,
+            salt,
+            createdAt: admin.firestore.Timestamp.now(),
+            createdBy: context.auth.uid,
+        });
+        return { id: ref.id, apiKey: rawKey, prefix };
+    });
+
+export const revokePayrollApiKey = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 15, memory: '128MB' })
+    .https.onCall(async (data: any, context) => {
+        if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
+        const { keyId } = data || {};
+        if (!keyId) throw new functions.https.HttpsError('invalid-argument', 'keyId requerido.');
+        const db = admin.firestore();
+        const ref = db.collection('integraciones_api').doc(String(keyId));
+        const snap = await ref.get();
+        if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Clave no encontrada.');
+        await ref.update({
+            status: 'revoked',
+            revokedAt: admin.firestore.Timestamp.now(),
+            revokedBy: context.auth.uid,
+        });
+        return { success: true };
+    });
+
 // Callable interna — usada por el panel admin (/admin/liquidaciones).
 // No requiere API Key; valida Firebase Auth.
 export const getPayrollSnapshotInternal = functions

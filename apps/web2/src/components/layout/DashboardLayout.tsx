@@ -610,7 +610,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {canReadModule('CONFIG') && (
+          {(canReadModule('CONFIG') || canReadModule('API_KEYS')) && (
             <>
               {sidebarOpen && (
                 <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest mt-2 animate-in fade-in"

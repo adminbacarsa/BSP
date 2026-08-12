@@ -10,6 +10,7 @@ export const SYSTEM_MODULES = [
     { key: 'ANALYSIS', label: '🔬 Análisis Operativo' },
     { key: 'SUPERVISION', label: '🛡️ Supervisión' },
     { key: 'ASSISTANT', label: '🤖 Asistente IA (globo)' },
+    { key: 'API_KEYS', label: '🔑 Liquidaciones y API Keys' },
     { key: 'CONFIG', label: '⚙️ Configuración Global' }
 ];
 

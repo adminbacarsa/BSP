@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { PageShell, PageHeader, ContentCard, MetricCard } from '@/components/ui';
+import { PageShell, PageHeader, ContentCard, MetricCard, TabBar } from '@/components/ui';
 import {
     ClipboardList, RefreshCw, Download, AlertTriangle, ChevronDown,
     ChevronUp, CheckCircle2, Edit3, Trash2, Save, X, Moon, Sun,
-    Clock, Users, CalendarDays, Loader2,
+    Clock, Users, CalendarDays, Loader2, Key, Plus, Copy, ShieldOff,
 } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
@@ -16,6 +16,9 @@ import {
 import {
     getCctPayrollPeriodByOffset, formatCctPeriodLabel, formatCctPeriodRangeDisplay,
 } from '@/lib/cctPayrollPeriod';
+import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
+import { db, app } from '@/lib/firebase';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -323,6 +326,312 @@ function LiqRow({ item, isExpanded, onToggle, ajuste, hoursMode, onSave, onDelet
     );
 }
 
+// ─── Tab: Claves API ──────────────────────────────────────────────────────────
+
+interface ApiKey {
+    id: string;
+    name: string;
+    empresaId: string;
+    scopes: string[];
+    status: 'active' | 'revoked';
+    apiKeyPrefix: string;
+    createdAt: Date | null;
+    revokedAt: Date | null;
+}
+
+function tsToDate(v: any): Date | null {
+    if (!v) return null;
+    if (v instanceof Date) return v;
+    if (v instanceof Timestamp) return v.toDate();
+    if (typeof v.toDate === 'function') return v.toDate();
+    return null;
+}
+
+interface ApiKeysTabProps { empresaId: string }
+
+function ApiKeysTab({ empresaId }: ApiKeysTabProps) {
+    const [keys, setKeys] = useState<ApiKey[]>([]);
+    const [loadingKeys, setLoadingKeys] = useState(true);
+    const [showForm, setShowForm] = useState(false);
+    const [formName, setFormName] = useState('');
+    const [formScopes, setFormScopes] = useState<string[]>(['payroll.read']);
+    const [saving, setSaving] = useState(false);
+    const [newKey, setNewKey] = useState<{ id: string; apiKey: string } | null>(null);
+    const [copied, setCopied] = useState(false);
+    const [revoking, setRevoking] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!empresaId) return;
+        setLoadingKeys(true);
+        const q = query(collection(db, 'integraciones_api'), where('empresaId', '==', empresaId));
+        const unsub = onSnapshot(q, (snap) => {
+            const list: ApiKey[] = snap.docs.map(d => {
+                const data = d.data();
+                return {
+                    id: d.id,
+                    name: data.name || '',
+                    empresaId: data.empresaId || '',
+                    scopes: data.scopes || [],
+                    status: data.status === 'revoked' ? 'revoked' : 'active',
+                    apiKeyPrefix: data.apiKeyPrefix || '',
+                    createdAt: tsToDate(data.createdAt),
+                    revokedAt: tsToDate(data.revokedAt),
+                };
+            });
+            list.sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
+            setKeys(list);
+            setLoadingKeys(false);
+        }, () => setLoadingKeys(false));
+        return () => unsub();
+    }, [empresaId]);
+
+    const toggleScope = (s: string) =>
+        setFormScopes(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]);
+
+    const handleCreate = async () => {
+        if (!formName.trim() || formScopes.length === 0) return;
+        setSaving(true);
+        try {
+            const fns = getFunctions(app, 'us-central1');
+            const callable = httpsCallable<any, { id: string; apiKey: string; prefix: string }>(fns, 'createPayrollApiKey');
+            const result = await callable({ name: formName.trim(), scopes: formScopes, empresaId });
+            setNewKey({ id: result.data.id, apiKey: result.data.apiKey });
+            setShowForm(false);
+            setFormName('');
+            setFormScopes(['payroll.read']);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleRevoke = async (keyId: string) => {
+        if (!window.confirm('¿Revocar esta clave? La acción es irreversible.')) return;
+        setRevoking(keyId);
+        try {
+            const fns = getFunctions(app, 'us-central1');
+            const callable = httpsCallable<any, { success: boolean }>(fns, 'revokePayrollApiKey');
+            await callable({ keyId });
+        } finally {
+            setRevoking(null);
+        }
+    };
+
+    const copyKey = () => {
+        if (!newKey) return;
+        navigator.clipboard.writeText(newKey.apiKey).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        });
+    };
+
+    const activeKeys = keys.filter(k => k.status === 'active');
+    const revokedKeys = keys.filter(k => k.status === 'revoked');
+
+    return (
+        <div className="space-y-6">
+            {/* Key recién generada — mostrar una sola vez */}
+            {newKey && (
+                <ContentCard>
+                    <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(16,185,129,0.15)' }}>
+                            <Key size={16} className="text-emerald-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-xs font-black uppercase tracking-widest text-emerald-500 mb-1">Clave generada</p>
+                            <p className="text-[11px] mb-3" style={{ color: 'var(--txt3)' }}>
+                                Copiá la clave ahora — no se vuelve a mostrar.
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <code className="flex-1 px-3 py-2 rounded-lg text-xs font-mono break-all" style={{ backgroundColor: 'var(--surf3)', color: 'var(--txt)' }}>
+                                    {newKey.apiKey}
+                                </code>
+                                <button
+                                    onClick={copyKey}
+                                    className="px-3 py-2 rounded-lg text-xs font-black uppercase flex items-center gap-1.5 shrink-0"
+                                    style={{ background: copied ? 'rgba(16,185,129,0.2)' : 'var(--surf3)', color: copied ? '#10b981' : 'var(--txt3)' }}
+                                >
+                                    <Copy size={12} />
+                                    {copied ? 'Copiado' : 'Copiar'}
+                                </button>
+                                <button onClick={() => setNewKey(null)}>
+                                    <X size={14} style={{ color: 'var(--txt3)' }} />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </ContentCard>
+            )}
+
+            {/* Encabezado + botón nueva clave */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <p className="text-sm font-black uppercase tracking-wider" style={{ color: 'var(--txt)' }}>
+                        Claves activas: {activeKeys.length}
+                    </p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
+                        Cada clave permite acceso a la API REST de liquidación por parte de sistemas externos.
+                    </p>
+                </div>
+                {!showForm && (
+                    <button
+                        onClick={() => setShowForm(true)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black uppercase"
+                        style={{ background: 'var(--company-primary,#6366f1)', color: '#fff' }}
+                    >
+                        <Plus size={13} />
+                        Nueva clave
+                    </button>
+                )}
+            </div>
+
+            {/* Formulario de nueva clave */}
+            {showForm && (
+                <ContentCard>
+                    <p className="text-xs font-black uppercase tracking-widest mb-4" style={{ color: 'var(--company-primary,#6366f1)' }}>
+                        Nueva clave de API
+                    </p>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest block mb-1" style={{ color: 'var(--txt3)' }}>
+                                Nombre / descripción
+                            </label>
+                            <input
+                                value={formName}
+                                onChange={e => setFormName(e.target.value)}
+                                placeholder="ej: Integración sistema de RRHH"
+                                className="w-full px-3 py-2 rounded-xl border text-sm"
+                                style={{ backgroundColor: 'var(--surf3)', borderColor: 'var(--border)', color: 'var(--txt)', outline: 'none' }}
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black uppercase tracking-widest block mb-2" style={{ color: 'var(--txt3)' }}>
+                                Permisos (scopes)
+                            </label>
+                            {[
+                                { scope: 'payroll.read', label: 'payroll.read', desc: 'Ver liquidación y ciclos' },
+                                { scope: 'payroll.close', label: 'payroll.close', desc: 'Cerrar ciclos (genera snapshot inmutable)' },
+                            ].map(({ scope, label, desc }) => (
+                                <label key={scope} className="flex items-center gap-3 mb-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={formScopes.includes(scope)}
+                                        onChange={() => toggleScope(scope)}
+                                        className="w-4 h-4 rounded"
+                                        style={{ accentColor: 'var(--company-primary,#6366f1)' }}
+                                    />
+                                    <div>
+                                        <span className="text-xs font-black" style={{ color: 'var(--txt)' }}>{label}</span>
+                                        <span className="text-xs ml-2" style={{ color: 'var(--txt3)' }}>{desc}</span>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                            <button
+                                onClick={handleCreate}
+                                disabled={saving || !formName.trim() || formScopes.length === 0}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase disabled:opacity-40"
+                                style={{ background: 'var(--company-primary,#6366f1)', color: '#fff' }}
+                            >
+                                {saving ? <Loader2 size={12} className="animate-spin" /> : <Key size={12} />}
+                                Generar clave
+                            </button>
+                            <button
+                                onClick={() => setShowForm(false)}
+                                className="px-3 py-1.5 rounded-lg text-xs font-black uppercase border"
+                                style={{ borderColor: 'var(--border)', color: 'var(--txt3)' }}
+                            >
+                                Cancelar
+                            </button>
+                        </div>
+                    </div>
+                </ContentCard>
+            )}
+
+            {/* Lista de claves */}
+            {loadingKeys ? (
+                <div className="flex items-center gap-3 py-8 justify-center" style={{ color: 'var(--txt3)' }}>
+                    <Loader2 size={18} className="animate-spin" />
+                    <span className="text-sm font-bold">Cargando claves…</span>
+                </div>
+            ) : (
+                <ContentCard padding={false}>
+                    {keys.length === 0 ? (
+                        <div className="py-12 text-center">
+                            <Key size={32} className="mx-auto mb-3 opacity-20" style={{ color: 'var(--txt3)' }} />
+                            <p className="text-sm font-bold" style={{ color: 'var(--txt3)' }}>Sin claves generadas</p>
+                        </div>
+                    ) : (
+                        <div>
+                            {keys.map((k, idx) => (
+                                <div key={k.id} className={`flex items-center gap-4 px-5 py-4 ${idx > 0 ? 'border-t' : ''}`}
+                                    style={idx > 0 ? { borderColor: 'var(--border)' } : undefined}>
+                                    <div className={`w-2 h-2 rounded-full shrink-0 ${k.status === 'active' ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{k.name}</span>
+                                            {k.scopes.map(s => (
+                                                <span key={s} className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wide"
+                                                    style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--company-primary,#6366f1)' }}>
+                                                    {s}
+                                                </span>
+                                            ))}
+                                            {k.status === 'revoked' && (
+                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wide text-red-500"
+                                                    style={{ background: 'rgba(239,68,68,0.1)' }}>
+                                                    Revocada
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-[11px] mt-0.5 tabular-nums" style={{ color: 'var(--txt3)' }}>
+                                            Prefijo: <code className="font-mono">{k.apiKeyPrefix}…</code>
+                                            {k.createdAt && ` · Creada: ${k.createdAt.toLocaleDateString('es-AR')}`}
+                                            {k.revokedAt && ` · Revocada: ${k.revokedAt.toLocaleDateString('es-AR')}`}
+                                        </p>
+                                    </div>
+                                    {k.status === 'active' && (
+                                        <button
+                                            onClick={() => handleRevoke(k.id)}
+                                            disabled={revoking === k.id}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase shrink-0 disabled:opacity-40"
+                                            style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+                                        >
+                                            {revoking === k.id ? <Loader2 size={12} className="animate-spin" /> : <ShieldOff size={12} />}
+                                            Revocar
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </ContentCard>
+            )}
+
+            {/* Referencia de la API */}
+            <ContentCard>
+                <p className="text-[10px] font-black uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>
+                    Cómo usar la API
+                </p>
+                <div className="space-y-2">
+                    {[
+                        ['Ciclos', 'GET https://us-central1-comtroldata.cloudfunctions.net/payrollApi/v1/payroll/cycles'],
+                        ['Liquidación', 'GET …/v1/payroll/liquidacion?cycleId=2026-07&hoursMode=real'],
+                        ['Auth header', 'X-API-Key: csp_…tu_clave…'],
+                    ].map(([label, code]) => (
+                        <div key={label}>
+                            <span className="text-[10px] font-black uppercase tracking-wide" style={{ color: 'var(--txt3)' }}>{label}</span>
+                            <code className="block mt-0.5 px-3 py-1.5 rounded text-[11px] font-mono break-all"
+                                style={{ backgroundColor: 'var(--surf3)', color: 'var(--txt)' }}>
+                                {code}
+                            </code>
+                        </div>
+                    ))}
+                </div>
+            </ContentCard>
+        </div>
+    );
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function LiquidacionesPage() {
@@ -330,9 +639,11 @@ export default function LiquidacionesPage() {
     const { empresaId } = useEmpresa();
     const { canReadModule } = useAuth();
 
+    const [activeTab, setActiveTab] = useState<'liquidacion' | 'claves'>('liquidacion');
+
     // Redirigir si no tiene permiso
     React.useEffect(() => {
-        if (!canReadModule('CONFIG') && !canReadModule('REPORTS')) {
+        if (!canReadModule('API_KEYS') && !canReadModule('CONFIG')) {
             router.replace('/admin/dashboard');
         }
     }, [canReadModule, router]);
@@ -410,34 +721,54 @@ export default function LiquidacionesPage() {
             <PageShell>
                 <PageHeader
                     title="Liquidaciones"
-                    subtitle={`CCT 422/05 — SUVICO · Horas ${modeLabel}`}
+                    subtitle="CCT 422/05 — SUVICO"
                     icon={ClipboardList}
                     actions={
-                        <div className="flex items-center gap-2">
-                            {snapshot && !loading && (
+                        activeTab === 'liquidacion' ? (
+                            <div className="flex items-center gap-2">
+                                {snapshot && !loading && (
+                                    <button
+                                        onClick={handleExport}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase border transition-opacity hover:opacity-80"
+                                        style={{ borderColor: 'var(--border)', color: 'var(--txt3)' }}
+                                    >
+                                        <Download size={13} />
+                                        CSV
+                                    </button>
+                                )}
                                 <button
-                                    onClick={handleExport}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase border transition-opacity hover:opacity-80"
+                                    onClick={refresh}
+                                    disabled={loading}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase border transition-opacity hover:opacity-80 disabled:opacity-40"
                                     style={{ borderColor: 'var(--border)', color: 'var(--txt3)' }}
                                 >
-                                    <Download size={13} />
-                                    CSV
+                                    <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+                                    Actualizar
                                 </button>
-                            )}
-                            <button
-                                onClick={refresh}
-                                disabled={loading}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase border transition-opacity hover:opacity-80 disabled:opacity-40"
-                                style={{ borderColor: 'var(--border)', color: 'var(--txt3)' }}
-                            >
-                                <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-                                Actualizar
-                            </button>
-                        </div>
+                            </div>
+                        ) : undefined
                     }
                 />
 
-                {/* Filtros */}
+                {/* Tabs */}
+                <div className="mb-6">
+                    <TabBar
+                        tabs={[
+                            { id: 'liquidacion', label: 'Liquidación', icon: ClipboardList },
+                            { id: 'claves', label: 'Claves API', icon: Key },
+                        ]}
+                        active={activeTab}
+                        onChange={(id) => setActiveTab(id as 'liquidacion' | 'claves')}
+                    />
+                </div>
+
+                {/* Contenido según tab */}
+                {activeTab === 'claves' && empresaId && (
+                    <ApiKeysTab empresaId={empresaId} />
+                )}
+
+                {activeTab === 'liquidacion' && (
+                <>{/* Filtros */}
                 <div className="flex flex-wrap items-center gap-3 mb-6">
                     {/* Selector de ciclo */}
                     <div className="flex flex-col gap-0.5">
@@ -662,6 +993,7 @@ export default function LiquidacionesPage() {
                         ))}
                     </div>
                 )}
+                </>)}
             </PageShell>
         </DashboardLayout>
     );
