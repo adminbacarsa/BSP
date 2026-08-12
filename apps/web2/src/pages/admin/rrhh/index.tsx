@@ -25,16 +25,24 @@ import {
     PieChart as PieChartIcon, TrendingUp, Clock, Target, MapPin, ExternalLink,
     UserCheck, UserX, TrendingDown, Award, ChevronDown, Phone, Home, Loader2,
     Send, KeyRound, CheckCircle2, Mail, ShieldCheck as ShieldCheckIcon, RefreshCw,
-    BellRing, MessageCircle, ClipboardEdit, Eye, EyeOff, Shuffle
+    BellRing, MessageCircle, ClipboardEdit, Eye, EyeOff, Shuffle, Tag
 } from 'lucide-react';
 import CorreccionesTab from '@/components/admin/rrhh/CorreccionesTab';
 import AusenciasTab from '@/components/admin/rrhh/AusenciasTab';
+import { TiposNovedadTab } from '@/components/admin/rrhh/TiposNovedadTab';
 import ExperienciaObjetivosPanel from '@/components/admin/employees/ExperienciaObjetivosPanel';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { countExperienciaObjetivos } from '@/lib/planificacion/experienciaObjetivos';
 import { normalizeArgPhone } from '@/lib/whatsapp';
 import { inferAbsenceCode, RRHH_ABSENCE_LABEL_TO_CODE, validateAbsenceDateRange, toCalendarDateStr, absenceNeedsMedicalVerification, absenceReplicatesToPlanning } from '@/lib/planificacion/absenceCodes';
 import { normalizeGeneroImport } from '@/lib/planificacion/genderPreference';
+import {
+  NOVEDAD_TYPE_LABELS_FALLBACK,
+  endDateFromDefaultDays,
+  findNovedadTypeByLabel,
+  type NovedadType,
+} from '@/lib/rrhh/novedadTypes';
+import { novedadTypeService } from '@/services/novedadTypeService';
 
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -214,24 +222,6 @@ interface ExtendedAgreement extends Agreement {
     sundayIs100?: boolean;
 }
 
-const NOVEDAD_TYPES = [
-    'Vacaciones',
-    'Matrimonio',
-    'Maternidad',
-    'Nacimiento / Paternidad',
-    'Fallecimiento Familiar',
-    'Examen / Estudio',
-    'Mudanza',
-    'Donación de Sangre',
-    'Licencia Esp.',
-    'Enfermedad',
-    'ART',
-    'PG Permiso Gremial',
-    'Sin Goce de Sueldo',
-    'Suspensión',
-    'Injustificada',
-] as const;
-
 export default function EmployeesPage() {
   const { empresaId, empresa, empresas } = useEmpresa();
   const { isSuperAdmin: authIsSuperAdmin, rolePermissions } = useAuth();
@@ -242,7 +232,23 @@ export default function EmployeesPage() {
   const canAdjust = authIsSuperAdmin || (rolePermissions['RRHH'] || []).includes('adjust');
   const [currentUserName, setCurrentUserName] = useState("Cargando...");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'legajos' | 'ausencias' | 'feriados' | 'convenios' | 'correcciones'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'legajos' | 'ausencias' | 'tipos_novedad' | 'feriados' | 'convenios' | 'correcciones'>('dashboard');
+  const [novedadTypes, setNovedadTypes] = useState<NovedadType[]>([]);
+  const activeNovedadLabels = useMemo(
+    () => {
+      const labels = novedadTypes.filter((t) => t.status === 'ACTIVE').map((t) => t.label);
+      const unique: string[] = [];
+      const seen = new Set<string>();
+      for (const l of labels) {
+        const k = l.trim().toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        unique.push(l);
+      }
+      return unique.length > 0 ? unique : [...NOVEDAD_TYPE_LABELS_FALLBACK];
+    },
+    [novedadTypes],
+  );
   const [view, setView] = useState<'list' | 'form'>('list');
   const [selectedEmp, setSelectedEmp] = useState<any | null>(null); // Changed type to any to avoid strict interface blocking
   const [employees, setEmployees] = useState<any[]>([]); // Changed to any[]
@@ -466,6 +472,24 @@ export default function EmployeesPage() {
   };
 
   useEffect(() => { loadData(); loadClientsAndObjectives(); loadAbsences(); loadHolidays(); loadAgreements(); }, [empresaId, migracionCompleta]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!empresaId) {
+      setNovedadTypes([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await novedadTypeService.ensureSeeded(empresaId);
+        if (!cancelled) setNovedadTypes(rows);
+      } catch (e) {
+        console.error('[rrhh] tipos_novedad', e);
+        if (!cancelled) setNovedadTypes([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [empresaId]);
 
   useEffect(() => {
     if (scopeEmpresa && !empresaId) {
@@ -1154,7 +1178,11 @@ export default function EmployeesPage() {
     const auth = getAuth();
     const u = auth.currentUser;
     const nombreReal = u?.displayName || u?.email || 'Usuario Desconocido';
-    const absenceType = RRHH_ABSENCE_LABEL_TO_CODE[absenceForm.type] || inferAbsenceCode({ type: absenceForm.type });
+    const configured = findNovedadTypeByLabel(novedadTypes, absenceForm.type);
+    const absenceType =
+      configured?.code ||
+      RRHH_ABSENCE_LABEL_TO_CODE[absenceForm.type] ||
+      inferAbsenceCode({ type: absenceForm.type });
     const dataToSave = {
       ...absenceForm,
       startDate: range.startDate,
@@ -1931,6 +1959,7 @@ export default function EmployeesPage() {
                             { id: 'dashboard',    label: 'Dashboard',    icon: BarChart2 },
                             { id: 'legajos',      label: 'Legajos',      icon: Users },
                             { id: 'ausencias',    label: 'Novedades',    icon: AlertTriangle },
+                            { id: 'tipos_novedad', label: 'Tipos',        icon: Tag },
                             { id: 'feriados',     label: 'Feriados',     icon: Calendar },
                             { id: 'convenios',    label: 'Convenios',    icon: Book },
                             { id: 'correcciones', label: 'Correcciones', icon: ClipboardEdit },
@@ -2867,6 +2896,14 @@ export default function EmployeesPage() {
             )}
 
             {/* OTROS TABS (AUSENCIAS, FERIADOS, CONVENIOS - SIN CAMBIOS) */}
+            {activeTab === 'tipos_novedad' && empresaId && (
+                <TiposNovedadTab
+                    empresaId={empresaId}
+                    canEdit={isSuperAdmin || (rolePermissions['RRHH'] || []).includes('update') || (rolePermissions['RRHH'] || []).includes('create')}
+                    onToast={(msg, type) => addToast(msg, type || 'info')}
+                    onTypesChanged={setNovedadTypes}
+                />
+            )}
             {activeTab === 'feriados' && (<div className="flex-1 flex gap-6 overflow-hidden"><div className="w-1/3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6"><h3 className="text-lg font-black text-slate-900 dark:text-white uppercase mb-4">Gestión Feriados</h3><div className="bg-indigo-50 dark:bg-indigo-900/30 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800 mb-6"><label className="text-[10px] font-black uppercase text-indigo-600 mb-2 block">Importar Oficiales</label><div className="flex gap-2"><select className={selectClass} value={syncYear} onChange={e => setSyncYear(parseInt(e.target.value))}><option value={2024}>2024</option><option value={2025}>2025</option><option value={2026}>2026</option></select><button onClick={handleSyncHolidays} disabled={isSyncing} className="flex-1 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 hover:bg-indigo-700 transition-colors">{isSyncing ? '...' : <><Download size={14}/> Sincronizar</>}</button></div></div><div className="space-y-4 pt-4 border-t dark:border-slate-700"><p className="text-[10px] font-black uppercase text-slate-400">Carga Manual</p><input className={inputClass} value={holidayForm.name} onChange={e => setHolidayForm({...holidayForm, name: e.target.value})} placeholder="Nombre del Feriado"/><input type="date" className={inputClass} value={holidayForm.date} onChange={e => setHolidayForm({...holidayForm, date: e.target.value})}/><button onClick={handleSaveHoliday} className="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase text-xs">Guardar Manual</button></div></div><div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-auto custom-scrollbar"><div className="grid grid-cols-1 gap-3">{holidays.map(h => (<div key={h.id} className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border dark:border-slate-700"><div className="flex items-center gap-4"><Calendar size={20} className="text-indigo-500"/><div><p className="font-black dark:text-white uppercase">{h.name}</p><p className="text-xs font-mono text-slate-500">{new Date(h.date + 'T00:00:00').toLocaleDateString()}</p></div></div><button onClick={() => handleDeleteHoliday(h.id!)} className="text-slate-400 hover:text-rose-500"><X size={20}/></button></div>))}</div></div></div>)}
             {activeTab === 'convenios' && (<div className="flex-1 flex gap-6 overflow-hidden"><div className="w-1/3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-y-auto"><h3 className="text-lg font-black text-slate-900 dark:text-white uppercase mb-4 flex items-center gap-2">{isEditingAgreement ? <Edit2 size={18}/> : <Book size={18}/>} {isEditingAgreement ? 'Editar' : 'Nuevo'} Convenio</h3><div className="space-y-4"><div><label className={labelClass}>Nombre</label><input className={inputClass} value={agreementForm.name} onChange={e => setAgreementForm({...agreementForm, name: e.target.value})}/></div><div className="grid grid-cols-2 gap-4"><div><label className={labelClass}>Semanal (hs)</label><input type="number" className={inputClass} value={agreementForm.maxHoursWeekly} onChange={e => setAgreementForm({...agreementForm, maxHoursWeekly: parseInt(e.target.value)})}/></div><div><label className={labelClass}>Mensual (hs)</label><input type="number" className={inputClass} value={agreementForm.maxHoursMonthly} onChange={e => setAgreementForm({...agreementForm, maxHoursMonthly: parseInt(e.target.value)})}/></div></div><div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border dark:border-slate-700"><label className={labelClass}>Sábados &gt; 13hs</label><div className="flex gap-2"><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 0})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 0 ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>NORMAL</button><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 50})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 50 ? 'bg-emerald-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>50%</button><button onClick={() => setAgreementForm({...agreementForm, saturdayRate: 100})} className={`flex-1 py-2 rounded-lg text-[10px] font-black ${agreementForm.saturdayRate === 100 ? 'bg-rose-500 text-white' : 'bg-white dark:bg-slate-800 text-slate-400'}`}>100%</button></div></div><div className="space-y-2"><div className="flex items-center gap-2"><input type="checkbox" checked={agreementForm.paysDoubleOnFranco} onChange={e => setAgreementForm({...agreementForm, paysDoubleOnFranco: e.target.checked})}/><span className="text-xs font-bold dark:text-white">Paga Franco Trabajado 100%</span></div><div className="flex items-center gap-2"><input type="checkbox" checked={agreementForm.holidayIsPlus} onChange={e => setAgreementForm({...agreementForm, holidayIsPlus: e.target.checked})}/><span className="text-xs font-bold dark:text-white text-emerald-600">Feriados se pagan como PLUS</span></div><div className="flex items-center gap-2"><input type="checkbox" checked={agreementForm.sundayIs100} onChange={e => setAgreementForm({...agreementForm, sundayIs100: e.target.checked})}/><span className="text-xs font-bold dark:text-white">Domingos al 100%</span></div></div><div className="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border dark:border-slate-700"><label className={labelClass}>Categorías</label><div className="flex gap-2 mb-2"><input className="flex-1 p-2 bg-white dark:bg-slate-800 rounded-lg text-xs text-slate-900 dark:text-white" value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="Ej: Vigilador"/><button onClick={handleAddCategory} className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><Plus size={14}/></button></div><div className="flex flex-wrap gap-2">{agreementForm.categories.map((c, idx) => (<span key={idx} className="px-2 py-1 bg-white dark:bg-slate-800 rounded-lg text-[10px] font-bold border dark:border-slate-600 flex items-center gap-1">{c} <button onClick={() => removeCategory(idx)} className="text-rose-500"><X size={10}/></button></span>))}</div></div><div className="flex gap-2">{isEditingAgreement && <button onClick={() => { setIsEditingAgreement(false); setAgreementForm(initialAgreement); }} className="px-4 py-3 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs uppercase">Cancelar</button>}<button onClick={handleSaveAgreement} className="flex-1 bg-amber-500 text-white py-3 rounded-xl font-black uppercase text-xs">Guardar</button></div></div></div><div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-6 overflow-auto custom-scrollbar"><div className="grid grid-cols-1 md:grid-cols-2 gap-3">{agreements.map(a => (<div key={a.id} className="p-5 bg-slate-50 dark:bg-slate-900 rounded-xl border dark:border-slate-700 relative group"><div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => handleEditAgreement(a)} className="text-slate-300 hover:text-indigo-500"><Edit2 size={18}/></button><button onClick={() => handleDeleteAgreement(a.id!)} className="text-slate-300 hover:text-rose-500"><Trash2 size={18}/></button></div><h3 className="font-black text-slate-800 dark:text-white uppercase mb-2">{a.name}</h3><div className="space-y-1 text-xs text-slate-500"><p>Semanal: {a.maxHoursWeekly}hs | Mensual: {a.maxHoursMonthly}hs</p><p>Sábado &gt; 13hs: <span className="font-bold text-indigo-500">{a.saturdayRate === 0 ? 'Normal' : a.saturdayRate + '%'}</span></p><p className="flex gap-2 mt-2">{a.holidayIsPlus && <span className="bg-emerald-100 text-emerald-700 px-2 rounded-full text-[9px] font-bold">Feriado PLUS</span>}{a.paysDoubleOnFranco && <span className="bg-indigo-100 text-indigo-700 px-2 rounded-full text-[9px] font-bold">Franco 100%</span>}</p></div></div>))}</div></div></div>)}
             {activeTab === 'correcciones' && (
@@ -2901,6 +2938,7 @@ export default function EmployeesPage() {
                     coberturaBadgeClass={coberturaBadgeClass}
                     handleOpenAbsenceModal={handleOpenAbsenceModal}
                     handleDeleteAbsence={handleDeleteAbsence}
+                    novedadTypeLabels={activeNovedadLabels}
                 />
             )}
         </div>
@@ -3256,20 +3294,29 @@ export default function EmployeesPage() {
                                     value={absenceForm.type}
                                     onChange={e => {
                                         const type = e.target.value;
+                                        const configured = findNovedadTypeByLabel(novedadTypes, type);
+                                        const medical = configured
+                                          ? configured.medicalVerification
+                                          : absenceNeedsMedicalVerification({ type });
                                         setAbsenceForm(f => {
-                                            const medical = absenceNeedsMedicalVerification({ type });
                                             let status = f.status;
                                             if (medical && (status === 'Pendiente' || status === 'Autorizada')) {
                                                 status = 'En verificación';
                                             } else if (!medical && status === 'En verificación') {
                                                 status = 'Pendiente';
                                             }
-                                            return { ...f, type, status };
+                                            const endFromDefault = endDateFromDefaultDays(f.startDate, configured?.defaultDays);
+                                            return {
+                                              ...f,
+                                              type,
+                                              status,
+                                              ...(endFromDefault ? { endDate: endFromDefault } : {}),
+                                            };
                                         });
                                     }}
                                     className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
                                 >
-                                    {NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                                    {activeNovedadLabels.map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
                             </div>
                             <div>
@@ -3279,14 +3326,22 @@ export default function EmployeesPage() {
                                     onChange={e => setAbsenceForm(f => ({...f, status: e.target.value as Absence['status']}))}
                                     className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
                                 >
-                                    {(absenceNeedsMedicalVerification(absenceForm)
-                                        ? ['En verificación', 'Justificada', 'Injustificada', 'Rechazada']
-                                        : ['Pendiente', 'Autorizada', 'Justificada', 'Injustificada', 'Rechazada']
-                                    ).map(s => <option key={s} value={s}>{s}</option>)}
+                                    {((() => {
+                                        const configured = findNovedadTypeByLabel(novedadTypes, absenceForm.type);
+                                        const medical = configured
+                                          ? configured.medicalVerification
+                                          : absenceNeedsMedicalVerification(absenceForm);
+                                        return medical
+                                          ? ['En verificación', 'Justificada', 'Injustificada', 'Rechazada']
+                                          : ['Pendiente', 'Autorizada', 'Justificada', 'Injustificada', 'Rechazada'];
+                                    })()).map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
                             </div>
                         </div>
-                        {absenceNeedsMedicalVerification(absenceForm) && absenceForm.status === 'En verificación' && (
+                        {((() => {
+                          const configured = findNovedadTypeByLabel(novedadTypes, absenceForm.type);
+                          return configured ? configured.medicalVerification : absenceNeedsMedicalVerification(absenceForm);
+                        })()) && absenceForm.status === 'En verificación' && (
                             <p className="text-[10px] font-bold text-violet-600 -mt-2">
                                 Enfermedad/ART: impacta planificación de inmediato. Verificá el certificado para pasar a Justificada o Injustificada.
                             </p>
@@ -3299,11 +3354,14 @@ export default function EmployeesPage() {
                                     value={absenceForm.startDate}
                                     onChange={e => {
                                         const startDate = e.target.value;
-                                        setAbsenceForm(f => ({
-                                            ...f,
-                                            startDate,
-                                            endDate: f.endDate && f.endDate < startDate ? startDate : f.endDate,
-                                        }));
+                                        setAbsenceForm(f => {
+                                            const configured = findNovedadTypeByLabel(novedadTypes, f.type);
+                                            const endFromDefault = endDateFromDefaultDays(startDate, configured?.defaultDays);
+                                            let endDate = f.endDate;
+                                            if (endFromDefault) endDate = endFromDefault;
+                                            else if (endDate && endDate < startDate) endDate = startDate;
+                                            return { ...f, startDate, endDate };
+                                        });
                                     }}
                                     className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
                                 />

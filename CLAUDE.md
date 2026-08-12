@@ -102,6 +102,7 @@ cronoapp/
 | `clients` | Clientes con array `objetivos[]` embebido |
 | `empleados` | Legajos. Campo `uid` = Firebase Auth UID |
 | `ausencias` | Ausencias/licencias. `shiftId` vincula con turno. `origin: 'AUTO_T30'` = generada automáticamente |
+| `tipos_novedad` | Catálogo parametrizable de tipos RRHH por empresa (label, código grilla, `defaultDays`, flags). Soft delete `status: INACTIVE`. Seed incluye MAVIC (mutual SUVICO) |
 | `novedades` | Alertas operativas. `shiftId` vincula con turno |
 | `planificacion_estados` | Publicación de planificación. Key: `${objectiveId}_${year}_${month}` |
 | `servicios_sla` | Contratos/SLA con estructura de puestos y turnos permitidos |

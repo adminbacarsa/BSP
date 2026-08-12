@@ -280,6 +280,14 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    // Catálogo de tipos de novedad RRHH (parametrizable por empresa). Soft delete vía status.
+    match /tipos_novedad/{typeId} {
+      allow read: if tenantAdminRead() || isAdmin();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if false;
+    }
+
     match /servicios_sla/{slaId} {
       allow read: if isSuperAdmin() || tenantAdminRead() || request.auth != null;
       allow create: if tenantAdminCreate();

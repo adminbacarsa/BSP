@@ -42,24 +42,7 @@ function useCountdownTo2359(startDate: string | undefined) {
   return remaining;
 }
 import type { Absence } from '@/services/absenceService';
-
-const NOVEDAD_TYPES = [
-    'Vacaciones',
-    'Matrimonio',
-    'Maternidad',
-    'Nacimiento / Paternidad',
-    'Fallecimiento Familiar',
-    'Examen / Estudio',
-    'Mudanza',
-    'Donación de Sangre',
-    'Licencia Esp.',
-    'Enfermedad',
-    'ART',
-    'PG Permiso Gremial',
-    'Sin Goce de Sueldo',
-    'Suspensión',
-    'Injustificada',
-] as const;
+import { NOVEDAD_TYPE_LABELS_FALLBACK } from '@/lib/rrhh/novedadTypes';
 
 function SelectionBox({
   checked,
@@ -116,6 +99,7 @@ export interface AusenciasTabProps {
   coberturaBadgeClass: (estado?: string) => string;
   handleOpenAbsenceModal: (a?: Absence) => void;
   handleDeleteAbsence: (id: string) => void;
+  novedadTypeLabels?: string[];
 }
 
 export default function AusenciasTab({
@@ -146,7 +130,11 @@ export default function AusenciasTab({
   coberturaBadgeClass,
   handleOpenAbsenceModal,
   handleDeleteAbsence,
+  novedadTypeLabels,
 }: AusenciasTabProps) {
+  const typeOptions = (novedadTypeLabels && novedadTypeLabels.length > 0)
+    ? novedadTypeLabels
+    : [...NOVEDAD_TYPE_LABELS_FALLBACK];
   const [showDayPicker, setShowDayPicker] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
 
@@ -210,7 +198,7 @@ export default function AusenciasTab({
           onChange={e => setAbsenceTypeFilter(e.target.value)}
         >
           <option value="">Todos los tipos</option>
-          {NOVEDAD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          {typeOptions.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
 
         <select

@@ -9,6 +9,16 @@ export const RRHH_ABSENCE_TYPES = new Set([
   'PG Permiso Gremial',
   'ART',
   'Injustificada',
+  'MAVIC',
+  'Matrimonio',
+  'Maternidad',
+  'Nacimiento / Paternidad',
+  'Fallecimiento Familiar',
+  'Examen / Estudio',
+  'Mudanza',
+  'Donación de Sangre',
+  'Sin Goce de Sueldo',
+  'Suspensión',
 ]);
 
 const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
@@ -18,6 +28,16 @@ const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
   'PG Permiso Gremial': 'PG',
   ART: 'A',
   Injustificada: 'AA',
+  MAVIC: 'L',
+  Matrimonio: 'L',
+  Maternidad: 'L',
+  'Nacimiento / Paternidad': 'L',
+  'Fallecimiento Familiar': 'L',
+  'Examen / Estudio': 'L',
+  Mudanza: 'L',
+  'Donación de Sangre': 'L',
+  'Sin Goce de Sueldo': 'SGS',
+  Suspensión: 'SUS',
 };
 
 export function resolveLeaveCode(

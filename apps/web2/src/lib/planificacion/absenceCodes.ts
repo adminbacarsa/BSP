@@ -59,6 +59,8 @@ export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     'mudanza': 'L',
     'donacion de sangre': 'L',
     'donación de sangre': 'L',
+    // MAVIC — mutual capacitación SUVICO (Córdoba)
+    'mavic': 'L',
     // Sin goce de sueldo
     'sin goce de sueldo': 'SGS',
     'sin goce': 'SGS',
@@ -93,6 +95,7 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
     'Examen / Estudio': 'L',
     'Mudanza': 'L',
     'Donación de Sangre': 'L',
+    'MAVIC': 'L',
     // Sin goce de sueldo
     'Sin Goce de Sueldo': 'SGS',
     // Suspensión disciplinaria
@@ -115,6 +118,7 @@ export const RRHH_ABSENCE_TYPES = [
     'Examen / Estudio',
     'Mudanza',
     'Donación de Sangre',
+    'MAVIC',
     'Licencia Esp.',
     'PG Permiso Gremial',
     'Sin Goce de Sueldo',
@@ -156,6 +160,7 @@ export const REQUIRES_AUTHORIZATION_TYPES = new Set([
     'Examen / Estudio',
     'Mudanza',
     'Donación de Sangre',
+    'MAVIC',
     'Sin Goce de Sueldo',
 ]);
 
@@ -200,6 +205,7 @@ export function inferAbsenceCode(doc: any): string {
     if (t.includes('enferm')) return 'E';
     if (t.includes('art')) return 'A';
     if (t.includes('gremial')) return 'PG';
+    if (t.includes('mavic')) return 'L';
     if (t.includes('licen')) return 'L';
     if (t.includes('injust') || t.includes('aa')) return 'AA';
     if (t.includes('sin goce') || t === 'sgs') return 'SGS';
