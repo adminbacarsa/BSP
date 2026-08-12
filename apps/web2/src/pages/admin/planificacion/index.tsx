@@ -20,7 +20,8 @@ import {
 
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
-import { db } from '@/lib/firebase';
+import { db, getDocsOnce } from '@/lib/firebase';
+import { eventoService, eventosParaFecha, calcHorasEvento, type Evento } from '@/services/eventoService';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 
@@ -338,6 +339,7 @@ const SHIFT_STYLES: any = {
     'TURA': 'bg-red-600 text-white border-red-700 font-black',
     'EXTENDED': 'bg-red-600 text-white border-red-700 font-black shadow-sm',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
+    'EV':  'bg-yellow-400 text-yellow-900 border-yellow-500 font-black',
     'PG':  'bg-white text-blue-700 border-blue-400 font-black',
     'LOCKED': 'bg-slate-200 text-slate-500 border-slate-300 pattern-grid',
     'PAST':   'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed',
@@ -392,6 +394,7 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'SWAP': 'Intercambio de Turno',
     'SWAP_PENDING': 'Intercambio pendiente de autorización',
     'EXTENDED': 'Turno extendido o adelantado (cobertura / horas extra)',
+    'EV': 'Evento especial (recital, partido, operativo)',
 };
 
 const SHIFT_RANGES: Record<string, string> = {
@@ -434,7 +437,7 @@ const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 const PLANNING_ENGINE_VERSION = '2.8';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
-    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'RFZ': 8, 'TURA': 8, 'ESC': 8, 'C': 8,
+    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'RFZ': 8, 'TURA': 8, 'ESC': 8, 'C': 8, 'EV': 8,
 };
 
 /**
@@ -1112,6 +1115,14 @@ export default function PlanificacionPage() {
     const [showConflictModal, setShowConflictModal] = useState(false);
     const [conflictNeighbors, setConflictNeighbors] = useState<{prev: any, next: any} | null>(null);
 
+    // --- EVENTOS ---
+    const [eventos, setEventos] = useState<Evento[]>([]);
+    const [showEventoCreateModal, setShowEventoCreateModal] = useState(false);
+    const [eventoForm, setEventoForm] = useState<Partial<Evento>>({ status: 'activo', horaInicio: '08:00', horaFin: '20:00', cupoGuardias: 5 });
+    const [eventoFormSaving, setEventoFormSaving] = useState(false);
+    /** Key del crono-cell (empId_dateStr) que muestra el sub-picker de evento */
+    const [eventoPickerKey, setEventoPickerKey] = useState<string | null>(null);
+
     // Clipboard para copy/paste/cut de celdas + deshacer (Ctrl+Z) sobre pendingChanges
     const [clipboard, setClipboard] = useState<Array<{relRow: number; relCol: number; shift: any | null}> | null>(null);
     const [clipboardDim, setClipboardDim] = useState<{rows: number; cols: number} | null>(null);
@@ -1427,6 +1438,17 @@ export default function PlanificacionPage() {
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, [cronoFullscreen, toolbarMoreOpen]);
+
+    // Cargar eventos de la empresa para el mes visible
+    useEffect(() => {
+        if (!empresaId) return;
+        const yr = currentDate.getFullYear();
+        const mo = currentDate.getMonth() + 1;
+        const fromDate = `${yr}-${String(mo).padStart(2, '0')}-01`;
+        const lastDay = new Date(yr, mo, 0).getDate();
+        const toDate = `${yr}-${String(mo).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+        eventoService.getByEmpresaAndRange(empresaId, fromDate, toDate).then(setEventos).catch(console.error);
+    }, [empresaId, currentDate]);
 
     // ============================================================================
     // 2. UTILIDADES Y HELPERS (NIVEL 1 - Definidos ANTES de usarse)
@@ -5572,6 +5594,10 @@ export default function PlanificacionPage() {
                         }
                         if (change.shiftGroupId) turnoPayload.shiftGroupId = change.shiftGroupId;
                         if (change.isSecondBlock) turnoPayload.isSecondBlock = true;
+                        if (change.eventoId) {
+                            turnoPayload.eventoId = change.eventoId;
+                            turnoPayload.eventoNombre = change.eventoNombre || null;
+                        }
 
                         batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
                         bumpBatchOp();
@@ -10204,6 +10230,18 @@ export default function PlanificacionPage() {
                             </div>
 
                             <div className="flex-shrink-0 flex items-center gap-2 no-print">
+                                {/* EVENTOS — solo expandido */}
+                                {!toolbarCollapsed && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setEventoForm({ status: 'activo', horaInicio: '08:00', horaFin: '20:00', cupoGuardias: 5 }); setShowEventoCreateModal(true); }}
+                                        title="Crear nuevo evento especial"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border bg-yellow-50 text-yellow-800 border-yellow-300 hover:bg-yellow-100 shadow-sm"
+                                    >
+                                        <Calendar size={12}/>
+                                        EVENTOS {eventos.length > 0 && <span className="bg-yellow-400 text-yellow-900 rounded-full px-1.5 py-0.5 text-[9px] font-black">{eventos.length}</span>}
+                                    </button>
+                                )}
                                 {/* CRONOGRAMAS — solo expandido */}
                                 {!toolbarCollapsed && (
                                     <button
@@ -12374,6 +12412,69 @@ export default function PlanificacionPage() {
                                                         >
                                                             <span>ESC</span><span className="text-[8px]">Escuela</span>
                                                         </button>
+                                                        {/* Botón EV: aparece si hay eventos activos ese día */}
+                                                        {(() => {
+                                                            const cellKey = `${selectedCell.empId}_${selectedCell.dateStr}`;
+                                                            const evsDia = eventosParaFecha(eventos, selectedCell.dateStr);
+                                                            if (evsDia.length === 0) return null;
+                                                            const isPickerOpen = eventoPickerKey === cellKey;
+                                                            return (
+                                                                <div className="col-span-3">
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            if (isServiceLocked) return;
+                                                                            if (evsDia.length === 1) {
+                                                                                const ev = evsDia[0];
+                                                                                handleAssignShift({
+                                                                                    code: 'EV',
+                                                                                    name: ev.nombre,
+                                                                                    hours: ev.horasEvento,
+                                                                                    startTime: ev.horaInicio,
+                                                                                    endTime: ev.horaFin,
+                                                                                    eventoId: ev.id,
+                                                                                    eventoNombre: ev.nombre,
+                                                                                }, 'Evento');
+                                                                            } else {
+                                                                                setEventoPickerKey(isPickerOpen ? null : cellKey);
+                                                                            }
+                                                                        }}
+                                                                        disabled={isServiceLocked}
+                                                                        className="w-full p-2 bg-yellow-400 text-yellow-900 border border-yellow-500 rounded-lg flex items-center justify-center gap-2 font-black disabled:opacity-40"
+                                                                        title="Asignar turno Evento"
+                                                                    >
+                                                                        <span>EV</span>
+                                                                        <span className="text-[9px] font-bold truncate max-w-[120px]">
+                                                                            {evsDia.length === 1 ? evsDia[0].nombre : `${evsDia.length} eventos`}
+                                                                        </span>
+                                                                    </button>
+                                                                    {isPickerOpen && evsDia.length > 1 && (
+                                                                        <div className="mt-1 flex flex-col gap-1 bg-yellow-50 border border-yellow-300 rounded-lg p-2">
+                                                                            {evsDia.map(ev => (
+                                                                                <button
+                                                                                    key={ev.id}
+                                                                                    onClick={() => {
+                                                                                        setEventoPickerKey(null);
+                                                                                        handleAssignShift({
+                                                                                            code: 'EV',
+                                                                                            name: ev.nombre,
+                                                                                            hours: ev.horasEvento,
+                                                                                            startTime: ev.horaInicio,
+                                                                                            endTime: ev.horaFin,
+                                                                                            eventoId: ev.id,
+                                                                                            eventoNombre: ev.nombre,
+                                                                                        }, 'Evento');
+                                                                                    }}
+                                                                                    className="text-left px-2 py-1.5 rounded text-xs font-bold text-yellow-900 hover:bg-yellow-200 flex justify-between"
+                                                                                >
+                                                                                    <span>{ev.nombre}</span>
+                                                                                    <span className="text-[10px] font-normal opacity-70">{ev.horaInicio}–{ev.horaFin} · {ev.horasEvento}hs</span>
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 </>
                                             );
@@ -16262,6 +16363,164 @@ export default function PlanificacionPage() {
                         >
                             {savingGrupo ? <Loader2 size={13} className="animate-spin"/> : <Save size={13}/>}
                             {grupoFormMode === 'new' ? 'Crear grupo' : 'Guardar cambios'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+        {/* MODAL CREAR EVENTO */}
+        {showEventoCreateModal && (
+            <div className="fixed inset-0 z-[9100] bg-slate-900/60 flex items-center justify-center p-4" onClick={() => setShowEventoCreateModal(false)}>
+                <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                    <div className="p-5 border-b bg-yellow-50 flex items-center gap-3">
+                        <div className="p-2 bg-yellow-400 rounded-xl"><Calendar size={18} className="text-yellow-900"/></div>
+                        <div>
+                            <h3 className="font-black text-base text-slate-900 uppercase">Nuevo Evento</h3>
+                            <p className="text-[11px] text-yellow-700 font-bold mt-0.5">Servicio especial / evento puntual</p>
+                        </div>
+                        <button className="ml-auto p-1.5 hover:bg-yellow-100 rounded-lg" onClick={() => setShowEventoCreateModal(false)}><X size={16}/></button>
+                    </div>
+                    <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+                        <div>
+                            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Nombre del evento *</label>
+                            <input
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                placeholder="Ej: Recital Bad Bunny, Partido Talleres vs Racing..."
+                                value={eventoForm.nombre || ''}
+                                onChange={e => setEventoForm(p => ({ ...p, nombre: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Cliente *</label>
+                            <input
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                placeholder="Nombre del cliente"
+                                value={eventoForm.clienteNombre || ''}
+                                onChange={e => setEventoForm(p => ({ ...p, clienteNombre: e.target.value, clienteId: e.target.value.toLowerCase().replace(/\s+/g, '_') }))}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Fecha principal *</label>
+                            <input
+                                type="date"
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                value={eventoForm.fecha || ''}
+                                onChange={e => setEventoForm(p => ({ ...p, fecha: e.target.value }))}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Fechas adicionales (separadas por coma)</label>
+                            <input
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                placeholder="Ej: 2026-08-20, 2026-08-21"
+                                value={(eventoForm.fechas || []).join(', ')}
+                                onChange={e => {
+                                    const vals = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                                    setEventoForm(p => ({ ...p, fechas: vals }));
+                                }}
+                            />
+                        </div>
+                        <div className="flex gap-3">
+                            <div className="flex-1">
+                                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Desde</label>
+                                <input
+                                    type="time"
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                    value={eventoForm.horaInicio || '08:00'}
+                                    onChange={e => {
+                                        const hi = e.target.value;
+                                        const horas = calcHorasEvento(hi, eventoForm.horaFin || '20:00');
+                                        setEventoForm(p => ({ ...p, horaInicio: hi, horasEvento: horas }));
+                                    }}
+                                />
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Hasta</label>
+                                <input
+                                    type="time"
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                    value={eventoForm.horaFin || '20:00'}
+                                    onChange={e => {
+                                        const hf = e.target.value;
+                                        const horas = calcHorasEvento(eventoForm.horaInicio || '08:00', hf);
+                                        setEventoForm(p => ({ ...p, horaFin: hf, horasEvento: horas }));
+                                    }}
+                                />
+                            </div>
+                            <div className="w-20">
+                                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Horas</label>
+                                <div className="border border-slate-200 bg-slate-50 rounded-lg px-3 py-2 text-sm font-black text-center text-yellow-800">
+                                    {eventoForm.horasEvento ?? calcHorasEvento(eventoForm.horaInicio || '08:00', eventoForm.horaFin || '20:00')}h
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Cupo de guardias</label>
+                            <input
+                                type="number"
+                                min={1}
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                value={eventoForm.cupoGuardias ?? 5}
+                                onChange={e => setEventoForm(p => ({ ...p, cupoGuardias: parseInt(e.target.value) || 1 }))}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Descripción (opcional)</label>
+                            <textarea
+                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                rows={2}
+                                placeholder="Detalles adicionales del evento..."
+                                value={eventoForm.descripcion || ''}
+                                onChange={e => setEventoForm(p => ({ ...p, descripcion: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+                    <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                        <button onClick={() => setShowEventoCreateModal(false)} className="px-4 py-2 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-100">Cancelar</button>
+                        <button
+                            disabled={eventoFormSaving || !eventoForm.nombre?.trim() || !eventoForm.clienteNombre?.trim() || !eventoForm.fecha}
+                            onClick={async () => {
+                                if (!eventoForm.nombre?.trim() || !eventoForm.fecha || !empresaId) return;
+                                setEventoFormSaving(true);
+                                try {
+                                    const horas = calcHorasEvento(eventoForm.horaInicio || '08:00', eventoForm.horaFin || '20:00');
+                                    const newEvento: Omit<Evento, 'id'> = {
+                                        empresaId,
+                                        nombre: eventoForm.nombre.trim(),
+                                        descripcion: eventoForm.descripcion?.trim() || '',
+                                        clienteId: eventoForm.clienteId || eventoForm.clienteNombre!.toLowerCase().replace(/\s+/g, '_'),
+                                        clienteNombre: eventoForm.clienteNombre!.trim(),
+                                        fecha: eventoForm.fecha!,
+                                        fechas: eventoForm.fechas?.filter(Boolean) || [],
+                                        horaInicio: eventoForm.horaInicio || '08:00',
+                                        horaFin: eventoForm.horaFin || '20:00',
+                                        horasEvento: horas,
+                                        cupoGuardias: eventoForm.cupoGuardias || 1,
+                                        status: 'activo',
+                                        creadoPor: activeActorName || 'Sistema',
+                                    };
+                                    await eventoService.add(newEvento);
+                                    // Refrescar lista de eventos del mes
+                                    const yr = currentDate.getFullYear();
+                                    const mo = currentDate.getMonth() + 1;
+                                    const fromDate = `${yr}-${String(mo).padStart(2, '0')}-01`;
+                                    const lastDay = new Date(yr, mo, 0).getDate();
+                                    const toDate = `${yr}-${String(mo).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+                                    const refreshed = await eventoService.getByEmpresaAndRange(empresaId, fromDate, toDate);
+                                    setEventos(refreshed);
+                                    setShowEventoCreateModal(false);
+                                    toast.success(`Evento "${newEvento.nombre}" creado`);
+                                } catch (err) {
+                                    console.error(err);
+                                    toast.error('Error al crear el evento');
+                                } finally {
+                                    setEventoFormSaving(false);
+                                }
+                            }}
+                            className="px-5 py-2 rounded-lg text-sm font-black bg-yellow-400 text-yellow-900 hover:bg-yellow-500 disabled:opacity-40 flex items-center gap-2"
+                        >
+                            {eventoFormSaving ? <Loader2 size={13} className="animate-spin"/> : <Plus size={13}/>}
+                            Crear evento
                         </button>
                     </div>
                 </div>
