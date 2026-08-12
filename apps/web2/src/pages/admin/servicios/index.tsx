@@ -3,7 +3,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
-import { db } from '@/lib/firebase';
+import { db, getDocsOnce } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
 import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, writeBatch, doc, Timestamp, limit } from 'firebase/firestore';
@@ -211,7 +211,7 @@ export default function ServiciosSLAPage() {
           console.error('Error cargando clientes:', e);
           return [] as any[];
         }),
-        getDocs(q),
+        getDocsOnce(q),
       ]);
 
       setClients(clientRows);
@@ -261,7 +261,7 @@ export default function ServiciosSLAPage() {
       : query(collection(db, 'turnos'),
           where('startTime', '>=', Timestamp.fromDate(rangeStart)),
           where('startTime', '<=', Timestamp.fromDate(rangeEnd)));
-    getDocs(q).then(snap => {
+    getDocsOnce(q).then(snap => {
       const rows = snap.docs
         .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
         .map(d => ({ id: d.id, ...(d.data() as any) }))

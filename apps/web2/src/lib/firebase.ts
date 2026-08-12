@@ -68,6 +68,32 @@ export function onSnapshotFresh(ref: any, ...args: any[]): Unsubscribe {
   );
 }
 
+/**
+ * Lectura única sin listener persistente.
+ * Usa onSnapshot internamente para aprovechar memoryLocalCache en el emulador
+ * (getDocs con longPolling puede tardar 60 s esperando el servidor).
+ * - Emulador: resuelve en el primer callback (desde cache de sesión, inmediato).
+ * - Producción: resuelve cuando llegan datos del servidor (omite fromCache).
+ * Se desuscribe automáticamente tras el primer resultado útil.
+ */
+export function getDocsOnce<T = any>(ref: Query<T> | CollectionReference<T>): Promise<QuerySnapshot<T>> {
+  return new Promise<QuerySnapshot<T>>((resolve, reject) => {
+    const unsub = _onSnapshot(
+      ref,
+      { includeMetadataChanges: !_USE_EMULATOR_FOR_SNAPSHOT },
+      (snap: QuerySnapshot<T>) => {
+        // Emulador: acepta el primer resultado (cache de sesión es fresco).
+        // Producción: espera resultado del servidor (fromCache=false).
+        if (_USE_EMULATOR_FOR_SNAPSHOT || !snap.metadata.fromCache) {
+          unsub();
+          resolve(snap);
+        }
+      },
+      (err) => { unsub(); reject(err); },
+    );
+  });
+}
+
 const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
 /**

@@ -1,5 +1,5 @@
 
-import { db } from '@/lib/firebase';
+import { db, getDocsOnce } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
 import { empresaScopedQuery, filterSlaRowsByEmpresa, filterRowsByEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 
@@ -200,12 +200,12 @@ export const slaService = {
       const q = scope
         ? query(empresaScopedQuery('clients', opts!.empresaId!, true) as ReturnType<typeof query>, orderBy('name'))
         : query(collection(db, 'clients'), orderBy('name'));
-      const s = await getDocs(q);
+      const s = await getDocsOnce(q);
       return filterRowsByEmpresa(
         s.docs.map(d => {
         const data = d.data();
-        return { 
-          id: d.id, 
+        return {
+          id: d.id,
           name: data.name || data.fantasyName || 'Sin Nombre',
           objectives: data.objetivos || data.objectives || [],
           empresaId: data.empresaId,
@@ -217,7 +217,7 @@ export const slaService = {
     } catch (e) {
       if (opts?.scopeEmpresa && opts.empresaId) {
         try {
-          const s = await getDocs(empresaScopedQuery('clients', opts.empresaId, true) as ReturnType<typeof query>);
+          const s = await getDocsOnce(empresaScopedQuery('clients', opts.empresaId, true) as ReturnType<typeof query>);
           return filterRowsByEmpresa(
             s.docs.map(d => {
               const data = d.data();
