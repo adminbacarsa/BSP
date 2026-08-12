@@ -7,6 +7,8 @@
  *   - Hs Reales = Σ rDur de todos los turnos del ciclo, donde rDur viene de
  *     realStartTime/realEndTime (o checkInTime/checkOutTime). Si no hay
  *     fichada, el turno NO suma a Hs Reales y se agrega un warning.
+ *   - hoursMode='planned': usa startTime/endTime planificados como horas reales;
+ *     no requiere fichada (útil para cálculos previos al cierre del período).
  *   - Hs Teóricas = Σ duración planificada (endTime − startTime). Códigos no
  *     laborales (F, FF, FP, AA, V, L, A, E, PG, RET) suman 0.
  *   - Al 100% (FT) = Σ horas reales de turnos con isFrancoTrabajado o code=FT.
@@ -14,6 +16,7 @@
  *   - Plus Feriado = horas reales en fechas listadas en colección `feriados`.
  *   - Bolsa 200hs = Hs Reales − Al 100% (FT y feriado se pagan aparte).
  *   - Hs Simples = min(Bolsa, 200). Al 50% = max(0, Bolsa − 200).
+ *   - Novedades RRHH: cualquier código no mapeado suma a `otrosDias`.
  */
 import * as admin from 'firebase-admin';
 import type { CycleRange } from './cycle';
@@ -26,8 +29,9 @@ const SHIFT_HOURS_FALLBACK: Record<string, number> = {
     M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 8, FT: 0,
 };
 
-// RRHH novedades (días pagos / días no pagos)
-const RRHH_CODE_MAP: Record<string, keyof RrhhNovedades> = {
+// RRHH novedades — códigos conocidos CCT 422/05.
+// Cualquier código no listado suma a `otrosDias` para no perderse silenciosamente.
+const RRHH_CODE_MAP: Record<string, keyof Omit<RrhhNovedades, 'otrosDias'>> = {
     V: 'vacacionesDias',
     L: 'licenciaEspecialDias',
     E: 'enfermedadDias',
@@ -43,6 +47,8 @@ export interface RrhhNovedades {
     licenciaEspecialDias: number;
     permisoGremialDias: number;
     injustificadaDias: number;
+    /** Días de ausencias con códigos no reconocidos (para futura extensibilidad). */
+    otrosDias: number;
 }
 
 export interface EmployeeLiquidacion {
@@ -84,6 +90,7 @@ export interface LiquidacionSnapshot {
     cycleStart: string;
     cycleEnd: string;
     cctVersion: '422/05';
+    hoursMode: 'planned' | 'real';
     generatedAt: string;
     lockedAt: string | null;
     empresaId: string;
@@ -156,12 +163,19 @@ const datesBetween = (start: Date, end: Date): string[] => {
     return out;
 };
 
-interface BuildSnapshotParams {
+export interface BuildSnapshotParams {
     cycle: CycleRange;
     empresaId: string;
     clientIdFilter?: string;
     page?: number;
     pageSize?: number;
+    /**
+     * 'real' (default): usa fichada (realStartTime/realEndTime o checkIn/checkOut).
+     *   Turnos sin fichada generan warning y no suman a Hs Reales.
+     * 'planned': usa los tiempos planificados (startTime/endTime) como horas reales.
+     *   Útil para calcular la liquidación antes de que todos los turnos estén fichados.
+     */
+    hoursMode?: 'planned' | 'real';
 }
 
 export async function buildLiquidacionSnapshot(
@@ -171,6 +185,7 @@ export async function buildLiquidacionSnapshot(
     const { cycle, empresaId } = params;
     const page = Math.max(1, params.page || 1);
     const pageSize = Math.min(500, Math.max(1, params.pageSize || 100));
+    const hoursMode: 'planned' | 'real' = params.hoursMode === 'planned' ? 'planned' : 'real';
 
     // 1) Empleados de la empresa (para mapear nombres / DNI / CUIL).
     let empQuery: FirebaseFirestore.Query = db.collection('empleados');
@@ -246,6 +261,7 @@ export async function buildLiquidacionSnapshot(
                 licenciaEspecialDias: 0,
                 permisoGremialDias: 0,
                 injustificadaDias: 0,
+                otrosDias: 0,
             },
         };
         acc.set(empId, cur);
@@ -262,7 +278,6 @@ export async function buildLiquidacionSnapshot(
 
         const empId = data.employeeId;
         if (!empId || empId === 'VACANTE') return;
-        // Solo consideramos turnos de empleados conocidos en esta empresa.
         if (empresaId && !empMap.has(empId)) return;
 
         const code = String(data.code || '').trim().toUpperCase();
@@ -296,41 +311,52 @@ export async function buildLiquidacionSnapshot(
         }
         a.hsTeoricas += plannedDur;
 
-        // Fichada real.
-        const rStartRaw = tsToDate(data.realStartTime) ?? tsToDate(data.checkInTime);
-        const rEndRaw = tsToDate(data.realEndTime) ?? tsToDate(data.checkOutTime);
-        const rStart = rStartRaw ? clampStart(rStartRaw, start, 5) : null;
-        const rEnd = rEndRaw ? clampEnd(rEndRaw, end, 5) : null;
-        let rDur: number | null = null;
-        if (rStart && rEnd) {
-            const rd = (rEnd.getTime() - rStart.getTime()) / 3600000;
-            if (rd >= 0 && rd <= 36) rDur = rd;
-        }
+        if (zeroHours) return;
 
-        if (zeroHours) {
-            // Códigos no laborales: 0 horas reales, no sumamos a la liquidación.
-            return;
-        }
+        // Resolver horas de trabajo según hoursMode.
+        let workStart: Date;
+        let workEnd: Date;
+        let workDur: number;
 
-        if (rDur == null) {
-            a.warnings.push(
-                `Turno ${doc.id} (${code} ${dateKey(start)}) sin fichada — no suma a Hs Reales.`,
-            );
-            return;
+        if (hoursMode === 'planned') {
+            // Usa tiempos planificados directamente — no requiere fichada.
+            workStart = start;
+            workEnd = end;
+            workDur = plannedDur;
+        } else {
+            // Modo real: requiere fichada.
+            const rStartRaw = tsToDate(data.realStartTime) ?? tsToDate(data.checkInTime);
+            const rEndRaw = tsToDate(data.realEndTime) ?? tsToDate(data.checkOutTime);
+            const rStart = rStartRaw ? clampStart(rStartRaw, start, 5) : null;
+            const rEnd = rEndRaw ? clampEnd(rEndRaw, end, 5) : null;
+            let rDur: number | null = null;
+            if (rStart && rEnd) {
+                const rd = (rEnd.getTime() - rStart.getTime()) / 3600000;
+                if (rd >= 0 && rd <= 36) rDur = rd;
+            }
+            if (rDur == null) {
+                a.warnings.push(
+                    `Turno ${doc.id} (${code} ${dateKey(start)}) sin fichada — no suma a Hs Reales.`,
+                );
+                return;
+            }
+            workStart = rStart!;
+            workEnd = rEnd!;
+            workDur = rDur;
         }
 
         a.turnosConFichada++;
-        a.hsReales += rDur;
+        a.hsReales += workDur;
 
-        const night = getNightDuration(rStart!, rEnd!);
-        const day = Math.max(0, rDur - night);
+        const night = getNightDuration(workStart, workEnd);
+        const day = Math.max(0, workDur - night);
         a.diurnas += day;
         a.nocturnas += night;
 
         const isFT = data.isFrancoTrabajado === true || code === 'FT';
-        if (isFT) a.al100FT += rDur;
+        if (isFT) a.al100FT += workDur;
 
-        if (holidays.has(dateKey(start))) a.plusFeriado += rDur;
+        if (holidays.has(dateKey(start))) a.plusFeriado += workDur;
     });
 
     // Ausencias / RRHH novedades — solo se cuentan días aprobados que solapan ciclo.
@@ -356,16 +382,21 @@ export async function buildLiquidacionSnapshot(
 
         const a = getAcc(empId);
         const code = String(data.absenceType || data.codigo || '').toUpperCase();
-        const mappedField = RRHH_CODE_MAP[code];
-        if (!mappedField) return;
 
-        // Contar días dentro del ciclo.
         const allDays = datesBetween(start, end);
         let count = 0;
         for (const dStr of allDays) {
             if (overlapsDay(cycle.cycleStart, cycle.cycleEnd, dStr)) count++;
         }
-        if (count > 0) (a.rrhh as any)[mappedField] += count;
+        if (count <= 0) return;
+
+        const mappedField = RRHH_CODE_MAP[code];
+        if (mappedField) {
+            (a.rrhh as any)[mappedField] += count;
+        } else {
+            // Código no reconocido — lo acumulamos en otrosDias para no silenciarlo.
+            a.rrhh.otrosDias += count;
+        }
     });
 
     // Armar items finales con bolsa 200hs y paginación.
@@ -424,6 +455,7 @@ export async function buildLiquidacionSnapshot(
         cycleStart: cycle.cycleStartStr,
         cycleEnd: cycle.cycleEndStr,
         cctVersion: '422/05',
+        hoursMode,
         generatedAt: new Date().toISOString(),
         lockedAt,
         empresaId,

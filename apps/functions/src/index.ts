@@ -1712,9 +1712,40 @@ export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 
 // =========================================================
-// Payroll API (HTTP) — para sistemas de liquidaciÃ³n externos
+// Payroll API (HTTP) — para sistemas de liquidación externos
 // =========================================================
 export { payrollApi } from './payroll-api/handler';
+
+// Callable interna — usada por el panel admin (/admin/liquidaciones).
+// No requiere API Key; valida Firebase Auth.
+export const getPayrollSnapshotInternal = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .https.onCall(async (data: any, context) => {
+        if (!context.auth) {
+            throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
+        }
+        const { parseCycleId } = await import('./payroll-api/cycle');
+        const { buildLiquidacionSnapshot } = await import('./payroll-api/calc');
+        const cycleId = String(data?.cycleId || '');
+        const empresaId = String(data?.empresaId || '');
+        const cycle = parseCycleId(cycleId);
+        if (!cycle) {
+            throw new functions.https.HttpsError('invalid-argument', 'cycleId debe tener formato YYYY-MM.');
+        }
+        if (!empresaId) {
+            throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+        }
+        const hoursMode: 'planned' | 'real' = data?.hoursMode === 'planned' ? 'planned' : 'real';
+        return buildLiquidacionSnapshot({
+            cycle,
+            empresaId,
+            clientIdFilter: data?.clientIdFilter ? String(data.clientIdFilter) : undefined,
+            page: data?.page ? Number(data.page) : 1,
+            pageSize: data?.pageSize ? Number(data.pageSize) : 500,
+            hoursMode,
+        });
+    });
 
 export const sendTestNotification = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');

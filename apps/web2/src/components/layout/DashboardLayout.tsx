@@ -11,7 +11,7 @@ import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -31,6 +31,7 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/reportes'))        return 'Reportes';
   if (pathname.startsWith('/admin/rrhh'))            return 'RRHH';
   if (pathname.startsWith('/admin/guia'))            return 'Guía';
+  if (pathname.startsWith('/admin/liquidaciones'))    return 'Liquidaciones';
   if (pathname.startsWith('/admin/configuracion'))   return 'Config';
   if (pathname.startsWith('/admin/empleados'))       return 'Empleados';
   if (pathname.startsWith('/admin/cotizador'))       return 'Cotizador';
@@ -616,6 +617,12 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
                   style={{ color: 'var(--sb-section)' }}>Sistema</div>
               )}
               {!sidebarOpen && <div className="h-2" />}
+              <Link href="/admin/liquidaciones" prefetch={false} title="Liquidaciones"
+                className={getLinkHoverClass('/admin/liquidaciones')}
+                style={getLinkStyle('/admin/liquidaciones')}>
+                <ClipboardList size={18} className="shrink-0" />
+                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Liquidaciones</span>}
+              </Link>
               <Link href="/admin/configuracion" prefetch={false} title="Configuración"
                 className={getLinkHoverClass('/admin/configuracion')}
                 style={getLinkStyle('/admin/configuracion')}>

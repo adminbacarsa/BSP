@@ -376,6 +376,14 @@
         { "fieldPath": "empresaId",            "order": "ASCENDING" },
         { "fieldPath": "preferredObjectiveId", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "ajustes_liquidacion",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "cycleId",   "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -80,12 +80,14 @@ async function handleLiquidacion(req: AuthedRequest, res: Response) {
         });
     }
     const empresaId = req.integration!.empresaId;
+    const hoursMode = req.query?.hoursMode === 'planned' ? 'planned' : 'real';
     const snapshot = await buildLiquidacionSnapshot({
         cycle,
         empresaId,
         clientIdFilter: req.query?.clientId ? String(req.query.clientId) : undefined,
         page: req.query?.page ? Number(req.query.page) : 1,
         pageSize: req.query?.pageSize ? Number(req.query.pageSize) : 100,
+        hoursMode,
     });
     json(res, 200, snapshot);
 }
