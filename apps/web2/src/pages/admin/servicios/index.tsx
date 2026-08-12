@@ -196,24 +196,27 @@ export default function ServiciosSLAPage() {
       .catch(() => setCoverageEmps([]));
   }, [form.objectiveId, view]);
 
-  // Carga única de servicios_sla + clientes (sin listener persistente).
+  // Carga única de servicios_sla + clientes en paralelo (sin listener persistente).
   // Las mutaciones (create/edit/delete) actualizan el estado local directamente.
   const loadServices = useCallback(async () => {
     if (!empresaId) return;
     setLoading(true);
     try {
-      let clientRows: any[] = [];
-      try {
-        clientRows = await slaService.getClients({ empresaId, scopeEmpresa });
-        setClients(clientRows);
-      } catch (e) {
-        console.error('Error cargando clientes:', e);
-      }
-      const clientIds = new Set(clientRows.map((c) => c.id));
       const q = scopeEmpresa
         ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
         : query(collection(db, 'servicios_sla'), limit(500));
-      const snapshot = await getDocs(q);
+
+      const [clientRows, snapshot] = await Promise.all([
+        slaService.getClients({ empresaId, scopeEmpresa }).catch((e) => {
+          console.error('Error cargando clientes:', e);
+          return [] as any[];
+        }),
+        getDocs(q),
+      ]);
+
+      setClients(clientRows);
+      const clientIds = new Set(clientRows.map((c: any) => c.id));
+
       let adaptedData = snapshot.docs.map(d => {
         const data = d.data();
         return {
@@ -244,9 +247,9 @@ export default function ServiciosSLAPage() {
     void loadServices();
   }, [loadServices]);
 
-  // Turnos RFZ/TURA — carga única, acotada a ±1 mes. Sin listener persistente.
+  // Turnos RFZ/TURA — carga única al abrir el listado, acotada a ±1 mes.
   useEffect(() => {
-    if (!empresaId) return;
+    if (!empresaId || view === 'form') return;
     const now = new Date();
     const rangeStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59);
@@ -265,7 +268,7 @@ export default function ServiciosSLAPage() {
         .filter(t => ['RFZ', 'TURA'].includes(String(t.code || '').toUpperCase()));
       setRfzTuraExtras(rows);
     }).catch(e => console.error('[servicios] RFZ/TURA extras error:', e));
-  }, [empresaId, scopeEmpresa, migracionCompleta]);
+  }, [empresaId, scopeEmpresa, migracionCompleta, view]);
 
 
   // Auditoría en 'audit_logs'
