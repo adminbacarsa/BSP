@@ -3,7 +3,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
-import { db, onSnapshotFresh } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
 import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, writeBatch, doc, Timestamp, limit } from 'firebase/firestore';
@@ -196,66 +196,55 @@ export default function ServiciosSLAPage() {
       .catch(() => setCoverageEmps([]));
   }, [form.objectiveId, view]);
 
-  // ✅ Colección servicios_sla — sin orderBy(clientName): excluye docs legacy sin ese campo
-  useEffect(() => {
-      if (!empresaId) return;
-
-      let unsub: (() => void) | undefined;
-      let cancelled = false;
-
-      (async () => {
-        setLoading(true);
-        let clientRows: any[] = [];
-        try {
-          clientRows = await slaService.getClients({ empresaId, scopeEmpresa });
-          if (!cancelled) setClients(clientRows);
-        } catch (e) {
-          console.error('Error cargando clientes:', e);
-        }
-
-        const clientIds = new Set(clientRows.map((c) => c.id));
-
-        const q = scopeEmpresa
-            ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
-            : query(collection(db, 'servicios_sla'), limit(500));
-
-        unsub = onSnapshotFresh(q, (snapshot) => {
-            let adaptedData = snapshot.docs.map(doc => {
-                const data = doc.data();
-                return { 
-                    id: doc.id, 
-                    ...data,
-                    startDate: toYyyyMmDd(data.startDate),
-                    endDate: toYyyyMmDd(data.endDate),
-                    positions: data.positions || [] 
-                } as ServiceSLA;
-              });
-            if (scopeEmpresa) {
-              adaptedData = filterSlaRowsByEmpresa(adaptedData, empresaId, true, clientIds);
-            }
-            adaptedData.sort((a, b) =>
-              (a.clientName || a.objectiveName || '').localeCompare(b.clientName || b.objectiveName || '', 'es'),
-            );
-            setServices(adaptedData);
-            setDbStatus('online');
-            setLoading(false);
-        }, (error) => {
-            console.error("Error RealTime:", error);
-            setDbStatus('offline');
-            setLoading(false);
-            loadDataFallback(clientIds);
-        });
-      })();
-
-      return () => {
-        cancelled = true;
-        unsub?.();
-      };
+  // Carga única de servicios_sla + clientes (sin listener persistente).
+  // Las mutaciones (create/edit/delete) actualizan el estado local directamente.
+  const loadServices = useCallback(async () => {
+    if (!empresaId) return;
+    setLoading(true);
+    try {
+      let clientRows: any[] = [];
+      try {
+        clientRows = await slaService.getClients({ empresaId, scopeEmpresa });
+        setClients(clientRows);
+      } catch (e) {
+        console.error('Error cargando clientes:', e);
+      }
+      const clientIds = new Set(clientRows.map((c) => c.id));
+      const q = scopeEmpresa
+        ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
+        : query(collection(db, 'servicios_sla'), limit(500));
+      const snapshot = await getDocs(q);
+      let adaptedData = snapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          startDate: toYyyyMmDd(data.startDate),
+          endDate: toYyyyMmDd(data.endDate),
+          positions: data.positions || [],
+        } as ServiceSLA;
+      });
+      if (scopeEmpresa) {
+        adaptedData = filterSlaRowsByEmpresa(adaptedData, empresaId, true, clientIds);
+      }
+      adaptedData.sort((a, b) =>
+        (a.clientName || a.objectiveName || '').localeCompare(b.clientName || b.objectiveName || '', 'es'),
+      );
+      setServices(adaptedData);
+      setDbStatus('online');
+    } catch (error) {
+      console.error('Error cargando servicios:', error);
+      setDbStatus('offline');
+    } finally {
+      setLoading(false);
+    }
   }, [empresaId, scopeEmpresa]);
 
-  // Suscripción turnos RFZ/TURA — extras solicitados por cliente.
-  // Acotado a mes anterior + mes siguiente para no leer toda la colección.
-  // Índice usado: (empresaId, startTime) — ya existe en firestore.indexes.json.
+  useEffect(() => {
+    void loadServices();
+  }, [loadServices]);
+
+  // Turnos RFZ/TURA — carga única, acotada a ±1 mes. Sin listener persistente.
   useEffect(() => {
     if (!empresaId) return;
     const now = new Date();
@@ -269,28 +258,15 @@ export default function ServiciosSLAPage() {
       : query(collection(db, 'turnos'),
           where('startTime', '>=', Timestamp.fromDate(rangeStart)),
           where('startTime', '<=', Timestamp.fromDate(rangeEnd)));
-    const unsub = onSnapshotFresh(q, snap => {
+    getDocs(q).then(snap => {
       const rows = snap.docs
         .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
         .map(d => ({ id: d.id, ...(d.data() as any) }))
         .filter(t => ['RFZ', 'TURA'].includes(String(t.code || '').toUpperCase()));
       setRfzTuraExtras(rows);
-    }, (e) => console.error('[servicios] RFZ/TURA extras error:', e));
-    return unsub;
+    }).catch(e => console.error('[servicios] RFZ/TURA extras error:', e));
   }, [empresaId, scopeEmpresa, migracionCompleta]);
 
-  const loadDataFallback = async (clientIds?: Set<string>) => {
-    const ids = clientIds ?? new Set(clients.map((c) => c.id));
-    const data = await slaService.getAll({ empresaId, scopeEmpresa, clientIds: ids });
-    const adaptedData = data.map((d: any) => ({
-      ...d,
-      startDate: toYyyyMmDd(d.startDate),
-      endDate: toYyyyMmDd(d.endDate),
-      positions: d.positions || [],
-    }));
-    setServices(adaptedData);
-    setLoading(false);
-  };
 
   // Auditoría en 'audit_logs'
   const registrarAuditoria = async (accion: string, detalle: string) => {
@@ -1166,6 +1142,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
         clientObjetivos,
       );
       await registrarAuditoria('DELETE_CONTRACT', `Eliminó contrato: ${srv.clientName} - ${srv.objectiveName} (${r.deletedTurnos} turnos)`);
+      setServices(prev => prev.filter(s => s.id !== id));
       addToast(`Servicio eliminado con ${r.deletedTurnos} turno(s)`, 'success');
     } catch (e) {
       addToast(e instanceof TenantIsolationError ? e.message : 'Error al eliminar servicio', 'error');
@@ -1485,11 +1462,21 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 <p className="text-xs text-slate-400">Contratos, puestos y proyección de costos</p>
               </div>
             </div>
-            {canCreateService && (
-            <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
-              <Plus size={14}/> Nuevo Servicio
-            </button>
-            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void loadServices()}
+                disabled={loading}
+                title="Recargar servicios"
+                className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <RotateCw size={14} className={loading ? 'animate-spin' : ''}/>
+              </button>
+              {canCreateService && (
+              <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
+                <Plus size={14}/> Nuevo Servicio
+              </button>
+              )}
+            </div>
           </div>
 
           {/* Búsqueda y filtro cliente */}
