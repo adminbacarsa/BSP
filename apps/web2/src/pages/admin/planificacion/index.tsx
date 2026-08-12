@@ -187,6 +187,7 @@ import {
     describeVacancySplitPlan,
     resolveVacancySplitSegmentTimes,
     vacancySplitUsesManualExtraHours,
+    VACANCY_BAND_SCHEDULE,
     type VacancyDayCoverage,
 } from '@/lib/planificacion/vacancyCoverage';
 import { alignVacancyGapBand } from '@/lib/planificacion/vacancySplitBands';
@@ -6085,12 +6086,48 @@ export default function PlanificacionPage() {
             const resolved = resolveVacancyDayCoverage(dateStr, vacancyDayCoverages, selectedReplacement);
             if (resolved.mode === 'substitute') {
                 const emp = employees.find((e: any) => e.id === resolved.employeeId);
+                // Misma resolución que el modal («Cubrir: M») para que el FT herede esa banda
+                const rawTitular = resolveTitularVacancyWorkShift(
+                    vacancyData.employeeId,
+                    dateStr,
+                    shiftsMap,
+                    pendingChanges,
+                    getTypicalShift,
+                    (positionName, code) => slaBlocksForPositionShift(effectivePosStructure, positionName, code),
+                    { absenceBlockStart: vacancyData.startDate },
+                );
+                const prefPos = activePosition || rawTitular?.positionName || undefined;
+                const gapOptions = listVacancyGapBandOptions(effectivePosStructure, prefPos || null);
+                const hist = inferTitularGapBandFromHistory(
+                    vacancyData.employeeId,
+                    vacancyData.startDate,
+                    effectivePosStructure,
+                    prefPos || null,
+                    shiftsMap,
+                    pendingChanges,
+                );
+                const inferred = hist
+                    ? buildTitularVacancyFromGapOption(
+                        hist,
+                        'history_inferred',
+                        'Patrón previo al bloque (cronograma)',
+                        rawTitular?.rawShift,
+                    )
+                    : rawTitular;
+                const effectiveTitular = resolveEffectiveVacancyGapTitular(
+                    inferred,
+                    vacancyGapBandOverride,
+                    gapOptions,
+                    effectivePosStructure,
+                );
                 return {
                     dateStr,
                     coverage: {
                         mode: 'substitute' as const,
                         employeeId: resolved.employeeId,
                         employeeName: emp?.name ?? null,
+                        gapBand: effectiveTitular?.code || undefined,
+                        gapPosition: effectiveTitular?.positionName || activePosition || undefined,
                     },
                 };
             }
@@ -11627,6 +11664,27 @@ export default function PlanificacionPage() {
                                 const ABSENCE_FRANCO_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA']);
                                 const isWorkCode = (c: string) => !!c && !ABSENCE_FRANCO_CODES.has(c.toUpperCase());
                                 const resolveOriginalWorkShift = () => {
+                                    // 1) Código preservado al aplicar cobertura (banda que se cubrió)
+                                    const pendingTitular = pending && !pending.isDeleted ? pending : null;
+                                    const storedOrig = String(
+                                      pendingTitular?.originalCode || shift?.originalCode || '',
+                                    ).toUpperCase();
+                                    if (storedOrig && isWorkCode(storedOrig)) {
+                                        const posName = pendingTitular?.originalPositionName || shift?.originalPositionName || coveredPosition;
+                                        const h = SHIFT_HOURS_LOOKUP[storedOrig] || 8;
+                                        return {
+                                            code: storedOrig,
+                                            label: LEGEND_DESCRIPTIONS[storedOrig] || storedOrig,
+                                            schedule: VACANCY_BAND_SCHEDULE[storedOrig]
+                                              || formatShiftScheduleLabel(
+                                                { code: storedOrig, positionName: posName },
+                                                storedOrig,
+                                              ),
+                                            hours: h,
+                                            service: serviceName,
+                                            position: posName,
+                                        };
+                                    }
                                     if (coverageInfo?.shift && coverageInfo.code && NON_ABSENCE_CODES.has(coverageInfo.code)) {
                                         const h = Number(coverageInfo.shift.hours) || SHIFT_HOURS_LOOKUP[coverageInfo.code] || 8;
                                         return {
@@ -11638,7 +11696,6 @@ export default function PlanificacionPage() {
                                             position: coverageInfo.shift.positionName || coveredPosition,
                                         };
                                     }
-                                    const pendingTitular = pending && !pending.isDeleted ? pending : null;
                                     if (pendingTitular?.coveredBy && code && NON_ABSENCE_CODES.has(code)) {
                                         const h = Number(pendingTitular.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
                                         return {

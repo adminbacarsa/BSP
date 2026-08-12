@@ -251,7 +251,14 @@ export type VacancyDayCoverage =
 
 export type VacancyDayCoverageInput =
   | { mode: 'none' }
-  | { mode: 'substitute'; employeeId: string; employeeName: string | null }
+  | {
+      mode: 'substitute';
+      employeeId: string;
+      employeeName: string | null;
+      /** Banda elegida en el modal («Cubrir: M») — debe prevalecer sobre inferencia weekday/típico. */
+      gapBand?: string;
+      gapPosition?: string;
+    }
   | {
       mode: 'split';
       extEmpId: string;
@@ -537,9 +544,11 @@ function buildVacancySplitPackage(
  */
 function deriveFallbackWorkShift(
   input: ProcessVacancyInput,
+  overrideBand?: string | null,
+  overridePosition?: string | null,
 ): { code: string; hours: number; startTime: string; positionName: string; objectiveId?: string } | null {
-  const code = input.fallbackGapBand?.toUpperCase();
-  const activePos = String(input.activePosition || '').trim();
+  const code = String(overrideBand || input.fallbackGapBand || '').toUpperCase() || undefined;
+  const activePos = String(overridePosition || input.activePosition || '').trim();
   const pos = input.positionStructure?.find(p => String(p.positionName || '') === activePos)
     ?? input.positionStructure?.[0];
 
@@ -566,6 +575,43 @@ function deriveFallbackWorkShift(
     positionName: String(pos?.positionName || activePos || 'General'),
     objectiveId: input.selectedObjective,
   };
+}
+
+function mapRawToWorkShift(
+  raw: Record<string, any>,
+  selectedObjective?: string,
+): { code: string; hours: number; startTime: string; positionName: string; objectiveId?: string } {
+  return {
+    code: String(raw.code || '').toUpperCase(),
+    hours: Number(raw.hours) || 8,
+    startTime: raw.startTime || '00:00',
+    positionName: String(raw.positionName || 'General'),
+    objectiveId: raw.objectiveId || selectedObjective,
+  };
+}
+
+/**
+ * Turno que hereda el suplente/FT: prioriza gapBand del modal (misma fuente que «Cubrir: M»).
+ */
+function resolveSubstituteInheritedWorkShift(
+  input: ProcessVacancyInput,
+  coverage: Extract<VacancyDayCoverageInput, { mode: 'substitute' }>,
+  workShift: Record<string, any> | null,
+): { code: string; hours: number; startTime: string; positionName: string; objectiveId?: string } | null {
+  const preferredBand = String(coverage.gapBand || '').toUpperCase() || null;
+  const preferredPos = coverage.gapPosition || null;
+
+  if (preferredBand) {
+    const fromModal = deriveFallbackWorkShift(input, preferredBand, preferredPos);
+    if (fromModal) return fromModal;
+  }
+
+  if (workShift && isVacancyWorkCode(workShift.code)) {
+    const mapped = mapRawToWorkShift(workShift, input.selectedObjective);
+    if (!preferredBand || mapped.code === preferredBand) return mapped;
+  }
+
+  return deriveFallbackWorkShift(input, preferredBand, preferredPos);
 }
 
 export function applyVacancyCoverageToChanges(
@@ -605,8 +651,15 @@ export function applyVacancyCoverageToChanges(
     // workInfo ya filtró códigos no-laborales; no usar getTypicalShift como fallback porque
     // puede devolver F/E del titular (RRHH) y bloquear deriveFallbackWorkShift
     const workShift = workInfo?.rawShift ?? null;
-    // Cuando el titular no tiene turno, usar la banda elegida en el modal como fallback
-    const effectiveWorkShift = workShift ?? deriveFallbackWorkShift(input);
+    // Split / sin suplente: turno inferido o fallback del modal
+    let effectiveWorkShift = workShift
+      ? mapRawToWorkShift(workShift, input.selectedObjective)
+      : deriveFallbackWorkShift(input);
+
+    // Suplente/FT: la banda del modal («Cubrir: M») gana sobre weekday/típico/adyacente
+    if (coverage.mode === 'substitute') {
+      effectiveWorkShift = resolveSubstituteInheritedWorkShift(input, coverage, workShift);
+    }
 
     const coveredByLabel =
       coverage.mode === 'substitute' && coverage.employeeName
@@ -626,10 +679,21 @@ export function applyVacancyCoverageToChanges(
             )
           : undefined;
 
-    // Preservar código y puesto del turno planificado para que el modal de cobertura
-    // pueda recuperarlos si se reabre (solo cuando había turno ese día, no historial).
+    // Preservar siempre la banda efectivamente cubierta (modal o saved_day) para reabrir detalle
     const savedDayCode = workInfo?.source === 'saved_day' ? workInfo.code : undefined;
     const savedDayPosition = workInfo?.source === 'saved_day' ? workInfo.positionName : undefined;
+    const originalCode =
+      (coverage.mode === 'substitute' && coverage.gapBand
+        ? String(coverage.gapBand).toUpperCase()
+        : null)
+      || effectiveWorkShift?.code
+      || savedDayCode;
+    const originalPositionName =
+      (coverage.mode === 'substitute' && coverage.gapPosition
+        ? coverage.gapPosition
+        : null)
+      || effectiveWorkShift?.positionName
+      || savedDayPosition;
     newChanges[titularKey] = {
       code: absCode,
       name: input.vacancyData.type,
@@ -638,8 +702,8 @@ export function applyVacancyCoverageToChanges(
       startTime: '00:00',
       comments: `${input.vacancyData.type} — gestionado desde planificador`,
       coveredBy: coveredByLabel || undefined,
-      ...(savedDayCode ? { originalCode: savedDayCode } : {}),
-      ...(savedDayPosition ? { originalPositionName: savedDayPosition } : {}),
+      ...(originalCode ? { originalCode } : {}),
+      ...(originalPositionName ? { originalPositionName } : {}),
     };
 
     if (coverage.mode === 'substitute' && coverage.employeeId && effectiveWorkShift) {
@@ -660,6 +724,7 @@ export function applyVacancyCoverageToChanges(
         isFrancoTrabajado: suplOnFranco || undefined,
         isFranco: suplOnFranco ? false : undefined,
         comments: coverageCommentForTitular(titularName, input.vacancyData.type),
+        coversEmployeeId: titularId,
       };
       covered++;
     } else if (coverage.mode === 'split' && coverage.extEmpId && coverage.adelEmpId && effectiveWorkShift) {
