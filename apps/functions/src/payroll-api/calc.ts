@@ -120,6 +120,7 @@ export interface LiquidacionSnapshot {
         turnosDescartadosEmpresa: number;
         turnosDescartadosEmpleado: number;
         turnosSinHorario: number;
+        turnosBorrador: number;
         ausenciasContadas: number;
     };
 }
@@ -231,13 +232,22 @@ export async function buildLiquidacionSnapshot(
     // 1) Empleados (con scope multiempresa alineado al resto de COSP).
     const empDocs = await queryEmpleadosDocsScoped(db, empresaId, scopeEmpresa, 5000);
     const empMap = new Map<string, FirebaseFirestore.DocumentData>();
+    const empIdByLegajo = new Map<string, string>();
     for (const d of empDocs) {
         const data = d.data();
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) continue;
         const st = String(data.status || '').toLowerCase();
         if (st === 'inactive' || st === 'inactivo') continue;
         empMap.set(d.id, { id: d.id, ...data });
+        const legajo = String(data.fileNumber || data.legajo || '').trim();
+        if (legajo && !empIdByLegajo.has(legajo)) empIdByLegajo.set(legajo, d.id);
     }
+
+    const resolveEmpId = (raw: string): string | null => {
+        if (!raw || raw === 'VACANTE') return null;
+        if (empMap.has(raw)) return raw;
+        return empIdByLegajo.get(raw) || null;
+    };
 
     // 2) Feriados.
     const holidaysSnap = await db.collection('feriados').get();
@@ -255,6 +265,21 @@ export async function buildLiquidacionSnapshot(
         .where('startTime', '>=', tStart)
         .where('startTime', '<=', tEnd)
         .get();
+
+    let turnosDocs = turnosSnap.docs;
+    try {
+        const bySched = await db
+            .collection('turnos')
+            .where('scheduleDate', '>=', cycle.cycleStartStr)
+            .where('scheduleDate', '<=', cycle.cycleEndStr)
+            .get();
+        const seen = new Set(turnosDocs.map((d) => d.id));
+        for (const d of bySched.docs) {
+            if (!seen.has(d.id)) turnosDocs.push(d);
+        }
+    } catch {
+        // Sin índice scheduleDate: alcanza la query por startTime.
+    }
 
     // 4) Ausencias que pueden solapar el ciclo.
     const ausenciasSnap = await db
@@ -284,13 +309,21 @@ export async function buildLiquidacionSnapshot(
 
     const diagnostics = {
         empleadosEmpresa: empMap.size,
-        turnosEnRango: turnosSnap.size,
+        turnosEnRango: turnosDocs.length,
         turnosContados: 0,
         turnosDescartadosEmpresa: 0,
         turnosDescartadosEmpleado: 0,
         turnosSinHorario: 0,
+        turnosBorrador: 0,
         ausenciasContadas: 0,
     };
+
+    const isOperationalTurno = (data: any): boolean =>
+        data?.origin === 'RETEN' ||
+        data?.origin === 'OPERATIONS_COVERAGE' ||
+        data?.origin === 'SLA_VIRTUAL' ||
+        !!data?.isReten ||
+        data?.resolvedBy === 'OPERACIONES';
 
     const getAcc = (empId: string): Acc => {
         let cur = acc.get(empId);
@@ -332,7 +365,7 @@ export async function buildLiquidacionSnapshot(
         return belongsToEmpresaView(data, empresaId, migracionCompleta);
     };
 
-    turnosSnap.forEach((doc) => {
+    turnosDocs.forEach((doc) => {
         const data = doc.data() as any;
         if (!data) return;
         if (!turnoBelongs(data)) {
@@ -340,13 +373,17 @@ export async function buildLiquidacionSnapshot(
             return;
         }
         if (params.clientIdFilter && data.clientId !== params.clientIdFilter) return;
-        if (data.draft === true) return;
+        // Planificadas = mismo criterio que Reportes "Todos": incluye borrador del crono.
+        // Fichadas: solo publicados / operativos (un draft no fichado no liquida).
+        if (data.draft === true) {
+            diagnostics.turnosBorrador++;
+            if (hoursMode !== 'planned' && !isOperationalTurno(data)) return;
+        }
         if (data.isUnassigned === true) return;
         if (String(data.type || '').toUpperCase() === 'NOVEDAD') return;
 
-        const empId = String(data.employeeId || '').trim();
-        if (!empId || empId === 'VACANTE') return;
-        if (!empMap.has(empId)) {
+        const empId = resolveEmpId(String(data.employeeId || '').trim());
+        if (!empId) {
             diagnostics.turnosDescartadosEmpleado++;
             return;
         }
@@ -361,8 +398,16 @@ export async function buildLiquidacionSnapshot(
         a.turnosCount++;
         diagnostics.turnosContados++;
 
-        const start = tsToDate(data.startTime);
-        const end = tsToDate(data.endTime);
+        let start = tsToDate(data.startTime);
+        let end = tsToDate(data.endTime);
+        if ((!start || !end) && data.scheduleDate) {
+            const ds = String(data.scheduleDate).slice(0, 10);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) {
+                const h = SHIFT_HOURS_FALLBACK[code] ?? 8;
+                if (!start) start = new Date(`${ds}T07:00:00.000-03:00`);
+                if (!end) end = new Date(start.getTime() + h * 3600000);
+            }
+        }
         if (!start || !end) {
             diagnostics.turnosSinHorario++;
             a.warnings.push(`Turno ${doc.id} sin startTime/endTime válidos.`);
@@ -370,10 +415,13 @@ export async function buildLiquidacionSnapshot(
         }
 
         const isFT = data.isFrancoTrabajado === true || code === 'FT' || codeRaw === 'FT';
+        // En planificadas el cronograma manda: isAbsent no anula M/T/N (la novedad va por ausencias).
         const isAbsent =
-            data.isAbsent === true ||
-            status === 'ABSENT' ||
-            (status === '' && code === 'AA');
+            hoursMode !== 'planned' && (
+                data.isAbsent === true ||
+                status === 'ABSENT' ||
+                (status === '' && code === 'AA')
+            );
         const isUnjustAbsent = !PAID_LEAVE.has(code) && isAbsent;
         const zeroHours = (!isFT && ZERO_HOUR_CODES.has(code)) || isUnjustAbsent;
 
@@ -445,8 +493,8 @@ export async function buildLiquidacionSnapshot(
             return;
         }
 
-        const empId = String(data.employeeId || '').trim();
-        if (!empId || !empMap.has(empId)) return;
+        const empId = resolveEmpId(String(data.employeeId || '').trim());
+        if (!empId) return;
 
         const startStr = String(data.startDate || '').slice(0, 10);
         const endStr = String(data.endDate || startStr).slice(0, 10);

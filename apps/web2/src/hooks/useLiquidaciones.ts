@@ -72,6 +72,7 @@ export interface LiquidacionSnapshot {
         turnosDescartadosEmpresa: number;
         turnosDescartadosEmpleado: number;
         turnosSinHorario: number;
+        turnosBorrador?: number;
         ausenciasContadas: number;
     };
 }
