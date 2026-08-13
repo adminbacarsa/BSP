@@ -85,6 +85,7 @@ async function buildLiquidacionSnapshot(params) {
     const { cycle, empresaId } = params;
     const page = Math.max(1, params.page || 1);
     const pageSize = Math.min(500, Math.max(1, params.pageSize || 100));
+    const hoursMode = params.hoursMode === 'planned' ? 'planned' : 'real';
     let empQuery = db.collection('empleados');
     if (empresaId)
         empQuery = empQuery.where('empresaId', '==', empresaId);
@@ -136,6 +137,7 @@ async function buildLiquidacionSnapshot(params) {
                 licenciaEspecialDias: 0,
                 permisoGremialDias: 0,
                 injustificadaDias: 0,
+                otrosDias: 0,
             },
         };
         acc.set(empId, cur);
@@ -183,34 +185,46 @@ async function buildLiquidacionSnapshot(params) {
             }
         }
         a.hsTeoricas += plannedDur;
-        const rStartRaw = tsToDate(data.realStartTime) ?? tsToDate(data.checkInTime);
-        const rEndRaw = tsToDate(data.realEndTime) ?? tsToDate(data.checkOutTime);
-        const rStart = rStartRaw ? clampStart(rStartRaw, start, 5) : null;
-        const rEnd = rEndRaw ? clampEnd(rEndRaw, end, 5) : null;
-        let rDur = null;
-        if (rStart && rEnd) {
-            const rd = (rEnd.getTime() - rStart.getTime()) / 3600000;
-            if (rd >= 0 && rd <= 36)
-                rDur = rd;
-        }
-        if (zeroHours) {
+        if (zeroHours)
             return;
+        let workStart;
+        let workEnd;
+        let workDur;
+        if (hoursMode === 'planned') {
+            workStart = start;
+            workEnd = end;
+            workDur = plannedDur;
         }
-        if (rDur == null) {
-            a.warnings.push(`Turno ${doc.id} (${code} ${dateKey(start)}) sin fichada — no suma a Hs Reales.`);
-            return;
+        else {
+            const rStartRaw = tsToDate(data.realStartTime) ?? tsToDate(data.checkInTime);
+            const rEndRaw = tsToDate(data.realEndTime) ?? tsToDate(data.checkOutTime);
+            const rStart = rStartRaw ? clampStart(rStartRaw, start, 5) : null;
+            const rEnd = rEndRaw ? clampEnd(rEndRaw, end, 5) : null;
+            let rDur = null;
+            if (rStart && rEnd) {
+                const rd = (rEnd.getTime() - rStart.getTime()) / 3600000;
+                if (rd >= 0 && rd <= 36)
+                    rDur = rd;
+            }
+            if (rDur == null) {
+                a.warnings.push(`Turno ${doc.id} (${code} ${dateKey(start)}) sin fichada — no suma a Hs Reales.`);
+                return;
+            }
+            workStart = rStart;
+            workEnd = rEnd;
+            workDur = rDur;
         }
         a.turnosConFichada++;
-        a.hsReales += rDur;
-        const night = getNightDuration(rStart, rEnd);
-        const day = Math.max(0, rDur - night);
+        a.hsReales += workDur;
+        const night = getNightDuration(workStart, workEnd);
+        const day = Math.max(0, workDur - night);
         a.diurnas += day;
         a.nocturnas += night;
         const isFT = data.isFrancoTrabajado === true || code === 'FT';
         if (isFT)
-            a.al100FT += rDur;
+            a.al100FT += workDur;
         if (holidays.has(dateKey(start)))
-            a.plusFeriado += rDur;
+            a.plusFeriado += workDur;
     });
     ausenciasSnap.forEach((doc) => {
         const data = doc.data();
@@ -238,17 +252,21 @@ async function buildLiquidacionSnapshot(params) {
             return;
         const a = getAcc(empId);
         const code = String(data.absenceType || data.codigo || '').toUpperCase();
-        const mappedField = RRHH_CODE_MAP[code];
-        if (!mappedField)
-            return;
         const allDays = datesBetween(start, end);
         let count = 0;
         for (const dStr of allDays) {
             if (overlapsDay(cycle.cycleStart, cycle.cycleEnd, dStr))
                 count++;
         }
-        if (count > 0)
+        if (count <= 0)
+            return;
+        const mappedField = RRHH_CODE_MAP[code];
+        if (mappedField) {
             a.rrhh[mappedField] += count;
+        }
+        else {
+            a.rrhh.otrosDias += count;
+        }
     });
     const allItems = [];
     for (const [empId, a] of acc) {
@@ -299,6 +317,7 @@ async function buildLiquidacionSnapshot(params) {
         cycleStart: cycle.cycleStartStr,
         cycleEnd: cycle.cycleEndStr,
         cctVersion: '422/05',
+        hoursMode,
         generatedAt: new Date().toISOString(),
         lockedAt,
         empresaId,

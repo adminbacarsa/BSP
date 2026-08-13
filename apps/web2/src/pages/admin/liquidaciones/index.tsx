@@ -79,7 +79,7 @@ function CorrectionForm({ item, ajuste, hoursMode, onSave, onDelete, onClose }: 
         };
         ['hsReales','diurnas','nocturnas','al100FT','plusFeriado',
          'vacacionesDias','enfermedadDias','art','licenciaEspecialDias',
-         'permisoGremialDias','injustificadaDias','otrosDias'].forEach(k => trySet(k as keyof AjusteAdj));
+         'permisoGremialDias','injustificadaDias','retiroAnticipadoDias','otrosDias'].forEach(k => trySet(k as keyof AjusteAdj));
         return result;
     };
 
@@ -112,6 +112,7 @@ function CorrectionForm({ item, ajuste, hoursMode, onSave, onDelete, onClose }: 
         { key: 'licenciaEspecialDias', label: 'Lic. Especial', original: nov.licenciaEspecialDias, isInt: true },
         { key: 'permisoGremialDias', label: 'P. Gremial', original: nov.permisoGremialDias, isInt: true },
         { key: 'injustificadaDias', label: 'Injustificadas', original: nov.injustificadaDias, isInt: true },
+        { key: 'retiroAnticipadoDias', label: 'Retiro anticipado', original: nov.retiroAnticipadoDias ?? 0, isInt: true },
         { key: 'otrosDias', label: 'Otros', original: nov.otrosDias, isInt: true },
     ];
 
@@ -291,6 +292,7 @@ function LiqRow({ item, isExpanded, onToggle, ajuste, hoursMode, onSave, onDelet
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.licenciaEspecialDias > 0 ? '#10b981' : 'var(--txt3)' }}>{fmtD(n.licenciaEspecialDias)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.permisoGremialDias > 0 ? '#6366f1' : 'var(--txt3)' }}>{fmtD(n.permisoGremialDias)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.injustificadaDias > 0 ? '#ef4444' : 'var(--txt3)' }}>{fmtD(n.injustificadaDias)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: (n.retiroAnticipadoDias ?? 0) > 0 ? '#e11d48' : 'var(--txt3)' }}>{fmtD(n.retiroAnticipadoDias ?? 0)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.otrosDias > 0 ? '#8b5cf6' : 'var(--txt3)' }}>{fmtD(n.otrosDias)}</td>
                 {/* Expand toggle */}
                 <td className="px-3 py-2 text-right">
@@ -302,7 +304,7 @@ function LiqRow({ item, isExpanded, onToggle, ajuste, hoursMode, onSave, onDelet
             </tr>
             {isExpanded && (
                 <tr>
-                    <td colSpan={22} className="px-6 py-5 border-t border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surf2)' }}>
+                    <td colSpan={23} className="px-6 py-5 border-t border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surf2)' }}>
                         {hasWarnings && (
                             <div className="mb-4 p-3 rounded-lg border" style={{ borderColor: 'rgba(245,158,11,0.3)', backgroundColor: 'rgba(245,158,11,0.05)' }}>
                                 <p className="text-[10px] font-black uppercase text-amber-500 mb-1 tracking-widest">Advertencias</p>
@@ -905,6 +907,7 @@ export default function LiquidacionesPage() {
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#10b981' }}>L</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#6366f1' }}>PG</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#ef4444' }}>AA</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#e11d48' }}>RA</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#8b5cf6' }}>Otros</th>
                                         <th className="px-3 py-2 w-8" />
                                     </tr>
@@ -912,7 +915,7 @@ export default function LiquidacionesPage() {
                                 <tbody>
                                     {filteredItems.length === 0 ? (
                                         <tr>
-                                            <td colSpan={22} className="text-center py-16 text-sm font-bold" style={{ color: 'var(--txt3)' }}>
+                                            <td colSpan={23} className="text-center py-16 text-sm font-bold" style={{ color: 'var(--txt3)' }}>
                                                 {search ? 'Sin resultados para la búsqueda.' : 'Sin empleados en este ciclo.'}
                                             </td>
                                         </tr>
@@ -921,7 +924,7 @@ export default function LiquidacionesPage() {
                                             <React.Fragment key={item.employee.id}>
                                                 {idx > 0 && (
                                                     <tr aria-hidden="true">
-                                                        <td colSpan={22} className="h-px p-0" style={{ backgroundColor: 'var(--border)' }} />
+                                                        <td colSpan={23} className="h-px p-0" style={{ backgroundColor: 'var(--border)' }} />
                                                     </tr>
                                                 )}
                                                 <LiqRow
@@ -985,6 +988,7 @@ export default function LiquidacionesPage() {
                             ['L', 'Lic. Especial', '#10b981'],
                             ['PG', 'Permiso Gremial', '#6366f1'],
                             ['AA', 'Injustificada', '#ef4444'],
+                            ['RA', 'Retiro anticipado', '#e11d48'],
                             ['Otros', 'Códigos no mapeados', '#8b5cf6'],
                         ].map(([abbr, full, color]) => (
                             <span key={abbr} className="text-[10px] font-medium" style={{ color: 'var(--txt3)' }}>

@@ -16,6 +16,7 @@ export interface RrhhNovedades {
     licenciaEspecialDias: number;
     permisoGremialDias: number;
     injustificadaDias: number;
+    retiroAnticipadoDias: number;
     otrosDias: number;
 }
 
@@ -78,6 +79,7 @@ export interface AjusteAdj {
     licenciaEspecialDias?: number;
     permisoGremialDias?: number;
     injustificadaDias?: number;
+    retiroAnticipadoDias?: number;
     otrosDias?: number;
 }
 
@@ -248,6 +250,7 @@ export function applyAjuste(
     if (adj.licenciaEspecialDias !== undefined) novedadesRRHH.licenciaEspecialDias = adj.licenciaEspecialDias;
     if (adj.permisoGremialDias !== undefined) novedadesRRHH.permisoGremialDias = adj.permisoGremialDias;
     if (adj.injustificadaDias !== undefined) novedadesRRHH.injustificadaDias = adj.injustificadaDias;
+    if (adj.retiroAnticipadoDias !== undefined) novedadesRRHH.retiroAnticipadoDias = adj.retiroAnticipadoDias;
     if (adj.otrosDias !== undefined) novedadesRRHH.otrosDias = adj.otrosDias;
 
     const bolsa = Math.max(0, acumulado.hsReales - acumulado.al100FT);
@@ -283,7 +286,7 @@ export function buildLiquidacionCsv(
         'Legajo', 'Apellido y Nombre', 'DNI', 'CUIL',
         `Hs Teóricas`, `Hs ${modeLabel}`, 'Diurnas', 'Nocturnas',
         'FT 100%', 'Plus Feriado', 'Bolsa 200hs', 'Simples', 'Al 50%',
-        'Vacaciones', 'Enfermedad', 'ART', 'Lic. Especial', 'P. Gremial', 'Injustificadas', 'Otros',
+        'Vacaciones', 'Enfermedad', 'ART', 'Lic. Especial', 'P. Gremial', 'Injustificadas', 'Retiro anticipado', 'Otros',
         'Ajustado', 'Warnings',
     ].join(',');
 
@@ -302,7 +305,7 @@ export function buildLiquidacionCsv(
             a.al100FT, a.plusFeriado,
             l.bolsa, l.hsSimples, l.al50,
             n.vacacionesDias, n.enfermedadDias, n.art, n.licenciaEspecialDias,
-            n.permisoGremialDias, n.injustificadaDias, n.otrosDias,
+            n.permisoGremialDias, n.injustificadaDias, n.retiroAnticipadoDias ?? 0, n.otrosDias,
             it.hasAdjustment ? 'SI' : 'NO',
             esc(it.warnings.join(' | ')),
         ].join(',');

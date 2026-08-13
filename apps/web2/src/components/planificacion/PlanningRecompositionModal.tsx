@@ -17,6 +17,7 @@ import {
   listRecompositionTargets,
   neighborBandsForTarget,
   resolveRecompositionTargetForEmployee,
+  hoursBetweenTimes,
   type FrancoCoverageConflict,
 } from '@/lib/planificacion/planningRecompositionApply';
 
@@ -38,14 +39,8 @@ type NearbyGuard = { id: string; name?: string; code: string; role: 'ext' | 'ade
 type NearbyGroup = { objId: string; objName: string; clientName?: string; dist: number; guards: NearbyGuard[] };
 type NearbyResult = { groups: NearbyGroup[]; noGpsCount: number };
 
-const RRHH_TYPE_OPTIONS = [
-  'Enfermedad',
-  'Vacaciones',
-  'ART',
-  'Licencia Esp.',
-  'PG Permiso Gremial',
-  'Injustificada',
-] as const;
+/** Solo novedades que se pueden declarar desde planificación sin autorización gerencial. */
+const RRHH_TYPE_OPTIONS = ['Enfermedad', 'Injustificada'] as const;
 
 type Props = {
   dateStr: string;
@@ -117,6 +112,8 @@ export default function PlanningRecompositionModal({
   const [extTo, setExtTo] = useState('19:00');
   const [adelFrom, setAdelFrom] = useState('19:00');
   const [adelTo, setAdelTo] = useState('23:00');
+  const [cutTime, setCutTime] = useState('11:00');
+  const [titularStart, setTitularStart] = useState('07:00');
   const [redeployNote, setRedeployNote] = useState('');
   const [rrhhType, setRrhhType] = useState<string>('Enfermedad');
   const [rrhhReason, setRrhhReason] = useState('');
@@ -151,22 +148,19 @@ export default function PlanningRecompositionModal({
   );
 
   const visibleTargets = useMemo(() => {
-    if (mode === 'anticipated_absence' || mode === 'liberation') {
-      const working = targets.filter(t => t.kind === 'working');
-      if (!preselectedEmpId) return working;
-      return working.filter(t => t.employeeId === preselectedEmpId);
-    }
-    const byMode = targets.filter(t => t.kind === 'absence');
-    if (!preselectedEmpId) return byMode;
-    return byMode.filter(t => t.employeeId === preselectedEmpId);
-  }, [targets, mode, preselectedEmpId]);
+    // Los 3 modos del asistente operan sobre turno laboral (working).
+    // Cubrir ausencia ya declarada vive en el modal de vacante V/E.
+    const working = targets.filter(t => t.kind === 'working');
+    if (!preselectedEmpId) return working;
+    return working.filter(t => t.employeeId === preselectedEmpId);
+  }, [targets, preselectedEmpId]);
 
   const selectedTarget: RecompositionTarget | undefined = targets.find(t => t.employeeId === targetId)
-    || (preselectedTarget?.kind === 'working' && (mode === 'anticipated_absence' || mode === 'liberation') ? preselectedTarget : undefined)
-    || (preselectedTarget?.kind === 'absence' && mode === 'absence' ? preselectedTarget : undefined);
+    || (preselectedTarget?.kind === 'working' ? preselectedTarget : undefined);
 
   const canContinuePreselected = !!(
     preselectedTarget
+    && preselectedTarget.kind === 'working'
     && visibleTargets.some(t => t.employeeId === preselectedTarget.employeeId)
   );
 
@@ -190,9 +184,10 @@ export default function PlanningRecompositionModal({
   );
 
   const splitFrancoPreview = useMemo(() => {
-    if (!extEmpId || !adelEmpId) return [];
-    return collectSplitFrancoConflicts(dateStr, extEmpId, adelEmpId, employeesById, shiftsMap, pendingChanges);
-  }, [dateStr, extEmpId, adelEmpId, employeesById, shiftsMap, pendingChanges]);
+    if (!adelEmpId) return [];
+    if (mode !== 'early_departure' && !extEmpId) return [];
+    return collectSplitFrancoConflicts(dateStr, mode === 'early_departure' ? '' : extEmpId, adelEmpId, employeesById, shiftsMap, pendingChanges);
+  }, [dateStr, mode, extEmpId, adelEmpId, employeesById, shiftsMap, pendingChanges]);
 
   const WORKING_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'RET', 'REF', 'ESC', 'FT']);
 
@@ -282,6 +277,8 @@ export default function PlanningRecompositionModal({
     setExtTo(split.extTo);
     setAdelFrom(split.adelFrom);
     setAdelTo(split.adelTo);
+    setTitularStart(split.extFrom);
+    setCutTime(split.adelFrom);
     setExtEmpId('');
     setAdelEmpId('');
     setError('');
@@ -289,11 +286,12 @@ export default function PlanningRecompositionModal({
   };
 
   const pickTarget = (t: RecompositionTarget) => {
-    const nextMode: RecompositionMode = mode === 'liberation'
-      ? 'liberation'
-      : mode === 'absence'
-        ? 'absence'
-        : 'anticipated_absence';
+    const nextMode: RecompositionMode =
+      mode === 'liberation'
+        ? 'liberation'
+        : mode === 'early_departure'
+          ? 'early_departure'
+          : 'anticipated_absence';
     goToCoverageStep(t, nextMode);
   };
 
@@ -303,15 +301,16 @@ export default function PlanningRecompositionModal({
   };
 
   const applyPackage = (authorizeFrancoTrabajado: boolean) => {
-    if (!selectedTarget || !extEmpId || !adelEmpId) return;
+    if (!selectedTarget || !adelEmpId) return;
+    if (mode !== 'early_departure' && !extEmpId) return;
 
     let anticipatedAbsence: AnticipatedAbsenceDecl | undefined;
     let novedad: PendingAbsenceNovedad | undefined;
+    const empName = employeesById[selectedTarget.employeeId]?.name || preselectedEmployeeName || selectedTarget.employeeId;
 
     if (mode === 'anticipated_absence') {
       const code = RRHH_ABSENCE_LABEL_TO_CODE[rrhhType] || 'AA';
       anticipatedAbsence = { type: rrhhType, code, reason: rrhhReason.trim() };
-      const empName = employeesById[selectedTarget.employeeId]?.name || preselectedEmployeeName || selectedTarget.employeeId;
       novedad = {
         employeeId: selectedTarget.employeeId,
         employeeName: empName,
@@ -320,39 +319,67 @@ export default function PlanningRecompositionModal({
         type: rrhhType,
         reason: rrhhReason.trim(),
         status: 'APPROVED',
+        absenceType: code,
+        codigo: code,
+      };
+    }
+
+    if (mode === 'early_departure') {
+      const reason = rrhhReason.trim()
+        || `Retiro anticipado · trabajó ${titularStart}–${cutTime} · cubierto desde ${cutTime}`;
+      novedad = {
+        employeeId: selectedTarget.employeeId,
+        employeeName: empName,
+        startDate: dateStr,
+        endDate: dateStr,
+        type: 'Retiro anticipado',
+        reason,
+        status: 'APPROVED',
+        absenceType: 'RA',
+        codigo: 'RA',
       };
     }
 
     const pkg: RecompositionPackage = {
       id: `cov_${Date.now()}`,
-      type: mode === 'liberation' ? 'LIBERATION_RECOMPOSITION' : 'ABSENCE_COVERAGE',
+      type: mode === 'liberation'
+        ? 'LIBERATION_RECOMPOSITION'
+        : mode === 'early_departure'
+          ? 'EARLY_DEPARTURE_COVERAGE'
+          : 'ABSENCE_COVERAGE',
       mode,
       objectiveId,
       dateStr,
       target: selectedTarget,
-      gapFrom: extFrom,
+      gapFrom: mode === 'early_departure' ? cutTime : extFrom,
       gapTo: adelTo,
       gapPositionName: gapPos || selectedTarget.positionName,
-      extension: {
-        employeeId: extEmpId,
-        role: 'EXTENSION',
-        positionName: gapPos || selectedTarget.positionName,
-        fromTime: extFrom,
-        toTime: extTo,
-        homePositionName: activeExtCandidates.find(c => c.id === extEmpId)?.positionName,
-        baseCode: activeExtCandidates.find(c => c.id === extEmpId)?.code,
-      },
+      ...(mode !== 'early_departure' && extEmpId
+        ? {
+            extension: {
+              employeeId: extEmpId,
+              role: 'EXTENSION' as const,
+              positionName: gapPos || selectedTarget.positionName,
+              fromTime: extFrom,
+              toTime: extTo,
+              homePositionName: activeExtCandidates.find(c => c.id === extEmpId)?.positionName,
+              baseCode: activeExtCandidates.find(c => c.id === extEmpId)?.code,
+            },
+          }
+        : {}),
       earlyStart: {
         employeeId: adelEmpId,
         role: 'EARLY_START',
         positionName: gapPos || selectedTarget.positionName,
-        fromTime: adelFrom,
+        fromTime: mode === 'early_departure' ? cutTime : adelFrom,
         toTime: adelTo,
         baseCode: activeAdelCandidates.find(c => c.id === adelEmpId)?.code,
       },
       liberationReason: mode === 'liberation' ? 'EVENTO' : undefined,
       redeployNote: mode === 'liberation' ? redeployNote : undefined,
       anticipatedAbsence,
+      earlyDepartureCutTime: mode === 'early_departure' ? cutTime : undefined,
+      earlyDepartureStartTime: mode === 'early_departure' ? titularStart : undefined,
     };
 
     const updates = buildRecompositionPendingUpdates(pkg, {
@@ -369,22 +396,41 @@ export default function PlanningRecompositionModal({
 
   const handleConfirm = () => {
     setError('');
-    if (!selectedTarget || !extEmpId || !adelEmpId) {
-      setError('Completá guardia extensión, adelanto y objetivo.');
+    if (!selectedTarget || !adelEmpId) {
+      setError(mode === 'early_departure'
+        ? 'Elegí el guardia que adelanta (cobertura del resto del turno).'
+        : 'Completá guardia extensión, adelanto y objetivo.');
       return;
     }
-    if (extEmpId === adelEmpId) {
-      setError('Extensión y adelanto deben ser guardias distintos.');
-      return;
+    if (mode !== 'early_departure') {
+      if (!extEmpId) {
+        setError('Completá guardia extensión, adelanto y objetivo.');
+        return;
+      }
+      if (extEmpId === adelEmpId) {
+        setError('Extensión y adelanto deben ser guardias distintos.');
+        return;
+      }
+      if (extTo !== adelFrom) {
+        setError('Los tramos deben ser contiguos (fin ext = inicio adel).');
+        return;
+      }
     }
-    if (extTo !== adelFrom) {
-      setError('Los tramos deben ser contiguos (fin ext = inicio adel).');
-      return;
+    if (mode === 'early_departure') {
+      if (adelEmpId === selectedTarget.employeeId) {
+        setError('El cobertura no puede ser el mismo guardia que se retira.');
+        return;
+      }
+      const worked = hoursBetweenTimes(titularStart, cutTime);
+      if (worked < 0.5) {
+        setError('La hora de corte debe ser posterior al inicio del turno.');
+        return;
+      }
     }
 
     const francoConflicts = collectSplitFrancoConflicts(
       dateStr,
-      extEmpId,
+      mode === 'early_departure' ? '' : extEmpId,
       adelEmpId,
       employeesById,
       shiftsMap,
@@ -448,17 +494,17 @@ export default function PlanningRecompositionModal({
                   className={`p-3 rounded-xl border-2 text-left transition-colors ${mode === 'anticipated_absence' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}
                 >
                   <Bell size={16} className="text-amber-600 mb-1" />
-                  <div className="text-[11px] font-black text-slate-800">Ausencia anticipada</div>
-                  <div className="text-[9px] text-slate-500 leading-snug">Aviso de falta · RRHH + cobertura</div>
+                  <div className="text-[11px] font-black text-slate-800">Declarar novedad</div>
+                  <div className="text-[9px] text-slate-500 leading-snug">E / AA · día completo + cobertura</div>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMode('absence')}
-                  className={`p-3 rounded-xl border-2 text-left transition-colors ${mode === 'absence' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-300'}`}
+                  onClick={() => setMode('early_departure')}
+                  className={`p-3 rounded-xl border-2 text-left transition-colors ${mode === 'early_departure' ? 'border-rose-500 bg-rose-50' : 'border-slate-200 hover:border-slate-300'}`}
                 >
-                  <AlertTriangle size={16} className="text-indigo-600 mb-1" />
-                  <div className="text-[11px] font-black text-slate-800">Cubrir ausencia</div>
-                  <div className="text-[9px] text-slate-500">Ya cargada V/L/E/A</div>
+                  <Clock size={16} className="text-rose-600 mb-1" />
+                  <div className="text-[11px] font-black text-slate-800">Retiro anticipado</div>
+                  <div className="text-[9px] text-slate-500 leading-snug">Trabajó parte · corte + adelanto</div>
                 </button>
                 <button
                   type="button"
@@ -489,16 +535,8 @@ export default function PlanningRecompositionModal({
                 {visibleTargets.length === 0 && (
                   <p className="text-[10px] text-slate-500 py-4 text-center leading-relaxed px-2">
                     {preselectedEmpId && preselectedEmployeeName
-                      ? (mode === 'anticipated_absence'
-                        ? `${preselectedEmployeeName} no tiene turno laboral (M/T/N…) este día. Asigná banda primero o usá Cubrir ausencia si ya tiene código RRHH.`
-                        : mode === 'absence'
-                          ? `${preselectedEmployeeName} no tiene ausencia V/L/E/A/AA/PG este día. Usá Ausencia anticipada si avisaron la falta con turno asignado.`
-                          : `${preselectedEmployeeName} no tiene turno laboral para liberar a RET.`)
-                      : (mode === 'anticipated_absence'
-                        ? 'No hay guardias con turno M/T/N… este día. Elegí otro modo o asigná banda en la grilla.'
-                        : mode === 'absence'
-                          ? 'No hay ausencias cargadas este día. Usá Ausencia anticipada si avisaron la falta.'
-                          : 'No hay guardias con turno laboral este día.')}
+                      ? `${preselectedEmployeeName} no tiene turno laboral (M/T/N…) este día. Asigná banda primero o, si ya tiene V/E, usá el modal de cobertura de ausencias.`
+                      : 'No hay guardias con turno laboral este día. Asigná banda en la grilla o abrí el modal desde una celda con turno.'}
                   </p>
                 )}
               </div>
@@ -514,7 +552,14 @@ export default function PlanningRecompositionModal({
                     onClick={() => setMode('anticipated_absence')}
                     className={`text-[9px] font-black px-2.5 py-1 rounded-lg border ${mode === 'anticipated_absence' ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-white border-slate-200 text-slate-500'}`}
                   >
-                    Ausencia anticipada
+                    Declarar novedad
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode('early_departure')}
+                    className={`text-[9px] font-black px-2.5 py-1 rounded-lg border ${mode === 'early_departure' ? 'bg-rose-100 border-rose-300 text-rose-900' : 'bg-white border-slate-200 text-slate-500'}`}
+                  >
+                    Retiro anticipado
                   </button>
                   <button
                     type="button"
@@ -529,10 +574,10 @@ export default function PlanningRecompositionModal({
               <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-[10px] font-bold text-slate-600">
                 {mode === 'liberation' ? (
                   <><Unlock size={12} className="inline mr-1 text-violet-600" />{selectedTarget.label} → <strong>RET</strong></>
-                ) : mode === 'anticipated_absence' ? (
-                  <><Bell size={12} className="inline mr-1 text-amber-600" />Ausencia anticipada: {selectedTarget.label}</>
+                ) : mode === 'early_departure' ? (
+                  <><Clock size={12} className="inline mr-1 text-rose-600" />Retiro anticipado: {selectedTarget.label} → <strong>{selectedTarget.code}/RA</strong></>
                 ) : (
-                  <><AlertTriangle size={12} className="inline mr-1 text-indigo-600" />Cubre: {selectedTarget.label}</>
+                  <><Bell size={12} className="inline mr-1 text-amber-600" />Novedad: {selectedTarget.label}</>
                 )}
               </div>
 
@@ -542,7 +587,7 @@ export default function PlanningRecompositionModal({
                     <FileText size={12} /> Declarar novedad RRHH
                   </div>
                   <p className="text-[9px] font-bold text-amber-800/90 leading-snug">
-                    Se registra la ausencia para RRHH al guardar la planificación. Después armás la cobertura split abajo.
+                    Solo Enfermedad (E) o Injustificada (AA). Se registra al guardar la planificación; abajo armás Ext + Adel.
                   </p>
                   <label className="block">
                     <span className="text-[10px] font-black text-slate-500 uppercase">Tipo de novedad</span>
@@ -580,6 +625,51 @@ export default function PlanningRecompositionModal({
                 </label>
               )}
 
+              {mode === 'early_departure' && (
+                <div className="rounded-xl border-2 border-rose-200 bg-rose-50/60 p-3 space-y-3">
+                  <div className="flex items-center gap-2 text-[10px] font-black text-rose-900 uppercase">
+                    <Clock size={12} /> Corte del retiro anticipado
+                  </div>
+                  <p className="text-[9px] font-bold text-rose-800/90 leading-snug">
+                    La hora de corte es el inicio del adelanto. El titular queda como {selectedTarget.code}/RA hasta esa hora; el resto lo cubre el adelanto.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block">
+                      <span className="text-[10px] font-black text-slate-500 uppercase">Inicio turno</span>
+                      <input
+                        value={titularStart}
+                        onChange={e => setTitularStart(e.target.value)}
+                        className="mt-1 w-full border border-rose-200 rounded-lg px-3 py-2 text-xs font-bold bg-white"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-black text-slate-500 uppercase">Corte (= adelanto)</span>
+                      <input
+                        value={cutTime}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setCutTime(v);
+                          setAdelFrom(v);
+                        }}
+                        className="mt-1 w-full border border-rose-200 rounded-lg px-3 py-2 text-xs font-bold bg-white"
+                      />
+                    </label>
+                  </div>
+                  <p className="text-[9px] font-bold text-slate-600">
+                    Trabajó {titularStart}–{cutTime} ({hoursBetweenTimes(titularStart, cutTime)}h) · cubre {cutTime}–{adelTo}
+                  </p>
+                  <label className="block">
+                    <span className="text-[10px] font-black text-slate-500 uppercase">Motivo / detalle</span>
+                    <textarea
+                      value={rrhhReason}
+                      onChange={e => setRrhhReason(e.target.value)}
+                      placeholder="Ej. Se retiró por malestar · 4hs trabajadas…"
+                      className="mt-1 w-full border border-rose-200 rounded-lg px-3 py-2 text-xs font-bold bg-white h-14 resize-none"
+                    />
+                  </label>
+                </div>
+              )}
+
               <label className="block">
                 <span className="text-[10px] font-black text-slate-500 uppercase">Puesto a recomponer</span>
                 <input
@@ -589,7 +679,8 @@ export default function PlanningRecompositionModal({
                 />
               </label>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className={`grid gap-3 ${mode === 'early_departure' ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                {mode !== 'early_departure' && (
                 <div className="rounded-xl border-2 border-violet-200 bg-violet-50/50 p-3 space-y-2">
                   <div className="flex items-center gap-1 text-[10px] font-black text-violet-800 uppercase">
                     <Clock size={12} /> Extensión (+)
@@ -627,10 +718,11 @@ export default function PlanningRecompositionModal({
                     <input value={extTo} onChange={e => setExtTo(e.target.value)} className="w-1/2 text-[10px] font-bold border rounded px-1 py-1" />
                   </div>
                 </div>
+                )}
 
                 <div className="rounded-xl border-2 border-cyan-200 bg-cyan-50/50 p-3 space-y-2">
                   <div className="flex items-center gap-1 text-[10px] font-black text-cyan-800 uppercase">
-                    <Clock size={12} /> Adelanto (+)
+                    <Clock size={12} /> {mode === 'early_departure' ? 'Cobertura (adelanto)' : 'Adelanto (+)'}
                   </div>
                   {bandNeighbors && (
                     <p className="text-[9px] font-bold text-cyan-700/80 leading-tight">
@@ -658,7 +750,11 @@ export default function PlanningRecompositionModal({
                     <p className="text-[9px] text-rose-600 font-bold">Sin guardias en turno {bandNeighbors?.earlyStartBand} este día.</p>
                   )}
                   <div className="flex gap-1">
-                    <input value={adelFrom} onChange={e => setAdelFrom(e.target.value)} className="w-1/2 text-[10px] font-bold border rounded px-1 py-1" />
+                    <input value={mode === 'early_departure' ? cutTime : adelFrom} onChange={e => {
+                      const v = e.target.value;
+                      setAdelFrom(v);
+                      if (mode === 'early_departure') setCutTime(v);
+                    }} className="w-1/2 text-[10px] font-bold border rounded px-1 py-1" />
                     <input value={adelTo} onChange={e => setAdelTo(e.target.value)} className="w-1/2 text-[10px] font-bold border rounded px-1 py-1" />
                   </div>
                 </div>
@@ -666,9 +762,12 @@ export default function PlanningRecompositionModal({
 
               <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 px-3 py-2 text-[10px] font-bold text-indigo-900 leading-relaxed">
                 <Split size={12} className="inline mr-1" />
-                Preview: {gapPos} · {extFrom}–{extTo} (ext) + {adelFrom}–{adelTo} (adel)
+                {mode === 'early_departure'
+                  ? <>Preview: {selectedTarget.code}/RA {titularStart}–{cutTime} · cubre {cutTime}–{adelTo} (adel)</>
+                  : <>Preview: {gapPos} · {extFrom}–{extTo} (ext) + {adelFrom}–{adelTo} (adel)</>}
                 {mode === 'liberation' && ' · titular pasa a RET'}
                 {mode === 'anticipated_absence' && ` · titular pasa a ${RRHH_ABSENCE_LABEL_TO_CODE[rrhhType] || 'AA'} (RRHH)`}
+                {mode === 'early_departure' && ' · liquidación: Retiro anticipado (RA)'}
               </div>
 
               {splitFrancoPreview.length > 0 && (
@@ -797,7 +896,13 @@ export default function PlanningRecompositionModal({
               className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 flex items-center justify-center gap-1"
             >
               <CheckCircle size={14} />
-              {mode === 'anticipated_absence' ? 'Declarar ausencia y cobertura' : mode === 'liberation' ? 'Liberar a RET y cobertura' : 'Aplicar paquete'}
+              {mode === 'anticipated_absence'
+                ? 'Declarar novedad y cobertura'
+                : mode === 'early_departure'
+                  ? 'Aplicar retiro anticipado'
+                  : mode === 'liberation'
+                    ? 'Liberar a RET y cobertura'
+                    : 'Aplicar paquete'}
             </button>
           )}
           {step === 1 && canContinuePreselected && (

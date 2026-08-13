@@ -84,25 +84,29 @@ export function collectSplitFrancoConflicts(
   pendingChanges: Record<string, any>,
 ): FrancoCoverageConflict[] {
   const rows: FrancoCoverageConflict[] = [];
-  const extShift = resolveEmployeeShift(extEmpId, dateStr, shiftsMap, pendingChanges);
-  if (isPlannedFrancoShift(extShift)) {
-    rows.push({
-      employeeId: extEmpId,
-      employeeName: empDisplayName(employeesById[extEmpId], extEmpId),
-      dateStr,
-      role: 'EXTENSION',
-      francoCode: String(extShift?.code || 'F').toUpperCase(),
-    });
+  if (extEmpId) {
+    const extShift = resolveEmployeeShift(extEmpId, dateStr, shiftsMap, pendingChanges);
+    if (isPlannedFrancoShift(extShift)) {
+      rows.push({
+        employeeId: extEmpId,
+        employeeName: empDisplayName(employeesById[extEmpId], extEmpId),
+        dateStr,
+        role: 'EXTENSION',
+        francoCode: String(extShift?.code || 'F').toUpperCase(),
+      });
+    }
   }
-  const adelShift = resolveEmployeeShift(adelEmpId, dateStr, shiftsMap, pendingChanges);
-  if (isPlannedFrancoShift(adelShift)) {
-    rows.push({
-      employeeId: adelEmpId,
-      employeeName: empDisplayName(employeesById[adelEmpId], adelEmpId),
-      dateStr,
-      role: 'EARLY_START',
-      francoCode: String(adelShift?.code || 'F').toUpperCase(),
-    });
+  if (adelEmpId) {
+    const adelShift = resolveEmployeeShift(adelEmpId, dateStr, shiftsMap, pendingChanges);
+    if (isPlannedFrancoShift(adelShift)) {
+      rows.push({
+        employeeId: adelEmpId,
+        employeeName: empDisplayName(employeesById[adelEmpId], adelEmpId),
+        dateStr,
+        role: 'EARLY_START',
+        francoCode: String(adelShift?.code || 'F').toUpperCase(),
+      });
+    }
   }
   return rows;
 }
@@ -139,17 +143,21 @@ export function buildRecompositionPendingUpdates(
     return shiftsMap[k] || null;
   };
 
-  const extEmp = employeesById[pkg.extension.employeeId];
+  const hasExtension = !!(pkg.extension?.employeeId);
+  const isEarlyDeparture = pkg.mode === 'early_departure';
+  const extEmp = hasExtension ? employeesById[pkg.extension!.employeeId] : undefined;
   const adelEmp = employeesById[pkg.earlyStart.employeeId];
   const targetEmp = pkg.target.employeeId ? employeesById[pkg.target.employeeId] : undefined;
-  const extName = empDisplayName(extEmp, pkg.extension.employeeId);
+  const extName = hasExtension ? empDisplayName(extEmp, pkg.extension!.employeeId) : '';
   const adelName = empDisplayName(adelEmp, pkg.earlyStart.employeeId);
   const targetName = targetEmp ? empDisplayName(targetEmp, pkg.target.employeeId) : pkg.target.label;
   const isOperationalGap = pkg.mode === 'operational_gap';
 
-  const coveredByLabel = isOperationalGap
-    ? `${extName.split(',')[0]} ext ${pkg.extension.fromTime}-${pkg.extension.toTime} + ${adelName.split(',')[0]} cierre ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime}`
-    : `${extName.split(',')[0]} ext ${pkg.extension.fromTime}-${pkg.extension.toTime} + ${adelName.split(',')[0]} adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime}`;
+  const coveredByLabel = isEarlyDeparture
+    ? `${adelName.split(',')[0]} adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime}`
+    : isOperationalGap
+      ? `${extName.split(',')[0]} ext ${pkg.extension!.fromTime}-${pkg.extension!.toTime} + ${adelName.split(',')[0]} cierre ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime}`
+      : `${extName.split(',')[0]} ext ${pkg.extension!.fromTime}-${pkg.extension!.toTime} + ${adelName.split(',')[0]} adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime}`;
 
   const baseMeta = (role: RecompositionPendingMeta['coverageSegmentRole'], extra: Partial<RecompositionPendingMeta> = {}): RecompositionPendingMeta => ({
     coveragePackageId: pkg.id,
@@ -158,7 +166,7 @@ export function buildRecompositionPendingUpdates(
     coversEmployeeId: isOperationalGap ? undefined : pkg.target.employeeId,
     coversPositionName: pkg.gapPositionName,
     coversBandCode: String(pkg.target.code || '').toUpperCase() || undefined,
-    coverageMode: 'SPLIT',
+    coverageMode: isEarlyDeparture ? 'EARLY_DEPARTURE' : 'SPLIT',
     coverageStatus: 'COVERED',
     ...extra,
   });
@@ -194,6 +202,36 @@ export function buildRecompositionPendingUpdates(
       }),
       comments: `Liberación planificada · ${pkg.redeployNote || 'Convocable otro objetivo'}`,
     });
+  } else if (pkg.mode === 'early_departure') {
+    const cut = pkg.earlyDepartureCutTime || pkg.gapFrom || pkg.earlyStart.fromTime;
+    const originalEnd = String(targetBase.endTime || pkg.gapTo || '').slice(0, 5) || pkg.gapTo;
+    const originalStart = pkg.earlyDepartureStartTime
+      || String(targetBase.startTime || pkg.gapFrom || '07:00').slice(0, 5);
+    const workedHours = Math.max(0.5, hoursBetweenTimes(originalStart, cut));
+    updates[targetKey] = mergeShift(targetBase, {
+      code: pkg.target.code,
+      name: targetBase.name || pkg.target.code,
+      hours: workedHours,
+      startTime: originalStart,
+      endTime: cut,
+      originalEndTime: originalEnd,
+      isRetiroAnticipado: true,
+      isFranco: false,
+      isExtended: false,
+      isEarlyStart: false,
+      positionName: pkg.target.positionName,
+      objectiveId,
+      ...baseMeta('TARGET', {
+        isRetiroAnticipado: true,
+        adjustedEndTime: cut,
+        segmentFromTime: originalStart,
+        segmentToTime: cut,
+        coveredBy: coveredByLabel,
+        coverageNote: `Retiro anticipado · corte ${cut} · cubre ${coveredByLabel}`,
+        coverageStatus: 'COVERED',
+      }),
+      comments: `Retiro anticipado · trabajó ${originalStart}–${cut} · cubierto por ${coveredByLabel}`,
+    });
   } else if (pkg.mode === 'anticipated_absence' && pkg.anticipatedAbsence) {
     updates[targetKey] = mergeShift(targetBase, {
       code: pkg.anticipatedAbsence.code,
@@ -226,7 +264,8 @@ export function buildRecompositionPendingUpdates(
   }
   }
 
-  // ── Extensión (G1) ──
+  // ── Extensión (G1) — omitida en retiro anticipado ──
+  if (hasExtension && pkg.extension) {
   const extDateStr = pkg.extension.applyDateStr || pkg.dateStr;
   const extKey = shiftKey(pkg.extension.employeeId, extDateStr);
   const extBase = getShift(pkg.extension.employeeId, extDateStr);
@@ -253,6 +292,7 @@ export function buildRecompositionPendingUpdates(
       coverageNote: `${extOnFranco ? 'FT ' : ''}Ext ${pkg.gapPositionName} ${pkg.extension.fromTime}-${pkg.extension.toTime} · ${isOperationalGap ? `cierra ${pkg.target.code}` : `${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`}`,
     }),
   });
+  }
 
   // ── Adelanto (G2) ──
   const adelKey = shiftKey(pkg.earlyStart.employeeId, pkg.dateStr);
@@ -264,7 +304,7 @@ export function buildRecompositionPendingUpdates(
   if (adelOnFranco && !ctx.authorizeFrancoTrabajado) {
     throw new Error(`FRANCO_COVERAGE:${adelName} tiene franco planificado (${adelBase.code}) el ${pkg.dateStr} — requiere PIN de supervisor (FT / costo extra).`);
   }
-  const tailExtension = vacancySecondSegmentIsTailExtension(String(pkg.target.code || ''));
+  const tailExtension = !isEarlyDeparture && vacancySecondSegmentIsTailExtension(String(pkg.target.code || ''));
   const adelExtraHoursField = pkg.earlyStart.extraHours != null && pkg.earlyStart.extraHours > 0
     ? { extExtraHours: pkg.earlyStart.extraHours }
     : {};
@@ -295,12 +335,32 @@ export function buildRecompositionPendingUpdates(
     ...baseMeta('EARLY_START', {
       segmentFromTime: pkg.earlyStart.fromTime,
       segmentToTime: pkg.earlyStart.toTime,
-      coverageNote: `${adelOnFranco ? 'FT ' : ''}Adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime} · ${pkg.gapPositionName} · ${pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
+      coverageNote: `${adelOnFranco ? 'FT ' : ''}Adel ${pkg.earlyStart.fromTime}-${pkg.earlyStart.toTime} · ${pkg.gapPositionName} · ${isEarlyDeparture ? 'retiro anticipado' : pkg.mode === 'liberation' ? 'liberación' : 'cubre'} ${targetName.split(',')[0]}`,
     }),
   });
   }
 
   return updates;
+}
+
+/** Diferencia en horas entre HH:mm (soporta cruce de medianoche). */
+export function hoursBetweenTimes(from: string, to: string): number {
+  const [fh, fm] = String(from || '00:00').split(':').map(Number);
+  const [th, tm] = String(to || '00:00').split(':').map(Number);
+  let a = (fh || 0) * 60 + (fm || 0);
+  let b = (th || 0) * 60 + (tm || 0);
+  if (b <= a) b += 24 * 60;
+  return Math.round(((b - a) / 60) * 100) / 100;
+}
+
+/** Suma horas a HH:mm (módulo 24h, formato HH:mm). */
+export function addHoursToTime(from: string, hours: number): string {
+  const [fh, fm] = String(from || '00:00').split(':').map(Number);
+  let total = (fh || 0) * 60 + (fm || 0) + Math.round(hours * 60);
+  total = ((total % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 /** Lista objetivos de cobertura/liberación para un día en el objetivo. */

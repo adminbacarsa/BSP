@@ -385,6 +385,7 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'L': 'Licencia Esp.',
     'E': 'Enfermedad',
     'AA': 'No Presentó',
+    'RA': 'Retiro anticipado',
     'LT': 'Llegada Tarde',
     'LOCKED': 'Bloqueado (Cerrado/Pasado)',
     'PAST': 'Fecha Pasada',
@@ -5580,6 +5581,13 @@ export default function PlanificacionPage() {
                                 turnoPayload.extExtraHours = Number(change.extExtraHours);
                             }
                         }
+                        if (change.isRetiroAnticipado) {
+                            turnoPayload.isRetiroAnticipado = true;
+                            if (typeof change.adjustedEndTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedEndTime)) {
+                                turnoPayload.adjustedEndTime = change.adjustedEndTime;
+                            }
+                            if (change.originalEndTime) turnoPayload.originalEndTime = change.originalEndTime;
+                        }
                         if (change.isEarlyStart && typeof change.adjustedStartTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedStartTime)) {
                             const [ah, am] = change.adjustedStartTime.split(':').map(Number);
                             const adj = new Date(tDate);
@@ -5694,7 +5702,9 @@ export default function PlanificacionPage() {
                     for (const pkg of packages) {
                         if (seenPkg.has(pkg.id)) continue;
                         seenPkg.add(pkg.id);
-                        const extName = employeesById[pkg.extension.employeeId]?.name || pkg.extension.employeeId;
+                        const extName = pkg.extension?.employeeId
+                            ? (employeesById[pkg.extension.employeeId]?.name || pkg.extension.employeeId)
+                            : '';
                         const adelName = employeesById[pkg.earlyStart.employeeId]?.name || pkg.earlyStart.employeeId;
                         const targetName = employeesById[pkg.target.employeeId]?.name || pkg.target.employeeId;
                         postSaveTasks.push(
@@ -6864,9 +6874,11 @@ export default function PlanificacionPage() {
         setSelectedCell(null);
         setRecompositionModalOpen(false);
         toast.success(
-            novedad
-                ? 'Ausencia RRHH y cobertura aplicadas (pendiente de guardar)'
-                : 'Paquete cobertura/liberación aplicado (pendiente de guardar)',
+            novedad?.absenceType === 'RA' || novedad?.type === 'Retiro anticipado'
+                ? 'Retiro anticipado y cobertura aplicados (pendiente de guardar)'
+                : novedad
+                    ? 'Novedad RRHH y cobertura aplicadas (pendiente de guardar)'
+                    : 'Paquete cobertura/liberación aplicado (pendiente de guardar)',
         );
     };
 
@@ -9311,6 +9323,14 @@ export default function PlanificacionPage() {
                                         if (plannedNov === 'AVISO') { style += ' border-l-4 border-l-amber-500'; }
                                         if (plannedNov === 'LICENCIA') { style += ' border-l-4 border-l-purple-500'; }
                                         if (content === 'Ausencia con Aviso' || content === 'Injustificada') { content = 'AA'; style = SHIFT_STYLES['AA']; }
+                                        const _isRaCell = !!(
+                                            (p && !p.isDeleted && p.isRetiroAnticipado)
+                                            || (s && s.isRetiroAnticipado)
+                                        );
+                                        if (_isRaCell && content != null && typeof content === 'string' && !String(content).includes('/RA')) {
+                                            content = `${String(content).toUpperCase()}/RA`;
+                                            style += ' ring-1 ring-rose-400';
+                                        }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
                                         const activeShift = (p && !p.isDeleted) ? p : (s || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
                                         // TURA: turno agregado por cliente → fondo rojo en celda padre

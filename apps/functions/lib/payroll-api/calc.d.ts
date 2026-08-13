@@ -6,6 +6,7 @@ export interface RrhhNovedades {
     licenciaEspecialDias: number;
     permisoGremialDias: number;
     injustificadaDias: number;
+    otrosDias: number;
 }
 export interface EmployeeLiquidacion {
     employee: {
@@ -45,6 +46,7 @@ export interface LiquidacionSnapshot {
     cycleStart: string;
     cycleEnd: string;
     cctVersion: '422/05';
+    hoursMode: 'planned' | 'real';
     generatedAt: string;
     lockedAt: string | null;
     empresaId: string;
@@ -55,12 +57,12 @@ export interface LiquidacionSnapshot {
         total: number;
     };
 }
-interface BuildSnapshotParams {
+export interface BuildSnapshotParams {
     cycle: CycleRange;
     empresaId: string;
     clientIdFilter?: string;
     page?: number;
     pageSize?: number;
+    hoursMode?: 'planned' | 'real';
 }
 export declare function buildLiquidacionSnapshot(params: BuildSnapshotParams): Promise<LiquidacionSnapshot>;
-export {};

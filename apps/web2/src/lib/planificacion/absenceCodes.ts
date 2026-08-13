@@ -43,6 +43,10 @@ export const ABSENCE_TYPE_TO_CODE: Record<string, string> = {
     'llegada tarde': 'LT',
     'tarde': 'LT',
     'lt': 'LT',
+    // Retiro anticipado (parcial)
+    'retiro anticipado': 'RA',
+    'retiro': 'RA',
+    'ra': 'RA',
     // Licencias CCT especiales
     'matrimonio': 'L',
     'casamiento': 'L',
@@ -85,6 +89,7 @@ export const RRHH_ABSENCE_LABEL_TO_CODE: Record<string, string> = {
     'Ausencia con aviso': 'AA',
     'Justificada': 'AA',
     'Llegada Tarde': 'LT',
+    'Retiro anticipado': 'RA',
     'Licencia Esp.': 'L',
     'PG Permiso Gremial': 'PG',
     // Licencias CCT especiales
@@ -165,7 +170,7 @@ export const REQUIRES_AUTHORIZATION_TYPES = new Set([
 ]);
 
 /** Códigos válidos de ausencia/licencia para grilla. */
-export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA', 'LT', 'SGS', 'SUS']);
+export const ABSENCE_VALID_CODES = new Set(['V', 'E', 'A', 'L', 'PG', 'AA', 'LT', 'SGS', 'SUS', 'RA']);
 
 /** Códigos de licencias pagas (computan horas y bloquean planificación). */
 export const PAID_LEAVE_CODES = new Set(['V', 'L', 'A', 'E', 'PG']);
@@ -337,6 +342,8 @@ export function buildAbsencesMapFromDocs(
         const { startDate: startStr, endDate: endStr } = range;
 
         const inferredCode = inferAbsenceCode(data);
+        // RA = retiro parcial: figura en liquidación, no pinta la celda como ausencia de día completo.
+        if (inferredCode === 'RA') return;
         iterateCalendarDateRange(startStr, endStr).forEach((dateStr) => {
             const [y, m, d] = dateStr.split('-').map(Number);
             const key = `${empId}_${formatDateKey(new Date(y, m - 1, d, 12, 0, 0, 0))}`;

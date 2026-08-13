@@ -38,6 +38,20 @@ const RRHH_CODE_MAP: Record<string, keyof Omit<RrhhNovedades, 'otrosDias'>> = {
     A: 'art',
     PG: 'permisoGremialDias',
     AA: 'injustificadaDias',
+    RA: 'retiroAnticipadoDias',
+};
+
+/** Etiquetas humanas → código (docs RRHH / planificación). */
+const RRHH_TYPE_LABEL_TO_CODE: Record<string, string> = {
+    VACACIONES: 'V',
+    ENFERMEDAD: 'E',
+    ART: 'A',
+    'LICENCIA ESP.': 'L',
+    'LICENCIA ESPECIAL': 'L',
+    'PG PERMISO GREMIAL': 'PG',
+    'PERMISO GREMIAL': 'PG',
+    INJUSTIFICADA: 'AA',
+    'RETIRO ANTICIPADO': 'RA',
 };
 
 export interface RrhhNovedades {
@@ -47,6 +61,7 @@ export interface RrhhNovedades {
     licenciaEspecialDias: number;
     permisoGremialDias: number;
     injustificadaDias: number;
+    retiroAnticipadoDias: number;
     /** Días de ausencias con códigos no reconocidos (para futura extensibilidad). */
     otrosDias: number;
 }
@@ -261,6 +276,7 @@ export async function buildLiquidacionSnapshot(
                 licenciaEspecialDias: 0,
                 permisoGremialDias: 0,
                 injustificadaDias: 0,
+                retiroAnticipadoDias: 0,
                 otrosDias: 0,
             },
         };
@@ -381,7 +397,11 @@ export async function buildLiquidacionSnapshot(
         if (end < cycle.cycleStart || start > cycle.cycleEnd) return;
 
         const a = getAcc(empId);
-        const code = String(data.absenceType || data.codigo || '').toUpperCase();
+        const raw = String(data.absenceType || data.codigo || data.type || '').trim();
+        const upper = raw.toUpperCase();
+        const code = RRHH_CODE_MAP[upper]
+            ? upper
+            : (RRHH_TYPE_LABEL_TO_CODE[upper] || upper);
 
         const allDays = datesBetween(start, end);
         let count = 0;

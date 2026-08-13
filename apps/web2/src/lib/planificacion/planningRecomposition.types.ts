@@ -1,10 +1,15 @@
 /** Paquete de cobertura / liberación planificada (ext + adel split). */
 
-export type RecompositionMode = 'absence' | 'liberation' | 'anticipated_absence' | 'operational_gap';
+export type RecompositionMode =
+  | 'absence'
+  | 'liberation'
+  | 'anticipated_absence'
+  | 'operational_gap'
+  | 'early_departure';
 
 export type CoverageSegmentRole = 'EXTENSION' | 'EARLY_START' | 'LIBERATED' | 'TARGET';
 
-export type CoveragePackageType = 'ABSENCE_COVERAGE' | 'LIBERATION_RECOMPOSITION';
+export type CoveragePackageType = 'ABSENCE_COVERAGE' | 'LIBERATION_RECOMPOSITION' | 'EARLY_DEPARTURE_COVERAGE';
 
 export interface AnticipatedAbsenceDecl {
   type: string;
@@ -20,6 +25,9 @@ export interface PendingAbsenceNovedad {
   type: string;
   reason: string;
   status: 'APPROVED';
+  /** Código corto para liquidación (E, AA, RA…). */
+  absenceType?: string;
+  codigo?: string;
 }
 
 export interface RecompositionSegment {
@@ -56,11 +64,16 @@ export interface RecompositionPackage {
   gapFrom: string;
   gapTo: string;
   gapPositionName: string;
-  extension: RecompositionSegment;
+  /** Obligatorio salvo retiro anticipado (solo adelanto). */
+  extension?: RecompositionSegment;
   earlyStart: RecompositionSegment;
   liberationReason?: string;
   redeployNote?: string;
   anticipatedAbsence?: AnticipatedAbsenceDecl;
+  /** Hora de corte del titular (= inicio del adelanto). */
+  earlyDepartureCutTime?: string;
+  /** Inicio del turno del titular (retiro anticipado). */
+  earlyDepartureStartTime?: string;
 }
 
 export interface RecompositionPendingMeta {
@@ -82,5 +95,6 @@ export interface RecompositionPendingMeta {
   redeployNote?: string;
   coveredBy?: string;
   coverageStatus?: 'PARTIAL' | 'COVERED';
-  coverageMode?: 'SPLIT';
+  coverageMode?: 'SPLIT' | 'EARLY_DEPARTURE';
+  isRetiroAnticipado?: boolean;
 }
