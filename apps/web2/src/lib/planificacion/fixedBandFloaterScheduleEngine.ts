@@ -1036,14 +1036,18 @@ export function generateFixedBandFloaterSchedule(ctx: V2EngineContext): V2Genera
                 rawCodeFinal = rawCode;
             }
             const isExcludedDay = !isRetFloater && WORK_BANDS.has(rawCodeFinal) && !!pos.excludedDates?.includes(dateStr);
+            const excludedBandsForDay = Array.isArray((pos as any).excludedShiftDates?.[dateStr])
+                ? ((pos as any).excludedShiftDates[dateStr] as string[]).map((c) => String(c).toUpperCase())
+                : [];
+            const isExcludedBand = !isRetFloater && WORK_BANDS.has(rawCodeFinal) && excludedBandsForDay.includes(rawCodeFinal);
             let workCode = rawCodeFinal;
             if (WORK_BANDS.has(workCode) && !empCanCoverPositionShift(ctx, emp.id, posName, workCode)) {
                 workCode = 'RET';
             }
-            const code = isExcludedDay ? 'RET' : (isRetFloater && WORK_BANDS.has(workCode)) ? 'RET' : workCode;
+            const code = (isExcludedDay || isExcludedBand) ? 'RET' : (isRetFloater && WORK_BANDS.has(workCode)) ? 'RET' : workCode;
             if (di === 0) primaryShiftByEmp[emp.id] = (!isRetFloater && WORK_BANDS.has(workCode)) ? workCode : null;
 
-            const meta = shiftMeta(pos, isExcludedDay ? rawCode : code);
+            const meta = shiftMeta(pos, (isExcludedDay || isExcludedBand) ? rawCode : code);
             const isFranco = code === 'F';
             const isRet = code === 'RET';
             assignments.push({

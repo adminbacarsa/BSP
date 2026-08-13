@@ -244,6 +244,8 @@ export type PlanningPositionRow = {
   activeDays: string[];
   coverageType: string;
   excludedDates?: string[];
+  /** Fecha → códigos de banda excluidos (parcial). */
+  excludedShiftDates?: Record<string, string[]>;
   preferenciaGenero?: string;
   _serviceId?: string;
   _serviceRange?: string;
@@ -307,6 +309,11 @@ export function buildPlanningPositionStructure(
       const slaExcluded: string[] = Array.isArray((srv as any).excludedDates) ? (srv as any).excludedDates : [];
       const posExcluded: string[] = Array.isArray(pos.excludedDates) ? (pos.excludedDates as string[]) : [];
       const mergedExcluded = [...new Set([...slaExcluded, ...posExcluded])];
+      const rawShiftEx = pos.excludedShiftDates;
+      const excludedShiftDates =
+        rawShiftEx && typeof rawShiftEx === 'object' && !Array.isArray(rawShiftEx)
+          ? (rawShiftEx as Record<string, string[]>)
+          : undefined;
       structure.push({
         positionName: String(pos.name ?? pos.positionName ?? 'General'),
         shifts: normalizedShifts,
@@ -316,6 +323,9 @@ export function buildPlanningPositionStructure(
         ...(pos.preferenciaGenero ? { preferenciaGenero: String(pos.preferenciaGenero) } : {}),
         ...(posExcluded.length > 0 ? { positionExcludedDates: [...posExcluded] } : {}),
         ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),
+        ...(excludedShiftDates && Object.keys(excludedShiftDates).length > 0
+          ? { excludedShiftDates }
+          : {}),
         _serviceId: srv.id,
         _serviceRange: slaServiceRangeLabel(srv),
       });
@@ -347,13 +357,50 @@ export function buildPlanningPositionStructure(
 
 const PLANNING_FRANCO_OR_ABSENCE = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
 
-/** Día sin servicio para el puesto (exclusión SLA global o por puesto). */
+/** Día sin servicio para el puesto (exclusión SLA global o por puesto — día completo). */
 export function isPlanningPositionExcludedOnDate(
   pos: { excludedDates?: string[] } | null | undefined,
   dateStr: string,
 ): boolean {
   if (!pos?.excludedDates?.length || !dateStr) return false;
   return pos.excludedDates.includes(dateStr);
+}
+
+/** Códigos de banda excluidos ese día (vacío si no hay exclusión parcial). */
+export function getPlanningExcludedShiftCodesOnDate(
+  pos: { excludedShiftDates?: Record<string, string[]> } | null | undefined,
+  dateStr: string,
+): string[] {
+  if (!pos?.excludedShiftDates || !dateStr) return [];
+  const raw = pos.excludedShiftDates[dateStr];
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  return [...new Set(raw.map((c) => String(c || '').toUpperCase()).filter(Boolean))];
+}
+
+/**
+ * True si ese código laboral no debe asignarse/contarse ese día:
+ * exclusión de puesto completo o banda listada en excludedShiftDates.
+ */
+export function isPlanningShiftExcludedOnDate(
+  pos: { excludedDates?: string[]; excludedShiftDates?: Record<string, string[]> } | null | undefined,
+  dateStr: string,
+  code: string | undefined | null,
+): boolean {
+  if (!pos || !dateStr) return false;
+  if (isPlanningPositionExcludedOnDate(pos, dateStr)) return true;
+  const c = String(code || '').toUpperCase();
+  if (!c || !isPlanningWorkShiftCode(c)) return false;
+  return getPlanningExcludedShiftCodesOnDate(pos, dateStr).includes(c);
+}
+
+/** True si el día tiene al menos una exclusión parcial de banda (sin ser día completo). */
+export function hasPlanningPartialShiftExclusionOnDate(
+  pos: { excludedDates?: string[]; excludedShiftDates?: Record<string, string[]> } | null | undefined,
+  dateStr: string,
+): boolean {
+  if (!pos || !dateStr) return false;
+  if (isPlanningPositionExcludedOnDate(pos, dateStr)) return false;
+  return getPlanningExcludedShiftCodesOnDate(pos, dateStr).length > 0;
 }
 
 /** Turnos laborales que no deben asignarse en un día excluido (francos/licencias sí). */

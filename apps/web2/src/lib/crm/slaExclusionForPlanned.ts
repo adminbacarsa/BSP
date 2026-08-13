@@ -5,7 +5,11 @@ import type { ServicePosition } from '@/services/slaService';
 
 export type ObjectiveExclusionRules = {
   contractExcluded: Set<string>;
-  positions: Array<{ name: string; excludedDates: Set<string> }>;
+  positions: Array<{
+    name: string;
+    excludedDates: Set<string>;
+    excludedShiftDates: Map<string, Set<string>>;
+  }>;
 };
 
 export type SlaExclusionContext = {
@@ -75,8 +79,20 @@ export function buildSlaExclusionContext(
       const name = String(pos.name ?? pos.positionName ?? '').trim();
       if (!name) continue;
       const dates = Array.isArray(pos.excludedDates) ? pos.excludedDates : [];
-      if (!dates.length) continue;
-      positions.push({ name, excludedDates: new Set(dates) });
+      const shiftMap = new Map<string, Set<string>>();
+      const rawShift = pos.excludedShiftDates;
+      if (rawShift && typeof rawShift === 'object') {
+        for (const [ds, codes] of Object.entries(rawShift)) {
+          if (!Array.isArray(codes) || !codes.length) continue;
+          shiftMap.set(ds, new Set(codes.map((c) => String(c || '').toUpperCase()).filter(Boolean)));
+        }
+      }
+      if (!dates.length && shiftMap.size === 0) continue;
+      positions.push({
+        name,
+        excludedDates: new Set(dates),
+        excludedShiftDates: shiftMap,
+      });
     }
 
     const rules: ObjectiveExclusionRules = { contractExcluded, positions };
@@ -121,9 +137,9 @@ function resolveScheduleDateKey(
   return getDateKeyInTimezone(plannedStart);
 }
 
-/** true si el turno cae en día/puesto excluido del SLA (no cuenta como planificado vs contrato). */
+/** true si el turno cae en día/puesto/banda excluido del SLA (no cuenta como planificado vs contrato). */
 export function isTurnoOnSlaExcludedSlot(
-  t: { startTime?: unknown; objectiveId?: unknown; objectiveName?: unknown; positionName?: unknown },
+  t: { startTime?: unknown; objectiveId?: unknown; objectiveName?: unknown; positionName?: unknown; code?: unknown },
   ctx: SlaExclusionContext | undefined,
   opts?: SlaExclusionSlotOptions,
 ): boolean {
@@ -138,8 +154,11 @@ export function isTurnoOnSlaExcludedSlot(
 
   const posName = String(opts?.positionName ?? t.positionName ?? '').trim();
   if (!posName) return false;
+  const code = String(t.code ?? '').toUpperCase();
   for (const pos of rules.positions) {
-    if (positionNamesMatch(posName, pos.name) && pos.excludedDates.has(dateKey)) return true;
+    if (!positionNamesMatch(posName, pos.name)) continue;
+    if (pos.excludedDates.has(dateKey)) return true;
+    if (code && pos.excludedShiftDates.get(dateKey)?.has(code)) return true;
   }
   return false;
 }

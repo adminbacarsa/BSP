@@ -73,6 +73,7 @@ export function v2PositionToServicePosition(pos: V2PositionDef, id: string): Ser
         }),
         activeDays,
         excludedDates: pos.excludedDates,
+        excludedShiftDates: pos.excludedShiftDates,
     };
 }
 

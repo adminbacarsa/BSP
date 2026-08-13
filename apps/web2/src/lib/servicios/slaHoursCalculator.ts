@@ -129,17 +129,28 @@ export function analyzeShiftComposition(start: string, end: string) {
   };
 }
 
-export function computePositionDayComposition(pos: ServicePosition, dayCode: string, dateStr?: string) {
+export function computePositionDayComposition(
+  pos: ServicePosition,
+  dayCode: string,
+  dateStr?: string,
+  skipShiftCodes?: Set<string> | string[],
+) {
   let dayTotal = 0;
   let dayNight = 0;
   const activeDays = pos.activeDays?.length ? pos.activeDays : [...WEEK_DAY_CODES];
   if (!activeDays.includes(dayCode)) return { dayTotal: 0, dayNight: 0 };
+
+  const skip = skipShiftCodes instanceof Set
+    ? skipShiftCodes
+    : new Set((skipShiftCodes || []).map((c) => String(c || '').toUpperCase()));
 
   // Si algún turno tiene quantity propio, usamos PAX por turno y NO aplicamos pos.quantity afuera.
   // Si ninguno lo tiene, addVariant contribuye horas sin multiplicar y el llamador aplica pos.quantity.
   const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);
 
   const addVariant = (v: ShiftVariant) => {
+    const code = String(v.code || '').toUpperCase();
+    if (code && skip.has(code)) return;
     const q = hasPerShiftQty ? (v.quantity ?? pos.quantity ?? 1) : 1;
     const timeBlocks =
       Array.isArray(v.blocks) && v.blocks.length >= 2
@@ -237,7 +248,8 @@ export function calculateMonthlyBreakdown(
     if (!slaExcluded.has(dateStr)) {
       positions.forEach((pos) => {
         if (pos.excludedDates?.includes(dateStr)) return;
-        const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode, dateStr);
+        const skipCodes = pos.excludedShiftDates?.[dateStr] || [];
+        const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode, dateStr, skipCodes);
         // Si algún turno tiene quantity propio, dayTotal ya incluye PAX → q=1.
         // Si no, aplicar el pos.quantity global como antes.
         const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);

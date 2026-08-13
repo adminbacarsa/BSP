@@ -114,6 +114,8 @@ import {
     buildPlanningPositionStructure,
     DEFAULT_PLANNING_SHIFTS,
     isPlanningPositionExcludedOnDate,
+    isPlanningShiftExcludedOnDate,
+    getPlanningExcludedShiftCodesOnDate,
     isPlanningWorkShiftCode,
     planningPositionExclusionLabel,
     buildExcludedPositionsByDate,
@@ -723,6 +725,7 @@ const posAsEngineDef = (pos: any) => ({
     activeDays: pos?.activeDays,
     coverageType: pos?.coverageType,
     excludedDates: pos?.excludedDates,
+    excludedShiftDates: pos?.excludedShiftDates,
 });
 
 const isPosActiveOnDay = (pos: any, dayLetter: string, dateStr?: string): boolean =>
@@ -730,15 +733,25 @@ const isPosActiveOnDay = (pos: any, dayLetter: string, dateStr?: string): boolea
 
 const PLANNING_REST_SHIFT_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC']);
 
-/** Horas SLA del día según bandas activas (respeta shift.days y fechas específicas). */
+/** Horas SLA del día según bandas activas (respeta shift.days, fechas específicas y exclusiones parciales). */
 function dailyCoverageHoursTargetForPos(pos: any, dayLetter: string, cycles?: string[], dateStr?: string): number {
     const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
-    if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') return 24;
-    const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
+    if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
+        if (dateStr && isPlanningPositionExcludedOnDate(pos, dateStr)) return 0;
+        // Con exclusión parcial de banda, no forzamos 24: sumamos bandas restantes abajo.
+        if (!(dateStr && getPlanningExcludedShiftCodesOnDate(pos, dateStr).length > 0)) return 24;
+    }
+    let eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
+    if (dateStr) {
+        const skip = new Set(getPlanningExcludedShiftCodesOnDate(pos, dateStr));
+        if (skip.size > 0) eff = eff.filter((s) => !skip.has(String(s.code || '').toUpperCase()));
+    }
     if (eff.length > 0) {
         return eff.reduce((acc, s) => acc + (Number(s.hours) || 8), 0);
     }
     const dayShifts = (pos?.shifts || []).filter((s: any) => {
+        const code = String(s.code || '').toUpperCase();
+        if (dateStr && isPlanningShiftExcludedOnDate(pos, dateStr, code)) return false;
         if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
             return dateStr ? s.specificDates.includes(dateStr) : false;
         }
@@ -782,12 +795,16 @@ function filterShiftsForPlanningDay(
     cycles?: string[],
 ): any[] {
     if (!shifts?.length) return [];
+    const skipCodes = dateStr ? new Set(getPlanningExcludedShiftCodesOnDate(pos, dateStr)) : new Set<string>();
+    const fullExcluded = dateStr ? isPlanningPositionExcludedOnDate(pos, dateStr) : false;
     // Para puestos 24hs o CUSTOM se muestran todos los turnos del SLA sin filtrar por ciclo
     const ct = String(pos?.coverageType ?? '').toLowerCase();
     if (ct === '24hs' || ct === 'custom') {
         return shifts.filter((s: any) => {
             const code = String(s.code || '').toUpperCase();
             if (PLANNING_REST_SHIFT_CODES.has(code)) return true;
+            if (fullExcluded && isPlanningWorkShiftCode(code)) return false;
+            if (skipCodes.has(code)) return false;
             if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
                 return dateStr ? s.specificDates.includes(dateStr) : false;
             }
@@ -800,6 +817,8 @@ function filterShiftsForPlanningDay(
     return shifts.filter((s: any) => {
         const code = String(s.code || '').toUpperCase();
         if (PLANNING_REST_SHIFT_CODES.has(code)) return true;
+        if (fullExcluded && isPlanningWorkShiftCode(code)) return false;
+        if (skipCodes.has(code)) return false;
         if (effCodes.size > 0) return effCodes.has(code);
         if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
         return true;
@@ -6457,6 +6476,10 @@ export default function PlanificacionPage() {
                     skippedExcluded++;
                     continue;
                 }
+                if (isPlanningShiftExcludedOnDate(posCfg, dateStr, shiftConfig.code)) {
+                    skippedExcluded++;
+                    continue;
+                }
                 const def = shiftDefFor(assignPos, codeUpper);
                 const hours = resolveBandHours(codeUpper, def || shiftConfig, (posCfg?.shifts || []) as any[]);
                 if (isCoverageBlocked(dateStr, assignPos, codeUpper, hours, newChanges)) {
@@ -6910,6 +6933,13 @@ export default function PlanificacionPage() {
         const posCfg = positionStructure.find((p: any) => p.positionName === positionName);
         if (isPosExcludedOnDate(posCfg, selectedCell.dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) {
             toast.error(`Puesto "${positionName}" excluido por SLA (${planningPositionExclusionLabel(selectedCell.dateStr)}). Configurado en Servicios.`, { duration: 9000 });
+            return;
+        }
+        if (isPlanningShiftExcludedOnDate(posCfg, selectedCell.dateStr, shiftConfig.code)) {
+            toast.error(
+                `Turno ${String(shiftConfig.code || '').toUpperCase()} excluido por SLA en "${positionName}" (${planningPositionExclusionLabel(selectedCell.dateStr)}).`,
+                { duration: 9000 },
+            );
             return;
         }
         const existingCode = String(selectedCell.currentShift?.code || selectedCell.currentShift?.type || '').toUpperCase();

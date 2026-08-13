@@ -135,6 +135,8 @@ export default function ServiciosSLAPage() {
   const [savingHorario, setSavingHorario] = useState(false);
   const [showExcludedDatesPicker, setShowExcludedDatesPicker] = useState(false);
   const [excludedDatesScope, setExcludedDatesScope] = useState<'ALL' | string>('ALL');
+  /** Vacío = excluir puesto completo; con códigos = excluir solo esas bandas al clickear días. */
+  const [excludedBandFilter, setExcludedBandFilter] = useState<string[]>([]);
   const savedSelfRef = useRef(false); // evita falsos positivos por nuestros propios guardados
   // Código del turno que se está editando (null = modo "agregar nuevo")
   const [editingShiftCode, setEditingShiftCode] = useState<string | null>(null);
@@ -2284,45 +2286,98 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
                  </div>
 
-                 {/* Días excluidos — por puesto o para todos */}
+                 {/* Días excluidos — puesto completo, o bandas de un puesto */}
                  {(() => {
                      const WD_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
                      const posNames = form.positions.map(p => p.name || p.id);
-                     // Scope actual: 'ALL' = nivel SLA, o positionName = nivel puesto
                      const isAll = excludedDatesScope === 'ALL';
                      const scopePosIdx = isAll ? -1 : form.positions.findIndex(p => (p.name || p.id) === excludedDatesScope);
-                     // Exclusiones activas para el scope seleccionado
-                     const activeDates = isAll
+                     const scopePos = scopePosIdx >= 0 ? form.positions[scopePosIdx] : null;
+                     const scopeBandCodes = (scopePos?.allowedShiftTypes || []).map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+                     const bandMode = !isAll && excludedBandFilter.length > 0;
+                     const activeFullDates = isAll
                          ? new Set(form.excludedDates || [])
                          : new Set(scopePosIdx >= 0 ? (form.positions[scopePosIdx]?.excludedDates || []) : []);
-                     // Exclusiones a nivel SLA (siempre marcadas, independiente del scope)
                      const slaGlobal = new Set(form.excludedDates || []);
+                     const scopeShiftMap: Record<string, string[]> = !isAll && scopePos?.excludedShiftDates
+                         ? { ...scopePos.excludedShiftDates }
+                         : {};
+
+                     const setScopePosition = (mutator: (p: ServicePosition) => ServicePosition) => {
+                         if (scopePosIdx < 0) return;
+                         const nextPositions = form.positions.map((p, i) => (i === scopePosIdx ? mutator(p) : p));
+                         setForm({ ...form, positions: nextPositions });
+                     };
 
                      const toggleDate = (ds: string) => {
                          if (isAll) {
                              const next = new Set(slaGlobal);
                              if (next.has(ds)) next.delete(ds); else next.add(ds);
                              setForm({ ...form, excludedDates: Array.from(next).sort() });
-                         } else if (scopePosIdx >= 0) {
-                             const nextPositions = form.positions.map((p, i) => {
-                                 if (i !== scopePosIdx) return p;
-                                 const cur = new Set(p.excludedDates || []);
-                                 if (cur.has(ds)) cur.delete(ds); else cur.add(ds);
-                                 return { ...p, excludedDates: Array.from(cur).sort() };
-                             });
-                             setForm({ ...form, positions: nextPositions });
+                             return;
                          }
+                         if (scopePosIdx < 0 || !scopePos) return;
+
+                         if (!bandMode) {
+                             setScopePosition((p) => {
+                                 const cur = new Set(p.excludedDates || []);
+                                 const shiftMap = { ...(p.excludedShiftDates || {}) };
+                                 if (cur.has(ds)) {
+                                     cur.delete(ds);
+                                 } else {
+                                     cur.add(ds);
+                                     delete shiftMap[ds];
+                                 }
+                                 const nextShift = Object.keys(shiftMap).length ? shiftMap : undefined;
+                                 return { ...p, excludedDates: Array.from(cur).sort(), excludedShiftDates: nextShift };
+                             });
+                             return;
+                         }
+
+                         // Modo bandas: toggle códigos seleccionados en ese día
+                         setScopePosition((p) => {
+                             const full = new Set(p.excludedDates || []);
+                             const shiftMap = { ...(p.excludedShiftDates || {}) };
+                             const existing = new Set((shiftMap[ds] || []).map(c => String(c).toUpperCase()));
+                             const want = excludedBandFilter.map(c => String(c).toUpperCase());
+                             // Si era día completo, pasar a parcial con las bandas elegidas
+                             if (full.has(ds)) {
+                                 full.delete(ds);
+                                 shiftMap[ds] = [...want].sort();
+                             } else {
+                                 const allSelectedAlready = want.length > 0 && want.every(c => existing.has(c));
+                                 if (allSelectedAlready) {
+                                     want.forEach(c => existing.delete(c));
+                                 } else {
+                                     want.forEach(c => existing.add(c));
+                                 }
+                                 const allBands = (p.allowedShiftTypes || []).map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+                                 const remaining = Array.from(existing);
+                                 if (allBands.length > 0 && allBands.every(c => remaining.includes(c))) {
+                                     full.add(ds);
+                                     delete shiftMap[ds];
+                                 } else if (remaining.length === 0) {
+                                     delete shiftMap[ds];
+                                 } else {
+                                     shiftMap[ds] = remaining.sort();
+                                 }
+                             }
+                             return {
+                                 ...p,
+                                 excludedDates: Array.from(full).sort(),
+                                 excludedShiftDates: Object.keys(shiftMap).length ? shiftMap : undefined,
+                             };
+                         });
                      };
+
                      const clearScope = () => {
                          if (isAll) {
                              setForm({ ...form, excludedDates: [] });
                          } else if (scopePosIdx >= 0) {
-                             const nextPositions = form.positions.map((p, i) =>
-                                 i === scopePosIdx ? { ...p, excludedDates: [] } : p
-                             );
-                             setForm({ ...form, positions: nextPositions });
+                             setScopePosition((p) => ({ ...p, excludedDates: [], excludedShiftDates: undefined }));
                          }
                      };
+
                      const excludeMonth = (monthDays: Array<{ date: Date; ds: string }>) => {
                          const validDs = monthDays.filter(d => d.ds).map(d => d.ds);
                          if (isAll) {
@@ -2330,22 +2385,53 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                              validDs.forEach(ds => next.add(ds));
                              setForm({ ...form, excludedDates: Array.from(next).sort() });
                          } else if (scopePosIdx >= 0) {
-                             const nextPositions = form.positions.map((p, i) => {
-                                 if (i !== scopePosIdx) return p;
+                             setScopePosition((p) => {
+                                 if (bandMode) {
+                                     const shiftMap = { ...(p.excludedShiftDates || {}) };
+                                     const full = new Set(p.excludedDates || []);
+                                     const want = excludedBandFilter.map(c => String(c).toUpperCase());
+                                     const allBands = (p.allowedShiftTypes || []).map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+                                     validDs.forEach(ds => {
+                                         if (full.has(ds)) return;
+                                         const cur = new Set((shiftMap[ds] || []).map(c => String(c).toUpperCase()));
+                                         want.forEach(c => cur.add(c));
+                                         const rem = Array.from(cur);
+                                         if (allBands.length > 0 && allBands.every(c => rem.includes(c))) {
+                                             full.add(ds);
+                                             delete shiftMap[ds];
+                                         } else {
+                                             shiftMap[ds] = rem.sort();
+                                         }
+                                     });
+                                     return {
+                                         ...p,
+                                         excludedDates: Array.from(full).sort(),
+                                         excludedShiftDates: Object.keys(shiftMap).length ? shiftMap : undefined,
+                                     };
+                                 }
                                  const cur = new Set(p.excludedDates || []);
-                                 validDs.forEach(ds => cur.add(ds));
-                                 return { ...p, excludedDates: Array.from(cur).sort() };
+                                 const shiftMap = { ...(p.excludedShiftDates || {}) };
+                                 validDs.forEach(ds => {
+                                     cur.add(ds);
+                                     delete shiftMap[ds];
+                                 });
+                                 return {
+                                     ...p,
+                                     excludedDates: Array.from(cur).sort(),
+                                     excludedShiftDates: Object.keys(shiftMap).length ? shiftMap : undefined,
+                                 };
                              });
-                             setForm({ ...form, positions: nextPositions });
                          }
                      };
 
-                     // Total excluidos en todos los scopes
+                     const partialDayCount = form.positions.reduce((acc, p) => {
+                         const m = p.excludedShiftDates || {};
+                         return acc + Object.values(m).reduce((n, codes) => n + (codes?.length ? 1 : 0), 0);
+                     }, 0);
                      const totalExcluded = slaGlobal.size + form.positions.reduce(
                          (acc, p) => acc + (p.excludedDates?.length || 0), 0
-                     );
+                     ) + partialDayCount;
 
-                     // Generar meses
                      const months: Array<{ year: number; month: number; label: string; days: Array<{ date: Date; ds: string }> }> = [];
                      const start = parseYmdToLocalDate(form.startDate);
                      const end = parseYmdToLocalDate(form.endDate);
@@ -2379,6 +2465,17 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                              .map(([wd, cnt]) => `${cnt} ${WD_NAMES[+wd].toLowerCase()}${cnt > 1 ? 's' : ''}`).join(', ');
                      };
 
+                     const makeShiftSummary = (p: ServicePosition) => {
+                         const m = p.excludedShiftDates || {};
+                         const parts = Object.entries(m)
+                             .filter(([, codes]) => codes?.length)
+                             .map(([ds, codes]) => {
+                                 const [, mo, d] = ds.split('-');
+                                 return `${d}/${mo}: ${(codes || []).join('+')}`;
+                             });
+                         return parts.slice(0, 6).join(' · ') + (parts.length > 6 ? ` (+${parts.length - 6})` : '');
+                     };
+
                      return (
                          <div className="rounded-xl border dark:border-slate-700 overflow-hidden">
                              <button type="button" onClick={() => setShowExcludedDatesPicker(p => !p)}
@@ -2393,23 +2490,48 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                  <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/20 border-t border-rose-100 dark:border-rose-900 space-y-0.5">
                                      {slaGlobal.size > 0 && <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">Todos los puestos: {makeSummary(slaGlobal)}</p>}
                                      {form.positions.map(p => (p.excludedDates?.length ?? 0) > 0 && (
-                                         <p key={p.id} className="text-[9px] font-bold text-rose-500 dark:text-rose-400">{p.name || p.id}: {makeSummary(new Set(p.excludedDates))}</p>
+                                         <p key={`${p.id}-full`} className="text-[9px] font-bold text-rose-500 dark:text-rose-400">{p.name || p.id} (completo): {makeSummary(new Set(p.excludedDates))}</p>
+                                     ))}
+                                     {form.positions.map(p => Object.keys(p.excludedShiftDates || {}).length > 0 && (
+                                         <p key={`${p.id}-partial`} className="text-[9px] font-bold text-amber-600 dark:text-amber-400">{p.name || p.id} (turnos): {makeShiftSummary(p)}</p>
                                      ))}
                                  </div>
                              )}
                              {showExcludedDatesPicker && (
                                  <div className="border-t dark:border-slate-700">
-                                     {/* Selector de scope */}
                                      <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900 flex items-center gap-2 flex-wrap border-b dark:border-slate-700">
                                          <span className="text-[9px] font-black uppercase text-slate-400">Aplica a:</span>
                                          {(['ALL', ...posNames] as string[]).map(scope => (
                                              <button key={scope} type="button"
-                                                 onClick={() => setExcludedDatesScope(scope)}
+                                                 onClick={() => { setExcludedDatesScope(scope); setExcludedBandFilter([]); }}
                                                  className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${excludedDatesScope === scope ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-rose-400'}`}>
                                                  {scope === 'ALL' ? 'Todos los puestos' : scope}
                                              </button>
                                          ))}
                                      </div>
+                                     {!isAll && scopeBandCodes.length > 0 && (
+                                         <div className="px-4 py-2 bg-white dark:bg-slate-900 flex items-center gap-2 flex-wrap border-b dark:border-slate-700">
+                                             <span className="text-[9px] font-black uppercase text-slate-400">Excluir:</span>
+                                             <button type="button"
+                                                 onClick={() => setExcludedBandFilter([])}
+                                                 className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${!bandMode ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-rose-400'}`}>
+                                                 Puesto completo
+                                             </button>
+                                             {scopeBandCodes.map(code => {
+                                                 const on = excludedBandFilter.includes(code);
+                                                 return (
+                                                     <button key={code} type="button"
+                                                         onClick={() => setExcludedBandFilter(prev => on ? prev.filter(c => c !== code) : [...prev, code])}
+                                                         className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${on ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-amber-400'}`}>
+                                                         {code}
+                                                     </button>
+                                                 );
+                                             })}
+                                             <span className="text-[8px] font-bold text-slate-400 ml-auto">
+                                                 {bandMode ? `Marcás días → excluye ${excludedBandFilter.join('+')}` : 'Marcás días → sin servicio el puesto'}
+                                             </span>
+                                         </div>
+                                     )}
                                      {months.length > 0 ? (
                                          <div className="p-4 bg-white dark:bg-slate-900 space-y-4">
                                              {months.map(({ year, month, label, days }) => {
@@ -2427,28 +2549,50 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                                                  if (!cell) return <span key={`pad-${i}`}/>;
                                                                  const { date, ds } = cell;
                                                                  if (!ds) return <span key={`out-${i}`} className="text-center text-[9px] text-slate-200 dark:text-slate-700 py-1">{date.getDate()}</span>;
-                                                                 const isActive = activeDates.has(ds);
-                                                                 const isGlobal = !isAll && slaGlobal.has(ds); // excluido para todos
+                                                                 const isFullActive = activeFullDates.has(ds);
+                                                                 const partialCodes = scopeShiftMap[ds] || [];
+                                                                 const isPartial = !isFullActive && partialCodes.length > 0;
+                                                                 const isGlobal = !isAll && slaGlobal.has(ds);
                                                                  const isWe = date.getDay() === 0 || date.getDay() === 6;
+                                                                 const title = isGlobal
+                                                                     ? 'Excluido para todos los puestos'
+                                                                     : isFullActive
+                                                                         ? `${ds} · puesto completo`
+                                                                         : isPartial
+                                                                             ? `${ds} · turnos ${partialCodes.join('+')}`
+                                                                             : ds;
                                                                  return (
-                                                                     <button key={ds} type="button" title={isGlobal ? 'Excluido para todos los puestos' : ds}
+                                                                     <button key={ds} type="button" title={title}
                                                                          onClick={() => !isGlobal && toggleDate(ds)}
-                                                                         className={`text-center text-[9px] font-bold py-1 rounded transition-colors leading-none
-                                                                             ${isActive || isGlobal
+                                                                         className={`text-center text-[9px] font-bold py-1 rounded transition-colors leading-none relative
+                                                                             ${isFullActive || isGlobal
                                                                                  ? isGlobal ? 'bg-rose-300 dark:bg-rose-800 text-white cursor-not-allowed' : 'bg-rose-500 text-white'
-                                                                                 : isWe ? 'text-amber-600 dark:text-amber-400 hover:bg-rose-50' : 'text-slate-700 dark:text-slate-300 hover:bg-rose-50'
+                                                                                 : isPartial
+                                                                                     ? 'bg-amber-400 text-white'
+                                                                                     : isWe ? 'text-amber-600 dark:text-amber-400 hover:bg-rose-50' : 'text-slate-700 dark:text-slate-300 hover:bg-rose-50'
                                                                              }`}
-                                                                     >{date.getDate()}</button>
+                                                                     >
+                                                                         {date.getDate()}
+                                                                         {isPartial && (
+                                                                             <span className="absolute -bottom-0.5 left-0 right-0 text-[6px] font-black leading-none truncate px-0.5">
+                                                                                 {partialCodes.join('')}
+                                                                             </span>
+                                                                         )}
+                                                                     </button>
                                                                  );
                                                              })}
                                                          </div>
                                                      </div>
                                                  );
                                              })}
-                                             {activeDates.size > 0 && (
-                                                 <div className="flex items-center justify-between pt-2 border-t dark:border-slate-700">
-                                                     <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">{makeSummary(activeDates)}</p>
-                                                     <button type="button" onClick={clearScope} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase">Limpiar</button>
+                                             {(activeFullDates.size > 0 || Object.keys(scopeShiftMap).length > 0) && (
+                                                 <div className="flex items-center justify-between pt-2 border-t dark:border-slate-700 gap-2">
+                                                     <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">
+                                                         {activeFullDates.size > 0 && makeSummary(activeFullDates)}
+                                                         {activeFullDates.size > 0 && Object.keys(scopeShiftMap).length > 0 && ' · '}
+                                                         {scopePos && Object.keys(scopeShiftMap).length > 0 && makeShiftSummary(scopePos)}
+                                                     </p>
+                                                     <button type="button" onClick={clearScope} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase shrink-0">Limpiar</button>
                                                  </div>
                                              )}
                                          </div>

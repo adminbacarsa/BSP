@@ -31,6 +31,11 @@ export interface ServicePosition {
   allowedShiftTypes: ShiftVariant[];
   activeDays: string[];
   excludedDates?: string[];  // YYYY-MM-DD: días sin servicio solo para este puesto
+  /**
+   * Exclusión parcial por banda: fecha → códigos (M, T, N…).
+   * Si ese día también está en excludedDates, manda el día completo.
+   */
+  excludedShiftDates?: Record<string, string[]>;
   preferenciaGenero?: 'M' | 'F' | 'INDISTINTO';
 }
 

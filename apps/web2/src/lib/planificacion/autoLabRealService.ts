@@ -157,6 +157,9 @@ function planningRowToV2Position(row: PlanningPositionRow): V2PositionDef {
         ],
         activeDays: row.activeDays?.length ? [...row.activeDays] : ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
         excludedDates: row.excludedDates?.length ? [...row.excludedDates] : undefined,
+        excludedShiftDates: row.excludedShiftDates && Object.keys(row.excludedShiftDates).length
+            ? { ...row.excludedShiftDates }
+            : undefined,
     };
     const is24 = is24hsRotationPosition(provisional);
     return {

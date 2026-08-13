@@ -278,6 +278,8 @@ export interface V2PositionDef {
     coverageType?: string;
     /** Fechas YYYY-MM-DD sin servicio para este puesto. El guardia pasa a RET y no se exige cobertura. */
     excludedDates?: string[];
+    /** Exclusión parcial: fecha → códigos de banda. */
+    excludedShiftDates?: Record<string, string[]>;
 }
 
 export interface V2EmployeeDef {
