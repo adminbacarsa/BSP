@@ -201,7 +201,6 @@ import { resolveCellSecondBlock, slaBlocksForPositionShift } from '@/lib/planifi
 import {
     listExtensionCandidates,
     listEarlyStartCandidates,
-    listVacancySplitWorkersForDay,
     defaultSplitForBand,
     defaultSplitForBandAtPosition,
     neighborBandsForTarget,
@@ -6098,20 +6097,22 @@ export default function PlanificacionPage() {
                 );
                 const prefPos = activePosition || rawTitular?.positionName || undefined;
                 const gapOptions = listVacancyGapBandOptions(effectivePosStructure, prefPos || null);
-                const hist = inferTitularGapBandFromHistory(
-                    vacancyData.employeeId,
-                    vacancyData.startDate,
-                    effectivePosStructure,
-                    prefPos || null,
-                    shiftsMap,
-                    pendingChanges,
-                );
+                const hist = !rawTitular
+                    ? inferTitularGapBandFromHistory(
+                        vacancyData.employeeId,
+                        vacancyData.startDate,
+                        effectivePosStructure,
+                        prefPos || null,
+                        shiftsMap,
+                        pendingChanges,
+                    )
+                    : null;
                 const inferred = hist
                     ? buildTitularVacancyFromGapOption(
                         hist,
                         'history_inferred',
                         'Patrón previo al bloque (cronograma)',
-                        rawTitular?.rawShift,
+                        undefined,
                     )
                     : rawTitular;
                 const effectiveTitular = resolveEffectiveVacancyGapTitular(
@@ -9391,7 +9392,7 @@ export default function PlanificacionPage() {
                                         const _billHint = _billBr && _billBr.gross > 0
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{covRole === 'TARGET' && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-indigo-600 text-white px-0.5 rounded">✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -12956,24 +12957,28 @@ export default function PlanificacionPage() {
                         const raw = resolveTitularShiftForDay(dateStr);
                         const prefPos = activePosition || raw?.positionName || vacancyGapPreferredPosition;
                         const options = listVacancyGapBandOptions(vacancyPosSla, prefPos);
-                        const hist = inferTitularGapBandFromHistory(
-                            vacancyData?.employeeId || '',
-                            vacancyData?.startDate,
-                            vacancyPosSla,
-                            prefPos,
-                            shiftsMap,
-                            pendingChanges,
-                        );
+                        // Solo usar historial si NO hay turno del día (ni originalCode en la celda V/E).
+                        // Si tenía T ese día, el default debe ser T — no el patrón más frecuente del mes.
+                        const hist = !raw
+                            ? inferTitularGapBandFromHistory(
+                                vacancyData?.employeeId || '',
+                                vacancyData?.startDate,
+                                vacancyPosSla,
+                                prefPos,
+                                shiftsMap,
+                                pendingChanges,
+                            )
+                            : null;
                         const inferred = hist
                             ? buildTitularVacancyFromGapOption(
                                 hist,
                                 'history_inferred',
                                 'Patrón previo al bloque (cronograma)',
-                                raw?.rawShift,
+                                undefined,
                             )
                             : null;
                         return resolveEffectiveVacancyGapTitular(
-                            inferred || raw,
+                            raw || inferred,
                             vacancyGapBandOverride,
                             vacancyGapBandOptions,
                             vacancyPosSla,
@@ -13118,28 +13123,40 @@ export default function PlanificacionPage() {
                         ? { ...vacancySplitListCtx, gapPositionName: splitWorkBand.positionName, gapBand: splitGapBand }
                         : vacancySplitListCtx;
                     const splitWorkerPoolExt = splitWorkBand && splitReferenceDate
-                        ? listVacancySplitWorkersForDay(
+                        ? listExtensionCandidates(
+                            splitGapBand || splitWorkBand.code,
                             splitReferenceDate,
                             selectedObjective,
                             employees,
                             shiftsMap,
                             pendingChanges,
-                            [vacancyData?.employeeId].filter(Boolean),
+                            [vacancyData?.employeeId].filter(Boolean) as string[],
                             splitListCtxWithGap,
-                            splitPlan ? [splitPlan.extBand] : [],
-                        ).filter(c => !q || c.name.toLowerCase().includes(q))
+                        )
+                            .filter((c) => {
+                                const want = String(splitPlan?.extBand || splitNeighbors?.extensionBand || '').toUpperCase();
+                                if (!want) return true;
+                                return String(c.code || '').toUpperCase() === want;
+                            })
+                            .filter((c) => !q || c.name.toLowerCase().includes(q))
                         : [];
                     const splitWorkerPoolAdel = splitWorkBand && splitReferenceDate
-                        ? listVacancySplitWorkersForDay(
+                        ? listEarlyStartCandidates(
+                            splitGapBand || splitWorkBand.code,
                             splitReferenceDate,
                             selectedObjective,
                             employees,
                             shiftsMap,
                             pendingChanges,
-                            [vacancyData?.employeeId, vacancySplitExtId].filter(Boolean),
+                            [vacancyData?.employeeId, vacancySplitExtId].filter(Boolean) as string[],
                             splitListCtxWithGap,
-                            splitPlan ? [splitPlan.adelBand] : [],
-                        ).filter(c => !q || c.name.toLowerCase().includes(q))
+                        )
+                            .filter((c) => {
+                                const want = String(splitPlan?.adelBand || splitNeighbors?.earlyStartBand || '').toUpperCase();
+                                if (!want) return true;
+                                return String(c.code || '').toUpperCase() === want;
+                            })
+                            .filter((c) => !q || c.name.toLowerCase().includes(q))
                         : [];
                     const splitManualExtraHours = vacancySplitUsesManualExtraHours({
                         extExtraHours: vacancySplitExtExtraHours,
@@ -13660,12 +13677,12 @@ export default function PlanificacionPage() {
                                                         1.er tramo — extensión ({splitExtSegmentLabel})
                                                     </label>
                                                     <p className="text-[9px] text-slate-400 font-bold mb-1.5">
-                                                        Elegí quien ya trabaja ese día (sugerido banda {splitPlan?.extBand}). No hace falta que sea E3: el titular en vacaciones no aparece.
+                                                        Solo banda {splitPlan?.extBand || 'anterior'} (turno que termina cuando empieza el hueco). El titular ausente no aparece.
                                                     </p>
                                                     <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
                                                         {splitWorkerPoolExt.length === 0 ? (
                                                             <p className="text-[10px] text-slate-400 px-2 py-3 text-center">
-                                                                No hay guardias con turno laboral ese día en el objetivo.
+                                                                No hay guardias en banda {splitPlan?.extBand || 'anterior'} ese día en el objetivo.
                                                             </p>
                                                         ) : splitWorkerPoolExt.map(c => (
                                                             <button
@@ -13675,24 +13692,23 @@ export default function PlanificacionPage() {
                                                                 className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border transition-colors ${vacancySplitExtId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
                                                             >
                                                                 {c.name} · {c.code} · {c.positionName}
-                                                                {splitPlan?.extBand === c.code && (
-                                                                    <span className="ml-1 text-[9px] font-black text-red-600">sugerido</span>
-                                                                )}
                                                             </button>
                                                         ))}
                                                     </div>
                                                 </div>
                                                 <div>
                                                     <label className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
-                                                        2.º tramo — cierre ({splitSecondSegmentLabel})
+                                                        2.º tramo — adelanto ({splitSecondSegmentLabel})
                                                     </label>
                                                     <p className="text-[9px] text-slate-400 font-bold mb-1.5">
-                                                        Otro guardia distinto (sugerido banda {splitPlan?.adelBand}, ej. E2 07:00–16:00 extendido).
+                                                        Solo banda {splitPlan?.adelBand || 'posterior'} (turno que empieza cuando termina el hueco).
                                                     </p>
                                                     <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
                                                         {splitWorkerPoolAdel.length === 0 ? (
                                                             <p className="text-[10px] text-slate-400 px-2 py-3 text-center">
-                                                                Elegí primero el 1.er tramo o no hay más guardias con turno ese día.
+                                                                {vacancySplitExtId
+                                                                    ? `No hay guardias en banda ${splitPlan?.adelBand || 'posterior'} ese día (distintos del 1.er tramo).`
+                                                                    : `No hay guardias en banda ${splitPlan?.adelBand || 'posterior'} ese día en el objetivo.`}
                                                             </p>
                                                         ) : splitWorkerPoolAdel.map(c => (
                                                             <button
@@ -13702,9 +13718,6 @@ export default function PlanificacionPage() {
                                                                 className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border transition-colors ${vacancySplitAdelId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
                                                             >
                                                                 {c.name} · {c.code} · {c.positionName}
-                                                                {splitPlan?.adelBand === c.code && (
-                                                                    <span className="ml-1 text-[9px] font-black text-red-600">sugerido</span>
-                                                                )}
                                                             </button>
                                                         ))}
                                                     </div>

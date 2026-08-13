@@ -702,6 +702,13 @@ export function applyVacancyCoverageToChanges(
       startTime: '00:00',
       comments: `${input.vacancyData.type} — gestionado desde planificador`,
       coveredBy: coveredByLabel || undefined,
+      ...(coveredByLabel
+        ? {
+            coverageSegmentRole: 'TARGET' as const,
+            coverageStatus: 'COVERED',
+            coverageType: coverage.mode === 'substitute' ? 'substitute' : coverage.mode === 'split' ? 'split' : undefined,
+          }
+        : {}),
       ...(originalCode ? { originalCode } : {}),
       ...(originalPositionName ? { originalPositionName } : {}),
     };
