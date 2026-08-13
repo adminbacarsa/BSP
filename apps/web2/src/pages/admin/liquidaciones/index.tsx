@@ -26,6 +26,19 @@ function pad2(n: number) { return String(n).padStart(2, '0'); }
 function fmtH(v: number) { return v === 0 ? '—' : v.toFixed(1); }
 function fmtD(v: number) { return v === 0 ? '—' : String(v); }
 
+const LIQ_INK = '#111827';
+const LIQ_VLINE = '#9ca3af';
+const LIQ_HLINE = '#111827';
+const liqCellStyle: React.CSSProperties = {
+    color: LIQ_INK,
+    borderRight: `1.5px solid ${LIQ_VLINE}`,
+    borderBottom: `2px solid ${LIQ_HLINE}`,
+};
+const liqHeadStyle: React.CSSProperties = {
+    ...liqCellStyle,
+    borderBottom: `2px solid ${LIQ_HLINE}`,
+};
+
 interface CycleOption {
     cycleId: string;
     label: string;
@@ -249,62 +262,62 @@ function LiqRow({ item, isExpanded, onToggle, ajuste, hoursMode, onSave, onDelet
                 }
             >
                 {/* Indicadores */}
-                <td className="pl-3 pr-1 py-2 w-8">
+                <td className="pl-3 pr-1 py-2 w-8" style={liqCellStyle}>
                     {item.hasAdjustment && (
                         <span title="Ajuste manual aplicado">
-                            <Edit3 size={12} style={{ color: 'var(--company-primary,#6366f1)' }} />
+                            <Edit3 size={12} style={{ color: LIQ_INK }} />
                         </span>
                     )}
                 </td>
-                <td className="pr-1 py-2 w-6">
+                <td className="pr-1 py-2 w-6" style={liqCellStyle}>
                     {hasWarnings && (
                         <span title={item.warnings.join('\n')}>
-                            <AlertTriangle size={12} className="text-amber-500" />
+                            <AlertTriangle size={12} style={{ color: LIQ_INK }} />
                         </span>
                     )}
                 </td>
                 {/* Empleado */}
-                <td className="px-2 py-2 whitespace-nowrap">
-                    <span className="text-xs tabular-nums font-medium" style={{ color: 'var(--txt3)' }}>
+                <td className="px-2 py-2 whitespace-nowrap" style={liqCellStyle}>
+                    <span className="text-xs tabular-nums font-medium" style={{ color: LIQ_INK }}>
                         {item.employee.fileNumber || '—'}
                     </span>
                 </td>
-                <td className="px-2 py-2 whitespace-nowrap">
-                    <span className="text-xs font-bold" style={{ color: 'var(--txt)' }}>
+                <td className="px-2 py-2 whitespace-nowrap" style={liqCellStyle}>
+                    <span className="text-xs font-bold" style={{ color: LIQ_INK }}>
                         {item.employee.fullName}
                     </span>
                 </td>
                 {/* Horas */}
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: 'var(--txt3)' }}>{fmtH(a.hsTeoricas)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: 'var(--txt)' }}>{fmtH(a.hsReales)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: '#f59e0b' }}>{fmtH(a.diurnas)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: '#8b5cf6' }}>{fmtH(a.nocturnas)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: a.al100FT > 0 ? '#ef4444' : 'var(--txt3)' }}>{fmtH(a.al100FT)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: a.plusFeriado > 0 ? '#06b6d4' : 'var(--txt3)' }}>{fmtH(a.plusFeriado)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.hsTeoricas)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{fmtH(a.hsReales)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.diurnas)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.nocturnas)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.al100FT)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.plusFeriado)}</td>
                 {/* Bolsa 200 */}
-                <td className="px-2 py-2 text-right tabular-nums text-xs font-bold border-l" style={{ color: 'var(--txt)', borderColor: 'var(--border)' }}>{fmtH(l.bolsa)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: 'var(--txt)' }}>{fmtH(l.hsSimples)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: l.al50 > 0 ? '#f97316' : 'var(--txt3)' }}>{fmtH(l.al50)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{fmtH(l.bolsa)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(l.hsSimples)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(l.al50)}</td>
                 {/* Novedades */}
-                <td className="px-2 py-2 text-right tabular-nums text-xs border-l" style={{ color: n.vacacionesDias > 0 ? '#10b981' : 'var(--txt3)', borderColor: 'var(--border)' }}>{fmtD(n.vacacionesDias)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.enfermedadDias > 0 ? '#f59e0b' : 'var(--txt3)' }}>{fmtD(n.enfermedadDias)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.art > 0 ? '#f59e0b' : 'var(--txt3)' }}>{fmtD(n.art)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.licenciaEspecialDias > 0 ? '#10b981' : 'var(--txt3)' }}>{fmtD(n.licenciaEspecialDias)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.permisoGremialDias > 0 ? '#6366f1' : 'var(--txt3)' }}>{fmtD(n.permisoGremialDias)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.injustificadaDias > 0 ? '#ef4444' : 'var(--txt3)' }}>{fmtD(n.injustificadaDias)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: (n.retiroAnticipadoDias ?? 0) > 0 ? '#e11d48' : 'var(--txt3)' }}>{fmtD(n.retiroAnticipadoDias ?? 0)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={{ color: n.otrosDias > 0 ? '#8b5cf6' : 'var(--txt3)' }}>{fmtD(n.otrosDias)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.vacacionesDias)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.enfermedadDias)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.art)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.licenciaEspecialDias)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.permisoGremialDias)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.injustificadaDias)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.retiroAnticipadoDias ?? 0)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.otrosDias)}</td>
                 {/* Expand toggle */}
-                <td className="px-3 py-2 text-right">
+                <td className="px-3 py-2 text-right" style={liqCellStyle}>
                     {isExpanded
-                        ? <ChevronUp size={14} style={{ color: 'var(--txt3)' }} />
-                        : <ChevronDown size={14} style={{ color: 'var(--txt3)' }} />
+                        ? <ChevronUp size={14} style={{ color: LIQ_INK }} />
+                        : <ChevronDown size={14} style={{ color: LIQ_INK }} />
                     }
                 </td>
             </tr>
             {isExpanded && (
                 <tr>
-                    <td colSpan={23} className="px-6 py-5 border-t border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surf2)' }}>
+                    <td colSpan={22} className="px-6 py-5" style={{ ...liqCellStyle, backgroundColor: 'var(--surf2)' }}>
                         {hasWarnings && (
                             <div className="mb-4 p-3 rounded-lg border" style={{ borderColor: 'rgba(245,158,11,0.3)', backgroundColor: 'rgba(245,158,11,0.05)' }}>
                                 <p className="text-[10px] font-black uppercase text-amber-500 mb-1 tracking-widest">Advertencias</p>
@@ -906,78 +919,73 @@ export default function LiquidacionesPage() {
                 {!loading && !error && snapshot && (
                     <ContentCard padding={false}>
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse" style={{ minWidth: '1100px' }}>
+                            <table className="w-full text-left border-collapse" style={{ minWidth: '1100px', borderTop: `2px solid ${LIQ_HLINE}`, borderLeft: `1.5px solid ${LIQ_VLINE}` }}>
                                 <thead>
-                                    <tr className="border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surf2)' }}>
-                                        <th className="pl-3 pr-1 py-2 w-8" />
-                                        <th className="pr-1 py-2 w-6" />
-                                        <th className="px-2 py-2 text-[10px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Leg.</th>
-                                        <th className="px-2 py-2 text-[10px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Apellido y Nombre</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Hs Teór.</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Hs {modeLabel.slice(0,6)}.</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#f59e0b' }}>Diurnas</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#8b5cf6' }}>Noct.</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#ef4444' }}>FT 100%</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#06b6d4' }}>+Feriado</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider border-l" style={{ color: 'var(--txt)', borderColor: 'var(--border)' }}>Bolsa</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: 'var(--txt)' }}>Simples</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#f97316' }}>Al 50%</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider border-l" style={{ color: '#10b981', borderColor: 'var(--border)' }}>V</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#f59e0b' }}>E</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#f59e0b' }}>ART</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#10b981' }}>L</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#6366f1' }}>PG</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#ef4444' }}>AA</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#e11d48' }}>RA</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={{ color: '#8b5cf6' }}>Otros</th>
-                                        <th className="px-3 py-2 w-8" />
+                                    <tr style={{ backgroundColor: 'var(--surf2)' }}>
+                                        <th className="pl-3 pr-1 py-2 w-8" style={liqHeadStyle} />
+                                        <th className="pr-1 py-2 w-6" style={liqHeadStyle} />
+                                        <th className="px-2 py-2 text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Leg.</th>
+                                        <th className="px-2 py-2 text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Apellido y Nombre</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Hs Teór.</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Hs {modeLabel.slice(0,6)}.</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Diurnas</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Noct.</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>FT 100%</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>+Feriado</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Bolsa</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Simples</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Al 50%</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>V</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>E</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>ART</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>L</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>PG</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>AA</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>RA</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Otros</th>
+                                        <th className="px-3 py-2 w-8" style={liqHeadStyle} />
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {filteredItems.length === 0 ? (
                                         <tr>
-                                            <td colSpan={23} className="text-center py-16 text-sm font-bold" style={{ color: 'var(--txt3)' }}>
+                                            <td colSpan={22} className="text-center py-16 text-sm font-bold" style={{ ...liqCellStyle, color: LIQ_INK }}>
                                                 {search ? 'Sin resultados para la búsqueda.' : 'Sin empleados en este ciclo.'}
                                             </td>
                                         </tr>
                                     ) : (
-                                        filteredItems.map((item, idx) => (
-                                            <React.Fragment key={item.employee.id}>
-                                                {idx > 0 && (
-                                                    <tr aria-hidden="true">
-                                                        <td colSpan={23} className="h-px p-0" style={{ backgroundColor: 'var(--border)' }} />
-                                                    </tr>
-                                                )}
-                                                <LiqRow
-                                                    item={item}
-                                                    isExpanded={expandedId === item.employee.id}
-                                                    onToggle={() => setExpandedId(prev => prev === item.employee.id ? null : item.employee.id)}
-                                                    ajuste={ajustes.get(item.employee.id)}
-                                                    hoursMode={hoursMode}
-                                                    onSave={(adj, nota) => saveAjuste(item.employee.id, adj, nota)}
-                                                    onDelete={() => deleteAjuste(item.employee.id)}
-                                                />
-                                            </React.Fragment>
+                                        filteredItems.map((item) => (
+                                            <LiqRow
+                                                key={item.employee.id}
+                                                item={item}
+                                                isExpanded={expandedId === item.employee.id}
+                                                onToggle={() => setExpandedId(prev => prev === item.employee.id ? null : item.employee.id)}
+                                                ajuste={ajustes.get(item.employee.id)}
+                                                hoursMode={hoursMode}
+                                                onSave={(adj, nota) => saveAjuste(item.employee.id, adj, nota)}
+                                                onDelete={() => deleteAjuste(item.employee.id)}
+                                            />
                                         ))
                                     )}
                                 </tbody>
                                 {/* Fila de totales */}
                                 {filteredItems.length > 0 && (
                                     <tfoot>
-                                        <tr className="border-t" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surf2)' }}>
-                                            <td colSpan={4} className="pl-3 py-2 text-[10px] font-black uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>
+                                        <tr style={{ backgroundColor: 'var(--surf2)' }}>
+                                            <td colSpan={4} className="pl-3 py-2 text-[10px] font-black uppercase tracking-widest" style={liqCellStyle}>
                                                 Total · {filteredItems.length} empleados
                                             </td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: 'var(--txt3)' }}>{totals.hsTeoricas.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: 'var(--txt)' }}>{totals.hsReales.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: '#f59e0b' }}>{totals.diurnas.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: '#8b5cf6' }}>{totals.nocturnas.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: '#ef4444' }}>{totals.al100FT.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: '#06b6d4' }}>{totals.plusFeriado.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold border-l" style={{ color: 'var(--txt)', borderColor: 'var(--border)' }}>{totals.bolsa.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: 'var(--txt)' }}>{totals.hsSimples.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={{ color: '#f97316' }}>{totals.al50.toFixed(1)}</td>
-                                            <td colSpan={8} />
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.hsTeoricas.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.hsReales.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.diurnas.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.nocturnas.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.al100FT.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.plusFeriado.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.bolsa.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.hsSimples.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.al50.toFixed(1)}</td>
+                                            <td colSpan={8} style={liqCellStyle} />
+                                            <td style={liqCellStyle} />
                                         </tr>
                                     </tfoot>
                                 )}
@@ -1003,17 +1011,17 @@ export default function LiquidacionesPage() {
                 {!loading && snapshot && (
                     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4">
                         {[
-                            ['V', 'Vacaciones', '#10b981'],
-                            ['E', 'Enfermedad', '#f59e0b'],
-                            ['ART', 'Autorizada/ART', '#f59e0b'],
-                            ['L', 'Lic. Especial', '#10b981'],
-                            ['PG', 'Permiso Gremial', '#6366f1'],
-                            ['AA', 'Injustificada', '#ef4444'],
-                            ['RA', 'Retiro anticipado', '#e11d48'],
-                            ['Otros', 'Códigos no mapeados', '#8b5cf6'],
-                        ].map(([abbr, full, color]) => (
-                            <span key={abbr} className="text-[10px] font-medium" style={{ color: 'var(--txt3)' }}>
-                                <span className="font-black" style={{ color }}>{abbr}</span> = {full}
+                            ['V', 'Vacaciones'],
+                            ['E', 'Enfermedad'],
+                            ['ART', 'Autorizada/ART'],
+                            ['L', 'Lic. Especial'],
+                            ['PG', 'Permiso Gremial'],
+                            ['AA', 'Injustificada'],
+                            ['RA', 'Retiro anticipado'],
+                            ['Otros', 'Códigos no mapeados'],
+                        ].map(([abbr, full]) => (
+                            <span key={abbr} className="text-[10px] font-medium" style={{ color: LIQ_INK }}>
+                                <span className="font-black">{abbr}</span> = {full}
                             </span>
                         ))}
                     </div>
