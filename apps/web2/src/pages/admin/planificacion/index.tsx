@@ -116,6 +116,7 @@ import {
     isPlanningPositionExcludedOnDate,
     isPlanningShiftExcludedOnDate,
     getPlanningExcludedShiftCodesOnDate,
+    getPlanningExcludedShiftPaxOnDate,
     isPlanningWorkShiftCode,
     planningPositionExclusionLabel,
     buildExcludedPositionsByDate,
@@ -726,6 +727,7 @@ const posAsEngineDef = (pos: any) => ({
     coverageType: pos?.coverageType,
     excludedDates: pos?.excludedDates,
     excludedShiftDates: pos?.excludedShiftDates,
+    excludedShiftPaxDates: pos?.excludedShiftPaxDates,
 });
 
 const isPosActiveOnDay = (pos: any, dayLetter: string, dateStr?: string): boolean =>
@@ -738,13 +740,30 @@ function dailyCoverageHoursTargetForPos(pos: any, dayLetter: string, cycles?: st
     const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
     if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
         if (dateStr && isPlanningPositionExcludedOnDate(pos, dateStr)) return 0;
-        // Con exclusión parcial de banda, no forzamos 24: sumamos bandas restantes abajo.
-        if (!(dateStr && getPlanningExcludedShiftCodesOnDate(pos, dateStr).length > 0)) return 24;
+        // Con exclusión parcial de banda/PAX, no forzamos 24: sumamos bandas restantes abajo.
+        const hasPartial = dateStr && (
+            getPlanningExcludedShiftCodesOnDate(pos, dateStr).length > 0
+            || Object.keys(getPlanningExcludedShiftPaxOnDate(pos, dateStr)).length > 0
+        );
+        if (!hasPartial) return 24;
     }
     let eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
     if (dateStr) {
         const skip = new Set(getPlanningExcludedShiftCodesOnDate(pos, dateStr));
+        const paxCuts = getPlanningExcludedShiftPaxOnDate(pos, dateStr);
         if (skip.size > 0) eff = eff.filter((s) => !skip.has(String(s.code || '').toUpperCase()));
+        // Bandas con PAX efectivo 0 (corte total vía excludedShiftPaxDates) no suman horas.
+        if (Object.keys(paxCuts).length > 0) {
+            eff = eff.filter((s) => {
+                const code = String(s.code || '').toUpperCase();
+                const cut = paxCuts[code] || 0;
+                if (cut <= 0) return true;
+                const base = (s as any).quantity != null && Number((s as any).quantity) > 0
+                    ? Math.floor(Number((s as any).quantity))
+                    : Math.max(1, Number(pos?.qty) || 1);
+                return base - cut > 0;
+            });
+        }
     }
     if (eff.length > 0) {
         return eff.reduce((acc, s) => acc + (Number(s.hours) || 8), 0);
@@ -775,14 +794,25 @@ function dailyCoverageHoursTargetWithPerShiftPax(pos: any, globalPax: number, da
         return true;
     });
     if (shifts.length === 0) return globalPax * 8;
-    const hasPerShiftPax = shifts.some((s: any) => (s as any).quantity != null && Number((s as any).quantity) > 0);
+    const paxCuts = dateStr ? getPlanningExcludedShiftPaxOnDate(pos, dateStr) : {};
+    const fullSkip = dateStr ? new Set(getPlanningExcludedShiftCodesOnDate(pos, dateStr)) : new Set<string>();
+    const hasPerShiftPax = shifts.some((s: any) => (s as any).quantity != null && Number((s as any).quantity) > 0)
+        || Object.keys(paxCuts).length > 0;
     if (!hasPerShiftPax) {
-        const sum = shifts.reduce((acc: number, s: any) => acc + (Number(s.hours) || 8), 0);
+        const sum = shifts.reduce((acc: number, s: any) => {
+            const code = String(s.code || '').toUpperCase();
+            if (fullSkip.has(code)) return acc;
+            return acc + (Number(s.hours) || 8);
+        }, 0);
         return globalPax * (sum > 0 ? sum : 8);
     }
     return shifts.reduce((acc: number, s: any) => {
+        const code = String(s.code || '').toUpperCase();
+        if (fullSkip.has(code)) return acc;
         const sq = (s as any).quantity;
-        const sp = (sq != null && Number(sq) > 0) ? Math.floor(Number(sq)) : globalPax;
+        const base = (sq != null && Number(sq) > 0) ? Math.floor(Number(sq)) : globalPax;
+        const sp = Math.max(0, base - (paxCuts[code] || 0));
+        if (sp <= 0) return acc;
         return acc + sp * (Number(s.hours) || 8);
     }, 0);
 }

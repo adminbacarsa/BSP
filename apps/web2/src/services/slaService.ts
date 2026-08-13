@@ -34,8 +34,15 @@ export interface ServicePosition {
   /**
    * Exclusión parcial por banda: fecha → códigos (M, T, N…).
    * Si ese día también está en excludedDates, manda el día completo.
+   * Si el turno tiene quantity>1 y solo querés bajar PAX, usá excludedShiftPaxDates.
    */
   excludedShiftDates?: Record<string, string[]>;
+  /**
+   * Exclusión de N pax de una banda (sin apagar el turno entero).
+   * fecha → { código → pax a excluir }. Ej: { "2025-07-03": { "M": 1 } } con M×2 → queda 1 pax.
+   * Si excludePax >= quantity del turno, equivale a excludedShiftDates.
+   */
+  excludedShiftPaxDates?: Record<string, Record<string, number>>;
   preferenciaGenero?: 'M' | 'F' | 'INDISTINTO';
 }
 

@@ -137,6 +137,8 @@ export default function ServiciosSLAPage() {
   const [excludedDatesScope, setExcludedDatesScope] = useState<'ALL' | string>('ALL');
   /** Vacío = excluir puesto completo; con códigos = excluir solo esas bandas al clickear días. */
   const [excludedBandFilter, setExcludedBandFilter] = useState<string[]>([]);
+  /** Por banda seleccionada: cuántos pax excluir (1..quantity). Si = quantity → exclusión total de la banda. */
+  const [excludedBandPax, setExcludedBandPax] = useState<Record<string, number>>({});
   const savedSelfRef = useRef(false); // evita falsos positivos por nuestros propios guardados
   // Código del turno que se está editando (null = modo "agregar nuevo")
   const [editingShiftCode, setEditingShiftCode] = useState<string | null>(null);
@@ -2302,6 +2304,109 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      const scopeShiftMap: Record<string, string[]> = !isAll && scopePos?.excludedShiftDates
                          ? { ...scopePos.excludedShiftDates }
                          : {};
+                     const scopePaxMap: Record<string, Record<string, number>> = !isAll && scopePos?.excludedShiftPaxDates
+                         ? { ...scopePos.excludedShiftPaxDates }
+                         : {};
+
+                     const bandQtyOf = (p: ServicePosition, code: string) => {
+                         const s = (p.allowedShiftTypes || []).find(x => String(x.code || '').toUpperCase() === code);
+                         return Math.max(1, Math.floor(Number(s?.quantity ?? p.quantity ?? 1) || 1));
+                     };
+
+                     const normalizeExclusionMaps = (
+                         p: ServicePosition,
+                         full: Set<string>,
+                         shiftMap: Record<string, string[]>,
+                         paxMap: Record<string, Record<string, number>>,
+                         ds: string,
+                     ) => {
+                         const allBands = (p.allowedShiftTypes || []).map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+                         const fullCodes = new Set((shiftMap[ds] || []).map(c => String(c).toUpperCase()));
+                         const paxDay = { ...(paxMap[ds] || {}) };
+                         for (const code of Object.keys(paxDay)) {
+                             const cut = Math.floor(Number(paxDay[code]) || 0);
+                             const qty = bandQtyOf(p, code);
+                             if (cut <= 0) delete paxDay[code];
+                             else if (cut >= qty) {
+                                 fullCodes.add(code);
+                                 delete paxDay[code];
+                             }
+                         }
+                         if (allBands.length > 0 && allBands.every(c => fullCodes.has(c))) {
+                             full.add(ds);
+                             delete shiftMap[ds];
+                             delete paxMap[ds];
+                             return;
+                         }
+                         full.delete(ds);
+                         if (fullCodes.size > 0) shiftMap[ds] = Array.from(fullCodes).sort();
+                         else delete shiftMap[ds];
+                         if (Object.keys(paxDay).length > 0) paxMap[ds] = paxDay;
+                         else delete paxMap[ds];
+                     };
+
+                     const applyBandCutsToDay = (
+                         p: ServicePosition,
+                         ds: string,
+                         want: string[],
+                         cuts: Record<string, number>,
+                         mode: 'set' | 'clear',
+                     ) => {
+                         const full = new Set(p.excludedDates || []);
+                         const shiftMap = { ...(p.excludedShiftDates || {}) };
+                         const paxMap = { ...(p.excludedShiftPaxDates || {}) };
+                         if (mode === 'clear') {
+                             full.delete(ds);
+                             const remCodes = new Set((shiftMap[ds] || []).map(c => String(c).toUpperCase()));
+                             const remPax = { ...(paxMap[ds] || {}) };
+                             want.forEach(c => {
+                                 remCodes.delete(c);
+                                 delete remPax[c];
+                             });
+                             if (remCodes.size > 0) shiftMap[ds] = Array.from(remCodes).sort();
+                             else delete shiftMap[ds];
+                             if (Object.keys(remPax).length > 0) paxMap[ds] = remPax;
+                             else delete paxMap[ds];
+                         } else {
+                             full.delete(ds);
+                             const remCodes = new Set((shiftMap[ds] || []).map(c => String(c).toUpperCase()));
+                             const remPax = { ...(paxMap[ds] || {}) };
+                             want.forEach(c => {
+                                 const qty = bandQtyOf(p, c);
+                                 const cut = Math.min(Math.max(1, Math.floor(Number(cuts[c] ?? qty) || qty)), qty);
+                                 if (cut >= qty) {
+                                     remCodes.add(c);
+                                     delete remPax[c];
+                                 } else {
+                                     remCodes.delete(c);
+                                     remPax[c] = cut;
+                                 }
+                             });
+                             if (remCodes.size > 0) shiftMap[ds] = Array.from(remCodes).sort();
+                             else delete shiftMap[ds];
+                             if (Object.keys(remPax).length > 0) paxMap[ds] = remPax;
+                             else delete paxMap[ds];
+                             normalizeExclusionMaps(p, full, shiftMap, paxMap, ds);
+                         }
+                         return {
+                             ...p,
+                             excludedDates: Array.from(full).sort(),
+                             excludedShiftDates: Object.keys(shiftMap).length ? shiftMap : undefined,
+                             excludedShiftPaxDates: Object.keys(paxMap).length ? paxMap : undefined,
+                         };
+                     };
+
+                     const dayMatchesWantCuts = (p: ServicePosition, ds: string, want: string[], cuts: Record<string, number>) => {
+                         if ((p.excludedDates || []).includes(ds)) return false;
+                         const fullCodes = new Set((p.excludedShiftDates?.[ds] || []).map(c => String(c).toUpperCase()));
+                         const paxDay = p.excludedShiftPaxDates?.[ds] || {};
+                         return want.length > 0 && want.every(c => {
+                             const qty = bandQtyOf(p, c);
+                             const cut = Math.min(Math.max(1, Math.floor(Number(cuts[c] ?? qty) || qty)), qty);
+                             if (cut >= qty) return fullCodes.has(c);
+                             return Number(paxDay[c] || 0) === cut;
+                         });
+                     };
 
                      const setScopePosition = (mutator: (p: ServicePosition) => ServicePosition) => {
                          if (scopePosIdx < 0) return;
@@ -2322,51 +2427,34 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                              setScopePosition((p) => {
                                  const cur = new Set(p.excludedDates || []);
                                  const shiftMap = { ...(p.excludedShiftDates || {}) };
+                                 const paxMap = { ...(p.excludedShiftPaxDates || {}) };
                                  if (cur.has(ds)) {
                                      cur.delete(ds);
                                  } else {
                                      cur.add(ds);
                                      delete shiftMap[ds];
+                                     delete paxMap[ds];
                                  }
-                                 const nextShift = Object.keys(shiftMap).length ? shiftMap : undefined;
-                                 return { ...p, excludedDates: Array.from(cur).sort(), excludedShiftDates: nextShift };
+                                 return {
+                                     ...p,
+                                     excludedDates: Array.from(cur).sort(),
+                                     excludedShiftDates: Object.keys(shiftMap).length ? shiftMap : undefined,
+                                     excludedShiftPaxDates: Object.keys(paxMap).length ? paxMap : undefined,
+                                 };
                              });
                              return;
                          }
 
-                         // Modo bandas: toggle códigos seleccionados en ese día
+                         const want = excludedBandFilter.map(c => String(c).toUpperCase());
                          setScopePosition((p) => {
-                             const full = new Set(p.excludedDates || []);
-                             const shiftMap = { ...(p.excludedShiftDates || {}) };
-                             const existing = new Set((shiftMap[ds] || []).map(c => String(c).toUpperCase()));
-                             const want = excludedBandFilter.map(c => String(c).toUpperCase());
-                             // Si era día completo, pasar a parcial con las bandas elegidas
-                             if (full.has(ds)) {
-                                 full.delete(ds);
-                                 shiftMap[ds] = [...want].sort();
-                             } else {
-                                 const allSelectedAlready = want.length > 0 && want.every(c => existing.has(c));
-                                 if (allSelectedAlready) {
-                                     want.forEach(c => existing.delete(c));
-                                 } else {
-                                     want.forEach(c => existing.add(c));
-                                 }
-                                 const allBands = (p.allowedShiftTypes || []).map(s => String(s.code || '').toUpperCase()).filter(Boolean);
-                                 const remaining = Array.from(existing);
-                                 if (allBands.length > 0 && allBands.every(c => remaining.includes(c))) {
-                                     full.add(ds);
-                                     delete shiftMap[ds];
-                                 } else if (remaining.length === 0) {
-                                     delete shiftMap[ds];
-                                 } else {
-                                     shiftMap[ds] = remaining.sort();
-                                 }
+                             if ((p.excludedDates || []).includes(ds)) {
+                                 // Día completo → pasar a las bandas/pax elegidos
+                                 return applyBandCutsToDay(p, ds, want, excludedBandPax, 'set');
                              }
-                             return {
-                                 ...p,
-                                 excludedDates: Array.from(full).sort(),
-                                 excludedShiftDates: Object.keys(shiftMap).length ? shiftMap : undefined,
-                             };
+                             if (dayMatchesWantCuts(p, ds, want, excludedBandPax)) {
+                                 return applyBandCutsToDay(p, ds, want, excludedBandPax, 'clear');
+                             }
+                             return applyBandCutsToDay(p, ds, want, excludedBandPax, 'set');
                          });
                      };
 
@@ -2374,7 +2462,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                          if (isAll) {
                              setForm({ ...form, excludedDates: [] });
                          } else if (scopePosIdx >= 0) {
-                             setScopePosition((p) => ({ ...p, excludedDates: [], excludedShiftDates: undefined }));
+                             setScopePosition((p) => ({
+                                 ...p,
+                                 excludedDates: [],
+                                 excludedShiftDates: undefined,
+                                 excludedShiftPaxDates: undefined,
+                             }));
                          }
                      };
 
@@ -2387,38 +2480,27 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                          } else if (scopePosIdx >= 0) {
                              setScopePosition((p) => {
                                  if (bandMode) {
-                                     const shiftMap = { ...(p.excludedShiftDates || {}) };
-                                     const full = new Set(p.excludedDates || []);
                                      const want = excludedBandFilter.map(c => String(c).toUpperCase());
-                                     const allBands = (p.allowedShiftTypes || []).map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+                                     let next = p;
                                      validDs.forEach(ds => {
-                                         if (full.has(ds)) return;
-                                         const cur = new Set((shiftMap[ds] || []).map(c => String(c).toUpperCase()));
-                                         want.forEach(c => cur.add(c));
-                                         const rem = Array.from(cur);
-                                         if (allBands.length > 0 && allBands.every(c => rem.includes(c))) {
-                                             full.add(ds);
-                                             delete shiftMap[ds];
-                                         } else {
-                                             shiftMap[ds] = rem.sort();
-                                         }
+                                         if ((next.excludedDates || []).includes(ds)) return;
+                                         next = applyBandCutsToDay(next, ds, want, excludedBandPax, 'set');
                                      });
-                                     return {
-                                         ...p,
-                                         excludedDates: Array.from(full).sort(),
-                                         excludedShiftDates: Object.keys(shiftMap).length ? shiftMap : undefined,
-                                     };
+                                     return next;
                                  }
                                  const cur = new Set(p.excludedDates || []);
                                  const shiftMap = { ...(p.excludedShiftDates || {}) };
+                                 const paxMap = { ...(p.excludedShiftPaxDates || {}) };
                                  validDs.forEach(ds => {
                                      cur.add(ds);
                                      delete shiftMap[ds];
+                                     delete paxMap[ds];
                                  });
                                  return {
                                      ...p,
                                      excludedDates: Array.from(cur).sort(),
                                      excludedShiftDates: Object.keys(shiftMap).length ? shiftMap : undefined,
+                                     excludedShiftPaxDates: Object.keys(paxMap).length ? paxMap : undefined,
                                  };
                              });
                          }
@@ -2426,7 +2508,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
                      const partialDayCount = form.positions.reduce((acc, p) => {
                          const m = p.excludedShiftDates || {};
-                         return acc + Object.values(m).reduce((n, codes) => n + (codes?.length ? 1 : 0), 0);
+                         const px = p.excludedShiftPaxDates || {};
+                         const shiftDays = Object.values(m).reduce((n, codes) => n + (codes?.length ? 1 : 0), 0);
+                         const paxDays = Object.values(px).reduce((n, row) => n + (row && Object.keys(row).length ? 1 : 0), 0);
+                         return acc + shiftDays + paxDays;
                      }, 0);
                      const totalExcluded = slaGlobal.size + form.positions.reduce(
                          (acc, p) => acc + (p.excludedDates?.length || 0), 0
@@ -2467,14 +2552,26 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
                      const makeShiftSummary = (p: ServicePosition) => {
                          const m = p.excludedShiftDates || {};
-                         const parts = Object.entries(m)
-                             .filter(([, codes]) => codes?.length)
-                             .map(([ds, codes]) => {
-                                 const [, mo, d] = ds.split('-');
-                                 return `${d}/${mo}: ${(codes || []).join('+')}`;
-                             });
+                         const px = p.excludedShiftPaxDates || {};
+                         const days = new Set([...Object.keys(m), ...Object.keys(px)]);
+                         const parts = Array.from(days).sort().map(ds => {
+                             const [, mo, d] = ds.split('-');
+                             const codes = (m[ds] || []).map(c => String(c).toUpperCase());
+                             const paxBits = Object.entries(px[ds] || {}).map(([c, n]) => `${String(c).toUpperCase()}-${n}`);
+                             const label = [...codes, ...paxBits].join('+');
+                             return label ? `${d}/${mo}: ${label}` : '';
+                         }).filter(Boolean);
                          return parts.slice(0, 6).join(' · ') + (parts.length > 6 ? ` (+${parts.length - 6})` : '');
                      };
+
+                     const bandHint = bandMode
+                         ? excludedBandFilter.map(c => {
+                             if (!scopePos) return c;
+                             const qty = bandQtyOf(scopePos, c);
+                             const cut = Math.min(excludedBandPax[c] ?? qty, qty);
+                             return cut >= qty ? c : `${c}×${cut}/${qty}`;
+                         }).join('+')
+                         : '';
 
                      return (
                          <div className="rounded-xl border dark:border-slate-700 overflow-hidden">
@@ -2495,6 +2592,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                      {form.positions.map(p => Object.keys(p.excludedShiftDates || {}).length > 0 && (
                                          <p key={`${p.id}-partial`} className="text-[9px] font-bold text-amber-600 dark:text-amber-400">{p.name || p.id} (turnos): {makeShiftSummary(p)}</p>
                                      ))}
+                                     {form.positions.map(p => Object.keys(p.excludedShiftPaxDates || {}).length > 0 && !Object.keys(p.excludedShiftDates || {}).length && (
+                                         <p key={`${p.id}-pax`} className="text-[9px] font-bold text-amber-600 dark:text-amber-400">{p.name || p.id} (pax): {makeShiftSummary(p)}</p>
+                                     ))}
                                  </div>
                              )}
                              {showExcludedDatesPicker && (
@@ -2503,33 +2603,73 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                          <span className="text-[9px] font-black uppercase text-slate-400">Aplica a:</span>
                                          {(['ALL', ...posNames] as string[]).map(scope => (
                                              <button key={scope} type="button"
-                                                 onClick={() => { setExcludedDatesScope(scope); setExcludedBandFilter([]); }}
+                                                 onClick={() => { setExcludedDatesScope(scope); setExcludedBandFilter([]); setExcludedBandPax({}); }}
                                                  className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${excludedDatesScope === scope ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-rose-400'}`}>
                                                  {scope === 'ALL' ? 'Todos los puestos' : scope}
                                              </button>
                                          ))}
                                      </div>
                                      {!isAll && scopeBandCodes.length > 0 && (
-                                         <div className="px-4 py-2 bg-white dark:bg-slate-900 flex items-center gap-2 flex-wrap border-b dark:border-slate-700">
-                                             <span className="text-[9px] font-black uppercase text-slate-400">Excluir:</span>
-                                             <button type="button"
-                                                 onClick={() => setExcludedBandFilter([])}
-                                                 className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${!bandMode ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-rose-400'}`}>
-                                                 Puesto completo
-                                             </button>
-                                             {scopeBandCodes.map(code => {
-                                                 const on = excludedBandFilter.includes(code);
-                                                 return (
-                                                     <button key={code} type="button"
-                                                         onClick={() => setExcludedBandFilter(prev => on ? prev.filter(c => c !== code) : [...prev, code])}
-                                                         className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${on ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-amber-400'}`}>
-                                                         {code}
-                                                     </button>
-                                                 );
-                                             })}
-                                             <span className="text-[8px] font-bold text-slate-400 ml-auto">
-                                                 {bandMode ? `Marcás días → excluye ${excludedBandFilter.join('+')}` : 'Marcás días → sin servicio el puesto'}
-                                             </span>
+                                         <div className="px-4 py-2 bg-white dark:bg-slate-900 space-y-2 border-b dark:border-slate-700">
+                                             <div className="flex items-center gap-2 flex-wrap">
+                                                 <span className="text-[9px] font-black uppercase text-slate-400">Excluir:</span>
+                                                 <button type="button"
+                                                     onClick={() => { setExcludedBandFilter([]); setExcludedBandPax({}); }}
+                                                     className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${!bandMode ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-rose-400'}`}>
+                                                     Puesto completo
+                                                 </button>
+                                                 {scopeBandCodes.map(code => {
+                                                     const on = excludedBandFilter.includes(code);
+                                                     const qty = scopePos ? bandQtyOf(scopePos, code) : 1;
+                                                     return (
+                                                         <button key={code} type="button"
+                                                             onClick={() => {
+                                                                 if (on) {
+                                                                     setExcludedBandFilter(prev => prev.filter(c => c !== code));
+                                                                     setExcludedBandPax(prev => {
+                                                                         const next = { ...prev };
+                                                                         delete next[code];
+                                                                         return next;
+                                                                     });
+                                                                 } else {
+                                                                     setExcludedBandFilter(prev => [...prev, code]);
+                                                                     setExcludedBandPax(prev => ({
+                                                                         ...prev,
+                                                                         [code]: qty > 1 ? 1 : qty,
+                                                                     }));
+                                                                 }
+                                                             }}
+                                                             className={`px-2 py-0.5 rounded text-[9px] font-black border transition-colors ${on ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-amber-400'}`}>
+                                                             {qty > 1 ? `${code}×${qty}` : code}
+                                                         </button>
+                                                     );
+                                                 })}
+                                                 <span className="text-[8px] font-bold text-slate-400 ml-auto">
+                                                     {bandMode ? `Marcás días → ${bandHint}` : 'Marcás días → sin servicio el puesto'}
+                                                 </span>
+                                             </div>
+                                             {bandMode && scopePos && excludedBandFilter.some(c => bandQtyOf(scopePos, c) > 1) && (
+                                                 <div className="flex items-center gap-3 flex-wrap pl-1">
+                                                     <span className="text-[9px] font-black uppercase text-slate-400">PAX a excluir:</span>
+                                                     {excludedBandFilter.map(code => {
+                                                         const qty = bandQtyOf(scopePos, code);
+                                                         if (qty <= 1) return null;
+                                                         const cut = Math.min(Math.max(1, excludedBandPax[code] || 1), qty);
+                                                         return (
+                                                             <div key={`pax-${code}`} className="flex items-center gap-1">
+                                                                 <span className="text-[9px] font-black text-amber-700 dark:text-amber-400">{code}</span>
+                                                                 {Array.from({ length: qty }, (_, i) => i + 1).map(n => (
+                                                                     <button key={`${code}-${n}`} type="button"
+                                                                         onClick={() => setExcludedBandPax(prev => ({ ...prev, [code]: n }))}
+                                                                         className={`min-w-[22px] px-1.5 py-0.5 rounded text-[9px] font-black border transition-colors ${cut === n ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-indigo-400'}`}>
+                                                                         {n === qty ? 'todos' : n}
+                                                                     </button>
+                                                                 ))}
+                                                             </div>
+                                                         );
+                                                     })}
+                                                 </div>
+                                             )}
                                          </div>
                                      )}
                                      {months.length > 0 ? (
@@ -2551,15 +2691,18 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                                                  if (!ds) return <span key={`out-${i}`} className="text-center text-[9px] text-slate-200 dark:text-slate-700 py-1">{date.getDate()}</span>;
                                                                  const isFullActive = activeFullDates.has(ds);
                                                                  const partialCodes = scopeShiftMap[ds] || [];
-                                                                 const isPartial = !isFullActive && partialCodes.length > 0;
+                                                                 const paxCuts = scopePaxMap[ds] || {};
+                                                                 const paxLabel = Object.entries(paxCuts).map(([c, n]) => `${c}-${n}`).join('');
+                                                                 const isPartial = !isFullActive && (partialCodes.length > 0 || Object.keys(paxCuts).length > 0);
                                                                  const isGlobal = !isAll && slaGlobal.has(ds);
                                                                  const isWe = date.getDay() === 0 || date.getDay() === 6;
+                                                                 const chip = [...partialCodes, ...Object.entries(paxCuts).map(([c, n]) => `${c}${n}`)].join('');
                                                                  const title = isGlobal
                                                                      ? 'Excluido para todos los puestos'
                                                                      : isFullActive
                                                                          ? `${ds} · puesto completo`
                                                                          : isPartial
-                                                                             ? `${ds} · turnos ${partialCodes.join('+')}`
+                                                                             ? `${ds} · ${[partialCodes.join('+'), paxLabel].filter(Boolean).join(' · ')}`
                                                                              : ds;
                                                                  return (
                                                                      <button key={ds} type="button" title={title}
@@ -2568,14 +2711,16 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                                                              ${isFullActive || isGlobal
                                                                                  ? isGlobal ? 'bg-rose-300 dark:bg-rose-800 text-white cursor-not-allowed' : 'bg-rose-500 text-white'
                                                                                  : isPartial
-                                                                                     ? 'bg-amber-400 text-white'
+                                                                                     ? Object.keys(paxCuts).length > 0 && partialCodes.length === 0
+                                                                                         ? 'bg-amber-300 text-amber-950'
+                                                                                         : 'bg-amber-400 text-white'
                                                                                      : isWe ? 'text-amber-600 dark:text-amber-400 hover:bg-rose-50' : 'text-slate-700 dark:text-slate-300 hover:bg-rose-50'
                                                                              }`}
                                                                      >
                                                                          {date.getDate()}
                                                                          {isPartial && (
                                                                              <span className="absolute -bottom-0.5 left-0 right-0 text-[6px] font-black leading-none truncate px-0.5">
-                                                                                 {partialCodes.join('')}
+                                                                                 {chip}
                                                                              </span>
                                                                          )}
                                                                      </button>
@@ -2585,12 +2730,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                                      </div>
                                                  );
                                              })}
-                                             {(activeFullDates.size > 0 || Object.keys(scopeShiftMap).length > 0) && (
+                                             {(activeFullDates.size > 0 || Object.keys(scopeShiftMap).length > 0 || Object.keys(scopePaxMap).length > 0) && (
                                                  <div className="flex items-center justify-between pt-2 border-t dark:border-slate-700 gap-2">
                                                      <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">
                                                          {activeFullDates.size > 0 && makeSummary(activeFullDates)}
-                                                         {activeFullDates.size > 0 && Object.keys(scopeShiftMap).length > 0 && ' · '}
-                                                         {scopePos && Object.keys(scopeShiftMap).length > 0 && makeShiftSummary(scopePos)}
+                                                         {activeFullDates.size > 0 && (Object.keys(scopeShiftMap).length > 0 || Object.keys(scopePaxMap).length > 0) && ' · '}
+                                                         {scopePos && (Object.keys(scopeShiftMap).length > 0 || Object.keys(scopePaxMap).length > 0) && makeShiftSummary(scopePos)}
                                                      </p>
                                                      <button type="button" onClick={clearScope} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase shrink-0">Limpiar</button>
                                                  </div>

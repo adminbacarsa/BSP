@@ -246,6 +246,8 @@ export type PlanningPositionRow = {
   excludedDates?: string[];
   /** Fecha → códigos de banda excluidos (parcial). */
   excludedShiftDates?: Record<string, string[]>;
+  /** Fecha → { código → pax excluidos } (turno con quantity>1). */
+  excludedShiftPaxDates?: Record<string, Record<string, number>>;
   preferenciaGenero?: string;
   _serviceId?: string;
   _serviceRange?: string;
@@ -314,6 +316,11 @@ export function buildPlanningPositionStructure(
         rawShiftEx && typeof rawShiftEx === 'object' && !Array.isArray(rawShiftEx)
           ? (rawShiftEx as Record<string, string[]>)
           : undefined;
+      const rawPaxEx = pos.excludedShiftPaxDates;
+      const excludedShiftPaxDates =
+        rawPaxEx && typeof rawPaxEx === 'object' && !Array.isArray(rawPaxEx)
+          ? (rawPaxEx as Record<string, Record<string, number>>)
+          : undefined;
       structure.push({
         positionName: String(pos.name ?? pos.positionName ?? 'General'),
         shifts: normalizedShifts,
@@ -325,6 +332,9 @@ export function buildPlanningPositionStructure(
         ...(mergedExcluded.length > 0 ? { excludedDates: mergedExcluded } : {}),
         ...(excludedShiftDates && Object.keys(excludedShiftDates).length > 0
           ? { excludedShiftDates }
+          : {}),
+        ...(excludedShiftPaxDates && Object.keys(excludedShiftPaxDates).length > 0
+          ? { excludedShiftPaxDates }
           : {}),
         _serviceId: srv.id,
         _serviceRange: slaServiceRangeLabel(srv),
@@ -377,12 +387,69 @@ export function getPlanningExcludedShiftCodesOnDate(
   return [...new Set(raw.map((c) => String(c || '').toUpperCase()).filter(Boolean))];
 }
 
+/** PAX excluidos por código ese día (solo reducción parcial; no incluye exclusión total de banda). */
+export function getPlanningExcludedShiftPaxOnDate(
+  pos: { excludedShiftPaxDates?: Record<string, Record<string, number>> } | null | undefined,
+  dateStr: string,
+): Record<string, number> {
+  if (!pos?.excludedShiftPaxDates || !dateStr) return {};
+  const raw = pos.excludedShiftPaxDates[dateStr];
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, number> = {};
+  for (const [code, n] of Object.entries(raw)) {
+    const c = String(code || '').toUpperCase();
+    const pax = Math.floor(Number(n) || 0);
+    if (!c || pax <= 0) continue;
+    out[c] = pax;
+  }
+  return out;
+}
+
+/**
+ * Quantity efectiva de una banda ese día (0 = apagada).
+ * Base = shift.quantity ?? fallbackQty; resta excludedShiftPaxDates y respeta excludedShiftDates.
+ */
+export function getEffectiveShiftQuantityOnDate(
+  pos: {
+    qty?: number;
+    quantity?: number;
+    excludedDates?: string[];
+    excludedShiftDates?: Record<string, string[]>;
+    excludedShiftPaxDates?: Record<string, Record<string, number>>;
+    shifts?: Array<{ code?: string; quantity?: number }>;
+    allowedShiftTypes?: Array<{ code?: string; quantity?: number }>;
+  } | null | undefined,
+  dateStr: string,
+  code: string | undefined | null,
+  fallbackQty?: number,
+): number {
+  if (!pos || !dateStr) return Math.max(1, Math.floor(Number(fallbackQty) || 1));
+  if (isPlanningPositionExcludedOnDate(pos, dateStr)) return 0;
+  const c = String(code || '').toUpperCase();
+  if (!c) return 0;
+  if (getPlanningExcludedShiftCodesOnDate(pos, dateStr).includes(c)) return 0;
+  const shifts = Array.isArray(pos.shifts) ? pos.shifts : (pos.allowedShiftTypes || []);
+  const shift = shifts.find((s) => String(s.code || '').toUpperCase() === c);
+  const baseRaw = shift?.quantity ?? fallbackQty ?? pos.qty ?? pos.quantity ?? 1;
+  const base = Math.max(1, Math.floor(Number(baseRaw) || 1));
+  const cut = getPlanningExcludedShiftPaxOnDate(pos, dateStr)[c] || 0;
+  return Math.max(0, base - cut);
+}
+
 /**
  * True si ese código laboral no debe asignarse/contarse ese día:
- * exclusión de puesto completo o banda listada en excludedShiftDates.
+ * exclusión de puesto completo, banda en excludedShiftDates, o PAX efectivo 0.
  */
 export function isPlanningShiftExcludedOnDate(
-  pos: { excludedDates?: string[]; excludedShiftDates?: Record<string, string[]> } | null | undefined,
+  pos: {
+    qty?: number;
+    quantity?: number;
+    excludedDates?: string[];
+    excludedShiftDates?: Record<string, string[]>;
+    excludedShiftPaxDates?: Record<string, Record<string, number>>;
+    shifts?: Array<{ code?: string; quantity?: number }>;
+    allowedShiftTypes?: Array<{ code?: string; quantity?: number }>;
+  } | null | undefined,
   dateStr: string,
   code: string | undefined | null,
 ): boolean {
@@ -390,17 +457,25 @@ export function isPlanningShiftExcludedOnDate(
   if (isPlanningPositionExcludedOnDate(pos, dateStr)) return true;
   const c = String(code || '').toUpperCase();
   if (!c || !isPlanningWorkShiftCode(c)) return false;
-  return getPlanningExcludedShiftCodesOnDate(pos, dateStr).includes(c);
+  if (getPlanningExcludedShiftCodesOnDate(pos, dateStr).includes(c)) return true;
+  const cuts = getPlanningExcludedShiftPaxOnDate(pos, dateStr);
+  if (!(c in cuts)) return false;
+  return getEffectiveShiftQuantityOnDate(pos, dateStr, c) <= 0;
 }
 
-/** True si el día tiene al menos una exclusión parcial de banda (sin ser día completo). */
+/** True si el día tiene al menos una exclusión parcial de banda o PAX (sin ser día completo). */
 export function hasPlanningPartialShiftExclusionOnDate(
-  pos: { excludedDates?: string[]; excludedShiftDates?: Record<string, string[]> } | null | undefined,
+  pos: {
+    excludedDates?: string[];
+    excludedShiftDates?: Record<string, string[]>;
+    excludedShiftPaxDates?: Record<string, Record<string, number>>;
+  } | null | undefined,
   dateStr: string,
 ): boolean {
   if (!pos || !dateStr) return false;
   if (isPlanningPositionExcludedOnDate(pos, dateStr)) return false;
-  return getPlanningExcludedShiftCodesOnDate(pos, dateStr).length > 0;
+  if (getPlanningExcludedShiftCodesOnDate(pos, dateStr).length > 0) return true;
+  return Object.keys(getPlanningExcludedShiftPaxOnDate(pos, dateStr)).length > 0;
 }
 
 /** Turnos laborales que no deben asignarse en un día excluido (francos/licencias sí). */

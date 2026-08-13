@@ -503,8 +503,10 @@ export function countPositionClosedUnitsFromShifts(
         positionName?: string;
         qty?: number;
         coverageType?: string;
-        shifts?: Array<{ code?: string; hours?: number }>;
+        shifts?: Array<{ code?: string; hours?: number; quantity?: number }>;
         activeDays?: string[];
+        excludedShiftDates?: Record<string, string[]>;
+        excludedShiftPaxDates?: Record<string, Record<string, number>>;
     },
     dayLetter: string,
     codeCounts: Record<string, number>,
@@ -518,24 +520,56 @@ export function countPositionClosedUnitsFromShifts(
 
     const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
     const allShifts = Array.isArray(pos?.shifts) ? pos.shifts : [];
+    const fullSkip = new Set(
+        dateStr && pos.excludedShiftDates?.[dateStr]
+            ? (pos.excludedShiftDates[dateStr] || []).map((c) => String(c || '').toUpperCase()).filter(Boolean)
+            : [],
+    );
+    const paxCuts: Record<string, number> = {};
+    if (dateStr && pos.excludedShiftPaxDates?.[dateStr]) {
+        for (const [code, n] of Object.entries(pos.excludedShiftPaxDates[dateStr])) {
+            const c = String(code || '').toUpperCase();
+            const cut = Math.floor(Number(n) || 0);
+            if (c && cut > 0) paxCuts[c] = cut;
+        }
+    }
+    const hasPaxCuts = Object.keys(paxCuts).length > 0;
+
+    const effectiveBandQty = (code: string, shiftQty?: number): number => {
+        const c = String(code || '').toUpperCase();
+        if (!c || fullSkip.has(c)) return 0;
+        const base = (shiftQty != null && Number(shiftQty) > 0)
+            ? Math.max(1, Math.floor(Number(shiftQty)))
+            : qty;
+        return Math.max(0, base - (paxCuts[c] || 0));
+    };
 
     if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
         const bands8 = [...new Set(
             allShifts.filter(s => shiftBandHours(s) < 12).map(s => String(s.code || '').toUpperCase()).filter(Boolean),
-        )];
+        )].filter((c) => effectiveBandQty(c) > 0);
         const bands12 = [...new Set(
             allShifts.filter(s => shiftBandHours(s) >= 12).map(s => String(s.code || '').toUpperCase()).filter(Boolean),
-        )];
+        )].filter((c) => effectiveBandQty(c) > 0);
+        // Con cortes de PAX asimétricos, cerrar = cada banda alcanza su qty efectiva.
+        if (hasPaxCuts) {
+            const bands = (bands8.length > 0 ? bands8 : bands12.length > 0 ? bands12 : ['M', 'T', 'N'])
+                .map((code) => ({ code, need: effectiveBandQty(code) }))
+                .filter((b) => b.need > 0);
+            if (bands.length === 0) return { closed: 0, required: 0, schemeLabel };
+            const allFull = bands.every((b) => (codeCounts[b.code] || 0) >= b.need);
+            return { closed: allFull ? 1 : 0, required: 1, schemeLabel };
+        }
         let closed = 0;
         if (bands8.length > 0) {
             closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, bands8));
         } else if (bands12.length === 0) {
-            closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, ['M', 'T', 'N']));
+            closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, ['M', 'T', 'N'].filter((c) => !fullSkip.has(c))));
         }
         if (closed < qty && bands12.length >= 2) {
             closed += Math.min(qty - closed, closedUnitsFromBandScheme(codeCounts, bands12));
         } else if (closed < qty && bands8.length === 0 && bands12.length === 0) {
-            closed += Math.min(qty - closed, closedUnitsFromBandScheme(codeCounts, ['D12', 'N12']));
+            closed += Math.min(qty - closed, closedUnitsFromBandScheme(codeCounts, ['D12', 'N12'].filter((c) => !fullSkip.has(c))));
         }
         return { closed, required: qty, schemeLabel };
     }
@@ -547,19 +581,20 @@ export function countPositionClosedUnitsFromShifts(
         }
         if (Array.isArray((s as any).days) && (s as any).days.length > 0) return (s as any).days.includes(dayLetter);
         return true;
-    })).map(s => ({ code: String((s as any).code || '').toUpperCase(), quantity: (s as any).quantity }));
+    })).map(s => ({ code: String((s as any).code || '').toUpperCase(), quantity: (s as any).quantity }))
+        .filter((b) => b.code && !fullSkip.has(b.code) && effectiveBandQty(b.code, b.quantity) > 0);
     const bandCodes = effBands.map(b => b.code).filter(Boolean);
     if (bandCodes.length === 0) {
-        const fallback = allShifts.map(s => String(s.code || '').toUpperCase()).filter(Boolean);
+        const fallback = allShifts.map(s => String(s.code || '').toUpperCase()).filter((c) => c && !fullSkip.has(c));
         const closed = Math.min(qty, closedUnitsFromBandScheme(codeCounts, fallback));
         return { closed, required: qty, schemeLabel };
     }
-    // Custom con PAX por turno: 1 unidad cerrada = todos los turnos en su PAX individual.
-    const hasPerShiftPax = effBands.some(b => b.quantity != null && Number(b.quantity) > 0);
+    // Custom con PAX por turno (o corte parcial de PAX): 1 unidad cerrada = todos los turnos en su PAX efectivo.
+    const hasPerShiftPax = effBands.some(b => b.quantity != null && Number(b.quantity) > 0) || hasPaxCuts;
     if (hasPerShiftPax) {
         const allFull = effBands.every(b => {
-            const pax = (b.quantity != null && Number(b.quantity) > 0) ? Math.max(1, Math.floor(Number(b.quantity))) : qty;
-            return (codeCounts[b.code] || 0) >= pax;
+            const need = effectiveBandQty(b.code, b.quantity);
+            return need <= 0 || (codeCounts[b.code] || 0) >= need;
         });
         return { closed: allFull ? 1 : 0, required: 1, schemeLabel };
     }

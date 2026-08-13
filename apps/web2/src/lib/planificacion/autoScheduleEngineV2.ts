@@ -280,6 +280,8 @@ export interface V2PositionDef {
     excludedDates?: string[];
     /** Exclusión parcial: fecha → códigos de banda. */
     excludedShiftDates?: Record<string, string[]>;
+    /** Exclusión de N pax por banda: fecha → { código → pax }. */
+    excludedShiftPaxDates?: Record<string, Record<string, number>>;
 }
 
 export interface V2EmployeeDef {

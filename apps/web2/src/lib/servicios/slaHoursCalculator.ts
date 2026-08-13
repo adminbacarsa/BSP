@@ -134,6 +134,7 @@ export function computePositionDayComposition(
   dayCode: string,
   dateStr?: string,
   skipShiftCodes?: Set<string> | string[],
+  paxExcludeByCode?: Record<string, number>,
 ) {
   let dayTotal = 0;
   let dayNight = 0;
@@ -144,14 +145,24 @@ export function computePositionDayComposition(
     ? skipShiftCodes
     : new Set((skipShiftCodes || []).map((c) => String(c || '').toUpperCase()));
 
+  const cutMap: Record<string, number> = {};
+  for (const [code, n] of Object.entries(paxExcludeByCode || {})) {
+    const c = String(code || '').toUpperCase();
+    const pax = Math.floor(Number(n) || 0);
+    if (c && pax > 0) cutMap[c] = pax;
+  }
+  const hasPaxCuts = Object.keys(cutMap).length > 0;
+
   // Si algún turno tiene quantity propio, usamos PAX por turno y NO aplicamos pos.quantity afuera.
-  // Si ninguno lo tiene, addVariant contribuye horas sin multiplicar y el llamador aplica pos.quantity.
-  const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);
+  // Con exclusión parcial de PAX también forzamos modo por banda (base = shift.quantity ?? pos.quantity).
+  const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null) || hasPaxCuts;
 
   const addVariant = (v: ShiftVariant) => {
     const code = String(v.code || '').toUpperCase();
     if (code && skip.has(code)) return;
-    const q = hasPerShiftQty ? (v.quantity ?? pos.quantity ?? 1) : 1;
+    const baseQ = hasPerShiftQty ? (v.quantity ?? pos.quantity ?? 1) : 1;
+    const q = Math.max(0, Math.floor(Number(baseQ) || 1) - (cutMap[code] || 0));
+    if (q <= 0) return;
     const timeBlocks =
       Array.isArray(v.blocks) && v.blocks.length >= 2
         ? v.blocks
@@ -249,10 +260,12 @@ export function calculateMonthlyBreakdown(
       positions.forEach((pos) => {
         if (pos.excludedDates?.includes(dateStr)) return;
         const skipCodes = pos.excludedShiftDates?.[dateStr] || [];
-        const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode, dateStr, skipCodes);
-        // Si algún turno tiene quantity propio, dayTotal ya incluye PAX → q=1.
+        const paxCuts = pos.excludedShiftPaxDates?.[dateStr] || {};
+        const { dayTotal, dayNight } = computePositionDayComposition(pos, dayCode, dateStr, skipCodes, paxCuts);
+        // Si algún turno tiene quantity propio (o hay corte de PAX), dayTotal ya incluye PAX → q=1.
         // Si no, aplicar el pos.quantity global como antes.
-        const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);
+        const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null)
+          || Object.keys(paxCuts).length > 0;
         const q = hasPerShiftQty ? 1 : (pos.quantity || 1);
         monthAccumulator[monthKey].totalHours += dayTotal * q;
         monthAccumulator[monthKey].nightHours += dayNight * q;
@@ -378,7 +391,9 @@ export function slaHoursForPositionOnDay(
   if (excludedDates?.includes(dateStr)) return 0;
   if (pos.excludedDates?.includes(dateStr)) return 0;
   const dayCode = WEEK_DAY_CODES[cur.getDay()];
-  return computePositionDayComposition(pos, dayCode, dateStr).dayTotal;
+  const skipCodes = pos.excludedShiftDates?.[dateStr] || [];
+  const paxCuts = pos.excludedShiftPaxDates?.[dateStr] || {};
+  return computePositionDayComposition(pos, dayCode, dateStr, skipCodes, paxCuts).dayTotal;
 }
 
 /** Horas SLA totales de un servicio en un día (suma puestos × quantity). */
@@ -389,8 +404,10 @@ export function slaHoursForServiceOnDay(
   if (!srv.startDate || !srv.endDate) return 0;
   return (srv.positions || []).reduce((acc, pos) => {
     const raw = slaHoursForPositionOnDay(pos, day, srv.startDate!, srv.endDate!, srv.excludedDates);
-    // Si hay PAX por turno, raw ya viene multiplicado; si no, aplicar pos.quantity global.
-    const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null);
+    // Si hay PAX por turno (o corte de PAX ese día), raw ya viene multiplicado; si no, aplicar pos.quantity global.
+    const dateStr = toLocalDateStr(new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12, 0, 0, 0));
+    const hasPaxCuts = Object.keys(pos.excludedShiftPaxDates?.[dateStr] || {}).length > 0;
+    const hasPerShiftQty = (pos.allowedShiftTypes || []).some((s) => s.quantity != null) || hasPaxCuts;
     return acc + raw * (hasPerShiftQty ? 1 : (pos.quantity || 1));
   }, 0);
 }
