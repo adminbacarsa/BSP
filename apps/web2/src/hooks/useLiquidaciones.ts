@@ -65,6 +65,15 @@ export interface LiquidacionSnapshot {
     empresaId: string;
     items: EmployeeLiquidacion[];
     pagination: { page: number; pageSize: number; total: number };
+    diagnostics?: {
+        empleadosEmpresa: number;
+        turnosEnRango: number;
+        turnosContados: number;
+        turnosDescartadosEmpresa: number;
+        turnosDescartadosEmpleado: number;
+        turnosSinHorario: number;
+        ausenciasContadas: number;
+    };
 }
 
 export interface AjusteAdj {

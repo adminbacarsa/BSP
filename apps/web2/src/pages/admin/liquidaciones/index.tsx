@@ -863,6 +863,27 @@ export default function LiquidacionesPage() {
                     </div>
                 )}
 
+                {snapshot?.diagnostics && !loading && snapshot.diagnostics.turnosContados === 0 && (
+                    <ContentCard>
+                        <div className="flex items-start gap-3 text-amber-700 dark:text-amber-400">
+                            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                            <div className="text-sm space-y-1">
+                                <p className="font-black">Sin turnos contados en este ciclo</p>
+                                <p className="text-xs font-medium opacity-90">
+                                    En rango: {snapshot.diagnostics.turnosEnRango} · Contados: {snapshot.diagnostics.turnosContados} ·
+                                    Descartados por empresa: {snapshot.diagnostics.turnosDescartadosEmpresa} ·
+                                    Empleado no en plantilla: {snapshot.diagnostics.turnosDescartadosEmpleado} ·
+                                    Plantilla: {snapshot.diagnostics.empleadosEmpresa} legajos
+                                </p>
+                                <p className="text-xs opacity-80">
+                                    Probá modo <strong>Planificadas</strong>. Si sigue en cero, los turnos del período pueden estar en borrador
+                                    o con otro <code>empresaId</code>.
+                                </p>
+                            </div>
+                        </div>
+                    </ContentCard>
+                )}
+
                 {/* Error */}
                 {error && (
                     <ContentCard>
