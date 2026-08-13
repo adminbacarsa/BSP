@@ -1610,9 +1610,13 @@ export default function PlanificacionPage() {
     ): string | null => {
         const pending = pendingKey ? pendingChanges[pendingKey] : null;
         const explicit = pending?.objectiveId ?? shift?.objectiveId;
-        if (explicit) return String(explicit);
+        if (explicit) {
+            const rawId = String(explicit);
+            // Turnos pueden guardar slaId; la cobertura de grupo compara contra objectiveId.
+            return slaIdToObjId[rawId] || rawId;
+        }
         return resolveNativeObjectiveInGrupo(emp);
-    }, [pendingChanges, resolveNativeObjectiveInGrupo]);
+    }, [pendingChanges, resolveNativeObjectiveInGrupo, slaIdToObjId]);
 
     const clearNearbyCustomOrder = useCallback(() => {
         if (!selectedObjective) return;
@@ -3541,6 +3545,89 @@ export default function PlanificacionPage() {
         );
     }, [selectedObjective, positionStructure, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, coverageCyclesForObjective, dominantPosition]);
 
+    /**
+     * Cobertura de un objetivo dentro del grupo unificado.
+     * Debe incluir créditos Ext+Adel (igual que countPositionClosedUnits en vista individual);
+     * sin eso, días cerrados por split aparecen como hueco al sumar el grupo (ej. 1/2 con ambos cronos en 1/1).
+     */
+    const sumGrupoObjectiveCoverageForDay = useCallback((
+        objId: string,
+        dateStr: string,
+        dayLetter: string,
+        cycles?: string[],
+    ): { required: number; closed: number } => {
+        const structure = grupoSlaMap[objId] || [];
+        if (!structure.length) return { required: 0, closed: 0 };
+        const dominant = structure.reduce(
+            (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
+            structure[0] || { qty: 1, positionName: 'General' },
+        );
+        const codeCountsByPos: Record<string, Record<string, number>> = {};
+        for (const pos of structure) {
+            codeCountsByPos[String(pos.positionName || 'General')] = {};
+        }
+
+        const empById = new Map<string, any>(dotacionBaseEmployees.map((e: any) => [e.id, e]));
+
+        for (const emp of dotacionBaseEmployees) {
+            const key = `${emp.id}_${dateStr}`;
+            const absence = absencesMap[key];
+            if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) continue;
+            const shift = pendingChanges[key]
+                ? (pendingChanges[key].isDeleted ? null : pendingChanges[key])
+                : shiftsMap[key];
+            if (!shift) continue;
+            const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
+            if (String(effectiveObjId || '') !== String(objId)) continue;
+            const code = String(shift.code || '').toUpperCase();
+            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) continue;
+            const shiftPos = shift.positionName || dominant?.positionName || 'General';
+            if (!codeCountsByPos[shiftPos]) codeCountsByPos[shiftPos] = {};
+            codeCountsByPos[shiftPos][code] = (codeCountsByPos[shiftPos][code] || 0) + 1;
+        }
+
+        const splitCredits = collectSplitBandCreditsForDay(
+            dotacionBaseEmployees,
+            dateStr,
+            (empId, ds) => {
+                const emp = empById.get(empId) || { id: empId };
+                const key = `${empId}_${ds}`;
+                const pending = pendingChanges[key];
+                if (pending?.isDeleted) return null;
+                const raw = pending || shiftsMap[key] || null;
+                if (!raw) return null;
+                const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, raw, key);
+                if (String(effectiveObjId || '') !== String(objId)) return null;
+                // Forzar objectiveId del objetivo para que shiftBelongsToObjective no confunda con slaId / pending huérfano.
+                return { ...raw, objectiveId: objId };
+            },
+            {
+                selectedObjective: objId,
+                isPendingChange: (empId, ds) => !!pendingChanges[`${empId}_${ds}`],
+                resolveOriginalShift: (empId, ds) => shiftsMap[`${empId}_${ds}`] || null,
+                shiftsMap,
+                pendingChanges,
+            },
+        );
+
+        let required = 0;
+        let closed = 0;
+        for (const pos of structure) {
+            if (!isPosActiveOnDay(pos, dayLetter, dateStr)) continue;
+            if (isPosExcludedOnDate(pos, dateStr)) continue;
+            const posName = String(pos.positionName || 'General');
+            const codeCounts: Record<string, number> = { ...(codeCountsByPos[posName] || {}) };
+            const posCredits = lookupSplitCreditsForPosition(splitCredits, posName);
+            for (const [bandCode, n] of Object.entries(posCredits)) {
+                codeCounts[bandCode] = (codeCounts[bandCode] || 0) + n;
+            }
+            const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cycles, true, dateStr);
+            required += units.required;
+            closed += units.closed;
+        }
+        return { required, closed };
+    }, [grupoSlaMap, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId]);
+
     // Diagnóstico de cobertura agregado para la vista de grupo unificado
     const grupoGapReport = useMemo(() => {
         if (!selectedGrupo || !grupoUnifiedMode || Object.keys(grupoSlaMap).length === 0) return null;
@@ -3551,29 +3638,9 @@ export default function PlanificacionPage() {
             const dayLetter = getDayLetter(dateStr);
             let requiredPax = 0, closedPax = 0;
             for (const objId of selectedGrupo.objectiveIds) {
-                const structure = grupoSlaMap[objId] || [];
-                for (const pos of structure) {
-                    if (!isPosActiveOnDay(pos, dayLetter, dateStr)) continue;
-                    if (isPosExcludedOnDate(pos, dateStr)) continue;
-                    const codeCounts: Record<string, number> = {};
-                    dotacionBaseEmployees.forEach((emp: any) => {
-                        const key = `${emp.id}_${dateStr}`;
-                        const absence = absencesMap[key];
-                        if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
-                        const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
-                        if (!shift) return;
-                        const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
-                        if (String(effectiveObjId || '') !== String(objId)) return;
-                        const code = String(shift.code || '').toUpperCase();
-                        if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                        const shiftPos = shift.positionName || pos.positionName || 'General';
-                        if (shiftPos !== pos.positionName) return;
-                        codeCounts[code] = (codeCounts[code] || 0) + 1;
-                    });
-                    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, undefined, true, dateStr);
-                    requiredPax += units.required;
-                    closedPax += units.closed;
-                }
+                const units = sumGrupoObjectiveCoverageForDay(objId, dateStr, dayLetter, undefined);
+                requiredPax += units.required;
+                closedPax += units.closed;
             }
             if (requiredPax === 0) continue;
             if (closedPax >= requiredPax) { daysFull++; }
@@ -3581,7 +3648,7 @@ export default function PlanificacionPage() {
             else { daysEmpty++; worstDays.push({ dateStr, closedPax, requiredPax }); }
         }
         return { daysFull, daysPartial, daysEmpty, worstDays };
-    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, daysInMonth, dotacionBaseEmployees, pendingChanges, shiftsMap, absencesMap, resolveEffectiveShiftObjectiveId]);
+    }, [selectedGrupo, grupoUnifiedMode, grupoSlaMap, daysInMonth, sumGrupoObjectiveCoverageForDay]);
 
     const buildDayCoverageReport = (dateStr: string) => {
         const structure = effectivePosStructure.length > 0 ? effectivePosStructure : positionStructure;
@@ -9583,33 +9650,12 @@ export default function PlanificacionPage() {
                             ? autoSelectedCyclesRef.current
                             : autoCycles;
                         if (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0) {
-                            // Vista unificada: agregar cobertura de todos los objetivos del grupo.
-                            // No usamos countPositionClosedUnits porque usa selectedObjective internamente;
-                            // construimos codeCounts por objetivo y llamamos directamente a countPositionClosedUnitsFromShifts.
+                            // Vista unificada: misma lógica que cada crono (incluye créditos Ext+Adel).
+                            // No reutilizar cycles del objetivo seleccionado: cada SLA del grupo tiene su propia rotación.
                             selectedGrupo.objectiveIds.forEach((objId: string) => {
-                                const structure = grupoSlaMap[objId] || [];
-                                structure.forEach((pos: any) => {
-                                    if (!isPosActiveOnDay(pos, dayLetter, dateStr)) return;
-                                    if (isPosExcludedOnDate(pos, dateStr)) return;
-                                    const codeCounts: Record<string, number> = {};
-                                    dotacionBaseEmployees.forEach((emp: any) => {
-                                        const key = `${emp.id}_${dateStr}`;
-                                        const absence = absencesMap[key];
-                                        if (isEmployeeOnLeave({ shiftCode: pendingChanges[key]?.code || shiftsMap[key]?.code, absence })) return;
-                                        const shift = pendingChanges[key] ? (pendingChanges[key].isDeleted ? null : pendingChanges[key]) : shiftsMap[key];
-                                        if (!shift) return;
-                                        const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
-                                        if (String(effectiveObjId || '') !== String(objId)) return;
-                                        const code = String(shift.code || '').toUpperCase();
-                                        if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                                        const shiftPos = shift.positionName || pos.positionName || 'General';
-                                        if (shiftPos !== pos.positionName) return;
-                                        codeCounts[code] = (codeCounts[code] || 0) + 1;
-                                    });
-                                    const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForCoverage, true, dateStr);
-                                    requiredPax += units.required;
-                                    closedPax += units.closed;
-                                });
+                                const units = sumGrupoObjectiveCoverageForDay(objId, dateStr, dayLetter, undefined);
+                                requiredPax += units.required;
+                                closedPax += units.closed;
                             });
                         } else {
                         (positionStructure || []).forEach((pos: any) => {
