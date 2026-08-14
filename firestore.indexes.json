@@ -384,6 +384,31 @@
         { "fieldPath": "empresaId", "order": "ASCENDING" },
         { "fieldPath": "cycleId",   "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "eventos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "fecha",     "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "solicitudes_evento",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "eventoId",  "order": "ASCENDING" },
+        { "fieldPath": "creadoAt",  "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "solicitudes_evento",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId",    "order": "ASCENDING" },
+        { "fieldPath": "empleadoId",   "order": "ASCENDING" },
+        { "fieldPath": "servicioFecha","order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
