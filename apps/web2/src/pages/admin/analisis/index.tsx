@@ -1872,8 +1872,8 @@ export default function AnalisisPage() {
             <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Análisis operativo</p>
             <h1 className="text-xl font-black text-slate-800 dark:text-white uppercase">Cargando Analítica</h1>
             <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-              Primera carga: catálogo (SLA / plantel) y la malla del <strong>mes en curso + 3 meses atrás</strong>.
-              Después, cambiar de mes dentro de esa ventana no vuelve a consultar.
+              Primero el <strong>mes en pantalla</strong> (y ausencias). Los 3 meses previos siguen en segundo plano;
+              cambiar de mes dentro de esa ventana no vuelve a consultar.
             </p>
             <div className="mt-6">
               <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wide text-slate-500 mb-2">
