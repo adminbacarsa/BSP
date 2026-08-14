@@ -17,6 +17,12 @@ import {
 } from '@/lib/analisis/analisisQueries';
 import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
 import {
+  buildAnalisisFinanciera,
+  finGuardConsumo,
+  rollAnalisisFinanciera,
+  type FinHoursMode,
+} from '@/lib/analisis/analisisFinanciera';
+import {
   buildInformeAnalitico,
   buildInformeSeries,
   chooseInformeSeriesBucket,
@@ -383,6 +389,7 @@ type AnalMetric = 'hours' | 'shifts' | 'presence' | 'absence' | 'night';
 type AnalChartKind = 'bar' | 'pie' | 'area';
 type DeploymentKind = 'RET' | 'REF' | 'ESC';
 type ExpandedDuration = number | 'all' | null;
+type FinMode = FinHoursMode;
 
 // ─── PAGE ─────────────────────────────────────────────────────────────────────
 export default function AnalisisPage() {
@@ -404,6 +411,9 @@ export default function AnalisisPage() {
   const [informeChartType, setInformeChartType] = useState('area' as InformeChartKind);
   const [expandedDuration, setExpandedDuration] = useState(null as ExpandedDuration);
   const [expandedDurationCode, setExpandedDurationCode] = useState(null as string | null);
+  const [finHoursMode, setFinHoursMode] = usePersistedState('cosp:analisis:finMode', 'planned' as FinMode);
+  const [expandedFinClientId, setExpandedFinClientId] = useState(null as string | null);
+  const [expandedFinObjId, setExpandedFinObjId] = useState(null as string | null);
   const [showAusentismo,   setShowAusentismo]   = useState(false);
 
   const [analDateFrom,   setAnalDateFrom]   = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10); });
@@ -906,6 +916,37 @@ export default function AnalisisPage() {
         slaExclusionCtx,
       }),
     [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
+  );
+
+  const finBases = useMemo(
+    () =>
+      buildAnalisisFinanciera({
+        turnos,
+        ausenciasStats,
+        vigenteServices,
+        periodStart: new Date(periodRange.start),
+        periodEnd: new Date(periodRange.end),
+        objectiveAliases: objectiveAliasesFromServices,
+        slaExclusionCtx,
+      }),
+    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
+  );
+  const fin = useMemo(() => rollAnalisisFinanciera(finBases, finHoursMode), [finBases, finHoursMode]);
+  const finClientBars = useMemo(
+    () =>
+      topNPlusResto(
+        fin.clients.map((c) => ({
+          name: c.name.length > 14 ? `${c.name.slice(0, 14)}…` : c.name,
+          SLA: Math.round(c.slaHours),
+          Consumo: Math.round(c.hsConsumo),
+          Novedades: Math.round(c.novedades.total),
+          FT: Math.round(c.hsFt),
+        })),
+        ['SLA', 'Consumo', 'Novedades', 'FT'],
+        10,
+        'name',
+      ),
+    [fin.clients],
   );
 
   const demandaStackBars = useMemo(
@@ -1742,6 +1783,47 @@ export default function AnalisisPage() {
     XLSX.writeFile(wb, `informe-analisis-${periodRange.labelShort.replace(/[^\w]+/g, '-')}.xlsx`);
   };
 
+  const exportFinanciera = async () => {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const modo = finHoursMode === 'real' ? 'Real / fichado' : 'Planificado';
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Financiera hs-hombre', periodRange.labelShort, modo],
+      ['SLA empresa', fin.slaHours],
+      ['Malla', fin.hsMalla],
+      ['Consumo', fin.hsConsumo],
+      ['Novedades', fin.novedades.total],
+      ['FT', fin.hsFt],
+      ['Extras', fin.hsExtra],
+      ['Ops', fin.hsOps],
+      ['Vacante', fin.hsVacante],
+      ['Guardias', fin.guardias],
+      ['Hs/guardia', fin.hsConsumoPorGuardia],
+      ['SLA/guardia', fin.hsSlaPorGuardia],
+      ['Eficiencia SLA/consumo %', fin.eficienciaPct],
+    ]), 'Empresa');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Cliente', 'Objetivos', 'SLA', 'Malla', 'Novedades', 'FT', 'Extra', 'Ops', 'Vacante', 'Consumo', 'Guardias', 'Hs/g', 'Δ SLA'],
+      ...fin.clients.map((c) => [
+        c.name, c.objetivos, c.slaHours, c.hsMalla, c.novedades.total, c.hsFt, c.hsExtra, c.hsOps, c.hsVacante, c.hsConsumo, c.guardias, c.hsConsumoPorGuardia, c.deltaVsSla,
+      ]),
+    ]), 'Clientes');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Cliente', 'Objetivo', 'SLA', 'Malla', 'V', 'E', 'ART', 'L/PG', 'AA', 'FT', 'Extra', 'Ops', 'Vacante', 'Consumo', 'Guardias', 'Hs/g', 'SLA/g', 'Δ SLA'],
+      ...fin.clients.flatMap((c) => c.rows.map((o) => [
+        c.name, o.name, o.slaHours, o.hsMalla, o.novedades.vac, o.novedades.enf, o.novedades.art, o.novedades.lic, o.novedades.inj,
+        o.hsFt, o.hsExtra, o.hsOps, o.hsVacante, o.hsConsumo, o.guardias, o.hsConsumoPorGuardia, o.hsSlaPorGuardia, o.deltaVsSla,
+      ])),
+    ]), 'Objetivos');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['Cliente', 'Objetivo', 'Guardia', 'Malla', 'FT', 'Extra', 'Ops', 'Novedad', 'Consumo'],
+      ...fin.clients.flatMap((c) => c.rows.flatMap((o) => o.guards.map((g) => [
+        c.name, o.name, g.name, finHoursMode === 'real' ? g.hsReal : g.hsPlan, g.hsFt, g.hsExtra, g.hsOps, g.hsNovedad, finGuardConsumo(g, finHoursMode),
+      ]))),
+    ]), 'Guardias');
+    XLSX.writeFile(wb, `financiera-hs-${periodRange.labelShort.replace(/[^\w]+/g, '-')}.xlsx`);
+  };
+
   // ─────────────────────────────────────────────────────────────────────────────
   if (loadInit) {
     return (
@@ -2255,7 +2337,263 @@ export default function AnalisisPage() {
           {/* ══════════════════════════════════════════════════════════════
               TAB: INFORME ANALÍTICO
           ══════════════════════════════════════════════════════════════ */}
-          {(activeTab === 'informe' || activeTab === 'financiera') && (
+          {activeTab === 'financiera' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                <p className="text-[11px] text-slate-500 max-w-3xl leading-relaxed">
+                  Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
+                  malla ({finHoursMode === 'real' ? 'fichada' : 'planificada'}) + novedades (V/L/E/A/AA/PG) + franco trabajado + extras/ops.
+                  Sin precios. Pirámide empresa → cliente → objetivo.
+                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800">
+                    {([
+                      { id: 'planned' as const, label: 'Planificado' },
+                      { id: 'real' as const, label: 'Real / fichado' },
+                    ]).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setFinHoursMode(opt.id)}
+                        className={`px-3 py-2 text-[10px] font-black uppercase ${
+                          finHoursMode === opt.id
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void exportFinanciera()}
+                    className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase"
+                  >
+                    <FileSpreadsheet size={13}/> Exportar Excel
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                <KpiCard icon={Target} color="#4f46e5" label="SLA empresa" value={fin.slaHours.toLocaleString('es-AR')} unit="hs" subtext={`${fin.clientes} clientes · ${fin.objetivos} objetivos`}/>
+                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Malla fichada' : 'Malla planificada'} value={fin.hsMalla.toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fin.hsPlan.toLocaleString('es-AR')} hs` : `Real ${fin.hsReal.toLocaleString('es-AR')} hs`}/>
+                <KpiCard icon={Wallet} color="#0f766e" label="Consumo hs-hombre" value={fin.hsConsumo.toLocaleString('es-AR')} unit="hs" subtext="Malla + novedades + FT + extra + ops" alert={fin.deltaVsSla > 8}/>
+                <KpiCard icon={Users} color="#0891b2" label="Hs / guardia" value={fin.hsConsumoPorGuardia.toLocaleString('es-AR')} unit="hs" subtext={`${fin.guardias} guardias · SLA ${fin.hsSlaPorGuardia.toLocaleString('es-AR')} hs/c/u`}/>
+                <KpiCard icon={AlertTriangle} color="#ea580c" label="FT + extras + ops" value={(fin.hsFt + fin.hsExtra + fin.hsOps).toLocaleString('es-AR')} unit="hs" subtext={`FT ${fin.hsFt.toLocaleString('es-AR')} · ext ${fin.hsExtra.toLocaleString('es-AR')} · ops ${fin.hsOps.toLocaleString('es-AR')}`}/>
+                <KpiCard icon={Activity} color={fin.eficienciaPct >= 90 ? '#059669' : fin.eficienciaPct >= 75 ? '#d97706' : '#dc2626'} label="Eficiencia SLA/consumo" value={`${fin.eficienciaPct}%`} subtext={`Novedades ${fin.novedades.total.toLocaleString('es-AR')} · vacante ${fin.hsVacante.toLocaleString('es-AR')}`} alert={fin.eficienciaPct < 75}/>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {([
+                  { k: 'Vacaciones', v: fin.novedades.vac, c: '#7c3aed' },
+                  { k: 'Enfermedad', v: fin.novedades.enf, c: '#dc2626' },
+                  { k: 'ART', v: fin.novedades.art, c: '#d97706' },
+                  { k: 'Lic. / PG', v: fin.novedades.lic, c: '#0891b2' },
+                  { k: 'Injustificada', v: fin.novedades.inj, c: '#64748b' },
+                ]).map((n) => (
+                  <div key={n.k} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 shadow-sm">
+                    <p className="text-[9px] font-black uppercase text-slate-400">{n.k}</p>
+                    <p className="text-lg font-black" style={{ color: n.c }}>{n.v.toLocaleString('es-AR')} <span className="text-[10px] font-bold text-slate-400">hs</span></p>
+                  </div>
+                ))}
+              </div>
+
+              {!loadTurnos && finClientBars.length > 0 && (
+                <SectionCard title={`SLA vs consumo por cliente · ${periodRange.labelShort}`} icon={BarChart3} loading={loadTurnos}>
+                  <LegendRow items={[
+                    { color: '#4f46e5', label: 'SLA' },
+                    { color: '#0f766e', label: 'Consumo hs-hombre' },
+                    { color: '#7c3aed', label: 'Novedades' },
+                    { color: '#ea580c', label: 'FT' },
+                  ]}/>
+                  <div className="px-5 pb-5 pt-2">
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={finClientBars} margin={{ top: 4, right: 8, left: -16, bottom: 52 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false}/>
+                        <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} angle={-40} textAnchor="end" interval={0}/>
+                        <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }}/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                        <Bar dataKey="SLA" fill="#4f46e5" radius={[4, 4, 0, 0]} maxBarSize={16}/>
+                        <Bar dataKey="Consumo" fill="#0f766e" radius={[4, 4, 0, 0]} maxBarSize={16}/>
+                        <Bar dataKey="Novedades" fill="#7c3aed" radius={[4, 4, 0, 0]} maxBarSize={16}/>
+                        <Bar dataKey="FT" fill="#ea580c" radius={[4, 4, 0, 0]} maxBarSize={16}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              )}
+
+              <SectionCard title={`Clientes · ${periodRange.labelShort}`} icon={Building2} loading={loadTurnos}>
+                {fin.clients.length === 0 ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <Wallet size={36} className="mx-auto mb-2 opacity-20"/>
+                    <p className="text-sm font-bold">Sin consumo calculable en este período</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 dark:bg-slate-700/30 text-slate-500 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="p-3">Cliente</th>
+                          <th className="p-3 text-center">Obj.</th>
+                          <th className="p-3 text-center text-indigo-600">SLA</th>
+                          <th className="p-3 text-center">Malla</th>
+                          <th className="p-3 text-center text-violet-600">Novedades</th>
+                          <th className="p-3 text-center text-orange-600">FT</th>
+                          <th className="p-3 text-center text-cyan-600">Extra/ops</th>
+                          <th className="p-3 text-center text-amber-600">Vacante</th>
+                          <th className="p-3 text-center text-teal-700">Consumo</th>
+                          <th className="p-3 text-center">Guardias</th>
+                          <th className="p-3 text-center">Hs/g</th>
+                          <th className="p-3 text-center">Δ SLA</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {fin.clients.map((cli) => {
+                          const open = expandedFinClientId === cli.id;
+                          return (
+                            <React.Fragment key={cli.id}>
+                              <tr
+                                className="hover:bg-slate-50/70 dark:hover:bg-slate-700/20 cursor-pointer"
+                                onClick={() => setExpandedFinClientId(open ? null : cli.id)}
+                              >
+                                <td className="p-3 font-bold text-slate-800 dark:text-white text-xs">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    {open ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}
+                                    {cli.name}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-center text-slate-500">{cli.objetivos}</td>
+                                <td className="p-3 text-center font-black text-indigo-600">{cli.slaHours.toLocaleString('es-AR')}</td>
+                                <td className="p-3 text-center font-black">{cli.hsMalla.toLocaleString('es-AR')}</td>
+                                <td className="p-3 text-center font-black text-violet-600">{cli.novedades.total.toLocaleString('es-AR')}</td>
+                                <td className="p-3 text-center font-black text-orange-600">{cli.hsFt.toLocaleString('es-AR')}</td>
+                                <td className="p-3 text-center font-black text-cyan-700">{(cli.hsExtra + cli.hsOps).toLocaleString('es-AR')}</td>
+                                <td className="p-3 text-center font-black text-amber-600">{cli.hsVacante.toLocaleString('es-AR')}</td>
+                                <td className="p-3 text-center font-black text-teal-700">{cli.hsConsumo.toLocaleString('es-AR')}</td>
+                                <td className="p-3 text-center">{cli.guardias}</td>
+                                <td className="p-3 text-center font-black">{cli.hsConsumoPorGuardia.toLocaleString('es-AR')}</td>
+                                <td className={`p-3 text-center font-black ${cli.deltaVsSla > 4 ? 'text-rose-600' : cli.deltaVsSla < -4 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                  {cli.deltaVsSla > 0 ? '+' : ''}{cli.deltaVsSla.toLocaleString('es-AR')}
+                                </td>
+                              </tr>
+                              {open && (
+                                <tr>
+                                  <td colSpan={12} className="p-0 bg-slate-50/80 dark:bg-slate-900/40">
+                                    <table className="w-full text-sm">
+                                      <thead className="text-[9px] uppercase text-slate-400 font-black">
+                                        <tr>
+                                          <th className="p-2.5 pl-8 text-left">Objetivo</th>
+                                          <th className="p-2.5 text-center">SLA</th>
+                                          <th className="p-2.5 text-center">Malla</th>
+                                          <th className="p-2.5 text-center">Nov.</th>
+                                          <th className="p-2.5 text-center">FT</th>
+                                          <th className="p-2.5 text-center">Extra/ops</th>
+                                          <th className="p-2.5 text-center">Vacante</th>
+                                          <th className="p-2.5 text-center">Consumo</th>
+                                          <th className="p-2.5 text-center">G</th>
+                                          <th className="p-2.5 text-center">Hs/g</th>
+                                          <th className="p-2.5 text-center">SLA/g</th>
+                                          <th className="p-2.5 text-center">Δ</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {cli.rows.map((obj) => {
+                                          const objOpen = expandedFinObjId === obj.id;
+                                          return (
+                                            <React.Fragment key={obj.id}>
+                                              <tr
+                                                className="hover:bg-white dark:hover:bg-slate-800 cursor-pointer"
+                                                onClick={(e) => { e.stopPropagation(); setExpandedFinObjId(objOpen ? null : obj.id); }}
+                                              >
+                                                <td className="p-2.5 pl-8 font-bold text-xs text-slate-700 dark:text-slate-100">
+                                                  <span className="inline-flex items-center gap-1">
+                                                    {objOpen ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+                                                    {obj.name}
+                                                  </span>
+                                                </td>
+                                                <td className="p-2.5 text-center font-black text-indigo-600">{obj.slaHours.toLocaleString('es-AR')}</td>
+                                                <td className="p-2.5 text-center font-black">{obj.hsMalla.toLocaleString('es-AR')}</td>
+                                                <td className="p-2.5 text-center font-black text-violet-600">{obj.novedades.total.toLocaleString('es-AR')}</td>
+                                                <td className="p-2.5 text-center font-black text-orange-600">{obj.hsFt.toLocaleString('es-AR')}</td>
+                                                <td className="p-2.5 text-center">{(obj.hsExtra + obj.hsOps).toLocaleString('es-AR')}</td>
+                                                <td className="p-2.5 text-center text-amber-600">{obj.hsVacante.toLocaleString('es-AR')}</td>
+                                                <td className="p-2.5 text-center font-black text-teal-700">{obj.hsConsumo.toLocaleString('es-AR')}</td>
+                                                <td className="p-2.5 text-center">{obj.guardias}</td>
+                                                <td className="p-2.5 text-center font-black">{obj.hsConsumoPorGuardia.toLocaleString('es-AR')}</td>
+                                                <td className="p-2.5 text-center text-slate-500">{obj.hsSlaPorGuardia.toLocaleString('es-AR')}</td>
+                                                <td className={`p-2.5 text-center font-black ${obj.deltaVsSla > 4 ? 'text-rose-600' : 'text-slate-600'}`}>
+                                                  {obj.deltaVsSla > 0 ? '+' : ''}{obj.deltaVsSla.toLocaleString('es-AR')}
+                                                </td>
+                                              </tr>
+                                              {objOpen && (
+                                                <tr>
+                                                  <td colSpan={12} className="px-8 py-3 bg-white dark:bg-slate-800">
+                                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+                                                      {([
+                                                        { k: 'V', v: obj.novedades.vac },
+                                                        { k: 'E', v: obj.novedades.enf },
+                                                        { k: 'A', v: obj.novedades.art },
+                                                        { k: 'L/PG', v: obj.novedades.lic },
+                                                        { k: 'AA', v: obj.novedades.inj },
+                                                      ]).map((n) => (
+                                                        <div key={n.k} className="rounded-xl border border-slate-100 dark:border-slate-700 px-3 py-2">
+                                                          <p className="text-[9px] font-black text-slate-400">{n.k}</p>
+                                                          <p className="text-sm font-black">{n.v.toLocaleString('es-AR')} hs</p>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Costo por guardia (hs-hombre)</p>
+                                                    <div className="overflow-x-auto">
+                                                      <table className="w-full text-xs">
+                                                        <thead className="text-[9px] uppercase text-slate-400 font-black">
+                                                          <tr>
+                                                            <th className="p-2 text-left">Guardia</th>
+                                                            <th className="p-2 text-center">Malla</th>
+                                                            <th className="p-2 text-center">FT</th>
+                                                            <th className="p-2 text-center">Extra/ops</th>
+                                                            <th className="p-2 text-center">Novedad</th>
+                                                            <th className="p-2 text-center">Consumo</th>
+                                                          </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                          {obj.guards.map((g) => (
+                                                            <tr key={g.employeeId} className="border-t border-slate-100 dark:border-slate-700">
+                                                              <td className="p-2 font-bold">{g.name}</td>
+                                                              <td className="p-2 text-center">{(finHoursMode === 'real' ? g.hsReal : g.hsPlan).toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-center text-orange-600">{g.hsFt.toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-center">{(g.hsExtra + g.hsOps).toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-center text-violet-600">{g.hsNovedad.toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-center font-black">{finGuardConsumo(g, finHoursMode).toLocaleString('es-AR')}</td>
+                                                            </tr>
+                                                          ))}
+                                                        </tbody>
+                                                      </table>
+                                                    </div>
+                                                  </td>
+                                                </tr>
+                                              )}
+                                            </React.Fragment>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          )}
+
+          {activeTab === 'informe' && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-2xl leading-relaxed">

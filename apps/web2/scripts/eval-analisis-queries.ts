@@ -228,8 +228,105 @@ const uni12 = buildAnalisisUniverso({
 });
 assert(uni12.slotsPeriodo === 1 && uni12.hsVendidas === 12, `N12 lunes = 1 slot 12 hs (slots=${uni12.slotsPeriodo} hs=${uni12.hsVendidas})`);
 
+void (async () => {
+  process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||= 'AIzaSyEvalOnlyNotARealKey00000000000';
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||= 'demo';
+  process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||= 'demo.firebaseapp.com';
+  process.env.NEXT_PUBLIC_FIREBASE_APP_ID ||= '1:1:web:1';
+  const { buildAnalisisFinanciera, finConsumoHours, rollAnalisisFinanciera } = await import('../src/lib/analisis/analisisFinanciera');
+const finSrv = {
+  clientId: 'cli-a',
+  clientName: 'Cliente A',
+  objectiveId: 'obj-a',
+  objectiveName: 'Objetivo A',
+  startDate: '2026-08-01',
+  endDate: '2026-08-31',
+  positions: [{
+    id: 'p-a',
+    name: 'Acceso',
+    coverageType: 'custom',
+    quantity: 1,
+    activeDays: ['L'],
+    allowedShiftTypes: [{ code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 }],
+  }],
+};
+const finTurnos = [
+  {
+    id: 'ft-plan',
+    employeeId: 'g1',
+    employeeName: 'Guardia Uno',
+    clientId: 'cli-a',
+    clientName: 'Cliente A',
+    objectiveId: 'obj-a',
+    objectiveName: 'Objetivo A',
+    code: 'M',
+    hours: 8,
+    isPresent: true,
+    startTime: { seconds: new Date(2026, 7, 3, 7, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 3, 15, 0).getTime() / 1000 },
+  },
+  {
+    id: 'ft-franco',
+    employeeId: 'g2',
+    employeeName: 'Guardia Dos',
+    clientId: 'cli-a',
+    clientName: 'Cliente A',
+    objectiveId: 'obj-a',
+    objectiveName: 'Objetivo A',
+    code: 'FT',
+    isFrancoTrabajado: true,
+    hours: 8,
+    startTime: { seconds: new Date(2026, 7, 3, 15, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 3, 23, 0).getTime() / 1000 },
+  },
+];
+const finAus = buildAusenciasStats({
+  ausencias: [{
+    id: 'fin-vac',
+    employeeId: 'g1',
+    employeeName: 'Guardia Uno',
+    type: 'Vacaciones',
+    absenceType: 'V',
+    startDate: '2026-08-03',
+    endDate: '2026-08-03',
+    status: 'Autorizada',
+    objectiveId: 'obj-a',
+  }],
+  turnos: finTurnos,
+  employees: [{ id: 'g1' }, { id: 'g2' }],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+const finBases = buildAnalisisFinanciera({
+  turnos: finTurnos,
+  ausenciasStats: finAus,
+  vigenteServices: [finSrv],
+  periodStart: new Date(2026, 7, 3),
+  periodEnd: new Date(2026, 7, 3, 23, 59, 59, 999),
+  objectiveAliases: { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
+  slaExclusionCtx: null,
+});
+assert(finBases.length === 1, `financiera 1 objetivo (got ${finBases.length})`);
+assert(finBases[0].hsPlan === 8, `financiera plan 8 (got ${finBases[0].hsPlan})`);
+assert(finBases[0].hsReal === 8, `financiera real 8 (got ${finBases[0].hsReal})`);
+assert(finBases[0].hsFt === 8, `financiera FT 8 (got ${finBases[0].hsFt})`);
+assert(finBases[0].novedades.vac === 8, `financiera vac 8 (got ${finBases[0].novedades.vac})`);
+assert(finConsumoHours(finBases[0], 'planned') === 24, `consumo plan = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'planned')})`);
+assert(finConsumoHours(finBases[0], 'real') === 24, `consumo real = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'real')})`);
+const finRoll = rollAnalisisFinanciera(finBases, 'planned');
+assert(finRoll.clientes === 1 && finRoll.objetivos === 1, 'financiera rollup 1 cliente');
+assert(finRoll.hsConsumo === 24, `empresa consumo 24 (got ${finRoll.hsConsumo})`);
+assert(finRoll.guardias === 2, `2 guardias tocaron el objetivo (got ${finRoll.guardias})`);
+assert(finRoll.hsConsumoPorGuardia === 12, `12 hs/guardia (got ${finRoll.hsConsumoPorGuardia})`);
+assert(
+  finRoll.clients[0].rows[0].hsSlaPorGuardia === Math.round((finRoll.clients[0].rows[0].slaHours / 2) * 10) / 10,
+  `SLA/guardia = sla/2 (got ${finRoll.clients[0].rows[0].hsSlaPorGuardia} sla=${finRoll.clients[0].rows[0].slaHours})`,
+);
+
 if (failed) {
   console.error(`\n${failed} assertion(s) failed`);
   process.exit(1);
 }
 console.log('\nanalisis queries: all ok');
+})();
