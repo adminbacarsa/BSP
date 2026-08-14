@@ -6,6 +6,7 @@ const functions = require("firebase-functions/v1");
 const auth_1 = require("./auth");
 const cycle_1 = require("./cycle");
 const calc_1 = require("./calc");
+const settings_1 = require("./settings");
 const applyCors = (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -31,7 +32,9 @@ async function handleListCycles(req, res) {
     const lockSnap = await admin.firestore().collection('payroll_cycles_locks').get();
     const lockedMap = new Map();
     lockSnap.forEach((d) => lockedMap.set(d.id, d.data()));
+    const hoursMode = await (0, settings_1.resolveEmpresaHoursMode)(req.integration.empresaId);
     json(res, 200, {
+        hoursMode,
         cycles: cycles.map((c) => {
             const lock = lockedMap.get(c.cycleId);
             return {
@@ -54,12 +57,14 @@ async function handleLiquidacion(req, res) {
         });
     }
     const empresaId = req.integration.empresaId;
+    const hoursMode = await (0, settings_1.resolveEmpresaHoursMode)(empresaId);
     const snapshot = await (0, calc_1.buildLiquidacionSnapshot)({
         cycle,
         empresaId,
         clientIdFilter: req.query?.clientId ? String(req.query.clientId) : undefined,
         page: req.query?.page ? Number(req.query.page) : 1,
         pageSize: req.query?.pageSize ? Number(req.query.pageSize) : 100,
+        hoursMode,
     });
     json(res, 200, snapshot);
 }
@@ -89,7 +94,8 @@ async function handleCloseCycle(req, res, cycleId) {
         });
     }
     const empresaId = req.integration.empresaId;
-    const snapshot = await (0, calc_1.buildLiquidacionSnapshot)({ cycle, empresaId });
+    const hoursMode = await (0, settings_1.resolveEmpresaHoursMode)(empresaId);
+    const snapshot = await (0, calc_1.buildLiquidacionSnapshot)({ cycle, empresaId, hoursMode });
     const now = admin.firestore.Timestamp.now();
     const lockedBy = `integraciones_api/${req.integration.id}`;
     await lockRef.set({
