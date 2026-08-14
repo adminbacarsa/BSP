@@ -1,19 +1,19 @@
-/**
- * Parchea turnos que tienen un objectiveId obsoleto, remplazándolo por el actual.
+﻿/**
+ * Parchea turnos que tienen un objectiveId obsoleto, remplazÃ¡ndolo por el actual.
  * Uso:
- *   node scripts/patch-objective-id.js              ← lista objectiveIds distintos de CASISA en jul/2026
- *   node scripts/patch-objective-id.js --execute    ← aplica el patch
+ *   node scripts/patch-objective-id.js              â† lista objectiveIds distintos de CASISA en jul/2026
+ *   node scripts/patch-objective-id.js --execute    â† aplica el patch
  *
- * OLD_OID se detecta automáticamente: cualquier objectiveId de CASISA que NO esté
+ * OLD_OID se detecta automÃ¡ticamente: cualquier objectiveId de CASISA que NO estÃ©
  * en la lista de objetivos registrados del cliente.
  */
 
 const admin = require('firebase-admin');
 
 const CLIENT_ID  = 'DB8UZxFC4DpqGSQ3o69w';   // CASISA
-const NEW_OID    = '9CbYIDmsUGnabENKvXZt';    // Obrador Malagueño actual
-const NEW_NAME   = 'OBRADOR MALAGUEÑO';
-// objectiveIds válidos conocidos de CASISA (del backup):
+const NEW_OID    = '9CbYIDmsUGnabENKvXZt';    // Obrador MalagueÃ±o actual
+const NEW_NAME   = 'OBRADOR MALAGUEÃ‘O';
+// objectiveIds vÃ¡lidos conocidos de CASISA (del backup):
 const KNOWN_OIDS = new Set([
   '3xqaoEr1npPnCX7q08uq',
   '5XMZ7UuKJEWosCnRhrHz',
@@ -42,10 +42,10 @@ const db = admin.firestore();
 async function run() {
   const env = process.env.FIRESTORE_EMULATOR_HOST
     ? `EMULADOR (${process.env.FIRESTORE_EMULATOR_HOST})`
-    : 'PRODUCCIÓN';
+    : 'PRODUCCIÃ“N';
   console.log(`\n=== patch-objective-id ===`);
   console.log(`Entorno : ${env}`);
-  console.log(`Modo    : ${DRY_RUN ? 'DRY RUN (sin cambios)' : '*** EJECUCIÓN REAL ***'}\n`);
+  console.log(`Modo    : ${DRY_RUN ? 'DRY RUN (sin cambios)' : '*** EJECUCIÃ“N REAL ***'}\n`);
 
   // Consulta todos los turnos de CASISA
   const snap = await db.collection('turnos')
@@ -57,14 +57,14 @@ async function run() {
   // Detecta objectiveIds distintos
   const byOid = new Map();
   snap.docs.forEach((doc) => {
-    const oid = doc.data().objectiveId ?? '(vacío)';
+    const oid = doc.data().objectiveId ?? '(vacÃ­o)';
     if (!byOid.has(oid)) byOid.set(oid, []);
     byOid.get(oid).push(doc);
   });
 
   console.log('\nObjectiveIds distintos encontrados:');
   for (const [oid, docs] of byOid.entries()) {
-    const label = KNOWN_OIDS.has(oid) ? '✓ conocido' : '⚠ DESCONOCIDO';
+    const label = KNOWN_OIDS.has(oid) ? 'âœ“ conocido' : 'âš  DESCONOCIDO';
     console.log(`  ${label}  ${oid}  (${docs.length} turnos)`);
   }
 
@@ -72,11 +72,11 @@ async function run() {
   const orphanEntries = [...byOid.entries()].filter(([oid]) => !KNOWN_OIDS.has(oid));
 
   if (orphanEntries.length === 0) {
-    console.log('\nNo hay objectiveIds huérfanos. Nada que parchear.');
+    console.log('\nNo hay objectiveIds huÃ©rfanos. Nada que parchear.');
     process.exit(0);
   }
 
-  console.log(`\nObjectiveIds huérfanos a parchear → ${NEW_OID} ("${NEW_NAME}"):`);
+  console.log(`\nObjectiveIds huÃ©rfanos a parchear â†’ ${NEW_OID} ("${NEW_NAME}"):`);
   for (const [oid, docs] of orphanEntries) {
     console.log(`  ${oid}  (${docs.length} turnos)`);
     docs.slice(0, 3).forEach((doc) => {
@@ -87,7 +87,7 @@ async function run() {
   }
 
   if (DRY_RUN) {
-    console.log('\n[DRY RUN] No se realizaron cambios. Ejecutá con --execute para aplicarlos.');
+    console.log('\n[DRY RUN] No se realizaron cambios. EjecutÃ¡ con --execute para aplicarlos.');
     process.exit(0);
   }
 
@@ -112,3 +112,4 @@ run().catch((err) => {
   console.error('Error:', err);
   process.exit(1);
 });
+

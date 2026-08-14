@@ -6,6 +6,7 @@ export interface RrhhNovedades {
     licenciaEspecialDias: number;
     permisoGremialDias: number;
     injustificadaDias: number;
+    retiroAnticipadoDias: number;
     otrosDias: number;
 }
 export interface EmployeeLiquidacion {
@@ -55,6 +56,16 @@ export interface LiquidacionSnapshot {
         page: number;
         pageSize: number;
         total: number;
+    };
+    diagnostics?: {
+        empleadosEmpresa: number;
+        turnosEnRango: number;
+        turnosContados: number;
+        turnosDescartadosEmpresa: number;
+        turnosDescartadosEmpleado: number;
+        turnosSinHorario: number;
+        turnosBorrador: number;
+        ausenciasContadas: number;
     };
 }
 export interface BuildSnapshotParams {
