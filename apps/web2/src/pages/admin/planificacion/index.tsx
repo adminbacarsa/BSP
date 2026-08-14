@@ -5409,6 +5409,51 @@ export default function PlanificacionPage() {
         return { ok: true, name: `${u.firstName} ${u.lastName}` };
     };
 
+    const submitSupervisorAuth = async () => {
+        if (authPin.length !== 4 || authLoading || !authModal.pendingFn) return;
+        setAuthLoading(true);
+        const result = await verifySupervisorPin(authPin);
+        if (!result.ok) {
+            setAuthError('PIN incorrecto. Intentá de nuevo.');
+            setAuthPin('');
+            setAuthLoading(false);
+            return;
+        }
+        try {
+            await authModal.pendingFn();
+            if (authModal.isSaveFlow) {
+                const newAuthorized = new Set(authorizedOver200IdsRef.current);
+                authModal.employees.forEach(e => { if ((e as any).empId) newAuthorized.add((e as any).empId); });
+                authorizedOver200IdsRef.current = newAuthorized;
+                setAuthorizedOver200Ids(newAuthorized);
+                await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                    timestamp: serverTimestamp(),
+                    action: 'OVERRIDE_200H',
+                    module: 'PLANIFICADOR',
+                    actorName: result.name,
+                    details: `${authModal.operatorName || 'Operador'} asignó turno a ${authModal.employees.map(e => `${e.name} (${e.hours}h)`).join(', ')} superando 200hs — autorizó: ${result.name}`,
+                    objectiveId: selectedObjective || undefined,
+                    objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
+                }, empresaId));
+            } else if (authModal.auditAction) {
+                await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                    timestamp: serverTimestamp(),
+                    action: authModal.auditAction,
+                    module: 'PLANIFICADOR',
+                    actorName: result.name,
+                    actorUid: getAuth().currentUser?.uid || null,
+                    details: authModal.auditDetails || authModal.employees.map(e => e.name).join(', '),
+                    objectiveId: selectedObjective || undefined,
+                    objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
+                }, empresaId));
+            }
+        } finally {
+            setAuthModal({ pendingFn: null, employees: [] });
+            setAuthPin('');
+            setAuthLoading(false);
+        }
+    };
+
     const requestSupervisorFrancoAuth = (
         conflicts: FrancoCoverageConflict[],
         onAuthorized: () => void | Promise<void>,
@@ -7108,8 +7153,14 @@ export default function PlanificacionPage() {
                 hours: shiftConfig.hours,
             });
             if (warning) {
-                setAuthWarningMessage(warning);
                 if (warning.includes('CRÍTICA')) { toast.error(warning); return; }
+                if (warning.startsWith('ALERTA MENSUAL')) {
+                    applyToPending({ ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
+                    const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || 'Empleado';
+                    toast.warning(`${empName} supera ${planningLimits.monthly}h. El PIN se pedirá al guardar.`, { duration: 2000 });
+                    return;
+                }
+                setAuthWarningMessage(warning);
                 setPendingAssignment({ shiftConfig, positionName, targetDate });
                 return;
             }
@@ -12736,19 +12787,7 @@ export default function PlanificacionPage() {
                     </div>
                 )}
 
-                {pendingAssignment && createPortal(<div className="fixed inset-0 z-[11000] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button onClick={() => { setPendingAssignment(null); setAuthWarningMessage(''); }} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button onClick={() => {
-                                        const cap = pendingAssignment;
-                                        const empName = employees.find((e: any) => e.id === selectedCell?.empId)?.name || 'Empleado';
-                                        setPendingAssignment(null);
-                                        setAuthModal({
-                                            pendingFn: async () => {
-                                                applyToPending({ ...cap.shiftConfig, positionName: cap.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
-                                                setAuthWarningMessage('');
-                                            },
-                                            employees: [empName],
-                                            operatorName: activeActorName || operatorName
-                                        });
-                                    }} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Autorizar con PIN</button></div></div></div></div>, document.body)}
+                {pendingAssignment && createPortal(<div className="fixed inset-0 z-[11000] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button type="button" onClick={() => { setPendingAssignment(null); setAuthWarningMessage(''); }} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button type="button" onClick={confirmPendingAssignment} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Aplicar</button></div></div></div></div>, document.body)}
                 {publishConfirmModal && typeof document !== 'undefined' && createPortal(
                     <div
                         className="fixed inset-0 z-[9200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
@@ -14056,76 +14095,38 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
 
-                            <form autoComplete="off" onSubmit={(e) => e.preventDefault()} className="mb-6">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-2 text-center">PIN de Supervisor</label>
-                                <SupervisorPinInput
-                                    autoFocus
-                                    maxLength={4}
-                                    placeholder="••••"
-                                    value={authPin}
-                                    onChange={e => { setAuthPin(e.target.value.replace(/\D/g,'').slice(0,4)); setAuthError(''); }}
-                                    className="w-full text-center text-3xl font-black tracking-[0.6em] bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-indigo-500 outline-none dark:text-white rounded-xl px-4 py-4"
-                                />
-                                {authError && <p className="text-rose-600 text-xs font-bold text-center mt-2">{authError}</p>}
-                            </form>
+                            <form autoComplete="off" onSubmit={(e) => { e.preventDefault(); void submitSupervisorAuth(); }}>
+                                <div className="mb-6">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block mb-2 text-center">PIN de Supervisor</label>
+                                    <SupervisorPinInput
+                                        autoFocus
+                                        maxLength={4}
+                                        placeholder="••••"
+                                        value={authPin}
+                                        onChange={e => { setAuthPin(e.target.value.replace(/\D/g,'').slice(0,4)); setAuthError(''); }}
+                                        className="w-full text-center text-3xl font-black tracking-[0.6em] bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 focus:border-indigo-500 outline-none dark:text-white rounded-xl px-4 py-4"
+                                    />
+                                    {authError && <p className="text-rose-600 text-xs font-bold text-center mt-2">{authError}</p>}
+                                </div>
 
-                            <div className="flex gap-3">
-                                <button
-                                    onClick={() => { setAuthModal({ pendingFn: null, employees: [] }); setAuthPin(''); setAuthError(''); }}
-                                    className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    disabled={authPin.length !== 4 || authLoading}
-                                    onClick={async () => {
-                                        setAuthLoading(true);
-                                        const result = await verifySupervisorPin(authPin);
-                                        if (!result.ok) {
-                                            setAuthError('PIN incorrecto. Intentá de nuevo.');
-                                            setAuthPin('');
-                                            setAuthLoading(false);
-                                            return;
-                                        }
-                                        // PIN válido → ejecutar el guardado
-                                        await authModal.pendingFn!();
-                                        if (authModal.isSaveFlow) {
-                                            // Recordar autorización para no pedir PIN de nuevo en esta sesión
-                                            const newAuthorized = new Set(authorizedOver200IdsRef.current);
-                                            authModal.employees.forEach(e => { if ((e as any).empId) newAuthorized.add((e as any).empId); });
-                                            authorizedOver200IdsRef.current = newAuthorized;
-                                            setAuthorizedOver200Ids(newAuthorized);
-                                            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                                                timestamp: serverTimestamp(),
-                                                action: 'OVERRIDE_200H',
-                                                module: 'PLANIFICADOR',
-                                                actorName: result.name,
-                                                details: `${authModal.operatorName || 'Operador'} asignó turno a ${authModal.employees.map(e => `${e.name} (${e.hours}h)`).join(', ')} superando 200hs — autorizó: ${result.name}`,
-                                                objectiveId: selectedObjective || undefined,
-                                                objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
-                                            }, empresaId));
-                                        } else if (authModal.auditAction) {
-                                            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                                                timestamp: serverTimestamp(),
-                                                action: authModal.auditAction,
-                                                module: 'PLANIFICADOR',
-                                                actorName: result.name,
-                                                actorUid: getAuth().currentUser?.uid || null,
-                                                details: authModal.auditDetails || authModal.employees.map(e => e.name).join(', '),
-                                                objectiveId: selectedObjective || undefined,
-                                                objectiveName: selectedObjective ? getObjectiveName(selectedObjective) : undefined,
-                                            }, empresaId));
-                                        }
-                                        setAuthModal({ pendingFn: null, employees: [] });
-                                        setAuthPin('');
-                                        setAuthLoading(false);
-                                    }}
-                                    className="flex-1 py-3 bg-indigo-600 disabled:bg-slate-300 text-white rounded-xl font-black uppercase text-xs hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-                                >
-                                    {authLoading ? <RefreshCw size={16} className="animate-spin"/> : <ShieldCheck size={16}/>}
-                                    AUTORIZAR
-                                </button>
-                            </div>
+                                <div className="flex gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setAuthModal({ pendingFn: null, employees: [] }); setAuthPin(''); setAuthError(''); }}
+                                        className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={authPin.length !== 4 || authLoading}
+                                        className="flex-1 py-3 bg-indigo-600 disabled:bg-slate-300 text-white rounded-xl font-black uppercase text-xs hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                                    >
+                                        {authLoading ? <RefreshCw size={16} className="animate-spin"/> : <ShieldCheck size={16}/>}
+                                        AUTORIZAR
+                                    </button>
+                                </div>
+                            </form>
                         </div>
                     </div>
                 , document.body)}
