@@ -2021,6 +2021,17 @@ export default function AnalisisPage() {
                   <p className="text-[9px] font-black uppercase text-slate-400">Extras / FT / ops</p>
                 </div>
               </div>
+              {!loadTurnos && informe.hsVendidas > 0 && turnos.length === 0 && (
+                <p className="mt-3 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
+                  Hay {informe.hsVendidas.toLocaleString('es-AR')} hs SLA y <strong>0 turnos</strong> en {periodRange.labelShort}.
+                  Si el mes está planificado, recargá el header. Si no hay malla en Firestore para este período, la financiera no puede calcular consumo.
+                </p>
+              )}
+              {!loadTurnos && turnos.length > 0 && informe.hsPlanificadas === 0 && (
+                <p className="mt-3 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
+                  {turnos.length.toLocaleString('es-AR')} turnos en el período pero 0 hs de malla (códigos no computables o exclusiones SLA).
+                </p>
+              )}
             </div>
           )}
 
@@ -2378,6 +2389,7 @@ export default function AnalisisPage() {
                   malla ({finHoursMode === 'real' ? 'fichada' : 'planificada'}) + novedades (V/L/E/A/AA/PG) + franco trabajado + extras/ops.
                   Sin precios. Pirámide empresa → cliente → objetivo.
                   Techo por vigilador = <strong>200 hs</strong> (no el promedio). Capacidad realista: {informe.bolsaHsEfectivasGuardia} hs/g con índice 3m {informe.bolsaIndicePct}% ({informe.bolsaLookbackLabel || '—'}).
+                  {' '}{turnos.length.toLocaleString('es-AR')} turnos en el período.
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800">

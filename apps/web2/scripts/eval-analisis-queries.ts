@@ -11,6 +11,8 @@ import {
   resolveAbsenceCode,
   buildAusenciasStats,
   topNPlusResto,
+  shiftStartMs,
+  filterTurnosInRange,
 } from '../src/lib/analisis/analisisQueries';
 import {
   buildInformeAnalitico,
@@ -64,6 +66,16 @@ const gaps = gapsToFetch(covered, {
   endMs: new Date(2026, 11, 31, 23, 59, 59, 999).getTime(),
 });
 assert(gaps.length === 2, `año vs agosto produce 2 huecos (got ${gaps.length})`);
+
+const julClock = shiftStartMs({ date: '2026-07-15', startTime: '07:00' });
+assert(!!julClock && new Date(julClock).getDate() === 15 && new Date(julClock).getMonth() === 6, 'shiftStartMs date+HH:mm');
+assert(shiftStartMs({ startTime: { _seconds: 1784160000 } }) === 1784160000 * 1000, 'shiftStartMs _seconds');
+const sliced = filterTurnosInRange(
+  [{ id: 'a', date: '2026-07-10', startTime: '23:00' }, { id: 'b', date: '2026-08-01', startTime: '07:00' }],
+  new Date(2026, 6, 1),
+  new Date(2026, 6, 31, 23, 59, 59, 999),
+);
+assert(sliced.length === 1 && sliced[0].id === 'a', 'filterTurnosInRange usa date si startTime es hora');
 
 assert(categoryFromAbsenceCode('V') === 'vac', 'V → vacaciones');
 assert(categoryFromAbsenceCode('E') === 'enf', 'E → enfermedad');
