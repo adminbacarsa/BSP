@@ -122,6 +122,31 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
     const [solicitudesMap, setSolicitudesMap] = useState<Record<string, SolicitudEvento[]>>({});
     const [expandedSolicitudes, setExpandedSolicitudes] = useState<Record<string, boolean>>({});
     const [respondiendo, setRespondiendo] = useState<string | null>(null);
+
+    // ── Staffing state (personal asignado por evento) ───────────────────────
+
+    type StaffingRow = { id: string; empleadoId: string; empleadoNombre: string; servicioId: string; servicioNombre: string; fecha: string };
+    const [staffingMap, setStaffingMap] = useState<Record<string, StaffingRow[]>>({});
+    const [expandedStaffing, setExpandedStaffing] = useState<Record<string, boolean>>({});
+    const [loadingStaffing, setLoadingStaffing] = useState<Record<string, boolean>>({});
+
+    async function loadStaffing(ev: Evento) {
+        if (!ev.id) return;
+        setLoadingStaffing(prev => ({ ...prev, [ev.id!]: true }));
+        try {
+            const rows = await eventoService.getStaffing(ev.id!);
+            setStaffingMap(prev => ({ ...prev, [ev.id!]: rows }));
+        } catch { /* silencioso */ } finally {
+            setLoadingStaffing(prev => ({ ...prev, [ev.id!]: false }));
+        }
+    }
+
+    function toggleStaffing(ev: Evento) {
+        if (!ev.id) return;
+        const next = !expandedStaffing[ev.id];
+        setExpandedStaffing(prev => ({ ...prev, [ev.id!]: next }));
+        if (next && !staffingMap[ev.id]) void loadStaffing(ev);
+    }
     const [srvForm, setSrvForm] = useState<Partial<ServicioEvento>>(emptySrv());
 
     // ── Load clients once ───────────────────────────────────────────────────
@@ -790,6 +815,10 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                         const sols = solicitudesMap[ev.id!] || [];
                         const pendientes = sols.filter(s => s.status === 'pendiente').length;
                         const solExpanded = expandedSolicitudes[ev.id!] || false;
+                        const staffRows = staffingMap[ev.id!] || [];
+                        const staffExpanded = expandedStaffing[ev.id!] || false;
+                        const staffLoading = loadingStaffing[ev.id!] || false;
+                        const totalAsignados = staffRows.length;
                         return (
                             <div
                                 key={ev.id}
@@ -803,6 +832,15 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                                 <span className="px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 rounded-full text-[9px] font-black">
                                                     {pendientes} sol.
                                                 </span>
+                                            )}
+                                            {totalCupo > 0 && (
+                                                <button
+                                                    onClick={() => toggleStaffing(ev)}
+                                                    className={`px-1.5 py-0.5 rounded-full text-[9px] font-black transition-colors ${totalAsignados >= totalCupo ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : totalAsignados > 0 ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}
+                                                    title="Ver personal asignado"
+                                                >
+                                                    {totalAsignados}/{totalCupo} pax
+                                                </button>
                                             )}
                                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase whitespace-nowrap ${sc.ring} ${sc.text}`}>
                                                 {sc.label}
@@ -896,6 +934,50 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                                 </div>
                                             ))}
                                         </div>
+                                    </div>
+                                )}
+                                {/* Panel personal asignado */}
+                                {staffExpanded && (
+                                    <div className="border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+                                        <div className="px-4 py-2 flex items-center justify-between">
+                                            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wide">Personal asignado</span>
+                                            <button onClick={() => void loadStaffing(ev)} className="text-[9px] text-slate-400 hover:text-slate-600">↺ actualizar</button>
+                                        </div>
+                                        {staffLoading ? (
+                                            <div className="px-4 pb-3 text-[10px] text-slate-400">Cargando…</div>
+                                        ) : staffRows.length === 0 ? (
+                                            <div className="px-4 pb-3 text-[10px] text-slate-400">Sin guardias asignados aún</div>
+                                        ) : (
+                                            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                                {(ev.servicios || []).map(srv => {
+                                                    const assigned = staffRows.filter(r => r.servicioId === srv.id || (!r.servicioId && srv.id === ev.id));
+                                                    const pct = srv.cupo > 0 ? Math.min(100, Math.round(assigned.length / srv.cupo * 100)) : 0;
+                                                    return (
+                                                        <div key={srv.id} className="px-4 py-2.5">
+                                                            <div className="flex items-center justify-between mb-1">
+                                                                <span className="text-[10px] font-black text-slate-600 dark:text-slate-300 truncate">{srv.nombre}</span>
+                                                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ml-2 shrink-0 ${assigned.length >= srv.cupo ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                                                    {assigned.length}/{srv.cupo}
+                                                                </span>
+                                                            </div>
+                                                            {/* Barra de progreso */}
+                                                            <div className="h-1 bg-slate-200 dark:bg-slate-700 rounded-full mb-1.5 overflow-hidden">
+                                                                <div className={`h-full rounded-full transition-all ${pct >= 100 ? 'bg-emerald-500' : pct > 0 ? 'bg-blue-400' : 'bg-slate-300'}`} style={{ width: `${pct}%` }}/>
+                                                            </div>
+                                                            {assigned.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                                    {assigned.map(r => (
+                                                                        <span key={r.id} className="text-[9px] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded-full truncate max-w-[120px]">
+                                                                            {r.empleadoNombre}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
