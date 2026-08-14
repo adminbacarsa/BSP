@@ -271,6 +271,46 @@ export function mergeDocsById<T extends { id: string }>(existing: T[], incoming:
   return [...map.values()];
 }
 
+export function formatEmployeeDisplayName(e: any): string {
+  const last = String(e?.lastName || e?.apellido || '').trim();
+  const first = String(e?.firstName || e?.nombre || '').trim();
+  if (last && first) return `${last}, ${first}`;
+  if (last || first) return `${last} ${first}`.trim();
+  return String(e?.name || e?.nombreCompleto || '').trim();
+}
+
+export function buildEmployeeNameIndex(employees: any[]): Record<string, string> {
+  const m: Record<string, string> = {};
+  const put = (key: unknown, name: string) => {
+    const k = String(key || '').trim();
+    if (!k || !name) return;
+    if (!m[k]) m[k] = name;
+  };
+  (employees || []).forEach((e) => {
+    const name = formatEmployeeDisplayName(e);
+    if (!name) return;
+    put(e?.id, name);
+    put(e?.employeeId, name);
+    put(e?.uid, name);
+    put(e?.fileNumber, name);
+    put(e?.legajo, name);
+  });
+  return m;
+}
+
+export function resolveEmployeeDisplayName(
+  employeeId: string,
+  fallback: string,
+  index: Record<string, string>,
+): string {
+  const id = String(employeeId || '').trim();
+  const fb = String(fallback || '').trim();
+  const fromIndex = (id && index[id]) || (fb && index[fb]) || '';
+  if (fromIndex) return fromIndex;
+  if (fb && fb !== id) return fb;
+  return id;
+}
+
 export function isVacantShift(t: any): boolean {
   const empNameU = String(t?.employeeName || '').trim().toUpperCase();
   return (

@@ -435,6 +435,7 @@ export default function AnalisisPage() {
   const {
     services,
     employees,
+    employeeNameById,
     turnos,
     ausencias,
     allTurnos,
@@ -553,12 +554,14 @@ export default function AnalisisPage() {
 
   // ── Mapas globales ID → nombre (empleados, objetivos, clientes) ────────────────
   const empNameById = useMemo(() => {
-    const m: Record<string, string> = {};
+    const m: Record<string, string> = { ...employeeNameById };
     employees.forEach((e: any) => {
-      m[e.id] = e.lastName ? `${e.lastName}, ${e.firstName || ''}`.trim() : (e.name || e.id);
+      const name = e.lastName ? `${e.lastName}, ${e.firstName || ''}`.trim() : (e.name || '');
+      if (!name) return;
+      if (e.id) m[e.id] = m[e.id] || name;
     });
     return m;
-  }, [employees]);
+  }, [employees, employeeNameById]);
 
   const objectiveNameById = useMemo(() => {
     const m: Record<string, string> = {};
@@ -812,9 +815,7 @@ export default function AnalisisPage() {
 
   // ── Actual ───────────────────────────────────────────────────────────────────
   const actual = useMemo(() => {
-    const empNameMap = new Map(employees.map((e: any) => [
-      e.id, e.lastName ? `${e.lastName}, ${e.firstName||''}`.trim() : (e.name||e.id),
-    ]));
+    const empNameMap = new Map(Object.entries(empNameById));
     const objInfoMap = new Map<string, { name: string; client: string }>();
     vigenteServices.forEach((s: any) => {
       const canonicalId = resolveCanonicalObjectiveId(s, objectiveAliasesFromServices) || String(s.objectiveId ?? '').trim();
@@ -905,7 +906,7 @@ export default function AnalisisPage() {
       scheduledHours: Math.round(scheduledHours),
       vacantHours: Math.round(vacantHours),
     };
-  }, [turnos, employees, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx]);
+  }, [turnos, employees, empNameById, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx]);
 
   const demanda = useMemo(
     () =>
@@ -933,8 +934,9 @@ export default function AnalisisPage() {
         slaExclusionCtx,
         turnosHistorial: allTurnos,
         employees,
+        employeeNameById: empNameById,
       }),
-    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees],
+    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
   );
   const fin = useMemo(() => rollAnalisisFinanciera(finBases, finHoursMode), [finBases, finHoursMode]);
   const finClientBars = useMemo(
@@ -1856,7 +1858,7 @@ export default function AnalisisPage() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ['Cliente', 'Objetivo', 'Guardia', 'Malla', 'FT', 'Extra', 'Ops', 'Novedad', 'Consumo'],
       ...fin.clients.flatMap((c) => c.rows.flatMap((o) => o.guards.map((g) => [
-        c.name, o.name, g.name, finHoursMode === 'real' ? g.hsReal : g.hsPlan, g.hsFt, g.hsExtra, g.hsOps, g.hsNovedad, finGuardConsumo(g, finHoursMode),
+        c.name, o.name, empNameById[g.employeeId] || g.name, finHoursMode === 'real' ? g.hsReal : g.hsPlan, g.hsFt, g.hsExtra, g.hsOps, g.hsNovedad, finGuardConsumo(g, finHoursMode),
       ]))),
     ]), 'Guardias');
     XLSX.writeFile(wb, `financiera-hs-${periodRange.labelShort.replace(/[^\w]+/g, '-')}.xlsx`);
@@ -2661,7 +2663,7 @@ export default function AnalisisPage() {
                                                         <tbody>
                                                           {obj.guards.map((g) => (
                                                             <tr key={g.employeeId} className="border-t border-slate-100 dark:border-slate-700">
-                                                              <td className="p-2 font-bold">{g.name}</td>
+                                                              <td className="p-2 font-bold">{empNameById[g.employeeId] || g.name}</td>
                                                               <td className="p-2 text-center">{(finHoursMode === 'real' ? g.hsReal : g.hsPlan).toLocaleString('es-AR')}</td>
                                                               <td className="p-2 text-center text-orange-600">{g.hsFt.toLocaleString('es-AR')}</td>
                                                               <td className="p-2 text-center">{(g.hsExtra + g.hsOps).toLocaleString('es-AR')}</td>
