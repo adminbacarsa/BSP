@@ -13,6 +13,7 @@ import {
   topNPlusResto,
   shiftStartMs,
   filterTurnosInRange,
+  splitRangeByDays,
 } from '../src/lib/analisis/analisisQueries';
 import {
   buildInformeAnalitico,
@@ -66,6 +67,14 @@ const gaps = gapsToFetch(covered, {
   endMs: new Date(2026, 11, 31, 23, 59, 59, 999).getTime(),
 });
 assert(gaps.length === 2, `año vs agosto produce 2 huecos (got ${gaps.length})`);
+
+const julChunks = splitRangeByDays(
+  { startMs: new Date(2026, 6, 1).getTime(), endMs: new Date(2026, 6, 31, 23, 59, 59, 999).getTime() },
+  7,
+);
+assert(julChunks.length === 5, `julio en ventanas de 7 días = 5 (got ${julChunks.length})`);
+assert(julChunks[0].startMs === new Date(2026, 6, 1).getTime(), 'primer chunk = 1 jul');
+assert(julChunks[julChunks.length - 1].endMs === new Date(2026, 6, 31, 23, 59, 59, 999).getTime(), 'último chunk cierra el 31');
 
 const julClock = shiftStartMs({ date: '2026-07-15', startTime: '07:00' });
 assert(!!julClock && new Date(julClock).getDate() === 15 && new Date(julClock).getMonth() === 6, 'shiftStartMs date+HH:mm');
@@ -164,7 +173,8 @@ const inf = buildInformeAnalitico({
 assert(inf.dotacionActiva === 10, 'informe dotación');
 assert(inf.hsVendidas === 1000, 'informe vendidas');
 assert(inf.hsRealizadas === 8, 'informe realizadas desde fichada');
-assert(inf.bolsaInicial === 1920, 'informe bolsa 10×192');
+assert(inf.bolsaInicial === 2000, 'informe sin bolsa = techo 10×200 (no 192)');
+assert(inf.bolsaModo === 'sin_indice', 'sin objeto bolsa → sin índice');
 assert(inf.conclusiones.length >= 1, 'informe genera conclusiones');
 assert(estimarCostoInforme(inf, 0) === null, 'sin valor hora no estima $');
 assert(!!estimarCostoInforme(inf, 5000), 'con valor hora estima $');
@@ -185,8 +195,8 @@ const serie = buildInformeSeries({
 });
 assert(serie[0].Vendidas === 12 && serie[0].Plan === 8 && serie[0].Realizadas === 8, 'serie día 1 plan+real');
 
-assert(CCT_HS_MENSUAL === 192, 'CCT mensual = 192');
-assert(cctBolsaHsPerGuard('month', 31) === 192, 'bolsa mes = 192');
+assert(CCT_HS_MENSUAL === 192, 'jornada mensual = 192');
+assert(cctBolsaHsPerGuard('month', 31) === 192, 'jornada mes = 192 (alias histórico, no es techo 200)');
 assert(cctBolsaHsPerGuard('quarter', 90) === 576, 'bolsa trimestre = 576');
 assert(cctBolsaHsPerGuard('year', 365) === 2304, 'bolsa año = 2304');
 assert(cctBolsaHsPerGuard('day', 1) === Math.round(192 / 30), 'bolsa día = prorrateo 192/30');
@@ -219,6 +229,18 @@ assert(bolsaIdx.hsAusenciaLookback === 600, `75 días × 8h = 600 (got ${bolsaId
 assert(bolsaIdx.indicePct === 10, `índice 600/6000 = 10% (got ${bolsaIdx.indicePct})`);
 assert(bolsaIdx.hsEfectivasGuardia === 180, `200 × 0.9 = 180 (got ${bolsaIdx.hsEfectivasGuardia})`);
 assert(bolsaIdx.bolsaInicial === 1800, `10 × 180 = 1800, no 2000 (got ${bolsaIdx.bolsaInicial})`);
+assert(bolsaIdx.modo === 'con_indice', 'con historial 3m el modo es con_indice');
+
+const bolsaSin = buildBolsaRealista({
+  employees: plantel10,
+  ausencias: [],
+  turnosLookback: [],
+  periodMode: 'month',
+  periodDays: 31,
+  periodStart: new Date(2026, 7, 1),
+});
+assert(bolsaSin.tieneHistorial === false && bolsaSin.modo === 'sin_indice', 'sin ausencias 3m → sin índice');
+assert(bolsaSin.bolsaInicial === 2000 && bolsaSin.indicePct === 0, `sin índice se muestra el techo 2000, no un promedio (got ${bolsaSin.bolsaInicial})`);
 
 const uni = buildAnalisisUniverso({
   vigenteServices: [{
@@ -280,7 +302,7 @@ void (async () => {
   process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||= 'demo';
   process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||= 'demo.firebaseapp.com';
   process.env.NEXT_PUBLIC_FIREBASE_APP_ID ||= '1:1:web:1';
-  const { buildAnalisisFinanciera, finConsumoHours, rollAnalisisFinanciera } = await import('../src/lib/analisis/analisisFinanciera');
+  const { buildAnalisisFinanciera, finConsumoHours, rollAnalisisFinanciera, resolveLeaveObjective, homeObjectiveByEmployee } = await import('../src/lib/analisis/analisisFinanciera');
 const finSrv = {
   clientId: 'cli-a',
   clientName: 'Cliente A',
@@ -370,6 +392,119 @@ assert(
   finRoll.clients[0].rows[0].hsSlaPorGuardia === Math.round((finRoll.clients[0].rows[0].slaHours / 2) * 10) / 10,
   `SLA/guardia = sla/2 (got ${finRoll.clients[0].rows[0].hsSlaPorGuardia} sla=${finRoll.clients[0].rows[0].slaHours})`,
 );
+
+const homeMap = homeObjectiveByEmployee(finTurnos, { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } });
+assert(homeMap.get('g1') === 'obj-a', 'home de g1 = obj-a');
+const vacSinOid = buildAusenciasStats({
+  ausencias: [{
+    id: 'vac-home',
+    employeeId: 'g1',
+    employeeName: 'Guardia Uno',
+    type: 'Vacaciones',
+    absenceType: 'V',
+    startDate: '2026-08-20',
+    endDate: '2026-08-20',
+    status: 'Autorizada',
+  }],
+  turnos: finTurnos,
+  employees: [{ id: 'g1' }, { id: 'g2' }],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+const finHome = buildAnalisisFinanciera({
+  turnos: finTurnos,
+  ausenciasStats: vacSinOid,
+  vigenteServices: [finSrv],
+  periodStart: new Date(2026, 7, 3),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  objectiveAliases: { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
+  slaExclusionCtx: null,
+});
+assert((finHome.find((r) => r.id === 'obj-a')?.novedades.vac || 0) >= 8, 'vacaciones sin oid van al home de malla');
+
+const vacHuerfana = buildAusenciasStats({
+  ausencias: [{
+    id: 'vac-none',
+    employeeId: 'g9',
+    employeeName: 'Sin Malla',
+    type: 'Vacaciones',
+    absenceType: 'V',
+    startDate: '2026-08-20',
+    endDate: '2026-08-20',
+    status: 'Autorizada',
+  }],
+  turnos: [],
+  employees: [{ id: 'g9' }],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+const resolvedNone = resolveLeaveObjective(
+  vacHuerfana!.detalle[0],
+  new Map(),
+  new Map(),
+  [],
+  [],
+  {},
+);
+assert(resolvedNone.source === 'sin_objetivo' && resolvedNone.oid === 'SIN_OBJETIVO', 'sin malla no se inventa puesto');
+const finHuerfana = buildAnalisisFinanciera({
+  turnos: [],
+  ausenciasStats: vacHuerfana,
+  vigenteServices: [finSrv],
+  periodStart: new Date(2026, 7, 3),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  objectiveAliases: { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
+  slaExclusionCtx: null,
+});
+const rowHuerfana = finHuerfana.find((r) => r.id === 'SIN_OBJETIVO');
+assert(!!rowHuerfana && rowHuerfana.novedades.vac === 8, 'hs de licencia huérfana no se tiran: van a SIN_OBJETIVO');
+
+const histTurnos = [{
+  id: 'hist-jul',
+  employeeId: 'g3',
+  employeeName: 'Guardia Tres',
+  objectiveId: 'obj-b',
+  code: 'M',
+  hours: 8,
+  startTime: { seconds: new Date(2026, 6, 10, 7, 0).getTime() / 1000 },
+  endTime: { seconds: new Date(2026, 6, 10, 15, 0).getTime() / 1000 },
+}];
+const vacHist = buildAusenciasStats({
+  ausencias: [{
+    id: 'vac-hist',
+    employeeId: 'g3',
+    employeeName: 'Guardia Tres',
+    type: 'Vacaciones',
+    absenceType: 'V',
+    startDate: '2026-08-01',
+    endDate: '2026-08-01',
+    status: 'Autorizada',
+  }],
+  turnos: [],
+  employees: [{ id: 'g3' }],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+const finHist = buildAnalisisFinanciera({
+  turnos: [],
+  ausenciasStats: vacHist,
+  vigenteServices: [{
+    ...finSrv,
+    objectiveId: 'obj-b',
+    objectiveName: 'Objetivo B',
+    clientId: 'cli-b',
+    clientName: 'Cliente B',
+  }],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  objectiveAliases: { 'obj-b': { canonicalId: 'obj-b', name: 'Objetivo B', clientId: 'cli-b' } },
+  slaExclusionCtx: null,
+  turnosHistorial: histTurnos,
+});
+assert((finHist.find((r) => r.id === 'obj-b')?.novedades.vac || 0) === 8, 'vacaciones sin oid usan último puesto del historial 3m');
 
 if (failed) {
   console.error(`\n${failed} assertion(s) failed`);

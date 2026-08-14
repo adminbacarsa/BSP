@@ -29,6 +29,8 @@ export type AbsenceEvent = {
   objectiveId?: string;
   shiftId?: string;
   covered: boolean;
+  /** Primer día calendario de la novedad (YYYY-MM-DD), para atribuir puesto. */
+  fromDay?: string;
 };
 
 export type AusenciasStats = {
@@ -129,6 +131,22 @@ export function gapsToFetch(intervals: MsRange[], requested: MsRange): MsRange[]
     remaining = next.filter((g) => g.endMs >= g.startMs);
   }
   return remaining;
+}
+
+/** Parte un rango en ventanas de N días calendario (carga progresiva de malla). */
+export function splitRangeByDays(range: MsRange, dayChunk: number): MsRange[] {
+  const days = Math.max(1, Math.floor(dayChunk) || 1);
+  const out: MsRange[] = [];
+  let cursor = new Date(range.startMs);
+  const endMs = range.endMs;
+  while (cursor.getTime() <= endMs) {
+    const chunkStart = cursor.getTime();
+    const next = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + days);
+    const chunkEnd = Math.min(next.getTime() - 1, endMs);
+    out.push({ startMs: chunkStart, endMs: chunkEnd });
+    cursor = new Date(chunkEnd + 1);
+  }
+  return out;
 }
 
 export function shiftStartMs(t: any): number | null {
@@ -433,6 +451,7 @@ export function buildAusenciasStats(opts: {
       objectiveId: oid,
       shiftId: a.shiftId ? String(a.shiftId) : undefined,
       covered,
+      fromDay: days[0],
     }, days);
   });
 
@@ -466,6 +485,7 @@ export function buildAusenciasStats(opts: {
       objectiveId: oid,
       shiftId: sid || undefined,
       covered: dayHasCoverage(idx, oid, day),
+      fromDay: day,
     }, [day]);
   });
 

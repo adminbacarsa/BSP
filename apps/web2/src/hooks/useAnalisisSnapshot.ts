@@ -5,6 +5,7 @@ import {
   isRangeCovered as intervalsCover,
 } from '@/lib/analisis/analisisQueries';
 import {
+  type AnalisisLoadProgress,
   type AnalisisMemoryStore,
   ensureAnalisisFacts,
   fetchAnalisisCatalog,
@@ -14,6 +15,8 @@ import {
   storeCoversRange,
 } from '@/lib/analisis/analisisSnapshot';
 import { threeMonthLookback } from '@/lib/analisis/analisisBolsa';
+
+export type { AnalisisLoadProgress };
 
 export type UseAnalisisSnapshotArgs = {
   empresaId: string | undefined;
@@ -32,7 +35,8 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   const [storeVersion, setStoreVersion] = useState(0);
   const [loadInit, setLoadInit] = useState(true);
   const [loadFacts, setLoadFacts] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(null as string | null);
+  const [loadProgress, setLoadProgress] = useState(null as AnalisisLoadProgress | null);
   const genRef = useRef(0);
 
   const bump = useCallback(() => setStoreVersion((v) => v + 1), []);
@@ -61,14 +65,13 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
         setLoadError(null);
         const existing = getAnalisisMemoryStore();
         const needCatalog = !existing || existing.empresaId !== scopeOpts.empresaId || !existing.catalogAt;
+        const needFirstFacts = !existing?.factsAt;
+        if (needCatalog || needFirstFacts) setLoadInit(true);
         if (needCatalog) {
-          setLoadInit(true);
+          setLoadProgress({ pct: 4, label: 'Catálogo (SLA, plantel, clientes)', phase: 'catalog', docs: 0 });
           await fetchAnalisisCatalog(scopeOpts);
           if (cancelled || gen !== genRef.current) return;
           bump();
-          setLoadInit(false);
-        } else {
-          setLoadInit(false);
         }
         if (cancelled || gen !== genRef.current) return;
         setLoadFacts(true);
@@ -77,14 +80,32 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
           ...scopeOpts,
           requestedStart: new Date(periodStartMs),
           requestedEnd: new Date(periodEndMs),
+          phase: 'malla',
+          onProgress: (p) => {
+            if (cancelled || gen !== genRef.current) return;
+            setLoadProgress({
+              ...p,
+              pct: 8 + Math.round(p.pct * 0.55),
+            });
+          },
         });
         if (cancelled || gen !== genRef.current) return;
         await ensureAnalisisFacts({
           ...scopeOpts,
           requestedStart: lookback.start,
           requestedEnd: lookback.end,
+          phase: 'lookback',
+          onProgress: (p) => {
+            if (cancelled || gen !== genRef.current) return;
+            setLoadProgress({
+              ...p,
+              label: `Índice 3m · ${p.label}`,
+              pct: 65 + Math.round(p.pct * 0.3),
+            });
+          },
         });
         if (cancelled || gen !== genRef.current) return;
+        setLoadProgress({ pct: 100, label: 'Listo', phase: 'done', docs: getAnalisisMemoryStore()?.turnos.length || 0 });
         bump();
       } catch (e) {
         console.error(e);
@@ -132,10 +153,13 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
         ...scopeOpts,
         requestedStart: start,
         requestedEnd: end,
+        phase: 'malla',
+        onProgress: (p) => setLoadProgress(p),
       });
       bump();
     } catch (e) {
       console.error(e);
+      setLoadError(e instanceof Error ? e.message : 'No se pudo ampliar el rango de Análisis.');
     } finally {
       setLoadFacts(false);
     }
@@ -145,8 +169,11 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     if (!scopeOpts.empresaId) return;
     setLoadInit(true);
     setLoadFacts(true);
+    setLoadError(null);
+    setLoadProgress({ pct: 2, label: 'Reiniciando snapshot…', phase: 'catalog', docs: 0 });
     try {
       resetAnalisisMemoryStore();
+      setLoadProgress({ pct: 6, label: 'Catálogo (SLA, plantel, clientes)', phase: 'catalog', docs: 0 });
       await fetchAnalisisCatalog(scopeOpts);
       const lookback = threeMonthLookback(new Date(periodStartMs));
       await ensureAnalisisFacts({
@@ -154,15 +181,25 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
         requestedStart: new Date(periodStartMs),
         requestedEnd: new Date(periodEndMs),
         force: true,
+        phase: 'malla',
+        onProgress: (p) => setLoadProgress({ ...p, pct: 10 + Math.round(p.pct * 0.55) }),
       });
       await ensureAnalisisFacts({
         ...scopeOpts,
         requestedStart: lookback.start,
         requestedEnd: lookback.end,
+        phase: 'lookback',
+        onProgress: (p) => setLoadProgress({
+          ...p,
+          label: `Índice 3m · ${p.label}`,
+          pct: 68 + Math.round(p.pct * 0.28),
+        }),
       });
+      setLoadProgress({ pct: 100, label: 'Listo', phase: 'done', docs: getAnalisisMemoryStore()?.turnos.length || 0 });
       bump();
     } catch (e) {
       console.error(e);
+      setLoadError(e instanceof Error ? e.message : 'No se pudo recargar Análisis.');
     } finally {
       setLoadInit(false);
       setLoadFacts(false);
@@ -187,6 +224,7 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     loadInit,
     loadFacts,
     loadError,
+    loadProgress,
     catalogAt: store?.catalogAt ?? null,
     factsAt: store?.factsAt ?? null,
     coveredIntervals: store?.intervals ?? [],

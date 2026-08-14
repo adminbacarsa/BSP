@@ -151,14 +151,20 @@ function peakOverlap(slots: SlotInst[]): number {
   return peak;
 }
 
-/** Tope CCT 422/05: 192 hs/mes constantes. Día/semana = prorrateo 192/30. */
-export function cctBolsaHsPerGuard(mode: AnalisisPeriodMode, daysCount: number): number {
+/**
+ * Jornada de referencia CCT 422/05: 192 hs/mes (no es el techo de liquidación 200).
+ * Día/semana = prorrateo 192/30. Alias histórico: cctBolsaHsPerGuard.
+ */
+export function cctJornadaHsPerGuard(mode: AnalisisPeriodMode, daysCount: number): number {
   if (mode === 'quarter') return CCT_HS_MENSUAL * 3;
   if (mode === 'semester') return CCT_HS_MENSUAL * 6;
   if (mode === 'year') return CCT_HS_MENSUAL * 12;
   if (mode === 'month') return CCT_HS_MENSUAL;
   return Math.max(1, Math.round(CCT_HS_MENSUAL * (Math.max(1, daysCount) / 30)));
 }
+
+/** @deprecated Nombre histórico. Usar cctJornadaHsPerGuard — 192 no es bolsa/techo 200. */
+export const cctBolsaHsPerGuard = cctJornadaHsPerGuard;
 
 export function buildAnalisisUniverso(opts: {
   vigenteServices: any[];
