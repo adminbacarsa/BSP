@@ -2463,6 +2463,7 @@ export default function AnalisisPage() {
               </SectionCard>
 
               {activeTab === 'informe' && (
+              <>
               <SectionCard title="4. Cobertura y calidad de servicio" icon={Target}>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-5">
                   <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 text-center">
@@ -2508,6 +2509,7 @@ export default function AnalisisPage() {
                   ))}
                 </div>
               </SectionCard>
+              </>
               )}
             </div>
           )}
