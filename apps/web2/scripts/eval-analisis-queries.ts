@@ -16,6 +16,8 @@ import {
   splitRangeByDays,
   monthsInRange,
   analisisWorkingWindow,
+  buildEmployeeNameIndex,
+  resolveEmployeeDisplayName,
 } from '../src/lib/analisis/analisisQueries';
 import {
   buildInformeAnalitico,
@@ -107,6 +109,16 @@ const sliced = filterTurnosInRange(
   new Date(2026, 6, 31, 23, 59, 59, 999),
 );
 assert(sliced.length === 1 && sliced[0].id === 'a', 'filterTurnosInRange usa date si startTime es hora');
+
+const nameIdx = buildEmployeeNameIndex([
+  { id: 'aVqbK64mr2kuqzax47t', lastName: 'PEREZ', firstName: 'Juan', uid: 'uid-1' },
+]);
+assert(nameIdx['aVqbK64mr2kuqzax47t'] === 'PEREZ, Juan', 'índice por id de legajo');
+assert(nameIdx['uid-1'] === 'PEREZ, Juan', 'índice por uid Auth');
+assert(
+  resolveEmployeeDisplayName('aVqbK64mr2kuqzax47t', 'aVqbK64mr2kuqzax47t', nameIdx) === 'PEREZ, Juan',
+  'turno sin employeeName resuelve apellido, nombre',
+);
 
 assert(categoryFromAbsenceCode('V') === 'vac', 'V → vacaciones');
 assert(categoryFromAbsenceCode('E') === 'enf', 'E → enfermedad');

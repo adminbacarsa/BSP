@@ -21,6 +21,8 @@ import {
   coverageHoursFromShift,
   isFrancoTrabajadoShift,
   isVacantShift,
+  resolveEmployeeDisplayName,
+  buildEmployeeNameIndex,
   shiftStartMs,
 } from './analisisQueries';
 
@@ -427,12 +429,17 @@ export function buildAnalisisFinanciera(opts: {
   slaExclusionCtx: any;
   /** Malla de meses previos (lookback) para licencias sin objectiveId. */
   turnosHistorial?: any[];
-  /** Legajos: preferredObjectiveId como último fallback de puesto. */
+  /** Legajos: preferredObjectiveId y nombres (id / uid). */
   employees?: any[];
+  employeeNameById?: Record<string, string>;
 }): FinObjectiveBase[] {
   const { turnos, ausenciasStats, vigenteServices, periodStart, periodEnd, objectiveAliases, slaExclusionCtx } = opts;
   const historial = opts.turnosHistorial && opts.turnosHistorial.length ? opts.turnosHistorial : turnos;
   const employeeHome = homeFromEmployees(opts.employees || []);
+  const nameIndex = {
+    ...buildEmployeeNameIndex(opts.employees || []),
+    ...(opts.employeeNameById || {}),
+  };
   const byObj = new Map<string, Acc>();
 
   vigenteServices.forEach((srv: any) => {
@@ -480,7 +487,11 @@ export function buildAnalisisFinanciera(opts: {
       String(t.clientId || alias?.clientId || '').trim(),
       t.clientName || 'Sin Cliente',
     );
-    const g = guardOf(row, t.employeeId, t.employeeName || '');
+    const g = guardOf(
+      row,
+      t.employeeId,
+      resolveEmployeeDisplayName(String(t.employeeId || ''), String(t.employeeName || ''), nameIndex),
+    );
 
     if (isFrancoTrabajadoShift(t) && !isVacantShift(t)) {
       const hs = coverageHoursFromShift(t);
@@ -550,7 +561,11 @@ export function buildAnalisisFinanciera(opts: {
       oid === SIN_OBJETIVO ? 'Sin asignar' : 'Sin Cliente',
     );
     bumpNov(row.novedades, ev);
-    const g = guardOf(row, ev.employeeId, ev.emp);
+    const g = guardOf(
+      row,
+      ev.employeeId,
+      resolveEmployeeDisplayName(String(ev.employeeId || ''), String(ev.emp || ''), nameIndex),
+    );
     if (g) g.hsNovedad += Number(ev.hs) || 0;
   });
 

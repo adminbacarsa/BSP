@@ -158,6 +158,7 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
 
   const services = store?.services ?? [];
   const employees = store?.employees ?? [];
+  const employeeNameById = store?.employeeNameById ?? {};
   const objectivesGeoById: Record<string, ObjectiveGeoEntry> = store?.objectivesGeoById ?? {};
   const tiposNovedad: NovedadType[] = store?.tiposNovedad ?? [];
   const allTurnos = store?.turnos ?? [];
@@ -255,6 +256,7 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   return {
     services,
     employees,
+    employeeNameById,
     turnos,
     ausencias,
     allTurnos,

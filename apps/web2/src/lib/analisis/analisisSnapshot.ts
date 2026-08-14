@@ -25,6 +25,7 @@ import {
   filterAusenciasLoose,
   shiftStartMs,
   monthsInRange,
+  buildEmployeeNameIndex,
 } from './analisisQueries';
 
 const META_KEY = 'cosp:analisis:snap-meta';
@@ -50,6 +51,7 @@ export type AnalisisMemoryStore = {
   empresaId: string;
   services: any[];
   employees: any[];
+  employeeNameById: Record<string, string>;
   objectivesGeoById: Record<string, ObjectiveGeoEntry>;
   tiposNovedad: NovedadType[];
   turnos: any[];
@@ -93,6 +95,7 @@ function ensureStore(empresaId: string): AnalisisMemoryStore {
       empresaId,
       services: [],
       employees: [],
+      employeeNameById: {},
       objectivesGeoById: {},
       tiposNovedad: [],
       turnos: [],
@@ -236,6 +239,7 @@ async function fetchAusenciasAll(opts: ScopeOpts): Promise<any[]> {
 export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
   services: any[];
   employees: any[];
+  employeeNameById: Record<string, string>;
   objectivesGeoById: Record<string, ObjectiveGeoEntry>;
   tiposNovedad: NovedadType[];
 }> {
@@ -250,12 +254,14 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
     scopeEmpresa,
     migracionCompleta,
   );
-  const employees = filterRowsByEmpresa(
+  const employeesAll = filterRowsByEmpresa(
     eSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
     empresaId,
     scopeEmpresa,
     migracionCompleta,
-  ).filter((e: any) => !['inactive', 'baja', 'inactivo'].includes(String(e.status || '').toLowerCase()));
+  );
+  const employeeNameById = buildEmployeeNameIndex(employeesAll);
+  const employees = employeesAll.filter((e: any) => !['inactive', 'baja', 'inactivo'].includes(String(e.status || '').toLowerCase()));
 
   const map: Record<string, ObjectiveGeoEntry> = {};
   const add = (key: string, lat: number, lng: number, name: string, clientName: string) => {
@@ -332,11 +338,12 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
   const store = ensureStore(empresaId);
   store.services = services;
   store.employees = employees;
+  store.employeeNameById = employeeNameById;
   store.objectivesGeoById = map;
   store.tiposNovedad = tiposNovedad;
   store.catalogAt = Date.now();
   persistMeta(store);
-  return { services, employees, objectivesGeoById: map, tiposNovedad };
+  return { services, employees, employeeNameById, objectivesGeoById: map, tiposNovedad };
 }
 
 export async function ensureAnalisisFacts(opts: ScopeOpts & {
