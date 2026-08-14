@@ -13,6 +13,8 @@ import {
     type TipoTurnoEvento,
 } from '@/services/eventoService';
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
+import { aptitudTypeService } from '@/services/aptitudTypeService';
+import { type AptitudType } from '@/lib/rrhh/aptitudTypes';
 import { slaService } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
 import { EventoDetailModal } from './EventoDetailModal';
@@ -73,6 +75,7 @@ function emptySrv(defaultFecha?: string): Partial<ServicioEvento> {
         horaFin: '20:00',
         ubicacion: { tipo: 'nueva', direccion: '' },
         cupo: 1,
+        aptitudesRequeridas: [],
         requisitos: '',
         instrucciones: '',
         status: 'pendiente',
@@ -113,6 +116,14 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
     const [form, setForm] = useState<Partial<Evento>>(emptyEvento());
     const [formServicios, setFormServicios] = useState<ServicioEvento[]>([]);
     const [saving, setSaving] = useState(false);
+
+    // ── Aptitud catalog ────────────────────────────────────────────────────
+
+    const [aptitudCatalog, setAptitudCatalog] = useState<AptitudType[]>([]);
+    useEffect(() => {
+        if (!empresaId) return;
+        aptitudTypeService.ensureSeeded(empresaId).then(setAptitudCatalog).catch(console.error);
+    }, [empresaId]);
 
     // ── Service sub-form state ──────────────────────────────────────────────
 
@@ -291,6 +302,7 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
             horasTotal,
             ubicacion: srvForm.ubicacion || { tipo: 'nueva', direccion: '' },
             cupo: Number(cupo),
+            aptitudesRequeridas: srvForm.aptitudesRequeridas || [],
             requisitos: srvForm.requisitos || '',
             instrucciones: srvForm.instrucciones || '',
             status: 'pendiente',
@@ -683,9 +695,42 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                         />
                                     </div>
                                 )}
+                                {/* Aptitudes requeridas */}
+                                {aptitudCatalog.length > 0 && (
+                                    <div className="md:col-span-3">
+                                        <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1.5">Aptitudes requeridas</label>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {aptitudCatalog.map(apt => {
+                                                const activa = (srvForm.aptitudesRequeridas || []).includes(apt.codigo);
+                                                return (
+                                                    <button
+                                                        key={apt.codigo}
+                                                        type="button"
+                                                        onClick={() => setSrvForm(f => {
+                                                            const prev = f.aptitudesRequeridas || [];
+                                                            return {
+                                                                ...f,
+                                                                aptitudesRequeridas: activa
+                                                                    ? prev.filter(c => c !== apt.codigo)
+                                                                    : [...prev, apt.codigo],
+                                                            };
+                                                        })}
+                                                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all ${
+                                                            activa
+                                                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                                                : 'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-indigo-400'
+                                                        }`}
+                                                    >
+                                                        <span>{apt.icono}</span> {apt.nombre}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                                 {/* Requisitos */}
                                 <div className="md:col-span-3">
-                                    <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">Requisitos / Instrucciones</label>
+                                    <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">Notas / Instrucciones adicionales</label>
                                     <input
                                         value={srvForm.requisitos || ''}
                                         onChange={e => setSrvForm(f => ({ ...f, requisitos: e.target.value }))}

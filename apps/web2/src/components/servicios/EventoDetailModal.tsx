@@ -10,6 +10,8 @@ import { empresaCollectionQuery } from '@/lib/multiempresa';
 import { type Evento, type ServicioEvento } from '@/services/eventoService';
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
 import { useToast } from '@/context/ToastContext';
+import { aptitudTypeService } from '@/services/aptitudTypeService';
+import { type AptitudType, type EmpleadoAptitud } from '@/lib/rrhh/aptitudTypes';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -58,6 +60,7 @@ interface EmpRow {
     uid?: string;
     name: string;
     fileNumber?: string;
+    aptitudes?: EmpleadoAptitud[];
 }
 
 interface Props {
@@ -79,6 +82,8 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const [sending, setSending] = useState(false);
     const [loadingAvail, setLoadingAvail] = useState(false);
     const [tab, setTab] = useState<'convocar' | 'estado'>('convocar');
+    const [aptitudCatalog, setAptitudCatalog] = useState<AptitudType[]>([]);
+    const [soloRequisitos, setSoloRequisitos] = useState(false);
 
     const selectedSrv = evento.servicios?.find(s => s.id === selectedSrvId) || null;
 
@@ -96,11 +101,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     const name = dat.name
                         || `${dat.firstName || dat.nombre || ''} ${dat.lastName || dat.apellido || ''}`.trim()
                         || d.id;
-                    return { id: d.id, uid: dat.uid || '', name, fileNumber: dat.fileNumber || dat.legajo || '' };
+                    return { id: d.id, uid: dat.uid || '', name, fileNumber: dat.fileNumber || dat.legajo || '', aptitudes: dat.aptitudes || [] };
                 })
                 .sort((a, b) => a.name.localeCompare(b.name, 'es'));
             setEmpleados(rows);
         }).catch(console.error);
+    }, [empresaId]);
+
+    useEffect(() => {
+        aptitudTypeService.ensureSeeded(empresaId).then(setAptitudCatalog).catch(() => {});
     }, [empresaId]);
 
     // Cargar solicitudes del evento
@@ -195,9 +204,19 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
 
     const cupo = selectedSrv?.cupo || 0;
 
-    const filteredEmps = empleados.filter(e =>
-        !search || e.name.toLowerCase().includes(search.toLowerCase())
-    );
+    const aptitudesRequeridas = selectedSrv?.aptitudesRequeridas || [];
+
+    function cumpleRequisitos(emp: EmpRow): boolean {
+        if (aptitudesRequeridas.length === 0) return true;
+        const empCodigos = new Set((emp.aptitudes || []).map(a => a.codigo));
+        return aptitudesRequeridas.every(c => empCodigos.has(c));
+    }
+
+    const filteredEmps = empleados.filter(e => {
+        if (search && !e.name.toLowerCase().includes(search.toLowerCase())) return false;
+        if (soloRequisitos && !cumpleRequisitos(e)) return false;
+        return true;
+    });
 
     function toggleEmp(id: string) {
         setSelected(prev => {
@@ -276,6 +295,19 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         <span className="text-[10px] text-slate-400 flex items-center gap-1 truncate max-w-[200px]"><MapPin size={9}/>{selectedSrv.ubicacion.direccion}</span>
                                     )}
                                 </div>
+                                {aptitudesRequeridas.length > 0 && (
+                                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                                        <span className="text-[9px] font-black uppercase text-slate-400">Requiere:</span>
+                                        {aptitudesRequeridas.map(codigo => {
+                                            const apt = aptitudCatalog.find(a => a.codigo === codigo);
+                                            return (
+                                                <span key={codigo} className="inline-flex items-center gap-1 text-[9px] font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 px-1.5 py-0.5 rounded-full">
+                                                    {apt?.icono} {apt?.nombre || codigo}
+                                                </span>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                                 {/* Barra progreso confirmados */}
                                 <div className="mt-2 flex items-center gap-2">
                                     <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
@@ -307,8 +339,8 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                             {/* Tab: Convocar */}
                             {tab === 'convocar' && (
                                 <div className="flex-1 flex flex-col overflow-hidden">
-                                    <div className="px-4 py-3 flex items-center gap-3 shrink-0 border-b border-slate-100 dark:border-slate-800">
-                                        <div className="relative flex-1">
+                                    <div className="px-4 py-3 flex items-center gap-3 shrink-0 border-b border-slate-100 dark:border-slate-800 flex-wrap">
+                                        <div className="relative flex-1 min-w-32">
                                             <Search size={11} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
                                             <input
                                                 value={search}
@@ -317,6 +349,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                 className="w-full pl-8 pr-3 py-2 text-xs border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 outline-none focus:border-yellow-400 dark:focus:border-yellow-600"
                                             />
                                         </div>
+                                        {aptitudesRequeridas.length > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setSoloRequisitos(v => !v)}
+                                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border transition-colors ${soloRequisitos ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-300 hover:border-amber-400'}`}
+                                            >
+                                                Solo cumplen requisitos
+                                            </button>
+                                        )}
                                         <button
                                             onClick={() => void handleConvocar()}
                                             disabled={selected.size === 0 || sending}
@@ -360,6 +401,27 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                         <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{emp.name}</p>
                                                         {emp.fileNumber && <p className="text-[9px] text-slate-400">Leg. {emp.fileNumber}</p>}
                                                     </div>
+                                                    {/* Chips aptitudes */}
+                                                    {(emp.aptitudes || []).length > 0 && (
+                                                        <div className="flex flex-wrap gap-0.5 max-w-[120px]">
+                                                            {(emp.aptitudes || []).slice(0, 3).map(a => {
+                                                                const apt = aptitudCatalog.find(t => t.codigo === a.codigo);
+                                                                const cumple = aptitudesRequeridas.includes(a.codigo);
+                                                                return (
+                                                                    <span
+                                                                        key={a.codigo}
+                                                                        title={apt?.nombre || a.codigo}
+                                                                        className={`text-[8px] px-1 py-0.5 rounded font-bold ${cumple ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}
+                                                                    >
+                                                                        {apt?.icono || a.codigo}
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                            {(emp.aptitudes || []).length > 3 && (
+                                                                <span className="text-[8px] text-slate-400">+{(emp.aptitudes || []).length - 3}</span>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                     {/* Badge disponibilidad / ya convocado */}
                                                     {yaEnviado ? (
                                                         <span className="text-[8px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded-full font-black shrink-0">Convocado</span>
