@@ -144,7 +144,7 @@ export function buildInformeAnalitico(opts: {
     {
       concepto: 'Bolsa de horas (capacidad CCT)',
       horas: bolsaInicial,
-      observacion: `Plantel ${plantel} × ${capHsPerGuardPeriod} hs tope/guardia. Flexibilidad CCT 422/05 (jornada ~48 h semanales / cupo mensual).`,
+      observacion: `Plantel ${plantel} × ${capHsPerGuardPeriod} hs. Tope CCT 422/05 = 192 hs/mes (constante de convenio, no divisor 8/12).`,
     },
     {
       concepto: 'Horas realizadas (efectivas)',
