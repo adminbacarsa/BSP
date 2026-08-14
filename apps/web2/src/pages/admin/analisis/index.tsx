@@ -1,18 +1,34 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, TabBar } from '@/components/ui';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
-import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { useAnalisisSnapshot } from '@/hooks/useAnalisisSnapshot';
+import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import {
+  parseAbsenceInstant,
+  ausenciaSolapaPeriodo,
+  ausenciaCuentaNoDisponible,
+  filterTurnosInRange,
+  buildAusenciasStats,
+  topNPlusResto,
+} from '@/lib/analisis/analisisQueries';
+import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
+import {
+  buildInformeAnalitico,
+  buildInformeSeries,
+  chooseInformeSeriesBucket,
+  estimarCostoInforme,
+  formatArs,
+  iterateInformeBuckets,
+} from '@/lib/analisis/analisisInforme';
 import {
   TrendingUp, Users, Clock, Activity, AlertTriangle, CheckCircle,
   Loader2, BarChart3, Target, ChevronLeft, ChevronRight,
   Shield, AlertCircle, ArrowUp, ArrowDown, Minus, Calendar, ChevronDown,
   Filter, PieChart as PieIcon, BarChart2, Download, RefreshCw, Scale,
-  MapPin,
+  MapPin, Wallet, FileText, FileSpreadsheet,
 } from 'lucide-react';
 import { buildViabilityRangeReport } from '@/utils/viabilityAnalysis';
 import {
@@ -25,6 +41,7 @@ import {
   isOperationalOriginShift,
   isPlanificadorPlannedHoursShift,
   isPlanningScheduledCoverageShift,
+  shiftCoverageExtensionExtraHours,
 } from '@/lib/planificacion/planningScheduledHours';
 import { isDeploymentOrPoolShift, resolveDeploymentStatHours, deploymentStatKind, shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deploymentRoles';
 import { getDateKeyInTimezone, isProformaVacancyShift } from '@/lib/crm/proformaGrid';
@@ -46,33 +63,6 @@ const FRANCO_SHIFT_CODES = new Set(['F', 'FF', 'FP']);
 /** Turnos no operativos desde planificación/RRHH (vacaciones, licencias, enfermedad, ART, PG…). */
 const LICENCIA_SHIFT_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG']);
 const isCoverageShift = isPlanningScheduledCoverageShift;
-
-const parseAbsenceInstant = (v: any, endOfDay: boolean): Date | null => {
-  if (v == null) return null;
-  if (typeof v === 'object' && v !== null && 'seconds' in v && typeof (v as { seconds: number }).seconds === 'number') {
-    const t = new Date((v as { seconds: number }).seconds * 1000);
-    const y = t.getFullYear(), m = t.getMonth(), d = t.getDate();
-    return endOfDay ? new Date(y, m, d, 23, 59, 59, 999) : new Date(y, m, d, 0, 0, 0, 0);
-  }
-  const s = String(v).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-  const p = s.split('-').map(Number);
-  return endOfDay
-    ? new Date(p[0], p[1] - 1, p[2], 23, 59, 59, 999)
-    : new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0);
-};
-
-const ausenciaSolapaPeriodo = (a: any, pStart: Date, pEnd: Date): boolean => {
-  const sd = parseAbsenceInstant(a.startDate, false);
-  const ed = parseAbsenceInstant(a.endDate, true);
-  if (!sd || !ed) return false;
-  return sd <= pEnd && ed >= pStart;
-};
-
-const ausenciaCuentaNoDisponible = (a: any): boolean => {
-  const st = String(a.status || '').toLowerCase();
-  return st !== 'rechazada';
-};
 
 /** Umbral referencia ART (convivencia / traslado): domicilio del personal vs ubicación del puesto. */
 const ART12_MAX_KM_VIVIENDA = 25;
@@ -117,7 +107,7 @@ function art12EmployeeCoordsForDistance(
 type ObjectiveGeoEntry = { lat: number; lng: number; name: string; clientName: string };
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-type PeriodMode = 'day' | 'week' | 'month' | 'year';
+type PeriodMode = 'day' | 'week' | 'month' | 'quarter' | 'semester' | 'year';
 
 const clampDayInMonth = (y: number, m: number, d: number) => {
   const last = new Date(y, m + 1, 0).getDate();
@@ -163,6 +153,18 @@ const getPeriodRange = (mode: PeriodMode, y: number, m: number, dayInMonth: numb
     const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
     return { start, end, labelShort: `${MONTHS_SHORT[m]} ${y}`, daysCount: end.getDate() };
   }
+  if (mode === 'quarter') {
+    const q = Math.floor(m / 3);
+    const start = new Date(y, q * 3, 1, 0, 0, 0, 0);
+    const end = new Date(y, q * 3 + 3, 0, 23, 59, 59, 999);
+    return { start, end, labelShort: `T${q + 1} ${y}`, daysCount: Math.round((end.getTime() - start.getTime()) / 86400000) + 1 };
+  }
+  if (mode === 'semester') {
+    const s = m < 6 ? 0 : 1;
+    const start = new Date(y, s * 6, 1, 0, 0, 0, 0);
+    const end = new Date(y, s * 6 + 6, 0, 23, 59, 59, 999);
+    return { start, end, labelShort: `S${s + 1} ${y}`, daysCount: Math.round((end.getTime() - start.getTime()) / 86400000) + 1 };
+  }
   const start = new Date(y, 0, 1, 0, 0, 0, 0);
   const end = new Date(y, 11, 31, 23, 59, 59, 999);
   return { start, end, labelShort: `Año ${y}`, daysCount: isLeapYear(y) ? 366 : 365 };
@@ -190,11 +192,12 @@ const capHsPerGuardInPeriod = (
     const scaled = Math.round(efectiveHsMonthly * (dClamped / diasPorGuardia));
     return Math.min(efectiveHsMonthly, Math.max(1, scaled));
   }
-  if (mode === 'year') {
-    const capAnnual = efectiveHsMonthly * 12;
-    const dClamped = Math.min(demand, diasPorGuardia * 12);
+  if (mode === 'quarter' || mode === 'semester' || mode === 'year') {
+    const months = mode === 'quarter' ? 3 : mode === 'semester' ? 6 : 12;
+    const capSpan = efectiveHsMonthly * months;
+    const dClamped = Math.min(demand, diasPorGuardia * months);
     const scaled = Math.round(efectiveHsMonthly * (dClamped / diasPorGuardia));
-    return Math.min(capAnnual, Math.max(1, scaled));
+    return Math.min(capSpan, Math.max(1, scaled));
   }
   return Math.max(1, Math.round(efectiveHsMonthly * (Math.min(demand, cal) / diasPorGuardia)));
 };
@@ -398,25 +401,19 @@ export default function AnalisisPage() {
   const [periodYear, setPeriodYear] = useState(now.getFullYear());
   const [periodMonth, setPeriodMonth] = useState(now.getMonth());
   const [periodDay, setPeriodDay] = useState(now.getDate());
-  const [activeTab,      setActiveTab]      = usePersistedState<'capacidad'|'guardias'|'cobertura'|'proyeccion'|'viabilidad'|'art12'|'analitica'>('cosp:analisis:tab', 'capacidad');
+  const [activeTab,      setActiveTab]      = usePersistedState<'informe'|'capacidad'|'guardias'|'cobertura'|'demanda'|'proyeccion'|'viabilidad'|'art12'|'analitica'>('cosp:analisis:tab', 'informe');
+  const [valorHoraBasica, setValorHoraBasica] = usePersistedState<number>('cosp:analisis:valorHora', 0);
   const [vialSrvId,      setVialSrvId]      = useState<string>('');
   const [diasPorGuardia, setDiasPorGuardia] = useState<24|25>(24);
   /** Vista día/semana: cupo por guardia para calcular mínimos (turno 8h o tope 12h). Mes/año usan cupo mensual CCT. */
   const [hsTurnoPlanif, setHsTurnoPlanif] = useState<8 | 12>(8);
   const efectiveHours = diasPorGuardia * 8; // 192 o 200 hs/guardia (CCT 422/05)
   const [expandedObjId,    setExpandedObjId]    = useState<string|null>(null);
+  const [expandedDemandaId, setExpandedDemandaId] = useState<string | null>(null);
+  const [informeChartType, setInformeChartType] = useState<'area' | 'line'>('area');
   const [expandedDuration, setExpandedDuration] = useState<number | 'all' | null>(null);
   const [expandedDurationCode, setExpandedDurationCode] = useState<string | null>(null);
   const [showAusentismo,   setShowAusentismo]   = useState(false);
-
-  const [services,    setServices]    = useState<any[]>([]);
-  const [employees,   setEmployees]   = useState<any[]>([]);
-  const [turnos,      setTurnos]      = useState<any[]>([]);
-  const [ausencias,   setAusencias]   = useState<any[]>([]);
-  const [loadInit,    setLoadInit]    = useState(true);
-  const [loadTurnos,  setLoadTurnos]  = useState(false);
-  const [loadAus,     setLoadAus]     = useState(false);
-  const [objectivesGeoById, setObjectivesGeoById] = useState<Record<string, ObjectiveGeoEntry>>({});
 
   const [analDateFrom,   setAnalDateFrom]   = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10); });
   const [analDateTo,     setAnalDateTo]     = useState(() => new Date().toISOString().slice(0,10));
@@ -427,14 +424,36 @@ export default function AnalisisPage() {
   const [analDimension,  setAnalDimension]  = useState<'employee'|'objective'|'client'|'code'|'status'|'date'>('employee');
   const [analMetric,     setAnalMetric]     = useState<'hours'|'shifts'|'presence'|'absence'|'night'>('hours');
   const [analChartType,  setAnalChartType]  = useState<'bar'|'pie'|'area'>('bar');
-  const [analRawTurnos,  setAnalRawTurnos]  = useState<any[]>([]);
-  const [loadAnal,       setLoadAnal]       = useState(false);
-  const [analLoaded,     setAnalLoaded]     = useState(false);
 
   const periodRange = useMemo(
     () => getPeriodRange(periodMode, periodYear, periodMonth, periodDay),
     [periodMode, periodYear, periodMonth, periodDay]
   );
+
+  const {
+    services,
+    employees,
+    turnos,
+    ausencias,
+    allTurnos,
+    tiposNovedad,
+    objectivesGeoById,
+    loadInit,
+    loadFacts,
+    factsAt,
+    ensureRange,
+    reloadAll,
+    isRangeCovered,
+  } = useAnalisisSnapshot({
+    empresaId,
+    loadingEmpresa,
+    scopeEmpresa,
+    migracionCompleta,
+    periodStart: periodRange.start,
+    periodEnd: periodRange.end,
+  });
+  const loadTurnos = loadFacts;
+  const loadAus = loadFacts;
 
   const periodKey = `${periodMode}:${periodRange.start.getTime()}:${periodRange.end.getTime()}`;
 
@@ -480,6 +499,22 @@ export default function AnalisisPage() {
       setPeriodYear(ny);
       setPeriodMonth(mm);
       setPeriodDay((d) => Math.min(d, lastD));
+    } else if (periodMode === 'quarter') {
+      const nm = periodMonth + dir * 3;
+      const ny = periodYear + Math.floor(nm / 12);
+      const mm = ((nm % 12) + 12) % 12;
+      const lastD = new Date(ny, mm + 1, 0).getDate();
+      setPeriodYear(ny);
+      setPeriodMonth(mm);
+      setPeriodDay((d) => Math.min(d, lastD));
+    } else if (periodMode === 'semester') {
+      const nm = periodMonth + dir * 6;
+      const ny = periodYear + Math.floor(nm / 12);
+      const mm = ((nm % 12) + 12) % 12;
+      const lastD = new Date(ny, mm + 1, 0).getDate();
+      setPeriodYear(ny);
+      setPeriodMonth(mm);
+      setPeriodDay((d) => Math.min(d, lastD));
     } else {
       setPeriodYear((y) => y + dir);
     }
@@ -503,139 +538,21 @@ export default function AnalisisPage() {
   const ausentismoTotal = Math.round((ausVac + ausEnf + ausArt + ausAus + ausOtros) * 10) / 10;
   const hsRealesGuardia = Math.round(capHsPerGuardPeriod * (1 - ausentismoTotal / 100));
 
-  useEffect(() => {
-    if (loadingEmpresa || !empresaId) return;
-    (async () => {
-      try {
-        const [sSnap, eSnap] = await Promise.all([
-          getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
-          getDocs(empresaScopedQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
-        ]);
-        setServices(filterRowsByEmpresa(sSnap.docs.map(d => ({ id: d.id, ...d.data() })), empresaId, scopeEmpresa, migracionCompleta));
-        setEmployees(
-          filterRowsByEmpresa(eSnap.docs.map(d => ({ id: d.id, ...d.data() })), empresaId, scopeEmpresa, migracionCompleta)
-            .filter((e: any) => !['inactive','baja','inactivo'].includes((e.status||'').toLowerCase())),
-        );
-      } catch(e) { console.error(e); }
-      finally { setLoadInit(false); }
-    })();
-  }, [loadingEmpresa, empresaId, migracionCompleta, scopeEmpresa]);
+  const analRangeStart = useMemo(() => new Date(analDateFrom + 'T00:00:00'), [analDateFrom]);
+  const analRangeEnd = useMemo(() => new Date(analDateTo + 'T23:59:59'), [analDateTo]);
+  const analLoaded = isRangeCovered(analRangeStart, analRangeEnd);
+  const loadAnal = loadFacts && !analLoaded;
+  const analRawTurnos = useMemo(
+    () => (analLoaded ? filterTurnosInRange(allTurnos, analRangeStart, analRangeEnd) : []),
+    [analLoaded, allTurnos, analRangeStart, analRangeEnd],
+  );
 
-  useEffect(() => {
-    if (loadingEmpresa) return;
-    (async () => {
-      const map: Record<string, ObjectiveGeoEntry> = {};
-      const add = (key: string, lat: number, lng: number, name: string, clientName: string) => {
-        const k = String(key || '').trim();
-        if (!k || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
-        map[k] = { lat, lng, name: name || k, clientName: clientName || '' };
-      };
-      try {
-        const snap = await getDocs(collection(db, 'objetivos'));
-        snap.forEach((d) => {
-          const data = d.data();
-          const lat = Number(data.lat ?? data.latitude);
-          const lng = Number(data.lng ?? data.longitude);
-          const name = String(data.name || data.nombre || d.id);
-          const clientName = String(data.clientName || data.nombreCliente || '');
-          add(d.id, lat, lng, name, clientName);
-          if (data.name) add(String(data.name), lat, lng, name, clientName);
-          if (data.nombre) add(String(data.nombre), lat, lng, name, clientName);
-          if (data.id != null) add(String(data.id), lat, lng, name, clientName);
-        });
-      } catch (e) {
-        console.error(e);
-      }
-      try {
-        const clientsSnap = await getDocs(
-          empresaScopedQuery('clients', empresaId, scopeEmpresa) as ReturnType<typeof query>,
-        );
-        clientsSnap.forEach((cd) => {
-          const cdata = cd.data();
-          const clientName = String(cdata.name || cdata.nombre || cdata.razonSocial || '');
-          (cdata.objetivos || []).forEach((o: any) => {
-            const lat = Number(o.lat ?? o.latitude);
-            const lng = Number(o.lng ?? o.longitude);
-            const name = String(o.name || o.nombre || o.id || '');
-            const cn = String(o.clientName || clientName || '');
-            if (o.id != null) add(String(o.id), lat, lng, name, cn);
-            if (o.name) add(String(o.name), lat, lng, name, cn);
-            if (o.nombre) add(String(o.nombre), lat, lng, name, cn);
-          });
-        });
-      } catch (e) {
-        console.error(e);
-      }
-      setObjectivesGeoById(map);
-    })();
-  }, [loadingEmpresa, migracionCompleta, empresaId, scopeEmpresa]);
-
-  const empIdsScope = useMemo(() => new Set(employees.map((e: any) => e.id)), [employees]);
-
-  useEffect(() => {
-    (async () => {
-      setLoadTurnos(true); setTurnos([]);
-      setLoadAus(true);   setAusencias([]);
-      try {
-        const start   = new Date(periodRange.start);
-        const end     = new Date(periodRange.end);
-        const tsStart = Timestamp.fromDate(start);
-        const tsEnd   = Timestamp.fromDate(end);
-        const [turnosSnap, ausSnap] = await Promise.all([
-          getDocs(query(
-            collection(db, 'turnos'),
-            where('startTime', '>=', tsStart),
-            where('startTime', '<=', tsEnd)
-          )),
-          getDocs(
-            scopeEmpresa
-              ? (empresaScopedQuery('ausencias', empresaId, true) as ReturnType<typeof query>)
-              : collection(db, 'ausencias'),
-          ),
-        ]);
-        setTurnos(turnosSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-          .filter((t: any) => {
-            if (t.type === 'NOVEDAD' || !t.startTime || !t.endTime) return false;
-            if (scopeEmpresa && t.empresaId && t.empresaId !== empresaId) return false;
-            if (scopeEmpresa && t.employeeId && !empIdsScope.has(t.employeeId)) return false;
-            return true;
-          }));
-        setAusencias(ausSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-          .filter((a: any) => {
-            if (scopeEmpresa && a.empresaId && a.empresaId !== empresaId) return false;
-            if (scopeEmpresa && a.employeeId && !empIdsScope.has(a.employeeId)) return false;
-            const ed = a.endDate?.seconds ? new Date(a.endDate.seconds*1000) : new Date(a.endDate);
-            return ed >= start;
-          }));
-      } catch(e) { console.error(e); }
-      finally { setLoadTurnos(false); setLoadAus(false); }
-    })();
-  }, [periodKey, scopeEmpresa, empresaId, empIdsScope]);
-
-  // ── Analítica: cargar turnos bajo demanda con filtros de fecha ────────────────
   const loadAnalytics = async (dateFromOverride?: string, dateToOverride?: string) => {
     const dFrom = dateFromOverride ?? analDateFrom;
     const dTo = dateToOverride ?? analDateTo;
-    setLoadAnal(true); setAnalRawTurnos([]); setAnalLoaded(false);
-    try {
-      const start = new Date(dFrom + 'T00:00:00');
-      const end   = new Date(dTo   + 'T23:59:59');
-      const snap  = await getDocs(query(
-        collection(db, 'turnos'),
-        where('startTime', '>=', Timestamp.fromDate(start)),
-        where('startTime', '<=', Timestamp.fromDate(end))
-      ));
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .filter((t: any) => {
-          if (t.type === 'NOVEDAD' || !t.startTime || !t.endTime) return false;
-          if (scopeEmpresa && t.empresaId && t.empresaId !== empresaId) return false;
-          if (scopeEmpresa && t.employeeId && !empIdsScope.has(t.employeeId)) return false;
-          return true;
-        });
-      setAnalRawTurnos(docs);
-      setAnalLoaded(true);
-    } catch(e) { console.error(e); }
-    finally { setLoadAnal(false); }
+    const start = new Date(dFrom + 'T00:00:00');
+    const end = new Date(dTo + 'T23:59:59');
+    await ensureRange(start, end);
   };
 
   // ── Mapas globales ID → nombre (empleados, objetivos, clientes) ────────────────
@@ -780,50 +697,31 @@ export default function AnalisisPage() {
   }, [analRawTurnos, analClientId, objectiveNameById]);
 
   // ── Tasas reales de ausentismo desde colección ausencias ─────────────────────
-  const ausenciasStats = useMemo(() => {
-    const mStart = new Date(periodRange.start);
-    const mEnd   = new Date(periodRange.end);
-    const totalDisponibleHs = employees.length * capHsPerGuardPeriod;
-    if (totalDisponibleHs === 0) return null;
+  const ausenciasStats = useMemo(
+    () =>
+      buildAusenciasStats({
+        ausencias,
+        turnos,
+        employees,
+        periodStart: new Date(periodRange.start),
+        periodEnd: new Date(periodRange.end),
+        capHsPerGuardPeriod,
+        tiposNovedad,
+      }),
+    [ausencias, turnos, employees, capHsPerGuardPeriod, tiposNovedad, periodKey],
+  );
 
-    let vacHs=0, enfHs=0, artHs=0, injHs=0, otrosHs=0;
-    const detalle: any[] = [];
-
-    ausencias.forEach((a: any) => {
-      const sd = a.startDate?.seconds ? new Date(a.startDate.seconds*1000) : new Date(a.startDate);
-      const ed = a.endDate?.seconds   ? new Date(a.endDate.seconds*1000)   : new Date(a.endDate);
-      const cs = sd < mStart ? mStart : sd;
-      const ce = ed > mEnd   ? mEnd   : ed;
-      if (cs > ce) return;
-      const days = Math.round((ce.getTime()-cs.getTime())/(1000*60*60*24)) + 1;
-      const hs   = days * 8; // 8 hs/día como base de cálculo laboral
-
-      const tipo   = (a.type||'OTHER').toUpperCase();
-      const status = (a.status||'').toLowerCase();
-      const isART  = tipo === 'SICK_LEAVE' && (a.isART || (a.reason||'').toLowerCase().includes('art'));
-
-      if      (tipo === 'VACATION')                hs > 0 && (vacHs  += hs);
-      else if (tipo === 'SICK_LEAVE' && isART)     hs > 0 && (artHs  += hs);
-      else if (tipo === 'SICK_LEAVE')              hs > 0 && (enfHs  += hs);
-      else if (status === 'injustificada')         hs > 0 && (injHs  += hs);
-      else                                         hs > 0 && (otrosHs+= hs);
-
-      detalle.push({ id:a.id, emp:a.employeeName||a.employeeId, tipo, days, hs, status:a.status });
-    });
-
-    const pct = (hs: number) => Math.round(hs / totalDisponibleHs * 1000) / 10; // 1 decimal
-    return {
-      total: ausencias.length,
-      detalle,
-      vacPct:   pct(vacHs),
-      enfPct:   pct(enfHs),
-      artPct:   pct(artHs),
-      injPct:   pct(injHs),
-      otrosPct: pct(otrosHs),
-      totalPct: pct(vacHs+enfHs+artHs+injHs+otrosHs),
-      hsAfectadas: Math.round(vacHs+enfHs+artHs+injHs+otrosHs),
-    };
-  }, [ausencias, employees, capHsPerGuardPeriod, periodKey]);
+  const seededAbsRatesForPeriod = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ausenciasStats || loadFacts) return;
+    if (seededAbsRatesForPeriod.current === periodKey) return;
+    seededAbsRatesForPeriod.current = periodKey;
+    setAusVac(ausenciasStats.vacPct);
+    setAusEnf(ausenciasStats.enfPct);
+    setAusArt(ausenciasStats.artPct);
+    setAusAus(ausenciasStats.injPct);
+    setAusOtros(ausenciasStats.otrosPct);
+  }, [ausenciasStats, loadFacts, periodKey]);
 
   const objectiveAliasesFromServices = useMemo(() => {
     const aliases: Record<string, { canonicalId: string; name: string; clientId?: string }> = {};
@@ -1015,6 +913,102 @@ export default function AnalisisPage() {
       vacantHours: Math.round(vacantHours),
     };
   }, [turnos, employees, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx]);
+
+  const demanda = useMemo(
+    () =>
+      buildDemandaByObjective({
+        turnos,
+        ausenciasStats,
+        vigenteServices,
+        periodStart: new Date(periodRange.start),
+        periodEnd: new Date(periodRange.end),
+        objectiveAliases: objectiveAliasesFromServices,
+        slaExclusionCtx,
+      }),
+    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
+  );
+
+  const demandaStackBars = useMemo(
+    () =>
+      demanda.rows.slice(0, 16).map((r) => ({
+        name: r.name.length > 13 ? `${r.name.slice(0, 13)}…` : r.name,
+        Plan: Math.round(r.planHours),
+        'Ext+Adel': Math.round(r.extHours + r.adelHours),
+        FT: Math.round(r.ftHours),
+        Vacante: Math.round(r.vacantHours),
+        Ausencia: Math.round(r.absenceHours),
+      })),
+    [demanda.rows],
+  );
+
+  const demandaCompareBars = useMemo(
+    () =>
+      topNPlusResto(
+        demanda.rows.map((r) => ({
+          name: r.name.length > 13 ? `${r.name.slice(0, 13)}…` : r.name,
+          SLA: Math.round(r.slaHours),
+          Plan: Math.round(r.planHours),
+          Resultante: Math.round(r.resultante),
+        })),
+        ['SLA', 'Plan', 'Resultante'],
+        12,
+        'name',
+      ),
+    [demanda.rows],
+  );
+
+  const demandaExtrasDonut = useMemo(() => {
+    const t = demanda.totals;
+    return [
+      { name: 'Franco trabajado', value: Math.round(t.ftHours * 10) / 10, color: '#ea580c' },
+      { name: 'Extensiones', value: Math.round(t.extHours * 10) / 10, color: '#7c3aed' },
+      { name: 'Adelantos', value: Math.round(t.adelHours * 10) / 10, color: '#0891b2' },
+      { name: 'Cobertura ops', value: Math.round(t.opsHours * 10) / 10, color: '#059669' },
+    ].filter((d) => d.value > 0);
+  }, [demanda.totals]);
+
+  const informe = useMemo(
+    () =>
+      buildInformeAnalitico({
+        plantel: employees.length,
+        capHsPerGuardPeriod,
+        demandaTotals: demanda.totals,
+        ausenciasStats,
+        turnos,
+      }),
+    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos],
+  );
+  const costoEstimado = useMemo(
+    () => estimarCostoInforme(informe, Number(valorHoraBasica) || 0),
+    [informe, valorHoraBasica],
+  );
+
+  const informeSeriesMeta = useMemo(() => {
+    const bucket = chooseInformeSeriesBucket(periodRange.daysCount);
+    const buckets = iterateInformeBuckets(periodRange.start, periodRange.end, bucket);
+    return { bucket, buckets };
+  }, [periodKey, periodRange.daysCount, periodRange.start, periodRange.end]);
+
+  const informeSeries = useMemo(() => {
+    const slaByKey: Record<string, number> = {};
+    if (informeSeriesMeta.bucket !== 'hour') {
+      informeSeriesMeta.buckets.forEach((b) => {
+        slaByKey[b.key] = vigenteServices.reduce(
+          (sum, srv) => sum + slaHoursForServiceInRange(srv, b.start, b.end),
+          0,
+        );
+      });
+    }
+    return buildInformeSeries({
+      turnos,
+      buckets: informeSeriesMeta.buckets,
+      bucket: informeSeriesMeta.bucket,
+      slaByKey,
+      hoursOf: (t) => calcPlanificadorShiftHours(t),
+      extraHoursOf: (t) => shiftCoverageExtensionExtraHours(t),
+      isPlannedCoverage: (t) => isPlanificadorPlannedHoursShift(t) && !isProformaVacancyShift(t),
+    });
+  }, [turnos, vigenteServices, informeSeriesMeta]);
 
   const shiftDurationBreakdown = useMemo(() => {
     type CodeAcc = { count: number; vacant: number; hours: number; coverageCount: number; coverageHours: number };
@@ -1514,7 +1508,7 @@ export default function AnalisisPage() {
       };
     }
 
-    if (periodMode === 'month' || periodMode === 'year') {
+    if (periodMode === 'month' || periodMode === 'quarter' || periodMode === 'semester' || periodMode === 'year') {
       // Nómina completa; solo licencias/ausencias bajan el plantel.
       const francoEmpSet = new Set<string>();
       const licenciaEmpSet = new Set<string>();
@@ -1725,6 +1719,49 @@ export default function AnalisisPage() {
     ...projectionDisplay.map(p => ({ name: p.label, 'Hs teóricas': p.hours, 'Guardias mín.': p.guards })),
   ], [theoretical.totalHours, totalGuardsDisplay, projectionDisplay, periodRange.labelShort]);
 
+  const exportInforme = async () => {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const resumen = [
+      ['Informe analítico operativo', periodRange.labelShort],
+      ['Dotación activa', informe.dotacionActiva],
+      ['Horas vendidas (SLA)', informe.hsVendidas],
+      ['Horas planificadas', informe.hsPlanificadas],
+      ['Horas realizadas', informe.hsRealizadas],
+      ['Bolsa inicial CCT', informe.bolsaInicial],
+      ['Bolsa disponible', informe.bolsaDisponible],
+      ['Cobertura plan %', informe.coberturaPlanPct],
+      ['Cobertura efectiva %', informe.coberturaEfectivaPct],
+      ['Desvío extras (hs)', informe.desvioExtras],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumen), 'Resumen');
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['Concepto', 'Horas', 'Observaciones'],
+        ...informe.balance.map((r) => [r.concepto, r.horas, r.observacion]),
+      ]),
+      'Balance',
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['Rubro', 'Código', 'Horas', 'Eventos', 'Impacto'],
+        ...informe.novedades.map((r) => [r.rubro, r.code, r.horas, r.eventos, r.impacto]),
+      ]),
+      'Novedades',
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ['Tipo', 'Título', 'Texto'],
+        ...informe.conclusiones.map((c) => [c.tipo, c.titulo, c.texto]),
+      ]),
+      'Conclusiones',
+    );
+    XLSX.writeFile(wb, `informe-analisis-${periodRange.labelShort.replace(/[^\w]+/g, '-')}.xlsx`);
+  };
+
   // ─────────────────────────────────────────────────────────────────────────────
   if (loadInit) return (
     <DashboardLayout>
@@ -1747,7 +1784,7 @@ export default function AnalisisPage() {
               </div>
               <div>
                 <h1 className="text-2xl font-black tracking-tight uppercase" style={{ color: 'var(--txt)' }}>Análisis Operativo</h1>
-                <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>Capacidad · cobertura · proyección</p>
+                <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>Informe gerencial · capacidad · demanda · cobertura</p>
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
@@ -1800,6 +1837,8 @@ export default function AnalisisPage() {
                     { id: 'day' as PeriodMode, label: 'Día' },
                     { id: 'week' as PeriodMode, label: 'Sem.' },
                     { id: 'month' as PeriodMode, label: 'Mes' },
+                    { id: 'quarter' as PeriodMode, label: 'Trim.' },
+                    { id: 'semester' as PeriodMode, label: 'Semestre' },
                     { id: 'year' as PeriodMode, label: 'Año' },
                   ]).map(({ id, label }) => (
                     <button
@@ -1821,6 +1860,16 @@ export default function AnalisisPage() {
                   <span className="text-sm font-black text-slate-700 dark:text-white uppercase min-w-[140px] max-w-[280px] text-center leading-tight">{periodRange.labelShort}</span>
                   <button type="button" onClick={() => shiftPeriod(1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 transition-colors"><ChevronRight size={16}/></button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void reloadAll()}
+                  disabled={loadInit || loadFacts}
+                  title={factsAt ? `Última carga ${new Date(factsAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}` : 'Recargar catálogo y hechos'}
+                  className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-500 disabled:opacity-50 text-[10px] font-black uppercase tracking-wide"
+                >
+                  <RefreshCw size={12} className={loadFacts ? 'animate-spin' : ''}/>
+                  Recargar
+                </button>
               </div>
             </div>
           </div>
@@ -2021,7 +2070,7 @@ export default function AnalisisPage() {
                         Ajuste por Ausentismo
                       </p>
                       <p className="text-[9px] text-slate-400 font-medium">
-                        Tasa actual: <strong className={`${ausentismoTotal>=20?'text-rose-600':ausentismoTotal>=12?'text-amber-600':'text-emerald-600'}`}>{ausentismoTotal}%</strong>
+                        Escenario what-if: <strong className={`${ausentismoTotal>=20?'text-rose-600':ausentismoTotal>=12?'text-amber-600':'text-emerald-600'}`}>{ausentismoTotal}%</strong>
                         {' · '}Hs reales/guardia: <strong className="text-violet-600">{hsRealesGuardia} hs</strong>
                         {' · '}Guardias ajustados: <strong className={brechaAjustada>0?'text-rose-600':'text-emerald-600'}>{guardiasAjustados}</strong>
                         {' · '}Brecha: <strong className={brechaAjustada>0?'text-rose-600':'text-emerald-600'}>{brechaAjustada>0?`+${brechaAjustada} déficit`:`${Math.abs(brechaAjustada)} superávit`}</strong>
@@ -2063,7 +2112,7 @@ export default function AnalisisPage() {
                       }`}>
                         <div>
                           <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">
-                            Datos reales — {ausenciasStats.total} ausencias registradas en {periodRange.labelShort}
+                            Tasas reales del período — {ausenciasStats.total} eventos (RRHH + isAbsent / AUTO_T30) en {periodRange.labelShort}
                             {loadAus && <span className="ml-2 text-indigo-500">· cargando...</span>}
                           </p>
                           {ausenciasStats.total > 0 ? (
@@ -2164,7 +2213,7 @@ export default function AnalisisPage() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 text-center">
                         <p className="text-2xl font-black text-violet-600">{ausentismoTotal}%</p>
-                        <p className="text-[9px] font-black uppercase text-slate-400">Ausentismo configurado</p>
+                        <p className="text-[9px] font-black uppercase text-slate-400">Escenario what-if</p>
                         {ausenciasStats && ausenciasStats.total > 0 && (
                           <p className="text-[9px] text-slate-400 mt-0.5">Real RRHH: <strong style={{ color: ausenciasStats.totalPct>ausentismoTotal?'#dc2626':'#059669' }}>{ausenciasStats.totalPct}%</strong></p>
                         )}
@@ -2209,9 +2258,10 @@ export default function AnalisisPage() {
                             <thead className="bg-slate-50 dark:bg-slate-700/40 text-slate-500 font-black uppercase text-[8px]">
                               <tr>
                                 <th className="px-3 py-2">Empleado</th>
-                                <th className="px-3 py-2">Tipo</th>
+                                <th className="px-3 py-2">Código</th>
                                 <th className="px-3 py-2 text-center">Días</th>
                                 <th className="px-3 py-2 text-center">Hs afectadas</th>
+                                <th className="px-3 py-2 text-center">Origen</th>
                                 <th className="px-3 py-2 text-center">Estado</th>
                               </tr>
                             </thead>
@@ -2221,19 +2271,24 @@ export default function AnalisisPage() {
                                   <td className="px-3 py-1.5 font-bold text-slate-700 dark:text-white uppercase">{a.emp}</td>
                                   <td className="px-3 py-1.5">
                                     <span className={`px-1.5 py-0.5 rounded font-black text-[8px] ${
-                                      a.tipo==='VACATION'?'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400':
-                                      a.tipo==='SICK_LEAVE'?'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400':
+                                      a.code==='V'?'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400':
+                                      a.code==='E'?'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400':
+                                      a.code==='A'?'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400':
+                                      a.code==='AA'?'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400':
                                       'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
                                     }`}>
-                                      {a.tipo==='VACATION'?'VACACIONES':a.tipo==='SICK_LEAVE'?'ENFERMEDAD':'OTRO'}
+                                      {a.code || a.tipo}
                                     </span>
                                   </td>
                                   <td className="px-3 py-1.5 text-center text-slate-500">{a.days}</td>
                                   <td className="px-3 py-1.5 text-center font-black text-rose-600">{a.hs} hs</td>
+                                  <td className="px-3 py-1.5 text-center text-[8px] font-bold text-slate-400 uppercase">
+                                    {a.source==='auto_t30'?'AUTO T30':a.source==='turno'?'Turno':a.source==='rrhh'?'RRHH':'—'}
+                                  </td>
                                   <td className="px-3 py-1.5 text-center">
                                     <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${
-                                      a.status==='Justificada'?'bg-emerald-100 text-emerald-700':
-                                      a.status==='Injustificada'?'bg-rose-100 text-rose-700':
+                                      a.status==='Justificada'||a.status==='Autorizada'?'bg-emerald-100 text-emerald-700':
+                                      a.status==='Injustificada'||a.status==='Ausente'?'bg-rose-100 text-rose-700':
                                       'bg-slate-100 text-slate-500'
                                     }`}>{a.status||'—'}</span>
                                   </td>
@@ -2254,9 +2309,11 @@ export default function AnalisisPage() {
           {/* ── Tabs ────────────────────────────────────────────────────── */}
           <div className="flex gap-1 overflow-x-auto pb-0.5 no-scrollbar">
             {([
+              { id:'informe',    label:'Informe',    icon:FileText,   alert: informe.desvioRealVsVendido < -8 || informe.hsVacante > 8 },
               { id:'capacidad',  label:'Capacidad',  icon:BarChart3,  alert: gapDisplay > 0 },
               { id:'guardias',   label:'Guardias',   icon:Users,      alert: false },
               { id:'cobertura',  label:'Cobertura',  icon:Target,     alert: vacancyPct > 20 },
+              { id:'demanda',    label:'Demanda / costo', icon:Wallet, alert: demanda.totals.deltaSla < -8 || demanda.totals.vacantHours > 0 },
               { id:'proyeccion', label:'Proyección', icon:TrendingUp, alert: false },
               { id:'viabilidad', label:'Viabilidad', icon:Scale,      alert: superavitGlobal < 0 },
               { id:'art12',      label:'ART.12',     icon:MapPin,     alert: false },
@@ -2283,6 +2340,282 @@ export default function AnalisisPage() {
               );
             })}
           </div>
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: INFORME ANALÍTICO
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'informe' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                <p className="text-[11px] text-slate-500 max-w-2xl leading-relaxed">
+                  Lectura gerencial de <strong>{periodRange.labelShort}</strong>: lo vendido, lo planificado, lo fichado,
+                  la bolsa CCT 422/05 y el ausentismo real. El costo en pesos es una estimación: cargá el valor hora básica SUVICO.
+                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
+                    <span className="text-[9px] font-black uppercase text-slate-400">Valor hora $</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={100}
+                      value={valorHoraBasica || ''}
+                      onChange={(e) => setValorHoraBasica(Number(e.target.value) || 0)}
+                      placeholder="0"
+                      className="w-24 text-xs font-black text-right bg-transparent text-slate-700 dark:text-white outline-none"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => void exportInforme()}
+                    className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase"
+                  >
+                    <FileSpreadsheet size={13}/> Exportar Excel
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                <KpiCard icon={Users} color="#0891b2" label="Dotación activa" value={informe.dotacionActiva} subtext="Legajos activos"/>
+                <KpiCard icon={Target} color="#4f46e5" label="Horas vendidas" value={informe.hsVendidas.toLocaleString('es-AR')} unit="hs" subtext="SLA / contrato"/>
+                <KpiCard icon={Clock} color="#6366f1" label="Horas planificadas" value={informe.hsPlanificadas.toLocaleString('es-AR')} unit="hs" subtext="Malla crono"/>
+                <KpiCard icon={CheckCircle} color="#059669" label="Horas realizadas" value={informe.hsRealizadas.toLocaleString('es-AR')} unit="hs"
+                  subtext={informe.hsPendientesFichada > 0 ? `${informe.hsPendientesFichada.toLocaleString('es-AR')} hs sin fichar` : 'Presencia / cierre'}/>
+                <KpiCard icon={Wallet} color="#7c3aed" label="Bolsa disponible" value={informe.bolsaDisponible.toLocaleString('es-AR')} unit="hs"
+                  subtext={`Inicial ${informe.bolsaInicial.toLocaleString('es-AR')} hs CCT`}/>
+                <KpiCard icon={Activity} color={informe.coberturaEfectivaPct >= 95 ? '#059669' : informe.coberturaEfectivaPct >= 85 ? '#d97706' : '#dc2626'}
+                  label="Cobertura operativa" value={`${informe.coberturaEfectivaPct}%`}
+                  subtext={`Plan ${informe.coberturaPlanPct}% · extras ${informe.desvioExtras.toLocaleString('es-AR')} hs`}
+                  alert={informe.coberturaEfectivaPct < 90}/>
+              </div>
+
+              {!loadTurnos && informeSeries.length > 0 && (
+                <SectionCard
+                  title={`Evolución · ${periodRange.labelShort} · ${informeSeriesMeta.bucket === 'hour' ? 'por hora' : informeSeriesMeta.bucket === 'day' ? 'por día' : informeSeriesMeta.bucket === 'week' ? 'por semana' : 'por mes'}`}
+                  icon={TrendingUp}
+                  loading={loadTurnos}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-3">
+                    <LegendRow items={[
+                      { color: '#4f46e5', label: 'Vendidas' },
+                      { color: '#0284c7', label: 'Planificadas' },
+                      { color: '#059669', label: 'Realizadas' },
+                      { color: '#ea580c', label: 'Extras / FT' },
+                      { color: '#f59e0b', label: 'Vacante' },
+                    ]}/>
+                    <div className="flex gap-1">
+                      {([
+                        { id: 'area' as const, label: 'Áreas' },
+                        { id: 'line' as const, label: 'Líneas' },
+                      ]).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setInformeChartType(opt.id)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
+                            informeChartType === opt.id
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-100 dark:bg-slate-700 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-600'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="px-5 pb-5 pt-1">
+                    <ResponsiveContainer width="100%" height={280}>
+                      <ComposedChart data={informeSeries} margin={{ top: 8, right: 12, left: -12, bottom: 8 }}>
+                        <defs>
+                          <linearGradient id="infVend" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.28}/>
+                            <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.02}/>
+                          </linearGradient>
+                          <linearGradient id="infPlan" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#6366f1" stopOpacity={0.22}/>
+                            <stop offset="100%" stopColor="#6366f1" stopOpacity={0.02}/>
+                          </linearGradient>
+                          <linearGradient id="infReal" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#059669" stopOpacity={0.28}/>
+                            <stop offset="100%" stopColor="#059669" stopOpacity={0.02}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false}/>
+                        <XAxis dataKey="label" tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} interval={informeSeries.length > 20 ? 2 : 0}/>
+                        <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }}/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                        {informeSeriesMeta.bucket === 'hour' && informe.hsVendidas > 0 && (
+                          <ReferenceLine
+                            y={Math.round(informe.hsVendidas / 24)}
+                            stroke="#4f46e5"
+                            strokeDasharray="5 4"
+                            label={{ value: 'SLA/h', fontSize: 9, fill: '#4f46e5', position: 'right' }}
+                          />
+                        )}
+                        {informeChartType === 'area' ? (
+                          <>
+                            {informeSeriesMeta.bucket !== 'hour' && (
+                              <Area type="monotone" dataKey="Vendidas" name="Vendidas" stroke="#4f46e5" strokeWidth={2} fill="url(#infVend)" />
+                            )}
+                            <Area type="monotone" dataKey="Realizadas" name="Realizadas" stroke="#059669" strokeWidth={2} fill="url(#infReal)" />
+                            <Line type="monotone" dataKey="Plan" name="Planificadas" stroke="#0284c7" strokeWidth={3} dot={{ r: 3, fill: '#0284c7', strokeWidth: 0 }} />
+                            <Line type="monotone" dataKey="Extras" name="Extras / FT" stroke="#ea580c" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="Vacante" name="Vacante" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 3" dot={false} />
+                          </>
+                        ) : (
+                          <>
+                            {informeSeriesMeta.bucket !== 'hour' && (
+                              <Line type="monotone" dataKey="Vendidas" name="Vendidas" stroke="#4f46e5" strokeWidth={2.5} dot={{ r: 3, fill: '#4f46e5', strokeWidth: 0 }} />
+                            )}
+                            <Line type="monotone" dataKey="Plan" name="Planificadas" stroke="#0284c7" strokeWidth={3} dot={{ r: 3.5, fill: '#0284c7', strokeWidth: 0 }} />
+                            <Line type="monotone" dataKey="Realizadas" name="Realizadas" stroke="#059669" strokeWidth={2.5} dot={{ r: 3, fill: '#059669', strokeWidth: 0 }} />
+                            <Line type="monotone" dataKey="Extras" name="Extras / FT" stroke="#ea580c" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="Vacante" name="Vacante" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 3" dot={false} />
+                          </>
+                        )}
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              )}
+
+              <SectionCard title={`1. Cuadro de balance de horas · ${periodRange.labelShort}`} icon={Scale} loading={loadTurnos}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-700/30 text-slate-500 font-bold uppercase text-[10px]">
+                      <tr>
+                        <th className="p-4">Concepto</th>
+                        <th className="p-4 text-center">Horas</th>
+                        <th className="p-4">Observaciones / impacto</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {informe.balance.map((row) => (
+                        <tr key={row.concepto} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/20">
+                          <td className="p-4 font-bold text-slate-700 dark:text-white text-xs uppercase">{row.concepto}</td>
+                          <td className={`p-4 text-center font-black ${row.horas < 0 ? 'text-rose-600' : 'text-slate-800 dark:text-white'}`}>
+                            {row.concepto.startsWith('Diferencia') && row.horas > 0 ? '+' : ''}{row.horas.toLocaleString('es-AR')}
+                          </td>
+                          <td className="p-4 text-[11px] text-slate-500">{row.observacion}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </SectionCard>
+
+              <SectionCard title="2. Novedades e incidencias (CCT SUVICO)" icon={AlertTriangle} loading={loadAus}>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-700/30 text-slate-500 font-bold uppercase text-[10px]">
+                      <tr>
+                        <th className="p-4">Rubro</th>
+                        <th className="p-4 text-center">Código</th>
+                        <th className="p-4 text-center">Eventos</th>
+                        <th className="p-4 text-center">Horas</th>
+                        <th className="p-4">Impacto</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {informe.novedades.map((row) => (
+                        <tr key={row.rubro}>
+                          <td className="p-4 font-bold text-slate-700 dark:text-white text-xs">{row.rubro}</td>
+                          <td className="p-4 text-center">
+                            <span className="px-1.5 py-0.5 rounded font-black text-[8px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{row.code}</span>
+                          </td>
+                          <td className="p-4 text-center text-slate-500">{row.eventos}</td>
+                          <td className="p-4 text-center font-black text-rose-600">{row.horas > 0 ? row.horas.toLocaleString('es-AR') : '—'}</td>
+                          <td className="p-4 text-[11px] text-slate-500">{row.impacto}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="px-5 pb-4 text-[10px] text-slate-400">
+                  Ausencias cubiertas con FT/ops: <strong className="text-slate-600 dark:text-slate-300">{informe.hsAusenciasCubiertas.toLocaleString('es-AR')} hs</strong>
+                  {' · '}Vacante de malla: <strong className="text-amber-600">{informe.hsVacante.toLocaleString('es-AR')} hs</strong>
+                </p>
+              </SectionCard>
+
+              <SectionCard title="3. Costo real en horas (y estimado en $)" icon={Wallet}>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-5">
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-3">
+                    <p className="text-[9px] font-black uppercase text-slate-400">Normales (100%)</p>
+                    <p className="text-lg font-black text-slate-800 dark:text-white">{informe.hsNormales.toLocaleString('es-AR')} hs</p>
+                    {costoEstimado && <p className="text-[10px] font-bold text-emerald-600">{formatArs(costoEstimado.normales)}</p>}
+                  </div>
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-3">
+                    <p className="text-[9px] font-black uppercase text-slate-400">Extras / ext+adel (50%)</p>
+                    <p className="text-lg font-black text-violet-600">{informe.hsExtras50.toLocaleString('es-AR')} hs</p>
+                    {costoEstimado && <p className="text-[10px] font-bold text-violet-600">{formatArs(costoEstimado.extras50)}</p>}
+                  </div>
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-3">
+                    <p className="text-[9px] font-black uppercase text-slate-400">FT (100%)</p>
+                    <p className="text-lg font-black text-orange-600">{informe.hsFT100.toLocaleString('es-AR')} hs</p>
+                    {costoEstimado && <p className="text-[10px] font-bold text-orange-600">{formatArs(costoEstimado.ft100)}</p>}
+                  </div>
+                  <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/20 p-3">
+                    <p className="text-[9px] font-black uppercase text-indigo-400">Costo cobertura ausentismo</p>
+                    <p className="text-lg font-black text-indigo-700 dark:text-indigo-300">
+                      {(informe.hsAusencias + informe.hsFT100).toLocaleString('es-AR')} hs
+                    </p>
+                    <p className="text-[10px] text-slate-500">No trabajadas + FT para cubrir</p>
+                    {costoEstimado && <p className="text-[10px] font-bold text-indigo-600">{formatArs(costoEstimado.ausentismo)}</p>}
+                  </div>
+                </div>
+                <p className="px-5 pb-4 text-[10px] text-slate-400">
+                  {costoEstimado
+                    ? <>Estimación total (normales + extra 50% + FT 100%): <strong className="text-slate-600 dark:text-slate-200">{formatArs(costoEstimado.total)}</strong>. No reemplaza la liquidación CCT (bolsa 200 hs por legajo).</>
+                    : 'Cargá un valor hora básica para ver el estimado en pesos. Sin tarifa única en el sistema: el $ es what-if, no liquidación.'}
+                </p>
+              </SectionCard>
+
+              <SectionCard title="4. Cobertura y calidad de servicio" icon={Target}>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-5">
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 text-center">
+                    <p className="text-3xl font-black text-indigo-600">{informe.coberturaPlanPct}%</p>
+                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1">Cobertura planificada</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Hs plan / hs vendidas</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 text-center">
+                    <p className={`text-3xl font-black ${informe.coberturaEfectivaPct >= 95 ? 'text-emerald-600' : informe.coberturaEfectivaPct >= 85 ? 'text-amber-600' : 'text-rose-600'}`}>
+                      {informe.coberturaEfectivaPct}%
+                    </p>
+                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1">Cobertura efectiva</p>
+                    <p className="text-[10px] text-slate-400 mt-1">(Realizadas o resultante) / vendidas</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 text-center">
+                    <p className={`text-3xl font-black ${informe.hsVacante > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                      {informe.hsVacante.toLocaleString('es-AR')}
+                    </p>
+                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1">Hs acéfalas</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Vacantes de malla sin titular</p>
+                  </div>
+                </div>
+              </SectionCard>
+
+              <SectionCard title="5. Conclusiones y propuestas" icon={FileText}>
+                <div className="p-5 space-y-3">
+                  {informe.conclusiones.map((c) => (
+                    <div
+                      key={c.titulo}
+                      className={`rounded-xl border p-4 ${
+                        c.tipo === 'risk'
+                          ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800'
+                          : c.tipo === 'warn'
+                            ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
+                            : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
+                      }`}
+                    >
+                      <p className={`text-xs font-black uppercase mb-1 ${
+                        c.tipo === 'risk' ? 'text-rose-700 dark:text-rose-300' : c.tipo === 'warn' ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'
+                      }`}>{c.titulo}</p>
+                      <p className="text-[12px] text-slate-600 dark:text-slate-300 leading-relaxed">{c.texto}</p>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            </div>
+          )}
 
           {/* ══════════════════════════════════════════════════════════════
               TAB: CAPACIDAD
@@ -3049,6 +3382,208 @@ export default function AnalisisPage() {
           )}
 
           {/* ══════════════════════════════════════════════════════════════
+              TAB: DEMANDA / COSTO
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'demanda' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                <KpiCard icon={Target} color="#4f46e5" label="SLA vendidas" value={demanda.totals.slaHours.toLocaleString('es-AR')} unit="hs"/>
+                <KpiCard icon={Clock} color="#6366f1" label="Costo previo (plan)" value={demanda.totals.planHours.toLocaleString('es-AR')} unit="hs"
+                  subtext="Crono de cobertura, sin FT/ext"/>
+                <KpiCard icon={Activity} color="#059669" label="Resultante" value={demanda.totals.resultante.toLocaleString('es-AR')} unit="hs"
+                  subtext="Plan + ext/adel + FT + ops"/>
+                <KpiCard icon={demanda.totals.deltaSla >= 0 ? ArrowUp : ArrowDown}
+                  color={demanda.totals.deltaSla >= 0 ? '#059669' : '#dc2626'}
+                  label="Δ vs SLA" value={`${demanda.totals.deltaSla > 0 ? '+' : ''}${demanda.totals.deltaSla.toLocaleString('es-AR')}`} unit="hs"/>
+                <KpiCard icon={Wallet} color="#ea580c" label="Extras (FT+ext+ops)" value={(demanda.totals.ftHours + demanda.totals.extHours + demanda.totals.adelHours + demanda.totals.opsHours).toLocaleString('es-AR')} unit="hs"/>
+                <KpiCard icon={AlertTriangle} color="#d97706" label="Vacante + ausencias" value={(demanda.totals.vacantHours + demanda.totals.absenceHours).toLocaleString('es-AR')} unit="hs"
+                  subtext={`${Math.round(demanda.totals.vacantHours)} vac · ${Math.round(demanda.totals.absenceHours)} aus`}/>
+              </div>
+              <p className="text-[10px] text-slate-400 px-1">
+                Horas comparables con pre-factura / cierre SLA. El costo en pesos queda para una fase posterior (tarifas CCT por código).
+              </p>
+
+              {!loadTurnos && demandaCompareBars.length > 0 && (
+                <SectionCard title={`SLA vs plan vs resultante · ${periodRange.labelShort}`} icon={BarChart3} loading={loadTurnos}>
+                  <LegendRow items={[
+                    { color: '#4f46e5', label: 'SLA vendidas' },
+                    { color: '#6366f1', label: 'Plan' },
+                    { color: '#059669', label: 'Resultante' },
+                  ]}/>
+                  <div className="px-5 pb-5 pt-2">
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart data={demandaCompareBars} margin={{ top: 4, right: 8, left: -16, bottom: 52 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false}/>
+                        <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} angle={-40} textAnchor="end" interval={0}/>
+                        <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }}/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                        <Bar dataKey="SLA" fill="#4f46e5" radius={[4, 4, 0, 0]} maxBarSize={18}/>
+                        <Bar dataKey="Plan" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={18}/>
+                        <Bar dataKey="Resultante" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={18}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              )}
+
+              {!loadTurnos && demandaStackBars.length > 0 && (
+                <SectionCard title={`Composición por objetivo · ${periodRange.labelShort}`} icon={Wallet} loading={loadTurnos}>
+                  <LegendRow items={[
+                    { color: '#4f46e5', label: 'Plan' },
+                    { color: '#7c3aed', label: 'Ext+Adel' },
+                    { color: '#ea580c', label: 'FT' },
+                    { color: '#f59e0b', label: 'Vacante' },
+                    { color: '#dc2626', label: 'Ausencia' },
+                  ]}/>
+                  <div className="px-5 pb-5 pt-2">
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={demandaStackBars} margin={{ top: 4, right: 8, left: -16, bottom: 52 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false}/>
+                        <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 700, fill: '#94a3b8' }} angle={-40} textAnchor="end" interval={0}/>
+                        <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }}/>
+                        <Tooltip content={<ChartTooltip/>}/>
+                        <Bar dataKey="Plan" stackId="a" fill="#4f46e5" maxBarSize={32}/>
+                        <Bar dataKey="Ext+Adel" stackId="a" fill="#7c3aed" maxBarSize={32}/>
+                        <Bar dataKey="FT" stackId="a" fill="#ea580c" maxBarSize={32}/>
+                        <Bar dataKey="Vacante" stackId="a" fill="#f59e0b" maxBarSize={32}/>
+                        <Bar dataKey="Ausencia" stackId="a" fill="#dc2626" radius={[4, 4, 0, 0]} maxBarSize={32}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </SectionCard>
+              )}
+
+              {!loadTurnos && demandaExtrasDonut.length > 0 && (
+                <SectionCard title="Composición de extras" icon={PieIcon}>
+                  <div className="flex flex-col md:flex-row items-center gap-6 p-5">
+                    <PieChart width={200} height={200}>
+                      <Pie data={demandaExtrasDonut} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={80} paddingAngle={2}>
+                        {demandaExtrasDonut.map((d) => <Cell key={d.name} fill={d.color}/>)}
+                      </Pie>
+                      <Tooltip content={<ChartTooltip/>}/>
+                    </PieChart>
+                    <div className="space-y-2">
+                      {demandaExtrasDonut.map((d) => (
+                        <div key={d.name} className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }}/>
+                          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">{d.name}</span>
+                          <span className="text-[11px] font-black text-slate-800 dark:text-white ml-auto">{d.value.toLocaleString('es-AR')} hs</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </SectionCard>
+              )}
+
+              <SectionCard title={`Demanda por objetivo · ${periodRange.labelShort}`} icon={Wallet} loading={loadTurnos}>
+                {!loadTurnos && demanda.rows.length === 0 ? (
+                  <div className="py-16 text-center text-slate-400">
+                    <Wallet size={36} className="mx-auto mb-2 opacity-20"/>
+                    <p className="text-sm font-bold">Sin demanda calculable en este período</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 dark:bg-slate-700/30 text-slate-500 font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="p-4">Objetivo</th>
+                          <th className="p-4">Cliente</th>
+                          <th className="p-4 text-center text-indigo-600">SLA</th>
+                          <th className="p-4 text-center">Plan</th>
+                          <th className="p-4 text-center text-violet-600">Ext+Adel</th>
+                          <th className="p-4 text-center text-orange-600">FT</th>
+                          <th className="p-4 text-center text-emerald-600">Ops</th>
+                          <th className="p-4 text-center text-amber-600">Vacante</th>
+                          <th className="p-4 text-center text-rose-600">Ausencias</th>
+                          <th className="p-4 text-center">Resultante</th>
+                          <th className="p-4 text-center">Δ SLA</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {demanda.rows.map((row) => {
+                          const isExpanded = expandedDemandaId === row.id;
+                          return (
+                            <React.Fragment key={row.id}>
+                              <tr
+                                onClick={() => setExpandedDemandaId(isExpanded ? null : row.id)}
+                                className={`cursor-pointer select-none transition-colors ${
+                                  isExpanded
+                                    ? 'bg-indigo-50 dark:bg-indigo-900/20'
+                                    : row.deltaSla < -8
+                                      ? 'bg-rose-50/30 dark:bg-rose-900/10 hover:bg-rose-50/60'
+                                      : 'hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10'
+                                }`}
+                              >
+                                <td className="p-4">
+                                  <div className="flex items-center gap-2">
+                                    <ChevronDown size={13} className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}/>
+                                    <span className="font-bold text-slate-700 dark:text-white uppercase text-xs">{row.name}</span>
+                                  </div>
+                                </td>
+                                <td className="p-4 text-slate-500 text-xs font-bold">{row.client}</td>
+                                <td className="p-4 text-center font-black text-indigo-600">{Math.round(row.slaHours)}</td>
+                                <td className="p-4 text-center font-bold text-slate-700 dark:text-white">{Math.round(row.planHours)}</td>
+                                <td className="p-4 text-center text-violet-600">{row.extHours + row.adelHours > 0 ? Math.round(row.extHours + row.adelHours) : '—'}</td>
+                                <td className="p-4 text-center text-orange-600">{row.ftHours > 0 ? Math.round(row.ftHours) : '—'}</td>
+                                <td className="p-4 text-center text-emerald-600">{row.opsHours > 0 ? Math.round(row.opsHours) : '—'}</td>
+                                <td className="p-4 text-center text-amber-600">{row.vacantHours > 0 ? Math.round(row.vacantHours) : '—'}</td>
+                                <td className="p-4 text-center text-rose-600">{row.absenceHours > 0 ? Math.round(row.absenceHours) : '—'}</td>
+                                <td className="p-4 text-center font-black text-slate-800 dark:text-white">{Math.round(row.resultante)}</td>
+                                <td className="p-4 text-center">
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                    row.deltaSla >= 0
+                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                      : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
+                                  }`}>
+                                    {row.deltaSla > 0 ? '+' : ''}{Math.round(row.deltaSla)}
+                                  </span>
+                                </td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="bg-slate-50/80 dark:bg-slate-800/60">
+                                  <td colSpan={11} className="px-6 py-3 text-[11px] text-slate-500 space-y-1">
+                                    <p>
+                                      <strong className="text-slate-700 dark:text-slate-200">Costo previo:</strong> {row.planHours.toLocaleString('es-AR')} hs planificadas
+                                      {' · '}
+                                      <strong className="text-slate-700 dark:text-slate-200">Resultante − plan:</strong> {row.deltaPlan > 0 ? '+' : ''}{row.deltaPlan.toLocaleString('es-AR')} hs
+                                      {' · '}
+                                      Ext {row.extHours} · Adel {row.adelHours} · FT {row.ftHours} · Ops {row.opsHours}
+                                    </p>
+                                    <p>
+                                      Licencias/ausencias: {row.absenceHours.toLocaleString('es-AR')} hs
+                                      {row.absenceCoveredHours > 0
+                                        ? ` · ${row.absenceCoveredHours.toLocaleString('es-AR')} hs con cobertura FT/ops`
+                                        : ' · sin cobertura extra detectada'}
+                                    </p>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-100 dark:bg-slate-700/50 font-black text-xs">
+                          <td className="p-4" colSpan={2}>Total</td>
+                          <td className="p-4 text-center text-indigo-600">{Math.round(demanda.totals.slaHours)}</td>
+                          <td className="p-4 text-center">{Math.round(demanda.totals.planHours)}</td>
+                          <td className="p-4 text-center text-violet-600">{Math.round(demanda.totals.extHours + demanda.totals.adelHours)}</td>
+                          <td className="p-4 text-center text-orange-600">{Math.round(demanda.totals.ftHours)}</td>
+                          <td className="p-4 text-center text-emerald-600">{Math.round(demanda.totals.opsHours)}</td>
+                          <td className="p-4 text-center text-amber-600">{Math.round(demanda.totals.vacantHours)}</td>
+                          <td className="p-4 text-center text-rose-600">{Math.round(demanda.totals.absenceHours)}</td>
+                          <td className="p-4 text-center">{Math.round(demanda.totals.resultante)}</td>
+                          <td className="p-4 text-center">{demanda.totals.deltaSla > 0 ? '+' : ''}{Math.round(demanda.totals.deltaSla)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </SectionCard>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
               TAB: PROYECCIÓN
           ══════════════════════════════════════════════════════════════ */}
           {activeTab === 'proyeccion' && (
@@ -3524,7 +4059,7 @@ export default function AnalisisPage() {
 
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
                   Las <strong>hs teóricas</strong> del panel superior usan el período <strong>{periodRange.labelShort}</strong>.
-                  Esta pestaña carga turnos por el rango de fechas de abajo (por defecto el mes calendario actual): si no coinciden, los totales no van a igualar a las hs teóricas.
+                  Analítica lee el mismo snapshot en memoria: si el rango de abajo ya está cubierto (día/semana/mes cargado), no hay otro viaje a Firestore.
                 </p>
 
                 {/* Fila 1: rango de fechas + botón */}
@@ -3812,8 +4347,8 @@ export default function AnalisisPage() {
               {!analLoaded && !loadAnal && (
                 <div className="rounded-xl border shadow-sm p-12 text-center" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                   <BarChart3 size={40} className="mx-auto text-slate-200 dark:text-slate-700 mb-4"/>
-                  <p className="text-sm font-black text-slate-400">Seleccioná un rango de fechas y presioná <span className="text-indigo-600">Cargar datos</span></p>
-                  <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-1">Podés filtrar por cliente, objetivo, empleado y estado, y elegir la dimensión y métrica que querés ver.</p>
+                  <p className="text-sm font-black text-slate-400">El rango no está en el snapshot. Presioná <span className="text-indigo-600">Cargar datos</span> para ampliarlo.</p>
+                  <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-1">Si el período del header ya cubre estas fechas, los datos aparecen solos. Podés filtrar por cliente, objetivo, empleado y estado.</p>
                 </div>
               )}
 

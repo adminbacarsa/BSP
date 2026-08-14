@@ -60,6 +60,7 @@
     "eval:casa-matriz": "npx tsx apps/web2/scripts/eval-casa-matriz-replay.ts",
     "eval:rotative-mtn": "npx tsx apps/web2/scripts/eval-rotative-mtn-cycle.ts",
     "eval:coverage-wisdom": "npx tsx apps/web2/scripts/eval-coverage-wisdom.ts",
+    "eval:analisis-queries": "npx tsx apps/web2/scripts/eval-analisis-queries.ts",
     "eval:vplan": "node scripts/eval-vplan.mjs",
     "run:vplan:obrador": "node scripts/run-vplan-local.mjs --emulator",
     "test:vplan-emulator": "node scripts/test-vplan-emulator.mjs",

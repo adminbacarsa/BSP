@@ -157,6 +157,8 @@ Definidos en `apps/web2/src/config/modules.ts`:
 Acciones por módulo: `read`, `create`, `update`, `delete`.
 `isSuperAdmin` bypasea todos los permisos.
 
+**Análisis — snapshot en memoria:** `useAnalisisSnapshot` + `lib/analisis/*`. Catálogo (SLA, empleados, geo, `tipos_novedad`) una vez por empresa; hechos (`turnos` + `ausencias`) con rango envolvente (mes) y merge si se amplía. Día/semana dentro del mes ya cargado = 0 queries. Analítica reutiliza el mismo store. Pestaña **Informe**: balance vendido/plan/realizado/bolsa CCT, novedades, costo estimado (valor hora opcional) y conclusiones; períodos día/semana/mes/trimestre/semestre/año; export Excel. Pestaña **Demanda / costo**: SLA vs plan vs resultante (ext/FT/ops). Ausentismo: tasas reales COSP (`shiftId` / `isAbsent` / `AUTO_T30`); sliders = what-if. Recargar en el header. Smoke: `npm run eval:analisis-queries` (desde `apps/web2`).
+
 ### Asistente virtual (globo en la app)
 
 - UI: `AssistantFloatingBubble` en `_app` (sesión **sólo en memoria**; botón papelera limpia el hilo). El **FAB es arrastrable**; la posición se guarda en `sessionStorage` hasta cerrar pestaña/navegador.

@@ -36,6 +36,7 @@
     "eval:pool-cycle-autolab": "npx tsx scripts/eval-pool-cycle-autolab.ts",
     "eval:planning-roster-24hs": "npx tsx scripts/eval-planning-roster-24hs.ts",
     "eval:pure-24hs-bands": "npx tsx scripts/eval-pure-24hs-bands.ts",
+    "eval:analisis-queries": "npx tsx scripts/eval-analisis-queries.ts",
     "auto-lab:snapshot": "node scripts/snapshot-auto-lab-version.js",
     "auto-lab:restore": "node scripts/restore-auto-lab-version.js",
     "auto-lab:versions": "node scripts/list-auto-lab-versions.js"
