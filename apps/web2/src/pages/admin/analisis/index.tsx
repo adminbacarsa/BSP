@@ -1,3 +1,4 @@
+/* COSP_ANALISIS_V2 swc-jsx-fix */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, TabBar } from '@/components/ui';
@@ -365,6 +366,24 @@ function LegendRow({ items }: { items: { color: string; label: string }[] }) {
   );
 }
 
+type AnalisisTab =
+  | 'informe'
+  | 'capacidad'
+  | 'guardias'
+  | 'cobertura'
+  | 'demanda'
+  | 'financiera'
+  | 'proyeccion'
+  | 'viabilidad'
+  | 'art12'
+  | 'analitica';
+type InformeChartKind = 'area' | 'line';
+type AnalDimension = 'employee' | 'objective' | 'client' | 'code' | 'status' | 'date';
+type AnalMetric = 'hours' | 'shifts' | 'presence' | 'absence' | 'night';
+type AnalChartKind = 'bar' | 'pie' | 'area';
+type DeploymentKind = 'RET' | 'REF' | 'ESC';
+type ExpandedDuration = number | 'all' | null;
+
 // ─── PAGE ─────────────────────────────────────────────────────────────────────
 export default function AnalisisPage() {
   useAuth();
@@ -372,19 +391,19 @@ export default function AnalisisPage() {
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const now = new Date();
-  const [periodMode, setPeriodMode] = useState<PeriodMode>('month');
+  const [periodMode, setPeriodMode] = useState('month' as PeriodMode);
   const [periodYear, setPeriodYear] = useState(now.getFullYear());
   const [periodMonth, setPeriodMonth] = useState(now.getMonth());
   const [periodDay, setPeriodDay] = useState(now.getDate());
-  const [activeTab,      setActiveTab]      = usePersistedState<'informe'|'capacidad'|'guardias'|'cobertura'|'demanda'|'financiera'|'proyeccion'|'viabilidad'|'art12'|'analitica'>('cosp:analisis:tab', 'informe');
-  const [valorHoraBasica, setValorHoraBasica] = usePersistedState<number>('cosp:analisis:valorHora', 0);
-  const [vialSrvId,      setVialSrvId]      = useState<string>('');
+  const [activeTab,      setActiveTab]      = usePersistedState('cosp:analisis:tab', 'informe' as AnalisisTab);
+  const [valorHoraBasica, setValorHoraBasica] = usePersistedState('cosp:analisis:valorHora', 0);
+  const [vialSrvId,      setVialSrvId]      = useState('');
   const efectiveHours = CCT_HS_MENSUAL;
-  const [expandedObjId,    setExpandedObjId]    = useState<string|null>(null);
-  const [expandedDemandaId, setExpandedDemandaId] = useState<string | null>(null);
-  const [informeChartType, setInformeChartType] = useState<'area' | 'line'>('area');
-  const [expandedDuration, setExpandedDuration] = useState<number | 'all' | null>(null);
-  const [expandedDurationCode, setExpandedDurationCode] = useState<string | null>(null);
+  const [expandedObjId,    setExpandedObjId]    = useState(null as string | null);
+  const [expandedDemandaId, setExpandedDemandaId] = useState(null as string | null);
+  const [informeChartType, setInformeChartType] = useState('area' as InformeChartKind);
+  const [expandedDuration, setExpandedDuration] = useState(null as ExpandedDuration);
+  const [expandedDurationCode, setExpandedDurationCode] = useState(null as string | null);
   const [showAusentismo,   setShowAusentismo]   = useState(false);
 
   const [analDateFrom,   setAnalDateFrom]   = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10); });
@@ -393,9 +412,9 @@ export default function AnalisisPage() {
   const [analObjectiveId,setAnalObjectiveId]= useState('');
   const [analEmployeeId, setAnalEmployeeId] = useState('');
   const [analStatus,     setAnalStatus]     = useState('');
-  const [analDimension,  setAnalDimension]  = useState<'employee'|'objective'|'client'|'code'|'status'|'date'>('employee');
-  const [analMetric,     setAnalMetric]     = useState<'hours'|'shifts'|'presence'|'absence'|'night'>('hours');
-  const [analChartType,  setAnalChartType]  = useState<'bar'|'pie'|'area'>('bar');
+  const [analDimension,  setAnalDimension]  = useState('employee' as AnalDimension);
+  const [analMetric,     setAnalMetric]     = useState('hours' as AnalMetric);
+  const [analChartType,  setAnalChartType]  = useState('bar' as AnalChartKind);
 
   const periodRange = useMemo(
     () => getPeriodRange(periodMode, periodYear, periodMonth, periodDay),
@@ -675,7 +694,7 @@ export default function AnalisisPage() {
     [ausencias, turnos, employees, capHsPerGuardPeriod, tiposNovedad, periodKey],
   );
 
-  const seededAbsRatesForPeriod = useRef<string | null>(null);
+  const seededAbsRatesForPeriod = useRef(null as string | null);
   useEffect(() => {
     if (!ausenciasStats || loadFacts) return;
     if (seededAbsRatesForPeriod.current === periodKey) return;
@@ -1090,7 +1109,7 @@ export default function AnalisisPage() {
   /** RET / REF / ESC — estadística operativa (no suman cobertura SLA ni hs planificadas del objetivo). */
   const deploymentStats = useMemo(() => {
     type Row = { count: number; vacant: number; hours: number };
-    const acc: Record<'RET' | 'REF' | 'ESC', Row> = {
+    const acc: Record<DeploymentKind, Row> = {
       RET: { count: 0, vacant: 0, hours: 0 },
       REF: { count: 0, vacant: 0, hours: 0 },
       ESC: { count: 0, vacant: 0, hours: 0 },
@@ -1724,13 +1743,15 @@ export default function AnalisisPage() {
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
-  if (loadInit) return (
-    <DashboardLayout>
-      <div className="flex items-center justify-center h-64 gap-3 text-slate-400">
-        <Loader2 className="animate-spin" size={24}/><span className="font-bold">Cargando datos...</span>
-      </div>
-    </DashboardLayout>
-  );
+  if (loadInit) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-64 gap-3 text-slate-400">
+          <Loader2 className="animate-spin" size={24}/><span className="font-bold">Cargando datos...</span>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
