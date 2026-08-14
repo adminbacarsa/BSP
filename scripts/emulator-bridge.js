@@ -10,7 +10,7 @@ const os = require('os');
 const { execSync, execFile, spawn } = require('child_process');
 const path = require('path');
 const { pipeline } = require('stream/promises');
-const { waitForFirestoreEmulator } = require('./emulator-firestore-ready');
+const { waitForFirestoreEmulator, formatFirestoreSeedError } = require('./emulator-firestore-ready');
 
 let _importProgress = { active: false, done: 0, total: 0, col: '', phase: '', error: null };
 
@@ -127,9 +127,9 @@ async function importBackupFile(req, res) {
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, fileName, written, output }));
   } catch (e) {
-    const msg = e.message.slice(0, 2000);
+    const msg = formatFirestoreSeedError(e).slice(0, 2000);
     console.error('[emulator-bridge] import-backup-file', msg);
-    const hint = /8080|UNAVAILABLE|ECONNRESET|offline|emulador/i.test(msg)
+    const hint = /8080|UNAVAILABLE|ECONNRESET|offline|emulador|lab:restart|turnos/i.test(msg)
       ? ' Si el navegador muestra Firestore offline, reiniciá npm run lab:restart e importá de nuevo sin otras pestañas escribiendo.'
       : '';
     res.writeHead(500);

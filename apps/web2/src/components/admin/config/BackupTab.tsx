@@ -210,8 +210,10 @@ function formatLocalBackupImportError(raw: string): string {
     return 'Payload inválido: el archivo no llegó completo al puente :3010 o el emulador está saturado. '
       + 'Reiniciá npm run lab:restart, cerrá Planificación/Operaciones y seleccioná el .json de nuevo.';
   }
-  if (/turnos saturada|lab:restart|Firestore emulador no acepta/i.test(msg)) {
-    return msg;
+  if (/firestore\s*\(?\s*(2|13)\)?|code:?\s*(2|13)\b|turnos saturada|no acepta escrituras|lab:restart|client is offline|could not reach cloud firestore/i.test(msg)) {
+    if (/lab:restart|no acepta escrituras/i.test(msg)) return msg;
+    return 'Firestore del emulador no responde (navegador en offline o lab saturado). '
+      + 'Cerrá Planificación/Operaciones, ejecutá npm run lab:restart, abrí solo Configuración → Backups y reimportá.';
   }
   if (/archivo vacío|no recibido/i.test(msg)) {
     return `${msg} Volvé a elegir el archivo .json (no refresques la pestaña durante la subida).`;

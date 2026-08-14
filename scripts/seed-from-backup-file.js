@@ -16,7 +16,7 @@ const path = require('path');
 const { initializeApp, getApps } = require('firebase-admin/app');
 const { getFirestore, Timestamp, FieldPath } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
-const { waitForFirestoreEmulator, sleep } = require('./emulator-firestore-ready');
+const { waitForFirestoreEmulator, sleep, formatFirestoreSeedError, assertTurnosWritable } = require('./emulator-firestore-ready');
 
 const PROJECT_ID = 'comtroldata';
 const BATCH_SIZE = 250;
@@ -316,6 +316,7 @@ async function seedFirestore(collections, empId, isFull, isDev) {
 
 async function run() {
   await waitForFirestoreEmulator({ maxWaitMs: 30_000 });
+  await assertTurnosWritable(db, { maxWaitMs: 45_000 });
   console.log(`\nLeyendo ${filePath}...`);
   const raw = fs.readFileSync(filePath, 'utf8');
   const data = JSON.parse(raw);
@@ -353,7 +354,7 @@ async function run() {
   console.log('  App: http://localhost:3000 (recargá con Ctrl+F5)\n');
 }
 
-run().catch(e => {
-  console.error('\nError:', e.message);
+run().catch((e) => {
+  console.error(`\nError: ${formatFirestoreSeedError(e)}`);
   process.exit(1);
 });

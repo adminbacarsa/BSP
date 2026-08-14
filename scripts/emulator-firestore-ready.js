@@ -45,4 +45,44 @@ async function waitForFirestoreEmulator(options = {}) {
   );
 }
 
-module.exports = { waitForFirestoreEmulator, sleep, probeFirestoreOnce };
+function formatFirestoreSeedError(err) {
+  const e = err && typeof err === 'object' ? err : { message: String(err ?? '') };
+  const msg = String(e.message ?? '').trim();
+  const code = e.code != null ? String(e.code) : '';
+  const note = String(e.note ?? '').trim();
+  const combined = `${code} ${msg} ${note}`.toLowerCase();
+
+  if (/payload isn't valid|payload is not valid|invalid argument.*payload/i.test(combined)) {
+    return 'Payload inválido para Firestore. El JSON del backup puede estar corrupto o el emulador saturado. '
+      + 'Reiniciá el lab (npm run lab:restart), cerrá pestañas de Planificación/Operaciones e intentá de nuevo.';
+  }
+  // Admin SDK suele devolver code 2/13 con message vacío → "Error Firestore (13)"
+  if (/\b(2|13)\b|unknown|econnreset|unavailable|offline|internal/i.test(combined)) {
+    return 'Firestore emulador no acepta escrituras (saturado o con el navegador en modo offline). '
+      + 'Cerrá otras pestañas de COSP, ejecutá npm run lab:restart, abrí solo Configuración → Backups y volvé a importar.';
+  }
+  if (msg) return msg;
+  if (code) return `Error Firestore (${code}). Probá npm run lab:restart e importá de nuevo.`;
+  return 'Error desconocido al importar backup';
+}
+
+async function assertTurnosWritable(db, options = {}) {
+  const projectId = options.projectId ?? 'comtroldata';
+  await waitForFirestoreEmulator({ maxWaitMs: options.maxWaitMs ?? 45_000, projectId });
+  const probeId = `__import_probe_${Date.now()}`;
+  const ref = db.collection('turnos').doc(probeId);
+  try {
+    await ref.set({ __probe: true, at: new Date().toISOString() });
+    await ref.delete();
+  } catch (err) {
+    throw new Error(formatFirestoreSeedError(err));
+  }
+}
+
+module.exports = {
+  waitForFirestoreEmulator,
+  sleep,
+  probeFirestoreOnce,
+  formatFirestoreSeedError,
+  assertTurnosWritable,
+};
