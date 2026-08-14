@@ -31,6 +31,7 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   const [storeVersion, setStoreVersion] = useState(0);
   const [loadInit, setLoadInit] = useState(true);
   const [loadFacts, setLoadFacts] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const genRef = useRef(0);
 
   const bump = useCallback(() => setStoreVersion((v) => v + 1), []);
@@ -42,7 +43,12 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   }), [empresaId, scopeEmpresa, migracionCompleta]);
 
   useEffect(() => {
-    if (loadingEmpresa || !scopeOpts.empresaId) return;
+    if (loadingEmpresa) return;
+    if (!scopeOpts.empresaId) {
+      setLoadInit(false);
+      setLoadError('No hay empresa activa en la sesión.');
+      return;
+    }
     const mem = getAnalisisMemoryStore();
     if (mem && mem.empresaId !== scopeOpts.empresaId) {
       resetAnalisisMemoryStore();
@@ -51,11 +57,17 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     const gen = ++genRef.current;
     (async () => {
       try {
+        setLoadError(null);
         const existing = getAnalisisMemoryStore();
         const needCatalog = !existing || existing.empresaId !== scopeOpts.empresaId || !existing.catalogAt;
         if (needCatalog) {
           setLoadInit(true);
           await fetchAnalisisCatalog(scopeOpts);
+          if (cancelled || gen !== genRef.current) return;
+          bump();
+          setLoadInit(false);
+        } else {
+          setLoadInit(false);
         }
         if (cancelled || gen !== genRef.current) return;
         setLoadFacts(true);
@@ -68,6 +80,9 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
         bump();
       } catch (e) {
         console.error(e);
+        if (!cancelled && gen === genRef.current) {
+          setLoadError(e instanceof Error ? e.message : 'No se pudo cargar el catálogo de Análisis.');
+        }
       } finally {
         if (!cancelled && gen === genRef.current) {
           setLoadInit(false);
@@ -157,6 +172,7 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     objectivesGeoById,
     loadInit,
     loadFacts,
+    loadError,
     catalogAt: store?.catalogAt ?? null,
     factsAt: store?.factsAt ?? null,
     coveredIntervals: store?.intervals ?? [],

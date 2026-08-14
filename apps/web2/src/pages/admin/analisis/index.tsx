@@ -412,6 +412,7 @@ export default function AnalisisPage() {
     objectivesGeoById,
     loadInit,
     loadFacts,
+    loadError,
     factsAt,
     ensureRange,
     reloadAll,
@@ -1791,6 +1792,19 @@ export default function AnalisisPage() {
               </div>
             </div>
           </div>
+
+          {(loadError || (employees.length === 0 && services.length === 0)) && (
+            <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3 shadow-sm">
+              <p className="text-xs font-black uppercase text-amber-800 dark:text-amber-300">
+                {loadError ? 'No se pudo leer el catálogo' : 'Catálogo vacío para esta empresa'}
+              </p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1 leading-relaxed">
+                {loadError
+                  ? loadError
+                  : 'No hay legajos ni SLA vigentes. Si en Planificación o RRHH sí ves datos, recargá el módulo. Los documentos legacy de Bacarsa sin empresaId ahora se incluyen (misma regla que CRM).'}
+              </p>
+            </div>
+          )}
 
           {/* ── Universo real ───────────────────────────────────────────── */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -3939,8 +3953,8 @@ export default function AnalisisPage() {
                 </p>
 
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                  Las <strong>hs teóricas</strong> del panel superior usan el período <strong>{periodRange.labelShort}</strong>.
-                  Analítica lee el mismo snapshot en memoria: si el rango de abajo ya está cubierto (día/semana/mes cargado), no hay otro viaje a Firestore.
+                  El universo del header usa el período <strong>{periodRange.labelShort}</strong>.
+                  Analítica lee el mismo snapshot: si el rango de abajo ya está cubierto, no hay otro viaje a Firestore.
                 </p>
 
                 {/* Fila 1: rango de fechas + botón */}
@@ -4225,6 +4239,12 @@ export default function AnalisisPage() {
               )}
 
               {/* ── Estado vacío ──────────────────────────────────────────────── */}
+              {loadAnal && (
+                <div className="rounded-xl border shadow-sm p-12 text-center" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
+                  <Loader2 size={32} className="mx-auto text-indigo-500 animate-spin mb-3"/>
+                  <p className="text-sm font-black text-slate-500">Cargando turnos del snapshot…</p>
+                </div>
+              )}
               {!analLoaded && !loadAnal && (
                 <div className="rounded-xl border shadow-sm p-12 text-center" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                   <BarChart3 size={40} className="mx-auto text-slate-200 dark:text-slate-700 mb-4"/>
