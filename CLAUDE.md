@@ -107,6 +107,7 @@ cronoapp/
 | `planificacion_estados` | Publicación de planificación. Key: `${objectiveId}_${year}_${month}` |
 | `servicios_sla` | Contratos/SLA con estructura de puestos y turnos permitidos |
 | `roles` | Permisos por módulo. Estructura: `{ permissions: { MODULE_KEY: ['read','create',...] } }` |
+| `payroll_settings` | Modo de horas publicado al endpoint de liquidación (`hoursMode: planned \| real`). Doc id = `empresaId`. |
 
 ### Campos importantes en `turnos`
 

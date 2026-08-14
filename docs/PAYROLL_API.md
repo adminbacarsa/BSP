@@ -132,6 +132,13 @@ Query params:
 | `page` | `1` | Paginación. |
 | `pageSize` | `100` (máx 500) | Paginación. |
 
+El modo de horas (**planificadas** o **fichadas**) lo define COSP en
+**Liquidaciones → Modo horas · endpoint**. El integrador **no** puede
+cambiarlo con un query param. `GET /cycles` incluye `hoursMode` para
+saber qué está publicado.
+
+Si no hay setting, el default es **planificadas**.
+
 ```bash
 curl -H "X-API-Key: $KEY" \
   "$BASE/v1/payroll/liquidacion?cycleId=2026-05&pageSize=200"
@@ -145,6 +152,7 @@ Respuesta (resumida a 1 empleado):
   "cycleStart": "2026-04-26",
   "cycleEnd": "2026-05-25",
   "cctVersion": "422/05",
+  "hoursMode": "planned",
   "generatedAt": "2026-05-13T11:50:00.000Z",
   "lockedAt": null,
   "empresaId": "bacarsa",

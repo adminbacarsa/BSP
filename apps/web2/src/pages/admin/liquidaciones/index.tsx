@@ -16,10 +16,12 @@ import {
 import {
     getCctPayrollPeriodByOffset, formatCctPeriodLabel, formatCctPeriodRangeDisplay,
 } from '@/lib/cctPayrollPeriod';
-import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, Timestamp, doc, setDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, app } from '@/lib/firebase';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
+import { stampEmpresaId } from '@/lib/multiempresa';
+import { toast } from 'sonner';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -630,7 +632,7 @@ function ApiKeysTab({ empresaId }: ApiKeysTabProps) {
                 <div className="space-y-2">
                     {[
                         ['Ciclos', 'GET https://us-central1-comtroldata.cloudfunctions.net/payrollApi/v1/payroll/cycles'],
-                        ['Liquidación', 'GET …/v1/payroll/liquidacion?cycleId=2026-07&hoursMode=real'],
+                        ['Liquidación', 'GET …/v1/payroll/liquidacion?cycleId=2026-07'],
                         ['Auth header', 'X-API-Key: csp_…tu_clave…'],
                     ].map(([label, code]) => (
                         <div key={label}>
@@ -652,7 +654,7 @@ function ApiKeysTab({ empresaId }: ApiKeysTabProps) {
 export default function LiquidacionesPage() {
     const router = useRouter();
     const { empresaId } = useEmpresa();
-    const { canReadModule } = useAuth();
+    const { canReadModule, user } = useAuth();
 
     const [activeTab, setActiveTab] = useState<'liquidacion' | 'claves'>('liquidacion');
 
@@ -665,21 +667,20 @@ export default function LiquidacionesPage() {
 
     const cycleOptions = useMemo(() => buildCycleOptions(), []);
     const [cycleId, setCycleId] = useState<string>(cycleOptions[1]?.cycleId || cycleOptions[0]?.cycleId || '');
-    const [hoursMode, setHoursMode] = useState<'planned' | 'real'>('real');
+    const [hoursMode, setHoursMode] = useState<'planned' | 'real'>('planned');
     const [search, setSearch] = useState('');
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [viewRestored, setViewRestored] = useState(false);
+    const [publishingMode, setPublishingMode] = useState(false);
 
     useEffect(() => {
         const saved = readSessionJson<{
             cycleId?: string;
-            hoursMode?: 'planned' | 'real';
             search?: string;
             expandedId?: string | null;
         }>('cosp:liq:view');
         if (saved) {
             if (saved.cycleId && cycleOptions.some(o => o.cycleId === saved.cycleId)) setCycleId(saved.cycleId);
-            if (saved.hoursMode === 'planned' || saved.hoursMode === 'real') setHoursMode(saved.hoursMode);
             if (typeof saved.search === 'string') setSearch(saved.search);
             if (saved.expandedId !== undefined) setExpandedId(saved.expandedId);
         }
@@ -688,8 +689,53 @@ export default function LiquidacionesPage() {
 
     useEffect(() => {
         if (!viewRestored) return;
-        writeSessionJson('cosp:liq:view', { cycleId, hoursMode, search, expandedId });
-    }, [viewRestored, cycleId, hoursMode, search, expandedId]);
+        writeSessionJson('cosp:liq:view', { cycleId, search, expandedId });
+    }, [viewRestored, cycleId, search, expandedId]);
+
+    useEffect(() => {
+        if (!empresaId) return;
+        const ref = doc(db, 'payroll_settings', empresaId);
+        return onSnapshot(ref, (snap) => {
+            const mode = snap.data()?.hoursMode;
+            if (mode === 'planned' || mode === 'real') setHoursMode(mode);
+        });
+    }, [empresaId]);
+
+    const publishHoursMode = useCallback(async (mode: 'planned' | 'real') => {
+        if (!empresaId || mode === hoursMode || publishingMode) return;
+        setHoursMode(mode);
+        setExpandedId(null);
+        setPublishingMode(true);
+        try {
+            await setDoc(
+                doc(db, 'payroll_settings', empresaId),
+                stampEmpresaId({
+                    hoursMode: mode,
+                    updatedAt: serverTimestamp(),
+                    updatedBy: user?.uid || '',
+                }, empresaId),
+                { merge: true },
+            );
+            await addDoc(
+                collection(db, 'audit_logs'),
+                stampEmpresaId({
+                    timestamp: serverTimestamp(),
+                    actorUid: user?.uid || '',
+                    actorName: user?.displayName || user?.email?.split('@')[0] || 'Usuario',
+                    action: 'PAYROLL_API_HOURS_MODE',
+                    module: 'REPORTES',
+                    details: `Endpoint de liquidación publicado en modo ${mode === 'planned' ? 'planificadas' : 'fichadas'}.`,
+                }, empresaId),
+            );
+            toast.success(mode === 'planned'
+                ? 'El endpoint ahora entrega horas planificadas.'
+                : 'El endpoint ahora entrega horas fichadas.');
+        } catch (e: any) {
+            toast.error(e?.message || 'No se pudo publicar el modo al endpoint.');
+        } finally {
+            setPublishingMode(false);
+        }
+    }, [empresaId, hoursMode, publishingMode, user]);
 
     const { snapshot, loading, error, ajustes, refresh, saveAjuste, deleteAjuste } = useLiquidaciones({
         cycleId,
@@ -826,15 +872,17 @@ export default function LiquidacionesPage() {
                         </select>
                     </div>
 
-                    {/* Toggle modo horas */}
+                    {/* Toggle modo horas — también publica el endpoint */}
                     <div className="flex flex-col gap-0.5">
                         <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>
-                            Modo horas
+                            Modo horas · endpoint
                         </span>
                         <div className="flex rounded-xl overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
                             <button
-                                onClick={() => { setHoursMode('real'); setExpandedId(null); }}
-                                className="flex items-center gap-1.5 px-3 py-2 text-xs font-black uppercase transition-colors"
+                                type="button"
+                                disabled={publishingMode}
+                                onClick={() => { void publishHoursMode('real'); }}
+                                className="flex items-center gap-1.5 px-3 py-2 text-xs font-black uppercase transition-colors disabled:opacity-50"
                                 style={hoursMode === 'real'
                                     ? { background: 'var(--company-primary,#6366f1)', color: '#fff' }
                                     : { background: 'var(--surf)', color: 'var(--txt3)' }}
@@ -843,8 +891,10 @@ export default function LiquidacionesPage() {
                                 Fichadas
                             </button>
                             <button
-                                onClick={() => { setHoursMode('planned'); setExpandedId(null); }}
-                                className="flex items-center gap-1.5 px-3 py-2 text-xs font-black uppercase transition-colors border-l"
+                                type="button"
+                                disabled={publishingMode}
+                                onClick={() => { void publishHoursMode('planned'); }}
+                                className="flex items-center gap-1.5 px-3 py-2 text-xs font-black uppercase transition-colors border-l disabled:opacity-50"
                                 style={hoursMode === 'planned'
                                     ? { background: 'var(--company-primary,#6366f1)', color: '#fff', borderColor: 'transparent' }
                                     : { background: 'var(--surf)', color: 'var(--txt3)', borderColor: 'var(--border)' }}
@@ -853,6 +903,9 @@ export default function LiquidacionesPage() {
                                 Planificadas
                             </button>
                         </div>
+                        <span className="text-[9px] font-medium" style={{ color: 'var(--txt3)' }}>
+                            Lo que ve quien consume la API. El liquidador no puede cambiarlo.
+                        </span>
                     </div>
 
                     {/* Búsqueda */}

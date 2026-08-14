@@ -603,6 +603,18 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    // Modo de horas publicado al endpoint de liquidación (planned | real).
+    match /payroll_settings/{empId} {
+      allow read: if isSuperAdmin() || systemUserHasAllEmpresas() || (
+        isAdmin() && userEmpresaId() != '' && empId == userEmpresaId()
+      );
+      allow create, update: if isSuperAdmin() || systemUserHasAllEmpresas() || (
+        isAdmin() && userEmpresaId() != '' && empId == userEmpresaId()
+        && request.resource.data.empresaId == empId
+      );
+      allow delete: if tenantAdminDelete();
+    }
+
     // API Keys de integraciones — solo lectura de metadata (no del hash).
     // Escritura exclusivamente vía Admin SDK (callables createPayrollApiKey / revokePayrollApiKey).
     match /integraciones_api/{keyId} {

@@ -13,6 +13,9 @@
  *     en horas.
  *   - El JSON entrega únicamente el ACUMULADO por empleado (sin detalle de
  *     turnos), igual a la grilla del reporte que ve el liquidador.
+ *   - El modo de horas (planificadas vs fichadas) lo publica Liquidaciones
+ *     en `payroll_settings/{empresaId}`. El query `hoursMode` del consumidor
+ *     se ignora.
  *   - El cierre del ciclo (`POST /close`) es obligatorio antes de liquidar:
  *     genera un snapshot inmutable en `payroll_cycles_locks/{cycleId}` y deja
  *     `payrollLockedAt` en cada turno/ausencia del ciclo para que las reglas
@@ -26,6 +29,7 @@ type Request = functions.https.Request;
 type Response = any;
 import { listRecentCycles, parseCycleId, toTs } from './cycle';
 import { buildLiquidacionSnapshot, LiquidacionSnapshot } from './calc';
+import { resolveEmpresaHoursMode } from './settings';
 
 const applyCors = (req: Request, res: Response): boolean => {
     res.set('Access-Control-Allow-Origin', '*');
@@ -55,7 +59,9 @@ async function handleListCycles(req: AuthedRequest, res: Response) {
     const lockSnap = await admin.firestore().collection('payroll_cycles_locks').get();
     const lockedMap = new Map<string, any>();
     lockSnap.forEach((d) => lockedMap.set(d.id, d.data()));
+    const hoursMode = await resolveEmpresaHoursMode(req.integration!.empresaId);
     json(res, 200, {
+        hoursMode,
         cycles: cycles.map((c) => {
             const lock = lockedMap.get(c.cycleId);
             return {
@@ -80,7 +86,7 @@ async function handleLiquidacion(req: AuthedRequest, res: Response) {
         });
     }
     const empresaId = req.integration!.empresaId;
-    const hoursMode = req.query?.hoursMode === 'planned' ? 'planned' : 'real';
+    const hoursMode = await resolveEmpresaHoursMode(empresaId);
     const snapshot = await buildLiquidacionSnapshot({
         cycle,
         empresaId,
@@ -122,7 +128,8 @@ async function handleCloseCycle(req: AuthedRequest, res: Response, cycleId: stri
 
     // Generamos el snapshot que vamos a archivar (idempotencia + auditoría).
     const empresaId = req.integration!.empresaId;
-    const snapshot = await buildLiquidacionSnapshot({ cycle, empresaId });
+    const hoursMode = await resolveEmpresaHoursMode(empresaId);
+    const snapshot = await buildLiquidacionSnapshot({ cycle, empresaId, hoursMode });
 
     const now = admin.firestore.Timestamp.now();
     const lockedBy = `integraciones_api/${req.integration!.id}`;

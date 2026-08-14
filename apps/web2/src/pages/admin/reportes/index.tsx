@@ -140,6 +140,7 @@ const DICTIONARY: Record<string, string> = {
     'CAMBIO_TURNO_FRANCO': 'Devolución (FF)',
     'AJUSTE_LIQUIDACION': 'Ajuste liquidación',
     'ELIMINAR_AJUSTE_LIQUIDACION': 'Baja ajuste liquidación',
+    'PAYROLL_API_HOURS_MODE': 'Modo endpoint liquidación',
     'EXPORT_REPORT': 'Exportó reporte',
 };
 
