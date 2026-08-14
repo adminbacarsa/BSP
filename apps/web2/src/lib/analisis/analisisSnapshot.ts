@@ -6,7 +6,8 @@
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
-  empresaScopedQuery,
+  belongsToEmpresaView,
+  empresaCollectionQuery,
   filterRowsByEmpresa,
 } from '@/lib/multiempresa';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
@@ -112,8 +113,10 @@ function mapTurnoDocs(
     .map((d) => ({ id: d.id, ...d.data() }))
     .filter((t: any) => {
       if (t.type === 'NOVEDAD' || !t.startTime || !t.endTime) return false;
-      if (opts.scopeEmpresa && t.empresaId && t.empresaId !== opts.empresaId) return false;
-      if (opts.scopeEmpresa && t.employeeId && !empIds.has(t.employeeId)) return false;
+      if (!belongsToEmpresaView(t, opts.empresaId, opts.migracionCompleta)) return false;
+      if (empIds.size > 0 && t.employeeId && t.employeeId !== 'VACANTE' && !empIds.has(t.employeeId)) {
+        return false;
+      }
       return true;
     });
 }
@@ -131,17 +134,17 @@ async function fetchTurnosRange(range: MsRange, opts: ScopeOpts, empIds: Set<str
 
 async function fetchAusenciasAll(opts: ScopeOpts, empIds: Set<string>): Promise<any[]> {
   const snap = await getDocs(
-    opts.scopeEmpresa
-      ? (empresaScopedQuery('ausencias', opts.empresaId, true) as ReturnType<typeof query>)
-      : collection(db, 'ausencias'),
+    empresaCollectionQuery('ausencias', opts.empresaId, opts.scopeEmpresa) as ReturnType<typeof query>,
   );
-  return snap.docs
-    .map((d) => ({ id: d.id, ...d.data() }))
-    .filter((a: any) => {
-      if (opts.scopeEmpresa && a.empresaId && a.empresaId !== opts.empresaId) return false;
-      if (opts.scopeEmpresa && a.employeeId && !empIds.has(a.employeeId)) return false;
-      return true;
-    });
+  return filterRowsByEmpresa(
+    snap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    opts.empresaId,
+    opts.scopeEmpresa,
+    opts.migracionCompleta,
+  ).filter((a: any) => {
+    if (empIds.size > 0 && a.employeeId && !empIds.has(a.employeeId)) return false;
+    return true;
+  });
 }
 
 export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
@@ -152,8 +155,8 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
 }> {
   const { empresaId, scopeEmpresa, migracionCompleta } = opts;
   const [sSnap, eSnap] = await Promise.all([
-    getDocs(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
-    getDocs(empresaScopedQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+    getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+    getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
   ]);
   const services = filterRowsByEmpresa(
     sSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
@@ -192,7 +195,7 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
   }
   try {
     const clientsSnap = await getDocs(
-      empresaScopedQuery('clients', empresaId, scopeEmpresa) as ReturnType<typeof query>,
+      empresaCollectionQuery('clients', empresaId, scopeEmpresa) as ReturnType<typeof query>,
     );
     clientsSnap.forEach((cd) => {
       const cdata = cd.data();
@@ -214,7 +217,7 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
   let tiposNovedad: NovedadType[] = [];
   try {
     const tSnap = await getDocs(
-      empresaScopedQuery('tipos_novedad', empresaId, scopeEmpresa) as ReturnType<typeof query>,
+      empresaCollectionQuery('tipos_novedad', empresaId, scopeEmpresa) as ReturnType<typeof query>,
     );
     tiposNovedad = filterRowsByEmpresa(
       tSnap.docs.map((d) => {
