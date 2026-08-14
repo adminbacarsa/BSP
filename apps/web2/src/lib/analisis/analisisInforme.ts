@@ -48,6 +48,11 @@ export type InformeAnalitico = {
   bolsaConsumida: number;
   bolsaDisponible: number;
   sobreBolsa: number;
+  bolsaTecho: number;
+  bolsaIndicePct: number;
+  bolsaHsEfectivasGuardia: number;
+  bolsaLookbackLabel: string;
+  bolsaTieneHistorial: boolean;
   coberturaPlanPct: number;
   coberturaEfectivaPct: number;
   desvioRealVsVendido: number;
@@ -87,8 +92,16 @@ export function buildInformeAnalitico(opts: {
   demandaTotals: DemandaObjectiveRow;
   ausenciasStats: AusenciasStats | null;
   turnos: any[];
+  bolsa?: {
+    inicial: number;
+    techo: number;
+    indicePct: number;
+    hsEfectivasGuardia: number;
+    lookbackLabel: string;
+    tieneHistorial: boolean;
+  };
 }): InformeAnalitico {
-  const { plantel, capHsPerGuardPeriod, demandaTotals: d, ausenciasStats, turnos } = opts;
+  const { plantel, capHsPerGuardPeriod, demandaTotals: d, ausenciasStats, turnos, bolsa } = opts;
   const hsVendidas = r1(d.slaHours);
   const hsPlanificadas = r1(d.planHours);
   const hsExtras50 = r1(d.extHours + d.adelHours);
@@ -119,7 +132,12 @@ export function buildInformeAnalitico(opts: {
   hsPendientesFichada = r1(hsPendientesFichada);
   hsNormales = r1(hsNormales);
 
-  const bolsaInicial = r1(Math.max(0, plantel) * Math.max(0, capHsPerGuardPeriod));
+  const bolsaInicial = r1(bolsa ? bolsa.inicial : Math.max(0, plantel) * Math.max(0, capHsPerGuardPeriod));
+  const bolsaTecho = r1(bolsa ? bolsa.techo : bolsaInicial);
+  const bolsaIndicePct = bolsa ? bolsa.indicePct : 0;
+  const bolsaHsEfectivasGuardia = r1(bolsa ? bolsa.hsEfectivasGuardia : capHsPerGuardPeriod);
+  const bolsaLookbackLabel = bolsa?.lookbackLabel || '';
+  const bolsaTieneHistorial = bolsa?.tieneHistorial === true;
   const bolsaConsumida = r1(hsNormales > 0 ? hsNormales : hsPlanificadas);
   const bolsaDisponible = r1(Math.max(0, bolsaInicial - bolsaConsumida));
   const sobreBolsa = r1(Math.max(0, bolsaConsumida - bolsaInicial));
@@ -142,9 +160,11 @@ export function buildInformeAnalitico(opts: {
       observacion: 'Malla de cobertura crono (sin FT ni tramos extra).',
     },
     {
-      concepto: 'Bolsa de horas (capacidad CCT)',
+      concepto: 'Bolsa de horas (capacidad realista)',
       horas: bolsaInicial,
-      observacion: `Plantel ${plantel} × ${capHsPerGuardPeriod} hs. Tope CCT 422/05 = 192 hs/mes (constante de convenio, no divisor 8/12).`,
+      observacion: bolsa
+        ? `No es ${plantel} × 200. Techo ${bolsaTecho.toLocaleString('es-AR')} hs · índice ausencia ${bolsaLookbackLabel} = ${bolsaIndicePct}% · ${bolsaHsEfectivasGuardia} hs efectivas/guardia.${bolsaTieneHistorial ? '' : ' Sin novedades en la ventana 3m: el índice queda en 0 hasta haber historial.'}`
+        : `Plantel ${plantel} × ${capHsPerGuardPeriod} hs (fallback).`,
     },
     {
       concepto: 'Horas realizadas (efectivas)',
@@ -255,6 +275,11 @@ export function buildInformeAnalitico(opts: {
     bolsaConsumida,
     bolsaDisponible,
     sobreBolsa,
+    bolsaTecho,
+    bolsaIndicePct,
+    bolsaHsEfectivasGuardia,
+    bolsaLookbackLabel,
+    bolsaTieneHistorial,
     coberturaPlanPct,
     coberturaEfectivaPct,
     desvioRealVsVendido,

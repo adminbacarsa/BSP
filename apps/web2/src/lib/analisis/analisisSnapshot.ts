@@ -104,35 +104,62 @@ type ScopeOpts = {
   migracionCompleta: boolean;
 };
 
+function ymdFromMs(ms: number): string {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function mapTurnoDocs(
   docs: Array<{ id: string; data: () => any }>,
   opts: ScopeOpts,
-  empIds: Set<string>,
 ): any[] {
   return docs
     .map((d) => ({ id: d.id, ...d.data() }))
     .filter((t: any) => {
-      if (t.type === 'NOVEDAD' || !t.startTime || !t.endTime) return false;
+      if (t.isDeleted === true) return false;
+      if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
+      const hasClock = !!(t.startTime || t.date || t.scheduleDate || t.planningDate || t.fecha);
+      if (!hasClock) return false;
       if (!belongsToEmpresaView(t, opts.empresaId, opts.migracionCompleta)) return false;
-      if (empIds.size > 0 && t.employeeId && t.employeeId !== 'VACANTE' && !empIds.has(t.employeeId)) {
-        return false;
-      }
       return true;
     });
 }
 
-async function fetchTurnosRange(range: MsRange, opts: ScopeOpts, empIds: Set<string>): Promise<any[]> {
+async function fetchTurnosByDateField(range: MsRange, field: string, opts: ScopeOpts): Promise<any[]> {
+  const start = ymdFromMs(range.startMs);
+  const end = ymdFromMs(range.endMs);
+  try {
+    const snap = await getDocs(query(
+      collection(db, 'turnos'),
+      where(field, '>=', start),
+      where(field, '<=', end),
+    ));
+    return mapTurnoDocs(snap.docs, opts);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchTurnosRange(range: MsRange, opts: ScopeOpts): Promise<any[]> {
   const start = new Date(range.startMs);
   const end = new Date(range.endMs);
-  const snap = await getDocs(query(
+  const byStart = await getDocs(query(
     collection(db, 'turnos'),
     where('startTime', '>=', Timestamp.fromDate(start)),
     where('startTime', '<=', Timestamp.fromDate(end)),
-  ));
-  return mapTurnoDocs(snap.docs, opts, empIds);
+  )).then((snap) => mapTurnoDocs(snap.docs, opts)).catch(() => [] as any[]);
+  const extra = await Promise.all([
+    fetchTurnosByDateField(range, 'date', opts),
+    fetchTurnosByDateField(range, 'scheduleDate', opts),
+    fetchTurnosByDateField(range, 'fecha', opts),
+  ]);
+  return mergeDocsById(byStart, extra.flat());
 }
 
-async function fetchAusenciasAll(opts: ScopeOpts, empIds: Set<string>): Promise<any[]> {
+async function fetchAusenciasAll(opts: ScopeOpts): Promise<any[]> {
   const snap = await getDocs(
     empresaCollectionQuery('ausencias', opts.empresaId, opts.scopeEmpresa) as ReturnType<typeof query>,
   );
@@ -141,10 +168,7 @@ async function fetchAusenciasAll(opts: ScopeOpts, empIds: Set<string>): Promise<
     opts.empresaId,
     opts.scopeEmpresa,
     opts.migracionCompleta,
-  ).filter((a: any) => {
-    if (empIds.size > 0 && a.employeeId && !empIds.has(a.employeeId)) return false;
-    return true;
-  });
+  );
 }
 
 export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
@@ -259,7 +283,6 @@ export async function ensureAnalisisFacts(opts: ScopeOpts & {
   force?: boolean;
 }): Promise<AnalisisMemoryStore> {
   const store = ensureStore(opts.empresaId);
-  const empIds = new Set(store.employees.map((e: any) => e.id));
   const env = envelopingRange(opts.requestedStart, opts.requestedEnd);
   const requested: MsRange = { startMs: env.start.getTime(), endMs: env.end.getTime() };
 
@@ -274,14 +297,14 @@ export async function ensureAnalisisFacts(opts: ScopeOpts & {
   }
 
   if (gaps.length) {
-    const chunks = await Promise.all(gaps.map((g) => fetchTurnosRange(g, opts, empIds)));
+    const chunks = await Promise.all(gaps.map((g) => fetchTurnosRange(g, opts)));
     store.turnos = mergeDocsById(store.turnos, chunks.flat());
     store.intervals = mergeIntervals([...store.intervals, ...gaps]);
     store.factsAt = Date.now();
   }
 
   if (!store.ausenciasLoaded || opts.force) {
-    store.ausencias = await fetchAusenciasAll(opts, empIds);
+    store.ausencias = await fetchAusenciasAll(opts);
     store.ausenciasLoaded = true;
     store.factsAt = Date.now();
   }

@@ -13,6 +13,7 @@ import {
   resetAnalisisMemoryStore,
   storeCoversRange,
 } from '@/lib/analisis/analisisSnapshot';
+import { threeMonthLookback } from '@/lib/analisis/analisisBolsa';
 
 export type UseAnalisisSnapshotArgs = {
   empresaId: string | undefined;
@@ -71,10 +72,17 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
         }
         if (cancelled || gen !== genRef.current) return;
         setLoadFacts(true);
+        const lookback = threeMonthLookback(new Date(periodStartMs));
         await ensureAnalisisFacts({
           ...scopeOpts,
           requestedStart: new Date(periodStartMs),
           requestedEnd: new Date(periodEndMs),
+        });
+        if (cancelled || gen !== genRef.current) return;
+        await ensureAnalisisFacts({
+          ...scopeOpts,
+          requestedStart: lookback.start,
+          requestedEnd: lookback.end,
         });
         if (cancelled || gen !== genRef.current) return;
         bump();
@@ -140,11 +148,17 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     try {
       resetAnalisisMemoryStore();
       await fetchAnalisisCatalog(scopeOpts);
+      const lookback = threeMonthLookback(new Date(periodStartMs));
       await ensureAnalisisFacts({
         ...scopeOpts,
         requestedStart: new Date(periodStartMs),
         requestedEnd: new Date(periodEndMs),
         force: true,
+      });
+      await ensureAnalisisFacts({
+        ...scopeOpts,
+        requestedStart: lookback.start,
+        requestedEnd: lookback.end,
       });
       bump();
     } catch (e) {
