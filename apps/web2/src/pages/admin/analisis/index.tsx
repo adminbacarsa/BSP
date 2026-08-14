@@ -24,11 +24,16 @@ import {
   iterateInformeBuckets,
 } from '@/lib/analisis/analisisInforme';
 import {
+  CCT_HS_MENSUAL,
+  buildAnalisisUniverso,
+  cctBolsaHsPerGuard,
+} from '@/lib/analisis/analisisUniverso';
+import {
   TrendingUp, Users, Clock, Activity, AlertTriangle, CheckCircle,
   Loader2, BarChart3, Target, ChevronLeft, ChevronRight,
   Shield, AlertCircle, ArrowUp, ArrowDown, Minus, Calendar, ChevronDown,
   Filter, PieChart as PieIcon, BarChart2, Download, RefreshCw, Scale,
-  MapPin, Wallet, FileText, FileSpreadsheet,
+  MapPin, Wallet, FileText, FileSpreadsheet, Building2, Layers, Briefcase,
 } from 'lucide-react';
 import { buildViabilityRangeReport } from '@/utils/viabilityAnalysis';
 import {
@@ -170,37 +175,7 @@ const getPeriodRange = (mode: PeriodMode, y: number, m: number, dayInMonth: numb
   return { start, end, labelShort: `Año ${y}`, daysCount: isLeapYear(y) ? 366 : 365 };
 };
 
-/** Tope hs/guardia en el período: prorrateo CCT usando días con demanda SLA cuando aplica. */
-const capHsPerGuardInPeriod = (
-  mode: PeriodMode,
-  calendarDaysInPeriod: number,
-  demandDaysWithSLA: number,
-  efectiveHsMonthly: number,
-  diasPorGuardia: number,
-  hsTurnoPlanif: number
-) => {
-  const cal = Math.max(1, calendarDaysInPeriod);
-  const demand = demandDaysWithSLA > 0 ? Math.min(demandDaysWithSLA, cal) : cal;
-
-  if (mode === 'day' || mode === 'week') {
-    const daysEff = Math.max(1, demand);
-    return hsTurnoPlanif * daysEff;
-  }
-
-  if (mode === 'month') {
-    const dClamped = Math.min(demand, diasPorGuardia);
-    const scaled = Math.round(efectiveHsMonthly * (dClamped / diasPorGuardia));
-    return Math.min(efectiveHsMonthly, Math.max(1, scaled));
-  }
-  if (mode === 'quarter' || mode === 'semester' || mode === 'year') {
-    const months = mode === 'quarter' ? 3 : mode === 'semester' ? 6 : 12;
-    const capSpan = efectiveHsMonthly * months;
-    const dClamped = Math.min(demand, diasPorGuardia * months);
-    const scaled = Math.round(efectiveHsMonthly * (dClamped / diasPorGuardia));
-    return Math.min(capSpan, Math.max(1, scaled));
-  }
-  return Math.max(1, Math.round(efectiveHsMonthly * (Math.min(demand, cal) / diasPorGuardia)));
-};
+/** Tope CCT 422/05: 192 hs/mes constantes (sin toggle 24/25 ni 8/12). */
 
 /** Horas SLA del servicio en un rango (motor compartido con Servicios/CRM). */
 const calcSrvDateRange = (srv: any, rangeStart: Date, rangeEnd: Date, quotaHsPerGuard = 192) => {
@@ -401,13 +376,10 @@ export default function AnalisisPage() {
   const [periodYear, setPeriodYear] = useState(now.getFullYear());
   const [periodMonth, setPeriodMonth] = useState(now.getMonth());
   const [periodDay, setPeriodDay] = useState(now.getDate());
-  const [activeTab,      setActiveTab]      = usePersistedState<'informe'|'capacidad'|'guardias'|'cobertura'|'demanda'|'proyeccion'|'viabilidad'|'art12'|'analitica'>('cosp:analisis:tab', 'informe');
+  const [activeTab,      setActiveTab]      = usePersistedState<'informe'|'capacidad'|'guardias'|'cobertura'|'demanda'|'financiera'|'proyeccion'|'viabilidad'|'art12'|'analitica'>('cosp:analisis:tab', 'informe');
   const [valorHoraBasica, setValorHoraBasica] = usePersistedState<number>('cosp:analisis:valorHora', 0);
   const [vialSrvId,      setVialSrvId]      = useState<string>('');
-  const [diasPorGuardia, setDiasPorGuardia] = useState<24|25>(24);
-  /** Vista día/semana: cupo por guardia para calcular mínimos (turno 8h o tope 12h). Mes/año usan cupo mensual CCT. */
-  const [hsTurnoPlanif, setHsTurnoPlanif] = useState<8 | 12>(8);
-  const efectiveHours = diasPorGuardia * 8; // 192 o 200 hs/guardia (CCT 422/05)
+  const efectiveHours = CCT_HS_MENSUAL;
   const [expandedObjId,    setExpandedObjId]    = useState<string|null>(null);
   const [expandedDemandaId, setExpandedDemandaId] = useState<string | null>(null);
   const [informeChartType, setInformeChartType] = useState<'area' | 'line'>('area');
@@ -463,20 +435,11 @@ export default function AnalisisPage() {
   );
 
   const capHsPerGuardPeriod = useMemo(
-    () =>
-      capHsPerGuardInPeriod(
-        periodMode,
-        periodRange.daysCount,
-        slaDemandDaysInPeriod,
-        efectiveHours,
-        diasPorGuardia,
-        hsTurnoPlanif
-      ),
-    [periodMode, periodRange.daysCount, slaDemandDaysInPeriod, efectiveHours, diasPorGuardia, hsTurnoPlanif]
+    () => cctBolsaHsPerGuard(periodMode, periodRange.daysCount),
+    [periodMode, periodRange.daysCount],
   );
 
-  const guardQuotaHs =
-    periodMode === 'day' || periodMode === 'week' ? hsTurnoPlanif : efectiveHours;
+  const guardQuotaHs = capHsPerGuardPeriod;
 
   const shiftPeriod = (dir: -1 | 1) => {
     if (periodMode === 'day') {
@@ -752,6 +715,17 @@ export default function AnalisisPage() {
     [services, periodKey],
   );
 
+  const universo = useMemo(
+    () =>
+      buildAnalisisUniverso({
+        vigenteServices,
+        employees,
+        periodStart: new Date(periodRange.start),
+        periodEnd: new Date(periodRange.end),
+      }),
+    [vigenteServices, employees, periodKey],
+  );
+
   const slaExclusionCtx = useMemo(
     () => buildSlaExclusionContext(services, new Date(periodRange.start), new Date(periodRange.end)),
     [services, periodKey],
@@ -770,36 +744,22 @@ export default function AnalisisPage() {
     vigenteServices.forEach(srv => {
       if (!srv.startDate || !srv.endDate) return;
       const hours = slaHoursForServiceInRange(srv, rs, re);
-      const guards = hours > 0 ? Math.ceil(hours / guardQuotaHs) : 0;
-      const surplus = guards * guardQuotaHs - hours;
       if (hours === 0) return;
       totalHours += hours;
-      active.push({ ...srv, monthHours: hours, guardsNeeded: guards, surplusHs: Math.round(surplus) });
+      active.push({ ...srv, monthHours: hours, guardsNeeded: universo.picoSimultaneo, surplusHs: 0 });
     });
 
-    const isShortPeriod = periodMode === 'day' || periodMode === 'week';
-    const demandDays = Math.max(1, slaDemandDaysInPeriod || periodRange.daysCount || 1);
-    const totalShifts = totalHours > 0 ? Math.ceil(totalHours / hsTurnoPlanif) : 0;
-    const guardsConcurrentes = totalHours > 0
-      ? Math.ceil((totalHours / demandDays) / hsTurnoPlanif)
-      : 0;
-
-    const totalGuards = isShortPeriod
-      ? guardsConcurrentes
-      : (totalHours > 0 ? Math.ceil(totalHours / guardQuotaHs) : 0);
-    const totalSurplus = isShortPeriod
-      ? Math.max(0, totalGuards * capHsPerGuardPeriod - totalHours)
-      : totalGuards * guardQuotaHs - totalHours;
+    const demandDays = Math.max(1, universo.demandDays || slaDemandDaysInPeriod || periodRange.daysCount || 1);
     return {
       totalHours,
-      totalGuards,
-      totalSurplus,
-      totalShifts,
-      shiftsPerDay: Math.ceil(totalShifts / demandDays),
+      totalGuards: universo.picoSimultaneo,
+      totalSurplus: Math.max(0, Math.round(employees.length * capHsPerGuardPeriod - totalHours)),
+      totalShifts: universo.slotsPeriodo,
+      shiftsPerDay: demandDays > 0 ? Math.round(universo.slotsPeriodo / demandDays) : 0,
       demandDays,
       active,
     };
-  }, [vigenteServices, guardQuotaHs, capHsPerGuardPeriod, hsTurnoPlanif, periodMode, slaDemandDaysInPeriod, periodRange.daysCount, periodKey]);
+  }, [vigenteServices, universo, employees.length, capHsPerGuardPeriod, slaDemandDaysInPeriod, periodRange.daysCount, periodKey]);
 
   useEffect(() => {
     const rs = new Date(periodRange.start);
@@ -1784,52 +1744,10 @@ export default function AnalisisPage() {
               </div>
               <div>
                 <h1 className="text-2xl font-black tracking-tight uppercase" style={{ color: 'var(--txt)' }}>Análisis Operativo</h1>
-                <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>Informe gerencial · capacidad · demanda · cobertura</p>
+                <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>Universo real · operativa · humana · financiera</p>
               </div>
             </div>
             <div className="flex items-center gap-3 flex-wrap justify-end">
-              {/* Selector días por guardia */}
-              <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
-                <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Días/guardia</span>
-                <div className="flex gap-1">
-                  {([24, 25] as const).map(d => (
-                    <button key={d} onClick={() => setDiasPorGuardia(d)}
-                      className={`w-8 h-7 rounded-lg text-xs font-black transition-all ${
-                        diasPorGuardia === d
-                          ? 'bg-violet-600 text-white shadow-sm'
-                          : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
-                      }`}>
-                      {d}
-                    </button>
-                  ))}
-                </div>
-                <span className="text-[9px] font-bold text-violet-600 border-l border-slate-200 dark:border-slate-700 pl-2">= {efectiveHours} hs/mes</span>
-              </div>
-              {/* Hs por turno: define el divisor para guardias mín. en vista día / semana */}
-              <div className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
-                <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Hs/turno</span>
-                <div className="flex gap-1">
-                  {([8, 12] as const).map((h) => (
-                    <button
-                      key={h}
-                      type="button"
-                      onClick={() => setHsTurnoPlanif(h)}
-                      className={`w-9 h-7 rounded-lg text-xs font-black transition-all ${
-                        hsTurnoPlanif === h
-                          ? 'bg-indigo-600 text-white shadow-sm'
-                          : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      {h}
-                    </button>
-                  ))}
-                </div>
-                <span className="text-[8px] font-bold text-slate-400 border-l border-slate-200 dark:border-slate-700 pl-2 max-w-[130px] leading-tight">
-                  {periodMode === 'day' || periodMode === 'week'
-                    ? `Mín. guardias = ⌈hs / ${hsTurnoPlanif} ⌉`
-                    : `Mes/año: ⌈hs / ${efectiveHours} ⌉ FTE`}
-                </span>
-              </div>
               {/* Período: modo + navegación */}
               <div className="flex items-center gap-2 flex-wrap justify-end">
                 <div className="flex items-center gap-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-0.5">
@@ -1874,43 +1792,24 @@ export default function AnalisisPage() {
             </div>
           </div>
 
-          {/* ── 6 KPIs operativos ───────────────────────────────────────── */}
+          {/* ── Universo real ───────────────────────────────────────────── */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            <KpiCard icon={Clock}       color="#4f46e5" label="Horas teóricas"       value={theoretical.totalHours.toLocaleString('es-AR')} unit="hs"/>
-            <KpiCard icon={Shield}      color="#7c3aed" label="Guardias mín. nec."   value={totalGuardsDisplay}
+            <KpiCard icon={Building2} color="#4f46e5" label="Clientes" value={universo.clientes}
+              subtext="Con SLA vigente en el período"/>
+            <KpiCard icon={Briefcase} color="#7c3aed" label="Objetivos" value={universo.objetivos}
+              subtext={`${universo.puestosUnicos} puestos SLA`}/>
+            <KpiCard icon={Layers} color="#0891b2" label="Puestos (pax)" value={universo.puestos}
+              subtext="Suma quantity de contratos vigentes"/>
+            <KpiCard icon={Target} color="#0ea5e9" label="Slots a cubrir" value={universo.slotsPeriodo.toLocaleString('es-AR')}
+              subtext={universo.picoSimultaneo > 0 ? `Pico ${universo.picoSimultaneo} en simultáneo${universo.picoFecha ? ` · ${universo.picoFecha.slice(8,10)}/${universo.picoFecha.slice(5,7)}` : ''}` : 'Sin demanda SLA'}/>
+            <KpiCard icon={Users} color="#059669" label="Plantel" value={universo.plantel}
               subtext={
-                aplicarAusentismo
-                  ? `Ajustado: ⌈hs / ${hsRealesGuardia} hs⌉ con ${ausentismoTotal}% aus. (puro: ${theoretical.totalGuards})`
-                  : periodMode === 'day' || periodMode === 'week'
-                    ? `${theoretical.totalShifts} turnos · ⌈hs/día / ${hsTurnoPlanif}⌉ guardias en simultáneo`
-                    : `⌈hs / ${guardQuotaHs} ⌉ FTE mes`
+                availableGuards !== universo.plantel
+                  ? `${availableGuards} disponibles · −${guardiasNoDispTotal} no disp.`
+                  : 'Legajos activos'
               }/>
-            <KpiCard icon={Users}       color="#0891b2" label="Guardias disponibles" value={availableGuards}
-              subtext={
-                periodMode === 'day'
-                  ? guardiasNoDispTotal > 0
-                    ? `Plantel ${plantelGuardias} · −${guardiasNoDispTotal} no disp. (${guardiasNoDispFranco} franco · ${guardiasNoDispLicencia} lic./aus.)`
-                    : `Plantel ${plantelGuardias} sin F/FF ni licencias en el día`
-                  : periodMode === 'week'
-                    ? `Plantel ${plantelGuardias} · ${disponibilidadGuardias.guardDaysAvailable.toLocaleString('es-AR')}/${disponibilidadGuardias.guardDaysTotal.toLocaleString('es-AR')} guardias-día (−${disponibilidadGuardias.francoDays} franco · −${disponibilidadGuardias.licenciaDays} lic./aus.)`
-                    : guardiasNoDispLicencia > 0
-                      ? `Plantel ${plantelGuardias} · −${guardiasNoDispLicencia} lic./aus. · ${guardiasNoDispFranco} con franco (no resta al cupo CCT)`
-                      : guardiasNoDispFranco > 0
-                        ? `Plantel ${plantelGuardias} · ${guardiasNoDispFranco} con franco en el período (ya contemplado en el ciclo CCT)`
-                        : `Plantel ${plantelGuardias} sin bajas por licencias/ausencias`
-              }/>
-            <KpiCard icon={gapDisplay>0?AlertTriangle:gapDisplay<0?CheckCircle:Activity}
-              color={gapDisplay>0?'#dc2626':gapDisplay<0?'#059669':'#64748b'} label="Brecha" alert={gapDisplay>0}
-              value={gapDisplay>0?`+${gapDisplay}`:gapDisplay<0?gapDisplay:'='}
-              subtext={
-                aplicarAusentismo
-                  ? `Ajustada por ${ausentismoTotal}% aus. (puro: ${gap>0?`+${gap}`:gap})`
-                  : gapDisplay>0?'Déficit de guardias':gapDisplay<0?`Superávit ${Math.abs(gapDisplay)}G`:'Exacto'
-              }/>
-            <KpiCard icon={Activity}    color="#d97706" label="Cobertura programada" value={`${coveragePct}%`}
-              subtext={loadTurnos?'Cargando...':`${actual.scheduledHours.toLocaleString('es-AR')} hs prog.`}/>
-            <KpiCard icon={AlertCircle} color="#ef4444" label="Vacancia"             value={`${vacancyPct}%`} alert={vacancyPct>20}
-              subtext={loadTurnos?'Cargando...':`${actual.vacantHours.toLocaleString('es-AR')} hs vacantes`}/>
+            <KpiCard icon={Clock} color="#4f46e5" label="Hs vendidas (SLA)" value={theoretical.totalHours.toLocaleString('es-AR')} unit="hs"
+              subtext={loadTurnos ? 'Cargando malla…' : `Plan ${informe.hsPlanificadas.toLocaleString('es-AR')} · real ${informe.hsRealizadas.toLocaleString('es-AR')} · vac ${informe.hsVacante.toLocaleString('es-AR')}`}/>
           </div>
 
           {!loadTurnos && deploymentStatsTotal > 0 && (
@@ -1944,106 +1843,118 @@ export default function AnalisisPage() {
             </div>
           )}
 
-          {/* ── Panel viabilidad global ──────────────────────────────────── */}
+          {/* ── Lectura real del período ─────────────────────────────── */}
           {theoretical.totalHours > 0 && (
-            <div className={`rounded-xl border p-4 ${
-              superavitGlobal < 0
-                ? 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800'
-                : utilizacionPct >= 90
-                  ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'
-                  : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800'
-            }`}>
-              <div className="flex flex-col md:flex-row md:items-center gap-4">
-                <div className="flex-1">
-                  <p className="text-[9px] font-black uppercase tracking-widest mb-1 text-slate-500">
-                    {periodMode === 'day' || periodMode === 'week' ? (
-                      <>
-                        Viabilidad global — {periodRange.labelShort} ({periodRange.daysCount} d. calendario, {slaDemandDaysInPeriod} d. con SLA vigente) · Planificación por turno de{' '}
-                        <strong className="text-slate-600 dark:text-slate-300">{hsTurnoPlanif} hs</strong> (turno estándar 8h / tope 12h) · tope guardia en período{' '}
-                        {capHsPerGuardPeriod} hs · turnos totales = ⌈
-                        {theoretical.totalHours.toLocaleString('es-AR')} / {hsTurnoPlanif}⌉ ={' '}
-                        <strong>{theoretical.totalShifts}</strong>; mín. guardias en simultáneo = ⌈
-                        {theoretical.totalHours.toLocaleString('es-AR')} / {theoretical.demandDays} d / {hsTurnoPlanif}⌉ ={' '}
-                        <strong>{theoretical.totalGuards}</strong> guardias
-                      </>
-                    ) : (
-                      <>
-                        Viabilidad global — {periodRange.labelShort} ({periodRange.daysCount} d. calendario, {slaDemandDaysInPeriod} d. con SLA vigente) · CCT base{' '}
-                        {diasPorGuardia} días × 8h = {efectiveHours} hs/guardia/mes · tope en período {capHsPerGuardPeriod} hs/guardia · mín. global (FTE) = ⌈
-                        {theoretical.totalHours.toLocaleString('es-AR')} / {guardQuotaHs} ⌉ = <strong>{theoretical.totalGuards}</strong> guardias
-                      </>
-                    )}
-                  </p>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <div className="text-center max-w-[11rem]">
-                      <p className="text-xl font-black text-slate-800 dark:text-white">{avgHsPerGuardia}</p>
-                      <p className="text-[9px] text-slate-500 font-bold uppercase">Carga media (hs ÷ disp.)</p>
-                      <p className="text-[9px] text-slate-400 leading-snug">
-                        {availableGuards > 0 ? (
-                          <>
-                            {theoretical.totalHours.toLocaleString('es-AR')} ÷ {availableGuards} ≈ {avgHsPerGuardia} hs. Es el reparto teórico del SLA entre guardias disponibles; no es la jornada máxima legal de una persona.
-                            {periodMode === 'week' && (
-                              <> Tope del panel: {capHsPerGuardPeriod} hs = {hsTurnoPlanif} h × {slaDemandDaysInPeriod} d. con demanda (no 48 h CCT semanal).</>
-                            )}
-                          </>
-                        ) : (
-                          'Sin guardias disponibles en el período.'
-                        )}
-                      </p>
-                    </div>
-                    <div className="w-px h-10 bg-slate-200 dark:bg-slate-700 hidden md:block"/>
-                    <div className="text-center">
-                      <p className={`text-xl font-black ${utilizacionPct >= 100 ? 'text-rose-600' : utilizacionPct >= 90 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                        {utilizacionPct}%
-                      </p>
-                      <p className="text-[9px] text-slate-500 font-bold uppercase">Utilización</p>
-                      <p className="text-[9px] text-slate-400">sobre {capHsPerGuardPeriod} hs tope período</p>
-                    </div>
-                    <div className="w-px h-10 bg-slate-200 dark:bg-slate-700 hidden md:block"/>
-                    <div className="text-center">
-                      <p className={`text-xl font-black ${superavitGlobal < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                        {superavitGlobal < 0 ? '-' : '+'}{Math.abs(superavitGlobal).toLocaleString('es-AR')}
-                      </p>
-                      <p className="text-[9px] text-slate-500 font-bold uppercase">{superavitGlobal < 0 ? 'Déficit hs' : 'Superávit hs'}</p>
-                      <p className="text-[9px] text-slate-400">
-                        {availableGuards} efectivos × {capHsPerGuardPeriod} hs/guardia (plantel {plantelGuardias}
-                        {guardiasNoDispTotal > 0 ? `, −${guardiasNoDispTotal} no disp.` : ''}) = {totalHsDisponibles.toLocaleString('es-AR')} hs disp.
-                      </p>
-                    </div>
-                    <div className="w-px h-10 bg-slate-200 dark:bg-slate-700 hidden md:block"/>
-                    <div className="text-center">
-                      <p className="text-xl font-black text-violet-600">{theoretical.totalSurplus.toLocaleString('es-AR')}</p>
-                      <p className="text-[9px] text-slate-500 font-bold uppercase">Colchón hs</p>
-                      <p className="text-[9px] text-slate-400">margen para francos / licencias / reemplazos</p>
-                    </div>
-                  </div>
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm p-4">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">
+                {periodRange.labelShort} · {universo.clientes} clientes · {universo.objetivos} objetivos · {universo.puestos} pax en puesto · {universo.slotsPeriodo.toLocaleString('es-AR')} slots SLA · pico {universo.picoSimultaneo} · plantel {universo.plantel} · bolsa CCT {CCT_HS_MENSUAL} hs/mes
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="text-center">
+                  <p className="text-xl font-black text-indigo-600">{informe.hsVendidas.toLocaleString('es-AR')}</p>
+                  <p className="text-[9px] font-black uppercase text-slate-400">Vendidas</p>
                 </div>
-                {/* Barra utilización */}
-                <div className="md:w-64 space-y-2">
-                  <div className="flex justify-between text-[10px] font-bold text-slate-500">
-                    <span>0 hs</span>
-                    <span>{capHsPerGuardPeriod} hs (tope período)</span>
-                  </div>
-                  <div className="h-4 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden relative">
-                    <div className={`h-full rounded-full transition-all ${
-                      utilizacionPct >= 100 ? 'bg-rose-500' : utilizacionPct >= 90 ? 'bg-amber-500' : 'bg-emerald-500'
-                    }`} style={{ width: `${Math.min(utilizacionPct, 100)}%` }}/>
-                    {utilizacionPct > 100 && (
-                      <div className="absolute inset-0 flex items-center justify-end pr-2">
-                        <span className="text-[9px] font-black text-white">+{utilizacionPct-100}% sobre límite</span>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-[9px] text-center text-slate-400">
-                    Carga media {avgHsPerGuardia} hs (hs SLA ÷ guardias disp.) · tope panel: {capHsPerGuardPeriod} hs período
-                  </p>
+                <div className="text-center">
+                  <p className="text-xl font-black text-sky-600">{informe.hsPlanificadas.toLocaleString('es-AR')}</p>
+                  <p className="text-[9px] font-black uppercase text-slate-400">Planificadas</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xl font-black text-emerald-600">{informe.hsRealizadas.toLocaleString('es-AR')}</p>
+                  <p className="text-[9px] font-black uppercase text-slate-400">Realizadas</p>
+                </div>
+                <div className="text-center">
+                  <p className={`text-xl font-black ${informe.hsVacante > 0 ? 'text-amber-600' : 'text-slate-700 dark:text-white'}`}>{informe.hsVacante.toLocaleString('es-AR')}</p>
+                  <p className="text-[9px] font-black uppercase text-slate-400">Vacante</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xl font-black text-orange-600">{informe.desvioExtras.toLocaleString('es-AR')}</p>
+                  <p className="text-[9px] font-black uppercase text-slate-400">Extras / FT / ops</p>
                 </div>
               </div>
             </div>
           )}
 
+          {/* ── Solapas ─────────────────────────────────────────────── */}
+          <div className="space-y-2">
+            <div className="flex gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+              {([
+                { id: 'operativa' as const, label: 'Operativa', icon: Activity, tab: 'informe' as const },
+                { id: 'humana' as const, label: 'Humana', icon: Users, tab: 'guardias' as const },
+                { id: 'financiera' as const, label: 'Financiera', icon: Wallet, tab: 'financiera' as const },
+                { id: 'herramientas' as const, label: 'Herramientas', icon: Filter, tab: 'viabilidad' as const },
+              ]).map((g) => {
+                const group =
+                  activeTab === 'financiera' ? 'financiera'
+                  : (activeTab === 'guardias' || activeTab === 'art12') ? 'humana'
+                  : (activeTab === 'viabilidad' || activeTab === 'analitica' || activeTab === 'proyeccion') ? 'herramientas'
+                  : 'operativa';
+                const Icon = g.icon;
+                const isActive = group === g.id;
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => { if (group !== g.id) setActiveTab(g.tab); }}
+                    className={`relative flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all shrink-0 ${
+                      isActive
+                        ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200 dark:shadow-indigo-900'
+                        : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 hover:text-indigo-600'
+                    }`}
+                  >
+                    <Icon size={13}/>
+                    {g.label}
+                  </button>
+                );
+              })}
+            </div>
+            {activeTab !== 'financiera' && (
+              <div className="flex gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+                {(
+                  (activeTab === 'guardias' || activeTab === 'art12')
+                    ? [
+                        { id: 'guardias', label: 'Guardias', icon: Users, alert: false },
+                        { id: 'art12', label: 'ART.12', icon: MapPin, alert: false },
+                      ]
+                    : (activeTab === 'viabilidad' || activeTab === 'analitica' || activeTab === 'proyeccion')
+                      ? [
+                          { id: 'viabilidad', label: 'Viabilidad', icon: Scale, alert: superavitGlobal < 0 },
+                          { id: 'analitica', label: 'Analítica', icon: Filter, alert: false },
+                          { id: 'proyeccion', label: 'Proyección', icon: TrendingUp, alert: false },
+                        ]
+                      : [
+                          { id: 'informe', label: 'Informe', icon: FileText, alert: informe.desvioRealVsVendido < -8 || informe.hsVacante > 8 },
+                          { id: 'demanda', label: 'Demanda', icon: Wallet, alert: demanda.totals.deltaSla < -8 || demanda.totals.vacantHours > 0 },
+                          { id: 'cobertura', label: 'Cobertura', icon: Target, alert: vacancyPct > 20 },
+                          { id: 'capacidad', label: 'Dist. horas', icon: BarChart3, alert: false },
+                        ]
+                ).map((t) => {
+                  const Icon = t.icon;
+                  const isActive = activeTab === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setActiveTab(t.id as typeof activeTab)}
+                      className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase whitespace-nowrap transition-all shrink-0 ${
+                        isActive
+                          ? 'bg-slate-800 dark:bg-slate-200 text-white dark:text-slate-900'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      <Icon size={12}/>
+                      {t.label}
+                      {t.alert && (
+                        <span className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${isActive ? 'bg-amber-300' : 'bg-rose-500'}`}/>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* ── Panel ausentismo ────────────────────────────────────────── */}
-          {theoretical.totalHours > 0 && (() => {
+          {(activeTab === 'guardias' || activeTab === 'art12') && theoretical.totalHours > 0 && (() => {
             const COMPONENTES = [
               { label:'Vacaciones',             val:ausVac,   set:setAusVac,   color:'#4f46e5', hint:'CCT: 14-28 días/año → ~4-9%', real: ausenciasStats?.vacPct   ?? null },
               { label:'Enfermedad / Cert.',      val:ausEnf,   set:setAusEnf,   color:'#d97706', hint:'Promedio sector: 3-6%',        real: ausenciasStats?.enfPct   ?? null },
@@ -2078,9 +1989,9 @@ export default function AnalisisPage() {
                     </div>
                   </button>
                   {/* Toggle propaga el ajuste a los KPIs principales del header */}
-                  <label className="flex items-center gap-2 cursor-pointer shrink-0 select-none" title="Cuando está activo, los KPIs Guardias mín. nec. y Brecha del header usan los valores ajustados por ausentismo.">
+                  <label className="flex items-center gap-2 cursor-pointer shrink-0 select-none" title="What-if: ajusta Viabilidad (herramientas) con el escenario de ausentismo. No cambia los KPIs reales del header.">
                     <span className="text-[9px] font-black uppercase tracking-wide text-slate-500 dark:text-slate-300 hidden sm:inline">
-                      Aplicar a KPIs
+                      Aplicar a Viabilidad
                     </span>
                     <input
                       type="checkbox"
@@ -2306,50 +2217,16 @@ export default function AnalisisPage() {
             );
           })()}
 
-          {/* ── Tabs ────────────────────────────────────────────────────── */}
-          <div className="flex gap-1 overflow-x-auto pb-0.5 no-scrollbar">
-            {([
-              { id:'informe',    label:'Informe',    icon:FileText,   alert: informe.desvioRealVsVendido < -8 || informe.hsVacante > 8 },
-              { id:'capacidad',  label:'Capacidad',  icon:BarChart3,  alert: gapDisplay > 0 },
-              { id:'guardias',   label:'Guardias',   icon:Users,      alert: false },
-              { id:'cobertura',  label:'Cobertura',  icon:Target,     alert: vacancyPct > 20 },
-              { id:'demanda',    label:'Demanda / costo', icon:Wallet, alert: demanda.totals.deltaSla < -8 || demanda.totals.vacantHours > 0 },
-              { id:'proyeccion', label:'Proyección', icon:TrendingUp, alert: false },
-              { id:'viabilidad', label:'Viabilidad', icon:Scale,      alert: superavitGlobal < 0 },
-              { id:'art12',      label:'ART.12',     icon:MapPin,     alert: false },
-              { id:'analitica',  label:'Analítica',  icon:Filter,     alert: false },
-            ] as Array<{ id: string; label: string; icon: React.ElementType; alert: boolean }>).map(t => {
-              const Icon = t.icon;
-              const isActive = activeTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id as typeof activeTab)}
-                  className={`relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black whitespace-nowrap transition-all shrink-0 ${
-                    isActive
-                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200 dark:shadow-indigo-900'
-                      : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-indigo-300 hover:text-indigo-600'
-                  }`}
-                >
-                  <Icon size={13}/>
-                  {t.label}
-                  {t.alert && (
-                    <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2 border-white dark:border-slate-900 ${isActive ? 'bg-amber-300' : 'bg-rose-500'} animate-pulse`}/>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
           {/* ══════════════════════════════════════════════════════════════
               TAB: INFORME ANALÍTICO
           ══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'informe' && (
+          {(activeTab === 'informe' || activeTab === 'financiera') && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-2xl leading-relaxed">
-                  Lectura gerencial de <strong>{periodRange.labelShort}</strong>: lo vendido, lo planificado, lo fichado,
-                  la bolsa CCT 422/05 y el ausentismo real. El costo en pesos es una estimación: cargá el valor hora básica SUVICO.
+                  {activeTab === 'financiera'
+                    ? <>Balance de horas y costo de <strong>{periodRange.labelShort}</strong>. Bolsa CCT = plantel × 192 hs/mes (constante de convenio). El $ es what-if hasta haber tarifa en el sistema.</>
+                    : <>Lectura gerencial de <strong>{periodRange.labelShort}</strong>: lo vendido, lo planificado, lo fichado y el ausentismo real. La bolsa CCT 422/05 usa 192 hs/mes por guardia (no un divisor 8/12).</>}
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <label className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
@@ -2388,7 +2265,7 @@ export default function AnalisisPage() {
                   alert={informe.coberturaEfectivaPct < 90}/>
               </div>
 
-              {!loadTurnos && informeSeries.length > 0 && (
+              {activeTab === 'informe' && !loadTurnos && informeSeries.length > 0 && (
                 <SectionCard
                   title={`Evolución · ${periodRange.labelShort} · ${informeSeriesMeta.bucket === 'hour' ? 'por hora' : informeSeriesMeta.bucket === 'day' ? 'por día' : informeSeriesMeta.bucket === 'week' ? 'por semana' : 'por mes'}`}
                   icon={TrendingUp}
@@ -2503,6 +2380,7 @@ export default function AnalisisPage() {
                 </div>
               </SectionCard>
 
+              {activeTab === 'informe' && (
               <SectionCard title="2. Novedades e incidencias (CCT SUVICO)" icon={AlertTriangle} loading={loadAus}>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
@@ -2535,6 +2413,7 @@ export default function AnalisisPage() {
                   {' · '}Vacante de malla: <strong className="text-amber-600">{informe.hsVacante.toLocaleString('es-AR')} hs</strong>
                 </p>
               </SectionCard>
+              )}
 
               <SectionCard title="3. Costo real en horas (y estimado en $)" icon={Wallet}>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-5">
@@ -2569,6 +2448,7 @@ export default function AnalisisPage() {
                 </p>
               </SectionCard>
 
+              {activeTab === 'informe' && (
               <SectionCard title="4. Cobertura y calidad de servicio" icon={Target}>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-5">
                   <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 text-center">
@@ -2614,6 +2494,7 @@ export default function AnalisisPage() {
                   ))}
                 </div>
               </SectionCard>
+              )}
             </div>
           )}
 
@@ -2660,7 +2541,7 @@ export default function AnalisisPage() {
                           </div>
                         </div>
                       ))}
-                      <p className="text-[9px] text-slate-400 pt-1">Total teórico: <strong className="text-slate-600 dark:text-slate-300">{theoretical.totalHours.toLocaleString('es-AR')} hs</strong> en {theoretical.active.length} servicios activos</p>
+                      <p className="text-[9px] text-slate-400 pt-1">Hs vendidas (SLA): <strong className="text-slate-600 dark:text-slate-300">{theoretical.totalHours.toLocaleString('es-AR')} hs</strong> en {theoretical.active.length} servicios vigentes</p>
                     </div>
                   </div>
                 </SectionCard>

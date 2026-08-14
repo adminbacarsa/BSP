@@ -19,6 +19,11 @@ import {
   estimarCostoInforme,
   iterateInformeBuckets,
 } from '../src/lib/analisis/analisisInforme';
+import {
+  CCT_HS_MENSUAL,
+  buildAnalisisUniverso,
+  cctBolsaHsPerGuard,
+} from '../src/lib/analisis/analisisUniverso';
 
 let failed = 0;
 function assert(cond: boolean, msg: string) {
@@ -161,6 +166,67 @@ const serie = buildInformeSeries({
   slaByKey: { [days[0].key]: 12 },
 });
 assert(serie[0].Vendidas === 12 && serie[0].Plan === 8 && serie[0].Realizadas === 8, 'serie día 1 plan+real');
+
+assert(CCT_HS_MENSUAL === 192, 'CCT mensual = 192');
+assert(cctBolsaHsPerGuard('month', 31) === 192, 'bolsa mes = 192');
+assert(cctBolsaHsPerGuard('quarter', 90) === 576, 'bolsa trimestre = 576');
+assert(cctBolsaHsPerGuard('year', 365) === 2304, 'bolsa año = 2304');
+assert(cctBolsaHsPerGuard('day', 1) === Math.round(192 / 30), 'bolsa día = prorrateo 192/30');
+
+const uni = buildAnalisisUniverso({
+  vigenteServices: [{
+    clientId: 'c1',
+    clientName: 'Cliente Uno',
+    objectiveId: 'o1',
+    objectiveName: 'Objetivo Uno',
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+    positions: [{
+      id: 'p1',
+      name: 'Acceso',
+      coverageType: '24hs',
+      quantity: 2,
+      activeDays: ['D', 'L', 'M', 'X', 'J', 'V', 'S'],
+      allowedShiftTypes: [
+        { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+        { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+        { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 },
+      ],
+    }],
+  }],
+  employees: [{ id: 'e1' }, { id: 'e2' }, { id: 'e3' }],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 1, 23, 59, 59, 999),
+});
+assert(uni.clientes === 1, 'universo 1 cliente');
+assert(uni.objetivos === 1, 'universo 1 objetivo');
+assert(uni.puestos === 2, `universo 2 pax (got ${uni.puestos})`);
+assert(uni.slotsPeriodo === 6, `universo 3 bandas × 2 pax = 6 slots (got ${uni.slotsPeriodo})`);
+assert(uni.picoSimultaneo === 2, `pico 2 en simultáneo M/T/N no se solapan (got ${uni.picoSimultaneo})`);
+assert(uni.hsVendidas === 48, `universo 6×8 = 48 hs (got ${uni.hsVendidas})`);
+assert(uni.plantel === 3, 'universo plantel 3');
+assert(uni.slotsByBand.M === 2 && uni.slotsByBand.N === 2, 'universo slots por banda');
+
+const uni12 = buildAnalisisUniverso({
+  vigenteServices: [{
+    clientId: 'c2',
+    objectiveId: 'o2',
+    startDate: '2026-08-01',
+    endDate: '2026-08-31',
+    positions: [{
+      id: 'p2',
+      name: 'Noche',
+      coverageType: '12hs_nocturno',
+      quantity: 1,
+      activeDays: ['L', 'M', 'X', 'J', 'V'],
+      allowedShiftTypes: [],
+    }],
+  }],
+  employees: [{ id: 'e1' }],
+  periodStart: new Date(2026, 7, 3), // lunes
+  periodEnd: new Date(2026, 7, 3, 23, 59, 59, 999),
+});
+assert(uni12.slotsPeriodo === 1 && uni12.hsVendidas === 12, `N12 lunes = 1 slot 12 hs (slots=${uni12.slotsPeriodo} hs=${uni12.hsVendidas})`);
 
 if (failed) {
   console.error(`\n${failed} assertion(s) failed`);
