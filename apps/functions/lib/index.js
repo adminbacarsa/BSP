@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = void 0;
+exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -1381,6 +1381,91 @@ var onCronogramaPublished_1 = require("./notifications/onCronogramaPublished");
 Object.defineProperty(exports, "onCronogramaPublished", { enumerable: true, get: function () { return onCronogramaPublished_1.onCronogramaPublished; } });
 var handler_1 = require("./payroll-api/handler");
 Object.defineProperty(exports, "payrollApi", { enumerable: true, get: function () { return handler_1.payrollApi; } });
+exports.createPayrollApiKey = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 30, memory: '256MB' })
+    .https.onCall(async (data, context) => {
+    if (!context.auth)
+        throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
+    const crypto = await Promise.resolve().then(() => require('crypto'));
+    const { name, scopes, empresaId } = data || {};
+    if (!name || !empresaId) {
+        throw new functions.https.HttpsError('invalid-argument', 'name y empresaId son requeridos.');
+    }
+    const validScopes = ['payroll.read', 'payroll.close'];
+    const cleanScopes = Array.isArray(scopes)
+        ? scopes.filter((s) => validScopes.includes(s))
+        : ['payroll.read'];
+    if (cleanScopes.length === 0)
+        cleanScopes.push('payroll.read');
+    const rawKey = 'csp_' + crypto.randomBytes(21).toString('base64url');
+    const prefix = rawKey.slice(0, 8);
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.createHash('sha256').update(salt + rawKey).digest('hex');
+    const db = admin.firestore();
+    const ref = db.collection('integraciones_api').doc();
+    await ref.set({
+        name: String(name).slice(0, 80),
+        empresaId: String(empresaId),
+        scopes: cleanScopes,
+        status: 'active',
+        apiKeyPrefix: prefix,
+        apiKeyHash: hash,
+        salt,
+        createdAt: admin.firestore.Timestamp.now(),
+        createdBy: context.auth.uid,
+    });
+    return { id: ref.id, apiKey: rawKey, prefix };
+});
+exports.revokePayrollApiKey = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 15, memory: '128MB' })
+    .https.onCall(async (data, context) => {
+    if (!context.auth)
+        throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
+    const { keyId } = data || {};
+    if (!keyId)
+        throw new functions.https.HttpsError('invalid-argument', 'keyId requerido.');
+    const db = admin.firestore();
+    const ref = db.collection('integraciones_api').doc(String(keyId));
+    const snap = await ref.get();
+    if (!snap.exists)
+        throw new functions.https.HttpsError('not-found', 'Clave no encontrada.');
+    await ref.update({
+        status: 'revoked',
+        revokedAt: admin.firestore.Timestamp.now(),
+        revokedBy: context.auth.uid,
+    });
+    return { success: true };
+});
+exports.getPayrollSnapshotInternal = functions
+    .region('us-central1')
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
+    }
+    const { parseCycleId } = await Promise.resolve().then(() => require('./payroll-api/cycle'));
+    const { buildLiquidacionSnapshot } = await Promise.resolve().then(() => require('./payroll-api/calc'));
+    const cycleId = String(data?.cycleId || '');
+    const empresaId = String(data?.empresaId || '');
+    const cycle = parseCycleId(cycleId);
+    if (!cycle) {
+        throw new functions.https.HttpsError('invalid-argument', 'cycleId debe tener formato YYYY-MM.');
+    }
+    if (!empresaId) {
+        throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+    }
+    const hoursMode = data?.hoursMode === 'planned' ? 'planned' : 'real';
+    return buildLiquidacionSnapshot({
+        cycle,
+        empresaId,
+        clientIdFilter: data?.clientIdFilter ? String(data.clientIdFilter) : undefined,
+        page: data?.page ? Number(data.page) : 1,
+        pageSize: data?.pageSize ? Number(data.pageSize) : 500,
+        hoursMode,
+    });
+});
 exports.sendTestNotification = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError('unauthenticated', 'Login required');
