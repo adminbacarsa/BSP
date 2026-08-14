@@ -290,14 +290,13 @@ function LiqRow({ item, isExpanded, onToggle, ajuste, hoursMode, onSave, onDelet
                 {/* Horas */}
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.hsTeoricas)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{fmtH(a.hsReales)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(l.hsSimples)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.diurnas)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.nocturnas)}</td>
+                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(l.al50)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.al100FT)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(a.plusFeriado)}</td>
-                {/* Bolsa 200 */}
                 <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{fmtH(l.bolsa)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(l.hsSimples)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtH(l.al50)}</td>
                 {/* Novedades */}
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.vacacionesDias)}</td>
                 <td className="px-2 py-2 text-right tabular-nums text-xs" style={liqCellStyle}>{fmtD(n.enfermedadDias)}</td>
@@ -928,13 +927,13 @@ export default function LiquidacionesPage() {
                                         <th className="px-2 py-2 text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Apellido y Nombre</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Hs Teór.</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Hs {modeLabel.slice(0,6)}.</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Simples</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Diurnas</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Noct.</th>
+                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Al 50%</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>FT 100%</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>+Feriado</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Bolsa</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Simples</th>
-                                        <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>Al 50%</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>V</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>E</th>
                                         <th className="px-2 py-2 text-right text-[10px] font-black uppercase tracking-wider" style={liqHeadStyle}>ART</th>
@@ -977,13 +976,13 @@ export default function LiquidacionesPage() {
                                             </td>
                                             <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.hsTeoricas.toFixed(1)}</td>
                                             <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.hsReales.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.hsSimples.toFixed(1)}</td>
                                             <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.diurnas.toFixed(1)}</td>
                                             <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.nocturnas.toFixed(1)}</td>
+                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.al50.toFixed(1)}</td>
                                             <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.al100FT.toFixed(1)}</td>
                                             <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.plusFeriado.toFixed(1)}</td>
                                             <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.bolsa.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.hsSimples.toFixed(1)}</td>
-                                            <td className="px-2 py-2 text-right tabular-nums text-xs font-bold" style={liqCellStyle}>{totals.al50.toFixed(1)}</td>
                                             <td colSpan={8} style={liqCellStyle} />
                                             <td style={liqCellStyle} />
                                         </tr>

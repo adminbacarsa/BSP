@@ -294,8 +294,8 @@ export function buildLiquidacionCsv(
     const modeLabel = hoursMode === 'planned' ? 'Planificadas' : 'Reales';
     const header = [
         'Legajo', 'Apellido y Nombre', 'DNI', 'CUIL',
-        `Hs Teóricas`, `Hs ${modeLabel}`, 'Diurnas', 'Nocturnas',
-        'FT 100%', 'Plus Feriado', 'Bolsa 200hs', 'Simples', 'Al 50%',
+        `Hs Teóricas`, `Hs ${modeLabel}`, 'Simples', 'Diurnas', 'Nocturnas',
+        'Al 50%', 'FT 100%', 'Plus Feriado', 'Bolsa 200hs',
         'Vacaciones', 'Enfermedad', 'ART', 'Lic. Especial', 'P. Gremial', 'Injustificadas', 'Retiro anticipado', 'Otros',
         'Ajustado', 'Warnings',
     ].join(',');
@@ -311,9 +311,8 @@ export function buildLiquidacionCsv(
             esc(e.fullName),
             esc(e.dni),
             esc(e.cuil ?? ''),
-            a.hsTeoricas, a.hsReales, a.diurnas, a.nocturnas,
-            a.al100FT, a.plusFeriado,
-            l.bolsa, l.hsSimples, l.al50,
+            a.hsTeoricas, a.hsReales, l.hsSimples, a.diurnas, a.nocturnas,
+            l.al50, a.al100FT, a.plusFeriado, l.bolsa,
             n.vacacionesDias, n.enfermedadDias, n.art, n.licenciaEspecialDias,
             n.permisoGremialDias, n.injustificadaDias, n.retiroAnticipadoDias ?? 0, n.otrosDias,
             it.hasAdjustment ? 'SI' : 'NO',
