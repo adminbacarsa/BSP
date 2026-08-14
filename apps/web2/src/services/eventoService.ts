@@ -42,6 +42,8 @@ export interface ServicioEvento {
     ubicacion: UbicacionServicio;
     /** Cupo de guardias para este servicio */
     cupo: number;
+    /** Códigos de aptitud requeridos para convocar (ej. ['BOMBERO', 'LICENCIA_MOTO']) */
+    aptitudesRequeridas?: string[];
     requisitos?: string;
     instrucciones?: string;
     status: EstadoServicio;
