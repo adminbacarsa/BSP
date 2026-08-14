@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     Plus, Trash2, Edit2, X, Save,
-    Calendar, ChevronLeft, ChevronRight,
+    Calendar, ChevronLeft, ChevronRight, Users, CheckCircle, XCircle, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
 import {
@@ -12,6 +12,7 @@ import {
     type ServicioEvento,
     type TipoTurnoEvento,
 } from '@/services/eventoService';
+import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
 import { slaService } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
 
@@ -115,6 +116,12 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
 
     const [srvFormOpen, setSrvFormOpen] = useState(false);
     const [editingSrvId, setEditingSrvId] = useState<string | null>(null);
+
+    // ── Solicitudes state ───────────────────────────────────────────────────
+
+    const [solicitudesMap, setSolicitudesMap] = useState<Record<string, SolicitudEvento[]>>({});
+    const [expandedSolicitudes, setExpandedSolicitudes] = useState<Record<string, boolean>>({});
+    const [respondiendo, setRespondiendo] = useState<string | null>(null);
     const [srvForm, setSrvForm] = useState<Partial<ServicioEvento>>(emptySrv());
 
     // ── Load clients once ───────────────────────────────────────────────────
@@ -142,6 +149,40 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
     }, [empresaId, mes]);
 
     useEffect(() => { void loadEventos(); }, [loadEventos]);
+
+    // Cargar solicitudes de los eventos visibles
+    useEffect(() => {
+        if (eventos.length === 0) return;
+        Promise.all(
+            eventos.filter(ev => ev.id).map(ev =>
+                solicitudEventoService.getByEvento(ev.id!).then(sols => ({ id: ev.id!, sols }))
+            )
+        ).then(results => {
+            const map: Record<string, SolicitudEvento[]> = {};
+            results.forEach(({ id, sols }) => { map[id] = sols; });
+            setSolicitudesMap(map);
+        }).catch(() => {});
+    }, [eventos]);
+
+    const handleResponder = async (sol: SolicitudEvento, status: 'aprobada' | 'rechazada') => {
+        if (!sol.id) return;
+        setRespondiendo(sol.id);
+        try {
+            const uid = getAuth().currentUser?.uid || '';
+            await solicitudEventoService.responder(sol.id, status, uid);
+            setSolicitudesMap(prev => {
+                const sols = (prev[sol.eventoId] || []).map(s =>
+                    s.id === sol.id ? { ...s, status } : s
+                );
+                return { ...prev, [sol.eventoId]: sols };
+            });
+            addToast(status === 'aprobada' ? 'Solicitud aprobada' : 'Solicitud rechazada', 'success');
+        } catch {
+            addToast('Error al responder la solicitud', 'error');
+        } finally {
+            setRespondiendo(null);
+        }
+    };
 
     // ── Month navigation ────────────────────────────────────────────────────
 
@@ -734,50 +775,109 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                         const sc = STATUS_CONFIG[ev.status] || STATUS_CONFIG.borrador;
                         const totalCupo = (ev.servicios || []).reduce((acc, s) => acc + s.cupo, 0);
                         const nSrv = (ev.servicios || []).length;
+                        const sols = solicitudesMap[ev.id!] || [];
+                        const pendientes = sols.filter(s => s.status === 'pendiente').length;
+                        const solExpanded = expandedSolicitudes[ev.id!] || false;
                         return (
                             <div
                                 key={ev.id}
-                                className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3 hover:border-yellow-300 dark:hover:border-yellow-700 transition-colors"
+                                className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden hover:border-yellow-300 dark:hover:border-yellow-700 transition-colors"
                             >
-                                <div className="flex items-start justify-between gap-2">
-                                    <h3 className="text-sm font-black text-slate-800 dark:text-white leading-tight">{ev.nombre}</h3>
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase whitespace-nowrap ${sc.ring} ${sc.text}`}>
-                                        {sc.label}
-                                    </span>
-                                </div>
-                                <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
-                                    <div className="font-bold text-slate-600 dark:text-slate-300">{ev.clienteNombre}</div>
-                                    <div className="flex items-center gap-1">
-                                        <Calendar size={11}/> {fmtFechaRango(ev)}
-                                    </div>
-                                    {nSrv > 0 && (
-                                        <div className="flex items-center gap-3">
-                                            <span>{nSrv} {nSrv === 1 ? 'servicio' : 'servicios'}</span>
-                                            {totalCupo > 0 && <><span>·</span><span>{totalCupo} pax total</span></>}
+                                <div className="p-4 space-y-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <h3 className="text-sm font-black text-slate-800 dark:text-white leading-tight">{ev.nombre}</h3>
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                            {pendientes > 0 && (
+                                                <span className="px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 rounded-full text-[9px] font-black">
+                                                    {pendientes} sol.
+                                                </span>
+                                            )}
+                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase whitespace-nowrap ${sc.ring} ${sc.text}`}>
+                                                {sc.label}
+                                            </span>
                                         </div>
-                                    )}
-                                    {ev.descripcion && (
-                                        <p className="text-slate-400 line-clamp-2 pt-0.5">{ev.descripcion}</p>
-                                    )}
+                                    </div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
+                                        <div className="font-bold text-slate-600 dark:text-slate-300">{ev.clienteNombre}</div>
+                                        <div className="flex items-center gap-1">
+                                            <Calendar size={11}/> {fmtFechaRango(ev)}
+                                        </div>
+                                        {nSrv > 0 && (
+                                            <div className="flex items-center gap-3">
+                                                <span>{nSrv} {nSrv === 1 ? 'servicio' : 'servicios'}</span>
+                                                {totalCupo > 0 && <><span>·</span><span>{totalCupo} pax total</span></>}
+                                            </div>
+                                        )}
+                                        {ev.descripcion && (
+                                            <p className="text-slate-400 line-clamp-2 pt-0.5">{ev.descripcion}</p>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-2 pt-1 border-t border-slate-50 dark:border-slate-700">
+                                        {(canUpdate || canCreate) && ev.status !== 'cancelado' && (
+                                            <button
+                                                onClick={() => openEdit(ev)}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-black uppercase hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
+                                            >
+                                                <Edit2 size={11}/> Editar
+                                            </button>
+                                        )}
+                                        {sols.length > 0 && (
+                                            <button
+                                                onClick={() => setExpandedSolicitudes(prev => ({ ...prev, [ev.id!]: !solExpanded }))}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800/50 rounded-xl text-xs font-black uppercase hover:bg-yellow-100 dark:hover:bg-yellow-900/40 transition-colors ml-auto"
+                                            >
+                                                <Users size={11}/> {sols.length} solicitud{sols.length > 1 ? 'es' : ''}
+                                                {solExpanded ? <ChevronUp size={10}/> : <ChevronDown size={10}/>}
+                                            </button>
+                                        )}
+                                        {canDelete && ev.status !== 'cancelado' && (
+                                            <button
+                                                onClick={() => void cancelEvento(ev)}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 rounded-xl text-xs font-black uppercase hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
+                                            >
+                                                <X size={11}/> Cancelar
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-2 pt-1 border-t border-slate-50 dark:border-slate-700">
-                                    {(canUpdate || canCreate) && ev.status !== 'cancelado' && (
-                                        <button
-                                            onClick={() => openEdit(ev)}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-black uppercase hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
-                                        >
-                                            <Edit2 size={11}/> Editar
-                                        </button>
-                                    )}
-                                    {canDelete && ev.status !== 'cancelado' && (
-                                        <button
-                                            onClick={() => void cancelEvento(ev)}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 rounded-xl text-xs font-black uppercase hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
-                                        >
-                                            <X size={11}/> Cancelar
-                                        </button>
-                                    )}
-                                </div>
+                                {/* Panel de solicitudes */}
+                                {solExpanded && sols.length > 0 && (
+                                    <div className="border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+                                        <div className="px-4 py-2 text-[10px] font-black uppercase text-slate-400 tracking-wide">Solicitudes de guardias</div>
+                                        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {sols.map(sol => (
+                                                <div key={sol.id} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{sol.empleadoNombre}</p>
+                                                        <p className="text-[10px] text-slate-400 truncate">{sol.servicioNombre} · {sol.servicioFecha}</p>
+                                                    </div>
+                                                    {sol.status === 'pendiente' ? (
+                                                        <div className="flex items-center gap-1.5 shrink-0">
+                                                            <button
+                                                                onClick={() => void handleResponder(sol, 'aprobada')}
+                                                                disabled={respondiendo === sol.id}
+                                                                className="flex items-center gap-1 px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg text-[10px] font-black hover:bg-emerald-200 disabled:opacity-50 transition-colors"
+                                                            >
+                                                                <CheckCircle size={10}/> Aprobar
+                                                            </button>
+                                                            <button
+                                                                onClick={() => void handleResponder(sol, 'rechazada')}
+                                                                disabled={respondiendo === sol.id}
+                                                                className="flex items-center gap-1 px-2 py-1 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-lg text-[10px] font-black hover:bg-rose-200 disabled:opacity-50 transition-colors"
+                                                            >
+                                                                <XCircle size={10}/> Rechazar
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${sol.status === 'aprobada' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-rose-100 dark:bg-rose-900/30 text-rose-500 dark:text-rose-400'}`}>
+                                                            {sol.status === 'aprobada' ? 'Aprobada' : 'Rechazada'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         );
                     })}

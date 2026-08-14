@@ -628,5 +628,15 @@ service cloud.firestore {
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
     }
+
+    // Solicitudes de guardia para trabajar en un servicio de evento.
+    // El guardia puede crear y leer las propias; el admin responde.
+    match /solicitudes_evento/{solicitudId} {
+      allow read:   if tenantAdminRead() || (request.auth != null && resource.data.empleadoId == request.auth.uid);
+      allow create: if request.auth != null && tenantMatches(request.resource.data)
+                       && request.resource.data.empleadoId == request.auth.uid;
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
   }
 }

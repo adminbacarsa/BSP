@@ -2,7 +2,9 @@
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import AuthGuard from '@/components/auth/AuthGuard';
-import { Calendar, MapPin, Bell, FileText, CheckCircle, AlertTriangle, Navigation, BellRing, Sun, Sunset, Moon, ArrowLeftRight, Search, X, CreditCard } from 'lucide-react';
+import { Calendar, MapPin, Bell, FileText, CheckCircle, AlertTriangle, Navigation, BellRing, Sun, Sunset, Moon, ArrowLeftRight, Search, X, CreditCard, Star, ChevronDown, ChevronUp, Clock } from 'lucide-react';
+import { eventoService, serviciosParaFecha, type Evento, type ServicioEvento } from '@/services/eventoService';
+import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
 import CredencialDigital from '@/components/empleado/CredencialDigital';
 import { app, db, functions, storage, auth, onSnapshotFresh } from '@/lib/firebase';
 import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
@@ -183,6 +185,11 @@ export default function EmployeeDashboard() {
   const [loadingShifts, setLoadingShifts] = useState(false);
   const [objectivesMap, setObjectivesMap] = useState<Record<string, ObjectiveLocation>>({});
   const [eventosMap, setEventosMap] = useState<Record<string, any>>({});
+  const [eventosDisponibles, setEventosDisponibles] = useState<Evento[]>([]);
+  const [mySolicitudes, setMySolicitudes] = useState<SolicitudEvento[]>([]);
+  const [loadingEventosDisp, setLoadingEventosDisp] = useState(false);
+  const [showEventosDisp, setShowEventosDisp] = useState(false);
+  const [solicitandoId, setSolicitandoId] = useState<string | null>(null);
   const [checkingShiftId, setCheckingShiftId] = useState<string | null>(null);
   const [absenceType, setAbsenceType] = useState<'Vacaciones' | 'Enfermedad' | 'ART' | 'Ausencia con aviso' | 'Licencia Esp.'>('Vacaciones');
   const [absenceReason, setAbsenceReason] = useState('');
@@ -568,6 +575,25 @@ export default function EmployeeDashboard() {
       .catch(() => {});
   }, [shifts]);
 
+  // Cargar eventos disponibles para solicitar + solicitudes propias
+  useEffect(() => {
+    const empresaId = empProfile?.empresaId;
+    const empId = empDocIdSt;
+    if (!empresaId || !empId) return;
+    setLoadingEventosDisp(true);
+    const now = new Date();
+    const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+    const to = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(nextMonth.getDate()).padStart(2, '0')}`;
+    Promise.all([
+      eventoService.getByEmpresaAndRange(empresaId, from, to),
+      solicitudEventoService.getByEmpleado(empId, empresaId, from, to),
+    ]).then(([evs, sols]) => {
+      setEventosDisponibles(evs);
+      setMySolicitudes(sols);
+    }).catch(() => {}).finally(() => setLoadingEventosDisp(false));
+  }, [empProfile?.empresaId, empDocIdSt]);
+
   useEffect(() => {
     if (!user || authLoading) return;
     // Superadmin en modo preview: saltar verificación de dispositivo
@@ -817,6 +843,37 @@ export default function EmployeeDashboard() {
     if (code) return code;
     if (s?.hours) return `${s.hours}h`;
     return 'Turno';
+  };
+
+  const handleSolicitarEvento = async (evento: Evento, servicio: ServicioEvento) => {
+    const empresaId = empProfile?.empresaId;
+    const empId = empDocIdSt;
+    if (!empresaId || !empId) return;
+    setSolicitandoId(servicio.id);
+    try {
+      await solicitudEventoService.add({
+        empresaId,
+        eventoId: evento.id!,
+        eventoNombre: evento.nombre,
+        servicioId: servicio.id,
+        servicioNombre: servicio.nombre,
+        servicioFecha: servicio.fecha,
+        empleadoId: empId,
+        empleadoNombre: empProfile?.firstName ? `${empProfile.lastName || ''} ${empProfile.firstName || ''}`.trim() : (user?.email || empId),
+      });
+      setMySolicitudes(prev => [...prev, {
+        empresaId, eventoId: evento.id!, eventoNombre: evento.nombre,
+        servicioId: servicio.id, servicioNombre: servicio.nombre,
+        servicioFecha: servicio.fecha, empleadoId: empId,
+        empleadoNombre: '',
+        status: 'pendiente',
+      }]);
+      addToast('Solicitud enviada', 'success');
+    } catch {
+      addToast('Error al enviar la solicitud', 'error');
+    } finally {
+      setSolicitandoId(null);
+    }
   };
 
   // Devuelve info del servicio de evento para mostrar en el portal
@@ -2433,6 +2490,90 @@ export default function EmployeeDashboard() {
             <CreditCard size={16} className="text-slate-400 group-hover:text-yellow-400 transition-colors shrink-0"/>
             <span className="text-xs font-black text-slate-400 group-hover:text-yellow-400 uppercase transition-colors">Ver credencial</span>
           </button>
+
+          {/* ===== EVENTOS DISPONIBLES ===== */}
+          {(() => {
+            const serviciosDisp = eventosDisponibles.flatMap(ev =>
+              (ev.servicios ?? [])
+                .filter(s => s.status !== 'cancelado' && s.fecha >= new Date().toISOString().slice(0, 10))
+                .map(s => ({ evento: ev, servicio: s }))
+            );
+            if (serviciosDisp.length === 0 && !loadingEventosDisp) return null;
+            const pendientes = mySolicitudes.filter(s => s.status === 'pendiente').length;
+            return (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+                <button
+                  onClick={() => setShowEventosDisp(v => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Star size={14} className="text-yellow-400"/>
+                    <span className="text-xs font-black text-slate-300 uppercase tracking-wide">Eventos disponibles</span>
+                    {pendientes > 0 && (
+                      <span className="px-1.5 py-0.5 bg-yellow-500 text-yellow-900 rounded-full text-[9px] font-black">{pendientes} pendiente{pendientes > 1 ? 's' : ''}</span>
+                    )}
+                  </div>
+                  {showEventosDisp ? <ChevronUp size={14} className="text-slate-500"/> : <ChevronDown size={14} className="text-slate-500"/>}
+                </button>
+                {showEventosDisp && (
+                  <div className="border-t border-slate-800">
+                    {loadingEventosDisp ? (
+                      <p className="text-center text-[11px] text-slate-500 py-4">Cargando...</p>
+                    ) : serviciosDisp.length === 0 ? (
+                      <p className="text-center text-[11px] text-slate-500 py-4">Sin eventos disponibles</p>
+                    ) : (
+                      <div className="divide-y divide-slate-800/60">
+                        {serviciosDisp.map(({ evento, servicio }) => {
+                          const sol = mySolicitudes.find(s => s.servicioId === servicio.id);
+                          const horarioBadge = servicio.tipoTurno === '3x8' ? '3×8h'
+                            : servicio.tipoTurno === '2x12' ? '2×12h'
+                            : `${servicio.horaInicio}–${servicio.horaFin}`;
+                          const ubi = servicio.ubicacion;
+                          const lugar = ubi?.tipo === 'nueva' ? (ubi.direccion || null) : (ubi?.objectiveNombre || null);
+                          return (
+                            <div key={servicio.id} className="px-4 py-3 flex items-start gap-3">
+                              <div className="w-9 h-9 rounded-xl bg-yellow-900/40 flex items-center justify-center shrink-0 mt-0.5">
+                                <Star size={14} className="text-yellow-400"/>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-black text-white truncate">{servicio.nombre}</p>
+                                <p className="text-[10px] text-yellow-500/80 truncate">{evento.nombre}</p>
+                                <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
+                                  <span className="flex items-center gap-1"><Calendar size={9}/>{servicio.fecha}</span>
+                                  <span className="flex items-center gap-1"><Clock size={9}/>{horarioBadge}</span>
+                                </div>
+                                {lugar && <p className="text-[10px] text-slate-600 flex items-center gap-1 mt-0.5"><MapPin size={9} className="shrink-0"/>{lugar}</p>}
+                                {servicio.requisitos && <p className="text-[10px] text-amber-500/70 mt-0.5">{servicio.requisitos}</p>}
+                              </div>
+                              <div className="shrink-0">
+                                {sol ? (
+                                  <span className={`text-[9px] font-black px-2 py-1 rounded-full ${
+                                    sol.status === 'aprobada' ? 'bg-emerald-900/50 text-emerald-400'
+                                    : sol.status === 'rechazada' ? 'bg-red-900/50 text-red-400'
+                                    : 'bg-yellow-900/50 text-yellow-400'
+                                  }`}>
+                                    {sol.status === 'aprobada' ? 'Aprobada' : sol.status === 'rechazada' ? 'Rechazada' : 'Pendiente'}
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => void handleSolicitarEvento(evento, servicio)}
+                                    disabled={solicitandoId === servicio.id}
+                                    className="text-[9px] font-black px-2 py-1 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-yellow-900 rounded-full transition-colors"
+                                  >
+                                    {solicitandoId === servicio.id ? '...' : 'Solicitar'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* ===== STATS DEL MES ===== */}
           <div className="grid grid-cols-3 gap-3">
