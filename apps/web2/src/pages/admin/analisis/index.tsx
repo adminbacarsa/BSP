@@ -932,8 +932,9 @@ export default function AnalisisPage() {
         objectiveAliases: objectiveAliasesFromServices,
         slaExclusionCtx,
         turnosHistorial: allTurnos,
+        employees,
       }),
-    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos],
+    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees],
   );
   const fin = useMemo(() => rollAnalisisFinanciera(finBases, finHoursMode), [finBases, finHoursMode]);
   const finClientBars = useMemo(
@@ -1871,8 +1872,8 @@ export default function AnalisisPage() {
             <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Análisis operativo</p>
             <h1 className="text-xl font-black text-slate-800 dark:text-white uppercase">Cargando Analítica</h1>
             <p className="text-sm text-slate-500 mt-2 leading-relaxed">
-              Primera carga: catálogo (SLA / plantel) y todos los turnos del período + 3 meses previos.
-              El análisis se habilita al 100%.
+              Primera carga: catálogo (SLA / plantel) y la malla del <strong>mes en curso + 3 meses atrás</strong>.
+              Después, cambiar de mes dentro de esa ventana no vuelve a consultar.
             </p>
             <div className="mt-6">
               <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wide text-slate-500 mb-2">
@@ -2436,7 +2437,8 @@ export default function AnalisisPage() {
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-3xl leading-relaxed">
                   Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
-                  malla ({finHoursMode === 'real' ? 'fichada' : 'planificada'}) + novedades (V/L/E/A/AA/PG) + franco trabajado + extras/ops.
+                  malla ({finHoursMode === 'real' ? 'fichada' : 'planificada + novedades del debe'}) + novedades (V/L/E/A/AA/PG) + franco trabajado + extras/ops.
+                  Las novedades se atribuyen al puesto (malla / historial / legajo) y en modo planificado entran en la malla para el Δ vs SLA.
                   Sin precios. Pirámide empresa → cliente → objetivo.
                   Techo liquidación = <strong>200 hs</strong>/vigilador (no mezclar con jornada 192).
                   {informe.bolsaModo === 'sin_indice'
@@ -2476,8 +2478,8 @@ export default function AnalisisPage() {
 
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Target} color="#4f46e5" label="SLA empresa" value={fin.slaHours.toLocaleString('es-AR')} unit="hs" subtext={`${fin.clientes} clientes · ${fin.objetivos} objetivos`}/>
-                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Malla fichada' : 'Malla planificada'} value={fin.hsMalla.toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fin.hsPlan.toLocaleString('es-AR')} hs` : `Real ${fin.hsReal.toLocaleString('es-AR')} hs`}/>
-                <KpiCard icon={Wallet} color="#0f766e" label="Consumo hs-hombre" value={fin.hsConsumo.toLocaleString('es-AR')} unit="hs" subtext="Malla + novedades + FT + extra + ops" alert={fin.deltaVsSla > 8}/>
+                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Malla fichada' : 'Malla planificada'} value={fin.hsMalla.toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fin.hsPlan.toLocaleString('es-AR')} hs` : `Cobertura ${fin.hsPlan.toLocaleString('es-AR')} + novedades ${fin.novedades.total.toLocaleString('es-AR')}`}/>
+                <KpiCard icon={Wallet} color="#0f766e" label="Consumo hs-hombre" value={fin.hsConsumo.toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? 'Fichada + novedades + FT + extra + ops' : 'Debe (malla + novedades) + FT + extra + ops'} alert={fin.deltaVsSla > 8}/>
                 <KpiCard icon={Users} color="#0891b2" label="Hs / guardia" value={fin.hsConsumoPorGuardia.toLocaleString('es-AR')} unit="hs" subtext={`${fin.guardias} guardias · SLA ${fin.hsSlaPorGuardia.toLocaleString('es-AR')} hs/c/u`}/>
                 <KpiCard icon={AlertTriangle} color="#ea580c" label="FT + extras + ops" value={(fin.hsFt + fin.hsExtra + fin.hsOps).toLocaleString('es-AR')} unit="hs" subtext={`FT ${fin.hsFt.toLocaleString('es-AR')} · ext ${fin.hsExtra.toLocaleString('es-AR')} · ops ${fin.hsOps.toLocaleString('es-AR')}`}/>
                 <KpiCard icon={Activity} color={fin.eficienciaPct >= 90 ? '#059669' : fin.eficienciaPct >= 75 ? '#d97706' : '#dc2626'} label="Eficiencia SLA/consumo" value={`${fin.eficienciaPct}%`} subtext={`Novedades ${fin.novedades.total.toLocaleString('es-AR')} · vacante ${fin.hsVacante.toLocaleString('es-AR')}`} alert={fin.eficienciaPct < 75}/>

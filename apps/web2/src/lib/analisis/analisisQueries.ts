@@ -91,6 +91,16 @@ export function envelopingRange(start: Date, end: Date): { start: Date; end: Dat
   };
 }
 
+/** Mes calendario de `now` y los 3 anteriores (4 meses). Ago 2026 → 01/05–31/08. */
+export function analisisWorkingWindow(now: Date): { start: Date; end: Date } {
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  return {
+    start: new Date(y, m - 3, 1, 0, 0, 0, 0),
+    end: new Date(y, m + 1, 0, 23, 59, 59, 999),
+  };
+}
+
 export function mergeIntervals(intervals: MsRange[]): MsRange[] {
   if (!intervals.length) return [];
   const sorted = [...intervals].sort((a, b) => a.startMs - b.startMs);
@@ -133,7 +143,7 @@ export function gapsToFetch(intervals: MsRange[], requested: MsRange): MsRange[]
   return remaining;
 }
 
-/** Parte un rango en ventanas de N días calendario (carga progresiva de malla). */
+/** Parte un rango en ventanas de N días calendario. */
 export function splitRangeByDays(range: MsRange, dayChunk: number): MsRange[] {
   const days = Math.max(1, Math.floor(dayChunk) || 1);
   const out: MsRange[] = [];
@@ -145,6 +155,26 @@ export function splitRangeByDays(range: MsRange, dayChunk: number): MsRange[] {
     const chunkEnd = Math.min(next.getTime() - 1, endMs);
     out.push({ startMs: chunkStart, endMs: chunkEnd });
     cursor = new Date(chunkEnd + 1);
+  }
+  return out;
+}
+
+/** Meses calendario (month = 1..12) que cubren el rango. */
+export function monthsInRange(range: MsRange): Array<{ year: number; month: number }> {
+  const start = new Date(range.startMs);
+  const end = new Date(range.endMs);
+  const out: Array<{ year: number; month: number }> = [];
+  let y = start.getFullYear();
+  let m = start.getMonth();
+  const endY = end.getFullYear();
+  const endM = end.getMonth();
+  while (y < endY || (y === endY && m <= endM)) {
+    out.push({ year: y, month: m + 1 });
+    m += 1;
+    if (m > 11) {
+      m = 0;
+      y += 1;
+    }
   }
   return out;
 }
