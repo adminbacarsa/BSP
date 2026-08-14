@@ -621,5 +621,12 @@ service cloud.firestore {
       allow read:  if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
       allow write: if false;
     }
+
+    match /eventos/{eventoId} {
+      allow read:   if tenantAdminRead();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
   }
 }
