@@ -21,7 +21,7 @@ import {
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
 import { db, getDocsOnce } from '@/lib/firebase';
-import { eventoService, eventosParaFecha, calcHorasEvento, type Evento } from '@/services/eventoService';
+import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 
@@ -5793,6 +5793,8 @@ export default function PlanificacionPage() {
                         if (change.eventoId) {
                             turnoPayload.eventoId = change.eventoId;
                             turnoPayload.eventoNombre = change.eventoNombre || null;
+                            turnoPayload.servicioId = change.servicioId || null;
+                            turnoPayload.servicioNombre = change.servicioNombre || null;
                         }
 
                         batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
@@ -12674,28 +12676,34 @@ export default function PlanificacionPage() {
                                                         >
                                                             <span>ESC</span><span className="text-[8px]">Escuela</span>
                                                         </button>
-                                                        {/* Botón EV: aparece si hay eventos activos ese día */}
+                                                        {/* Botón EV: aparece si hay servicios de evento activos ese día */}
                                                         {(() => {
                                                             const cellKey = `${selectedCell.empId}_${selectedCell.dateStr}`;
-                                                            const evsDia = eventosParaFecha(eventos, selectedCell.dateStr);
-                                                            if (evsDia.length === 0) return null;
+                                                            const srvsDia = serviciosParaFecha(eventos, selectedCell.dateStr);
+                                                            if (srvsDia.length === 0) return null;
                                                             const isPickerOpen = eventoPickerKey === cellKey;
+                                                            const assignServicio = ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {
+                                                                if (isServiceLocked) return;
+                                                                handleAssignShift({
+                                                                    code: 'EV',
+                                                                    name: servicio.nombre,
+                                                                    hours: servicio.horasTotal,
+                                                                    startTime: servicio.horaInicio,
+                                                                    endTime: servicio.horaFin,
+                                                                    eventoId: evento.id,
+                                                                    eventoNombre: evento.nombre,
+                                                                    servicioId: servicio.id,
+                                                                    servicioNombre: servicio.nombre,
+                                                                }, 'Evento');
+                                                                setEventoPickerKey(null);
+                                                            };
                                                             return (
                                                                 <div className="col-span-3">
                                                                     <button
                                                                         onClick={() => {
                                                                             if (isServiceLocked) return;
-                                                                            if (evsDia.length === 1) {
-                                                                                const ev = evsDia[0];
-                                                                                handleAssignShift({
-                                                                                    code: 'EV',
-                                                                                    name: ev.nombre,
-                                                                                    hours: ev.horasEvento,
-                                                                                    startTime: ev.horaInicio,
-                                                                                    endTime: ev.horaFin,
-                                                                                    eventoId: ev.id,
-                                                                                    eventoNombre: ev.nombre,
-                                                                                }, 'Evento');
+                                                                            if (srvsDia.length === 1) {
+                                                                                assignServicio(srvsDia[0]);
                                                                             } else {
                                                                                 setEventoPickerKey(isPickerOpen ? null : cellKey);
                                                                             }
@@ -12706,32 +12714,34 @@ export default function PlanificacionPage() {
                                                                     >
                                                                         <span>EV</span>
                                                                         <span className="text-[9px] font-bold truncate max-w-[120px]">
-                                                                            {evsDia.length === 1 ? evsDia[0].nombre : `${evsDia.length} eventos`}
+                                                                            {srvsDia.length === 1 ? srvsDia[0].servicio.nombre : `${srvsDia.length} servicios`}
                                                                         </span>
                                                                     </button>
-                                                                    {isPickerOpen && evsDia.length > 1 && (
-                                                                        <div className="mt-1 flex flex-col gap-1 bg-yellow-50 border border-yellow-300 rounded-lg p-2">
-                                                                            {evsDia.map(ev => (
-                                                                                <button
-                                                                                    key={ev.id}
-                                                                                    onClick={() => {
-                                                                                        setEventoPickerKey(null);
-                                                                                        handleAssignShift({
-                                                                                            code: 'EV',
-                                                                                            name: ev.nombre,
-                                                                                            hours: ev.horasEvento,
-                                                                                            startTime: ev.horaInicio,
-                                                                                            endTime: ev.horaFin,
-                                                                                            eventoId: ev.id,
-                                                                                            eventoNombre: ev.nombre,
-                                                                                        }, 'Evento');
-                                                                                    }}
-                                                                                    className="text-left px-2 py-1.5 rounded text-xs font-bold text-yellow-900 hover:bg-yellow-200 flex justify-between"
-                                                                                >
-                                                                                    <span>{ev.nombre}</span>
-                                                                                    <span className="text-[10px] font-normal opacity-70">{ev.horaInicio}–{ev.horaFin} · {ev.horasEvento}hs</span>
-                                                                                </button>
-                                                                            ))}
+                                                                    {isPickerOpen && srvsDia.length > 1 && (
+                                                                        <div className="mt-1 flex flex-col gap-1 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg p-2 max-h-48 overflow-y-auto">
+                                                                            {srvsDia.map(({ evento, servicio }) => {
+                                                                                const horarioBadge = servicio.tipoTurno === '3x8'
+                                                                                    ? '3×8h'
+                                                                                    : servicio.tipoTurno === '2x12'
+                                                                                        ? '2×12h'
+                                                                                        : `${servicio.horaInicio}–${servicio.horaFin}`;
+                                                                                return (
+                                                                                    <button
+                                                                                        key={servicio.id}
+                                                                                        onClick={() => assignServicio({ evento, servicio })}
+                                                                                        className="text-left px-2 py-2 rounded text-xs font-bold text-yellow-900 hover:bg-yellow-200 border-b border-yellow-100 last:border-0"
+                                                                                    >
+                                                                                        <div className="flex items-center justify-between gap-2">
+                                                                                            <span className="font-black truncate">{servicio.nombre}</span>
+                                                                                            <span className="text-[9px] font-normal opacity-60 whitespace-nowrap shrink-0">{evento.nombre}</span>
+                                                                                        </div>
+                                                                                        <div className="flex items-center gap-1.5 mt-0.5 font-normal text-[10px] opacity-70">
+                                                                                            <span className="px-1 py-0.5 bg-yellow-300 rounded text-[9px] font-bold">{horarioBadge}</span>
+                                                                                            {servicio.cupo > 0 && <span>{servicio.cupo} pax</span>}
+                                                                                        </div>
+                                                                                    </button>
+                                                                                );
+                                                                            })}
                                                                         </div>
                                                                     )}
                                                                 </div>
