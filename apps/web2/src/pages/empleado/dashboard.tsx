@@ -31,6 +31,14 @@ type Shift = {
   checkInRequestedAt?: any;
   checkInRequestStatus?: string;
   lateArrivalAt?: any;
+  // Campos de evento
+  eventoId?: string;
+  eventoNombre?: string;
+  servicioId?: string;
+  servicioNombre?: string;
+  code?: string;
+  type?: string;
+  hours?: number;
 };
 
 type ObjectiveLocation = { lat: number; lng: number; name: string; clientName?: string; address?: string; allowRemoteCheckIn?: boolean };
@@ -174,6 +182,7 @@ export default function EmployeeDashboard() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loadingShifts, setLoadingShifts] = useState(false);
   const [objectivesMap, setObjectivesMap] = useState<Record<string, ObjectiveLocation>>({});
+  const [eventosMap, setEventosMap] = useState<Record<string, any>>({});
   const [checkingShiftId, setCheckingShiftId] = useState<string | null>(null);
   const [absenceType, setAbsenceType] = useState<'Vacaciones' | 'Enfermedad' | 'ART' | 'Ausencia con aviso' | 'Licencia Esp.'>('Vacaciones');
   const [absenceReason, setAbsenceReason] = useState('');
@@ -546,6 +555,19 @@ export default function EmployeeDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, authLoading, previewEmpId]);
 
+  // Cargar documentos de evento para turnos EV
+  useEffect(() => {
+    const ids = [...new Set(shifts.filter(s => s.eventoId).map(s => s.eventoId as string))];
+    if (ids.length === 0) return;
+    Promise.all(ids.map(id => getDoc(doc(db, 'eventos', id))))
+      .then(docs => {
+        const map: Record<string, any> = {};
+        docs.forEach(d => { if (d.exists()) map[d.id] = { id: d.id, ...d.data() }; });
+        setEventosMap(map);
+      })
+      .catch(() => {});
+  }, [shifts]);
+
   useEffect(() => {
     if (!user || authLoading) return;
     // Superadmin en modo preview: saltar verificación de dispositivo
@@ -795,6 +817,35 @@ export default function EmployeeDashboard() {
     if (code) return code;
     if (s?.hours) return `${s.hours}h`;
     return 'Turno';
+  };
+
+  // Devuelve info del servicio de evento para mostrar en el portal
+  const getEvData = (shift: Shift) => {
+    if (!shift.eventoId) return null;
+    const evento = eventosMap[shift.eventoId];
+    const servicio = evento?.servicios?.find((s: any) => s.id === shift.servicioId) ?? null;
+    const tipoTurno = servicio?.tipoTurno ?? null;
+    const horarioBadge = tipoTurno === '3x8' ? '3×8h'
+      : tipoTurno === '2x12' ? '2×12h'
+      : (servicio?.horaInicio && servicio?.horaFin) ? `${servicio.horaInicio}–${servicio.horaFin}`
+      : null;
+    const ubi = servicio?.ubicacion ?? null;
+    const direccion = ubi?.tipo === 'nueva' ? (ubi.direccion ?? null) : (ubi?.objectiveNombre ?? null);
+    const lat = ubi?.tipo === 'nueva' ? (ubi.latitud ?? null) : null;
+    const lng = ubi?.tipo === 'nueva' ? (ubi.longitud ?? null) : null;
+    const mapsUrl = (lat && lng)
+      ? `https://www.google.com/maps?q=${lat},${lng}`
+      : direccion ? `https://www.google.com/maps/search/${encodeURIComponent(direccion)}` : null;
+    return {
+      nombre: servicio?.nombre ?? shift.servicioNombre ?? shift.eventoNombre ?? 'Evento',
+      eventoNombre: evento?.nombre ?? shift.eventoNombre ?? null,
+      clienteNombre: evento?.clienteNombre ?? null,
+      horarioBadge,
+      direccion,
+      mapsUrl,
+      requisitos: servicio?.requisitos ?? null,
+      instrucciones: servicio?.instrucciones ?? null,
+    };
   };
 
   const formatSwapOption = (s: any) => {
@@ -2126,8 +2177,38 @@ export default function EmployeeDashboard() {
                 </p>
               )}
               {(todayShift || nextShift) && !todayShiftAny?.isFranco && (() => {
-                const heroObjective = todayObjective || nextShiftObjective;
                 const heroShift = todayShift || nextShift;
+                const evData = heroShift ? getEvData(heroShift) : null;
+                if (evData) {
+                  return (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className="px-3 py-1 bg-yellow-400/20 border border-yellow-400/30 rounded-full text-xs font-black text-yellow-200">
+                        🎯 {evData.nombre}
+                      </span>
+                      {evData.eventoNombre && evData.eventoNombre !== evData.nombre && (
+                        <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-indigo-100">{evData.eventoNombre}</span>
+                      )}
+                      {evData.clienteNombre && (
+                        <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-indigo-100">{evData.clienteNombre}</span>
+                      )}
+                      {evData.horarioBadge && (
+                        <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-indigo-100">{evData.horarioBadge}</span>
+                      )}
+                      {evData.direccion && (
+                        <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-indigo-100 flex items-center gap-1 max-w-full">
+                          <MapPin size={10} className="shrink-0"/> <span className="truncate">{evData.direccion}</span>
+                        </span>
+                      )}
+                      {evData.mapsUrl && (
+                        <a href={evData.mapsUrl} target="_blank" rel="noopener noreferrer"
+                           className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/20 border border-indigo-400/30 rounded-full text-xs font-black text-indigo-200 hover:bg-indigo-500/30 transition-colors">
+                          <Navigation size={11}/> Cómo llegar
+                        </a>
+                      )}
+                    </div>
+                  );
+                }
+                const heroObjective = todayObjective || nextShiftObjective;
                 const hasCoords = heroObjective && heroObjective.lat && heroObjective.lng;
                 const heroMapsUrl = hasCoords
                   ? `https://www.google.com/maps?q=${heroObjective!.lat},${heroObjective!.lng}`
@@ -2305,24 +2386,32 @@ export default function EmployeeDashboard() {
                           <p className="text-sm font-black text-emerald-400">Franco</p>
                           <p className="text-[10px] text-slate-600 mt-0.5">Día libre</p>
                         </div>
-                      ) : (
-                        <div>
-                          <p className="text-sm font-black text-white truncate leading-tight">
-                            {objective?.name || shift.objectiveName || (shift.objectiveId ? objectivesMap[shift.objectiveId]?.name : null) || 'Sin objetivo'}
-                          </p>
-                          <p className="text-[11px] text-indigo-400 font-bold mt-1">
-                            {formatTime(shift.startTime)} – {formatTime(shift.endTime)}
-                          </p>
-                          {objective?.clientName && (
-                            <p className="text-[9px] text-slate-600 truncate mt-0.5">{objective.clientName}</p>
-                          )}
-                          {shift.isPresent && (
-                            <p className="text-[9px] text-emerald-400 font-bold mt-1.5 flex items-center gap-1">
-                              <CheckCircle size={8}/> Presente
+                      ) : (() => {
+                        const evd = getEvData(shift);
+                        return (
+                          <div>
+                            <p className="text-sm font-black text-white truncate leading-tight">
+                              {evd ? evd.nombre : (objective?.name || shift.objectiveName || (shift.objectiveId ? objectivesMap[shift.objectiveId]?.name : null) || 'Sin objetivo')}
                             </p>
-                          )}
-                        </div>
-                      )
+                            <p className="text-[11px] text-indigo-400 font-bold mt-1">
+                              {evd?.horarioBadge ?? `${formatTime(shift.startTime)} – ${formatTime(shift.endTime)}`}
+                            </p>
+                            {(evd ? evd.clienteNombre : objective?.clientName) && (
+                              <p className="text-[9px] text-slate-600 truncate mt-0.5">{evd ? evd.clienteNombre : objective?.clientName}</p>
+                            )}
+                            {evd?.direccion && (
+                              <p className="text-[9px] text-slate-500 truncate mt-0.5 flex items-center gap-1">
+                                <MapPin size={8} className="shrink-0"/> {evd.direccion}
+                              </p>
+                            )}
+                            {shift.isPresent && (
+                              <p className="text-[9px] text-emerald-400 font-bold mt-1.5 flex items-center gap-1">
+                                <CheckCircle size={8}/> Presente
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()
                     ) : (
                       <p className="text-xs text-slate-600 font-bold">Sin turno</p>
                     )}
@@ -2390,10 +2479,11 @@ export default function EmployeeDashboard() {
                 const DAY_ABBR = ['Do','Lu','Ma','Mi','Ju','Vi','Sa'];
                 const selShift = selectedCalendarDay ? shiftsByDate[selectedCalendarDay] : null;
                 const selObjData = selShift?.objectiveId ? objectivesMap[selShift.objectiveId] : null;
-                const selLabel = selShift?.isFranco ? 'Franco' : (selObjData?.name || selShift?.objectiveName || selShift?.clientName || (selShift?.objectiveId ? objectivesMap[selShift.objectiveId]?.name : null) || 'Sin objetivo');
-                const selMapsUrl = selObjData && selObjData.lat && selObjData.lng
+                const selEvData = selShift ? getEvData(selShift) : null;
+                const selLabel = selShift?.isFranco ? 'Franco' : (selEvData?.nombre || selObjData?.name || selShift?.objectiveName || selShift?.clientName || (selShift?.objectiveId ? objectivesMap[selShift.objectiveId]?.name : null) || 'Sin objetivo');
+                const selMapsUrl = selEvData?.mapsUrl ?? (selObjData && selObjData.lat && selObjData.lng
                   ? `https://www.google.com/maps?q=${selObjData.lat},${selObjData.lng}`
-                  : selObjData?.address ? `https://www.google.com/maps/search/${encodeURIComponent(selObjData.address)}` : null;
+                  : selObjData?.address ? `https://www.google.com/maps/search/${encodeURIComponent(selObjData.address)}` : null);
 
                 const getCellStyle = (key: string, selected: boolean) => {
                   const s = shiftsByDate[key];
@@ -2491,15 +2581,25 @@ export default function EmployeeDashboard() {
                               <div className="min-w-0">
                                 <p className={`text-sm font-black ${selShift.isFranco ? 'text-emerald-300' : 'text-white'}`}>{selLabel}</p>
                                 {!selShift.isFranco && (
-                                  <p className="text-[11px] text-slate-400 font-bold">{formatTime(selShift.startTime)} – {formatTime(selShift.endTime)}</p>
-                                )}
-                                {selObjData?.clientName && <p className="text-[10px] text-slate-500 mt-0.5">{selObjData.clientName}</p>}
-                                {selObjData?.address && (
-                                  <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
-                                    <MapPin size={9}/> {selObjData.address}
+                                  <p className="text-[11px] text-slate-400 font-bold">
+                                    {selEvData?.horarioBadge ?? `${formatTime(selShift.startTime)} – ${formatTime(selShift.endTime)}`}
                                   </p>
                                 )}
-                                {selShift.positionName && <p className="text-[10px] text-slate-600 mt-0.5">Puesto: {selShift.positionName}</p>}
+                                {selEvData ? (
+                                  <>
+                                    {selEvData.eventoNombre && selEvData.eventoNombre !== selEvData.nombre && <p className="text-[10px] text-yellow-400/80 mt-0.5">{selEvData.eventoNombre}</p>}
+                                    {selEvData.clienteNombre && <p className="text-[10px] text-slate-500 mt-0.5">{selEvData.clienteNombre}</p>}
+                                    {selEvData.direccion && <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5"><MapPin size={9}/> {selEvData.direccion}</p>}
+                                    {selEvData.requisitos && <p className="text-[10px] text-amber-400/80 mt-1">Requisitos: {selEvData.requisitos}</p>}
+                                    {selEvData.instrucciones && <p className="text-[10px] text-slate-400 mt-0.5">{selEvData.instrucciones}</p>}
+                                  </>
+                                ) : (
+                                  <>
+                                    {selObjData?.clientName && <p className="text-[10px] text-slate-500 mt-0.5">{selObjData.clientName}</p>}
+                                    {selObjData?.address && <p className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5"><MapPin size={9}/> {selObjData.address}</p>}
+                                    {selShift.positionName && <p className="text-[10px] text-slate-600 mt-0.5">Puesto: {selShift.positionName}</p>}
+                                  </>
+                                )}
                                 {selShift.isPresent && <p className="text-[10px] text-emerald-400 font-bold flex items-center gap-1 mt-1"><CheckCircle size={10}/> Presente registrado</p>}
                               </div>
                               {selMapsUrl && (
@@ -2532,35 +2632,44 @@ export default function EmployeeDashboard() {
                 <div className="divide-y divide-slate-800/60">
                   {upcomingShifts.map(shift => {
                     const objectiveData = shift.objectiveId ? objectivesMap[shift.objectiveId] : null;
-                    const objectiveLabel = shift.isFranco ? 'Franco' : (objectiveData?.name || shift.objectiveName || shift.clientName || (shift.objectiveId ? objectivesMap[shift.objectiveId]?.name : null) || 'Sin objetivo');
+                    const evd = getEvData(shift);
+                    const objectiveLabel = shift.isFranco ? 'Franco' : (evd?.nombre || objectiveData?.name || shift.objectiveName || shift.clientName || (shift.objectiveId ? objectivesMap[shift.objectiveId]?.name : null) || 'Sin objetivo');
                     const isFranco = !!shift.isFranco;
                     const rawStatus = shift.status || (shift.isPresent ? 'PRESENT' : 'ASSIGNED');
                     const isPresent = shift.isPresent || rawStatus === 'PRESENT' || rawStatus === 'InProgress';
                     const shiftCode = (shift.code || '').toUpperCase();
-                    const codeColor = isFranco ? 'bg-emerald-900/40 text-emerald-400' : isPresent ? 'bg-indigo-900/40 text-indigo-400' : 'bg-slate-800 text-slate-400';
+                    const codeColor = isFranco ? 'bg-emerald-900/40 text-emerald-400' : evd ? 'bg-yellow-900/40 text-yellow-400' : isPresent ? 'bg-indigo-900/40 text-indigo-400' : 'bg-slate-800 text-slate-400';
                     const hasCoords = objectiveData && objectiveData.lat && objectiveData.lng;
-                    const mapsUrl = hasCoords
+                    const mapsUrl = evd?.mapsUrl ?? (hasCoords
                       ? `https://www.google.com/maps?q=${objectiveData!.lat},${objectiveData!.lng}`
                       : objectiveData?.address
                         ? `https://www.google.com/maps/search/${encodeURIComponent(objectiveData.address)}`
-                        : null;
+                        : null);
                     return (
-                      <div key={shift.id} className={`px-4 py-3.5 flex items-start gap-3 ${isFranco ? 'bg-emerald-950/10' : ''}`}>
+                      <div key={shift.id} className={`px-4 py-3.5 flex items-start gap-3 ${isFranco ? 'bg-emerald-950/10' : evd ? 'bg-yellow-950/10' : ''}`}>
                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-black text-xs mt-0.5 ${codeColor}`}>
                           {shiftCode || (isFranco ? 'F' : 'T')}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-black truncate ${isFranco ? 'text-emerald-300' : 'text-white'}`}>{objectiveLabel}</p>
+                          <p className={`text-sm font-black truncate ${isFranco ? 'text-emerald-300' : evd ? 'text-yellow-300' : 'text-white'}`}>{objectiveLabel}</p>
                           <p className="text-[11px] text-slate-500">
                             {formatDate(shift.startTime)}
-                            {!isFranco && ` · ${formatTime(shift.startTime)} – ${formatTime(shift.endTime)}`}
+                            {!isFranco && evd?.horarioBadge && ` · ${evd.horarioBadge}`}
+                            {!isFranco && !evd?.horarioBadge && ` · ${formatTime(shift.startTime)} – ${formatTime(shift.endTime)}`}
                           </p>
-                          {!isFranco && objectiveData?.address && (
+                          {!isFranco && evd && (
+                            <>
+                              {evd.eventoNombre && evd.eventoNombre !== evd.nombre && <p className="text-[10px] text-yellow-500/70 truncate mt-0.5">{evd.eventoNombre}</p>}
+                              {evd.direccion && <p className="text-[10px] text-slate-600 truncate mt-0.5 flex items-center gap-1"><MapPin size={9} className="shrink-0"/> {evd.direccion}</p>}
+                              {evd.clienteNombre && <p className="text-[10px] text-slate-600 truncate">{evd.clienteNombre}</p>}
+                            </>
+                          )}
+                          {!isFranco && !evd && objectiveData?.address && (
                             <p className="text-[10px] text-slate-600 truncate mt-0.5 flex items-center gap-1">
                               <MapPin size={9} className="shrink-0"/> {objectiveData.address}
                             </p>
                           )}
-                          {!isFranco && objectiveData?.clientName && (
+                          {!isFranco && !evd && objectiveData?.clientName && (
                             <p className="text-[10px] text-slate-600 truncate">{objectiveData.clientName}</p>
                           )}
                         </div>
