@@ -3,13 +3,18 @@ import { X, Clock, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   collectSplitFrancoConflicts,
+  listEarlyStartCandidates,
   listExtensionCandidates,
-  listVacancySplitWorkersForDay,
+  listPlannedFrancoCandidates,
   resolveEmployeeShift,
   type FrancoCoverageConflict,
   type SegmentCandidateRow,
 } from '@/lib/planificacion/planningRecompositionApply';
-import { applyOperationalGapCloseToChanges } from '@/lib/planificacion/operationalGapCoverage';
+import {
+  applyFrancoTrabajadoGapCloseToChanges,
+  applyOperationalGapCloseToChanges,
+  applySingleWorkerFullGapCloseToChanges,
+} from '@/lib/planificacion/operationalGapCoverage';
 import {
   describeVacancySplitPlan,
   resolveVacancySplitSegmentTimes,
@@ -66,9 +71,13 @@ export default function PlanningSlaGapCloseModal({
   onClose,
   onRequestSupervisorAuth,
 }: Props) {
+  const [coverMode, setCoverMode] = useState<'solo' | 'split'>('solo');
   const [extId, setExtId] = useState('');
   const [extApplyDate, setExtApplyDate] = useState('');
   const [secondId, setSecondId] = useState('');
+  const [soloId, setSoloId] = useState('');
+  const [soloApplyDate, setSoloApplyDate] = useState('');
+  const [ftId, setFtId] = useState('');
   const [extExtraH, setExtExtraH] = useState<number | null>(null);
   const [secondExtraH, setSecondExtraH] = useState<number | null>(null);
   const [q, setQ] = useState('');
@@ -100,16 +109,45 @@ export default function PlanningSlaGapCloseModal({
     ).filter((c) => !q || c.name.toLowerCase().includes(q)),
     [data.gapBand, data.dateStr, objectiveId, employees, shiftsMap, pendingChanges, listCtx, q],
   );
-  const poolSecond = listVacancySplitWorkersForDay(
-    data.dateStr,
-    objectiveId,
-    employees,
-    shiftsMap,
-    pendingChanges,
-    [extId].filter(Boolean),
-    listCtx,
-    splitPlan ? [splitPlan.adelBand] : [],
-  ).filter((c) => !q || c.name.toLowerCase().includes(q));
+  const poolSecond = useMemo(
+    () => listEarlyStartCandidates(
+      data.gapBand,
+      data.dateStr,
+      objectiveId,
+      employees,
+      shiftsMap,
+      pendingChanges,
+      [extId].filter(Boolean),
+      listCtx,
+    ).filter((c) => !q || c.name.toLowerCase().includes(q)),
+    [data.gapBand, data.dateStr, objectiveId, employees, shiftsMap, pendingChanges, extId, listCtx, q],
+  );
+  const poolSolo = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: Array<SegmentCandidateRow & { soloRole: 'ext' | 'adel' }> = [];
+    for (const c of poolExt) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      rows.push({ ...c, soloRole: 'ext' });
+    }
+    for (const c of poolSecond) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      rows.push({ ...c, soloRole: 'adel' });
+    }
+    return rows;
+  }, [poolExt, poolSecond]);
+  const poolFt = useMemo(
+    () => listPlannedFrancoCandidates(
+      data.dateStr,
+      objectiveId,
+      employees,
+      shiftsMap,
+      pendingChanges,
+      [extId, secondId].filter(Boolean),
+    ).filter((c) => !q || c.name.toLowerCase().includes(q)),
+    [data.dateStr, objectiveId, employees, shiftsMap, pendingChanges, extId, secondId, q],
+  );
 
   const manual = vacancySplitUsesManualExtraHours({ extExtraHours: extExtraH, secondExtExtraHours: secondExtraH });
   const extCand = poolExt.find((c) => c.id === extId);
@@ -133,15 +171,51 @@ export default function PlanningSlaGapCloseModal({
   );
 
   const commit = (authorizeFranco: boolean) => {
-    if (!extId || !secondId) {
-      toast.error('Elegí guardia para el 1.er y el 2.º tramo.');
-      return;
-    }
-    if (extId === secondId) {
-      toast.error('Los dos tramos deben ser guardias distintos.');
-      return;
-    }
     try {
+      if (ftId) {
+        const changes = applyFrancoTrabajadoGapCloseToChanges(pendingChanges, {
+          objectiveId,
+          clientId,
+          dateStr: data.dateStr,
+          gapPosition: data.positionName,
+          gapBand: data.gapBand,
+          employeeId: ftId,
+          positionStructure,
+          authorizeFrancoTrabajado: authorizeFranco,
+        }, {
+          shiftsMap,
+          employeesById,
+        });
+        onApply(changes);
+        onClose();
+        return;
+      }
+      if (coverMode === 'solo' && soloId) {
+        const changes = applySingleWorkerFullGapCloseToChanges(pendingChanges, {
+          objectiveId,
+          clientId,
+          dateStr: data.dateStr,
+          gapPosition: data.positionName,
+          gapBand: data.gapBand,
+          employeeId: soloId,
+          applyDateStr: soloApplyDate || data.dateStr,
+          positionStructure,
+        }, {
+          shiftsMap,
+          employeesById,
+        });
+        onApply(changes);
+        onClose();
+        return;
+      }
+      if (!extId || !secondId) {
+        toast.error('Elegí una persona para las 8 h, o un guardia por tramo, o un franco trabajado.');
+        return;
+      }
+      if (extId === secondId) {
+        toast.error('Los dos tramos deben ser guardias distintos.');
+        return;
+      }
       const extShift = resolveEmployeeShift(extId, extShiftDate, shiftsMap, pendingChanges);
       const secondShift = resolveEmployeeShift(secondId, data.dateStr, shiftsMap, pendingChanges);
       if (!extShift || extShift.isDeleted) {
@@ -181,6 +255,22 @@ export default function PlanningSlaGapCloseModal({
   };
 
   const tryApply = () => {
+    if (ftId) {
+      const ftShift = resolveEmployeeShift(ftId, data.dateStr, shiftsMap, pendingChanges);
+      const conflicts: FrancoCoverageConflict[] = [{
+        employeeId: ftId,
+        employeeName: employeesById[ftId]?.name || ftId,
+        dateStr: data.dateStr,
+        role: 'SUBSTITUTE',
+        francoCode: String(ftShift?.code || 'F').toUpperCase(),
+      }];
+      if (onRequestSupervisorAuth) {
+        onRequestSupervisorAuth(conflicts, () => commit(true));
+        return;
+      }
+      commit(true);
+      return;
+    }
     const conflicts = collectSplitFrancoConflicts(
       data.dateStr,
       extId,
@@ -215,7 +305,7 @@ export default function PlanningSlaGapCloseModal({
               {titular.scheduleLabel !== '—' && <> · {titular.scheduleLabel}</>}
             </p>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              Sin licencia en titular — extensiones de quien ya está en servicio (cualquier puesto del objetivo).
+              Una persona cubre las 8 h, o se reparte 4+4 (extensión del turno anterior + adelanto del siguiente).
             </p>
             {splitPlan && (
               <p className="text-[9px] font-bold text-rose-800 mt-1">
@@ -236,9 +326,102 @@ export default function PlanningSlaGapCloseModal({
             onChange={(e) => setQ(e.target.value)}
           />
 
+          <div className="rounded-xl border border-violet-200 bg-violet-50/70 p-2">
+            <div className="text-[10px] font-black uppercase text-violet-900 mb-1">
+              Franco trabajado (FT) — cubre la banda completa
+            </div>
+            <p className="text-[9px] font-bold text-violet-800/80 mb-1.5">
+              Último recurso CCT (costo extra). Requiere autorización de supervisor.
+            </p>
+            <div className="space-y-1 max-h-32 overflow-y-auto rounded-xl border border-violet-100 bg-white p-1">
+              {poolFt.length === 0 ? (
+                <p className="text-[10px] font-bold text-slate-500 px-2 py-3">
+                  Nadie de este objetivo está de franco (F/FF/FP) ese día.
+                </p>
+              ) : poolFt.map((c) => (
+                <button
+                  key={`ft_${c.id}`}
+                  type="button"
+                  onClick={() => {
+                    setFtId(c.id);
+                    setSoloId('');
+                    setExtId('');
+                    setSecondId('');
+                    setExtApplyDate('');
+                  }}
+                  className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${ftId === c.id ? 'bg-violet-600 text-white border-violet-700' : 'bg-white border-slate-200 text-slate-800'}`}
+                >
+                  {c.name} · {c.code} · Franco
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setCoverMode('solo');
+                setExtId('');
+                setSecondId('');
+                setExtApplyDate('');
+              }}
+              className={`flex-1 py-2 rounded-xl text-[10px] font-black border ${coverMode === 'solo' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white border-slate-200 text-slate-600'}`}
+            >
+              Una persona · 8 h
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCoverMode('split');
+                setSoloId('');
+              }}
+              className={`flex-1 py-2 rounded-xl text-[10px] font-black border ${coverMode === 'split' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white border-slate-200 text-slate-600'}`}
+            >
+              Repartir 4+4
+            </button>
+          </div>
+
+          {coverMode === 'solo' && (
+          <div>
+            <div className="text-[10px] font-black uppercase text-slate-500 mb-1">
+              Cubre {titular.scheduleLabel !== '—' ? titular.scheduleLabel : 'las 8 h'}
+            </div>
+            <p className="text-[9px] font-bold text-slate-500 mb-1.5">
+              Solo banda anterior ({splitPlan?.extBand || 'M'}) o siguiente ({splitPlan?.adelBand || 'N'}). No se adelanta un turno ya pasado.
+            </p>
+            <div className="space-y-1 max-h-40 overflow-y-auto rounded-xl border border-slate-100 p-1">
+              {poolSolo.length === 0 ? (
+                <p className="text-[10px] font-bold text-amber-800 px-2 py-3">
+                  No hay guardia en la banda anterior o siguiente para cubrir las 8 h.
+                </p>
+              ) : poolSolo.map((c) => (
+                <button
+                  key={`solo_${c.id}_${c.extensionApplyDate || data.dateStr}`}
+                  type="button"
+                  onClick={() => {
+                    setFtId('');
+                    setSoloId(c.id);
+                    setSoloApplyDate(c.extensionApplyDate || data.dateStr);
+                  }}
+                  className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${soloId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
+                >
+                  {c.name} · {c.code} · {c.positionName}
+                  <span className="block text-[9px] font-bold text-slate-500">
+                    {c.soloRole === 'ext' ? 'Extiende' : 'Adelanta'} {titular.scheduleLabel !== '—' ? titular.scheduleLabel : '8 h'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+          )}
+
+          {coverMode === 'split' && (
+          <>
           <div>
             <div className="text-[10px] font-black uppercase text-slate-500 mb-1">
               1.er tramo {preview ? `(${preview.first.from}–${preview.first.to})` : splitPlan ? `(${splitPlan.extSegment})` : ''}
+              {splitPlan?.extBand && <span className="font-mono text-slate-400"> · solo {splitPlan.extBand}</span>}
             </div>
             <div className="space-y-1 max-h-32 overflow-y-auto rounded-xl border border-slate-100 p-1">
               {poolExt.length === 0 ? (
@@ -248,6 +431,8 @@ export default function PlanningSlaGapCloseModal({
                   key={`${c.id}_${c.extensionApplyDate || data.dateStr}`}
                   type="button"
                   onClick={() => {
+                    setFtId('');
+                    setSoloId('');
                     setExtId(c.id);
                     setExtApplyDate(c.extensionApplyDate || data.dateStr);
                   }}
@@ -262,13 +447,22 @@ export default function PlanningSlaGapCloseModal({
           <div>
             <div className="text-[10px] font-black uppercase text-slate-500 mb-1">
               2.º tramo {preview ? `(${preview.second.from}–${preview.second.to})` : splitPlan ? `(${splitPlan.adelSegment})` : ''}
+              {splitPlan?.adelBand && <span className="font-mono text-slate-400"> · solo {splitPlan.adelBand}</span>}
             </div>
             <div className="space-y-1 max-h-32 overflow-y-auto rounded-xl border border-slate-100 p-1">
-              {poolSecond.map((c) => (
+              {poolSecond.length === 0 ? (
+                <p className="text-[10px] font-bold text-amber-800 px-2 py-3">
+                  No hay guardia en la banda siguiente ({splitPlan?.adelBand || 'N'}) para adelantar.
+                </p>
+              ) : poolSecond.map((c) => (
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => setSecondId(c.id)}
+                  onClick={() => {
+                    setFtId('');
+                    setSoloId('');
+                    setSecondId(c.id);
+                  }}
                   className={`w-full px-2.5 py-2 text-left text-xs font-bold rounded-lg border ${secondId === c.id ? 'bg-red-100 border-red-500 text-red-900' : 'bg-white border-slate-200'}`}
                 >
                   {c.name} · {c.code} · {c.positionName}
@@ -337,6 +531,8 @@ export default function PlanningSlaGapCloseModal({
               </p>
             )}
           </div>
+          </>
+          )}
         </div>
 
         <div className="p-4 border-t border-slate-100 flex gap-2">
@@ -345,11 +541,11 @@ export default function PlanningSlaGapCloseModal({
           </button>
           <button
             type="button"
-            disabled={!extId || !secondId || extId === secondId}
+            disabled={ftId ? false : coverMode === 'solo' ? !soloId : (!extId || !secondId || extId === secondId)}
             onClick={tryApply}
             className="flex-1 py-3 rounded-xl font-black text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 shadow-lg shadow-rose-200"
           >
-            Aplicar y cerrar banda
+            {ftId ? 'Aplicar franco trabajado' : coverMode === 'solo' ? 'Aplicar 8 h' : 'Aplicar y cerrar banda'}
           </button>
         </div>
       </div>

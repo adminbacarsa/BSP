@@ -305,4 +305,6 @@ export type VacancySplitListContext = {
   gapPositionName?: string | null;
   gapBand?: string | null;
   preferSamePosition?: boolean;
+  /** Si true, no rellenar con otras bandas (adelanto = solo turno siguiente). */
+  strictNeighborBand?: boolean;
 };

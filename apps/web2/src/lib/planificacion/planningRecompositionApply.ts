@@ -442,6 +442,33 @@ export function neighborBandsForTargetAtPosition(
   return neighborBandsForVacancyGap(positionStructure, positionName, targetBand);
 }
 
+/** Guardias del objetivo con franco planificado (F/FF/FP) ese día — candidatos a FT. */
+export function listPlannedFrancoCandidates(
+  dateStr: string,
+  objectiveId: string,
+  employees: { id: string; name?: string }[],
+  shiftsMap: Record<string, any>,
+  pendingChanges: Record<string, any>,
+  excludeIds: string[] = [],
+): SegmentCandidateRow[] {
+  const exclude = new Set(excludeIds);
+  const rows: SegmentCandidateRow[] = [];
+  for (const emp of employees) {
+    if (!emp.id || exclude.has(emp.id)) continue;
+    const shift = resolveEmployeeShift(emp.id, dateStr, shiftsMap, pendingChanges);
+    if (!isPlannedFrancoShift(shift)) continue;
+    const shiftObj = shift?.objectiveId;
+    if (shiftObj != null && shiftObj !== '' && String(shiftObj) !== String(objectiveId)) continue;
+    rows.push({
+      id: emp.id,
+      name: empDisplayName(emp, emp.id),
+      code: String(shift?.code || 'F').toUpperCase(),
+      positionName: shift?.positionName || 'Franco',
+    });
+  }
+  return rows.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
 /** Guardias del objetivo con turno laboral ese día (candidatos ext/adel). */
 export function listSegmentCandidates(
   dateStr: string,
@@ -525,6 +552,7 @@ function listSegmentCandidatesWithBandFallback(
   const bandUp = String(band).toUpperCase();
   const byBand = loose.filter((r) => r.code === bandUp);
   if (byBand.length > 0) return byBand;
+  if (listCtx?.strictNeighborBand) return [];
   return loose;
 }
 
@@ -617,7 +645,7 @@ export function listExtensionCandidates(
   return rows;
 }
 
-/** Adelanto: guardias de la banda **siguiente** (ej. cubrir M → turnos T). */
+/** Adelanto: solo la banda **inmediata siguiente** (cubrir T → N). Nunca M ya pasada ni mañana del otro día. */
 export function listEarlyStartCandidates(
   targetBand: string,
   dateStr: string,
@@ -632,15 +660,27 @@ export function listEarlyStartCandidates(
   const { earlyStartBand } = listCtx?.positionStructure?.length
     ? neighborBandsForVacancyGap(listCtx.positionStructure, positionName, targetBand)
     : neighborBandsForTarget(targetBand);
-  return listSegmentCandidatesWithBandFallback(
+  const target = String(targetBand || '').toUpperCase();
+  const adelBand = String(earlyStartBand || '').toUpperCase();
+  // Cubrir N con “adelanto M” del mismo día = turno ya ocurrido. La M del día siguiente no se usa acá.
+  if ((target === 'N' || target === 'N12') && adelBand === 'M') {
+    return [];
+  }
+  return listSegmentCandidates(
     dateStr,
     objectiveId,
     employees,
     shiftsMap,
     pendingChanges,
     excludeIds,
-    earlyStartBand,
-    { ...listCtx, gapBand: targetBand, gapPositionName: positionName ?? listCtx?.gapPositionName },
+    adelBand,
+    {
+      ...listCtx,
+      gapBand: targetBand,
+      gapPositionName: positionName ?? listCtx?.gapPositionName,
+      preferSamePosition: false,
+      strictNeighborBand: true,
+    },
   );
 }
 
