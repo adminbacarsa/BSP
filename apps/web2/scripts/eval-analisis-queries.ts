@@ -14,6 +14,8 @@ import {
   shiftStartMs,
   filterTurnosInRange,
   splitRangeByDays,
+  monthsInRange,
+  analisisWorkingWindow,
 } from '../src/lib/analisis/analisisQueries';
 import {
   buildInformeAnalitico,
@@ -75,6 +77,26 @@ const julChunks = splitRangeByDays(
 assert(julChunks.length === 5, `julio en ventanas de 7 días = 5 (got ${julChunks.length})`);
 assert(julChunks[0].startMs === new Date(2026, 6, 1).getTime(), 'primer chunk = 1 jul');
 assert(julChunks[julChunks.length - 1].endMs === new Date(2026, 6, 31, 23, 59, 59, 999).getTime(), 'último chunk cierra el 31');
+
+const julMonths = monthsInRange({
+  startMs: new Date(2026, 6, 1).getTime(),
+  endMs: new Date(2026, 6, 31, 23, 59, 59, 999).getTime(),
+});
+assert(julMonths.length === 1 && julMonths[0].year === 2026 && julMonths[0].month === 7, 'julio = 1 mes calendario');
+const lookbackMonths = monthsInRange({
+  startMs: new Date(2026, 3, 1).getTime(),
+  endMs: new Date(2026, 5, 30, 23, 59, 59, 999).getTime(),
+});
+assert(lookbackMonths.length === 3, `abr-jun = 3 meses (got ${lookbackMonths.length})`);
+
+const winAgo = analisisWorkingWindow(new Date(2026, 7, 14));
+assert(winAgo.start.getMonth() === 4 && winAgo.start.getFullYear() === 2026, 'ventana ago = desde mayo');
+assert(winAgo.end.getMonth() === 7 && winAgo.end.getDate() === 31, 'ventana ago = hasta 31 ago');
+const winJulInside = isRangeCovered(
+  [{ startMs: winAgo.start.getTime(), endMs: winAgo.end.getTime() }],
+  { startMs: new Date(2026, 6, 1).getTime(), endMs: new Date(2026, 6, 31, 23, 59, 59, 999).getTime() },
+);
+assert(winJulInside, 'julio ya está cubierto si se cargó ago + 3 atrás');
 
 const julClock = shiftStartMs({ date: '2026-07-15', startTime: '07:00' });
 assert(!!julClock && new Date(julClock).getDate() === 15 && new Date(julClock).getMonth() === 6, 'shiftStartMs date+HH:mm');
@@ -384,6 +406,7 @@ assert(finBases[0].novedades.vac === 8, `financiera vac 8 (got ${finBases[0].nov
 assert(finConsumoHours(finBases[0], 'planned') === 24, `consumo plan = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'planned')})`);
 assert(finConsumoHours(finBases[0], 'real') === 24, `consumo real = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'real')})`);
 const finRoll = rollAnalisisFinanciera(finBases, 'planned');
+assert(finRoll.hsMalla === 16, `malla plan debe = cobertura 8 + vac 8 (got ${finRoll.hsMalla})`);
 assert(finRoll.clientes === 1 && finRoll.objetivos === 1, 'financiera rollup 1 cliente');
 assert(finRoll.hsConsumo === 24, `empresa consumo 24 (got ${finRoll.hsConsumo})`);
 assert(finRoll.guardias === 2, `2 guardias tocaron el objetivo (got ${finRoll.guardias})`);
@@ -449,6 +472,16 @@ const resolvedNone = resolveLeaveObjective(
   {},
 );
 assert(resolvedNone.source === 'sin_objetivo' && resolvedNone.oid === 'SIN_OBJETIVO', 'sin malla no se inventa puesto');
+const resolvedLegajo = resolveLeaveObjective(
+  vacHuerfana!.detalle[0],
+  new Map(),
+  new Map(),
+  [],
+  [],
+  { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
+  new Map([['g9', 'obj-a']]),
+);
+assert(resolvedLegajo.source === 'legajo' && resolvedLegajo.oid === 'obj-a', 'sin malla usa preferredObjectiveId del legajo');
 const finHuerfana = buildAnalisisFinanciera({
   turnos: [],
   ausenciasStats: vacHuerfana,

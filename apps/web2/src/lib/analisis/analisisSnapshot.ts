@@ -3,13 +3,14 @@
  * Los turnos NO se persisten en sessionStorage (pueden ser ~18k docs).
  */
 
-import { collection, query, where, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, type Query, type QuerySnapshot } from 'firebase/firestore';
 import { db, getDocsOnce } from '@/lib/firebase';
 import {
   belongsToEmpresaView,
   empresaCollectionQuery,
   filterRowsByEmpresa,
 } from '@/lib/multiempresa';
+import { buildPlanningMonthTurnosQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import type { NovedadType } from '@/lib/rrhh/novedadTypes';
 import {
@@ -23,13 +24,12 @@ import {
   filterTurnosInRange,
   filterAusenciasLoose,
   shiftStartMs,
-  splitRangeByDays,
+  monthsInRange,
 } from './analisisQueries';
 
 const META_KEY = 'cosp:analisis:snap-meta';
-const CHUNK_DAYS = 7;
 /** Sube si cambia la semántica de fetch (invalida store en memoria envenenado con 0 turnos). */
-const SNAPSHOT_GEN = 2;
+const SNAPSHOT_GEN = 4;
 
 export type AnalisisLoadProgress = {
   pct: number;
@@ -121,12 +121,40 @@ type ScopeOpts = {
   migracionCompleta: boolean;
 };
 
-function ymdFromMs(ms: number): string {
-  const d = new Date(ms);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+/**
+ * Lectura de malla: no aceptar snapshot vacío por timeout (eso marcaba julio cubierto con 0 turnos).
+ * Emulador: el 1.er fromCache vacío es miss; el siguiente (o uno con docs) es el dato.
+ */
+function getDocsMalla<T = any>(q: Query<T>): Promise<QuerySnapshot<T>> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let n = 0;
+    const done = (snap?: QuerySnapshot<T>, err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { unsub(); } catch { /* ignore */ }
+      if (err) reject(err);
+      else resolve(snap as QuerySnapshot<T>);
+    };
+    const timer = setTimeout(() => {
+      done(undefined, new Error('Timeout leyendo malla (90s). Probá Recargar.'));
+    }, 90_000);
+    const unsub = onSnapshot(
+      q,
+      { includeMetadataChanges: true },
+      (snap) => {
+        n += 1;
+        if (!snap.metadata.fromCache) {
+          done(snap);
+          return;
+        }
+        if (snap.empty && n === 1) return;
+        done(snap);
+      },
+      (err) => done(undefined, err),
+    );
+  });
 }
 
 function mapTurnoDocs(
@@ -145,14 +173,14 @@ function mapTurnoDocs(
     });
 }
 
-async function fetchTurnosByStartTime(range: MsRange, opts: ScopeOpts): Promise<any[]> {
-  const start = new Date(range.startMs);
-  const end = new Date(range.endMs);
-  const snap = await getDocsOnce(query(
-    collection(db, 'turnos'),
-    where('startTime', '>=', Timestamp.fromDate(start)),
-    where('startTime', '<=', Timestamp.fromDate(end)),
-  ));
+async function fetchTurnosMonth(year: number, month: number, opts: ScopeOpts): Promise<any[]> {
+  const q = buildPlanningMonthTurnosQuery({
+    empresaId: opts.empresaId,
+    scopeEmpresa: opts.scopeEmpresa,
+    year,
+    month,
+  });
+  const snap = await getDocsMalla(q);
   return mapTurnoDocs(snap.docs, opts);
 }
 
@@ -296,26 +324,26 @@ export async function ensureAnalisisFacts(opts: ScopeOpts & {
     });
   }
 
-  const chunks = gaps.flatMap((g) => splitRangeByDays(g, CHUNK_DAYS));
-  const totalSteps = Math.max(1, chunks.length);
+  const months = gaps.flatMap((g) => monthsInRange(g));
+  const totalSteps = Math.max(1, months.length);
+  const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-  if (chunks.length) {
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      const from = ymdFromMs(chunk.startMs);
-      const to = ymdFromMs(chunk.endMs);
+  if (months.length) {
+    for (let i = 0; i < months.length; i++) {
+      const { year, month } = months[i];
+      const label = `${MONTHS_SHORT[month - 1]} ${year}`;
       opts.onProgress?.({
         phase,
         pct: Math.min(99, Math.round((i / totalSteps) * 100)),
-        label: `Malla ${from} → ${to}`,
+        label: `Malla ${label}`,
         docs: store.turnos.length,
       });
-      const docs = await fetchTurnosByStartTime(chunk, opts);
+      const docs = await fetchTurnosMonth(year, month, opts);
       store.turnos = mergeDocsById(store.turnos, docs);
       opts.onProgress?.({
         phase,
         pct: Math.min(99, Math.round(((i + 1) / totalSteps) * 100)),
-        label: `Malla ${from} → ${to}`,
+        label: `Malla ${label}`,
         docs: store.turnos.length,
       });
     }

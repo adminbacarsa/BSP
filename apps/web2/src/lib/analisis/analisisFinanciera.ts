@@ -121,7 +121,7 @@ export type FinEmpresaView = {
 
 const SIN_OBJETIVO = 'SIN_OBJETIVO';
 
-export type LeaveAttributionSource = 'ausencia' | 'malla_periodo' | 'malla_historial' | 'sin_objetivo';
+export type LeaveAttributionSource = 'ausencia' | 'malla_periodo' | 'malla_historial' | 'legajo' | 'sin_objetivo';
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -232,17 +232,24 @@ function uniqueGuards(rows: { guards: FinGuardRow[] }[]): number {
   return ids.size;
 }
 
-export function finMallaHours(row: Pick<FinObjectiveBase, 'hsPlan' | 'hsReal'>, mode: FinHoursMode): number {
-  return mode === 'real' ? row.hsReal : row.hsPlan;
+export function finMallaHours(
+  row: Pick<FinObjectiveBase, 'hsPlan' | 'hsReal' | 'novedades'>,
+  mode: FinHoursMode,
+): number {
+  if (mode === 'real') return row.hsReal;
+  return r1(row.hsPlan + (row.novedades?.total || 0));
 }
 
 export function finConsumoHours(row: FinObjectiveBase, mode: FinHoursMode): number {
-  return r1(finMallaHours(row, mode) + row.hsFt + row.hsExtra + row.hsOps + row.novedades.total);
+  const malla = finMallaHours(row, mode);
+  const novedad = mode === 'real' ? row.novedades.total : 0;
+  return r1(malla + row.hsFt + row.hsExtra + row.hsOps + novedad);
 }
 
 export function finGuardConsumo(g: FinGuardRow, mode: FinHoursMode): number {
-  const malla = mode === 'real' ? g.hsReal : g.hsPlan;
-  return r1(malla + g.hsFt + g.hsExtra + g.hsOps + g.hsNovedad);
+  const malla = mode === 'real' ? g.hsReal : r1(g.hsPlan + g.hsNovedad);
+  const novedad = mode === 'real' ? g.hsNovedad : 0;
+  return r1(malla + g.hsFt + g.hsExtra + g.hsOps + novedad);
 }
 
 function decorate(base: FinObjectiveBase, mode: FinHoursMode): FinViewRow {
@@ -338,6 +345,16 @@ export function homeObjectiveByEmployee(
   return home;
 }
 
+export function homeFromEmployees(employees: any[]): Map<string, string> {
+  const m = new Map<string, string>();
+  (employees || []).forEach((e) => {
+    const id = String(e?.id || e?.employeeId || '').trim();
+    const oid = String(e?.preferredObjectiveId || e?.objectiveId || e?.objetivoId || '').trim();
+    if (id && oid) m.set(id, oid);
+  });
+  return m;
+}
+
 /** Último puesto de malla del legajo antes de `beforeDay` (YYYY-MM-DD). */
 export function lastPlannedObjectiveBefore(
   turnos: any[],
@@ -377,6 +394,7 @@ export function resolveLeaveObjective(
   turnosPeriodo: any[],
   turnosHistorial: any[],
   aliases: Record<string, { canonicalId: string; name: string; clientId?: string }>,
+  employeeHome?: Map<string, string>,
 ): { oid: string; source: LeaveAttributionSource } {
   if (ev.objectiveId) {
     const oid = resolveCanonicalObjectiveId({ objectiveId: ev.objectiveId }, aliases) || ev.objectiveId;
@@ -391,6 +409,11 @@ export function resolveLeaveObjective(
   if (lastHist) return { oid: lastHist, source: 'malla_historial' };
   const homeH = eid ? homeLookback.get(eid) : '';
   if (homeH) return { oid: homeH, source: 'malla_historial' };
+  const homeEmp = eid && employeeHome ? employeeHome.get(eid) : '';
+  if (homeEmp) {
+    const oid = resolveCanonicalObjectiveId({ objectiveId: homeEmp }, aliases) || homeEmp;
+    return { oid, source: 'legajo' };
+  }
   return { oid: SIN_OBJETIVO, source: 'sin_objetivo' };
 }
 
@@ -404,9 +427,12 @@ export function buildAnalisisFinanciera(opts: {
   slaExclusionCtx: any;
   /** Malla de meses previos (lookback) para licencias sin objectiveId. */
   turnosHistorial?: any[];
+  /** Legajos: preferredObjectiveId como último fallback de puesto. */
+  employees?: any[];
 }): FinObjectiveBase[] {
   const { turnos, ausenciasStats, vigenteServices, periodStart, periodEnd, objectiveAliases, slaExclusionCtx } = opts;
   const historial = opts.turnosHistorial && opts.turnosHistorial.length ? opts.turnosHistorial : turnos;
+  const employeeHome = homeFromEmployees(opts.employees || []);
   const byObj = new Map<string, Acc>();
 
   vigenteServices.forEach((srv: any) => {
@@ -511,6 +537,7 @@ export function buildAnalisisFinanciera(opts: {
       turnos,
       historial,
       objectiveAliases,
+      employeeHome,
     );
     const alias = objectiveAliases[oid];
     const row = touch(
