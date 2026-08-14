@@ -15,6 +15,7 @@ import {
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
 import { slaService } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
+import { EventoDetailModal } from './EventoDetailModal';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -101,6 +102,7 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
 
     const [eventos, setEventos] = useState<Evento[]>([]);
     const [loading, setLoading] = useState(false);
+    const [detailEvento, setDetailEvento] = useState<Evento | null>(null);
     const [mes, setMes] = useState(() => yyyyMm(new Date()));
     const [filterCliente, setFilterCliente] = useState('all');
     const [filterStatus, setFilterStatus] = useState('all');
@@ -863,6 +865,15 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                         )}
                                     </div>
                                     <div className="flex items-center gap-2 pt-1 border-t border-slate-50 dark:border-slate-700">
+                                        {/* Botón principal: Gestionar (abre modal de convocatoria/asignación) */}
+                                        {ev.status !== 'cancelado' && (ev.servicios || []).length > 0 && (
+                                            <button
+                                                onClick={() => setDetailEvento(ev)}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl text-xs font-black uppercase transition-colors shadow-sm"
+                                            >
+                                                <Users size={11}/> Gestionar
+                                            </button>
+                                        )}
                                         {(canUpdate || canCreate) && ev.status !== 'cancelado' && (
                                             <button
                                                 onClick={() => openEdit(ev)}
@@ -984,6 +995,15 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                         );
                     })}
                 </div>
+            )}
+
+            {/* Modal de gestión de evento (convocatoria) */}
+            {detailEvento && (
+                <EventoDetailModal
+                    evento={detailEvento}
+                    empresaId={empresaId}
+                    onClose={() => setDetailEvento(null)}
+                />
             )}
         </div>
     );

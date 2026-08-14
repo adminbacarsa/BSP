@@ -190,6 +190,7 @@ export default function EmployeeDashboard() {
   const [loadingEventosDisp, setLoadingEventosDisp] = useState(false);
   const [showEventosDisp, setShowEventosDisp] = useState(false);
   const [solicitandoId, setSolicitandoId] = useState<string | null>(null);
+  const [respondiendoConvId, setRespondiendoConvId] = useState<string | null>(null);
   const [checkingShiftId, setCheckingShiftId] = useState<string | null>(null);
   const [absenceType, setAbsenceType] = useState<'Vacaciones' | 'Enfermedad' | 'ART' | 'Ausencia con aviso' | 'Licencia Esp.'>('Vacaciones');
   const [absenceReason, setAbsenceReason] = useState('');
@@ -659,11 +660,11 @@ export default function EmployeeDashboard() {
     const register = (key: string, q: any, fallback?: () => any) => {
       const unsub = onSnapshotFresh(
         q,
-        (snap) => {
-          inboxBucketsRef.current[key] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        (snap: any) => {
+          inboxBucketsRef.current[key] = snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
           rebuild();
         },
-        (err) => {
+        (err: any) => {
           console.error(err);
           const message = `${err?.code || ''} ${err?.message || ''}`.toLowerCase();
           const needsIndex = message.includes('requires an index') || message.includes('failed-precondition');
@@ -866,13 +867,28 @@ export default function EmployeeDashboard() {
         servicioId: servicio.id, servicioNombre: servicio.nombre,
         servicioFecha: servicio.fecha, empleadoId: empId,
         empleadoNombre: '',
-        status: 'pendiente',
+        tipo: 'guardia_solicita' as const,
+        status: 'pendiente' as const,
       }]);
       addToast('Solicitud enviada', 'success');
     } catch {
       addToast('Error al enviar la solicitud', 'error');
     } finally {
       setSolicitandoId(null);
+    }
+  };
+
+  const handleResponderConvocatoria = async (sol: SolicitudEvento, respuesta: 'aprobada' | 'rechazada') => {
+    if (!sol.id) return;
+    setRespondiendoConvId(sol.id);
+    try {
+      await solicitudEventoService.responderConvocatoria(sol.id, respuesta);
+      setMySolicitudes(prev => prev.map(s => s.id === sol.id ? { ...s, status: respuesta } : s));
+      addToast(respuesta === 'aprobada' ? '¡Confirmaste tu participación!' : 'Rechazaste la convocatoria', 'success');
+    } catch {
+      addToast('Error al responder', 'error');
+    } finally {
+      setRespondiendoConvId(null);
     }
   };
 
@@ -1985,7 +2001,7 @@ export default function EmployeeDashboard() {
                     <div className="text-[11px] text-slate-300 mt-1">{n.body || n.message || ''}</div>
                     <div className="flex items-center justify-between mt-2">
                       <span className="text-[10px] text-rose-500 font-bold">No leída</span>
-                      <button onClick={() => markNotificationRead(n.id, n.title || n.body)} className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-800 text-white">Marcar leída</button>
+                      <button onClick={() => markNotificationRead(n.id)} className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-800 text-white">Marcar leída</button>
                     </div>
                   </div>
                 ))}
@@ -2024,7 +2040,7 @@ export default function EmployeeDashboard() {
                       else if (type === 'ADELANTO_PLANIFICADO') actionLabel = 'Adelanto planificado';
                       else if (type === 'RET_LIBERACION_PLANIFICADA') actionLabel = 'Stand-by RET';
                       return (
-                        <div key={n.id} onClick={() => !n.read && markNotificationRead(n.id, n.title || n.body)}
+                        <div key={n.id} onClick={() => !n.read && markNotificationRead(n.id)}
                           className={`border border-slate-800 rounded-xl cursor-pointer p-3 ${n.read ? 'bg-slate-950/60' : 'bg-indigo-950/30 border-indigo-800/40'}`}>
                           <div className="flex items-start justify-between gap-2">
                             <div>
@@ -2035,7 +2051,7 @@ export default function EmployeeDashboard() {
                                 <span className={`ml-2 font-bold ${n.read ? 'text-slate-600' : 'text-rose-400'}`}>{n.read ? 'Leída' : 'No leída'}</span>
                               </div>
                             </div>
-                            {!n.read && <button onClick={() => markNotificationRead(n.id, n.title || n.body)} className="text-[10px] font-black uppercase text-indigo-400 shrink-0">✓</button>}
+                            {!n.read && <button onClick={() => markNotificationRead(n.id)} className="text-[10px] font-black uppercase text-indigo-400 shrink-0">✓</button>}
                           </div>
                         </div>
                       );
@@ -2492,6 +2508,48 @@ export default function EmployeeDashboard() {
           </button>
 
           {/* ===== EVENTOS DISPONIBLES ===== */}
+          {/* ── CONVOCATORIAS PENDIENTES DEL ADMIN ── */}
+          {(() => {
+            const convPendientes = mySolicitudes.filter(s => s.tipo === 'admin_convoca' && s.status === 'convocado');
+            if (convPendientes.length === 0) return null;
+            return (
+              <div className="bg-slate-900 border border-yellow-600/50 rounded-2xl overflow-hidden">
+                <div className="px-4 py-3 flex items-center gap-2 border-b border-slate-800">
+                  <span className="text-yellow-400 text-base">📣</span>
+                  <span className="text-xs font-black text-yellow-300 uppercase tracking-wide">Convocatorias pendientes</span>
+                  <span className="ml-auto px-1.5 py-0.5 bg-yellow-500 text-yellow-900 rounded-full text-[9px] font-black">{convPendientes.length}</span>
+                </div>
+                <div className="divide-y divide-slate-800">
+                  {convPendientes.map(sol => (
+                    <div key={sol.id} className="px-4 py-3 flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-black text-white truncate">{sol.eventoNombre}</p>
+                        <p className="text-[10px] text-yellow-500/80">{sol.servicioNombre}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">{sol.servicioFecha}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                        <button
+                          onClick={() => void handleResponderConvocatoria(sol, 'aprobada')}
+                          disabled={respondiendoConvId === sol.id}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-[10px] font-black transition-colors"
+                        >
+                          Acepto
+                        </button>
+                        <button
+                          onClick={() => void handleResponderConvocatoria(sol, 'rechazada')}
+                          disabled={respondiendoConvId === sol.id}
+                          className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-300 rounded-xl text-[10px] font-black transition-colors"
+                        >
+                          No puedo
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {(() => {
             const serviciosDisp = eventosDisponibles.flatMap(ev =>
               (ev.servicios ?? [])
