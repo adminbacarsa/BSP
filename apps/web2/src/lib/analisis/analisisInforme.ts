@@ -10,6 +10,7 @@ import {
   isFrancoTrabajadoShift,
   isVacantShift,
 } from './analisisQueries';
+import { CCT_HS_TECHO_MENSUAL } from './analisisBolsa';
 
 export type InformeBalanceRow = {
   concepto: string;
@@ -53,6 +54,7 @@ export type InformeAnalitico = {
   bolsaHsEfectivasGuardia: number;
   bolsaLookbackLabel: string;
   bolsaTieneHistorial: boolean;
+  bolsaModo: 'con_indice' | 'sin_indice';
   coberturaPlanPct: number;
   coberturaEfectivaPct: number;
   desvioRealVsVendido: number;
@@ -99,9 +101,10 @@ export function buildInformeAnalitico(opts: {
     hsEfectivasGuardia: number;
     lookbackLabel: string;
     tieneHistorial: boolean;
+    modo?: 'con_indice' | 'sin_indice';
   };
 }): InformeAnalitico {
-  const { plantel, capHsPerGuardPeriod, demandaTotals: d, ausenciasStats, turnos, bolsa } = opts;
+  const { plantel, demandaTotals: d, ausenciasStats, turnos, bolsa } = opts;
   const hsVendidas = r1(d.slaHours);
   const hsPlanificadas = r1(d.planHours);
   const hsExtras50 = r1(d.extHours + d.adelHours);
@@ -132,12 +135,14 @@ export function buildInformeAnalitico(opts: {
   hsPendientesFichada = r1(hsPendientesFichada);
   hsNormales = r1(hsNormales);
 
-  const bolsaInicial = r1(bolsa ? bolsa.inicial : Math.max(0, plantel) * Math.max(0, capHsPerGuardPeriod));
-  const bolsaTecho = r1(bolsa ? bolsa.techo : bolsaInicial);
+  const techoFallback = Math.max(0, plantel) * CCT_HS_TECHO_MENSUAL;
+  const bolsaInicial = r1(bolsa ? bolsa.inicial : techoFallback);
+  const bolsaTecho = r1(bolsa ? bolsa.techo : techoFallback);
   const bolsaIndicePct = bolsa ? bolsa.indicePct : 0;
-  const bolsaHsEfectivasGuardia = r1(bolsa ? bolsa.hsEfectivasGuardia : capHsPerGuardPeriod);
+  const bolsaHsEfectivasGuardia = r1(bolsa ? bolsa.hsEfectivasGuardia : CCT_HS_TECHO_MENSUAL);
   const bolsaLookbackLabel = bolsa?.lookbackLabel || '';
   const bolsaTieneHistorial = bolsa?.tieneHistorial === true;
+  const bolsaModo = bolsa?.modo || (bolsaTieneHistorial ? 'con_indice' : 'sin_indice');
   const bolsaConsumida = r1(hsNormales > 0 ? hsNormales : hsPlanificadas);
   const bolsaDisponible = r1(Math.max(0, bolsaInicial - bolsaConsumida));
   const sobreBolsa = r1(Math.max(0, bolsaConsumida - bolsaInicial));
@@ -160,11 +165,13 @@ export function buildInformeAnalitico(opts: {
       observacion: 'Malla de cobertura crono (sin FT ni tramos extra).',
     },
     {
-      concepto: 'Bolsa de horas (capacidad realista)',
+      concepto: bolsaModo === 'sin_indice' ? 'Bolsa de horas (techo 200, sin índice)' : 'Bolsa de horas (capacidad realista)',
       horas: bolsaInicial,
-      observacion: bolsa
-        ? `No es ${plantel} × 200. Techo ${bolsaTecho.toLocaleString('es-AR')} hs · índice ausencia ${bolsaLookbackLabel} = ${bolsaIndicePct}% · ${bolsaHsEfectivasGuardia} hs efectivas/guardia.${bolsaTieneHistorial ? '' : ' Sin novedades en la ventana 3m: el índice queda en 0 hasta haber historial.'}`
-        : `Plantel ${plantel} × ${capHsPerGuardPeriod} hs (fallback).`,
+      observacion: bolsaModo === 'sin_indice'
+        ? `Sin índice: no hay ausencias en ${bolsaLookbackLabel || 'los 3 meses cerrados previos'}. Se muestra el techo ${plantel} × 200 = ${bolsaTecho.toLocaleString('es-AR')} hs, no una capacidad realista.`
+        : (bolsa
+          ? `No es ${plantel} × 200 como promedio. Techo ${bolsaTecho.toLocaleString('es-AR')} hs · índice ausencia ${bolsaLookbackLabel} = ${bolsaIndicePct}% · ${bolsaHsEfectivasGuardia} hs efectivas/guardia.`
+          : `Plantel ${plantel} × ${CCT_HS_TECHO_MENSUAL} hs techo (sin índice). La jornada de referencia 192 no entra en esta KPI.`),
     },
     {
       concepto: 'Horas realizadas (efectivas)',
@@ -280,6 +287,7 @@ export function buildInformeAnalitico(opts: {
     bolsaHsEfectivasGuardia,
     bolsaLookbackLabel,
     bolsaTieneHistorial,
+    bolsaModo,
     coberturaPlanPct,
     coberturaEfectivaPct,
     desvioRealVsVendido,

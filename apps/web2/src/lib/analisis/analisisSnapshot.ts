@@ -3,8 +3,8 @@
  * Los turnos NO se persisten en sessionStorage (pueden ser ~18k docs).
  */
 
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, query, where, Timestamp } from 'firebase/firestore';
+import { db, getDocsOnce } from '@/lib/firebase';
 import {
   belongsToEmpresaView,
   empresaCollectionQuery,
@@ -22,9 +22,21 @@ import {
   mergeIntervals,
   filterTurnosInRange,
   filterAusenciasLoose,
+  shiftStartMs,
+  splitRangeByDays,
 } from './analisisQueries';
 
 const META_KEY = 'cosp:analisis:snap-meta';
+const CHUNK_DAYS = 7;
+/** Sube si cambia la semántica de fetch (invalida store en memoria envenenado con 0 turnos). */
+const SNAPSHOT_GEN = 2;
+
+export type AnalisisLoadProgress = {
+  pct: number;
+  label: string;
+  phase: 'catalog' | 'malla' | 'lookback' | 'ausencias' | 'done';
+  docs: number;
+};
 
 export type AnalisisSnapMeta = {
   empresaId: string;
@@ -45,6 +57,7 @@ export type AnalisisMemoryStore = {
   catalogAt: number | null;
   factsAt: number | null;
   ausenciasLoaded: boolean;
+  snapGen: number;
 };
 
 let memoryStore: AnalisisMemoryStore | null = null;
@@ -58,6 +71,9 @@ function writeMeta(meta: AnalisisSnapMeta) {
 }
 
 export function getAnalisisMemoryStore(): AnalisisMemoryStore | null {
+  if (memoryStore && memoryStore.snapGen !== SNAPSHOT_GEN) {
+    memoryStore = null;
+  }
   return memoryStore;
 }
 
@@ -66,7 +82,7 @@ export function resetAnalisisMemoryStore() {
 }
 
 function ensureStore(empresaId: string): AnalisisMemoryStore {
-  if (!memoryStore || memoryStore.empresaId !== empresaId) {
+  if (!memoryStore || memoryStore.empresaId !== empresaId || memoryStore.snapGen !== SNAPSHOT_GEN) {
     memoryStore = {
       empresaId,
       services: [],
@@ -79,6 +95,7 @@ function ensureStore(empresaId: string): AnalisisMemoryStore {
       catalogAt: null,
       factsAt: null,
       ausenciasLoaded: false,
+      snapGen: SNAPSHOT_GEN,
     };
   }
   return memoryStore;
@@ -128,39 +145,19 @@ function mapTurnoDocs(
     });
 }
 
-async function fetchTurnosByDateField(range: MsRange, field: string, opts: ScopeOpts): Promise<any[]> {
-  const start = ymdFromMs(range.startMs);
-  const end = ymdFromMs(range.endMs);
-  try {
-    const snap = await getDocs(query(
-      collection(db, 'turnos'),
-      where(field, '>=', start),
-      where(field, '<=', end),
-    ));
-    return mapTurnoDocs(snap.docs, opts);
-  } catch {
-    return [];
-  }
-}
-
-async function fetchTurnosRange(range: MsRange, opts: ScopeOpts): Promise<any[]> {
+async function fetchTurnosByStartTime(range: MsRange, opts: ScopeOpts): Promise<any[]> {
   const start = new Date(range.startMs);
   const end = new Date(range.endMs);
-  const byStart = await getDocs(query(
+  const snap = await getDocsOnce(query(
     collection(db, 'turnos'),
     where('startTime', '>=', Timestamp.fromDate(start)),
     where('startTime', '<=', Timestamp.fromDate(end)),
-  )).then((snap) => mapTurnoDocs(snap.docs, opts)).catch(() => [] as any[]);
-  const extra = await Promise.all([
-    fetchTurnosByDateField(range, 'date', opts),
-    fetchTurnosByDateField(range, 'scheduleDate', opts),
-    fetchTurnosByDateField(range, 'fecha', opts),
-  ]);
-  return mergeDocsById(byStart, extra.flat());
+  ));
+  return mapTurnoDocs(snap.docs, opts);
 }
 
 async function fetchAusenciasAll(opts: ScopeOpts): Promise<any[]> {
-  const snap = await getDocs(
+  const snap = await getDocsOnce(
     empresaCollectionQuery('ausencias', opts.empresaId, opts.scopeEmpresa) as ReturnType<typeof query>,
   );
   return filterRowsByEmpresa(
@@ -179,8 +176,8 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
 }> {
   const { empresaId, scopeEmpresa, migracionCompleta } = opts;
   const [sSnap, eSnap] = await Promise.all([
-    getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
-    getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+    getDocsOnce(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+    getDocsOnce(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
   ]);
   const services = filterRowsByEmpresa(
     sSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
@@ -202,7 +199,7 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
     map[k] = { lat, lng, name: name || k, clientName: clientName || '' };
   };
   try {
-    const snap = await getDocs(collection(db, 'objetivos'));
+    const snap = await getDocsOnce(collection(db, 'objetivos'));
     snap.forEach((d) => {
       const data = d.data();
       const lat = Number(data.lat ?? data.latitude);
@@ -218,7 +215,7 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
     console.error(e);
   }
   try {
-    const clientsSnap = await getDocs(
+    const clientsSnap = await getDocsOnce(
       empresaCollectionQuery('clients', empresaId, scopeEmpresa) as ReturnType<typeof query>,
     );
     clientsSnap.forEach((cd) => {
@@ -240,7 +237,7 @@ export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
 
   let tiposNovedad: NovedadType[] = [];
   try {
-    const tSnap = await getDocs(
+    const tSnap = await getDocsOnce(
       empresaCollectionQuery('tipos_novedad', empresaId, scopeEmpresa) as ReturnType<typeof query>,
     );
     tiposNovedad = filterRowsByEmpresa(
@@ -281,29 +278,58 @@ export async function ensureAnalisisFacts(opts: ScopeOpts & {
   requestedStart: Date;
   requestedEnd: Date;
   force?: boolean;
+  phase?: 'malla' | 'lookback';
+  onProgress?: (p: AnalisisLoadProgress) => void;
 }): Promise<AnalisisMemoryStore> {
   const store = ensureStore(opts.empresaId);
   const env = envelopingRange(opts.requestedStart, opts.requestedEnd);
   const requested: MsRange = { startMs: env.start.getTime(), endMs: env.end.getTime() };
+  const phase = opts.phase || 'malla';
 
   const gaps = opts.force ? [requested] : gapsToFetch(store.intervals, requested);
 
   if (opts.force) {
     store.turnos = store.turnos.filter((t) => {
-      const ms = t.startTime?.seconds != null ? t.startTime.seconds * 1000 : null;
+      const ms = shiftStartMs(t);
       if (ms == null) return true;
       return ms < requested.startMs || ms > requested.endMs;
     });
   }
 
-  if (gaps.length) {
-    const chunks = await Promise.all(gaps.map((g) => fetchTurnosRange(g, opts)));
-    store.turnos = mergeDocsById(store.turnos, chunks.flat());
+  const chunks = gaps.flatMap((g) => splitRangeByDays(g, CHUNK_DAYS));
+  const totalSteps = Math.max(1, chunks.length);
+
+  if (chunks.length) {
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const from = ymdFromMs(chunk.startMs);
+      const to = ymdFromMs(chunk.endMs);
+      opts.onProgress?.({
+        phase,
+        pct: Math.min(99, Math.round((i / totalSteps) * 100)),
+        label: `Malla ${from} → ${to}`,
+        docs: store.turnos.length,
+      });
+      const docs = await fetchTurnosByStartTime(chunk, opts);
+      store.turnos = mergeDocsById(store.turnos, docs);
+      opts.onProgress?.({
+        phase,
+        pct: Math.min(99, Math.round(((i + 1) / totalSteps) * 100)),
+        label: `Malla ${from} → ${to}`,
+        docs: store.turnos.length,
+      });
+    }
     store.intervals = mergeIntervals([...store.intervals, ...gaps]);
     store.factsAt = Date.now();
   }
 
   if (!store.ausenciasLoaded || opts.force) {
+    opts.onProgress?.({
+      phase: 'ausencias',
+      pct: 96,
+      label: 'Ausencias RRHH',
+      docs: store.turnos.length,
+    });
     store.ausencias = await fetchAusenciasAll(opts);
     store.ausenciasLoaded = true;
     store.factsAt = Date.now();

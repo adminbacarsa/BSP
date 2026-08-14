@@ -183,7 +183,7 @@ const getPeriodRange = (mode: PeriodMode, y: number, m: number, dayInMonth: numb
   return { start, end, labelShort: `Año ${y}`, daysCount: isLeapYear(y) ? 366 : 365 };
 };
 
-/** Tope CCT 422/05: 192 hs/mes constantes (sin toggle 24/25 ni 8/12). */
+/** Jornada de referencia 192 hs/mes (viabilidad). El techo de liquidación es 200 (`analisisBolsa`). */
 
 /** Horas SLA del servicio en un rango (motor compartido con Servicios/CRM). */
 const calcSrvDateRange = (srv: any, rangeStart: Date, rangeEnd: Date, quotaHsPerGuard = 192) => {
@@ -444,6 +444,7 @@ export default function AnalisisPage() {
     loadInit,
     loadFacts,
     loadError,
+    loadProgress,
     factsAt,
     ensureRange,
     reloadAll,
@@ -930,8 +931,9 @@ export default function AnalisisPage() {
         periodEnd: new Date(periodRange.end),
         objectiveAliases: objectiveAliasesFromServices,
         slaExclusionCtx,
+        turnosHistorial: allTurnos,
       }),
-    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
+    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos],
   );
   const fin = useMemo(() => rollAnalisisFinanciera(finBases, finHoursMode), [finBases, finHoursMode]);
   const finClientBars = useMemo(
@@ -1024,6 +1026,7 @@ export default function AnalisisPage() {
           hsEfectivasGuardia: bolsaRealista.hsEfectivasGuardia,
           lookbackLabel: bolsaRealista.lookback.label,
           tieneHistorial: bolsaRealista.tieneHistorial,
+          modo: bolsaRealista.modo,
         },
       }),
     [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista],
@@ -1778,9 +1781,10 @@ export default function AnalisisPage() {
       ['Horas vendidas (SLA)', informe.hsVendidas],
       ['Horas planificadas', informe.hsPlanificadas],
       ['Horas realizadas', informe.hsRealizadas],
-      ['Bolsa inicial (realista)', informe.bolsaInicial],
+      ['Bolsa inicial hs', informe.bolsaInicial],
+      ['Bolsa modo', informe.bolsaModo === 'sin_indice' ? 'Techo 200×N (sin índice)' : 'Capacidad realista'],
       ['Bolsa techo 200×N', informe.bolsaTecho],
-      ['Índice ausencia 3m %', informe.bolsaIndicePct],
+      ['Índice ausencia 3m %', informe.bolsaModo === 'sin_indice' ? 'sin índice' : informe.bolsaIndicePct],
       ['Hs efectivas / guardia', informe.bolsaHsEfectivasGuardia],
       ['Ventana índice', informe.bolsaLookbackLabel],
       ['Bolsa disponible', informe.bolsaDisponible],
@@ -1859,10 +1863,42 @@ export default function AnalisisPage() {
 
   // ─────────────────────────────────────────────────────────────────────────────
   if (loadInit) {
+    const pct = Math.max(0, Math.min(100, loadProgress?.pct ?? 0));
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-64 gap-3 text-slate-400">
-          <Loader2 className="animate-spin" size={24}/><span className="font-bold">Cargando datos...</span>
+        <div className="max-w-xl mx-auto mt-16 px-4">
+          <div className="rounded-3xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg p-6 sm:p-8">
+            <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-2">Análisis operativo</p>
+            <h1 className="text-xl font-black text-slate-800 dark:text-white uppercase">Cargando Analítica</h1>
+            <p className="text-sm text-slate-500 mt-2 leading-relaxed">
+              Primera carga: catálogo (SLA / plantel) y todos los turnos del período + 3 meses previos.
+              El análisis se habilita al 100%.
+            </p>
+            <div className="mt-6">
+              <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wide text-slate-500 mb-2">
+                <span>{loadProgress?.label || 'Preparando…'}</span>
+                <span className="tabular-nums text-indigo-600">{pct}%</span>
+              </div>
+              <div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden shadow-inner">
+                <div
+                  className="h-full rounded-full bg-indigo-600 transition-all duration-300"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              {loadProgress?.docs ? (
+                <p className="text-[11px] text-slate-400 mt-2 tabular-nums">
+                  {loadProgress.docs.toLocaleString('es-AR')} turnos en memoria
+                </p>
+              ) : null}
+            </div>
+            {loadError ? (
+              <p className="mt-4 text-sm font-medium text-rose-600">{loadError}</p>
+            ) : (
+              <p className="mt-4 text-[11px] text-slate-400 flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin"/> Esperá a que termine. No hace falta recargar a mitad de camino.
+              </p>
+            )}
+          </div>
         </div>
       </DashboardLayout>
     );
@@ -1928,6 +1964,20 @@ export default function AnalisisPage() {
               </div>
             </div>
           </div>
+
+          {loadFacts && loadProgress && (
+            <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/30 px-4 py-3 shadow-sm">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-[11px] font-black uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
+                  {loadProgress.label}
+                </p>
+                <span className="text-[11px] font-black tabular-nums text-indigo-600">{Math.max(0, Math.min(100, loadProgress.pct))}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-white dark:bg-slate-800 overflow-hidden">
+                <div className="h-full rounded-full bg-indigo-600 transition-all duration-300" style={{ width: `${Math.max(0, Math.min(100, loadProgress.pct))}%` }} />
+              </div>
+            </div>
+          )}
 
           {(loadError || (employees.length === 0 && services.length === 0)) && (
             <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3 shadow-sm">
@@ -1997,7 +2047,7 @@ export default function AnalisisPage() {
           {theoretical.totalHours > 0 && (
             <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm p-4">
               <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">
-                {periodRange.labelShort} · {universo.clientes} clientes · {universo.objetivos} objetivos · {universo.puestos} pax en puesto · {universo.slotsPeriodo.toLocaleString('es-AR')} slots SLA · pico {universo.picoSimultaneo} · plantel {universo.plantel} · techo 200 hs/g · índice 3m {informe.bolsaIndicePct}% ({informe.bolsaLookbackLabel || '—'})
+                {periodRange.labelShort} · {universo.clientes} clientes · {universo.objetivos} objetivos · {universo.puestos} pax en puesto · {universo.slotsPeriodo.toLocaleString('es-AR')} slots SLA · pico {universo.picoSimultaneo} · plantel {universo.plantel}
               </p>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="text-center">
@@ -2230,7 +2280,7 @@ export default function AnalisisPage() {
                     <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 text-[10px] text-slate-500 leading-relaxed">
                       <p className="font-black text-slate-700 dark:text-white mb-1 text-xs">Fórmula de disponibilidad real</p>
                       <p>
-                        <span className="font-black text-violet-600">{capHsPerGuardPeriod} hs tope período/guardia</span>
+                        <span className="font-black text-violet-600">{capHsPerGuardPeriod} hs jornada de referencia/guardia</span>
                         {' × (1 − '}
                         <span className="font-black text-amber-600">{ausentismoTotal}%</span>
                         {' ausentismo) = '}
@@ -2293,7 +2343,7 @@ export default function AnalisisPage() {
                       <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 text-center">
                         <p className="text-2xl font-black text-emerald-600">{hsRealesGuardia}</p>
                         <p className="text-[9px] font-black uppercase text-slate-400">Hs reales/guardia</p>
-                        <p className="text-[9px] text-slate-400 mt-0.5">vs {capHsPerGuardPeriod} hs tope período</p>
+                        <p className="text-[9px] text-slate-400 mt-0.5">vs {capHsPerGuardPeriod} hs jornada ref.</p>
                       </div>
                       <div className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 text-center">
                         <p className={`text-2xl font-black ${brechaAjustada>0?'text-rose-600':'text-emerald-600'}`}>{guardiasAjustados}</p>
@@ -2388,7 +2438,10 @@ export default function AnalisisPage() {
                   Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
                   malla ({finHoursMode === 'real' ? 'fichada' : 'planificada'}) + novedades (V/L/E/A/AA/PG) + franco trabajado + extras/ops.
                   Sin precios. Pirámide empresa → cliente → objetivo.
-                  Techo por vigilador = <strong>200 hs</strong> (no el promedio). Capacidad realista: {informe.bolsaHsEfectivasGuardia} hs/g con índice 3m {informe.bolsaIndicePct}% ({informe.bolsaLookbackLabel || '—'}).
+                  Techo liquidación = <strong>200 hs</strong>/vigilador (no mezclar con jornada 192).
+                  {informe.bolsaModo === 'sin_indice'
+                    ? ` Sin índice: no hay ausencias en ${informe.bolsaLookbackLabel || 'los 3 meses previos'}; se muestra el techo 200×N, no una capacidad realista.`
+                    : ` Capacidad realista: ${informe.bolsaHsEfectivasGuardia} hs/g con índice 3m ${informe.bolsaIndicePct}% (${informe.bolsaLookbackLabel || '—'}).`}
                   {' '}{turnos.length.toLocaleString('es-AR')} turnos en el período.
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -2644,7 +2697,10 @@ export default function AnalisisPage() {
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-2xl leading-relaxed">
                   Lectura gerencial de <strong>{periodRange.labelShort}</strong>: vendido, plan, fichado y ausentismo real.
-                  La bolsa no es plantel × 200: 200 hs es el <strong>techo</strong> por vigilador. La capacidad usa el índice de ausencia de <strong>{informe.bolsaLookbackLabel || 'los 3 meses previos'}</strong> sobre la plantilla activa.
+                  {informe.bolsaModo === 'sin_indice'
+                    ? ` Bolsa = techo 200×N sin índice (${informe.bolsaLookbackLabel || '3 meses previos'} sin historial de ausencias). No es capacidad realista.`
+                    : ` La bolsa no es plantel × 200 como promedio: 200 hs es el techo. Capacidad = techo × (1 − índice ${informe.bolsaLookbackLabel || '3m'}).`}
+                  {' '}Jornada de referencia (viabilidad) = {CCT_HS_MENSUAL} hs; no se mezcla con el techo 200.
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <label className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">

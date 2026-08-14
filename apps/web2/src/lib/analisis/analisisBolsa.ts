@@ -30,6 +30,8 @@ export type BolsaRealista = {
   indice: number;
   indicePct: number;
   tieneHistorial: boolean;
+  /** con_indice = hay 3m de ausencias; sin_indice = no fingir 200×N como capacidad realista. */
+  modo: 'con_indice' | 'sin_indice';
   hsEfectivasGuardia: number;
   bolsaInicial: number;
 };
@@ -102,7 +104,7 @@ export function buildBolsaRealista(opts: {
 
   const hsAusenciaLookback = r1(stats?.hsAfectadas ?? 0);
   const tieneHistorial = (stats?.total ?? 0) > 0 || hsAusenciaLookback > 0;
-  const indiceRaw = techoLookback > 0 ? hsAusenciaLookback / techoLookback : 0;
+  const indiceRaw = tieneHistorial && techoLookback > 0 ? hsAusenciaLookback / techoLookback : 0;
   const indice = Math.min(1, Math.max(0, indiceRaw));
   const hsEfectivasGuardia = r1(techoPeriodoGuardia * (1 - indice));
   const bolsaInicial = r1(Math.max(0, plantel) * hsEfectivasGuardia);
@@ -118,6 +120,7 @@ export function buildBolsaRealista(opts: {
     indice,
     indicePct: r1(indice * 100),
     tieneHistorial,
+    modo: tieneHistorial ? 'con_indice' : 'sin_indice',
     hsEfectivasGuardia,
     bolsaInicial,
   };

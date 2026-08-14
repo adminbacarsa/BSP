@@ -21,6 +21,7 @@ import {
   coverageHoursFromShift,
   isFrancoTrabajadoShift,
   isVacantShift,
+  shiftStartMs,
 } from './analisisQueries';
 
 export type FinHoursMode = 'planned' | 'real';
@@ -117,6 +118,10 @@ export type FinEmpresaView = {
   deltaVsSla: number;
   clients: FinClientView[];
 };
+
+const SIN_OBJETIVO = 'SIN_OBJETIVO';
+
+export type LeaveAttributionSource = 'ausencia' | 'malla_periodo' | 'malla_historial' | 'sin_objetivo';
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -333,6 +338,62 @@ export function homeObjectiveByEmployee(
   return home;
 }
 
+/** Último puesto de malla del legajo antes de `beforeDay` (YYYY-MM-DD). */
+export function lastPlannedObjectiveBefore(
+  turnos: any[],
+  employeeId: string,
+  beforeDay: string | undefined,
+  aliases: Record<string, { canonicalId: string; name: string; clientId?: string }>,
+): string {
+  const eid = String(employeeId || '').trim();
+  if (!eid) return '';
+  let bestOid = '';
+  let bestMs = -1;
+  for (const t of turnos) {
+    if (String(t.employeeId || '').trim() !== eid) continue;
+    if (isVacantShift(t) || isFrancoTrabajadoShift(t)) continue;
+    if (!isPlanificadorPlannedHoursShift(t)) continue;
+    const ms = shiftStartMs(t);
+    if (ms == null) continue;
+    if (beforeDay) {
+      const day = getDateKeyInTimezone(new Date(ms));
+      if (day >= beforeDay) continue;
+    }
+    if (ms < bestMs) continue;
+    const oid =
+      resolveCanonicalObjectiveId(t, aliases) ||
+      String(t.objectiveId ?? '').trim();
+    if (!oid) continue;
+    bestMs = ms;
+    bestOid = oid;
+  }
+  return bestOid;
+}
+
+export function resolveLeaveObjective(
+  ev: AbsenceEvent,
+  homePeriod: Map<string, string>,
+  homeLookback: Map<string, string>,
+  turnosPeriodo: any[],
+  turnosHistorial: any[],
+  aliases: Record<string, { canonicalId: string; name: string; clientId?: string }>,
+): { oid: string; source: LeaveAttributionSource } {
+  if (ev.objectiveId) {
+    const oid = resolveCanonicalObjectiveId({ objectiveId: ev.objectiveId }, aliases) || ev.objectiveId;
+    return { oid, source: 'ausencia' };
+  }
+  const eid = String(ev.employeeId || '').trim();
+  const lastPeriod = lastPlannedObjectiveBefore(turnosPeriodo, eid, ev.fromDay, aliases);
+  if (lastPeriod) return { oid: lastPeriod, source: 'malla_periodo' };
+  const homeP = eid ? homePeriod.get(eid) : '';
+  if (homeP) return { oid: homeP, source: 'malla_periodo' };
+  const lastHist = lastPlannedObjectiveBefore(turnosHistorial, eid, ev.fromDay, aliases);
+  if (lastHist) return { oid: lastHist, source: 'malla_historial' };
+  const homeH = eid ? homeLookback.get(eid) : '';
+  if (homeH) return { oid: homeH, source: 'malla_historial' };
+  return { oid: SIN_OBJETIVO, source: 'sin_objetivo' };
+}
+
 export function buildAnalisisFinanciera(opts: {
   turnos: any[];
   ausenciasStats: AusenciasStats | null;
@@ -341,8 +402,11 @@ export function buildAnalisisFinanciera(opts: {
   periodEnd: Date;
   objectiveAliases: Record<string, { canonicalId: string; name: string; clientId?: string }>;
   slaExclusionCtx: any;
+  /** Malla de meses previos (lookback) para licencias sin objectiveId. */
+  turnosHistorial?: any[];
 }): FinObjectiveBase[] {
   const { turnos, ausenciasStats, vigenteServices, periodStart, periodEnd, objectiveAliases, slaExclusionCtx } = opts;
+  const historial = opts.turnosHistorial && opts.turnosHistorial.length ? opts.turnosHistorial : turnos;
   const byObj = new Map<string, Acc>();
 
   vigenteServices.forEach((srv: any) => {
@@ -362,9 +426,11 @@ export function buildAnalisisFinanciera(opts: {
   });
 
   const homeByEmp = homeObjectiveByEmployee(turnos, objectiveAliases);
+  const homeLookback = homeObjectiveByEmployee(historial, objectiveAliases);
 
   turnos.forEach((t: any) => {
-    const plannedStart = t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null;
+    const ms = shiftStartMs(t);
+    const plannedStart = ms != null ? new Date(ms) : (t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null);
     const scheduleDateKey = plannedStart ? getDateKeyInTimezone(plannedStart) : '';
     if (
       plannedStart &&
@@ -438,13 +504,24 @@ export function buildAnalisisFinanciera(opts: {
   });
 
   (ausenciasStats?.detalle || []).forEach((ev) => {
-    let oid = ev.objectiveId
-      ? (resolveCanonicalObjectiveId({ objectiveId: ev.objectiveId }, objectiveAliases) || ev.objectiveId)
-      : '';
-    if (!oid && ev.employeeId) oid = homeByEmp.get(String(ev.employeeId)) || '';
-    if (!oid) return;
+    const { oid } = resolveLeaveObjective(
+      ev,
+      homeByEmp,
+      homeLookback,
+      turnos,
+      historial,
+      objectiveAliases,
+    );
     const alias = objectiveAliases[oid];
-    const row = touch(byObj, oid, alias?.name || oid, String(alias?.clientId || '').trim(), alias ? 'Sin Cliente' : 'Sin Cliente');
+    const row = touch(
+      byObj,
+      oid,
+      oid === SIN_OBJETIVO
+        ? 'Sin objetivo (licencia sin puesto en malla)'
+        : (alias?.name || oid),
+      String(alias?.clientId || '').trim(),
+      oid === SIN_OBJETIVO ? 'Sin asignar' : 'Sin Cliente',
+    );
     bumpNov(row.novedades, ev);
     const g = guardOf(row, ev.employeeId, ev.emp);
     if (g) g.hsNovedad += Number(ev.hs) || 0;

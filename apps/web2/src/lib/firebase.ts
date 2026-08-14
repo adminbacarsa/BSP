@@ -70,26 +70,45 @@ export function onSnapshotFresh(ref: any, ...args: any[]): Unsubscribe {
 
 /**
  * Lectura única sin listener persistente.
- * Usa onSnapshot internamente para aprovechar memoryLocalCache en el emulador
- * (getDocs con longPolling puede tardar 60 s esperando el servidor).
- * - Emulador: resuelve en el primer callback (desde cache de sesión, inmediato).
- * - Producción: resuelve cuando llegan datos del servidor (omite fromCache).
- * Se desuscribe automáticamente tras el primer resultado útil.
+ * getDocs nativo en emulador puede colgarse ~60 s (longPolling).
+ * - Producción: espera snapshot del servidor (fromCache=false).
+ * - Emulador + memoryLocalCache: el 1.er snapshot fromCache vacío es un miss;
+ *   el siguiente (o uno fromCache con docs) ya es el listen. Nunca esperar
+ *   fromCache=false: en emulador casi no llega y la UI se queda en 8%.
  */
 export function getDocsOnce<T = any>(ref: Query<T> | CollectionReference<T>): Promise<QuerySnapshot<T>> {
   return new Promise<QuerySnapshot<T>>((resolve, reject) => {
+    let settled = false;
+    let n = 0;
+    let last: QuerySnapshot<T> | null = null;
+    const done = (snap?: QuerySnapshot<T>, err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { unsub(); } catch { /* ignore */ }
+      if (err) reject(err);
+      else resolve(snap as QuerySnapshot<T>);
+    };
+    const timer = setTimeout(() => {
+      if (last) done(last);
+      else done(undefined, new Error('Timeout leyendo Firestore (60s).'));
+    }, _USE_EMULATOR_FOR_SNAPSHOT ? 12_000 : 60_000);
     const unsub = _onSnapshot(
       ref,
-      { includeMetadataChanges: !_USE_EMULATOR_FOR_SNAPSHOT },
+      { includeMetadataChanges: true },
       (snap: QuerySnapshot<T>) => {
-        // Emulador: acepta el primer resultado (cache de sesión es fresco).
-        // Producción: espera resultado del servidor (fromCache=false).
-        if (_USE_EMULATOR_FOR_SNAPSHOT || !snap.metadata.fromCache) {
-          unsub();
-          resolve(snap);
+        last = snap;
+        n += 1;
+        if (!snap.metadata.fromCache) {
+          done(snap);
+          return;
+        }
+        if (_USE_EMULATOR_FOR_SNAPSHOT) {
+          if (n === 1 && snap.empty) return;
+          done(snap);
         }
       },
-      (err) => { unsub(); reject(err); },
+      (err) => done(undefined, err),
     );
   });
 }
