@@ -133,11 +133,39 @@ export function gapsToFetch(intervals: MsRange[], requested: MsRange): MsRange[]
 
 export function shiftStartMs(t: any): number | null {
   if (!t) return null;
-  if (t.startTime?.seconds != null) return t.startTime.seconds * 1000;
-  if (typeof t.startTime?.toMillis === 'function') return t.startTime.toMillis();
-  if (typeof t.startTime === 'string') {
-    const d = new Date(t.startTime);
-    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  const st = t.startTime;
+  if (st != null) {
+    if (typeof st.seconds === 'number') return st.seconds * 1000;
+    if (typeof st._seconds === 'number') return st._seconds * 1000;
+    if (typeof st.toMillis === 'function') {
+      const ms = st.toMillis();
+      if (Number.isFinite(ms)) return ms;
+    }
+    if (typeof st.toDate === 'function') {
+      try {
+        const d = st.toDate();
+        if (d instanceof Date && !Number.isNaN(d.getTime())) return d.getTime();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (st instanceof Date && !Number.isNaN(st.getTime())) return st.getTime();
+    if (typeof st === 'string' && !/^\d{1,2}:\d{2}/.test(st.trim())) {
+      const d = new Date(st);
+      if (!Number.isNaN(d.getTime())) return d.getTime();
+    }
+  }
+  const dateStr = String(t.date || t.scheduleDate || t.planningDate || t.fecha || t.shiftDate || '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [y, mo, d] = dateStr.split('-').map(Number);
+    let h = 12;
+    let min = 0;
+    const clock = String(typeof st === 'string' ? st : (t.startHour || '')).match(/^(\d{1,2}):(\d{2})/);
+    if (clock) {
+      h = Number(clock[1]);
+      min = Number(clock[2]);
+    }
+    return new Date(y, mo - 1, d, h, min, 0, 0).getTime();
   }
   return null;
 }

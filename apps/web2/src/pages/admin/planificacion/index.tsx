@@ -5795,6 +5795,10 @@ export default function PlanificacionPage() {
                             turnoPayload.eventoNombre = change.eventoNombre || null;
                             turnoPayload.servicioId = change.servicioId || null;
                             turnoPayload.servicioNombre = change.servicioNombre || null;
+                            // Guardar horas explícitas para que liquidación no dependa de startTime/endTime
+                            if (change.hours != null && Number.isFinite(Number(change.hours)) && Number(change.hours) > 0) {
+                                turnoPayload.hours = Number(change.hours);
+                            }
                         }
 
                         batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
@@ -12684,10 +12688,14 @@ export default function PlanificacionPage() {
                                                             const isPickerOpen = eventoPickerKey === cellKey;
                                                             const assignServicio = ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {
                                                                 if (isServiceLocked) return;
+                                                                // Para 3x8/2x12 cada guardia trabaja su banda (8h o 12h), no las 24h totales del servicio
+                                                                const guardHours = servicio.tipoTurno === '3x8' ? 8
+                                                                    : servicio.tipoTurno === '2x12' ? 12
+                                                                    : calcHorasEvento(servicio.horaInicio, servicio.horaFin);
                                                                 handleAssignShift({
                                                                     code: 'EV',
                                                                     name: servicio.nombre,
-                                                                    hours: servicio.horasTotal,
+                                                                    hours: guardHours,
                                                                     startTime: servicio.horaInicio,
                                                                     endTime: servicio.horaFin,
                                                                     eventoId: evento.id,
