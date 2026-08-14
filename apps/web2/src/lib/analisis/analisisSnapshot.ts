@@ -10,7 +10,7 @@ import {
   empresaCollectionQuery,
   filterRowsByEmpresa,
 } from '@/lib/multiempresa';
-import { buildPlanningMonthTurnosQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
+import { buildPlanningMonthTurnosQuery, planningMonthBounds } from '@/lib/planificacion/loadPlanningMonthShifts';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import type { NovedadType } from '@/lib/rrhh/novedadTypes';
 import {
@@ -62,6 +62,8 @@ export type AnalisisMemoryStore = {
 };
 
 let memoryStore: AnalisisMemoryStore | null = null;
+let loadEpoch = 0;
+const turnosMonthInflight = new Map<string, Promise<any[]>>();
 
 function readMeta(): AnalisisSnapMeta | null {
   return readSessionJson<AnalisisSnapMeta>(META_KEY);
@@ -79,6 +81,9 @@ export function getAnalisisMemoryStore(): AnalisisMemoryStore | null {
 }
 
 export function resetAnalisisMemoryStore() {
+  loadEpoch += 1;
+  turnosMonthInflight.clear();
+  ausenciasInflight = null;
   memoryStore = null;
 }
 
@@ -182,7 +187,7 @@ function mapTurnoDocs(
     });
 }
 
-async function fetchTurnosMonth(year: number, month: number, opts: ScopeOpts): Promise<any[]> {
+async function fetchTurnosMonthOnce(year: number, month: number, opts: ScopeOpts): Promise<any[]> {
   const q = buildPlanningMonthTurnosQuery({
     empresaId: opts.empresaId,
     scopeEmpresa: opts.scopeEmpresa,
@@ -197,16 +202,35 @@ async function fetchTurnosMonth(year: number, month: number, opts: ScopeOpts): P
   return mapped;
 }
 
+async function fetchTurnosMonth(year: number, month: number, opts: ScopeOpts): Promise<any[]> {
+  const key = `${opts.empresaId}:${year}-${String(month).padStart(2, '0')}`;
+  const hit = turnosMonthInflight.get(key);
+  if (hit) return hit;
+  const p = fetchTurnosMonthOnce(year, month, opts).finally(() => {
+    turnosMonthInflight.delete(key);
+  });
+  turnosMonthInflight.set(key, p);
+  return p;
+}
+
+let ausenciasInflight: Promise<any[]> | null = null;
+
 async function fetchAusenciasAll(opts: ScopeOpts): Promise<any[]> {
-  const snap = await getDocsOnce(
-    empresaCollectionQuery('ausencias', opts.empresaId, opts.scopeEmpresa) as ReturnType<typeof query>,
-  );
-  return filterRowsByEmpresa(
-    snap.docs.map((d) => ({ id: d.id, ...d.data() })),
-    opts.empresaId,
-    opts.scopeEmpresa,
-    opts.migracionCompleta,
-  );
+  if (ausenciasInflight) return ausenciasInflight;
+  ausenciasInflight = (async () => {
+    const snap = await getDocsOnce(
+      empresaCollectionQuery('ausencias', opts.empresaId, opts.scopeEmpresa) as ReturnType<typeof query>,
+    );
+    return filterRowsByEmpresa(
+      snap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      opts.empresaId,
+      opts.scopeEmpresa,
+      opts.migracionCompleta,
+    );
+  })().finally(() => {
+    ausenciasInflight = null;
+  });
+  return ausenciasInflight;
 }
 
 export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
@@ -340,28 +364,42 @@ export async function ensureAnalisisFacts(opts: ScopeOpts & {
   const months = gaps.flatMap((g) => monthsInRange(g));
   const totalSteps = Math.max(1, months.length);
   const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const epoch = loadEpoch;
+
+  const ausenciasP = (!store.ausenciasLoaded || opts.force)
+    ? fetchAusenciasAll(opts)
+    : Promise.resolve(null as any[] | null);
 
   if (months.length) {
-    for (let i = 0; i < months.length; i++) {
-      const { year, month } = months[i];
-      const label = `${MONTHS_SHORT[month - 1]} ${year}`;
-      opts.onProgress?.({
-        phase,
-        pct: Math.min(99, Math.round((i / totalSteps) * 100)),
-        label: `Malla ${label}`,
-        docs: store.turnos.length,
-      });
+    opts.onProgress?.({
+      phase,
+      pct: 4,
+      label: months.length === 1
+        ? `Malla ${MONTHS_SHORT[months[0].month - 1]} ${months[0].year}`
+        : `Malla ${months.length} meses en paralelo`,
+      docs: store.turnos.length,
+    });
+    let done = 0;
+    await Promise.all(months.map(async ({ year, month }) => {
       const docs = await fetchTurnosMonth(year, month, opts);
+      if (epoch !== loadEpoch) return;
       store.turnos = mergeDocsById(store.turnos, docs);
+      const bounds = planningMonthBounds(year, month);
+      store.intervals = mergeIntervals([
+        ...store.intervals,
+        { startMs: bounds.firstDay.getTime(), endMs: bounds.lastDay.getTime() },
+      ]);
+      store.factsAt = Date.now();
+      persistMeta(store);
+      done += 1;
       opts.onProgress?.({
         phase,
-        pct: Math.min(99, Math.round(((i + 1) / totalSteps) * 100)),
-        label: `Malla ${label}`,
+        pct: Math.min(95, Math.round((done / totalSteps) * 90) + 4),
+        label: `Malla ${MONTHS_SHORT[month - 1]} ${year}`,
         docs: store.turnos.length,
       });
-    }
-    store.intervals = mergeIntervals([...store.intervals, ...gaps]);
-    store.factsAt = Date.now();
+    }));
+    if (epoch !== loadEpoch) return ensureStore(opts.empresaId);
   }
 
   if (!store.ausenciasLoaded || opts.force) {
@@ -371,7 +409,8 @@ export async function ensureAnalisisFacts(opts: ScopeOpts & {
       label: 'Ausencias RRHH',
       docs: store.turnos.length,
     });
-    store.ausencias = await fetchAusenciasAll(opts);
+    store.ausencias = (await ausenciasP) || [];
+    if (epoch !== loadEpoch) return ensureStore(opts.empresaId);
     store.ausenciasLoaded = true;
     store.factsAt = Date.now();
   }

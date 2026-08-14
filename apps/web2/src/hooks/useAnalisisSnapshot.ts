@@ -34,11 +34,13 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   const periodEndMs = periodEnd.getTime();
 
   const [storeVersion, setStoreVersion] = useState(0);
+  const [catalogReady, setCatalogReady] = useState(false);
   const [loadInit, setLoadInit] = useState(true);
   const [loadFacts, setLoadFacts] = useState(false);
   const [loadError, setLoadError] = useState(null as string | null);
   const [loadProgress, setLoadProgress] = useState(null as AnalisisLoadProgress | null);
-  const genRef = useRef(0);
+  const windowGenRef = useRef(0);
+  const periodGenRef = useRef(0);
 
   const bump = useCallback(() => setStoreVersion((v) => v + 1), []);
 
@@ -52,84 +54,76 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     if (loadingEmpresa) return;
     if (!scopeOpts.empresaId) {
       setLoadInit(false);
+      setCatalogReady(false);
       setLoadError('No hay empresa activa en la sesión.');
       return;
     }
     const mem = getAnalisisMemoryStore();
     if (mem && mem.empresaId !== scopeOpts.empresaId) {
       resetAnalisisMemoryStore();
+      setCatalogReady(false);
     }
     let cancelled = false;
-    const gen = ++genRef.current;
+    const gen = ++windowGenRef.current;
     const win = analisisWorkingWindow(new Date());
     (async () => {
       try {
         setLoadError(null);
         const existing = getAnalisisMemoryStore();
-        const windowCovered = storeCoversRange(
-          existing && existing.empresaId === scopeOpts.empresaId ? existing : null,
-          win.start,
-          win.end,
-        );
         const needCatalog = !existing || existing.empresaId !== scopeOpts.empresaId || !existing.catalogAt;
-        if (needCatalog || !windowCovered) setLoadInit(true);
-        else setLoadInit(false);
         if (needCatalog) {
+          setLoadInit(true);
           setLoadProgress({ pct: 4, label: 'Catálogo (SLA, plantel, clientes)', phase: 'catalog', docs: 0 });
           await fetchAnalisisCatalog(scopeOpts);
-          if (cancelled || gen !== genRef.current) return;
-          bump();
+          if (cancelled || gen !== windowGenRef.current) return;
         }
-        if (cancelled || gen !== genRef.current) return;
-        if (!windowCovered) {
+        setCatalogReady(true);
+        bump();
+        if (cancelled || gen !== windowGenRef.current) return;
+        if (!storeCoversRange(getAnalisisMemoryStore(), win.start, win.end)) {
           setLoadFacts(true);
           await ensureAnalisisFacts({
             ...scopeOpts,
             requestedStart: win.start,
             requestedEnd: win.end,
-            phase: 'malla',
+            phase: 'lookback',
             onProgress: (p) => {
-              if (cancelled || gen !== genRef.current) return;
+              if (cancelled || gen !== windowGenRef.current) return;
               setLoadProgress({
                 ...p,
-                pct: 8 + Math.round(p.pct * 0.9),
+                label: `Ventana · ${p.label}`,
+                pct: Math.min(99, 50 + Math.round(p.pct * 0.45)),
               });
+              bump();
             },
           });
         }
-        if (cancelled || gen !== genRef.current) return;
+        if (cancelled || gen !== windowGenRef.current) return;
         setLoadProgress({ pct: 100, label: 'Listo', phase: 'done', docs: getAnalisisMemoryStore()?.turnos.length || 0 });
         bump();
       } catch (e) {
         console.error(e);
-        if (!cancelled && gen === genRef.current) {
+        if (!cancelled && gen === windowGenRef.current) {
           setLoadError(e instanceof Error ? e.message : 'No se pudo cargar el catálogo de Análisis.');
         }
       } finally {
-        if (!cancelled && gen === genRef.current) {
-          setLoadFacts(false);
-          const store = getAnalisisMemoryStore();
-          const covered = storeCoversRange(
-            store && store.empresaId === scopeOpts.empresaId ? store : null,
-            win.start,
-            win.end,
-          );
-          if (covered) setLoadInit(false);
-        }
+        if (!cancelled && gen === windowGenRef.current) setLoadFacts(false);
       }
     })();
     return () => { cancelled = true; };
   }, [loadingEmpresa, scopeOpts, bump]);
 
   useEffect(() => {
-    if (loadingEmpresa || loadInit || !scopeOpts.empresaId) return;
+    if (loadingEmpresa || !scopeOpts.empresaId || !catalogReady) return;
     const env = envelopingRange(new Date(periodStartMs), new Date(periodEndMs));
-    if (storeCoversRange(getAnalisisMemoryStore(), env.start, env.end)) return;
+    if (storeCoversRange(getAnalisisMemoryStore(), env.start, env.end)) {
+      setLoadInit(false);
+      return;
+    }
     let cancelled = false;
-    const gen = ++genRef.current;
+    const gen = ++periodGenRef.current;
+    setLoadInit(true);
     (async () => {
-      setLoadFacts(true);
-      setLoadError(null);
       try {
         await ensureAnalisisFacts({
           ...scopeOpts,
@@ -137,22 +131,23 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
           requestedEnd: env.end,
           phase: 'malla',
           onProgress: (p) => {
-            if (cancelled || gen !== genRef.current) return;
-            setLoadProgress(p);
+            if (cancelled || gen !== periodGenRef.current) return;
+            setLoadProgress({ ...p, pct: 8 + Math.round(p.pct * 0.7) });
           },
         });
-        if (!cancelled && gen === genRef.current) bump();
+        if (!cancelled && gen === periodGenRef.current) {
+          setLoadInit(false);
+          bump();
+        }
       } catch (e) {
         console.error(e);
-        if (!cancelled && gen === genRef.current) {
-          setLoadError(e instanceof Error ? e.message : 'No se pudo ampliar el rango de Análisis.');
+        if (!cancelled && gen === periodGenRef.current) {
+          setLoadError(e instanceof Error ? e.message : 'No se pudo cargar el mes de Análisis.');
         }
-      } finally {
-        if (!cancelled && gen === genRef.current) setLoadFacts(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [loadingEmpresa, loadInit, scopeOpts, periodStartMs, periodEndMs, bump]);
+  }, [loadingEmpresa, catalogReady, scopeOpts, periodStartMs, periodEndMs, bump]);
 
   const store: AnalisisMemoryStore | null = useMemo(() => {
     void storeVersion;
@@ -200,7 +195,11 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   const reloadAll = useCallback(async () => {
     if (!scopeOpts.empresaId) return;
     const win = analisisWorkingWindow(new Date());
+    const env = envelopingRange(new Date(periodStartMs), new Date(periodEndMs));
+    windowGenRef.current += 1;
+    const gen = windowGenRef.current;
     setLoadInit(true);
+    setCatalogReady(false);
     setLoadFacts(true);
     setLoadError(null);
     setLoadProgress({ pct: 2, label: 'Reiniciando snapshot…', phase: 'catalog', docs: 0 });
@@ -208,30 +207,44 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
       resetAnalisisMemoryStore();
       setLoadProgress({ pct: 6, label: 'Catálogo (SLA, plantel, clientes)', phase: 'catalog', docs: 0 });
       await fetchAnalisisCatalog(scopeOpts);
+      if (gen !== windowGenRef.current) return;
+      setCatalogReady(true);
+      await ensureAnalisisFacts({
+        ...scopeOpts,
+        requestedStart: env.start,
+        requestedEnd: env.end,
+        force: true,
+        phase: 'malla',
+        onProgress: (p) => setLoadProgress({ ...p, pct: 10 + Math.round(p.pct * 0.55) }),
+      });
+      if (gen !== windowGenRef.current) return;
+      setLoadInit(false);
+      bump();
       await ensureAnalisisFacts({
         ...scopeOpts,
         requestedStart: win.start,
         requestedEnd: win.end,
-        force: true,
-        phase: 'malla',
-        onProgress: (p) => setLoadProgress({ ...p, pct: 10 + Math.round(p.pct * 0.88) }),
+        phase: 'lookback',
+        onProgress: (p) => setLoadProgress({
+          ...p,
+          label: `Ventana · ${p.label}`,
+          pct: 70 + Math.round(p.pct * 0.28),
+        }),
       });
+      if (gen !== windowGenRef.current) return;
       setLoadProgress({ pct: 100, label: 'Listo', phase: 'done', docs: getAnalisisMemoryStore()?.turnos.length || 0 });
       bump();
     } catch (e) {
       console.error(e);
       setLoadError(e instanceof Error ? e.message : 'No se pudo recargar Análisis.');
     } finally {
-      setLoadFacts(false);
-      const mem = getAnalisisMemoryStore();
-      const covered = storeCoversRange(
-        mem && mem.empresaId === scopeOpts.empresaId ? mem : null,
-        win.start,
-        win.end,
-      );
-      if (covered) setLoadInit(false);
+      if (gen === windowGenRef.current) {
+        setLoadFacts(false);
+        const mem = getAnalisisMemoryStore();
+        if (storeCoversRange(mem, env.start, env.end)) setLoadInit(false);
+      }
     }
-  }, [scopeOpts, bump]);
+  }, [scopeOpts, periodStartMs, periodEndMs, bump]);
 
   const isRangeCovered = useCallback((start: Date, end: Date) => {
     const mem = getAnalisisMemoryStore();
