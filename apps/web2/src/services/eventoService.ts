@@ -5,6 +5,7 @@ import {
     addDoc,
     updateDoc,
     deleteDoc,
+    getDocs,
     query,
     where,
     orderBy,
@@ -208,5 +209,38 @@ export const eventoService = {
 
     delete: async (id: string): Promise<void> => {
         await deleteDoc(doc(db, 'eventos', id));
+    },
+
+    /** Turnos EV asignados para un evento (para mostrar personal en EventosPanel). */
+    getStaffing: async (eventoId: string): Promise<Array<{
+        id: string;
+        empleadoId: string;
+        empleadoNombre: string;
+        servicioId: string;
+        servicioNombre: string;
+        fecha: string;
+    }>> => {
+        const snap = await getDocs(
+            query(collection(db, 'turnos'), where('eventoId', '==', eventoId)),
+        );
+        return snap.docs
+            .filter(d => {
+                const t = d.data();
+                return t.employeeId && !t.draft;
+            })
+            .map(d => {
+                const t = d.data();
+                const fechaStr = typeof t.startTime === 'string'
+                    ? t.startTime.slice(0, 10)
+                    : t.startTime?.toDate?.()?.toISOString?.()?.slice(0, 10) ?? '';
+                return {
+                    id: d.id,
+                    empleadoId: t.employeeId,
+                    empleadoNombre: t.employeeName || t.employeeId,
+                    servicioId: t.servicioId || '',
+                    servicioNombre: t.servicioNombre || '',
+                    fecha: fechaStr,
+                };
+            });
     },
 };
