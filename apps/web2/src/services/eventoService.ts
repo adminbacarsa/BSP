@@ -4,6 +4,7 @@ import {
     doc,
     addDoc,
     updateDoc,
+    deleteDoc,
     query,
     where,
     orderBy,
@@ -203,5 +204,9 @@ export const eventoService = {
             status: 'cancelado',
             updatedAt: serverTimestamp(),
         });
+    },
+
+    delete: async (id: string): Promise<void> => {
+        await deleteDoc(doc(db, 'eventos', id));
     },
 };

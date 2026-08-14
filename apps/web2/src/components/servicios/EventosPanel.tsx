@@ -333,6 +333,18 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
         }
     }
 
+    async function deleteEvento(ev: Evento) {
+        if (!ev.id) return;
+        if (!confirm(`¿Eliminar definitivamente el evento "${ev.nombre}"? Esta acción no se puede deshacer.`)) return;
+        try {
+            await eventoService.delete(ev.id);
+            setEventos(prev => prev.filter(e => e.id !== ev.id));
+            addToast('Evento eliminado', 'success');
+        } catch {
+            addToast('Error al eliminar el evento', 'error');
+        }
+    }
+
     // ── Derived list ────────────────────────────────────────────────────────
 
     const filtered = eventos.filter(ev => {
@@ -836,6 +848,14 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 rounded-xl text-xs font-black uppercase hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
                                             >
                                                 <X size={11}/> Cancelar
+                                            </button>
+                                        )}
+                                        {canDelete && ev.status === 'cancelado' && (
+                                            <button
+                                                onClick={() => void deleteEvento(ev)}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-black uppercase hover:bg-rose-200 dark:hover:bg-rose-900/60 transition-colors"
+                                            >
+                                                <Trash2 size={11}/> Eliminar
                                             </button>
                                         )}
                                     </div>
