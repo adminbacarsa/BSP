@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSchemeModal';
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
+import { EventosPanel } from '@/components/servicios/EventosPanel';
 import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdvisor';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -1245,6 +1246,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   const [srvFeatureFilter, setSrvFeatureFilter] = usePersistedState<'all' | 'rotaciones' | 'condiciones'>('cosp:srv:feature', 'all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [listMode, setListMode] = usePersistedState<'objectives' | 'clients'>('cosp:srv:listMode', 'clients');
+  const [mainTab, setMainTab] = useState<'sla' | 'eventos'>('sla');
   const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
   const toggleClient = (id: string) =>
     setExpandedClients(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -1479,13 +1481,42 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               >
                 <RotateCw size={14} className={loading ? 'animate-spin' : ''}/>
               </button>
-              {canCreateService && (
+              {canCreateService && mainTab === 'sla' && (
               <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
                 <Plus size={14}/> Nuevo Servicio
               </button>
               )}
             </div>
           </div>
+
+          {/* ── Tabs: Contratos SLA / Eventos ──────────────────────────── */}
+          <div className="flex gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-fit">
+            <button
+              onClick={() => setMainTab('sla')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${mainTab === 'sla' ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+            >
+              <Shield size={11}/> Contratos SLA
+            </button>
+            <button
+              onClick={() => setMainTab('eventos')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${mainTab === 'eventos' ? 'bg-white dark:bg-slate-700 text-yellow-600 dark:text-yellow-400 shadow-sm' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+            >
+              <Calendar size={11}/> Eventos
+            </button>
+          </div>
+
+          {/* ── Panel Eventos ───────────────────────────────────────────── */}
+          {mainTab === 'eventos' && (
+            <EventosPanel
+              empresaId={empresaId || ''}
+              canCreate={canCreateService}
+              canUpdate={canUpdateService}
+              canDelete={canDeleteService}
+            />
+          )}
+
+          {/* ── Contratos SLA (contenido existente) ────────────────────── */}
+          {mainTab === 'sla' && (<>
 
           {/* Búsqueda y filtro cliente */}
           <div className="flex flex-col md:flex-row gap-3">
@@ -1987,6 +2018,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             onClose={() => setShiftModal({ open: false, service: null })}
             service={shiftModal.service}
           />
+          </>)}
         </div>
       )}
 
