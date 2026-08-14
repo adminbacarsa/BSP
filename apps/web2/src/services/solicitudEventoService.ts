@@ -12,7 +12,8 @@ import {
 } from 'firebase/firestore';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
-export type EstadoSolicitudEvento = 'pendiente' | 'aprobada' | 'rechazada';
+export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada';
+export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca';
 
 export interface SolicitudEvento {
     id?: string;
@@ -24,20 +25,23 @@ export interface SolicitudEvento {
     servicioFecha: string;           // YYYY-MM-DD
     empleadoId: string;
     empleadoNombre: string;
+    tipo: TipoSolicitudEvento;       // quién inició
     status: EstadoSolicitudEvento;
     nota?: string;
+    convocadoPor?: string;           // uid del admin que convocó
     respondidoAt?: any;
     respondidoPor?: string;
     creadoAt?: any;
 }
 
 export const solicitudEventoService = {
-    /** Crea una solicitud del guardia para un servicio de evento. */
-    add: async (data: Omit<SolicitudEvento, 'id' | 'status' | 'creadoAt'>): Promise<string> => {
+    /** Guardia solicita participar en un evento. */
+    add: async (data: Omit<SolicitudEvento, 'id' | 'tipo' | 'status' | 'creadoAt'>): Promise<string> => {
         const payload = stampEmpresaId(
             {
                 ...data,
-                status: 'pendiente',
+                tipo: 'guardia_solicita' as TipoSolicitudEvento,
+                status: 'pendiente' as EstadoSolicitudEvento,
                 creadoAt: serverTimestamp(),
             } as Record<string, unknown>,
             data.empresaId,
@@ -46,7 +50,32 @@ export const solicitudEventoService = {
         return ref.id;
     },
 
-    /** Responde una solicitud (aprobada / rechazada). */
+    /** Admin convoca a un guardia a un servicio de evento. */
+    convocar: async (data: {
+        empresaId: string;
+        eventoId: string;
+        eventoNombre: string;
+        servicioId: string;
+        servicioNombre: string;
+        servicioFecha: string;
+        empleadoId: string;
+        empleadoNombre: string;
+        convocadoPor?: string;
+    }): Promise<string> => {
+        const payload = stampEmpresaId(
+            {
+                ...data,
+                tipo: 'admin_convoca' as TipoSolicitudEvento,
+                status: 'convocado' as EstadoSolicitudEvento,
+                creadoAt: serverTimestamp(),
+            } as Record<string, unknown>,
+            data.empresaId,
+        );
+        const ref = await addDoc(collection(db, 'solicitudes_evento'), payload);
+        return ref.id;
+    },
+
+    /** Admin responde una solicitud (aprobada / rechazada). */
     responder: async (
         id: string,
         status: 'aprobada' | 'rechazada',
@@ -61,7 +90,18 @@ export const solicitudEventoService = {
         });
     },
 
-    /** Carga solicitudes de un evento (para el panel admin). */
+    /** Guardia responde a una convocatoria del admin. */
+    responderConvocatoria: async (
+        id: string,
+        status: 'aprobada' | 'rechazada',
+    ): Promise<void> => {
+        await updateDoc(doc(db, 'solicitudes_evento', id), {
+            status,
+            respondidoAt: serverTimestamp(),
+        });
+    },
+
+    /** Carga todas las solicitudes de un evento (panel admin). */
     getByEvento: async (eventoId: string): Promise<SolicitudEvento[]> => {
         const q = query(
             collection(db, 'solicitudes_evento'),
@@ -72,7 +112,7 @@ export const solicitudEventoService = {
         return snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudEvento));
     },
 
-    /** Carga solicitudes del empleado para el mes actual (para el portal guardia). */
+    /** Carga solicitudes del empleado en un rango de fechas (portal guardia). */
     getByEmpleado: async (empleadoId: string, empresaId: string, fromDate: string, toDate: string): Promise<SolicitudEvento[]> => {
         const q = query(
             collection(db, 'solicitudes_evento'),
