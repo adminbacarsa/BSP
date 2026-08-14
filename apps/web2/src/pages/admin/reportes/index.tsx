@@ -1471,16 +1471,16 @@ export default function ReportsPage() {
                         )}
                     </div>
 
-                    <div className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-950 p-3 sm:p-4 min-h-0">
+                    <div className="flex-1 overflow-auto bg-slate-100/80 dark:bg-slate-950 min-h-0">
                         {rowsWithData.length === 0 ? (
-                            <div className="rounded-2xl border border-dashed border-slate-300 bg-white dark:bg-slate-900 p-10 text-center text-slate-500 text-sm font-medium">
+                            <div className="m-3 sm:m-4 rounded-2xl border border-dashed border-slate-300 bg-white dark:bg-slate-900 p-10 text-center text-slate-500 text-sm font-medium">
                                 No hay filas con los filtros actuales. Probá limpiar la búsqueda o ampliar el período del reporte.
                             </div>
                         ) : (
-                        <table className="w-full min-w-[720px] text-xs text-left border-separate border-spacing-0 bg-white dark:bg-slate-900 shadow-sm rounded-2xl">
+                        <table className="w-full min-w-[720px] text-xs text-left border-separate border-spacing-0 bg-white dark:bg-slate-900">
                             <thead className="text-[10px] font-black text-slate-500 uppercase">
-                                <tr className="[&>th]:sticky [&>th]:top-0 [&>th]:z-20 [&>th]:bg-slate-50 dark:[&>th]:bg-slate-800 [&>th]:border-b [&>th]:border-slate-200 dark:[&>th]:border-slate-700 [&>th]:shadow-[0_1px_0_0_rgb(226,232,240)] dark:[&>th]:shadow-[0_1px_0_0_rgb(51,65,85)]">
-                                    <th className="py-2.5 px-3 rounded-tl-2xl">Fecha</th>
+                                <tr className="[&>th]:sticky [&>th]:top-0 [&>th]:z-20 [&>th]:bg-slate-50 dark:[&>th]:bg-slate-800 [&>th]:border-b [&>th]:border-slate-200 dark:[&>th]:border-slate-700">
+                                    <th className="py-2.5 px-3">Fecha</th>
                                     <th className="py-2.5 px-3">Planificado</th>
                                     <th className="py-2.5 px-3">{usePlannedHours ? 'Horas (plan.)' : 'Fichada'}</th>
                                     <th className="py-2.5 px-2 text-center">Cód.</th>
@@ -1490,7 +1490,7 @@ export default function ReportsPage() {
                                     <th className="py-2.5 px-2 text-center text-violet-600">Noche</th>
                                     <th className="py-2.5 px-2 text-center text-rose-600">100%</th>
                                     <th className="py-2.5 px-2 text-center text-emerald-600">Feriado</th>
-                                    <th className="py-2.5 px-3 text-center rounded-tr-2xl">Estado</th>
+                                    <th className="py-2.5 px-3 text-center">Estado</th>
                                 </tr>
                             </thead>
                             <tbody className="[&_td]:border-b [&_td]:border-slate-100 dark:[&_td]:border-slate-800">
