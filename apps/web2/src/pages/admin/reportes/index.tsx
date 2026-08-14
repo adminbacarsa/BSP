@@ -137,7 +137,10 @@ const DICTIONARY: Record<string, string> = {
     'BAJA_EMPLEADO': 'Baja Empleado', 'EDICION_CLIENTE': 'Edición Cliente',
     'AUTORIZACION_EXCEPCION': 'Excepción', 'ASIGNACION_MASIVA': 'Carga Masiva',
     'CAMBIO_FRANCO_TURNO': 'Franco Trab. (FT)', 'CAMBIO_DIAGRAMA': 'Enroque',
-    'CAMBIO_TURNO_FRANCO': 'Devolución (FF)'
+    'CAMBIO_TURNO_FRANCO': 'Devolución (FF)',
+    'AJUSTE_LIQUIDACION': 'Ajuste liquidación',
+    'ELIMINAR_AJUSTE_LIQUIDACION': 'Baja ajuste liquidación',
+    'EXPORT_REPORT': 'Exportó reporte',
 };
 
 export default function ReportsPage() {

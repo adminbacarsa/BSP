@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { readSessionString, writeSessionString } from '@/lib/persistSession';
 import { LayoutGrid, List, Search, Loader2 } from 'lucide-react';
 
 export { SupervisorPinInput } from './SupervisorPinInput';
@@ -113,8 +114,29 @@ interface TabBarProps {
   onChange: (id: string) => void;
   label?: string;
   compact?: boolean;
+  persist?: boolean;
+  persistKey?: string;
 }
-export const TabBar = ({ tabs, active, onChange, label, compact }: TabBarProps) => (
+export const TabBar = ({ tabs, active, onChange, label, compact, persist = true, persistKey }: TabBarProps) => {
+  const storageKey = persistKey
+    || (typeof window !== 'undefined' ? `cosp:tab:${window.location.pathname}` : '');
+
+  useEffect(() => {
+    if (!persist || !storageKey) return;
+    const saved = readSessionString(storageKey);
+    if (saved && saved !== active && tabs.some(t => t.id === saved)) {
+      onChange(saved);
+    }
+    // Solo restaurar al montar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey, persist]);
+
+  const handleChange = (id: string) => {
+    if (persist && storageKey) writeSessionString(storageKey, id);
+    onChange(id);
+  };
+
+  return (
   <div
     role="tablist"
     aria-label={label}
@@ -126,7 +148,7 @@ export const TabBar = ({ tabs, active, onChange, label, compact }: TabBarProps) 
         key={tab.id}
         role="tab"
         aria-selected={active === tab.id}
-        onClick={() => onChange(tab.id)}
+        onClick={() => handleChange(tab.id)}
         className={`flex items-center gap-1 rounded-lg font-black uppercase transition-all ${compact ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-1.5 text-[11px]'}`}
         style={active === tab.id ? {
           backgroundColor: 'var(--surf)',
@@ -155,7 +177,8 @@ export const TabBar = ({ tabs, active, onChange, label, compact }: TabBarProps) 
       </button>
     ))}
   </div>
-);
+  );
+};
 
 // ─── MODULE SHELL ─────────────────────────────────────────────────────────────
 // Shell reutilizable con toggle card/lista y expand/collapse por ítem.

@@ -104,6 +104,7 @@ import {
     fetchMergedPlanificacionEstadoData,
 } from '@/lib/multiempresa';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
+import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
     filterSlasForPlanningTenant,
     filterSlasForPlanningContext,
@@ -1034,6 +1035,32 @@ export default function PlanificacionPage() {
     const [columnSelectSource, setColumnSelectSource] = useState<number | null>(null);
     const [openDrop, setOpenDrop] = useState<'client' | 'objective' | 'grupo' | null>(null);
     const [selectedGrupo, setSelectedGrupo] = useState<GrupoObjetivos | null>(null);
+    const [planViewReady, setPlanViewReady] = useState(false);
+    useEffect(() => {
+        const saved = readSessionJson<{
+            client?: string;
+            objective?: string;
+            y?: number;
+            m?: number;
+        }>('cosp:plan:view');
+        if (saved) {
+            if (saved.client) setSelectedClient(saved.client);
+            if (saved.objective) setSelectedObjective(saved.objective);
+            if (typeof saved.y === 'number' && typeof saved.m === 'number') {
+                setCurrentDate(new Date(saved.y, saved.m, 1));
+            }
+        }
+        setPlanViewReady(true);
+    }, []);
+    useEffect(() => {
+        if (!planViewReady) return;
+        writeSessionJson('cosp:plan:view', {
+            client: selectedClient,
+            objective: selectedObjective,
+            y: currentDate.getFullYear(),
+            m: currentDate.getMonth(),
+        });
+    }, [planViewReady, selectedClient, selectedObjective, currentDate]);
     const [grupos, setGrupos] = useState<GrupoObjetivos[]>([]);
     const [showGrupoForm, setShowGrupoForm] = useState(false);
     const [grupoFormMode, setGrupoFormMode] = useState<'new' | 'edit'>('new');

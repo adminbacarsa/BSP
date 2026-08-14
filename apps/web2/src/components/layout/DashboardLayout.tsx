@@ -18,6 +18,7 @@ import { applyCompanyTheme } from '@/lib/companyTheme';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtils';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
+import { readSessionString, writeSessionString } from '@/lib/persistSession';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -313,9 +314,37 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
+  const mainScrollRef = useRef<HTMLElement>(null);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
   const [rfzPlanifIds, setRfzPlanifIds] = useState<string[]>([]);
+  useEffect(() => {
+    const path = router.pathname;
+    const key = `cosp:scroll:${path}`;
+    const el = compactSidebar ? mainScrollRef.current : null;
+
+    const restore = () => {
+      const y = Number(readSessionString(key) || 0);
+      if (!(y > 0)) return;
+      if (el) el.scrollTop = y;
+      else window.scrollTo(0, y);
+    };
+    const t0 = window.setTimeout(restore, 0);
+    const t1 = window.setTimeout(restore, 280);
+
+    const onScroll = () => {
+      const y = el ? el.scrollTop : window.scrollY;
+      writeSessionString(key, String(Math.round(y)));
+    };
+    const target: EventTarget = el || window;
+    target.addEventListener('scroll', onScroll, { passive: true } as AddEventListenerOptions);
+
+    return () => {
+      window.clearTimeout(t0);
+      window.clearTimeout(t1);
+      target.removeEventListener('scroll', onScroll);
+    };
+  }, [router.pathname, compactSidebar]);
   const canViewSupervision = canReadModule('SUPERVISION');
   const canViewPlanning = canReadModule('PLANNING');
 
@@ -667,13 +696,13 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           <div className={'absolute top-0 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ' + (topbarVisible ? 'opacity-0' : 'opacity-60')}>
             <div className="w-12 h-1 rounded-b-full bg-slate-500/60" />
           </div>
-          <main className="h-full overflow-y-auto min-h-0">{children}</main>
+          <main ref={mainScrollRef} className="h-full overflow-y-auto min-h-0">{children}</main>
         </div>
       ) : (
         <div className={'flex-1 transition-all duration-300 ease-in-out ' + (isPinned ? 'lg:ml-64' : 'lg:ml-16') + ' min-w-0'}>
           <DashboardHeader isSidebarOpen={sidebarOpen} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
           {/* Supervisión usa su propia bottom nav en mobile */}
-          <main className={'overflow-x-hidden ' + (isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8')}>
+          <main ref={compactSidebar ? undefined : mainScrollRef} className={'overflow-x-hidden ' + (isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8')}>
             {children}
           </main>
         </div>

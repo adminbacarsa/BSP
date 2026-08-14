@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
 import { useAuth } from '@/context/AuthContext';
@@ -1918,8 +1919,8 @@ export default function OperacionesPage() {
     const [manualRetentionData, setManualRetentionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [waData, setWaData] = useState<{ isOpen: boolean; ctx: WAComposeContext }>({ isOpen: false, ctx: { employeeName: '', phone: '' } });
     const [isGrouped, setIsGrouped] = useState(true);
-    const [viewMode, setViewMode] = useState<'objetivos' | 'lista'>('objetivos'); // default: vista por objetivo
-    const [expandedObjectiveId, setExpandedObjectiveId] = useState<string | null>(null);
+    const [viewMode, setViewMode] = usePersistedState<'objetivos' | 'lista'>('cosp:ops:viewMode', 'objetivos');
+    const [expandedObjectiveId, setExpandedObjectiveId] = usePersistedState<string | null>('cosp:ops:expandedObj', null);
     const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'>('reciente');
     const [bitacoraOpen, setBitacoraOpen] = useState(false);
     const [bitacoraExpanded, setBitacoraExpanded] = useState<string | null>(null);
@@ -2406,7 +2407,14 @@ export default function OperacionesPage() {
     };
     const OPS_ACTIONS = new Set(['CHECKIN','CHECKOUT','MARK_ABSENT','HANDOVER','INTERRUPT','COVERAGE','WORKED_FRANCO','ATTENDANCE','REPORT_PLANNING','REPORTE','RETENCION','PRESENTE','AUSENTE','SALIDA','ENTRADA','CHECK_IN','CHECK_OUT','MANUAL_ATTENDANCE','VACANCY','LLEGADA_TARDE','ADELANTO_TURNO','CONVOCATORIA_RETEN','FRANCO_TRABAJADO','BAJA_SERVICIO','INTERCAMBIO_TURNO','GUARDIA_INICIADA','GUARDIA_FINALIZADA','COBERTURA_RELEVO','EXTENSION_TURNO']);
     const filteredBitacora = useMemo(() => {
-        let logs = logic.recentLogs.filter((l: any) => l.formattedActor !== 'VACANTE');
+        let logs = logic.recentLogs.filter((l: any) => {
+            if (l.formattedActor === 'VACANTE') return false;
+            const mod = String(l.module || '').toUpperCase();
+            if (mod === 'REPORTES' || mod === 'LIQUIDACION') return false;
+            const a = String(l.action || '').toUpperCase();
+            if (a.includes('LIQUIDACION') || a === 'EXPORT_REPORT') return false;
+            return true;
+        });
         if (bitacoraFiltroGuardia && session.mySession?.startTime) {
             const guardStart = session.mySession.startTime.getTime();
             logs = logs.filter((l: any) => l.time && l.time.getTime() >= guardStart);

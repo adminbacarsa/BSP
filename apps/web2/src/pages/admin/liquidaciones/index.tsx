@@ -19,6 +19,7 @@ import {
 import { collection, query, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { db, app } from '@/lib/firebase';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -667,6 +668,28 @@ export default function LiquidacionesPage() {
     const [hoursMode, setHoursMode] = useState<'planned' | 'real'>('real');
     const [search, setSearch] = useState('');
     const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [viewRestored, setViewRestored] = useState(false);
+
+    useEffect(() => {
+        const saved = readSessionJson<{
+            cycleId?: string;
+            hoursMode?: 'planned' | 'real';
+            search?: string;
+            expandedId?: string | null;
+        }>('cosp:liq:view');
+        if (saved) {
+            if (saved.cycleId && cycleOptions.some(o => o.cycleId === saved.cycleId)) setCycleId(saved.cycleId);
+            if (saved.hoursMode === 'planned' || saved.hoursMode === 'real') setHoursMode(saved.hoursMode);
+            if (typeof saved.search === 'string') setSearch(saved.search);
+            if (saved.expandedId !== undefined) setExpandedId(saved.expandedId);
+        }
+        setViewRestored(true);
+    }, [cycleOptions]);
+
+    useEffect(() => {
+        if (!viewRestored) return;
+        writeSessionJson('cosp:liq:view', { cycleId, hoursMode, search, expandedId });
+    }, [viewRestored, cycleId, hoursMode, search, expandedId]);
 
     const { snapshot, loading, error, ajustes, refresh, saveAjuste, deleteAjuste } = useLiquidaciones({
         cycleId,
@@ -906,8 +929,8 @@ export default function LiquidacionesPage() {
                     </ContentCard>
                 )}
 
-                {/* Loading */}
-                {loading && (
+                {/* Loading inicial */}
+                {loading && !snapshot && (
                     <div className="flex items-center justify-center py-24 gap-3" style={{ color: 'var(--txt3)' }}>
                         <Loader2 size={24} className="animate-spin" />
                         <span className="text-sm font-bold">Calculando liquidación…</span>
@@ -915,8 +938,16 @@ export default function LiquidacionesPage() {
                 )}
 
                 {/* Tabla */}
-                {!loading && !error && snapshot && (
-                    <ContentCard padding={false}>
+                {!error && snapshot && (
+                    <ContentCard padding={false} className="relative">
+                        {loading && (
+                            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl" style={{ backgroundColor: 'rgba(255,255,255,0.55)' }}>
+                                <span className="flex items-center gap-2 text-sm font-bold" style={{ color: 'var(--txt3)' }}>
+                                    <Loader2 size={18} className="animate-spin" />
+                                    Actualizando…
+                                </span>
+                            </div>
+                        )}
                         <div className="overflow-x-auto">
                             <table className="w-full text-left border-collapse" style={{ minWidth: '1100px', borderTop: `2px solid ${LIQ_HLINE}`, borderLeft: `1.5px solid ${LIQ_VLINE}` }}>
                                 <thead>

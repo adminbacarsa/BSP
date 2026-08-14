@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
-    collection, doc, setDoc, deleteDoc, onSnapshot,
+    collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, getDoc,
     query, where, serverTimestamp,
 } from 'firebase/firestore';
 import { app, db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
+import { stampEmpresaId } from '@/lib/multiempresa';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,76 @@ function tsToDate(val: any): Date | null {
     return null;
 }
 
+const ADJ_LABELS: Record<string, string> = {
+    hsReales: 'Hs plan/reales',
+    diurnas: 'Diurnas',
+    nocturnas: 'Nocturnas',
+    al100FT: 'FT 100%',
+    plusFeriado: 'Plus feriado',
+    vacacionesDias: 'Vacaciones',
+    enfermedadDias: 'Enfermedad',
+    art: 'ART',
+    licenciaEspecialDias: 'Lic. especial',
+    permisoGremialDias: 'P. gremial',
+    injustificadaDias: 'Injustificadas',
+    retiroAnticipadoDias: 'Retiro anticipado',
+    otrosDias: 'Otros',
+};
+
+function formatAdjDiff(prev: AjusteAdj, next: AjusteAdj): string {
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    const parts: string[] = [];
+    keys.forEach((k) => {
+        const a = (prev as Record<string, unknown>)[k];
+        const b = (next as Record<string, unknown>)[k];
+        if (a === b) return;
+        const label = ADJ_LABELS[k] || k;
+        parts.push(`${label} ${a ?? '—'}→${b ?? '—'}`);
+    });
+    return parts.join('; ') || 'sin cambios de valores';
+}
+
+function actorLabel(user: { displayName?: string | null; email?: string | null } | null): string {
+    return user?.displayName || user?.email?.split('@')[0] || 'Usuario';
+}
+
+async function writeLiquidacionAudit(opts: {
+    empresaId: string;
+    cycleId: string;
+    hoursMode: 'planned' | 'real';
+    action: 'AJUSTE_LIQUIDACION' | 'ELIMINAR_AJUSTE_LIQUIDACION';
+    actorUid: string;
+    actorName: string;
+    employeeId: string;
+    employeeName: string;
+    fileNumber?: string | null;
+    details: string;
+}): Promise<void> {
+    try {
+        await addDoc(
+            collection(db, 'audit_logs'),
+            stampEmpresaId(
+                {
+                    timestamp: serverTimestamp(),
+                    actorUid: opts.actorUid,
+                    actorName: opts.actorName,
+                    action: opts.action,
+                    module: 'REPORTES',
+                    details: opts.details,
+                    employeeId: opts.employeeId,
+                    employeeName: opts.employeeName,
+                    cycleId: opts.cycleId,
+                    hoursMode: opts.hoursMode,
+                    fileNumber: opts.fileNumber || '',
+                },
+                opts.empresaId,
+            ),
+        );
+    } catch (e) {
+        console.warn('[liquidaciones] no se pudo escribir auditoría', e);
+    }
+}
+
 export function useLiquidaciones(opts: UseLiquidacionesOptions): UseLiquidacionesResult {
     const { cycleId, hoursMode, empresaId } = opts;
     const { user } = useAuth();
@@ -205,31 +276,65 @@ export function useLiquidaciones(opts: UseLiquidacionesOptions): UseLiquidacione
             if (!user || !cycleId || !empresaId) return;
             const docId = `${empresaId}_${cycleId}_${employeeId}`;
             const ref = doc(db, 'ajustes_liquidacion', docId);
-            await setDoc(
-                ref,
-                {
-                    empresaId,
-                    cycleId,
-                    employeeId,
-                    adj,
-                    nota,
-                    creadoPor: user.uid,
-                    updatedAt: serverTimestamp(),
-                    creadoAt: serverTimestamp(),
-                },
-                { merge: true },
-            );
+            const prevSnap = await getDoc(ref);
+            const prevAdj = (prevSnap.exists() ? (prevSnap.data().adj || {}) : ajustes.get(employeeId)?.adj) || {};
+            const payload: Record<string, unknown> = {
+                empresaId,
+                cycleId,
+                employeeId,
+                adj,
+                nota,
+                creadoPor: user.uid,
+                updatedAt: serverTimestamp(),
+            };
+            if (!prevSnap.exists()) payload.creadoAt = serverTimestamp();
+            await setDoc(ref, payload, { merge: true });
+
+            const emp = snapshot?.items.find((it) => it.employee.id === employeeId)?.employee;
+            const empName = emp?.fullName || employeeId;
+            const leg = emp?.fileNumber ? ` (leg. ${emp.fileNumber})` : '';
+            const modeLbl = hoursMode === 'planned' ? 'planificadas' : 'fichadas';
+            await writeLiquidacionAudit({
+                empresaId,
+                cycleId,
+                hoursMode,
+                action: 'AJUSTE_LIQUIDACION',
+                actorUid: user.uid,
+                actorName: actorLabel(user),
+                employeeId,
+                employeeName: empName,
+                fileNumber: emp?.fileNumber,
+                details: `Ciclo ${cycleId} · ${modeLbl} · ${empName}${leg} · ${formatAdjDiff(prevAdj, adj)}${nota ? ` · Nota: ${nota}` : ''}`,
+            });
         },
-        [user, cycleId, empresaId],
+        [user, cycleId, empresaId, hoursMode, snapshot, ajustes],
     );
 
     const deleteAjuste = useCallback(
         async (employeeId: string) => {
             if (!empresaId || !cycleId) return;
+            const emp = snapshot?.items.find((it) => it.employee.id === employeeId)?.employee;
+            const empName = emp?.fullName || employeeId;
+            const leg = emp?.fileNumber ? ` (leg. ${emp.fileNumber})` : '';
+            const prevAdj = ajustes.get(employeeId)?.adj || {};
             const docId = `${empresaId}_${cycleId}_${employeeId}`;
             await deleteDoc(doc(db, 'ajustes_liquidacion', docId));
+            if (user) {
+                await writeLiquidacionAudit({
+                    empresaId,
+                    cycleId,
+                    hoursMode,
+                    action: 'ELIMINAR_AJUSTE_LIQUIDACION',
+                    actorUid: user.uid,
+                    actorName: actorLabel(user),
+                    employeeId,
+                    employeeName: empName,
+                    fileNumber: emp?.fileNumber,
+                    details: `Ciclo ${cycleId} · se eliminó el ajuste de ${empName}${leg}${Object.keys(prevAdj).length ? ` · era: ${formatAdjDiff(prevAdj, {})}` : ''}`,
+                });
+            }
         },
-        [empresaId, cycleId],
+        [empresaId, cycleId, hoursMode, snapshot, ajustes, user],
     );
 
     return { snapshot, loading, error, ajustes, refresh, saveAjuste, deleteAjuste };

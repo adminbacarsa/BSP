@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import {
   TrendingUp, Users, Clock, Activity, AlertTriangle, CheckCircle,
@@ -397,7 +398,7 @@ export default function AnalisisPage() {
   const [periodYear, setPeriodYear] = useState(now.getFullYear());
   const [periodMonth, setPeriodMonth] = useState(now.getMonth());
   const [periodDay, setPeriodDay] = useState(now.getDate());
-  const [activeTab,      setActiveTab]      = useState<'capacidad'|'guardias'|'cobertura'|'proyeccion'|'viabilidad'|'art12'|'analitica'>('capacidad');
+  const [activeTab,      setActiveTab]      = usePersistedState<'capacidad'|'guardias'|'cobertura'|'proyeccion'|'viabilidad'|'art12'|'analitica'>('cosp:analisis:tab', 'capacidad');
   const [vialSrvId,      setVialSrvId]      = useState<string>('');
   const [diasPorGuardia, setDiasPorGuardia] = useState<24|25>(24);
   /** Vista día/semana: cupo por guardia para calcular mínimos (turno 8h o tope 12h). Mes/año usan cupo mensual CCT. */

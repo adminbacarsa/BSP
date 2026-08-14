@@ -4,6 +4,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { Toaster, toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, getDoc, addDoc } from 'firebase/firestore';
 import {
@@ -259,8 +260,8 @@ export default function SupervisionPage() {
   const [ausencias, setAusencias] = useState<Absence[]>([]);
   const [vacaciones, setVacaciones] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mainTab, setMainTab] = useState<SupervisionMainTab>('BANDEJA');
-  const [tab, setTab] = useState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('PENDIENTE');
+  const [mainTab, setMainTab] = usePersistedState<SupervisionMainTab>('cosp:sup:mainTab', 'BANDEJA');
+  const [tab, setTab] = usePersistedState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('cosp:sup:tab', 'PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [busqueda, setBusqueda] = useState('');

@@ -17,6 +17,7 @@ import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSche
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
 import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdvisor';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/context/AuthContext';
 import {
   filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
@@ -1239,11 +1240,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   const [kpiMonth, setKpiMonth] = useState(new Date().getMonth());
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
   const [srvSearch, setSrvSearch] = useState('');
-  const [srvCatalogFilter, setSrvCatalogFilter] = useState<ServiciosCatalogFilter>('all');
-  const [srvClientFilter, setSrvClientFilter] = useState<string>('all');
-  const [srvFeatureFilter, setSrvFeatureFilter] = useState<'all' | 'rotaciones' | 'condiciones'>('all');
+  const [srvCatalogFilter, setSrvCatalogFilter] = usePersistedState<ServiciosCatalogFilter>('cosp:srv:catalog', 'all');
+  const [srvClientFilter, setSrvClientFilter] = usePersistedState<string>('cosp:srv:client', 'all');
+  const [srvFeatureFilter, setSrvFeatureFilter] = usePersistedState<'all' | 'rotaciones' | 'condiciones'>('cosp:srv:feature', 'all');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [listMode, setListMode] = useState<'objectives' | 'clients'>('clients');
+  const [listMode, setListMode] = usePersistedState<'objectives' | 'clients'>('cosp:srv:listMode', 'clients');
   const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set());
   const toggleClient = (id: string) =>
     setExpandedClients(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });

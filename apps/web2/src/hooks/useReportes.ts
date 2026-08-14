@@ -21,6 +21,7 @@ import {
 } from '@/lib/planificacion/deploymentRoles';
 import { RET_STANDBY_REFERENCE_HOURS } from '@/lib/planificacion/constants';
 import { getCctPayrollPeriodByOffset } from '@/lib/cctPayrollPeriod';
+import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
     coalescePlannedCellBillableHours,
     coalescePlannedTurnosForCell,
@@ -1116,9 +1117,12 @@ export const useReportes = (forcedClientId?: string | null) => {
     const [loading, setLoading] = useState(false);
 
     const initialCctPeriod = getCctPayrollPeriodByOffset(0);
+    const savedRpt = typeof window !== 'undefined'
+        ? readSessionJson<{ start?: string; end?: string; publishFilter?: ReportPublishFilter; usePlannedHours?: boolean }>('cosp:rpt:view')
+        : null;
     const [dateRange, setDateRange] = useState({
-        start: initialCctPeriod.start,
-        end: initialCctPeriod.end,
+        start: savedRpt?.start || initialCctPeriod.start,
+        end: savedRpt?.end || initialCctPeriod.end,
     });
     
     const [employeeReport, setEmployeeReport] = useState<any[]>([]);
@@ -1133,12 +1137,21 @@ export const useReportes = (forcedClientId?: string | null) => {
         experienciaObjetivos?: Record<string, unknown>;
         planificacionDotacion?: Record<string, unknown>;
     }>>({});
-    const [publishFilter, setPublishFilter] = useState<ReportPublishFilter>('all');
-    const [usePlannedHours, setUsePlannedHours] = useState(false);
+    const [publishFilter, setPublishFilter] = useState<ReportPublishFilter>(savedRpt?.publishFilter || 'all');
+    const [usePlannedHours, setUsePlannedHours] = useState(savedRpt?.usePlannedHours ?? false);
     const [objMap, setObjMap] = useState<Record<string, string>>({});
     const [objectiveAliases, setObjectiveAliases] = useState<Record<string, ObjectiveMeta>>({});
     const [clientMap, setClientMap] = useState<Record<string, string>>({});
     const [holidaysData, setHolidaysData] = useState<Record<string, boolean>>({});
+
+    useEffect(() => {
+        writeSessionJson('cosp:rpt:view', {
+            start: dateRange.start,
+            end: dateRange.end,
+            publishFilter,
+            usePlannedHours,
+        });
+    }, [dateRange.start, dateRange.end, publishFilter, usePlannedHours]);
 
     useEffect(() => {
         if (!empresaId) return;

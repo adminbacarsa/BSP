@@ -4,6 +4,7 @@ import { useRouter } from 'next/router';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { auth, db } from '@/lib/firebase';
+import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
   addDoc,
   arrayUnion,
@@ -376,14 +377,32 @@ export default function CRMPage() {
     });
   }, []);
 
+  const crmRestoredRef = useRef(false);
   useEffect(() => {
     if (!router.isReady || loadingClients) return;
     const qid = String(router.query.clientId ?? '').trim();
-    if (!qid || view === 'detail') return;
-    void openClientDetail({ id: qid });
-    router.replace('/admin/crm', undefined, { shallow: true });
+    if (qid) {
+      if (view === 'detail') return;
+      void openClientDetail({ id: qid });
+      router.replace('/admin/crm', undefined, { shallow: true });
+      return;
+    }
+    if (crmRestoredRef.current || view === 'detail' || !clients.length) return;
+    crmRestoredRef.current = true;
+    const saved = readSessionJson<{ clientId?: string; tab?: string }>('cosp:crm:view');
+    if (saved?.clientId) {
+      void openClientDetail({ id: saved.clientId });
+      if (saved.tab) setActiveTab(saved.tab);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, router.query.clientId, loadingClients]);
+  }, [router.isReady, router.query.clientId, loadingClients, clients.length]);
+
+  useEffect(() => {
+    writeSessionJson('cosp:crm:view', {
+      clientId: selectedClient?.id || '',
+      tab: activeTab,
+    });
+  }, [selectedClient?.id, activeTab]);
 
   const loadPortalUserForClient = async (clientId: string) => {
     try {
