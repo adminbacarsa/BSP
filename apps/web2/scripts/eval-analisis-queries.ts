@@ -11,6 +11,8 @@ import {
   resolveAbsenceCode,
   buildAusenciasStats,
   topNPlusResto,
+  shiftStartMs,
+  filterTurnosInRange,
 } from '../src/lib/analisis/analisisQueries';
 import {
   buildInformeAnalitico,
@@ -24,6 +26,12 @@ import {
   buildAnalisisUniverso,
   cctBolsaHsPerGuard,
 } from '../src/lib/analisis/analisisUniverso';
+import {
+  CCT_HS_TECHO_MENSUAL,
+  buildBolsaRealista,
+  cctTechoHsPerGuard,
+  threeMonthLookback,
+} from '../src/lib/analisis/analisisBolsa';
 
 let failed = 0;
 function assert(cond: boolean, msg: string) {
@@ -58,6 +66,16 @@ const gaps = gapsToFetch(covered, {
   endMs: new Date(2026, 11, 31, 23, 59, 59, 999).getTime(),
 });
 assert(gaps.length === 2, `año vs agosto produce 2 huecos (got ${gaps.length})`);
+
+const julClock = shiftStartMs({ date: '2026-07-15', startTime: '07:00' });
+assert(!!julClock && new Date(julClock).getDate() === 15 && new Date(julClock).getMonth() === 6, 'shiftStartMs date+HH:mm');
+assert(shiftStartMs({ startTime: { _seconds: 1784160000 } }) === 1784160000 * 1000, 'shiftStartMs _seconds');
+const sliced = filterTurnosInRange(
+  [{ id: 'a', date: '2026-07-10', startTime: '23:00' }, { id: 'b', date: '2026-08-01', startTime: '07:00' }],
+  new Date(2026, 6, 1),
+  new Date(2026, 6, 31, 23, 59, 59, 999),
+);
+assert(sliced.length === 1 && sliced[0].id === 'a', 'filterTurnosInRange usa date si startTime es hora');
 
 assert(categoryFromAbsenceCode('V') === 'vac', 'V → vacaciones');
 assert(categoryFromAbsenceCode('E') === 'enf', 'E → enfermedad');
@@ -173,6 +191,35 @@ assert(cctBolsaHsPerGuard('quarter', 90) === 576, 'bolsa trimestre = 576');
 assert(cctBolsaHsPerGuard('year', 365) === 2304, 'bolsa año = 2304');
 assert(cctBolsaHsPerGuard('day', 1) === Math.round(192 / 30), 'bolsa día = prorrateo 192/30');
 
+assert(CCT_HS_TECHO_MENSUAL === 200, 'techo vigilador = 200 (no el promedio)');
+assert(cctTechoHsPerGuard('month', 31) === 200, 'techo mes = 200');
+const lb = threeMonthLookback(new Date(2026, 7, 1));
+assert(lb.start.getMonth() === 4 && lb.end.getMonth() === 6, 'lookback de ago = may–jul');
+assert(lb.label.includes('May') && lb.label.includes('Jul'), `label lookback ${lb.label}`);
+const plantel10 = Array.from({ length: 10 }, (_, i) => ({ id: `be${i + 1}`, name: `G${i + 1}` }));
+const bolsaIdx = buildBolsaRealista({
+  employees: plantel10,
+  ausencias: [{
+    id: 'bolsa-vac',
+    employeeId: 'be1',
+    employeeName: 'G1',
+    type: 'Vacaciones',
+    absenceType: 'V',
+    startDate: '2026-05-01',
+    endDate: '2026-07-14',
+    status: 'Autorizada',
+  }],
+  turnosLookback: [],
+  periodMode: 'month',
+  periodDays: 31,
+  periodStart: new Date(2026, 7, 1),
+});
+assert(bolsaIdx.techoBruto === 2000, `techo 10×200 = 2000 (got ${bolsaIdx.techoBruto})`);
+assert(bolsaIdx.hsAusenciaLookback === 600, `75 días × 8h = 600 (got ${bolsaIdx.hsAusenciaLookback})`);
+assert(bolsaIdx.indicePct === 10, `índice 600/6000 = 10% (got ${bolsaIdx.indicePct})`);
+assert(bolsaIdx.hsEfectivasGuardia === 180, `200 × 0.9 = 180 (got ${bolsaIdx.hsEfectivasGuardia})`);
+assert(bolsaIdx.bolsaInicial === 1800, `10 × 180 = 1800, no 2000 (got ${bolsaIdx.bolsaInicial})`);
+
 const uni = buildAnalisisUniverso({
   vigenteServices: [{
     clientId: 'c1',
@@ -228,8 +275,105 @@ const uni12 = buildAnalisisUniverso({
 });
 assert(uni12.slotsPeriodo === 1 && uni12.hsVendidas === 12, `N12 lunes = 1 slot 12 hs (slots=${uni12.slotsPeriodo} hs=${uni12.hsVendidas})`);
 
+void (async () => {
+  process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||= 'AIzaSyEvalOnlyNotARealKey00000000000';
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||= 'demo';
+  process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||= 'demo.firebaseapp.com';
+  process.env.NEXT_PUBLIC_FIREBASE_APP_ID ||= '1:1:web:1';
+  const { buildAnalisisFinanciera, finConsumoHours, rollAnalisisFinanciera } = await import('../src/lib/analisis/analisisFinanciera');
+const finSrv = {
+  clientId: 'cli-a',
+  clientName: 'Cliente A',
+  objectiveId: 'obj-a',
+  objectiveName: 'Objetivo A',
+  startDate: '2026-08-01',
+  endDate: '2026-08-31',
+  positions: [{
+    id: 'p-a',
+    name: 'Acceso',
+    coverageType: 'custom',
+    quantity: 1,
+    activeDays: ['L'],
+    allowedShiftTypes: [{ code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 }],
+  }],
+};
+const finTurnos = [
+  {
+    id: 'ft-plan',
+    employeeId: 'g1',
+    employeeName: 'Guardia Uno',
+    clientId: 'cli-a',
+    clientName: 'Cliente A',
+    objectiveId: 'obj-a',
+    objectiveName: 'Objetivo A',
+    code: 'M',
+    hours: 8,
+    isPresent: true,
+    startTime: { seconds: new Date(2026, 7, 3, 7, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 3, 15, 0).getTime() / 1000 },
+  },
+  {
+    id: 'ft-franco',
+    employeeId: 'g2',
+    employeeName: 'Guardia Dos',
+    clientId: 'cli-a',
+    clientName: 'Cliente A',
+    objectiveId: 'obj-a',
+    objectiveName: 'Objetivo A',
+    code: 'FT',
+    isFrancoTrabajado: true,
+    hours: 8,
+    startTime: { seconds: new Date(2026, 7, 3, 15, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 3, 23, 0).getTime() / 1000 },
+  },
+];
+const finAus = buildAusenciasStats({
+  ausencias: [{
+    id: 'fin-vac',
+    employeeId: 'g1',
+    employeeName: 'Guardia Uno',
+    type: 'Vacaciones',
+    absenceType: 'V',
+    startDate: '2026-08-03',
+    endDate: '2026-08-03',
+    status: 'Autorizada',
+    objectiveId: 'obj-a',
+  }],
+  turnos: finTurnos,
+  employees: [{ id: 'g1' }, { id: 'g2' }],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+const finBases = buildAnalisisFinanciera({
+  turnos: finTurnos,
+  ausenciasStats: finAus,
+  vigenteServices: [finSrv],
+  periodStart: new Date(2026, 7, 3),
+  periodEnd: new Date(2026, 7, 3, 23, 59, 59, 999),
+  objectiveAliases: { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
+  slaExclusionCtx: null,
+});
+assert(finBases.length === 1, `financiera 1 objetivo (got ${finBases.length})`);
+assert(finBases[0].hsPlan === 8, `financiera plan 8 (got ${finBases[0].hsPlan})`);
+assert(finBases[0].hsReal === 8, `financiera real 8 (got ${finBases[0].hsReal})`);
+assert(finBases[0].hsFt === 8, `financiera FT 8 (got ${finBases[0].hsFt})`);
+assert(finBases[0].novedades.vac === 8, `financiera vac 8 (got ${finBases[0].novedades.vac})`);
+assert(finConsumoHours(finBases[0], 'planned') === 24, `consumo plan = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'planned')})`);
+assert(finConsumoHours(finBases[0], 'real') === 24, `consumo real = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'real')})`);
+const finRoll = rollAnalisisFinanciera(finBases, 'planned');
+assert(finRoll.clientes === 1 && finRoll.objetivos === 1, 'financiera rollup 1 cliente');
+assert(finRoll.hsConsumo === 24, `empresa consumo 24 (got ${finRoll.hsConsumo})`);
+assert(finRoll.guardias === 2, `2 guardias tocaron el objetivo (got ${finRoll.guardias})`);
+assert(finRoll.hsConsumoPorGuardia === 12, `12 hs/guardia (got ${finRoll.hsConsumoPorGuardia})`);
+assert(
+  finRoll.clients[0].rows[0].hsSlaPorGuardia === Math.round((finRoll.clients[0].rows[0].slaHours / 2) * 10) / 10,
+  `SLA/guardia = sla/2 (got ${finRoll.clients[0].rows[0].hsSlaPorGuardia} sla=${finRoll.clients[0].rows[0].slaHours})`,
+);
+
 if (failed) {
   console.error(`\n${failed} assertion(s) failed`);
   process.exit(1);
 }
 console.log('\nanalisis queries: all ok');
+})();

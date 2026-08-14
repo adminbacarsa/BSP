@@ -15,6 +15,7 @@ const SHIFT_HOURS_FALLBACK = {
     PU: 12,
     GU: 8,
     FT: 0,
+    EV: 8,
 };
 const AR_DAY_OFFSET = '-03:00';
 const TURNOS_LIM = 4500;

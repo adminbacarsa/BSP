@@ -2112,6 +2112,7 @@ const ASSISTANT_SHIFT_HOURS_LOOKUP: Record<string, number> = {
   GU: 8,
   EN: 9,
   C: 8,
+  EV: 8,
   F: 0,
   FF: 0,
   FP: 0,

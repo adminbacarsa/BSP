@@ -31,7 +31,7 @@ const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 /** Códigos que no aportan jornada laboral “normal” (FT se trata aparte). */
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
 const SHIFT_HOURS_FALLBACK: Record<string, number> = {
-    M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 8, FT: 8, EN: 9, RO: 10,
+    M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 8, FT: 8, EN: 9, RO: 10, EV: 8,
 };
 
 const RRHH_CODE_MAP: Record<string, keyof Omit<RrhhNovedades, 'otrosDias'>> = {
