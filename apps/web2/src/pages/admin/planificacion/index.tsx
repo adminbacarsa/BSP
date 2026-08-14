@@ -10478,18 +10478,6 @@ export default function PlanificacionPage() {
                             </div>
 
                             <div className="flex-shrink-0 flex items-center gap-2 no-print">
-                                {/* EVENTOS — solo expandido */}
-                                {!toolbarCollapsed && (
-                                    <button
-                                        type="button"
-                                        onClick={() => { setEventoForm({ status: 'activo', horaInicio: '08:00', horaFin: '20:00', cupoGuardias: 5 }); setShowEventoCreateModal(true); }}
-                                        title="Crear nuevo evento especial"
-                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border bg-yellow-50 text-yellow-800 border-yellow-300 hover:bg-yellow-100 shadow-sm"
-                                    >
-                                        <Calendar size={12}/>
-                                        EVENTOS {eventos.length > 0 && <span className="bg-yellow-400 text-yellow-900 rounded-full px-1.5 py-0.5 text-[9px] font-black">{eventos.length}</span>}
-                                    </button>
-                                )}
                                 {/* CRONOGRAMAS — solo expandido */}
                                 {!toolbarCollapsed && (
                                     <button
