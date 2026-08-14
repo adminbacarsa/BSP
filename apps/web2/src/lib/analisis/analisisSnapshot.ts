@@ -3,7 +3,7 @@
  * Los turnos NO se persisten en sessionStorage (pueden ser ~18k docs).
  */
 
-import { collection, onSnapshot, query, type Query, type QuerySnapshot } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, type Query, type QuerySnapshot } from 'firebase/firestore';
 import { db, getDocsOnce } from '@/lib/firebase';
 import {
   belongsToEmpresaView,
@@ -29,7 +29,8 @@ import {
 
 const META_KEY = 'cosp:analisis:snap-meta';
 /** Sube si cambia la semántica de fetch (invalida store en memoria envenenado con 0 turnos). */
-const SNAPSHOT_GEN = 4;
+const SNAPSHOT_GEN = 5;
+const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
 export type AnalisisLoadProgress = {
   pct: number;
@@ -122,10 +123,15 @@ type ScopeOpts = {
 };
 
 /**
- * Lectura de malla: no aceptar snapshot vacío por timeout (eso marcaba julio cubierto con 0 turnos).
- * Emulador: el 1.er fromCache vacío es miss; el siguiente (o uno con docs) es el dato.
+ * Lectura de malla.
+ * Producción: getDocs (una ida al servidor). Nunca cortar con cache vacío.
+ * Emulador: onSnapshot — getDocs con longPolling se cuelga; el 1.er fromCache vacío
+ * es miss, el 2.º (con docs o vacío real) es el listen.
  */
 function getDocsMalla<T = any>(q: Query<T>): Promise<QuerySnapshot<T>> {
+  if (!USE_EMULATOR) {
+    return getDocs(q);
+  }
   return new Promise((resolve, reject) => {
     let settled = false;
     let n = 0;
@@ -149,8 +155,11 @@ function getDocsMalla<T = any>(q: Query<T>): Promise<QuerySnapshot<T>> {
           done(snap);
           return;
         }
-        if (snap.empty && n === 1) return;
-        done(snap);
+        if (!snap.empty) {
+          done(snap);
+          return;
+        }
+        if (n >= 2) done(snap);
       },
       (err) => done(undefined, err),
     );
@@ -181,7 +190,11 @@ async function fetchTurnosMonth(year: number, month: number, opts: ScopeOpts): P
     month,
   });
   const snap = await getDocsMalla(q);
-  return mapTurnoDocs(snap.docs, opts);
+  const mapped = mapTurnoDocs(snap.docs, opts);
+  if (snap.size > 0 && mapped.length === 0) {
+    console.warn(`[analisis] ${year}-${String(month).padStart(2, '0')}: ${snap.size} turnos en Firestore, 0 tras filtro empresa/tipo`);
+  }
+  return mapped;
 }
 
 async function fetchAusenciasAll(opts: ScopeOpts): Promise<any[]> {
