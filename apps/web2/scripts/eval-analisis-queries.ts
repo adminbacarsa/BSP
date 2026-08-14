@@ -24,6 +24,12 @@ import {
   buildAnalisisUniverso,
   cctBolsaHsPerGuard,
 } from '../src/lib/analisis/analisisUniverso';
+import {
+  CCT_HS_TECHO_MENSUAL,
+  buildBolsaRealista,
+  cctTechoHsPerGuard,
+  threeMonthLookback,
+} from '../src/lib/analisis/analisisBolsa';
 
 let failed = 0;
 function assert(cond: boolean, msg: string) {
@@ -172,6 +178,35 @@ assert(cctBolsaHsPerGuard('month', 31) === 192, 'bolsa mes = 192');
 assert(cctBolsaHsPerGuard('quarter', 90) === 576, 'bolsa trimestre = 576');
 assert(cctBolsaHsPerGuard('year', 365) === 2304, 'bolsa año = 2304');
 assert(cctBolsaHsPerGuard('day', 1) === Math.round(192 / 30), 'bolsa día = prorrateo 192/30');
+
+assert(CCT_HS_TECHO_MENSUAL === 200, 'techo vigilador = 200 (no el promedio)');
+assert(cctTechoHsPerGuard('month', 31) === 200, 'techo mes = 200');
+const lb = threeMonthLookback(new Date(2026, 7, 1));
+assert(lb.start.getMonth() === 4 && lb.end.getMonth() === 6, 'lookback de ago = may–jul');
+assert(lb.label.includes('May') && lb.label.includes('Jul'), `label lookback ${lb.label}`);
+const plantel10 = Array.from({ length: 10 }, (_, i) => ({ id: `be${i + 1}`, name: `G${i + 1}` }));
+const bolsaIdx = buildBolsaRealista({
+  employees: plantel10,
+  ausencias: [{
+    id: 'bolsa-vac',
+    employeeId: 'be1',
+    employeeName: 'G1',
+    type: 'Vacaciones',
+    absenceType: 'V',
+    startDate: '2026-05-01',
+    endDate: '2026-07-14',
+    status: 'Autorizada',
+  }],
+  turnosLookback: [],
+  periodMode: 'month',
+  periodDays: 31,
+  periodStart: new Date(2026, 7, 1),
+});
+assert(bolsaIdx.techoBruto === 2000, `techo 10×200 = 2000 (got ${bolsaIdx.techoBruto})`);
+assert(bolsaIdx.hsAusenciaLookback === 600, `75 días × 8h = 600 (got ${bolsaIdx.hsAusenciaLookback})`);
+assert(bolsaIdx.indicePct === 10, `índice 600/6000 = 10% (got ${bolsaIdx.indicePct})`);
+assert(bolsaIdx.hsEfectivasGuardia === 180, `200 × 0.9 = 180 (got ${bolsaIdx.hsEfectivasGuardia})`);
+assert(bolsaIdx.bolsaInicial === 1800, `10 × 180 = 1800, no 2000 (got ${bolsaIdx.bolsaInicial})`);
 
 const uni = buildAnalisisUniverso({
   vigenteServices: [{

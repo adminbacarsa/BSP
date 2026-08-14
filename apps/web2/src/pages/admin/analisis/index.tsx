@@ -35,6 +35,7 @@ import {
   buildAnalisisUniverso,
   cctBolsaHsPerGuard,
 } from '@/lib/analisis/analisisUniverso';
+import { buildBolsaRealista, threeMonthLookback } from '@/lib/analisis/analisisBolsa';
 import {
   TrendingUp, Users, Clock, Activity, AlertTriangle, CheckCircle,
   Loader2, BarChart3, Target, ChevronLeft, ChevronRight,
@@ -437,6 +438,7 @@ export default function AnalisisPage() {
     turnos,
     ausencias,
     allTurnos,
+    allAusencias,
     tiposNovedad,
     objectivesGeoById,
     loadInit,
@@ -988,6 +990,25 @@ export default function AnalisisPage() {
     ].filter((d) => d.value > 0);
   }, [demanda.totals]);
 
+  const lookback3m = useMemo(() => threeMonthLookback(periodRange.start), [periodKey]);
+  const turnosLookback = useMemo(
+    () => filterTurnosInRange(allTurnos, lookback3m.start, lookback3m.end),
+    [allTurnos, lookback3m.start, lookback3m.end],
+  );
+  const bolsaRealista = useMemo(
+    () =>
+      buildBolsaRealista({
+        employees,
+        ausencias: allAusencias,
+        turnosLookback,
+        periodMode,
+        periodDays: periodRange.daysCount,
+        periodStart: periodRange.start,
+        tiposNovedad,
+      }),
+    [employees, allAusencias, turnosLookback, periodMode, periodRange.daysCount, periodKey, tiposNovedad],
+  );
+
   const informe = useMemo(
     () =>
       buildInformeAnalitico({
@@ -996,8 +1017,16 @@ export default function AnalisisPage() {
         demandaTotals: demanda.totals,
         ausenciasStats,
         turnos,
+        bolsa: {
+          inicial: bolsaRealista.bolsaInicial,
+          techo: bolsaRealista.techoBruto,
+          indicePct: bolsaRealista.indicePct,
+          hsEfectivasGuardia: bolsaRealista.hsEfectivasGuardia,
+          lookbackLabel: bolsaRealista.lookback.label,
+          tieneHistorial: bolsaRealista.tieneHistorial,
+        },
       }),
-    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos],
+    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista],
   );
   const costoEstimado = useMemo(
     () => estimarCostoInforme(informe, Number(valorHoraBasica) || 0),
@@ -1749,7 +1778,11 @@ export default function AnalisisPage() {
       ['Horas vendidas (SLA)', informe.hsVendidas],
       ['Horas planificadas', informe.hsPlanificadas],
       ['Horas realizadas', informe.hsRealizadas],
-      ['Bolsa inicial CCT', informe.bolsaInicial],
+      ['Bolsa inicial (realista)', informe.bolsaInicial],
+      ['Bolsa techo 200×N', informe.bolsaTecho],
+      ['Índice ausencia 3m %', informe.bolsaIndicePct],
+      ['Hs efectivas / guardia', informe.bolsaHsEfectivasGuardia],
+      ['Ventana índice', informe.bolsaLookbackLabel],
       ['Bolsa disponible', informe.bolsaDisponible],
       ['Cobertura plan %', informe.coberturaPlanPct],
       ['Cobertura efectiva %', informe.coberturaEfectivaPct],
@@ -1964,7 +1997,7 @@ export default function AnalisisPage() {
           {theoretical.totalHours > 0 && (
             <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm p-4">
               <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">
-                {periodRange.labelShort} · {universo.clientes} clientes · {universo.objetivos} objetivos · {universo.puestos} pax en puesto · {universo.slotsPeriodo.toLocaleString('es-AR')} slots SLA · pico {universo.picoSimultaneo} · plantel {universo.plantel} · bolsa CCT {CCT_HS_MENSUAL} hs/mes
+                {periodRange.labelShort} · {universo.clientes} clientes · {universo.objetivos} objetivos · {universo.puestos} pax en puesto · {universo.slotsPeriodo.toLocaleString('es-AR')} slots SLA · pico {universo.picoSimultaneo} · plantel {universo.plantel} · techo 200 hs/g · índice 3m {informe.bolsaIndicePct}% ({informe.bolsaLookbackLabel || '—'})
               </p>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="text-center">
@@ -2344,6 +2377,7 @@ export default function AnalisisPage() {
                   Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
                   malla ({finHoursMode === 'real' ? 'fichada' : 'planificada'}) + novedades (V/L/E/A/AA/PG) + franco trabajado + extras/ops.
                   Sin precios. Pirámide empresa → cliente → objetivo.
+                  Techo por vigilador = <strong>200 hs</strong> (no el promedio). Capacidad realista: {informe.bolsaHsEfectivasGuardia} hs/g con índice 3m {informe.bolsaIndicePct}% ({informe.bolsaLookbackLabel || '—'}).
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800">
@@ -2597,9 +2631,8 @@ export default function AnalisisPage() {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-2xl leading-relaxed">
-                  {activeTab === 'financiera'
-                    ? <>Balance de horas y costo de <strong>{periodRange.labelShort}</strong>. Bolsa CCT = plantel × 192 hs/mes (constante de convenio). El $ es what-if hasta haber tarifa en el sistema.</>
-                    : <>Lectura gerencial de <strong>{periodRange.labelShort}</strong>: lo vendido, lo planificado, lo fichado y el ausentismo real. La bolsa CCT 422/05 usa 192 hs/mes por guardia (no un divisor 8/12).</>}
+                  Lectura gerencial de <strong>{periodRange.labelShort}</strong>: vendido, plan, fichado y ausentismo real.
+                  La bolsa no es plantel × 200: 200 hs es el <strong>techo</strong> por vigilador. La capacidad usa el índice de ausencia de <strong>{informe.bolsaLookbackLabel || 'los 3 meses previos'}</strong> sobre la plantilla activa.
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <label className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
@@ -2631,7 +2664,7 @@ export default function AnalisisPage() {
                 <KpiCard icon={CheckCircle} color="#059669" label="Horas realizadas" value={informe.hsRealizadas.toLocaleString('es-AR')} unit="hs"
                   subtext={informe.hsPendientesFichada > 0 ? `${informe.hsPendientesFichada.toLocaleString('es-AR')} hs sin fichar` : 'Presencia / cierre'}/>
                 <KpiCard icon={Wallet} color="#7c3aed" label="Bolsa disponible" value={informe.bolsaDisponible.toLocaleString('es-AR')} unit="hs"
-                  subtext={`Inicial ${informe.bolsaInicial.toLocaleString('es-AR')} hs CCT`}/>
+                  subtext={`Inicial ${informe.bolsaInicial.toLocaleString('es-AR')} · techo ${informe.bolsaTecho.toLocaleString('es-AR')} · índice 3m ${informe.bolsaIndicePct}% · ${informe.bolsaHsEfectivasGuardia} hs/g`}/>
                 <KpiCard icon={Activity} color={informe.coberturaEfectivaPct >= 95 ? '#059669' : informe.coberturaEfectivaPct >= 85 ? '#d97706' : '#dc2626'}
                   label="Cobertura operativa" value={`${informe.coberturaEfectivaPct}%`}
                   subtext={`Plan ${informe.coberturaPlanPct}% · extras ${informe.desvioExtras.toLocaleString('es-AR')} hs`}
