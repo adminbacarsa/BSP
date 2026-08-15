@@ -72,6 +72,9 @@ const LEAVE_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'SGS', 'SUS']);
 const BAND_HOURS: Record<string, number> = {
   M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, EN: 9, REF: 8, RFZ: 8, C: 8, GU: 8, ESC: 8,
 };
+/** Jornada de referencia si no hay banda. Un día RRHH 00:00–23:59 no es 24 hs de licencia. */
+const JORNADA_DEFAULT_HS = 8;
+const FULL_CALENDAR_DAY_HS = 23.5;
 
 export function dateToMsRange(start: Date, end: Date): MsRange {
   return { startMs: start.getTime(), endMs: end.getTime() };
@@ -366,15 +369,44 @@ export function isOperationalOriginShiftLite(t: any): boolean {
 }
 
 export function coverageHoursFromShift(t: any): number {
-  if (!t) return 8;
-  const stored = Number(t.hours);
-  if (Number.isFinite(stored) && stored >= 0.5) return Math.min(stored, 24);
+  if (!t) return JORNADA_DEFAULT_HS;
   const code = String(t.code || t.shiftCode || '').toUpperCase();
-  if (BAND_HOURS[code] != null) return BAND_HOURS[code];
-  if (t.startTime?.seconds && t.endTime?.seconds) {
-    return Math.max(0, Math.min((t.endTime.seconds - t.startTime.seconds) / 3600, 24));
+  const isLeave = LEAVE_CODES.has(code);
+  const stored = Number(t.hours);
+  if (Number.isFinite(stored) && stored >= 0.5 && stored < FULL_CALENDAR_DAY_HS) {
+    return Math.min(stored, isLeave ? 12 : 24);
   }
-  return 8;
+  if (!isLeave && BAND_HOURS[code] != null) return BAND_HOURS[code];
+  if (!isLeave && t.startTime?.seconds && t.endTime?.seconds) {
+    const dur = (t.endTime.seconds - t.startTime.seconds) / 3600;
+    if (dur >= 0.5 && dur < FULL_CALENDAR_DAY_HS) return Math.min(dur, 24);
+  }
+  if (BAND_HOURS[code] != null && BAND_HOURS[code] > 0) return BAND_HOURS[code];
+  return JORNADA_DEFAULT_HS;
+}
+
+/** Licencia / enfermedad / suspensión: 1 día = jornada del turno (8 o 12), nunca 24 hs de calendario. */
+export function jornadaHoursForLeaveDay(opts: {
+  absence?: any;
+  linkedShift?: any;
+  coverageShift?: any;
+  leaveShift?: any;
+}): number {
+  const coverage = opts.coverageShift;
+  if (coverage) {
+    const hs = coverageHoursFromShift(coverage);
+    if (hs >= 0.5 && hs < FULL_CALENDAR_DAY_HS) return Math.min(hs, 12);
+  }
+  const band = String(
+    opts.absence?.shiftCode || opts.absence?.code || opts.linkedShift?.code || opts.linkedShift?.shiftCode || '',
+  ).toUpperCase();
+  if (BAND_HOURS[band] != null && BAND_HOURS[band] > 0) return BAND_HOURS[band];
+  for (const t of [opts.linkedShift, opts.leaveShift, opts.absence]) {
+    if (!t) continue;
+    const stored = Number(t.hours);
+    if (Number.isFinite(stored) && stored >= 0.5 && stored < FULL_CALENDAR_DAY_HS) return Math.min(stored, 12);
+  }
+  return JORNADA_DEFAULT_HS;
 }
 
 function buildShiftIndexes(turnos: any[]) {
@@ -409,35 +441,22 @@ function hoursForAbsenceDays(
   days: string[],
   idx: ReturnType<typeof buildShiftIndexes>,
 ): number {
-  const shiftId = String(a.shiftId || '').trim();
-  if (shiftId && idx.byId.has(shiftId)) {
-    return coverageHoursFromShift(idx.byId.get(shiftId));
-  }
+  if (!days.length) return 0;
+  const linked = idx.byId.get(String(a.shiftId || '').trim());
   const eid = String(a.employeeId || '').trim();
   let total = 0;
-  let matched = 0;
   for (const day of days) {
-    const band = String(a.shiftCode || a.code || '').toUpperCase();
-    if (BAND_HOURS[band] != null) {
-      total += BAND_HOURS[band];
-      matched++;
-      continue;
-    }
     const shifts = eid ? idx.byEmpDay.get(`${eid}_${day}`) || [] : [];
     const coverage = shifts.find((t) => !LEAVE_CODES.has(String(t.code || '').toUpperCase()) && !isVacantShift(t));
     const leave = shifts.find((t) => LEAVE_CODES.has(String(t.code || '').toUpperCase()));
-    if (coverage) {
-      total += coverageHoursFromShift(coverage);
-      matched++;
-    } else if (leave && Number(leave.hours) >= 0.5) {
-      total += Math.min(Number(leave.hours), 24);
-      matched++;
-    } else {
-      total += 8;
-      matched++;
-    }
+    total += jornadaHoursForLeaveDay({
+      absence: a,
+      linkedShift: linked,
+      coverageShift: coverage,
+      leaveShift: leave,
+    });
   }
-  return matched > 0 ? total : days.length * 8;
+  return total;
 }
 
 function dayHasCoverage(idx: ReturnType<typeof buildShiftIndexes>, objectiveId: string | undefined, day: string): boolean {
@@ -538,7 +557,7 @@ export function buildAusenciasStats(opts: {
     const ms = shiftStartMs(t);
     if (ms == null || ms < periodStart.getTime() || ms > periodEnd.getTime()) return;
     const absCode = isLeaveCell ? code : 'AA';
-    const hs = coverageHoursFromShift(t);
+    const hs = jornadaHoursForLeaveDay({ leaveShift: t, coverageShift: isLeaveCell ? undefined : t });
     const day = getDateKeyInTimezone(new Date(ms));
     const oid = String(t.objectiveId || '').trim() || undefined;
     pushEvent({
