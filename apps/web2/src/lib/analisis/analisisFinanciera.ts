@@ -1,7 +1,8 @@
 /**
  * Financiera COSP: consumo de hs-hombre e impacto.
  * Pirámide objetivo → cliente → empresa. Sin precios ni tarifas.
- * Modo planificado | real + novedades (V/L/E/A/AA/PG) + FT + extras.
+ * Modo planificado | real + novedades (V/L/E/A/AA/PG) + FT + extras
+ * + gasto de horas no usadas: francos (F/FF), RET no activado y REF/ESC.
  */
 
 import {
@@ -10,6 +11,13 @@ import {
   isPlanificadorPlannedHoursShift,
   shiftCoverageExtensionExtraHours,
 } from '@/lib/planificacion/planningScheduledHours';
+import {
+  deploymentStatKind,
+  isDeploymentOrPoolShift,
+  isRegularLiquidationWorkShift,
+  resolveDeploymentStatHours,
+} from '@/lib/planificacion/deploymentRoles';
+import { RET_STANDBY_REFERENCE_HOURS } from '@/lib/planificacion/constants';
 import { getDateKeyInTimezone } from '@/lib/crm/crmDateUtils';
 import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
@@ -26,6 +34,9 @@ import {
   shiftStartMs,
 } from './analisisQueries';
 
+/** Franco de descanso: día asignado que no se usó en cobertura. Gasto = jornada de referencia. */
+const FRANCO_GASTO_HOURS = 8;
+
 export type FinHoursMode = 'planned' | 'real';
 
 export type FinNovedades = {
@@ -36,7 +47,14 @@ export type FinNovedades = {
   inj: number;
   total: number;
   eventos: number;
+  /** Horas por código de grilla (V, E, L, A, AA, PG, SUS, SGS…). */
+  byCode: Record<string, number>;
 };
+
+/** Códigos de novedad que se muestran desglosados en Financiera. */
+export const FIN_NOV_BREAKDOWN_CODES = ['V', 'E', 'L', 'A', 'AA', 'PG', 'SUS'] as const;
+/** Columnas de novedad en tabla: códigos + Otr. */
+export const FIN_NOV_HEAD_COLS = FIN_NOV_BREAKDOWN_CODES.length + 1;
 
 export type FinGuardRow = {
   employeeId: string;
@@ -46,7 +64,12 @@ export type FinGuardRow = {
   hsFt: number;
   hsExtra: number;
   hsOps: number;
+  hsFranco: number;
+  hsRet: number;
+  hsDespliegue: number;
+  hsEv: number;
   hsNovedad: number;
+  novByCode: Record<string, number>;
 };
 
 export type FinObjectiveBase = {
@@ -60,6 +83,10 @@ export type FinObjectiveBase = {
   hsFt: number;
   hsExtra: number;
   hsOps: number;
+  hsFranco: number;
+  hsRet: number;
+  hsDespliegue: number;
+  hsEv: number;
   hsVacante: number;
   novedades: FinNovedades;
   guards: FinGuardRow[];
@@ -87,6 +114,10 @@ export type FinClientView = {
   hsFt: number;
   hsExtra: number;
   hsOps: number;
+  hsFranco: number;
+  hsRet: number;
+  hsDespliegue: number;
+  hsEv: number;
   hsVacante: number;
   novedades: FinNovedades;
   hsConsumo: number;
@@ -109,6 +140,10 @@ export type FinEmpresaView = {
   hsFt: number;
   hsExtra: number;
   hsOps: number;
+  hsFranco: number;
+  hsRet: number;
+  hsDespliegue: number;
+  hsEv: number;
   hsVacante: number;
   novedades: FinNovedades;
   hsConsumo: number;
@@ -128,7 +163,15 @@ export type LeaveAttributionSource = 'ausencia' | 'malla_periodo' | 'malla_histo
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
 function emptyNov(): FinNovedades {
-  return { vac: 0, enf: 0, art: 0, lic: 0, inj: 0, total: 0, eventos: 0 };
+  return { vac: 0, enf: 0, art: 0, lic: 0, inj: 0, total: 0, eventos: 0, byCode: {} };
+}
+
+function mergeByCode(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
+  const out = { ...a };
+  Object.entries(b || {}).forEach(([k, v]) => {
+    out[k] = r1((out[k] || 0) + v);
+  });
+  return out;
 }
 
 function addNov(a: FinNovedades, b: FinNovedades): FinNovedades {
@@ -140,6 +183,7 @@ function addNov(a: FinNovedades, b: FinNovedades): FinNovedades {
     inj: r1(a.inj + b.inj),
     total: r1(a.total + b.total),
     eventos: a.eventos + b.eventos,
+    byCode: mergeByCode(a.byCode || {}, b.byCode || {}),
   };
 }
 
@@ -152,6 +196,8 @@ function bumpNov(n: FinNovedades, ev: AbsenceEvent): void {
   else n.lic += hs;
   n.total += hs;
   n.eventos += 1;
+  const code = String(ev.code || '').trim().toUpperCase() || 'L';
+  n.byCode[code] = (n.byCode[code] || 0) + hs;
 }
 
 function isFichado(t: any): boolean {
@@ -173,7 +219,40 @@ function isExtensionShift(t: any): boolean {
 }
 
 function emptyGuard(employeeId: string, name: string): FinGuardRow {
-  return { employeeId, name, hsPlan: 0, hsReal: 0, hsFt: 0, hsExtra: 0, hsOps: 0, hsNovedad: 0 };
+  return {
+    employeeId,
+    name,
+    hsPlan: 0,
+    hsReal: 0,
+    hsFt: 0,
+    hsExtra: 0,
+    hsOps: 0,
+    hsFranco: 0,
+    hsRet: 0,
+    hsDespliegue: 0,
+    hsEv: 0,
+    hsNovedad: 0,
+    novByCode: {},
+  };
+}
+
+function empDayKey(t: any): string {
+  const eid = String(t?.employeeId || '').trim();
+  if (!eid || eid === 'VACANTE') return '';
+  const ms = shiftStartMs(t);
+  if (ms == null) return '';
+  return `${eid}_${getDateKeyInTimezone(new Date(ms))}`;
+}
+
+function isFrancoRestShift(t: any): boolean {
+  if (!t || isVacantShift(t) || isFrancoTrabajadoShift(t)) return false;
+  const code = String(t.code || t.type || '').toUpperCase();
+  if (code === 'F' || code === 'FF' || code === 'FP') return true;
+  return t.isFranco === true && code !== 'FT';
+}
+
+function isEventoShift(t: any): boolean {
+  return String(t?.code || t?.type || '').toUpperCase() === 'EV';
 }
 
 type Acc = {
@@ -186,6 +265,10 @@ type Acc = {
   ft: number;
   extra: number;
   ops: number;
+  franco: number;
+  ret: number;
+  despliegue: number;
+  ev: number;
   vacant: number;
   novedades: FinNovedades;
   guards: Map<string, FinGuardRow>;
@@ -208,6 +291,10 @@ function touch(
     ft: 0,
     extra: 0,
     ops: 0,
+    franco: 0,
+    ret: 0,
+    despliegue: 0,
+    ev: 0,
     vacant: 0,
     novedades: emptyNov(),
     guards: new Map<string, FinGuardRow>(),
@@ -242,16 +329,68 @@ export function finMallaHours(
   return r1(row.hsPlan + (row.novedades?.total || 0));
 }
 
+export function finIdleHours(
+  row: Pick<FinObjectiveBase, 'hsFranco' | 'hsRet' | 'hsDespliegue'> | Pick<FinGuardRow, 'hsFranco' | 'hsRet' | 'hsDespliegue'>,
+): number {
+  return r1((row.hsFranco || 0) + (row.hsRet || 0) + (row.hsDespliegue || 0));
+}
+
+/** Cobertura de malla (sin novedades ni gasto). */
+export function finPlanHours(
+  row: Pick<FinObjectiveBase, 'hsPlan' | 'hsReal'> | Pick<FinGuardRow, 'hsPlan' | 'hsReal'>,
+  mode: FinHoursMode,
+): number {
+  return mode === 'real' ? row.hsReal : row.hsPlan;
+}
+
+export function finNovCode(n: FinNovedades | undefined, code: string): number {
+  return r1(n?.byCode?.[code] || 0);
+}
+
+export function finNovOtros(n: FinNovedades | undefined): number {
+  const known = FIN_NOV_BREAKDOWN_CODES.reduce((s, c) => s + (n?.byCode?.[c] || 0), 0);
+  return r1(Math.max(0, (n?.total || 0) - known));
+}
+
+export function finGuardNovCode(g: FinGuardRow, code: string): number {
+  return r1(g.novByCode?.[code] || 0);
+}
+
+export function finGuardNovOtros(g: FinGuardRow): number {
+  const known = FIN_NOV_BREAKDOWN_CODES.reduce((s, c) => s + (g.novByCode?.[c] || 0), 0);
+  return r1(Math.max(0, (g.hsNovedad || 0) - known));
+}
+
+/** Horas que se suman al plan: novedades + EV + FT + extra/ops + F/RET/REF. */
+export function finSumadasHours(row: {
+  hsFt: number;
+  hsExtra: number;
+  hsOps: number;
+  hsFranco?: number;
+  hsRet?: number;
+  hsDespliegue?: number;
+  hsEv?: number;
+  novedades?: { total: number };
+  hsNovedad?: number;
+}): number {
+  const nov = row.novedades?.total ?? row.hsNovedad ?? 0;
+  return r1(nov + (row.hsEv || 0) + row.hsFt + row.hsExtra + row.hsOps + finIdleHours({
+    hsFranco: row.hsFranco || 0,
+    hsRet: row.hsRet || 0,
+    hsDespliegue: row.hsDespliegue || 0,
+  }));
+}
+
 export function finConsumoHours(row: FinObjectiveBase, mode: FinHoursMode): number {
   const malla = finMallaHours(row, mode);
   const novedad = mode === 'real' ? row.novedades.total : 0;
-  return r1(malla + row.hsFt + row.hsExtra + row.hsOps + novedad);
+  return r1(malla + row.hsFt + row.hsExtra + row.hsOps + novedad + finIdleHours(row) + (row.hsEv || 0));
 }
 
 export function finGuardConsumo(g: FinGuardRow, mode: FinHoursMode): number {
   const malla = mode === 'real' ? g.hsReal : r1(g.hsPlan + g.hsNovedad);
   const novedad = mode === 'real' ? g.hsNovedad : 0;
-  return r1(malla + g.hsFt + g.hsExtra + g.hsOps + novedad);
+  return r1(malla + g.hsFt + g.hsExtra + g.hsOps + novedad + finIdleHours(g) + (g.hsEv || 0));
 }
 
 function decorate(base: FinObjectiveBase, mode: FinHoursMode): FinViewRow {
@@ -286,6 +425,10 @@ function metricsFrom(rows: FinViewRow[], extraGuards?: number) {
   const hsFt = r1(rows.reduce((s, r) => s + r.hsFt, 0));
   const hsExtra = r1(rows.reduce((s, r) => s + r.hsExtra, 0));
   const hsOps = r1(rows.reduce((s, r) => s + r.hsOps, 0));
+  const hsFranco = r1(rows.reduce((s, r) => s + r.hsFranco, 0));
+  const hsRet = r1(rows.reduce((s, r) => s + r.hsRet, 0));
+  const hsDespliegue = r1(rows.reduce((s, r) => s + r.hsDespliegue, 0));
+  const hsEv = r1(rows.reduce((s, r) => s + r.hsEv, 0));
   const hsVacante = r1(rows.reduce((s, r) => s + r.hsVacante, 0));
   const novedades = sumNovedades(rows);
   const hsConsumo = r1(rows.reduce((s, r) => s + r.hsConsumo, 0));
@@ -298,6 +441,10 @@ function metricsFrom(rows: FinViewRow[], extraGuards?: number) {
     hsFt,
     hsExtra,
     hsOps,
+    hsFranco,
+    hsRet,
+    hsDespliegue,
+    hsEv,
     hsVacante,
     novedades,
     hsConsumo,
@@ -461,6 +608,13 @@ export function buildAnalisisFinanciera(opts: {
   const homeByEmp = homeObjectiveByEmployee(turnos, objectiveAliases);
   const homeLookback = homeObjectiveByEmployee(historial, objectiveAliases);
 
+  const workedDays = new Set<string>();
+  turnos.forEach((t: any) => {
+    if (isVacantShift(t) || !isRegularLiquidationWorkShift(t)) return;
+    const k = empDayKey(t);
+    if (k) workedDays.add(k);
+  });
+
   turnos.forEach((t: any) => {
     const ms = shiftStartMs(t);
     const plannedStart = ms != null ? new Date(ms) : (t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null);
@@ -498,6 +652,41 @@ export function buildAnalisisFinanciera(opts: {
       if (hs > 0) {
         row.ft += hs;
         if (g) g.hsFt += hs;
+      }
+      return;
+    }
+
+    if (isFrancoRestShift(t)) {
+      row.franco += FRANCO_GASTO_HOURS;
+      if (g) g.hsFranco += FRANCO_GASTO_HOURS;
+      return;
+    }
+
+    if (isDeploymentOrPoolShift(t) && !isVacantShift(t)) {
+      const kind = deploymentStatKind(t);
+      const hs = resolveDeploymentStatHours(t) || (kind === 'RET' ? RET_STANDBY_REFERENCE_HOURS : 0);
+      if (hs <= 0) return;
+      if (kind === 'RET') {
+        const k = empDayKey(t);
+        if (k && workedDays.has(k)) return;
+        row.ret += hs;
+        if (g) g.hsRet += hs;
+      } else {
+        row.despliegue += hs;
+        if (g) g.hsDespliegue += hs;
+      }
+      return;
+    }
+
+    if (isEventoShift(t) && !isVacantShift(t)) {
+      const hs = calcPlanificadorShiftHours(t) || coverageHoursFromShift(t);
+      if (hs > 0) {
+        row.ev += hs;
+        if (g) g.hsEv += hs;
+        if (g && isFichado(t) && !isAusenteTurno(t)) {
+          g.hsReal += hs;
+          row.real += hs;
+        }
       }
       return;
     }
@@ -566,7 +755,12 @@ export function buildAnalisisFinanciera(opts: {
       ev.employeeId,
       resolveEmployeeDisplayName(String(ev.employeeId || ''), String(ev.emp || ''), nameIndex),
     );
-    if (g) g.hsNovedad += Number(ev.hs) || 0;
+    if (g) {
+      const hs = Number(ev.hs) || 0;
+      g.hsNovedad += hs;
+      const code = String(ev.code || '').trim().toUpperCase() || 'L';
+      g.novByCode[code] = (g.novByCode[code] || 0) + hs;
+    }
   });
 
   return [...byObj.entries()].map(([id, d]) => {
@@ -578,6 +772,9 @@ export function buildAnalisisFinanciera(opts: {
       inj: r1(d.novedades.inj),
       total: r1(d.novedades.total),
       eventos: d.novedades.eventos,
+      byCode: Object.fromEntries(
+        Object.entries(d.novedades.byCode || {}).map(([k, v]) => [k, r1(v)]),
+      ),
     };
     const guards = [...d.guards.values()]
       .map((g) => ({
@@ -587,9 +784,19 @@ export function buildAnalisisFinanciera(opts: {
         hsFt: r1(g.hsFt),
         hsExtra: r1(g.hsExtra),
         hsOps: r1(g.hsOps),
+        hsFranco: r1(g.hsFranco),
+        hsRet: r1(g.hsRet),
+        hsDespliegue: r1(g.hsDespliegue),
+        hsEv: r1(g.hsEv),
         hsNovedad: r1(g.hsNovedad),
+        novByCode: Object.fromEntries(
+          Object.entries(g.novByCode || {}).map(([k, v]) => [k, r1(v)]),
+        ),
       }))
-      .sort((a, b) => (b.hsPlan + b.hsReal + b.hsFt + b.hsNovedad) - (a.hsPlan + a.hsReal + a.hsFt + a.hsNovedad));
+      .sort((a, b) =>
+        (b.hsPlan + b.hsReal + b.hsFt + b.hsNovedad + b.hsFranco + b.hsRet + b.hsDespliegue + b.hsEv)
+        - (a.hsPlan + a.hsReal + a.hsFt + a.hsNovedad + a.hsFranco + a.hsRet + a.hsDespliegue + a.hsEv),
+      );
     return {
       id,
       name: d.name,
@@ -601,12 +808,26 @@ export function buildAnalisisFinanciera(opts: {
       hsFt: r1(d.ft),
       hsExtra: r1(d.extra),
       hsOps: r1(d.ops),
+      hsFranco: r1(d.franco),
+      hsRet: r1(d.ret),
+      hsDespliegue: r1(d.despliegue),
+      hsEv: r1(d.ev),
       hsVacante: r1(d.vacant),
       novedades,
       guards,
     };
   }).filter((r) =>
-    r.slaHours > 0 || r.hsPlan > 0 || r.hsReal > 0 || r.hsFt > 0 || r.hsVacante > 0 || r.novedades.total > 0 || r.hsOps > 0,
+    r.slaHours > 0
+    || r.hsPlan > 0
+    || r.hsReal > 0
+    || r.hsFt > 0
+    || r.hsVacante > 0
+    || r.novedades.total > 0
+    || r.hsOps > 0
+    || r.hsFranco > 0
+    || r.hsRet > 0
+    || r.hsDespliegue > 0
+    || r.hsEv > 0,
   ).sort((a, b) => (b.slaHours + b.hsPlan) - (a.slaHours + a.hsPlan));
 }
 

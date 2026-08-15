@@ -14,11 +14,22 @@ import {
   filterTurnosInRange,
   buildAusenciasStats,
   topNPlusResto,
+  isVacantShift,
+  shiftStartMs,
 } from '@/lib/analisis/analisisQueries';
 import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
 import {
   buildAnalisisFinanciera,
+  FIN_NOV_BREAKDOWN_CODES,
+  FIN_NOV_HEAD_COLS,
   finGuardConsumo,
+  finGuardNovCode,
+  finGuardNovOtros,
+  finIdleHours,
+  finNovCode,
+  finNovOtros,
+  finPlanHours,
+  finSumadasHours,
   rollAnalisisFinanciera,
   type FinHoursMode,
 } from '@/lib/analisis/analisisFinanciera';
@@ -56,7 +67,7 @@ import {
   isPlanningScheduledCoverageShift,
   shiftCoverageExtensionExtraHours,
 } from '@/lib/planificacion/planningScheduledHours';
-import { isDeploymentOrPoolShift, resolveDeploymentStatHours, deploymentStatKind, shiftCountsForEmployeeCronoHours } from '@/lib/planificacion/deploymentRoles';
+import { isDeploymentOrPoolShift, resolveDeploymentStatHours, deploymentStatKind, shiftCountsForEmployeeCronoHours, isRegularLiquidationWorkShift } from '@/lib/planificacion/deploymentRoles';
 import { getDateKeyInTimezone, isProformaVacancyShift } from '@/lib/crm/proformaGrid';
 import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
@@ -899,6 +910,28 @@ export default function AnalisisPage() {
       byGuard.set(employeeId, { ...g, hours: g.hours + dur, shifts: g.shifts + 1 });
     });
 
+    const workedDays = new Set<string>();
+    turnos.forEach((t: any) => {
+      if (isVacantShift(t) || !isRegularLiquidationWorkShift(t)) return;
+      const eid = String(t.employeeId || '').trim();
+      const ms = shiftStartMs(t);
+      if (!eid || eid === 'VACANTE' || ms == null) return;
+      workedDays.add(`${eid}_${getDateKeyInTimezone(new Date(ms))}`);
+    });
+    turnos.forEach((t: any) => {
+      if (!isDeploymentOrPoolShift(t) || isVacantShift(t)) return;
+      const eid = String(t.employeeId || '').trim();
+      const ms = shiftStartMs(t);
+      if (!eid || eid === 'VACANTE' || ms == null) return;
+      const kind = deploymentStatKind(t);
+      if (kind === 'RET' && workedDays.has(`${eid}_${getDateKeyInTimezone(new Date(ms))}`)) return;
+      const hs = resolveDeploymentStatHours(t);
+      if (hs <= 0) return;
+      const empName = empNameMap.get(eid) || t.employeeName || eid;
+      const g = byGuard.get(eid) || { name: empName, hours: 0, shifts: 0 };
+      byGuard.set(eid, { name: g.name, hours: g.hours + hs, shifts: g.shifts + 1 });
+    });
+
     return {
       byGuard: [...byGuard.entries()].map(([id,d]) => ({ id,...d })).sort((a,b) => b.hours-a.hours),
       byObjective: [...byObj.entries()].map(([id,d]) => ({ id,...d })).sort((a,b) => (b.scheduled+b.vacant)-(a.scheduled+a.vacant)),
@@ -948,8 +981,9 @@ export default function AnalisisPage() {
           Consumo: Math.round(c.hsConsumo),
           Novedades: Math.round(c.novedades.total),
           FT: Math.round(c.hsFt),
+          'F/RET': Math.round(finIdleHours(c)),
         })),
-        ['SLA', 'Consumo', 'Novedades', 'FT'],
+        ['SLA', 'Consumo', 'Novedades', 'FT', 'F/RET'],
         10,
         'name',
       ),
@@ -1830,12 +1864,18 @@ export default function AnalisisPage() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ['Financiera hs-hombre', periodRange.labelShort, modo],
       ['SLA empresa', fin.slaHours],
-      ['Malla', fin.hsMalla],
+      ['Hs plan', finPlanHours(fin, finHoursMode)],
+      ['Horas sumadas', finSumadasHours(fin)],
       ['Consumo', fin.hsConsumo],
-      ['Novedades', fin.novedades.total],
+      ...FIN_NOV_BREAKDOWN_CODES.map((c) => [c, finNovCode(fin.novedades, c)]),
+      ['Otras novedades', finNovOtros(fin.novedades)],
+      ['EV', fin.hsEv],
       ['FT', fin.hsFt],
       ['Extras', fin.hsExtra],
       ['Ops', fin.hsOps],
+      ['Francos F/FF', fin.hsFranco],
+      ['RET no usado', fin.hsRet],
+      ['REF / ESC', fin.hsDespliegue],
       ['Vacante', fin.hsVacante],
       ['Guardias', fin.guardias],
       ['Hs/guardia', fin.hsConsumoPorGuardia],
@@ -1843,22 +1883,30 @@ export default function AnalisisPage() {
       ['Eficiencia SLA/consumo %', fin.eficienciaPct],
     ]), 'Empresa');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivos', 'SLA', 'Malla', 'Novedades', 'FT', 'Extra', 'Ops', 'Vacante', 'Consumo', 'Guardias', 'Hs/g', 'Δ SLA'],
+      ['Cliente', 'Objetivos', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'Δ SLA'],
       ...fin.clients.map((c) => [
-        c.name, c.objetivos, c.slaHours, c.hsMalla, c.novedades.total, c.hsFt, c.hsExtra, c.hsOps, c.hsVacante, c.hsConsumo, c.guardias, c.hsConsumoPorGuardia, c.deltaVsSla,
+        c.name, c.objetivos, c.slaHours, finPlanHours(c, finHoursMode),
+        ...FIN_NOV_BREAKDOWN_CODES.map((code) => finNovCode(c.novedades, code)),
+        finNovOtros(c.novedades), c.hsEv, c.hsFt, c.hsExtra, c.hsOps, c.hsFranco, c.hsRet, c.hsDespliegue,
+        finSumadasHours(c), c.hsConsumo, c.hsVacante, c.guardias, c.hsConsumoPorGuardia, c.deltaVsSla,
       ]),
     ]), 'Clientes');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivo', 'SLA', 'Malla', 'V', 'E', 'ART', 'L/PG', 'AA', 'FT', 'Extra', 'Ops', 'Vacante', 'Consumo', 'Guardias', 'Hs/g', 'SLA/g', 'Δ SLA'],
+      ['Cliente', 'Objetivo', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'SLA/g', 'Δ SLA'],
       ...fin.clients.flatMap((c) => c.rows.map((o) => [
-        c.name, o.name, o.slaHours, o.hsMalla, o.novedades.vac, o.novedades.enf, o.novedades.art, o.novedades.lic, o.novedades.inj,
-        o.hsFt, o.hsExtra, o.hsOps, o.hsVacante, o.hsConsumo, o.guardias, o.hsConsumoPorGuardia, o.hsSlaPorGuardia, o.deltaVsSla,
+        c.name, o.name, o.slaHours, finPlanHours(o, finHoursMode),
+        ...FIN_NOV_BREAKDOWN_CODES.map((code) => finNovCode(o.novedades, code)),
+        finNovOtros(o.novedades), o.hsEv, o.hsFt, o.hsExtra, o.hsOps, o.hsFranco, o.hsRet, o.hsDespliegue,
+        finSumadasHours(o), o.hsConsumo, o.hsVacante, o.guardias, o.hsConsumoPorGuardia, o.hsSlaPorGuardia, o.deltaVsSla,
       ])),
     ]), 'Objetivos');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivo', 'Guardia', 'Malla', 'FT', 'Extra', 'Ops', 'Novedad', 'Consumo'],
+      ['Cliente', 'Objetivo', 'Guardia', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo'],
       ...fin.clients.flatMap((c) => c.rows.flatMap((o) => o.guards.map((g) => [
-        c.name, o.name, empNameById[g.employeeId] || g.name, finHoursMode === 'real' ? g.hsReal : g.hsPlan, g.hsFt, g.hsExtra, g.hsOps, g.hsNovedad, finGuardConsumo(g, finHoursMode),
+        c.name, o.name, empNameById[g.employeeId] || g.name, finPlanHours(g, finHoursMode),
+        ...FIN_NOV_BREAKDOWN_CODES.map((code) => finGuardNovCode(g, code)),
+        finGuardNovOtros(g), g.hsEv, g.hsFt, g.hsExtra, g.hsOps, g.hsFranco, g.hsRet, g.hsDespliegue,
+        finSumadasHours(g), finGuardConsumo(g, finHoursMode),
       ]))),
     ]), 'Guardias');
     XLSX.writeFile(wb, `financiera-hs-${periodRange.labelShort.replace(/[^\w]+/g, '-')}.xlsx`);
@@ -2439,8 +2487,9 @@ export default function AnalisisPage() {
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-3xl leading-relaxed">
                   Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
-                  malla ({finHoursMode === 'real' ? 'fichada' : 'planificada + novedades del debe'}) + novedades (V/L/E/A/AA/PG) + franco trabajado + extras/ops.
-                  Las novedades se atribuyen al puesto (malla / historial / legajo) y en modo planificado entran en la malla para el Δ vs SLA.
+                  <strong>hs plan</strong> (cobertura de malla) + <strong>horas sumadas</strong> (novedades V/L/E/A/AA/PG + FT + extra/ops + francos F/FF y RET/REF/ESC no usados).
+                  El SLA no incluye esas horas extra. Si el RET se usó el mismo día (M/T/N), no se duplica.
+                  Las novedades se atribuyen al puesto (malla / historial / legajo).
                   Sin precios. Pirámide empresa → cliente → objetivo.
                   Techo liquidación = <strong>200 hs</strong>/vigilador (no mezclar con jornada 192).
                   {informe.bolsaModo === 'sin_indice'
@@ -2480,20 +2529,23 @@ export default function AnalisisPage() {
 
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Target} color="#4f46e5" label="SLA empresa" value={fin.slaHours.toLocaleString('es-AR')} unit="hs" subtext={`${fin.clientes} clientes · ${fin.objetivos} objetivos`}/>
-                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Malla fichada' : 'Malla planificada'} value={fin.hsMalla.toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fin.hsPlan.toLocaleString('es-AR')} hs` : `Cobertura ${fin.hsPlan.toLocaleString('es-AR')} + novedades ${fin.novedades.total.toLocaleString('es-AR')}`}/>
-                <KpiCard icon={Wallet} color="#0f766e" label="Consumo hs-hombre" value={fin.hsConsumo.toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? 'Fichada + novedades + FT + extra + ops' : 'Debe (malla + novedades) + FT + extra + ops'} alert={fin.deltaVsSla > 8}/>
+                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Hs plan (fichada)' : 'Hs plan'} value={finPlanHours(fin, finHoursMode).toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fin.hsPlan.toLocaleString('es-AR')} hs` : 'Cobertura de malla, sin novedades'}/>
+                <KpiCard icon={Wallet} color="#0f766e" label="Consumo hs-hombre" value={fin.hsConsumo.toLocaleString('es-AR')} unit="hs" subtext={`Plan ${finPlanHours(fin, finHoursMode).toLocaleString('es-AR')} + sumadas ${finSumadasHours(fin).toLocaleString('es-AR')}`} alert={fin.deltaVsSla > 8}/>
                 <KpiCard icon={Users} color="#0891b2" label="Hs / guardia" value={fin.hsConsumoPorGuardia.toLocaleString('es-AR')} unit="hs" subtext={`${fin.guardias} guardias · SLA ${fin.hsSlaPorGuardia.toLocaleString('es-AR')} hs/c/u`}/>
-                <KpiCard icon={AlertTriangle} color="#ea580c" label="FT + extras + ops" value={(fin.hsFt + fin.hsExtra + fin.hsOps).toLocaleString('es-AR')} unit="hs" subtext={`FT ${fin.hsFt.toLocaleString('es-AR')} · ext ${fin.hsExtra.toLocaleString('es-AR')} · ops ${fin.hsOps.toLocaleString('es-AR')}`}/>
+                <KpiCard icon={AlertTriangle} color="#ea580c" label="FT + extras + no usadas" value={(fin.hsFt + fin.hsExtra + fin.hsOps + finIdleHours(fin)).toLocaleString('es-AR')} unit="hs" subtext={`FT ${fin.hsFt.toLocaleString('es-AR')} · ext ${fin.hsExtra.toLocaleString('es-AR')} · ops ${fin.hsOps.toLocaleString('es-AR')} · F ${fin.hsFranco.toLocaleString('es-AR')} · RET ${fin.hsRet.toLocaleString('es-AR')} · REF/ESC ${fin.hsDespliegue.toLocaleString('es-AR')}`}/>
                 <KpiCard icon={Activity} color={fin.eficienciaPct >= 90 ? '#059669' : fin.eficienciaPct >= 75 ? '#d97706' : '#dc2626'} label="Eficiencia SLA/consumo" value={`${fin.eficienciaPct}%`} subtext={`Novedades ${fin.novedades.total.toLocaleString('es-AR')} · vacante ${fin.hsVacante.toLocaleString('es-AR')}`} alert={fin.eficienciaPct < 75}/>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
                 {([
-                  { k: 'Vacaciones', v: fin.novedades.vac, c: '#7c3aed' },
-                  { k: 'Enfermedad', v: fin.novedades.enf, c: '#dc2626' },
-                  { k: 'ART', v: fin.novedades.art, c: '#d97706' },
-                  { k: 'Lic. / PG', v: fin.novedades.lic, c: '#0891b2' },
-                  { k: 'Injustificada', v: fin.novedades.inj, c: '#64748b' },
+                  { k: 'V Vacaciones', v: finNovCode(fin.novedades, 'V'), c: '#7c3aed' },
+                  { k: 'E Enfermedad', v: finNovCode(fin.novedades, 'E'), c: '#dc2626' },
+                  { k: 'L Licencia', v: finNovCode(fin.novedades, 'L'), c: '#0891b2' },
+                  { k: 'A ART', v: finNovCode(fin.novedades, 'A'), c: '#d97706' },
+                  { k: 'AA Injust.', v: finNovCode(fin.novedades, 'AA'), c: '#64748b' },
+                  { k: 'PG Gremial', v: finNovCode(fin.novedades, 'PG'), c: '#0f766e' },
+                  { k: 'SUS Suspensión', v: finNovCode(fin.novedades, 'SUS'), c: '#be123c' },
+                  { k: 'EV Evento', v: fin.hsEv, c: '#ca8a04' },
                 ]).map((n) => (
                   <div key={n.k} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 shadow-sm">
                     <p className="text-[9px] font-black uppercase text-slate-400">{n.k}</p>
@@ -2509,6 +2561,7 @@ export default function AnalisisPage() {
                     { color: '#0f766e', label: 'Consumo hs-hombre' },
                     { color: '#7c3aed', label: 'Novedades' },
                     { color: '#ea580c', label: 'FT' },
+                    { color: '#64748b', label: 'F / RET / REF' },
                   ]}/>
                   <div className="px-5 pb-5 pt-2">
                     <ResponsiveContainer width="100%" height={260}>
@@ -2521,6 +2574,7 @@ export default function AnalisisPage() {
                         <Bar dataKey="Consumo" fill="#0f766e" radius={[4, 4, 0, 0]} maxBarSize={16}/>
                         <Bar dataKey="Novedades" fill="#7c3aed" radius={[4, 4, 0, 0]} maxBarSize={16}/>
                         <Bar dataKey="FT" fill="#ea580c" radius={[4, 4, 0, 0]} maxBarSize={16}/>
+                        <Bar dataKey="F/RET" fill="#64748b" radius={[4, 4, 0, 0]} maxBarSize={16}/>
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -2534,141 +2588,224 @@ export default function AnalisisPage() {
                     <p className="text-sm font-bold">Sin consumo calculable en este período</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-slate-50 dark:bg-slate-700/30 text-slate-500 font-bold uppercase text-[10px]">
-                        <tr>
-                          <th className="p-3">Cliente</th>
-                          <th className="p-3 text-center">Obj.</th>
-                          <th className="p-3 text-center text-indigo-600">SLA</th>
-                          <th className="p-3 text-center">Malla</th>
-                          <th className="p-3 text-center text-violet-600">Novedades</th>
-                          <th className="p-3 text-center text-orange-600">FT</th>
-                          <th className="p-3 text-center text-cyan-600">Extra/ops</th>
-                          <th className="p-3 text-center text-amber-600">Vacante</th>
-                          <th className="p-3 text-center text-teal-700">Consumo</th>
-                          <th className="p-3 text-center">Guardias</th>
-                          <th className="p-3 text-center">Hs/g</th>
-                          <th className="p-3 text-center">Δ SLA</th>
+                  <div className="overflow-auto max-h-[70vh] rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                    <table className="w-full min-w-[1680px] text-sm border-collapse">
+                      <thead className="sticky top-0 z-10">
+                        <tr className="bg-slate-800 text-white text-[10px] font-black uppercase tracking-wide">
+                          <th rowSpan={2} className="sticky left-0 z-20 bg-slate-800 p-3 text-left min-w-[180px] border-b border-slate-700">Cliente</th>
+                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Obj.</th>
+                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">SLA hs</th>
+                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700 bg-slate-700/80">Hs plan</th>
+                          <th colSpan={FIN_NOV_HEAD_COLS} className="p-2 text-center border-b border-l border-slate-600 bg-violet-900/80">Novedades</th>
+                          <th colSpan={6} className="p-2 text-center border-b border-l border-slate-600 bg-slate-700">Otras sumadas</th>
+                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Σ</th>
+                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Consumo</th>
+                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Vacante</th>
+                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">G</th>
+                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Hs / g</th>
+                          <th rowSpan={2} className="p-3 text-right pr-4 border-b border-slate-700">Δ vs SLA</th>
+                        </tr>
+                        <tr className="bg-slate-700 text-white text-[9px] font-black uppercase tracking-wide">
+                          {FIN_NOV_BREAKDOWN_CODES.map((c, i) => (
+                            <th key={c} className={`p-2 text-right ${i === 0 ? 'border-l border-slate-600' : ''}`}>{c}</th>
+                          ))}
+                          <th className="p-2 text-right">Otr.</th>
+                          <th className="p-2 text-right border-l border-slate-600">EV</th>
+                          <th className="p-2 text-right">FT</th>
+                          <th className="p-2 text-right">Extra</th>
+                          <th className="p-2 text-right">F</th>
+                          <th className="p-2 text-right">RET</th>
+                          <th className="p-2 text-right">REF</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {fin.clients.map((cli) => {
+                      <tbody>
+                        {fin.clients.map((cli, idx) => {
                           const open = expandedFinClientId === cli.id;
+                          const hsCell = (n: number, extra = '') => (
+                            <td className={`p-2.5 text-right tabular-nums ${extra}`}>
+                              {n === 0 ? <span className="text-slate-300 dark:text-slate-600">—</span> : n.toLocaleString('es-AR')}
+                            </td>
+                          );
                           return (
                             <React.Fragment key={cli.id}>
                               <tr
-                                className="hover:bg-slate-50/70 dark:hover:bg-slate-700/20 cursor-pointer"
+                                className={`cursor-pointer border-b border-slate-100 dark:border-slate-800 ${
+                                  open
+                                    ? 'bg-indigo-50/80 dark:bg-indigo-950/40'
+                                    : idx % 2 === 0
+                                      ? 'bg-white dark:bg-slate-900'
+                                      : 'bg-slate-50 dark:bg-slate-800/40'
+                                } hover:bg-indigo-50 dark:hover:bg-indigo-950/30`}
                                 onClick={() => setExpandedFinClientId(open ? null : cli.id)}
                               >
-                                <td className="p-3 font-bold text-slate-800 dark:text-white text-xs">
+                                <td className={`sticky left-0 z-10 p-2.5 font-bold text-slate-800 dark:text-white text-xs ${open ? 'bg-indigo-50 dark:bg-indigo-950' : idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-800'}`}>
                                   <span className="inline-flex items-center gap-1.5">
-                                    {open ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}
-                                    {cli.name}
+                                    {open ? <ChevronDown size={14} className="text-indigo-500 shrink-0"/> : <ChevronRight size={14} className="text-slate-400 shrink-0"/>}
+                                    <span className="uppercase tracking-wide">{cli.name}</span>
                                   </span>
                                 </td>
-                                <td className="p-3 text-center text-slate-500">{cli.objetivos}</td>
-                                <td className="p-3 text-center font-black text-indigo-600">{cli.slaHours.toLocaleString('es-AR')}</td>
-                                <td className="p-3 text-center font-black">{cli.hsMalla.toLocaleString('es-AR')}</td>
-                                <td className="p-3 text-center font-black text-violet-600">{cli.novedades.total.toLocaleString('es-AR')}</td>
-                                <td className="p-3 text-center font-black text-orange-600">{cli.hsFt.toLocaleString('es-AR')}</td>
-                                <td className="p-3 text-center font-black text-cyan-700">{(cli.hsExtra + cli.hsOps).toLocaleString('es-AR')}</td>
-                                <td className="p-3 text-center font-black text-amber-600">{cli.hsVacante.toLocaleString('es-AR')}</td>
-                                <td className="p-3 text-center font-black text-teal-700">{cli.hsConsumo.toLocaleString('es-AR')}</td>
-                                <td className="p-3 text-center">{cli.guardias}</td>
-                                <td className="p-3 text-center font-black">{cli.hsConsumoPorGuardia.toLocaleString('es-AR')}</td>
-                                <td className={`p-3 text-center font-black ${cli.deltaVsSla > 4 ? 'text-rose-600' : cli.deltaVsSla < -4 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                {hsCell(cli.objetivos, 'text-slate-500')}
+                                {hsCell(cli.slaHours, 'text-slate-700 dark:text-slate-200')}
+                                {hsCell(finPlanHours(cli, finHoursMode), 'font-semibold')}
+                                {FIN_NOV_BREAKDOWN_CODES.map((c) => (
+                                  <React.Fragment key={c}>{hsCell(finNovCode(cli.novedades, c))}</React.Fragment>
+                                ))}
+                                {hsCell(finNovOtros(cli.novedades))}
+                                {hsCell(cli.hsEv)}
+                                {hsCell(cli.hsFt)}
+                                {hsCell(cli.hsExtra + cli.hsOps)}
+                                {hsCell(cli.hsFranco)}
+                                {hsCell(cli.hsRet)}
+                                {hsCell(cli.hsDespliegue)}
+                                {hsCell(finSumadasHours(cli), 'font-bold text-slate-700 dark:text-slate-200')}
+                                {hsCell(cli.hsConsumo, 'font-black text-slate-900 dark:text-white')}
+                                {hsCell(cli.hsVacante)}
+                                {hsCell(cli.guardias, 'text-slate-500')}
+                                {hsCell(cli.hsConsumoPorGuardia, 'font-semibold')}
+                                <td className={`p-2.5 pr-4 text-right tabular-nums font-black ${
+                                  cli.deltaVsSla > 4 ? 'text-rose-600' : cli.deltaVsSla < -4 ? 'text-amber-600' : 'text-emerald-600'
+                                }`}>
                                   {cli.deltaVsSla > 0 ? '+' : ''}{cli.deltaVsSla.toLocaleString('es-AR')}
                                 </td>
                               </tr>
                               {open && (
                                 <tr>
-                                  <td colSpan={12} className="p-0 bg-slate-50/80 dark:bg-slate-900/40">
-                                    <table className="w-full text-sm">
-                                      <thead className="text-[9px] uppercase text-slate-400 font-black">
-                                        <tr>
-                                          <th className="p-2.5 pl-8 text-left">Objetivo</th>
-                                          <th className="p-2.5 text-center">SLA</th>
-                                          <th className="p-2.5 text-center">Malla</th>
-                                          <th className="p-2.5 text-center">Nov.</th>
-                                          <th className="p-2.5 text-center">FT</th>
-                                          <th className="p-2.5 text-center">Extra/ops</th>
-                                          <th className="p-2.5 text-center">Vacante</th>
-                                          <th className="p-2.5 text-center">Consumo</th>
-                                          <th className="p-2.5 text-center">G</th>
-                                          <th className="p-2.5 text-center">Hs/g</th>
-                                          <th className="p-2.5 text-center">SLA/g</th>
-                                          <th className="p-2.5 text-center">Δ</th>
+                                  <td colSpan={16 + FIN_NOV_HEAD_COLS} className="p-0 bg-slate-100/90 dark:bg-slate-950/50">
+                                    <table className="w-full min-w-[1680px] text-sm border-collapse">
+                                      <thead>
+                                        <tr className="bg-slate-200/80 dark:bg-slate-800 text-[9px] uppercase font-black tracking-wide text-slate-600 dark:text-slate-300">
+                                          <th rowSpan={2} className="p-2 pl-10 text-left border-b border-slate-300 dark:border-slate-700">Objetivo</th>
+                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">SLA hs</th>
+                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Hs plan</th>
+                                          <th colSpan={FIN_NOV_HEAD_COLS} className="p-1.5 text-center border-b border-l border-slate-300 dark:border-slate-600">Novedades</th>
+                                          <th colSpan={6} className="p-1.5 text-center border-b border-l border-slate-300 dark:border-slate-600">Otras sumadas</th>
+                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Σ</th>
+                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Consumo</th>
+                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Vacante</th>
+                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">G</th>
+                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Hs / g</th>
+                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">SLA / g</th>
+                                          <th rowSpan={2} className="p-2 text-right pr-4 border-b border-slate-300 dark:border-slate-700">Δ</th>
+                                        </tr>
+                                        <tr className="bg-slate-300/70 dark:bg-slate-700 text-[9px] uppercase font-black tracking-wide text-slate-600 dark:text-slate-300">
+                                          {FIN_NOV_BREAKDOWN_CODES.map((c, i) => (
+                                            <th key={c} className={`p-1.5 text-right ${i === 0 ? 'border-l border-slate-300 dark:border-slate-600' : ''}`}>{c}</th>
+                                          ))}
+                                          <th className="p-1.5 text-right">Otr.</th>
+                                          <th className="p-1.5 text-right border-l border-slate-300 dark:border-slate-600">EV</th>
+                                          <th className="p-1.5 text-right">FT</th>
+                                          <th className="p-1.5 text-right">Extra</th>
+                                          <th className="p-1.5 text-right">F</th>
+                                          <th className="p-1.5 text-right">RET</th>
+                                          <th className="p-1.5 text-right">REF</th>
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {cli.rows.map((obj) => {
+                                        {cli.rows.map((obj, oidx) => {
                                           const objOpen = expandedFinObjId === obj.id;
+                                          const oCell = (n: number, extra = '') => (
+                                            <td className={`p-2 text-right tabular-nums ${extra}`}>
+                                              {n === 0 ? <span className="text-slate-300 dark:text-slate-600">—</span> : n.toLocaleString('es-AR')}
+                                            </td>
+                                          );
                                           return (
                                             <React.Fragment key={obj.id}>
                                               <tr
-                                                className="hover:bg-white dark:hover:bg-slate-800 cursor-pointer"
+                                                className={`cursor-pointer border-b border-slate-200/70 dark:border-slate-800 ${
+                                                  objOpen ? 'bg-white dark:bg-slate-800' : oidx % 2 === 0 ? 'bg-white/70 dark:bg-slate-900/40' : 'bg-slate-50 dark:bg-slate-900/20'
+                                                } hover:bg-white dark:hover:bg-slate-800`}
                                                 onClick={(e) => { e.stopPropagation(); setExpandedFinObjId(objOpen ? null : obj.id); }}
                                               >
-                                                <td className="p-2.5 pl-8 font-bold text-xs text-slate-700 dark:text-slate-100">
+                                                <td className="p-2 pl-10 font-bold text-xs text-slate-700 dark:text-slate-100">
                                                   <span className="inline-flex items-center gap-1">
-                                                    {objOpen ? <ChevronDown size={12}/> : <ChevronRight size={12}/>}
+                                                    {objOpen ? <ChevronDown size={12} className="text-indigo-500 shrink-0"/> : <ChevronRight size={12} className="text-slate-400 shrink-0"/>}
                                                     {obj.name}
                                                   </span>
                                                 </td>
-                                                <td className="p-2.5 text-center font-black text-indigo-600">{obj.slaHours.toLocaleString('es-AR')}</td>
-                                                <td className="p-2.5 text-center font-black">{obj.hsMalla.toLocaleString('es-AR')}</td>
-                                                <td className="p-2.5 text-center font-black text-violet-600">{obj.novedades.total.toLocaleString('es-AR')}</td>
-                                                <td className="p-2.5 text-center font-black text-orange-600">{obj.hsFt.toLocaleString('es-AR')}</td>
-                                                <td className="p-2.5 text-center">{(obj.hsExtra + obj.hsOps).toLocaleString('es-AR')}</td>
-                                                <td className="p-2.5 text-center text-amber-600">{obj.hsVacante.toLocaleString('es-AR')}</td>
-                                                <td className="p-2.5 text-center font-black text-teal-700">{obj.hsConsumo.toLocaleString('es-AR')}</td>
-                                                <td className="p-2.5 text-center">{obj.guardias}</td>
-                                                <td className="p-2.5 text-center font-black">{obj.hsConsumoPorGuardia.toLocaleString('es-AR')}</td>
-                                                <td className="p-2.5 text-center text-slate-500">{obj.hsSlaPorGuardia.toLocaleString('es-AR')}</td>
-                                                <td className={`p-2.5 text-center font-black ${obj.deltaVsSla > 4 ? 'text-rose-600' : 'text-slate-600'}`}>
+                                                {oCell(obj.slaHours)}
+                                                {oCell(finPlanHours(obj, finHoursMode), 'font-semibold')}
+                                                {FIN_NOV_BREAKDOWN_CODES.map((c) => (
+                                                  <React.Fragment key={c}>{oCell(finNovCode(obj.novedades, c))}</React.Fragment>
+                                                ))}
+                                                {oCell(finNovOtros(obj.novedades))}
+                                                {oCell(obj.hsEv)}
+                                                {oCell(obj.hsFt)}
+                                                {oCell(obj.hsExtra + obj.hsOps)}
+                                                {oCell(obj.hsFranco)}
+                                                {oCell(obj.hsRet)}
+                                                {oCell(obj.hsDespliegue)}
+                                                {oCell(finSumadasHours(obj), 'font-bold')}
+                                                {oCell(obj.hsConsumo, 'font-black')}
+                                                {oCell(obj.hsVacante)}
+                                                {oCell(obj.guardias, 'text-slate-500')}
+                                                {oCell(obj.hsConsumoPorGuardia, 'font-semibold')}
+                                                {oCell(obj.hsSlaPorGuardia, 'text-slate-500')}
+                                                <td className={`p-2 pr-4 text-right tabular-nums font-black ${
+                                                  obj.deltaVsSla > 4 ? 'text-rose-600' : obj.deltaVsSla < -4 ? 'text-amber-600' : 'text-emerald-600'
+                                                }`}>
                                                   {obj.deltaVsSla > 0 ? '+' : ''}{obj.deltaVsSla.toLocaleString('es-AR')}
                                                 </td>
                                               </tr>
                                               {objOpen && (
                                                 <tr>
-                                                  <td colSpan={12} className="px-8 py-3 bg-white dark:bg-slate-800">
-                                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+                                                  <td colSpan={16 + FIN_NOV_HEAD_COLS} className="px-10 py-3 bg-white dark:bg-slate-800">
+                                                    <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-9 gap-2 mb-3">
                                                       {([
-                                                        { k: 'V', v: obj.novedades.vac },
-                                                        { k: 'E', v: obj.novedades.enf },
-                                                        { k: 'A', v: obj.novedades.art },
-                                                        { k: 'L/PG', v: obj.novedades.lic },
-                                                        { k: 'AA', v: obj.novedades.inj },
+                                                        { k: 'V Vacaciones', v: finNovCode(obj.novedades, 'V') },
+                                                        { k: 'E Enfermedad', v: finNovCode(obj.novedades, 'E') },
+                                                        { k: 'L Licencia', v: finNovCode(obj.novedades, 'L') },
+                                                        { k: 'A ART', v: finNovCode(obj.novedades, 'A') },
+                                                        { k: 'AA Injust.', v: finNovCode(obj.novedades, 'AA') },
+                                                        { k: 'PG Gremial', v: finNovCode(obj.novedades, 'PG') },
+                                                        { k: 'SUS Suspensión', v: finNovCode(obj.novedades, 'SUS') },
+                                                        { k: 'Otras nov.', v: finNovOtros(obj.novedades) },
+                                                        { k: 'EV Evento', v: obj.hsEv },
+                                                        { k: 'RET', v: obj.hsRet },
                                                       ]).map((n) => (
-                                                        <div key={n.k} className="rounded-xl border border-slate-100 dark:border-slate-700 px-3 py-2">
-                                                          <p className="text-[9px] font-black text-slate-400">{n.k}</p>
-                                                          <p className="text-sm font-black">{n.v.toLocaleString('es-AR')} hs</p>
+                                                        <div key={n.k} className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 shadow-sm">
+                                                          <p className="text-[9px] font-black uppercase text-slate-400">{n.k}</p>
+                                                          <p className="text-sm font-black tabular-nums">{n.v.toLocaleString('es-AR')} hs</p>
                                                         </div>
                                                       ))}
                                                     </div>
-                                                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Costo por guardia (hs-hombre)</p>
-                                                    <div className="overflow-x-auto">
-                                                      <table className="w-full text-xs">
-                                                        <thead className="text-[9px] uppercase text-slate-400 font-black">
-                                                          <tr>
+                                                    <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Hs-hombre por guardia</p>
+                                                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                                                      <table className="w-full text-xs border-collapse">
+                                                        <thead>
+                                                          <tr className="bg-slate-100 dark:bg-slate-700 text-[9px] uppercase font-black text-slate-500">
                                                             <th className="p-2 text-left">Guardia</th>
-                                                            <th className="p-2 text-center">Malla</th>
-                                                            <th className="p-2 text-center">FT</th>
-                                                            <th className="p-2 text-center">Extra/ops</th>
-                                                            <th className="p-2 text-center">Novedad</th>
-                                                            <th className="p-2 text-center">Consumo</th>
+                                                            <th className="p-2 text-right">Hs plan</th>
+                                                            {FIN_NOV_BREAKDOWN_CODES.map((c) => (
+                                                              <th key={c} className="p-2 text-right">{c}</th>
+                                                            ))}
+                                                            <th className="p-2 text-right">Otr.</th>
+                                                            <th className="p-2 text-right">EV</th>
+                                                            <th className="p-2 text-right">FT</th>
+                                                            <th className="p-2 text-right">Extra</th>
+                                                            <th className="p-2 text-right">F</th>
+                                                            <th className="p-2 text-right">RET</th>
+                                                            <th className="p-2 text-right">REF</th>
+                                                            <th className="p-2 text-right">Σ</th>
+                                                            <th className="p-2 text-right pr-3">Consumo</th>
                                                           </tr>
                                                         </thead>
                                                         <tbody>
-                                                          {obj.guards.map((g) => (
-                                                            <tr key={g.employeeId} className="border-t border-slate-100 dark:border-slate-700">
+                                                          {obj.guards.map((g, gi) => (
+                                                            <tr key={g.employeeId} className={`border-t border-slate-100 dark:border-slate-700 ${gi % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-900/40'}`}>
                                                               <td className="p-2 font-bold">{empNameById[g.employeeId] || g.name}</td>
-                                                              <td className="p-2 text-center">{(finHoursMode === 'real' ? g.hsReal : g.hsPlan).toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-center text-orange-600">{g.hsFt.toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-center">{(g.hsExtra + g.hsOps).toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-center text-violet-600">{g.hsNovedad.toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-center font-black">{finGuardConsumo(g, finHoursMode).toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-right tabular-nums">{finPlanHours(g, finHoursMode).toLocaleString('es-AR')}</td>
+                                                              {FIN_NOV_BREAKDOWN_CODES.map((c) => (
+                                                                <td key={c} className="p-2 text-right tabular-nums">{finGuardNovCode(g, c) === 0 ? '—' : finGuardNovCode(g, c).toLocaleString('es-AR')}</td>
+                                                              ))}
+                                                              <td className="p-2 text-right tabular-nums">{finGuardNovOtros(g) === 0 ? '—' : finGuardNovOtros(g).toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-right tabular-nums">{g.hsEv === 0 ? '—' : g.hsEv.toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-right tabular-nums">{g.hsFt === 0 ? '—' : g.hsFt.toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-right tabular-nums">{(g.hsExtra + g.hsOps) === 0 ? '—' : (g.hsExtra + g.hsOps).toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-right tabular-nums">{g.hsFranco === 0 ? '—' : g.hsFranco.toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-right tabular-nums">{g.hsRet === 0 ? '—' : g.hsRet.toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-right tabular-nums">{g.hsDespliegue === 0 ? '—' : g.hsDespliegue.toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 text-right tabular-nums font-bold">{finSumadasHours(g) === 0 ? '—' : finSumadasHours(g).toLocaleString('es-AR')}</td>
+                                                              <td className="p-2 pr-3 text-right tabular-nums font-black">{finGuardConsumo(g, finHoursMode).toLocaleString('es-AR')}</td>
                                                             </tr>
                                                           ))}
                                                         </tbody>
@@ -2689,6 +2826,32 @@ export default function AnalisisPage() {
                           );
                         })}
                       </tbody>
+                      <tfoot className="sticky bottom-0">
+                        <tr className="bg-slate-800 text-white text-xs font-black">
+                          <td className="sticky left-0 z-10 bg-slate-800 p-3">Total empresa · {fin.clientes} clientes</td>
+                          <td className="p-3 text-right tabular-nums">{fin.objetivos}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.slaHours.toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{finPlanHours(fin, finHoursMode).toLocaleString('es-AR')}</td>
+                          {FIN_NOV_BREAKDOWN_CODES.map((c) => (
+                            <td key={c} className="p-3 text-right tabular-nums">{finNovCode(fin.novedades, c).toLocaleString('es-AR')}</td>
+                          ))}
+                          <td className="p-3 text-right tabular-nums">{finNovOtros(fin.novedades).toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.hsEv.toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.hsFt.toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{(fin.hsExtra + fin.hsOps).toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.hsFranco.toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.hsRet.toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.hsDespliegue.toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{finSumadasHours(fin).toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.hsConsumo.toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.hsVacante.toLocaleString('es-AR')}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.guardias}</td>
+                          <td className="p-3 text-right tabular-nums">{fin.hsConsumoPorGuardia.toLocaleString('es-AR')}</td>
+                          <td className={`p-3 pr-4 text-right tabular-nums ${fin.deltaVsSla > 4 ? 'text-rose-300' : fin.deltaVsSla < -4 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                            {fin.deltaVsSla > 0 ? '+' : ''}{fin.deltaVsSla.toLocaleString('es-AR')}
+                          </td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 )}
@@ -3360,7 +3523,7 @@ export default function AnalisisPage() {
                   {/* RadialBar top guardias */}
                   <SectionCard title={`Top ${radialGuards.length} guardias por utilización`} icon={Activity}>
                     <div className="px-4 py-3">
-                      <p className="text-[9px] text-slate-400 font-bold mb-2 uppercase">% del límite CCT 200h/mes</p>
+                      <p className="text-[9px] text-slate-400 font-bold mb-2 uppercase">% del límite CCT 200h/mes (cobertura + RET/REF/ESC liquidables)</p>
                       <ResponsiveContainer width="100%" height={Math.max(160, radialGuards.length * 22)}>
                         <RadialBarChart cx="50%" cy="50%"
                           innerRadius="15%" outerRadius="95%"

@@ -157,7 +157,7 @@ const stats = buildAusenciasStats({
   capHsPerGuardPeriod: 192,
 });
 assert(!!stats && stats.total === 1, '1 ausencia RRHH con shiftId');
-assert(!!stats && stats.vacHs === 8, `hs por shiftId = 8 (got ${stats?.vacHs})`);
+assert(!!stats && stats.vacHs === 16, `2 días V × 8 hs (got ${stats?.vacHs})`);
 assert(!!stats && stats.detalle[0].source === 'rrhh', 'fuente rrhh');
 
 const statsOp = buildAusenciasStats({
@@ -179,6 +179,96 @@ const statsOp = buildAusenciasStats({
   capHsPerGuardPeriod: 192,
 });
 assert(!!statsOp && statsOp.total === 1 && statsOp.injHs === 8, 'isAbsent operativo cuenta como AA 8h');
+
+const statsCalDay = buildAusenciasStats({
+  ausencias: [],
+  turnos: [{
+    id: 't-v24',
+    employeeId: 'e1',
+    employeeName: 'Guardia Uno',
+    type: 'NOVEDAD',
+    code: 'V',
+    hours: 0,
+    startTime: { seconds: new Date(2026, 7, 13, 0, 0, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 13, 23, 59, 59).getTime() / 1000 },
+    objectiveId: 'obj1',
+  }],
+  employees: emp,
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+assert(!!statsCalDay && statsCalDay.vacHs === 8, `V 00:00–23:59 = 8 hs jornada (got ${statsCalDay?.vacHs})`);
+
+const statsEnf24 = buildAusenciasStats({
+  ausencias: [{
+    id: 'a-e24',
+    employeeId: 'e1',
+    type: 'Enfermedad',
+    absenceType: 'E',
+    startDate: '2026-08-14',
+    endDate: '2026-08-14',
+    status: 'Autorizada',
+    hours: 24,
+  }],
+  turnos: [{
+    id: 't-e24',
+    employeeId: 'e1',
+    code: 'E',
+    hours: 24,
+    startTime: { seconds: new Date(2026, 7, 14, 0, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 14, 23, 59).getTime() / 1000 },
+  }],
+  employees: emp,
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+assert(!!statsEnf24 && statsEnf24.enfHs === 8, `E con hours 24 = 8 hs (got ${statsEnf24?.enfHs})`);
+
+const statsSus = buildAusenciasStats({
+  ausencias: [{
+    id: 'a-sus',
+    employeeId: 'e1',
+    type: 'Suspensión',
+    absenceType: 'SUS',
+    startDate: '2026-08-15',
+    endDate: '2026-08-16',
+    status: 'Autorizada',
+  }],
+  turnos: [],
+  employees: emp,
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+assert(!!statsSus && statsSus.otrosHs === 16, `SUS 2 días × 8 hs (got ${statsSus?.otrosHs})`);
+
+const statsD12 = buildAusenciasStats({
+  ausencias: [{
+    id: 'a-l12',
+    employeeId: 'e1',
+    type: 'Licencia',
+    absenceType: 'L',
+    startDate: '2026-08-17',
+    endDate: '2026-08-17',
+    status: 'Autorizada',
+    shiftId: 't-d12',
+  }],
+  turnos: [{
+    id: 't-d12',
+    employeeId: 'e1',
+    code: 'D12',
+    hours: 12,
+    startTime: { seconds: new Date(2026, 7, 17, 7, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 17, 19, 0).getTime() / 1000 },
+  }],
+  employees: emp,
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+assert(!!statsD12 && statsD12.otrosHs === 12, `L cubre D12 = 12 hs no 24 (got ${statsD12?.otrosHs})`);
 
 const plus = topNPlusResto(
   [{ name: 'A', v: 10 }, { name: 'B', v: 5 }, { name: 'C', v: 3 }],
@@ -212,6 +302,24 @@ assert(inf.bolsaModo === 'sin_indice', 'sin objeto bolsa → sin índice');
 assert(inf.conclusiones.length >= 1, 'informe genera conclusiones');
 assert(estimarCostoInforme(inf, 0) === null, 'sin valor hora no estima $');
 assert(!!estimarCostoInforme(inf, 5000), 'con valor hora estima $');
+
+const infSus = buildInformeAnalitico({
+  plantel: 10,
+  capHsPerGuardPeriod: 192,
+  demandaTotals: {
+    id: '_total', name: 'Total', client: '',
+    slaHours: 1000, planHours: 920, extHours: 20, adelHours: 10, ftHours: 40, opsHours: 8,
+    vacantHours: 30, absenceHours: 80, absenceCoveredHours: 40,
+    resultante: 998, deltaSla: -2, deltaPlan: 78,
+  },
+  ausenciasStats: statsSus,
+  turnos: [],
+});
+assert(infSus.novedades.some((r) => r.code === 'SUS' && r.horas === 16), 'informe tiene rubro SUS 16 hs');
+assert(
+  infSus.novedades.find((r) => r.code === 'L/PG')?.horas === 0,
+  'informe L/PG no incluye SUS',
+);
 
 assert(chooseInformeSeriesBucket(1) === 'hour', '1 día → hora');
 assert(chooseInformeSeriesBucket(31) === 'day', 'mes → día');
@@ -336,7 +444,7 @@ void (async () => {
   process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||= 'demo';
   process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||= 'demo.firebaseapp.com';
   process.env.NEXT_PUBLIC_FIREBASE_APP_ID ||= '1:1:web:1';
-  const { buildAnalisisFinanciera, finConsumoHours, rollAnalisisFinanciera, resolveLeaveObjective, homeObjectiveByEmployee } = await import('../src/lib/analisis/analisisFinanciera');
+  const { buildAnalisisFinanciera, finConsumoHours, finNovCode, finNovOtros, finPlanHours, finSumadasHours, rollAnalisisFinanciera, resolveLeaveObjective, homeObjectiveByEmployee } = await import('../src/lib/analisis/analisisFinanciera');
 const finSrv = {
   clientId: 'cli-a',
   clientName: 'Cliente A',
@@ -416,6 +524,9 @@ assert(finBases[0].hsReal === 8, `financiera real 8 (got ${finBases[0].hsReal})`
 assert(finBases[0].hsFt === 8, `financiera FT 8 (got ${finBases[0].hsFt})`);
 assert(finBases[0].novedades.vac === 8, `financiera vac 8 (got ${finBases[0].novedades.vac})`);
 assert(finConsumoHours(finBases[0], 'planned') === 24, `consumo plan = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'planned')})`);
+assert(finPlanHours(finBases[0], 'planned') === 8, `hs plan = 8 cobertura (got ${finPlanHours(finBases[0], 'planned')})`);
+assert(finSumadasHours(finBases[0]) === 16, `sumadas = 8V+8FT (got ${finSumadasHours(finBases[0])})`);
+assert((finBases[0].novedades.byCode?.V || 0) === 8, `novedad V desglosada 8 (got ${finBases[0].novedades.byCode?.V})`);
 assert(finConsumoHours(finBases[0], 'real') === 24, `consumo real = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'real')})`);
 const finRoll = rollAnalisisFinanciera(finBases, 'planned');
 assert(finRoll.hsMalla === 16, `malla plan debe = cobertura 8 + vac 8 (got ${finRoll.hsMalla})`);
@@ -427,6 +538,19 @@ assert(
   finRoll.clients[0].rows[0].hsSlaPorGuardia === Math.round((finRoll.clients[0].rows[0].slaHours / 2) * 10) / 10,
   `SLA/guardia = sla/2 (got ${finRoll.clients[0].rows[0].hsSlaPorGuardia} sla=${finRoll.clients[0].rows[0].slaHours})`,
 );
+
+const finSusRows = buildAnalisisFinanciera({
+  turnos: [],
+  ausenciasStats: statsSus,
+  vigenteServices: [],
+  periodStart: new Date(2026, 7, 15),
+  periodEnd: new Date(2026, 7, 16, 23, 59, 59, 999),
+  objectiveAliases: {},
+  slaExclusionCtx: null,
+});
+const finSusRoll = rollAnalisisFinanciera(finSusRows, 'planned');
+assert(finNovCode(finSusRoll.novedades, 'SUS') === 16, `financiera SUS desglosada 16 (got ${finNovCode(finSusRoll.novedades, 'SUS')})`);
+assert(finNovOtros(finSusRoll.novedades) === 0, `SUS no va a Otr (got ${finNovOtros(finSusRoll.novedades)})`);
 
 const homeMap = homeObjectiveByEmployee(finTurnos, { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } });
 assert(homeMap.get('g1') === 'obj-a', 'home de g1 = obj-a');
@@ -457,6 +581,79 @@ const finHome = buildAnalisisFinanciera({
   slaExclusionCtx: null,
 });
 assert((finHome.find((r) => r.id === 'obj-a')?.novedades.vac || 0) >= 8, 'vacaciones sin oid van al home de malla');
+
+const idleTurnos = [
+  ...finTurnos,
+  {
+    id: 'ft-ret-unused',
+    employeeId: 'g3',
+    employeeName: 'Guardia Tres',
+    clientId: 'cli-a',
+    clientName: 'Cliente A',
+    objectiveId: 'obj-a',
+    objectiveName: 'Objetivo A',
+    code: 'RET',
+    hours: 0,
+    startTime: { seconds: new Date(2026, 7, 3, 7, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 3, 15, 0).getTime() / 1000 },
+  },
+  {
+    id: 'ft-ret-used-same-day',
+    employeeId: 'g1',
+    employeeName: 'Guardia Uno',
+    clientId: 'cli-a',
+    clientName: 'Cliente A',
+    objectiveId: 'obj-a',
+    objectiveName: 'Objetivo A',
+    code: 'RET',
+    hours: 0,
+    startTime: { seconds: new Date(2026, 7, 3, 8, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 3, 16, 0).getTime() / 1000 },
+  },
+  {
+    id: 'ft-franco-rest',
+    employeeId: 'g3',
+    employeeName: 'Guardia Tres',
+    clientId: 'cli-a',
+    clientName: 'Cliente A',
+    objectiveId: 'obj-a',
+    objectiveName: 'Objetivo A',
+    code: 'F',
+    isFranco: true,
+    hours: 0,
+    startTime: { seconds: new Date(2026, 7, 4, 0, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 4, 23, 59).getTime() / 1000 },
+  },
+  {
+    id: 'ft-ref',
+    employeeId: 'g3',
+    employeeName: 'Guardia Tres',
+    clientId: 'cli-a',
+    clientName: 'Cliente A',
+    objectiveId: 'obj-a',
+    objectiveName: 'Objetivo A',
+    code: 'REF',
+    isRefuerzo: true,
+    deploymentBand: 'M',
+    hours: 8,
+    startTime: { seconds: new Date(2026, 7, 4, 7, 0).getTime() / 1000 },
+    endTime: { seconds: new Date(2026, 7, 4, 15, 0).getTime() / 1000 },
+  },
+];
+const finIdle = buildAnalisisFinanciera({
+  turnos: idleTurnos,
+  ausenciasStats: finAus,
+  vigenteServices: [finSrv],
+  periodStart: new Date(2026, 7, 3),
+  periodEnd: new Date(2026, 7, 4, 23, 59, 59, 999),
+  objectiveAliases: { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
+  slaExclusionCtx: null,
+});
+assert(finIdle[0].hsPlan === 8, `idle: malla cobertura sigue en 8 (got ${finIdle[0].hsPlan})`);
+assert(finIdle[0].hsRet === 8, `idle: RET no usado 8, RET del mismo día que M no duplica (got ${finIdle[0].hsRet})`);
+assert(finIdle[0].hsFranco === 8, `idle: franco F 8 (got ${finIdle[0].hsFranco})`);
+assert(finIdle[0].hsDespliegue === 8, `idle: REF 8 (got ${finIdle[0].hsDespliegue})`);
+assert(finConsumoHours(finIdle[0], 'planned') === 48, `idle consumo 8plan+8FT+8V+8RET+8F+8REF (got ${finConsumoHours(finIdle[0], 'planned')})`);
 
 const vacHuerfana = buildAusenciasStats({
   ausencias: [{

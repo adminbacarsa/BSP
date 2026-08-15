@@ -202,6 +202,9 @@ export function buildInformeAnalitico(opts: {
 
   const det = ausenciasStats?.detalle || [];
   const countCat = (cat: string) => det.filter((e) => e.category === cat).length;
+  const codeOf = (e: { code?: string }) => String(e.code || '').toUpperCase();
+  const hsCode = (code: string) => det.filter((e) => codeOf(e) === code).reduce((s, e) => s + (Number(e.hs) || 0), 0);
+  const nCode = (code: string) => det.filter((e) => codeOf(e) === code).length;
   const novedades: InformeNovedadRow[] = [
     {
       rubro: 'Vacaciones',
@@ -232,10 +235,17 @@ export function buildInformeAnalitico(opts: {
       impacto: 'Impacta presentismo y liquidación. Incluye AUTO_T30 e isAbsent operativo.',
     },
     {
+      rubro: 'Suspensión',
+      code: 'SUS',
+      horas: hsCode('SUS'),
+      eventos: nCode('SUS'),
+      impacto: 'Medida disciplinaria (art. 218 LCT). Jornada del turno (8 o 12 hs), no 24 hs de calendario.',
+    },
+    {
       rubro: 'Licencias especiales / PG / otros',
       code: 'L/PG',
-      horas: ausenciasStats?.otrosHs ?? 0,
-      eventos: countCat('otros'),
+      horas: Math.max(0, (ausenciasStats?.otrosHs ?? 0) - hsCode('SUS')),
+      eventos: Math.max(0, countCat('otros') - nCode('SUS')),
       impacto: 'Casamiento, nacimiento, duelo, examen, MAVIC, permiso gremial (CCT SUVICO).',
     },
     {
