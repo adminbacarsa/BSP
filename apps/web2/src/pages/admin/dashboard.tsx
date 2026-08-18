@@ -17,7 +17,7 @@ import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiem
 import { calculateSlaHoursForMonth } from '@/lib/servicios/slaHoursCalculator';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { calcPlanificadorShiftHours, isPlanificadorPlannedHoursShift } from '@/lib/planificacion/planningScheduledHours';
-import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/plannedHours';
+import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 import {
@@ -895,6 +895,7 @@ function AdminDashboard() {
 
       const hasPlan = totalTurnos > 0 && totalEmp > 0;
       const now = new Date();
+      const conTurno = Object.keys(empHrsMap).length;
 
       const newState = {
         clientsCount: cCount, objectivesCount: oCount,
@@ -914,7 +915,6 @@ function AdminDashboard() {
         coveragePct: hasPlan && (serviceShiftsCount + vacantes) > 0
           ? ((serviceShiftsCount - absent) / (serviceShiftsCount + vacantes)) * 100
           : 0,
-        const conTurno = Object.keys(empHrsMap).length;
         avgHrsVigilador: conTurno > 0 ? Math.round(mTotalHrs / conTurno) : 0,
         vigiladoresConTurno: conTurno,
         licencias: licRows.slice(0, 8),
