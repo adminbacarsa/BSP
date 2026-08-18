@@ -13,9 +13,9 @@ export {
   sumBalancesByPeriodKey,
   balancesCoverPeriodKeys,
   balancesCoverObjectives,
-  applyLiveSlaHoursToBalanceRows,
   overlayLiveSlaOnBalanceRows,
 } from './buildHoursBalance';
+export { applyLiveSlaHoursToBalanceRows } from './overlayLiveSla';
 export {
   persistHoursBalances,
   fetchHoursBalances,
