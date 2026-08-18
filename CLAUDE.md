@@ -106,6 +106,7 @@ cronoapp/
 | `novedades` | Alertas operativas. `shiftId` vincula con turno |
 | `planificacion_estados` | Publicación de planificación. Key: `${objectiveId}_${year}_${month}` |
 | `servicios_sla` | Contratos/SLA con estructura de puestos y turnos permitidos |
+| `hours_balances` | Extracto mensual por objetivo: SLA (debe), planificadas, reales, FT/ext, saldos. Doc id = `{empresaId}_{objectiveId}_{yyyy-mm}` |
 | `roles` | Permisos por módulo. Estructura: `{ permissions: { MODULE_KEY: ['read','create',...] } }` |
 | `payroll_settings` | Modo de horas publicado al endpoint de liquidación (`hoursMode: planned \| real`). Doc id = `empresaId`. |
 

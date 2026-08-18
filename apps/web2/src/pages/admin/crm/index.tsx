@@ -118,6 +118,14 @@ import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib
 import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
 import { callableErrorText } from '@/lib/callableError';
 import {
+  fetchHoursBalances,
+  peekHoursBalances,
+  persistHoursBalancesFromTurnos,
+  sumBalancesByClient,
+  sumBalancesByPeriodKey,
+  balancesCoverObjectives,
+} from '@/lib/hoursBalance';
+import {
   calculateMonthlyBreakdown,
 } from '@/lib/servicios/slaHoursCalculator';
 import {
@@ -137,7 +145,7 @@ import {
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange, pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { buildCrmTrendBuckets, crmTrendChartTitle } from '@/lib/crm/crmDashboardBuckets';
-import { aggregateCrmPortfolioHours } from '@/lib/crm/crmDashboardAggregate';
+import { aggregateCrmHoursByClient } from '@/lib/crm/crmDashboardAggregate';
 import type { CrmTrendPoint } from '@/components/crm/CrmDashboardSummary';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
@@ -269,6 +277,11 @@ export default function CRMPage() {
   const metricsRunRef = useRef(0);
   const clientsFetchGenRef = useRef(0);
   const metricsCache = useRef<Map<string, { metrics: any; trend: any[]; updatedAt: Date }>>(new Map());
+  const periodMetricsRef = useRef<Map<string, {
+    metrics: Record<string, any>;
+    totals: { totalSold: number; totalPlanned: number; totalExecuted: number };
+    updatedAt: Date;
+  }>>(new Map());
   const sharedEmpMetaRef = useRef<Record<string, { legajo?: string; name?: string }>>({});
 
   const [clients, setClients] = useState<any[]>([]);
@@ -283,6 +296,7 @@ export default function CRMPage() {
   const [loadingClients, setLoadingClients] = useState(false);
   const [loadingClientData, setLoadingClientData] = useState(false);
   const [calculatingMetrics, setCalculatingMetrics] = useState(false);
+  const [metricsLoadProgress, setMetricsLoadProgress] = useState<{ pct: number; label: string } | null>(null);
   const [dashboardIsStale, setDashboardIsStale] = useState(false);
 
   const [globalMetrics, setGlobalMetrics] = useState({ totalSold: 0, totalPlanned: 0, totalExecuted: 0, criticalClients: [] as any[] });
@@ -654,19 +668,239 @@ export default function CRMPage() {
     return { start: new Date(rangeYear, rangeMonth, 1), end: new Date(rangeYear, rangeMonth + 1, 0, 23, 59, 59, 999) };
   };
 
+  const periodCacheKey = (periodKey: string) => `${empresaId}__${periodKey}`;
+
+  const totalsFromClientMetrics = (metrics: Record<string, any>) => {
+    let totalSold = 0;
+    let totalPlanned = 0;
+    let totalExecuted = 0;
+    Object.values(metrics || {}).forEach((m: any) => {
+      totalSold += Number(m?.sla) || 0;
+      totalPlanned += Number(m?.planned) || 0;
+      totalExecuted += Number(m?.real) || 0;
+    });
+    return { totalSold, totalPlanned, totalExecuted };
+  };
+
+  const buildMetricsFromHours = (
+    byClient: Record<string, { sla: number; planned: number; real: number }>,
+    contractedByClient: Record<string, number> = {},
+    closedByClient: Record<string, number> = {},
+  ) => {
+    const metrics: Record<string, any> = {};
+    let totalSold = 0;
+    let totalPlanned = 0;
+    let totalExecuted = 0;
+    clients.forEach((c) => {
+      const row = byClient[c.id] || { sla: 0, planned: 0, real: 0 };
+      const sla = Math.round(row.sla || 0);
+      const planned = Math.round(row.planned || 0);
+      const real = Math.round(row.real || 0);
+      const contracted = Math.round(contractedByClient[c.id] || 0);
+      const contractClosed = Math.round(closedByClient[c.id] || 0);
+      totalSold += sla;
+      totalPlanned += planned;
+      totalExecuted += real;
+      metrics[c.id] = {
+        sla,
+        planned,
+        real,
+        contracted,
+        contractClosed,
+        contractMismatch: contractClosed > 0 && contractClosed !== sla,
+        burnRate: sla > 0 ? (real / sla) * 100 : 0,
+        hasActivity: sla > 0 || planned > 0 || real > 0,
+      };
+    });
+    return { metrics, totalSold, totalPlanned, totalExecuted };
+  };
+
+  const storePeriodMetrics = (
+    periodKey: string,
+    byClient: Record<string, { sla: number; planned: number; real: number }>,
+    contractedByClient?: Record<string, number>,
+    closedByClient?: Record<string, number>,
+  ) => {
+    const built = buildMetricsFromHours(byClient, contractedByClient, closedByClient);
+    periodMetricsRef.current.set(periodCacheKey(periodKey), {
+      metrics: built.metrics,
+      totals: { totalSold: built.totalSold, totalPlanned: built.totalPlanned, totalExecuted: built.totalExecuted },
+      updatedAt: new Date(),
+    });
+    return built;
+  };
+
+  const applyPeriodCache = (
+    periodKey: string,
+    buckets: { key: string; label: string }[],
+    cacheKey: string,
+  ) => {
+    const hit = periodMetricsRef.current.get(periodCacheKey(periodKey));
+    if (!hit) return false;
+    const trendSeries = buckets.map((b) => {
+      const e = periodMetricsRef.current.get(periodCacheKey(b.key));
+      return {
+        label: b.label,
+        sla: e?.totals.totalSold ?? 0,
+        planificado: e?.totals.totalPlanned ?? 0,
+        ejecutado: e?.totals.totalExecuted ?? 0,
+      };
+    });
+    setClientMetricsMap(hit.metrics);
+    setGlobalMetrics({ ...hit.totals, criticalClients: [] });
+    setCrmTrendSeries(trendSeries);
+    setMetricsUpdatedAt(hit.updatedAt);
+    metricsCache.current.set(cacheKey, {
+      metrics: hit.metrics,
+      trend: trendSeries,
+      updatedAt: hit.updatedAt,
+    });
+    return true;
+  };
+
   const calculateDashboardMetrics = async () => {
     const runId = ++metricsRunRef.current;
-    // Mostrar datos cacheados inmediatamente mientras se recalcula en background
     const cacheKey = `${empresaId}__${rangeMode}__${rangeMonth}__${rangeYear}`;
+    const bucketsEarly = buildCrmTrendBuckets(rangeMode, rangeMonth, rangeYear);
+    const selectedPeriodKey = `${rangeYear}-${String(rangeMonth + 1).padStart(2, '0')}`;
     const cached = metricsCache.current.get(cacheKey);
     if (cached) {
       setClientMetricsMap(cached.metrics);
       setCrmTrendSeries(cached.trend);
-      setDashboardIsStale(true);
+      setGlobalMetrics({ ...totalsFromClientMetrics(cached.metrics), criticalClients: [] });
+      setMetricsUpdatedAt(cached.updatedAt);
+      setCalculatingMetrics(false);
+      setMetricsLoadProgress(null);
+      setDashboardIsStale(false);
+      return;
+    }
+    if (rangeMode === 'month' && applyPeriodCache(selectedPeriodKey, bucketsEarly, cacheKey)) {
+      setCalculatingMetrics(false);
+      setMetricsLoadProgress(null);
+      setDashboardIsStale(false);
+      return;
+    }
+    if (rangeMode === 'month' && empresaId) {
+      const memRows = peekHoursBalances({
+        empresaId,
+        periodKeys: bucketsEarly.map((b) => b.key),
+      });
+      if (memRows.length > 0) {
+        const memKeys = new Set(memRows.map((r) => r.periodKey));
+        memKeys.forEach((pk) => {
+          if (periodMetricsRef.current.has(periodCacheKey(pk))) return;
+          storePeriodMetrics(pk, sumBalancesByClient(memRows.filter((r) => r.periodKey === pk)));
+        });
+        if (applyPeriodCache(selectedPeriodKey, bucketsEarly, cacheKey)) {
+          setCalculatingMetrics(false);
+          setMetricsLoadProgress(null);
+          setDashboardIsStale(false);
+          return;
+        }
+      }
     }
     setCalculatingMetrics(true);
-    // C1 — snapshot Firestore (aislado: un fallo aquí no rompe el cálculo)
+    setMetricsLoadProgress({ pct: 8, label: 'Cargando información…' });
+    const bumpProgress = (pct: number, label: string) => {
+      if (runId !== metricsRunRef.current) return;
+      setMetricsLoadProgress({ pct, label });
+    };
     const snapRef = doc(db, 'crm_metrics_snapshot', cacheKey);
+    if (rangeMode !== 'all' && empresaId) {
+      try {
+        const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+        const clientRefs: ClientRef[] = clients.map((c) => ({
+          id: c.id,
+          name: c.name,
+          legalName: c.legalName,
+          objetivos: c.objetivos || [],
+        }));
+        const { start, end } = getRangeDates();
+        const objectiveIds = [
+          ...new Set(
+            clients.flatMap((c) =>
+              (c.objetivos || []).map((o: any) => String(o.id ?? o.objectiveId ?? '').trim()).filter(Boolean),
+            ),
+          ),
+        ];
+        bumpProgress(18, 'Cargando información…');
+        const [balanceRows, slaRows, contractRows] = await Promise.all([
+          fetchHoursBalances({
+            empresaId,
+            periodKeys: bucketsEarly.map((b) => b.key),
+            migracionCompleta,
+            objectiveIds,
+          }),
+          fetchSlaRowsForCrmDashboard(clientRefs, { empresaId, scopeEmpresa, migracionCompleta }),
+          fetchContractsForCrmDashboard(clientRefs, { empresaId, scopeEmpresa }),
+        ]);
+        const selectedRows = rangeMode === 'year'
+          ? balanceRows.filter((r) => r.year === rangeYear)
+          : balanceRows.filter((r) => r.periodKey === selectedPeriodKey);
+        const vigente = pickVigenteSlasForPeriod(slaRows, start, end);
+        const neededIds = vigente
+          .map((s) => String(s.objectiveId ?? '').trim())
+          .filter(Boolean);
+        const coverKeys = rangeMode === 'year'
+          ? bucketsEarly.map((b) => b.key)
+          : [selectedPeriodKey];
+        bumpProgress(36, 'Revisando extracto…');
+        const extractReady = balancesCoverObjectives(selectedRows, coverKeys, neededIds);
+        if (extractReady && runId === metricsRunRef.current) {
+          bumpProgress(88, 'Armando resumen…');
+          const contractedByClient: Record<string, number> = {};
+          const closedByClient: Record<string, number> = {};
+          contractRows.forEach((c: any) => {
+            if (!c.clientId) return;
+            const canonical = resolveCanonicalClientIdForCrmRow(c.clientId, clients);
+            if (!canonical) return;
+            if (scopeEmpresa) {
+              if (!clients.some((cl) => cl.id === canonical)) return;
+              const docEmp = String(c.empresaId ?? '').trim();
+              if (docEmp && !tenantEmpresaIdsMatch(docEmp, empresaId)) return;
+            }
+            const totalHours = Number(c.totalHours) || 0;
+            const cStart = c.startDate ? new Date(c.startDate) : null;
+            const cEnd = c.endDate ? new Date(c.endDate) : null;
+            const clamped = clampDateRange(cStart, cEnd, start, end);
+            if (!clamped && (cStart || cEnd) && rangeMode !== 'year') return;
+            contractedByClient[canonical] = (contractedByClient[canonical] || 0) + totalHours;
+            if (c.type === 'cerrado') closedByClient[canonical] = (closedByClient[canonical] || 0) + totalHours;
+          });
+          const byClient = sumBalancesByClient(selectedRows);
+          const byPeriod = sumBalancesByPeriodKey(balanceRows);
+          const { metrics, totalSold, totalPlanned, totalExecuted } = storePeriodMetrics(
+            selectedPeriodKey,
+            byClient,
+            contractedByClient,
+            closedByClient,
+          );
+          new Set(balanceRows.map((r) => r.periodKey)).forEach((pk) => {
+            if (pk === selectedPeriodKey) return;
+            storePeriodMetrics(pk, sumBalancesByClient(balanceRows.filter((r) => r.periodKey === pk)));
+          });
+          const trendSeries = bucketsEarly.map((b) => {
+            const p = byPeriod[b.key] || { sla: 0, planned: 0, real: 0 };
+            return { label: b.label, sla: Math.round(p.sla), planificado: Math.round(p.planned), ejecutado: Math.round(p.real) };
+          });
+          setClientMetricsMap(metrics);
+          setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
+          setCrmTrendSeries(trendSeries);
+          const now = new Date();
+          setMetricsUpdatedAt(now);
+          metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now });
+          setCalculatingMetrics(false);
+          setMetricsLoadProgress(null);
+          setDashboardIsStale(false);
+          return;
+        }
+      } catch (err) {
+        console.warn('[crm] hours_balances', err);
+      }
+    }
+
+    // C1 — snapshot Firestore (aislado: un fallo aquí no rompe el cálculo)
+    bumpProgress(42, 'Buscando datos guardados…');
     try {
       const snapDoc = await getDoc(snapRef);
       if (snapDoc.exists()) {
@@ -682,7 +916,19 @@ export default function CRMPage() {
           setCrmTrendSeries(t);
           setMetricsUpdatedAt(computedAt);
           metricsCache.current.set(cacheKey, { metrics: m, trend: t, updatedAt: computedAt });
+          if (rangeMode === 'month') {
+            periodMetricsRef.current.set(periodCacheKey(selectedPeriodKey), {
+              metrics: m,
+              totals: {
+                totalSold: Number(g.totalSold) || 0,
+                totalPlanned: Number(g.totalPlanned) || 0,
+                totalExecuted: Number(g.totalExecuted) || 0,
+              },
+              updatedAt: computedAt,
+            });
+          }
           setCalculatingMetrics(false);
+          setMetricsLoadProgress(null);
           setDashboardIsStale(false);
           return;
         }
@@ -690,6 +936,7 @@ export default function CRMPage() {
     } catch { /* snapshot no disponible — continúa con cálculo normal */ }
 
     try {
+      bumpProgress(52, 'Cargando contratos SLA…');
       const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
       const tenantClientIds = new Set(clients.map((c) => c.id));
       const clientRefs: ClientRef[] = clients.map((c) => ({
@@ -783,12 +1030,14 @@ export default function CRMPage() {
         return next;
       });
       setGlobalMetrics((prev) => ({ ...prev, totalSold: phase1Sold }));
+      bumpProgress(62, 'Cargando turnos…');
 
       const [turnosRaw, sEmployees] = await Promise.all([
         fetchCrmDashboardTurnos(empresaId, scopeEmpresa, turnoStart, turnoEnd, clientRefs),
         getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
       ]);
       if (runId !== metricsRunRef.current) return;
+      bumpProgress(80, 'Calculando horas…');
 
       const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
 
@@ -827,7 +1076,7 @@ export default function CRMPage() {
       }
 
       const trendSeries: CrmTrendPoint[] = buckets.map((b) => {
-        const agg = aggregateCrmPortfolioHours(
+        const byClientHours = aggregateCrmHoursByClient(
           clientRefs,
           slaDocsByClient,
           turnosByBucketKey.get(b.key) ?? [],
@@ -837,14 +1086,16 @@ export default function CRMPage() {
           tenantClientIds,
           turnosByClient,
         );
+        const built = storePeriodMetrics(b.key, byClientHours);
         return {
           label: b.label,
-          sla: agg.sla,
-          planificado: agg.planned,
-          ejecutado: agg.executed,
+          sla: built.totalSold,
+          planificado: built.totalPlanned,
+          ejecutado: built.totalExecuted,
         };
       });
       setCrmTrendSeries(trendSeries);
+      bumpProgress(92, 'Armando resumen…');
 
       clientRefs.forEach((clientRef) => {
         const clientSlas = slaDocsByClient.get(clientRef.id) || [];
@@ -918,6 +1169,23 @@ export default function CRMPage() {
           hasActivity: sla > 0 || planned > 0 || real > 0,
         };
       });
+      if (rangeMode === 'month') {
+        storePeriodMetrics(
+          selectedPeriodKey,
+          Object.fromEntries(
+            clients.map((c) => [
+              c.id,
+              {
+                sla: slaByClient[c.id] || 0,
+                planned: plannedByClient[c.id] || 0,
+                real: executedByClient[c.id] || 0,
+              },
+            ]),
+          ),
+          contractedByClient,
+          closedByClient,
+        );
+      }
 
       setClientMetricsMap(metrics);
       setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
@@ -925,6 +1193,15 @@ export default function CRMPage() {
       setMetricsUpdatedAt(now);
       // Guardar en cache en memoria y en Firestore (C1)
       metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now });
+      if (empresaId && slaRows.length && allTurnos.length) {
+        void persistHoursBalancesFromTurnos({
+          empresaId,
+          services: slaRows as any,
+          turnos: allTurnos,
+          months: buckets.map((b) => ({ year: b.start.getFullYear(), month: b.start.getMonth() + 1 })),
+          rebuiltFrom: 'crm-bootstrap',
+        }).catch((err) => console.warn('[crm] hours_balances bootstrap', err));
+      }
       setDoc(snapRef, {
         empresaId,
         computedAt: serverTimestamp(),
@@ -938,6 +1215,7 @@ export default function CRMPage() {
     } finally {
       if (runId === metricsRunRef.current) {
         setCalculatingMetrics(false);
+        setMetricsLoadProgress(null);
         setDashboardIsStale(false);
       }
     }
@@ -2000,6 +2278,7 @@ export default function CRMPage() {
               totalExecuted={globalMetrics.totalExecuted}
               trendSeries={crmTrendSeries}
               calculatingMetrics={calculatingMetrics}
+              loadProgress={metricsLoadProgress}
               isStale={dashboardIsStale}
               metricsUpdatedAt={metricsUpdatedAt}
               clientsCount={clients.length}

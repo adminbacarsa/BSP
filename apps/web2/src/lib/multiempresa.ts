@@ -23,6 +23,7 @@ const COLECCIONES = [
   'tipos_turno',
   'servicios_sla',
   'objetivos',
+  'hours_balances',
   'audit_logs',
   'user_notifications',
 ];

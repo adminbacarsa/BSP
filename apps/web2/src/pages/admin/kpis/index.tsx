@@ -4,6 +4,8 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { belongsToEmpresaView, filterSlaRowsByEmpresa, empresaCollectionQuery } from '@/lib/multiempresa';
+import { isSlaContractActive } from '@/lib/slaPlanningMatch';
+import { balancesCoverObjectives, fetchHoursBalances, hoursBalancePeriodKey, type HoursBalanceRow } from '@/lib/hoursBalance';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   TrendingUp, TrendingDown, Users, Clock, Shield, AlertTriangle, CheckCircle,
@@ -123,6 +125,7 @@ export default function KpisPage() {
   const [slaRaw,       setSlaRaw]       = useState<Record<string, unknown>[]>([]);
   const [empleadosRaw, setEmpleadosRaw] = useState<Record<string, unknown>[]>([]);
   const [clientsRaw,   setClientsRaw]   = useState<Record<string, unknown>[]>([]);
+  const [balanceRows,  setBalanceRows]  = useState<HoursBalanceRow[]>([]);
 
   useEffect(() => {
     if (!empresaId) return;
@@ -132,13 +135,20 @@ export default function KpisPage() {
     const startTs = Timestamp.fromDate(sd);
     async function go() {
       try {
-        const [tSnap, aSnap, auSnap, sSnap, eSnap, cSnap] = await Promise.all([
+        const now = new Date();
+        const periodKeys = [hoursBalancePeriodKey(now.getFullYear(), now.getMonth() + 1)];
+        if (days >= 60) {
+          const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          periodKeys.unshift(hoursBalancePeriodKey(prev.getFullYear(), prev.getMonth() + 1));
+        }
+        const [tSnap, aSnap, auSnap, sSnap, eSnap, cSnap, bals] = await Promise.all([
           getDocs(query(collection(db, 'turnos'),     where('startTime',  '>=', startTs))),
           getDocs(collection(db, 'ausencias')),
           getDocs(query(collection(db, 'audit_logs'), where('timestamp',  '>=', startTs))),
           getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa)),
           getDocs(collection(db, 'empleados')),
           getDocs(collection(db, 'clients')),
+          fetchHoursBalances({ empresaId, periodKeys, migracionCompleta }).catch(() => [] as HoursBalanceRow[]),
         ]);
         if (!cancelled) {
           setTurnosRaw(tSnap.docs.map(d=>({id:d.id,...d.data()})));
@@ -147,6 +157,7 @@ export default function KpisPage() {
           setSlaRaw(sSnap.docs.map(d=>({id:d.id,...(d.data() as Record<string,unknown>)})));
           setEmpleadosRaw(eSnap.docs.map(d=>({id:d.id,...d.data()})));
           setClientsRaw(cSnap.docs.map(d=>({id:d.id,...d.data()})));
+          setBalanceRows(bals);
           setLoading(false);
         }
       } catch(e) { console.error('[KPIs]',e); if(!cancelled) setLoading(false); }
@@ -278,6 +289,47 @@ export default function KpisPage() {
   }, [turnos, audit]);
 
   const liqRows = useMemo<LiqRow[]>(() => {
+    const nowLiq = new Date();
+    const liqKeys = [hoursBalancePeriodKey(nowLiq.getFullYear(), nowLiq.getMonth() + 1)];
+    if (days >= 60) {
+      const prevLiq = new Date(nowLiq.getFullYear(), nowLiq.getMonth() - 1, 1);
+      liqKeys.unshift(hoursBalancePeriodKey(prevLiq.getFullYear(), prevLiq.getMonth() + 1));
+    }
+    const neededObjIds = (slas as any[])
+      .filter((s: any) => isSlaContractActive(s.status))
+      .map((s: any) => String(s.objectiveId ?? '').trim())
+      .filter(Boolean);
+    if (balancesCoverObjectives(balanceRows, liqKeys, neededObjIds)) {
+      const byObj = new Map<string, LiqRow>();
+      for (const r of balanceRows) {
+        const prev = byObj.get(r.objectiveId);
+        if (!prev) {
+          byObj.set(r.objectiveId, {
+            objectiveId: r.objectiveId,
+            objectiveName: r.objectiveName,
+            clientName: r.clientName,
+            hsVendidas: r.slaHours,
+            hsPlanificadas: r.plannedHours,
+            hsEjecutadas: r.realHours,
+            hsAusencia: r.absenceHours,
+            hsExtras: r.extHours + r.adelHours,
+            hsFT: r.ftHours,
+            hsLiquidadas: r.resultante,
+            delta: r.saldoReal,
+          });
+          continue;
+        }
+        prev.hsVendidas += r.slaHours;
+        prev.hsPlanificadas += r.plannedHours;
+        prev.hsEjecutadas += r.realHours;
+        prev.hsAusencia += r.absenceHours;
+        prev.hsExtras += r.extHours + r.adelHours;
+        prev.hsFT += r.ftHours;
+        prev.hsLiquidadas += r.resultante;
+        prev.delta += r.saldoReal;
+      }
+      return [...byObj.values()];
+    }
     // Mapa SLA: objectiveId → totalMonthlyHours
     const slaMap = new Map<string,number>();
     (slas as any[]).forEach((s:any) => {
@@ -312,7 +364,7 @@ export default function KpisPage() {
       r.delta = r.hsVendidas > 0 ? r.hsLiquidadas - r.hsVendidas : 0;
     });
     return Object.values(m);
-  }, [turnos, slas, objMap, days]);
+  }, [balanceRows, turnos, slas, objMap, days]);
 
   function tgl(cur:[string,SortDir],col:string,set:(v:[string,SortDir])=>void){
     set(cur[0]===col?[col,cur[1]==='asc'?'desc':'asc']:[col,'desc']);

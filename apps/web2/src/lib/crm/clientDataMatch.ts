@@ -397,12 +397,25 @@ export async function fetchCrmDashboardTurnos(
 
   for (let i = 0; i < aliases.length; i += 10) {
     const chunk = aliases.slice(i, i + 10);
+    const withRange = rangeStart && rangeEnd
+      ? query(
+          col as ReturnType<typeof query>,
+          where('clientId', 'in', chunk),
+          where('startTime', '>=', Timestamp.fromDate(padStart)),
+          where('startTime', '<=', Timestamp.fromDate(padEnd)),
+        )
+      : query(col as ReturnType<typeof query>, where('clientId', 'in', chunk));
     batchQueries.push(
-      getDocs(query(col as ReturnType<typeof query>, where('clientId', 'in', chunk)))
+      getDocs(withRange)
         .then((snap) => {
           snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
         })
-        .catch((err) => console.warn('CRM dashboard: turnos por clientId', err)),
+        .catch((err) => {
+          console.warn('CRM dashboard: turnos por clientId', err);
+          return getDocs(query(col as ReturnType<typeof query>, where('clientId', 'in', chunk))).then((snap) => {
+            snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
+          });
+        }),
     );
   }
 
