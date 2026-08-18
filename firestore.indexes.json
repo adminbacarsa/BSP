@@ -124,6 +124,14 @@
       ]
     },
     {
+      "collectionGroup": "hours_balances",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "periodKey", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "turnos",
       "queryScope": "COLLECTION",
       "fields": [

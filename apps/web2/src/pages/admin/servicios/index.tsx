@@ -26,6 +26,7 @@ import {
   empresaCollectionQuery,
 } from '@/lib/multiempresa';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
+import { patchSlaHoursOnBalances } from '@/lib/hoursBalance';
 import {
   analyzeShiftComposition,
   calculateMonthlyBreakdown,
@@ -1063,6 +1064,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       }
       addToast('Guardado correctamente', 'success');
       setView('list');
+      if (empresaId && dataToSave.objectiveId) {
+        void patchSlaHoursOnBalances({
+          empresaId,
+          sla: { ...dataToSave, id: isEditing && form.id ? form.id : dataToSave.id } as any,
+        }).catch((err) => console.warn('[servicios] hours_balances', err));
+      }
     } catch (e: unknown) {
         console.error(e);
         if (e instanceof TenantIsolationError) {

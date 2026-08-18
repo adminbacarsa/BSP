@@ -42,6 +42,7 @@ type Props = {
   totalExecuted: number;
   trendSeries: CrmTrendPoint[];
   calculatingMetrics: boolean;
+  loadProgress?: { pct: number; label: string } | null;
   isStale?: boolean;
   metricsUpdatedAt: Date | null;
   clientsCount: number;
@@ -93,6 +94,7 @@ export default function CrmDashboardSummary({
   totalExecuted,
   trendSeries,
   calculatingMetrics,
+  loadProgress,
   isStale,
   metricsUpdatedAt,
   clientsCount,
@@ -123,9 +125,27 @@ export default function CrmDashboardSummary({
           <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
             <BarChart3 size={14} className="text-indigo-600" aria-hidden />
             Centro de mando comercial
-            {calculatingMetrics && <Loader2 className="animate-spin text-indigo-500" size={14} />}
+            {calculatingMetrics && (
+              <span className="inline-flex items-center gap-1.5 text-indigo-600">
+                <Loader2 className="animate-spin" size={14} aria-hidden />
+                <span className="normal-case tracking-normal font-semibold text-slate-500">
+                  {loadProgress?.label || 'Cargando información…'}
+                </span>
+                <span className="tabular-nums font-black">
+                  {Math.max(0, Math.min(100, Math.round(loadProgress?.pct ?? 0)))}%
+                </span>
+              </span>
+            )}
           </div>
           <h2 className="text-lg font-black text-slate-900 dark:text-white mt-0.5">{rangeLabel}</h2>
+          {calculatingMetrics && (
+            <div className="mt-2 h-1.5 w-48 max-w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden shadow-inner">
+              <div
+                className="h-full rounded-full bg-indigo-600 transition-all duration-300"
+                style={{ width: `${Math.max(4, Math.min(100, loadProgress?.pct ?? 8))}%` }}
+              />
+            </div>
+          )}
           {metricsUpdatedAt && (
             <p className="text-[10px] font-medium text-slate-400 mt-0.5">
               Actualizado{' '}
