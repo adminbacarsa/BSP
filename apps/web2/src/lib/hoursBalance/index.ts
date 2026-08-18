@@ -13,6 +13,8 @@ export {
   sumBalancesByPeriodKey,
   balancesCoverPeriodKeys,
   balancesCoverObjectives,
+  applyLiveSlaHoursToBalanceRows,
+  overlayLiveSlaOnBalanceRows,
 } from './buildHoursBalance';
 export {
   persistHoursBalances,

@@ -3,12 +3,11 @@ import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import {
   buildSlaCodeHoursHintByObjectiveId,
   buildSlaCodeHoursHintFromServices,
-  CRM_PLANNED_SHIFT_HOURS,
-  getDurationHours,
-  isCrmWorkingShiftCode,
+  fichadaAnchorDate,
+  fichadaHoursForShift,
+  isShiftFichado,
   resolveClientIdForTurno,
   sumPlannedHoursForClient,
-  toDateSafe,
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
 import { sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
@@ -64,19 +63,14 @@ export function aggregateCrmPortfolioHours(
 
     const cid = resolveClientIdForTurno(t, clientRefs);
     if (!cid || !tenantClientIds.has(cid)) continue;
-
-    const realStart = toDateSafe(t.realStartTime);
-    const realEnd = toDateSafe(t.realEndTime);
-    if (!realStart || !realEnd) continue;
-    if (realStart < start || realStart > end) continue;
     if (!validEmp[t.employeeId]) continue;
+    if (!isShiftFichado(t)) continue;
 
-    const code = String((t.code || t.type || '')).trim().toUpperCase();
-    if (!isCrmWorkingShiftCode(code)) continue;
-    let hrs = getDurationHours(realStart, realEnd);
-    if (CRM_PLANNED_SHIFT_HOURS[code]) hrs = CRM_PLANNED_SHIFT_HOURS[code];
-    if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = CRM_PLANNED_SHIFT_HOURS[code] || 8;
-    executed += hrs;
+    const when = fichadaAnchorDate(t);
+    if (!when || when < start || when > end) continue;
+
+    const hrs = fichadaHoursForShift(t);
+    if (hrs > 0) executed += hrs;
   }
 
   return {
@@ -124,16 +118,12 @@ export function aggregateCrmHoursByClient(
     if (status.includes('cancel') || status.includes('delet')) continue;
     const cid = resolveClientIdForTurno(t, clientRefs);
     if (!cid || !tenantClientIds.has(cid)) continue;
-    const realStart = toDateSafe(t.realStartTime);
-    const realEnd = toDateSafe(t.realEndTime);
-    if (!realStart || !realEnd) continue;
-    if (realStart < start || realStart > end) continue;
     if (!validEmp[t.employeeId]) continue;
-    const code = String((t.code || t.type || '')).trim().toUpperCase();
-    if (!isCrmWorkingShiftCode(code)) continue;
-    let hrs = getDurationHours(realStart, realEnd);
-    if (CRM_PLANNED_SHIFT_HOURS[code]) hrs = CRM_PLANNED_SHIFT_HOURS[code];
-    if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = CRM_PLANNED_SHIFT_HOURS[code] || 8;
+    if (!isShiftFichado(t)) continue;
+    const when = fichadaAnchorDate(t);
+    if (!when || when < start || when > end) continue;
+    const hrs = fichadaHoursForShift(t);
+    if (!(hrs > 0)) continue;
     const prev = out[cid] || { sla: 0, planned: 0, real: 0 };
     prev.real += hrs;
     out[cid] = prev;

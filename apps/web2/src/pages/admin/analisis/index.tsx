@@ -813,6 +813,23 @@ export default function AnalisisPage() {
     };
   }, [vigenteServices, universo, employees.length, capHsPerGuardPeriod, slaDemandDaysInPeriod, periodRange.daysCount, periodKey]);
 
+  /** SLA del contrato vigente — misma fórmula que CRM pie / theoretical.totalHours. */
+  const liveSlaByObjective = useMemo(() => {
+    const m: Record<string, number> = {};
+    const rs = new Date(periodRange.start);
+    const re = new Date(periodRange.end);
+    vigenteServices.forEach((srv: any) => {
+      const hours = slaHoursForServiceInRange(srv, rs, re);
+      if (!(hours > 0)) return;
+      const id =
+        resolveCanonicalObjectiveId(srv, objectiveAliasesFromServices)
+        || String(srv.objectiveId || '').trim();
+      if (!id) return;
+      m[id] = Math.round(((m[id] || 0) + hours) * 10) / 10;
+    });
+    return m;
+  }, [vigenteServices, objectiveAliasesFromServices, periodKey]);
+
   useEffect(() => {
     const rs = new Date(periodRange.start);
     const re = new Date(periodRange.end);
@@ -959,7 +976,7 @@ export default function AnalisisPage() {
           slaExclusionCtx,
         });
       }
-      if (extractReady) return demandaFromHoursBalances(extractRows);
+      if (extractReady) return demandaFromHoursBalances(extractRows, liveSlaByObjective);
       return buildDemandaByObjective({
         turnos,
         ausenciasStats,
@@ -970,7 +987,7 @@ export default function AnalisisPage() {
         slaExclusionCtx,
       });
     },
-    [mallaReady, extractReady, extractRows, turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
+    [mallaReady, extractReady, extractRows, liveSlaByObjective, turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
   );
 
   const finBases = useMemo(
@@ -989,7 +1006,7 @@ export default function AnalisisPage() {
           employeeNameById: empNameById,
         });
       }
-      if (extractReady) return financieraFromHoursBalances(extractRows, ausenciasStats);
+      if (extractReady) return financieraFromHoursBalances(extractRows, ausenciasStats, liveSlaByObjective);
       return buildAnalisisFinanciera({
         turnos,
         ausenciasStats,
@@ -1003,7 +1020,7 @@ export default function AnalisisPage() {
         employeeNameById: empNameById,
       });
     },
-    [mallaReady, extractReady, extractRows, turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
+    [mallaReady, extractReady, extractRows, liveSlaByObjective, turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
   );
   const fin = useMemo(() => rollAnalisisFinanciera(finBases, finHoursMode), [finBases, finHoursMode]);
   const extractPersistKey = useRef('');
@@ -2130,7 +2147,7 @@ export default function AnalisisPage() {
                   ? `${availableGuards} disponibles · −${guardiasNoDispTotal} no disp.`
                   : 'Legajos activos'
               }/>
-            <KpiCard icon={Clock} color="#4f46e5" label="Hs vendidas (SLA)" value={theoretical.totalHours.toLocaleString('es-AR')} unit="hs"
+            <KpiCard icon={Clock} color="#4f46e5" label="Hs vendidas (SLA)" value={informe.hsVendidas.toLocaleString('es-AR')} unit="hs"
               subtext={loadTurnos ? 'Cargando malla…' : `Plan ${informe.hsPlanificadas.toLocaleString('es-AR')} · real ${informe.hsRealizadas.toLocaleString('es-AR')} · vac ${informe.hsVacante.toLocaleString('es-AR')}`}/>
           </div>
 
@@ -3983,10 +4000,10 @@ export default function AnalisisPage() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Target} color="#4f46e5" label="SLA vendidas" value={demanda.totals.slaHours.toLocaleString('es-AR')} unit="hs"/>
-                <KpiCard icon={Clock} color="#6366f1" label="Costo previo (plan)" value={demanda.totals.planHours.toLocaleString('es-AR')} unit="hs"
-                  subtext="Crono de cobertura, sin FT/ext"/>
+                <KpiCard icon={Clock} color="#6366f1" label="Plan (cobertura)" value={demanda.totals.planHours.toLocaleString('es-AR')} unit="hs"
+                  subtext="Turno cubierto (M=8). Sin novedades ni recargo FT"/>
                 <KpiCard icon={Activity} color="#059669" label="Resultante" value={demanda.totals.resultante.toLocaleString('es-AR')} unit="hs"
-                  subtext="Plan + ext/adel + FT + ops"/>
+                  subtext="Plan + ext/adel + ops (sin FT/novedades)"/>
                 <KpiCard icon={demanda.totals.deltaSla >= 0 ? ArrowUp : ArrowDown}
                   color={demanda.totals.deltaSla >= 0 ? '#059669' : '#dc2626'}
                   label="Δ vs SLA" value={`${demanda.totals.deltaSla > 0 ? '+' : ''}${demanda.totals.deltaSla.toLocaleString('es-AR')}`} unit="hs"/>
@@ -4138,11 +4155,11 @@ export default function AnalisisPage() {
                                 <tr className="bg-slate-50/80 dark:bg-slate-800/60">
                                   <td colSpan={11} className="px-6 py-3 text-[11px] text-slate-500 space-y-1">
                                     <p>
-                                      <strong className="text-slate-700 dark:text-slate-200">Costo previo:</strong> {row.planHours.toLocaleString('es-AR')} hs planificadas
+                                      <strong className="text-slate-700 dark:text-slate-200">Plan (cobertura):</strong> {row.planHours.toLocaleString('es-AR')} hs
                                       {' · '}
                                       <strong className="text-slate-700 dark:text-slate-200">Resultante − plan:</strong> {row.deltaPlan > 0 ? '+' : ''}{row.deltaPlan.toLocaleString('es-AR')} hs
                                       {' · '}
-                                      Ext {row.extHours} · Adel {row.adelHours} · FT {row.ftHours} · Ops {row.opsHours}
+                                      Ext {row.extHours} · Adel {row.adelHours} · FT {row.ftHours} (costo, no cobertura) · Ops {row.opsHours}
                                     </p>
                                     <p>
                                       Licencias/ausencias: {row.absenceHours.toLocaleString('es-AR')} hs

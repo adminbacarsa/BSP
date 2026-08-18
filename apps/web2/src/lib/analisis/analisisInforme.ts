@@ -11,6 +11,7 @@ import {
   isVacantShift,
 } from './analisisQueries';
 import { CCT_HS_TECHO_MENSUAL } from './analisisBolsa';
+import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/plannedHours';
 
 export type InformeBalanceRow = {
   concepto: string;
@@ -78,11 +79,6 @@ function isLeaveOrFranco(t: any): boolean {
   return false;
 }
 
-function isFichado(t: any): boolean {
-  const st = String(t?.status || '').toUpperCase();
-  return t?.isPresent === true || t?.isCompleted === true || st === 'PRESENT' || st === 'COMPLETED';
-}
-
 function isAusenteTurno(t: any): boolean {
   const st = String(t?.status || '').toUpperCase();
   return t?.isAbsent === true || st === 'ABSENT';
@@ -123,9 +119,9 @@ export function buildInformeAnalitico(opts: {
     const hs = coverageHoursFromShift(t);
     if (hs <= 0) return;
     if (isAusenteTurno(t)) return;
-    if (isFichado(t)) {
-      hsRealizadas += hs;
-      if (!isFrancoTrabajadoShift(t)) hsNormales += hs;
+    if (isShiftFichado(t)) {
+      hsRealizadas += fichadaHoursForShift(t) || hs;
+      if (!isFrancoTrabajadoShift(t)) hsNormales += fichadaHoursForShift(t) || hs;
     } else if (t.employeeId && t.employeeId !== 'VACANTE') {
       hsPendientesFichada += hs;
     }
@@ -146,11 +142,11 @@ export function buildInformeAnalitico(opts: {
   const bolsaConsumida = r1(hsNormales > 0 ? hsNormales : hsPlanificadas);
   const bolsaDisponible = r1(Math.max(0, bolsaInicial - bolsaConsumida));
   const sobreBolsa = r1(Math.max(0, bolsaConsumida - bolsaInicial));
-  const desvioRealVsVendido = r1((hsRealizadas > 0 ? hsRealizadas : d.resultante) - hsVendidas);
+  const desvioRealVsVendido = r1(hsRealizadas - hsVendidas);
   const desvioExtras = r1(hsExtras50 + hsFT100 + hsOps);
   const coberturaPlanPct = hsVendidas > 0 ? Math.round((hsPlanificadas / hsVendidas) * 1000) / 10 : 0;
   const coberturaEfectivaPct = hsVendidas > 0
-    ? Math.round(((hsRealizadas > 0 ? hsRealizadas : d.resultante) / hsVendidas) * 1000) / 10
+    ? Math.round((hsRealizadas / hsVendidas) * 1000) / 10
     : 0;
 
   const balance: InformeBalanceRow[] = [
@@ -183,13 +179,17 @@ export function buildInformeAnalitico(opts: {
           : 'Sin turnos fichados en el período.'),
     },
     {
-      concepto: 'Diferencia (real/resultante vs vendido)',
+      concepto: 'Diferencia (fichadas vs vendido)',
       horas: desvioRealVsVendido,
-      observacion: desvioRealVsVendido > 4
-        ? 'Sobre-cobertura: se operó más de lo vendido (presión de margen).'
-        : desvioRealVsVendido < -4
-          ? 'Déficit de servicio frente al contrato (riesgo de reclamo).'
-          : 'Alineado al compromiso comercial.',
+      observacion: hsRealizadas <= 0
+        ? (hsPendientesFichada > 0
+          ? `Sin fichadas: no se usa el plan (${hsPendientesFichada} hs asignadas) como si fueran reales.`
+          : 'Sin fichadas en el período: el desvío no se infiere de la malla.')
+        : desvioRealVsVendido > 4
+          ? 'Sobre-ejecución: se fichó más de lo vendido (presión de margen).'
+          : desvioRealVsVendido < -4
+            ? 'Déficit de fichadas frente al contrato.'
+            : 'Alineado al compromiso comercial.',
     },
     {
       concepto: 'Bolsa disponible / remanente',
@@ -336,23 +336,31 @@ export function buildInformeConclusions(p: {
     return out;
   }
 
-  if (p.desvioRealVsVendido > 8) {
+  if (p.hsRealizadas <= 0) {
+    out.push({
+      tipo: 'warn',
+      titulo: 'Sin fichadas en el período',
+      texto: p.hsPendientesFichada > 0
+        ? `Hay ${p.hsPendientesFichada.toLocaleString('es-AR')} hs asignadas pendientes de marcar. El plan no se cuenta como realizado.`
+        : 'No hay turnos fichados. Las horas realizadas quedan en 0; no se infieren del plan ni de la resultante.',
+    });
+  } else if (p.desvioRealVsVendido > 8) {
     out.push({
       tipo: 'risk',
-      titulo: 'Se operó más de lo vendido',
-      texto: `Hay ${p.desvioRealVsVendido.toLocaleString('es-AR')} hs por encima del contrato. Eso comprime el margen: extras, FT u ops no estaban en el precio vendido.`,
+      titulo: 'Se fichó más de lo vendido',
+      texto: `Hay ${p.desvioRealVsVendido.toLocaleString('es-AR')} hs fichadas por encima del contrato. Eso comprime el margen: extras, FT u ops no estaban en el precio vendido.`,
     });
   } else if (p.desvioRealVsVendido < -8) {
     out.push({
       tipo: 'risk',
-      titulo: 'Se operó menos de lo vendido',
-      texto: `Faltan ${Math.abs(p.desvioRealVsVendido).toLocaleString('es-AR')} hs respecto del SLA. Riesgo de reclamo o multa del cliente si hubo puestos acéfalos.`,
+      titulo: 'Se fichó menos de lo vendido',
+      texto: `Faltan ${Math.abs(p.desvioRealVsVendido).toLocaleString('es-AR')} hs fichadas respecto del SLA. Si el mes ya cerró, hay riesgo de reclamo; si sigue abierto, puede ser fichada pendiente.`,
     });
   } else {
     out.push({
       tipo: 'ok',
       titulo: 'Balance comercial alineado',
-      texto: `La diferencia real/resultante vs vendido es de ${p.desvioRealVsVendido > 0 ? '+' : ''}${p.desvioRealVsVendido.toLocaleString('es-AR')} hs. El servicio está cerca del compromiso.`,
+      texto: `La diferencia fichadas vs vendido es de ${p.desvioRealVsVendido > 0 ? '+' : ''}${p.desvioRealVsVendido.toLocaleString('es-AR')} hs. El servicio está cerca del compromiso.`,
     });
   }
 
@@ -620,8 +628,10 @@ export function buildInformeSeries(opts: {
 
     if (isFrancoTrabajadoShift(t) && !isVacantShift(t)) {
       const ftHs = gross > 0 ? gross : coverageHoursFromShift(t);
-      if (ftHs > 0) row.Extras += ftHs;
-      if (isFichado(t)) row.Realizadas += ftHs;
+      const ftBase = Math.max(0, r1(ftHs - extra));
+      if (ftBase > 0) row.Plan += ftBase;
+      if (extra > 0) row.Extras += extra;
+      if (isShiftFichado(t)) row.Realizadas += ftHs;
       return;
     }
 
@@ -634,7 +644,7 @@ export function buildInformeSeries(opts: {
       if (extra > 0 && !isVacantShift(t)) row.Extras += extra;
     }
 
-    if (isFichado(t) && !isVacantShift(t) && !isLeaveOrFranco(t)) {
+    if (isShiftFichado(t) && !isVacantShift(t) && !isLeaveOrFranco(t)) {
       const done = gross > 0 ? gross : coverageHoursFromShift(t);
       if (done > 0) row.Realizadas += done;
     }

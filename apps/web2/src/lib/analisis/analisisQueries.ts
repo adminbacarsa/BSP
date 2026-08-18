@@ -68,6 +68,16 @@ export type DemandaObjectiveRow = {
   deltaPlan: number;
 };
 
+/** Cobertura vs SLA: plan + ext/adel + ops. FT y novedades no entran (son costo/liquidación). */
+export function coverageResultanteHours(d: {
+  planHours?: number;
+  extHours?: number;
+  adelHours?: number;
+  opsHours?: number;
+}): number {
+  return Math.round(((d.planHours || 0) + (d.extHours || 0) + (d.adelHours || 0) + (d.opsHours || 0)) * 10) / 10;
+}
+
 const LEAVE_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG', 'SGS', 'SUS']);
 const BAND_HOURS: Record<string, number> = {
   M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, EN: 9, REF: 8, RFZ: 8, C: 8, GU: 8, ESC: 8,

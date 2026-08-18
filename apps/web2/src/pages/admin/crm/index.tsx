@@ -124,6 +124,7 @@ import {
   sumBalancesByClient,
   sumBalancesByPeriodKey,
   balancesCoverObjectives,
+  overlayLiveSlaOnBalanceRows,
 } from '@/lib/hoursBalance';
 import {
   calculateMonthlyBreakdown,
@@ -867,8 +868,10 @@ export default function CRMPage() {
             contractedByClient[canonical] = (contractedByClient[canonical] || 0) + totalHours;
             if (c.type === 'cerrado') closedByClient[canonical] = (closedByClient[canonical] || 0) + totalHours;
           });
-          const byClient = sumBalancesByClient(selectedRows);
-          const byPeriod = sumBalancesByPeriodKey(balanceRows);
+          const selectedLive = overlayLiveSlaOnBalanceRows(selectedRows, slaRows);
+          const balancesLive = overlayLiveSlaOnBalanceRows(balanceRows, slaRows);
+          const byClient = sumBalancesByClient(selectedLive);
+          const byPeriod = sumBalancesByPeriodKey(balancesLive);
           const { metrics, totalSold, totalPlanned, totalExecuted } = storePeriodMetrics(
             selectedPeriodKey,
             byClient,
@@ -877,7 +880,7 @@ export default function CRMPage() {
           );
           new Set(balanceRows.map((r) => r.periodKey)).forEach((pk) => {
             if (pk === selectedPeriodKey) return;
-            storePeriodMetrics(pk, sumBalancesByClient(balanceRows.filter((r) => r.periodKey === pk)));
+            storePeriodMetrics(pk, sumBalancesByClient(balancesLive.filter((r) => r.periodKey === pk)));
           });
           const trendSeries = bucketsEarly.map((b) => {
             const p = byPeriod[b.key] || { sla: 0, planned: 0, real: 0 };

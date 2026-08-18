@@ -25,7 +25,7 @@ export type HoursBalanceRow = {
   adelHours: number;
   opsHours: number;
   absenceHours: number;
-  /** Plan + ext + adel + FT + ops. */
+  /** Cobertura: plan + ext + adel + ops. FT/novedades no entran (costo/liquidación). */
   resultante: number;
   /** SLA − planificado. Positivo = faltante de cobertura. */
   saldoPlan: number;

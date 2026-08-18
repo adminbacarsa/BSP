@@ -5,7 +5,7 @@
  */
 
 import type { HoursBalanceRow } from '@/lib/hoursBalance';
-import type { DemandaObjectiveRow } from './analisisQueries';
+import { coverageResultanteHours, type DemandaObjectiveRow } from './analisisQueries';
 import type { AusenciasStats } from './analisisQueries';
 import type { FinNovedades, FinObjectiveBase } from './analisisFinanciera';
 
@@ -98,13 +98,54 @@ export function sumHoursBalancesByObjective(rows: HoursBalanceRow[]): HoursBalan
   }));
 }
 
-export function demandaFromHoursBalances(rows: HoursBalanceRow[]): {
+export function overlayLiveSlaHours(
+  acc: HoursBalanceAcc[],
+  liveSlaByObjective: Record<string, number> | undefined,
+): HoursBalanceAcc[] {
+  if (!liveSlaByObjective || !Object.keys(liveSlaByObjective).length) return acc;
+  const seen = new Set(acc.map((r) => r.objectiveId));
+  const out = acc.map((r) => {
+    const live = liveSlaByObjective[r.objectiveId];
+    if (live == null) return r;
+    return { ...r, slaHours: r1(live) };
+  });
+  Object.entries(liveSlaByObjective).forEach(([id, sla]) => {
+    if (seen.has(id) || !(sla > 0)) return;
+    out.push({
+      objectiveId: id,
+      objectiveName: id,
+      clientId: '',
+      clientName: 'Sin Cliente',
+      slaHours: r1(sla),
+      plannedHours: 0,
+      realHours: 0,
+      ftHours: 0,
+      extHours: 0,
+      adelHours: 0,
+      opsHours: 0,
+      vacantHours: 0,
+      absenceHours: 0,
+    });
+  });
+  return out;
+}
+
+export function demandaFromHoursBalances(
+  rows: HoursBalanceRow[],
+  liveSlaByObjective?: Record<string, number>,
+): {
   rows: DemandaObjectiveRow[];
   totals: DemandaObjectiveRow;
 } {
-  const mapped: DemandaObjectiveRow[] = sumHoursBalancesByObjective(rows).map((a) => {
+  const summed = overlayLiveSlaHours(sumHoursBalancesByObjective(rows), liveSlaByObjective);
+  const mapped: DemandaObjectiveRow[] = summed.map((a) => {
     const planHours = a.plannedHours;
-    const resultante = r1(planHours + a.extHours + a.adelHours + a.ftHours + a.opsHours);
+    const resultante = coverageResultanteHours({
+      planHours,
+      extHours: a.extHours,
+      adelHours: a.adelHours,
+      opsHours: a.opsHours,
+    });
     return {
       id: a.objectiveId,
       name: a.objectiveName,
@@ -240,8 +281,12 @@ function overlayNovedades(
 export function financieraFromHoursBalances(
   rows: HoursBalanceRow[],
   ausenciasStats?: AusenciasStats | null,
+  liveSlaByObjective?: Record<string, number>,
 ): FinObjectiveBase[] {
-  const bases: FinObjectiveBase[] = sumHoursBalancesByObjective(rows).map((a) => {
+  const bases: FinObjectiveBase[] = overlayLiveSlaHours(
+    sumHoursBalancesByObjective(rows),
+    liveSlaByObjective,
+  ).map((a) => {
     const nov = emptyNov();
     if (a.absenceHours > 0) {
       nov.total = a.absenceHours;
