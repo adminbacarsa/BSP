@@ -19,8 +19,8 @@ import {
   buildEmployeeNameIndex,
   resolveEmployeeDisplayName,
 } from '../src/lib/analisis/analisisQueries';
-import { applyLiveSlaHoursToBalanceRows } from '../src/lib/hoursBalance/buildHoursBalance';
-import { fichadaHoursForShift, isShiftFichado } from '../src/lib/crm/plannedHours';
+import { applyLiveSlaHoursToBalanceRows } from '../src/lib/hoursBalance/overlayLiveSla';
+import { fichadaHoursForShift, isShiftFichado } from '../src/lib/crm/fichadaHours';
 import {
   demandaFromHoursBalances,
   financieraFromHoursBalances,
