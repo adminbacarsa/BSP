@@ -125,46 +125,6 @@ export const getDurationHours = (start: Date, end: Date) => {
   return diff + 24;
 };
 
-export function isShiftAbsent(t: any): boolean {
-  if (!t) return false;
-  const st = String(t.status || '').toUpperCase();
-  return t.isAbsent === true || st === 'ABSENT';
-}
-
-/** Presencia real: flags de fichada o par de timestamps de ingreso/egreso. Ausente no cuenta. */
-export function isShiftFichado(t: any): boolean {
-  if (!t || isShiftAbsent(t)) return false;
-  const st = String(t.status || '').toUpperCase();
-  if (t.isPresent === true || t.isCompleted === true || st === 'PRESENT' || st === 'COMPLETED') return true;
-  const rs = toDateSafeCore(t.realStartTime) || toDateSafeCore(t.checkInTime);
-  const re = toDateSafeCore(t.realEndTime) || toDateSafeCore(t.checkOutTime);
-  return !!(rs && re && re.getTime() > rs.getTime());
-}
-
-export function fichadaAnchorDate(t: any): Date | null {
-  return toDateSafeCore(t.realStartTime) || toDateSafeCore(t.checkInTime) || toDateSafeCore(t.startTime);
-}
-
-/**
- * Horas de una fichada (misma jornada que CRM/extracto: banda M/T/N=8, D12/N12=12).
- * No inventa horas si el turno no está fichado.
- */
-export function fichadaHoursForShift(t: any): number {
-  if (!isShiftFichado(t)) return 0;
-  const code = String((t.code || t.type || '')).trim().toUpperCase();
-  if (!isCrmWorkingShiftCode(code)) return 0;
-  if (CRM_PLANNED_SHIFT_HOURS[code]) return CRM_PLANNED_SHIFT_HOURS[code];
-  const stored = Number(t.hours);
-  if (Number.isFinite(stored) && stored >= 0.5 && stored < 24) return Math.min(stored, 24);
-  const rs = toDateSafeCore(t.realStartTime) || toDateSafeCore(t.checkInTime);
-  const re = toDateSafeCore(t.realEndTime) || toDateSafeCore(t.checkOutTime);
-  if (rs && re && re.getTime() > rs.getTime()) {
-    const hrs = getDurationHours(rs, re);
-    if (hrs > 0 && hrs <= 24) return hrs;
-  }
-  return 8;
-}
-
 export function resolveCrmPlannedShiftHours(
   t: any,
   _plannedStart?: Date,

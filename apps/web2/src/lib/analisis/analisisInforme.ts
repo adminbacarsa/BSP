@@ -11,7 +11,7 @@ import {
   isVacantShift,
 } from './analisisQueries';
 import { CCT_HS_TECHO_MENSUAL } from './analisisBolsa';
-import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/plannedHours';
+import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
 
 export type InformeBalanceRow = {
   concepto: string;

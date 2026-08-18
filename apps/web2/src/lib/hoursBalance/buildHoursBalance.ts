@@ -5,10 +5,11 @@ import {
   fichadaAnchorDate,
   fichadaHoursForShift,
   isShiftFichado,
-} from '@/lib/crm/plannedHours';
+} from '@/lib/crm/fichadaHours';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
+import { applyLiveSlaHoursToBalanceRows } from './overlayLiveSla';
 import {
   type HoursBalanceRow,
   type HoursBalanceSource,
@@ -235,57 +236,6 @@ export function balancesCoverObjectives(
     const have = byPeriod.get(k);
     return !!have && ids.every((id) => have.has(id));
   });
-}
-
-/** Pisa el SLA del extracto con el contrato vigente. Conserva plan/real/fichadas. */
-export function applyLiveSlaHoursToBalanceRows(
-  rows: HoursBalanceRow[],
-  liveSlaByObjective: Record<string, number>,
-  metaByObjective?: Record<string, { clientId?: string; clientName?: string; objectiveName?: string }>,
-): HoursBalanceRow[] {
-  if (!liveSlaByObjective || !Object.keys(liveSlaByObjective).length) return rows;
-  const seen = new Set(rows.map((r) => r.objectiveId));
-  const out = rows.map((r) => {
-    const live = liveSlaByObjective[r.objectiveId];
-    if (live == null) return r;
-    const slaHours = round1(live);
-    return {
-      ...r,
-      slaHours,
-      saldoPlan: round1(slaHours - r.plannedHours),
-      saldoReal: round1(slaHours - r.realHours),
-    };
-  });
-  const template = rows[0];
-  Object.entries(liveSlaByObjective).forEach(([id, sla]) => {
-    if (seen.has(id) || !(sla > 0) || !template) return;
-    const meta = metaByObjective?.[id];
-    const slaHours = round1(sla);
-    out.push({
-      empresaId: template.empresaId,
-      objectiveId: id,
-      objectiveName: meta?.objectiveName || id,
-      clientId: meta?.clientId || '',
-      clientName: meta?.clientName || '',
-      year: template.year,
-      month: template.month,
-      periodKey: template.periodKey,
-      slaHours,
-      plannedHours: 0,
-      vacantHours: 0,
-      realHours: 0,
-      ftHours: 0,
-      extHours: 0,
-      adelHours: 0,
-      opsHours: 0,
-      absenceHours: 0,
-      resultante: 0,
-      saldoPlan: slaHours,
-      saldoReal: slaHours,
-      rebuiltFrom: 'sla',
-    });
-  });
-  return out;
 }
 
 /** SLA vivo por mes del extracto (evita 84.193 viejo vs 84.098 del contrato actual). */

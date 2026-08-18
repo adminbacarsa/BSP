@@ -1,11 +1,9 @@
 import type { ClientRef } from '@/lib/crm/clientDataMatch';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
+import { fichadaAnchorDate, fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
 import {
   buildSlaCodeHoursHintByObjectiveId,
   buildSlaCodeHoursHintFromServices,
-  fichadaAnchorDate,
-  fichadaHoursForShift,
-  isShiftFichado,
   resolveClientIdForTurno,
   sumPlannedHoursForClient,
   type PlannedHoursRange,

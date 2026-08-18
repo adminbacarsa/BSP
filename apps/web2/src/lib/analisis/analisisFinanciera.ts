@@ -23,7 +23,7 @@ import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { isProformaVacancyShift } from '@/lib/crm/proformaVacancy';
-import { isShiftFichado } from '@/lib/crm/plannedHours';
+import { isShiftFichado } from '@/lib/crm/fichadaHours';
 import {
   type AbsenceEvent,
   type AusenciasStats,
