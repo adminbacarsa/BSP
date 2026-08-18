@@ -13,6 +13,7 @@ import {
   type AusenciasStats,
   type DemandaObjectiveRow,
   coverageHoursFromShift,
+  coverageResultanteHours,
   isFrancoTrabajadoShift,
   isVacantShift,
 } from './analisisQueries';
@@ -93,10 +94,7 @@ export function buildDemandaByObjective(opts: {
     const slaInfo = slaByObj.get(ok);
     const row = touch(ok, slaInfo?.name || t.objectiveName || ok, slaInfo?.client || t.clientName || 'Sin Cliente');
 
-    if (isFrancoTrabajadoShift(t) && !isVacantShift(t)) {
-      row.ft += coverageHoursFromShift(t);
-      return;
-    }
+    const isFt = isFrancoTrabajadoShift(t) && !isVacantShift(t);
 
     if (isOperationalOriginShift(t) && !isVacantShift(t) && !isProformaVacancyShift(t)) {
       const hs = coverageHoursFromShift(t);
@@ -104,16 +102,22 @@ export function buildDemandaByObjective(opts: {
       return;
     }
 
-    if (!isPlanificadorPlannedHoursShift(t)) return;
+    if (!isPlanificadorPlannedHoursShift(t) && !isFt) return;
     if (isProformaVacancyShift(t)) return;
     const extra = shiftCoverageExtensionExtraHours(t);
-    const gross = calcPlanificadorShiftHours(t);
+    const gross = isPlanificadorPlannedHoursShift(t)
+      ? calcPlanificadorShiftHours(t)
+      : coverageHoursFromShift(t);
     const base = Math.max(0, Math.round((gross - extra) * 100) / 100);
     if (isVacantShift(t)) {
       if (base > 0) row.vacant += base;
       return;
     }
     if (base > 0) row.plan += base;
+    if (isFt) {
+      const ftHs = coverageHoursFromShift(t) || gross;
+      if (ftHs > 0) row.ft += ftHs;
+    }
     if (extra > 0) {
       if (isAdelantoShift(t) && !isExtensionShift(t)) row.adel += extra;
       else if (isAdelantoShift(t) && isExtensionShift(t)) {
@@ -144,7 +148,7 @@ export function buildDemandaByObjective(opts: {
     const opsHours = round1(d.ops);
     const vacantHours = round1(d.vacant);
     const absenceHours = round1(d.absence);
-    const resultante = round1(planHours + extHours + adelHours + ftHours + opsHours);
+    const resultante = coverageResultanteHours({ planHours, extHours, adelHours, opsHours });
     return {
       id,
       name: d.name,

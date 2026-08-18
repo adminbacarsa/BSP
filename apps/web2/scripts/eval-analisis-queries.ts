@@ -19,6 +19,8 @@ import {
   buildEmployeeNameIndex,
   resolveEmployeeDisplayName,
 } from '../src/lib/analisis/analisisQueries';
+import { applyLiveSlaHoursToBalanceRows } from '../src/lib/hoursBalance/buildHoursBalance';
+import { fichadaHoursForShift, isShiftFichado } from '../src/lib/crm/plannedHours';
 import {
   demandaFromHoursBalances,
   financieraFromHoursBalances,
@@ -292,7 +294,7 @@ const extractRows = [{
   adelHours: 0,
   opsHours: 0,
   absenceHours: 24,
-  resultante: 168,
+  resultante: 152,
   saldoPlan: 12,
   saldoReal: 20,
   rebuiltFrom: 'crm-bootstrap' as const,
@@ -301,11 +303,18 @@ const demExtract = demandaFromHoursBalances(extractRows);
 assert(demExtract.totals.slaHours === 160, `extract demanda SLA 160 (got ${demExtract.totals.slaHours})`);
 assert(demExtract.totals.planHours === 148, `extract demanda plan 148 (got ${demExtract.totals.planHours})`);
 assert(demExtract.totals.ftHours === 16, `extract demanda FT 16 (got ${demExtract.totals.ftHours})`);
-assert(demExtract.totals.resultante === 168, `extract resultante 148+4+16 (got ${demExtract.totals.resultante})`);
+assert(demExtract.totals.resultante === 152, `extract resultante 148+4 sin FT (got ${demExtract.totals.resultante})`);
 const finExtract = financieraFromHoursBalances(extractRows);
 assert(finExtract.length === 1 && finExtract[0].hsPlan === 148, 'extract financiera 1 objetivo plan 148');
 assert(finExtract[0].novedades.total === 24, `extract nov lump 24 (got ${finExtract[0].novedades.total})`);
 assert(finExtract[0].guards.length === 0, 'extract financiera sin guardias hasta la malla');
+const demLiveSla = demandaFromHoursBalances(extractRows, { 'obj-a': 150 });
+assert(demLiveSla.totals.slaHours === 150, `SLA vivo pisa extracto (got ${demLiveSla.totals.slaHours})`);
+assert(demLiveSla.totals.planHours === 148, 'plan del extracto se mantiene al pisar SLA');
+const extractLiveRows = applyLiveSlaHoursToBalanceRows(extractRows, { 'obj-a': 150 });
+assert(extractLiveRows[0].slaHours === 150, 'CRM extracto: SLA vivo pisa hours_balances');
+assert(extractLiveRows[0].plannedHours === 148, 'CRM extracto: plan no se toca al pisar SLA');
+assert(extractLiveRows[0].realHours === 140, 'CRM extracto: fichadas no se tocan al pisar SLA');
 
 const plus = topNPlusResto(
   [{ name: 'A', v: 10 }, { name: 'B', v: 5 }, { name: 'C', v: 3 }],
@@ -334,11 +343,22 @@ const inf = buildInformeAnalitico({
 assert(inf.dotacionActiva === 10, 'informe dotación');
 assert(inf.hsVendidas === 1000, 'informe vendidas');
 assert(inf.hsRealizadas === 8, 'informe realizadas desde fichada');
+assert(inf.desvioRealVsVendido === -992, 'desvio = fichadas − vendido (no se finge resultante)');
 assert(inf.bolsaInicial === 2000, 'informe sin bolsa = techo 10×200 (no 192)');
 assert(inf.bolsaModo === 'sin_indice', 'sin objeto bolsa → sin índice');
 assert(inf.conclusiones.length >= 1, 'informe genera conclusiones');
 assert(estimarCostoInforme(inf, 0) === null, 'sin valor hora no estima $');
 assert(!!estimarCostoInforme(inf, 5000), 'con valor hora estima $');
+
+assert(isShiftFichado({ isPresent: true, code: 'M' }), 'fichado por isPresent');
+assert(isShiftFichado({
+  code: 'M',
+  realStartTime: { seconds: 1 },
+  realEndTime: { seconds: 8 * 3600 + 1 },
+}), 'fichado por timestamps');
+assert(!isShiftFichado({ isPresent: true, isAbsent: true, code: 'M' }), 'ausente no es fichado');
+assert(fichadaHoursForShift({ isPresent: true, code: 'M' }) === 8, 'fichada M = 8');
+assert(fichadaHoursForShift({ code: 'M' }) === 0, 'sin fichada = 0 hs reales');
 
 const infSus = buildInformeAnalitico({
   plantel: 10,
@@ -482,6 +502,7 @@ void (async () => {
   process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||= 'demo.firebaseapp.com';
   process.env.NEXT_PUBLIC_FIREBASE_APP_ID ||= '1:1:web:1';
   const { buildAnalisisFinanciera, finConsumoHours, finNovCode, finNovOtros, finPlanHours, finSumadasHours, rollAnalisisFinanciera, resolveLeaveObjective, homeObjectiveByEmployee } = await import('../src/lib/analisis/analisisFinanciera');
+  const { buildDemandaByObjective } = await import('../src/lib/analisis/analisisDemanda');
 const finSrv = {
   clientId: 'cli-a',
   clientName: 'Cliente A',
@@ -555,22 +576,34 @@ const finBases = buildAnalisisFinanciera({
   objectiveAliases: { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
   slaExclusionCtx: null,
 });
+const demFt = buildDemandaByObjective({
+  turnos: finTurnos,
+  ausenciasStats: finAus,
+  vigenteServices: [finSrv],
+  periodStart: new Date(2026, 7, 3),
+  periodEnd: new Date(2026, 7, 3, 23, 59, 59, 999),
+  objectiveAliases: { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
+  slaExclusionCtx: null,
+});
+assert(demFt.rows[0].planHours === 16, `demanda plan 16 = M + turno cubierto FT (got ${demFt.rows[0].planHours})`);
+assert(demFt.rows[0].ftHours === 8, `demanda FT 8 costo (got ${demFt.rows[0].ftHours})`);
+assert(demFt.rows[0].resultante === 16, `demanda resultante = plan sin recargo FT (got ${demFt.rows[0].resultante})`);
 assert(finBases.length === 1, `financiera 1 objetivo (got ${finBases.length})`);
-assert(finBases[0].hsPlan === 8, `financiera plan 8 (got ${finBases[0].hsPlan})`);
+assert(finBases[0].hsPlan === 16, `financiera plan 16 = M cubierto + FT como turno (got ${finBases[0].hsPlan})`);
 assert(finBases[0].hsReal === 8, `financiera real 8 (got ${finBases[0].hsReal})`);
-assert(finBases[0].hsFt === 8, `financiera FT 8 (got ${finBases[0].hsFt})`);
+assert(finBases[0].hsFt === 8, `financiera FT 8 recargo (got ${finBases[0].hsFt})`);
 assert(finBases[0].novedades.vac === 8, `financiera vac 8 (got ${finBases[0].novedades.vac})`);
-assert(finConsumoHours(finBases[0], 'planned') === 24, `consumo plan = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'planned')})`);
-assert(finPlanHours(finBases[0], 'planned') === 8, `hs plan = 8 cobertura (got ${finPlanHours(finBases[0], 'planned')})`);
+assert(finConsumoHours(finBases[0], 'planned') === 32, `consumo plan = 16 cobertura + 8FT + 8V (got ${finConsumoHours(finBases[0], 'planned')})`);
+assert(finPlanHours(finBases[0], 'planned') === 16, `hs plan = 16 cobertura (got ${finPlanHours(finBases[0], 'planned')})`);
 assert(finSumadasHours(finBases[0]) === 16, `sumadas = 8V+8FT (got ${finSumadasHours(finBases[0])})`);
 assert((finBases[0].novedades.byCode?.V || 0) === 8, `novedad V desglosada 8 (got ${finBases[0].novedades.byCode?.V})`);
-assert(finConsumoHours(finBases[0], 'real') === 24, `consumo real = 8+8FT+8V (got ${finConsumoHours(finBases[0], 'real')})`);
+assert(finConsumoHours(finBases[0], 'real') === 24, `consumo real = 8 fichadas + 8FT + 8V (got ${finConsumoHours(finBases[0], 'real')})`);
 const finRoll = rollAnalisisFinanciera(finBases, 'planned');
-assert(finRoll.hsMalla === 16, `malla plan debe = cobertura 8 + vac 8 (got ${finRoll.hsMalla})`);
+assert(finRoll.hsMalla === 24, `malla plan = 16 cobertura + 8 vac (got ${finRoll.hsMalla})`);
 assert(finRoll.clientes === 1 && finRoll.objetivos === 1, 'financiera rollup 1 cliente');
-assert(finRoll.hsConsumo === 24, `empresa consumo 24 (got ${finRoll.hsConsumo})`);
+assert(finRoll.hsConsumo === 32, `empresa consumo 32 (got ${finRoll.hsConsumo})`);
 assert(finRoll.guardias === 2, `2 guardias tocaron el objetivo (got ${finRoll.guardias})`);
-assert(finRoll.hsConsumoPorGuardia === 12, `12 hs/guardia (got ${finRoll.hsConsumoPorGuardia})`);
+assert(finRoll.hsConsumoPorGuardia === 16, `16 hs/guardia (got ${finRoll.hsConsumoPorGuardia})`);
 assert(
   finRoll.clients[0].rows[0].hsSlaPorGuardia === Math.round((finRoll.clients[0].rows[0].slaHours / 2) * 10) / 10,
   `SLA/guardia = sla/2 (got ${finRoll.clients[0].rows[0].hsSlaPorGuardia} sla=${finRoll.clients[0].rows[0].slaHours})`,
@@ -686,11 +719,11 @@ const finIdle = buildAnalisisFinanciera({
   objectiveAliases: { 'obj-a': { canonicalId: 'obj-a', name: 'Objetivo A', clientId: 'cli-a' } },
   slaExclusionCtx: null,
 });
-assert(finIdle[0].hsPlan === 8, `idle: malla cobertura sigue en 8 (got ${finIdle[0].hsPlan})`);
+assert(finIdle[0].hsPlan === 16, `idle: malla cobertura 16 = M + turno FT (got ${finIdle[0].hsPlan})`);
 assert(finIdle[0].hsRet === 8, `idle: RET no usado 8, RET del mismo día que M no duplica (got ${finIdle[0].hsRet})`);
 assert(finIdle[0].hsFranco === 8, `idle: franco F 8 (got ${finIdle[0].hsFranco})`);
 assert(finIdle[0].hsDespliegue === 8, `idle: REF 8 (got ${finIdle[0].hsDespliegue})`);
-assert(finConsumoHours(finIdle[0], 'planned') === 48, `idle consumo 8plan+8FT+8V+8RET+8F+8REF (got ${finConsumoHours(finIdle[0], 'planned')})`);
+assert(finConsumoHours(finIdle[0], 'planned') === 56, `idle consumo 16plan+8FT+8V+8RET+8F+8REF (got ${finConsumoHours(finIdle[0], 'planned')})`);
 
 const vacHuerfana = buildAusenciasStats({
   ausencias: [{

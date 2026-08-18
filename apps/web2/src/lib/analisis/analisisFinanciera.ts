@@ -23,6 +23,7 @@ import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { isProformaVacancyShift } from '@/lib/crm/proformaVacancy';
+import { isShiftFichado } from '@/lib/crm/plannedHours';
 import {
   type AbsenceEvent,
   type AusenciasStats,
@@ -198,11 +199,6 @@ function bumpNov(n: FinNovedades, ev: AbsenceEvent): void {
   n.eventos += 1;
   const code = String(ev.code || '').trim().toUpperCase() || 'L';
   n.byCode[code] = (n.byCode[code] || 0) + hs;
-}
-
-function isFichado(t: any): boolean {
-  const st = String(t?.status || '').toUpperCase();
-  return t?.isPresent === true || t?.isCompleted === true || st === 'PRESENT' || st === 'COMPLETED';
 }
 
 function isAusenteTurno(t: any): boolean {
@@ -467,8 +463,8 @@ export function homeObjectiveByEmployee(
 ): Map<string, string> {
   const acc = new Map<string, Map<string, number>>();
   turnos.forEach((t: any) => {
-    if (isVacantShift(t) || isFrancoTrabajadoShift(t)) return;
-    if (!isPlanificadorPlannedHoursShift(t)) return;
+    if (isVacantShift(t)) return;
+    if (!isPlanificadorPlannedHoursShift(t) && !isFrancoTrabajadoShift(t)) return;
     const eid = String(t.employeeId || '').trim();
     if (!eid || eid === 'VACANTE') return;
     const oid =
@@ -476,7 +472,10 @@ export function homeObjectiveByEmployee(
       String(t.objectiveId ?? '').trim();
     if (!oid) return;
     const byObj = acc.get(eid) || new Map<string, number>();
-    byObj.set(oid, (byObj.get(oid) || 0) + calcPlanificadorShiftHours(t));
+    const hs = isPlanificadorPlannedHoursShift(t)
+      ? calcPlanificadorShiftHours(t)
+      : coverageHoursFromShift(t);
+    byObj.set(oid, (byObj.get(oid) || 0) + hs);
     acc.set(eid, byObj);
   });
   const home = new Map<string, string>();
@@ -517,8 +516,8 @@ export function lastPlannedObjectiveBefore(
   let bestMs = -1;
   for (const t of turnos) {
     if (String(t.employeeId || '').trim() !== eid) continue;
-    if (isVacantShift(t) || isFrancoTrabajadoShift(t)) continue;
-    if (!isPlanificadorPlannedHoursShift(t)) continue;
+    if (isVacantShift(t)) continue;
+    if (!isPlanificadorPlannedHoursShift(t) && !isFrancoTrabajadoShift(t)) continue;
     const ms = shiftStartMs(t);
     if (ms == null) continue;
     if (beforeDay) {
@@ -648,10 +647,30 @@ export function buildAnalisisFinanciera(opts: {
     );
 
     if (isFrancoTrabajadoShift(t) && !isVacantShift(t)) {
-      const hs = coverageHoursFromShift(t);
-      if (hs > 0) {
-        row.ft += hs;
-        if (g) g.hsFt += hs;
+      const extra = shiftCoverageExtensionExtraHours(t);
+      const gross = isPlanificadorPlannedHoursShift(t)
+        ? calcPlanificadorShiftHours(t)
+        : coverageHoursFromShift(t);
+      const base = Math.max(0, Math.round((gross - extra) * 100) / 100);
+      if (base > 0) {
+        row.plan += base;
+        if (g) g.hsPlan += base;
+      }
+      if (extra > 0) {
+        row.extra += extra;
+        if (g) g.hsExtra += extra;
+      }
+      const ftHs = coverageHoursFromShift(t) || gross;
+      if (ftHs > 0) {
+        row.ft += ftHs;
+        if (g) g.hsFt += ftHs;
+      }
+      if (g && isShiftFichado(t) && !isAusenteTurno(t)) {
+        const done = gross > 0 ? gross : ftHs;
+        if (done > 0) {
+          row.real += done;
+          g.hsReal += done;
+        }
       }
       return;
     }
@@ -683,7 +702,7 @@ export function buildAnalisisFinanciera(opts: {
       if (hs > 0) {
         row.ev += hs;
         if (g) g.hsEv += hs;
-        if (g && isFichado(t) && !isAusenteTurno(t)) {
+        if (g && isShiftFichado(t) && !isAusenteTurno(t)) {
           g.hsReal += hs;
           row.real += hs;
         }
@@ -696,7 +715,7 @@ export function buildAnalisisFinanciera(opts: {
       if (hs > 0) {
         row.ops += hs;
         if (g) g.hsOps += hs;
-        if (g && isFichado(t) && !isAusenteTurno(t)) g.hsReal += hs;
+        if (g && isShiftFichado(t) && !isAusenteTurno(t)) g.hsReal += hs;
       }
       return;
     }
@@ -720,7 +739,7 @@ export function buildAnalisisFinanciera(opts: {
       row.extra += extraPlan;
       if (g) g.hsExtra += extraPlan;
     }
-    if (g && isFichado(t) && !isAusenteTurno(t)) {
+    if (g && isShiftFichado(t) && !isAusenteTurno(t)) {
       const done = gross > 0 ? gross : coverageHoursFromShift(t);
       if (done > 0) {
         row.real += done;

@@ -2,13 +2,12 @@ import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
 import { isVacantShift, type AusenciasStats } from '@/lib/analisis/analisisQueries';
 import { resolveCanonicalObjectiveId, type ObjectiveMeta } from '@/lib/crm/objectiveIdentity';
 import {
-  CRM_PLANNED_SHIFT_HOURS,
-  getDurationHours,
-  isCrmWorkingShiftCode,
-  toDateSafe,
+  fichadaAnchorDate,
+  fichadaHoursForShift,
+  isShiftFichado,
 } from '@/lib/crm/plannedHours';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
-import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
+import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
 import {
   type HoursBalanceRow,
@@ -50,15 +49,11 @@ function realHoursByObjective(
     if (String(t.type || '').toUpperCase() === 'NOVEDAD') continue;
     const status = String(t.status || '').toLowerCase();
     if (status.includes('cancel') || status.includes('delet')) continue;
-    const rs = toDateSafe(t.realStartTime);
-    const re = toDateSafe(t.realEndTime);
-    if (!rs || !re) continue;
-    if (rs < periodStart || rs > periodEnd) continue;
-    const code = String((t.code || t.type || '')).trim().toUpperCase();
-    if (!isCrmWorkingShiftCode(code)) continue;
-    let hrs = getDurationHours(rs, re);
-    if (CRM_PLANNED_SHIFT_HOURS[code]) hrs = CRM_PLANNED_SHIFT_HOURS[code];
-    if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = CRM_PLANNED_SHIFT_HOURS[code] || 8;
+    if (!isShiftFichado(t)) continue;
+    const when = fichadaAnchorDate(t);
+    if (!when || when < periodStart || when > periodEnd) continue;
+    const hrs = fichadaHoursForShift(t);
+    if (!(hrs > 0)) continue;
     const oid =
       resolveCanonicalObjectiveId(t, aliases) ||
       String(t.objectiveId ?? '').trim() ||
@@ -122,7 +117,7 @@ export function buildHoursBalanceMonth(opts: {
     const opsHours = round1(extra.opsHours || 0);
     const vacantHours = round1(extra.vacantHours || 0);
     const absenceHours = round1(extra.absenceHours || 0);
-    const resultante = round1(plannedHours + extHours + adelHours + ftHours + opsHours);
+    const resultante = round1(plannedHours + extHours + adelHours + opsHours);
     rows.push({
       empresaId: emp,
       objectiveId: id,
@@ -240,4 +235,99 @@ export function balancesCoverObjectives(
     const have = byPeriod.get(k);
     return !!have && ids.every((id) => have.has(id));
   });
+}
+
+/** Pisa el SLA del extracto con el contrato vigente. Conserva plan/real/fichadas. */
+export function applyLiveSlaHoursToBalanceRows(
+  rows: HoursBalanceRow[],
+  liveSlaByObjective: Record<string, number>,
+  metaByObjective?: Record<string, { clientId?: string; clientName?: string; objectiveName?: string }>,
+): HoursBalanceRow[] {
+  if (!liveSlaByObjective || !Object.keys(liveSlaByObjective).length) return rows;
+  const seen = new Set(rows.map((r) => r.objectiveId));
+  const out = rows.map((r) => {
+    const live = liveSlaByObjective[r.objectiveId];
+    if (live == null) return r;
+    const slaHours = round1(live);
+    return {
+      ...r,
+      slaHours,
+      saldoPlan: round1(slaHours - r.plannedHours),
+      saldoReal: round1(slaHours - r.realHours),
+    };
+  });
+  const template = rows[0];
+  Object.entries(liveSlaByObjective).forEach(([id, sla]) => {
+    if (seen.has(id) || !(sla > 0) || !template) return;
+    const meta = metaByObjective?.[id];
+    const slaHours = round1(sla);
+    out.push({
+      empresaId: template.empresaId,
+      objectiveId: id,
+      objectiveName: meta?.objectiveName || id,
+      clientId: meta?.clientId || '',
+      clientName: meta?.clientName || '',
+      year: template.year,
+      month: template.month,
+      periodKey: template.periodKey,
+      slaHours,
+      plannedHours: 0,
+      vacantHours: 0,
+      realHours: 0,
+      ftHours: 0,
+      extHours: 0,
+      adelHours: 0,
+      opsHours: 0,
+      absenceHours: 0,
+      resultante: 0,
+      saldoPlan: slaHours,
+      saldoReal: slaHours,
+      rebuiltFrom: 'sla',
+    });
+  });
+  return out;
+}
+
+/** SLA vivo por mes del extracto (evita 84.193 viejo vs 84.098 del contrato actual). */
+export function overlayLiveSlaOnBalanceRows(
+  rows: HoursBalanceRow[],
+  services: SlaPlanningRow[],
+): HoursBalanceRow[] {
+  if (!rows.length || !services.length) return rows;
+  const aliases = buildObjectiveAliasesFromSla(services);
+  const groups = new Map<string, HoursBalanceRow[]>();
+  for (const r of rows) {
+    const k = r.periodKey || hoursBalancePeriodKey(r.year, r.month);
+    const arr = groups.get(k) || [];
+    arr.push(r);
+    groups.set(k, arr);
+  }
+  const out: HoursBalanceRow[] = [];
+  for (const subset of groups.values()) {
+    const year = subset[0]?.year;
+    const month = subset[0]?.month;
+    if (!year || !month) {
+      out.push(...subset);
+      continue;
+    }
+    const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const end = new Date(year, month, 0, 23, 59, 59, 999);
+    const vigente = pickVigenteSlasForPeriod(services, start, end);
+    const live: Record<string, number> = {};
+    const meta: Record<string, { clientId?: string; clientName?: string; objectiveName?: string }> = {};
+    for (const srv of vigente) {
+      const oid = resolveCanonicalObjectiveId(srv, aliases) || String(srv.objectiveId ?? '').trim();
+      if (!oid) continue;
+      const hs = slaHoursForServiceInRange(srv, start, end);
+      if (!(hs > 0)) continue;
+      live[oid] = round1((live[oid] || 0) + hs);
+      meta[oid] = {
+        clientId: String(srv.clientId ?? '').trim(),
+        clientName: String(srv.clientName ?? '').trim(),
+        objectiveName: String(srv.objectiveName ?? oid).trim(),
+      };
+    }
+    out.push(...applyLiveSlaHoursToBalanceRows(subset, live, meta));
+  }
+  return out;
 }

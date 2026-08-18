@@ -14,7 +14,10 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
-import { calculateSlaHoursForMonth, serviceOverlapsMonth } from '@/lib/servicios/slaHoursCalculator';
+import { calculateSlaHoursForMonth } from '@/lib/servicios/slaHoursCalculator';
+import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
+import { calcPlanificadorShiftHours, isPlanificadorPlannedHoursShift } from '@/lib/planificacion/planningScheduledHours';
+import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/plannedHours';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 import {
@@ -644,21 +647,31 @@ function AdminDashboard() {
         oCount += (data.objetivos || data.objectives || []).length;
       });
 
-      // 2. SERVICIOS SLA
+      // 2. SERVICIOS SLA (contrato vigente — misma fórmula que CRM / Análisis)
       let svcCount = 0, totalSlaH = 0, nightSlaH = 0, holSlaH = 0, wkndSlaH = 0;
       const svcList: {client:string; objective:string; hrs:number}[] = [];
       const kpiYear = today.getFullYear(), kpiMonth = today.getMonth();
+      const slaRaw: any[] = [];
       svcSnap.forEach(doc => {
-        const d = doc.data();
+        const d = { id: doc.id, ...doc.data() };
         if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
-        const sd = d.startDate || '', ed = d.endDate || '';
-        if (!serviceOverlapsMonth(sd, ed, kpiYear, kpiMonth)) return;
+        slaRaw.push(d);
+      });
+      const vigenteSlas = pickVigenteSlasForPeriod(slaRaw, monthStart, monthEnd);
+      vigenteSlas.forEach(d => {
+        const hours = slaHoursForServiceInRange(d, monthStart, monthEnd);
+        if (!(hours > 0)) return;
         svcCount++;
-        const { total, night, holiday, weekend } = calculateSlaHoursForMonth(
-          d.positions || [], sd, ed, d.excludedDates, kpiYear, kpiMonth,
+        totalSlaH += hours;
+        const { night, holiday, weekend } = calculateSlaHoursForMonth(
+          d.positions || [], d.startDate || '', d.endDate || '', d.excludedDates, kpiYear, kpiMonth,
         );
-        totalSlaH += total; nightSlaH += night; holSlaH += holiday; wkndSlaH += weekend;
-        if (total > 0) svcList.push({ client: d.clientName || 'Cliente', objective: d.objectiveName || 'Objetivo', hrs: Math.round(total) });
+        nightSlaH += night; holSlaH += holiday; wkndSlaH += weekend;
+        svcList.push({
+          client: d.clientName || 'Cliente',
+          objective: d.objectiveName || 'Objetivo',
+          hrs: Math.round(hours),
+        });
       });
 
       // 3. EMPLEADOS
@@ -786,9 +799,7 @@ function AdminDashboard() {
       vacantesDetalleList.sort((a, b) => `${a.client} ${a.objective}`.localeCompare(`${b.client} ${b.objective}`, 'es'));
       ausentesDetalleList.sort((a, b) => `${a.client} ${a.empleado}`.localeCompare(`${b.client} ${b.empleado}`, 'es'));
 
-      // 7. HORAS PLANIFICADAS Y REALES DEL MES
-      const SHIFT_HRS: Record<string,number> = { M:8,T:8,N:8,D12:12,N12:12,FT:8 };
-      const NON_WORKING = new Set(['F','FF','V','L','A','E','AA','AUS']);
+      // 7. HORAS PLANIFICADAS Y REALES DEL MES (misma regla que Análisis / CRM)
       let mTotalHrs = 0, mRealHrs = 0;
       const empHrsMap: Record<string,number> = {};
 
@@ -800,7 +811,6 @@ function AdminDashboard() {
         if (!belongsToEmpresaView(s, empresaId, migracionCompleta)) return;
         if (s.status === 'Canceled' || s.status === 'CANCELED') return;
 
-        // Servicios en riesgo (agrupa todos, incluyendo vacantes)
         const objKey = s.objectiveId || s.objectiveName || 'unknown';
         if (objKey !== 'unknown') {
           if (!objRiesgoMap[objKey]) objRiesgoMap[objKey] = {
@@ -810,26 +820,19 @@ function AdminDashboard() {
           };
           objRiesgoMap[objKey].total++;
           if (!s.employeeId || s.employeeId === 'VACANTE') objRiesgoMap[objKey].vacantes++;
-          if (s.status === 'ABSENT') objRiesgoMap[objKey].ausentes++;
+          if (s.status === 'ABSENT' || s.isAbsent === true) objRiesgoMap[objKey].ausentes++;
         }
 
-        // Horas planificadas (solo turnos con empleado asignado)
-        if (!s.employeeId || s.employeeId === 'VACANTE' || !empMap[s.employeeId]) return;
-        const code = (s.code || s.type || '').toString().toUpperCase();
-        if (NON_WORKING.has(code)) return;
-        const hrs = Number(s.hours) || SHIFT_HRS[code] || 8;
-        mTotalHrs += hrs;
-        empHrsMap[s.employeeId] = (empHrsMap[s.employeeId] || 0) + hrs;
-
-        // Horas reales (turnos completados con timestamps)
-        const rStart = s.realStartTime?.seconds
-          ? new Date(s.realStartTime.seconds * 1000)
-          : s.checkInTime?.seconds ? new Date(s.checkInTime.seconds * 1000) : null;
-        const rEnd = s.realEndTime?.seconds
-          ? new Date(s.realEndTime.seconds * 1000)
-          : s.checkOutTime?.seconds ? new Date(s.checkOutTime.seconds * 1000) : null;
-        if (rStart && rEnd && rEnd > rStart) {
-          mRealHrs += (rEnd.getTime() - rStart.getTime()) / 3600000;
+        if (!s.employeeId || s.employeeId === 'VACANTE') return;
+        if (isPlanificadorPlannedHoursShift(s)) {
+          const hrs = calcPlanificadorShiftHours(s);
+          if (hrs > 0) {
+            mTotalHrs += hrs;
+            empHrsMap[s.employeeId] = (empHrsMap[s.employeeId] || 0) + hrs;
+          }
+        }
+        if (isShiftFichado(s)) {
+          mRealHrs += fichadaHoursForShift(s);
         }
       });
 
@@ -911,8 +914,9 @@ function AdminDashboard() {
         coveragePct: hasPlan && (serviceShiftsCount + vacantes) > 0
           ? ((serviceShiftsCount - absent) / (serviceShiftsCount + vacantes)) * 100
           : 0,
-        avgHrsVigilador: totalEmp > 0 ? Math.round(totalSlaH / totalEmp) : 0,
-        vigiladoresConTurno: totalEmp,
+        const conTurno = Object.keys(empHrsMap).length;
+        avgHrsVigilador: conTurno > 0 ? Math.round(mTotalHrs / conTurno) : 0,
+        vigiladoresConTurno: conTurno,
         licencias: licRows.slice(0, 8),
         licenciasByReason: Object.entries(licReasonMap).map(([name, value], i) => ({ name, value, color: COLORS[i % COLORS.length] })).sort((a,b) => b.value - a.value),
         absenceChart: Object.entries(absMap30).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 6),
@@ -944,6 +948,7 @@ function AdminDashboard() {
   const normalHrs = Math.max(0, slaTotalHrs - slaNightHrs - slaHolidayHrs - slaWeekendHrs);
   const cumplimientoRealPct = plannedHrsMonth > 0 ? Math.min(100, (realHoursMonth / plannedHrsMonth) * 100) : 0;
   const brechaPct = plannedHrsMonth > 0 ? Math.max(0, ((plannedHrsMonth - realHoursMonth) / plannedHrsMonth) * 100) : 0;
+  const presencePct = enServicioHoy > 0 ? (presentesHoy / enServicioHoy) * 100 : 0;
 
   const semaforoConfig = {
     verde:    { label: 'OPERACIÓN NORMAL',    color: '#10b981', bg: 'rgba(16,185,129,0.08)',  border: 'rgba(16,185,129,0.3)' },
@@ -1098,10 +1103,10 @@ function AdminDashboard() {
                 subtext={activeServicesCount > 0 ? `${activeServicesCount} servicio${activeServicesCount>1?'s':''}` : 'Sin servicios'}
                 noData={slaTotalHrs === 0}/>
               <KpiCard
-                title="Prom. Hs/Vigilador"
+                title="Prom. Hs planificadas"
                 value={avgHrsVigilador > 0 ? `${avgHrsVigilador}h` : '—'}
                 icon={TrendingUp} color="#f59e0b"
-                subtext={vigiladoresConTurno > 0 ? `${vigiladoresConTurno} vigiladores` : 'Sin servicios'}
+                subtext={vigiladoresConTurno > 0 ? `${vigiladoresConTurno} con turno este mes` : 'Sin malla'}
                 noData={avgHrsVigilador === 0}/>
             </div>
 
@@ -1161,10 +1166,10 @@ function AdminDashboard() {
               <div className="rounded-xl border p-5 flex flex-col gap-4"
                 style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)', borderTop: '2px solid var(--company-primary, #6366f1)' }}>
 
-                {/* Cobertura hoy */}
+                {/* Asignación de puesto vs presencia fichada */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>COBERTURA HOY</p>
+                    <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>ASIGNACIÓN HOY</p>
                     <p className="text-4xl font-black leading-tight mt-1" style={{
                       color: !hasPlanificacion ? 'var(--txt3)' : coveragePct >= 95 ? '#10b981' : '#ef4444'
                     }}>
@@ -1172,20 +1177,19 @@ function AdminDashboard() {
                     </p>
                     <p className="text-[10px] font-medium mt-1" style={{ color: 'var(--txt3)' }}>
                       {!hasPlanificacion ? 'Sin planificación'
-                        : coveragePct >= 95 ? '✓ Dentro de parámetros'
-                        : '⚠ Por debajo del umbral (95%)'}
+                        : `${enServicioHoy} puestos con titular · ${vacantesHoy} vacantes · ${ausentesHoy} ausentes`}
                     </p>
                     {hasPlanificacion && (
-                      <div className="mt-2">
+                      <div className="mt-3">
                         <div className="flex justify-between text-[10px] font-bold mb-1" style={{ color: 'var(--txt3)' }}>
-                          <span>{presentesHoy} presentes</span>
-                          <span>de {enServicioHoy} planificados</span>
+                          <span>Presencia fichada</span>
+                          <span>{presentesHoy} de {enServicioHoy} · {presencePct.toFixed(0)}%</span>
                         </div>
                         <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
                           <div className="h-full rounded-full transition-all duration-700"
                             style={{
-                              width: enServicioHoy > 0 ? `${Math.min(100,(presentesHoy/enServicioHoy)*100)}%` : '0%',
-                              backgroundColor: coveragePct >= 95 ? '#10b981' : '#ef4444'
+                              width: `${Math.min(100, presencePct)}%`,
+                              backgroundColor: presencePct >= 80 ? '#10b981' : presencePct > 0 ? '#f59e0b' : '#94a3b8'
                             }}/>
                         </div>
                       </div>
@@ -1206,11 +1210,11 @@ function AdminDashboard() {
                 {/* Horas reales vs planificadas del mes */}
                 <div>
                   <p className="text-[9px] font-black uppercase tracking-wider mb-3" style={{ color: 'var(--txt3)' }}>
-                    HORAS TRABAJADAS — MES ACTUAL
+                    HORAS FICHADAS vs PLAN — MES ACTUAL
                   </p>
                   <div className="flex items-end gap-6">
                     <div>
-                      <p className="text-[10px] font-bold" style={{ color: 'var(--txt3)' }}>Reales</p>
+                      <p className="text-[10px] font-bold" style={{ color: 'var(--txt3)' }}>Fichadas</p>
                       <p className="text-2xl font-black" style={{ color: 'var(--txt)' }}>{fmt(realHoursMonth)}<span className="text-sm font-bold ml-1">hs</span></p>
                     </div>
                     <div>
@@ -1233,7 +1237,7 @@ function AdminDashboard() {
                     </div>
                   )}
                   {realHoursMonth === 0 && plannedHrsMonth > 0 && (
-                    <p className="text-[10px] mt-1" style={{ color: 'var(--txt3)' }}>Sin horas reales registradas aún</p>
+                    <p className="text-[10px] mt-1" style={{ color: 'var(--txt3)' }}>Sin fichadas en el mes (no se infiere del plan)</p>
                   )}
                 </div>
               </div>

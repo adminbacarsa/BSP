@@ -3422,9 +3422,11 @@ export default function PlanificacionPage() {
             ? dailyCoverageHoursTargetWithPerShiftPax(posConfig, pax, dayLetter, cycles, dateStr)
             : 0;
 
+        // Bandas del puesto (SLA), no las del ciclo automático: si no, M+T+N da 0h/72h con 3/3.
         const validWorkCodes = new Set(
-            effectiveShiftsForPositionDay(posAsEngineDef(posConfig), dayLetter, cycles, dateStr)
-                .map((s) => String(s.code || '').toUpperCase()),
+            (posConfig.shifts || [])
+                .map((s: any) => String(s.code || '').toUpperCase())
+                .filter((c: string) => c && isPlanningWorkShiftCode(c)),
         );
 
         let current = 0;
