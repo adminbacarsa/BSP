@@ -5,6 +5,7 @@ import {
   analisisWorkingWindow,
   envelopingRange,
   isRangeCovered as intervalsCover,
+  monthsInRange,
 } from '@/lib/analisis/analisisQueries';
 import {
   type AnalisisLoadProgress,
@@ -13,11 +14,32 @@ import {
   fetchAnalisisCatalog,
   getAnalisisMemoryStore,
   periodSliceFromStore,
+  prefetchAnalisisAusencias,
   resetAnalisisMemoryStore,
   storeCoversRange,
 } from '@/lib/analisis/analisisSnapshot';
+import {
+  balancesCoverPeriodKeys,
+  fetchHoursBalances,
+  hoursBalancePeriodKey,
+  peekHoursBalances,
+  type HoursBalanceRow,
+} from '@/lib/hoursBalance';
 
 export type { AnalisisLoadProgress };
+
+function allowExtractPaint(startMs: number, endMs: number): boolean {
+  return (endMs - startMs) / 86400000 >= 27;
+}
+
+function periodKeysOf(startMs: number, endMs: number): string[] {
+  return monthsInRange({ startMs, endMs }).map((m) => hoursBalancePeriodKey(m.year, m.month));
+}
+
+function objectiveIdsFromCatalog(): string[] {
+  const services = getAnalisisMemoryStore()?.services || [];
+  return [...new Set(services.map((s: any) => String(s.objectiveId || '').trim()).filter(Boolean))];
+}
 
 export type UseAnalisisSnapshotArgs = {
   empresaId: string | undefined;
@@ -39,6 +61,7 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   const [loadFacts, setLoadFacts] = useState(false);
   const [loadError, setLoadError] = useState(null as string | null);
   const [loadProgress, setLoadProgress] = useState(null as AnalisisLoadProgress | null);
+  const [extractRows, setExtractRows] = useState([] as HoursBalanceRow[]);
   const windowGenRef = useRef(0);
   const periodGenRef = useRef(0);
 
@@ -74,11 +97,47 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
         if (needCatalog) {
           setLoadInit(true);
           setLoadProgress({ pct: 4, label: 'Catálogo (SLA, plantel, clientes)', phase: 'catalog', docs: 0 });
+          const ausenciasP = prefetchAnalisisAusencias(scopeOpts);
           await fetchAnalisisCatalog(scopeOpts);
           if (cancelled || gen !== windowGenRef.current) return;
+          await ausenciasP;
+        } else {
+          void prefetchAnalisisAusencias(scopeOpts);
         }
         setCatalogReady(true);
         bump();
+        if (cancelled || gen !== windowGenRef.current) return;
+
+        const keys = periodKeysOf(periodStartMs, periodEndMs);
+        const oids = objectiveIdsFromCatalog();
+        const peeked = peekHoursBalances({ empresaId: scopeOpts.empresaId, periodKeys: keys });
+        const extractOk = allowExtractPaint(periodStartMs, periodEndMs)
+          && peeked.length > 0
+          && balancesCoverPeriodKeys(peeked, keys);
+        if (extractOk) {
+          setExtractRows(peeked);
+          setLoadInit(false);
+        } else if (keys.length && oids.length) {
+          try {
+            const fetched = await fetchHoursBalances({
+              empresaId: scopeOpts.empresaId,
+              periodKeys: keys,
+              migracionCompleta: scopeOpts.migracionCompleta,
+              objectiveIds: oids,
+            });
+            if (cancelled || gen !== windowGenRef.current) return;
+            setExtractRows(fetched);
+            if (
+              allowExtractPaint(periodStartMs, periodEndMs)
+              && balancesCoverPeriodKeys(fetched, keys)
+            ) {
+              setLoadInit(false);
+            }
+          } catch (err) {
+            console.warn('[analisis] hours_balances', err);
+          }
+        }
+
         if (cancelled || gen !== windowGenRef.current) return;
         if (!storeCoversRange(getAnalisisMemoryStore(), win.start, win.end)) {
           setLoadFacts(true);
@@ -116,15 +175,44 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   useEffect(() => {
     if (loadingEmpresa || !scopeOpts.empresaId || !catalogReady) return;
     const env = envelopingRange(new Date(periodStartMs), new Date(periodEndMs));
-    if (storeCoversRange(getAnalisisMemoryStore(), env.start, env.end)) {
+    const keys = periodKeysOf(periodStartMs, periodEndMs);
+    const oids = objectiveIdsFromCatalog();
+    const peeked = peekHoursBalances({ empresaId: scopeOpts.empresaId, periodKeys: keys });
+    if (peeked.length) setExtractRows(peeked);
+    const extractOk = allowExtractPaint(periodStartMs, periodEndMs)
+      && peeked.length > 0
+      && balancesCoverPeriodKeys(peeked, keys);
+    if (storeCoversRange(getAnalisisMemoryStore(), env.start, env.end) || extractOk) {
       setLoadInit(false);
-      return;
+      if (storeCoversRange(getAnalisisMemoryStore(), env.start, env.end)) return;
     }
     let cancelled = false;
     const gen = ++periodGenRef.current;
-    setLoadInit(true);
+    if (!extractOk && !storeCoversRange(getAnalisisMemoryStore(), env.start, env.end)) {
+      setLoadInit(true);
+    }
     (async () => {
       try {
+        if (!extractOk && keys.length && oids.length) {
+          try {
+            const fetched = await fetchHoursBalances({
+              empresaId: scopeOpts.empresaId,
+              periodKeys: keys,
+              migracionCompleta: scopeOpts.migracionCompleta,
+              objectiveIds: oids,
+            });
+            if (cancelled || gen !== periodGenRef.current) return;
+            setExtractRows(fetched);
+            if (
+              allowExtractPaint(periodStartMs, periodEndMs)
+              && balancesCoverPeriodKeys(fetched, keys)
+            ) {
+              setLoadInit(false);
+            }
+          } catch (err) {
+            console.warn('[analisis] hours_balances', err);
+          }
+        }
         await ensureAnalisisFacts({
           ...scopeOpts,
           requestedStart: env.start,
@@ -253,6 +341,14 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     return intervalsCover(mem.intervals, { startMs: start.getTime(), endMs: end.getTime() });
   }, [scopeOpts.empresaId, storeVersion]);
 
+  const extractReady = useMemo(() => {
+    if (!allowExtractPaint(periodStartMs, periodEndMs)) return false;
+    const keys = periodKeysOf(periodStartMs, periodEndMs);
+    return balancesCoverPeriodKeys(extractRows, keys);
+  }, [extractRows, periodStartMs, periodEndMs]);
+
+  const mallaReady = storeCoversRange(store, new Date(periodStartMs), new Date(periodEndMs));
+
   return {
     services,
     employees,
@@ -263,6 +359,9 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     allAusencias,
     tiposNovedad,
     objectivesGeoById,
+    extractRows,
+    extractReady,
+    mallaReady,
     loadInit,
     loadFacts,
     loadError,

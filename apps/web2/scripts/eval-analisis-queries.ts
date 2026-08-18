@@ -20,6 +20,10 @@ import {
   resolveEmployeeDisplayName,
 } from '../src/lib/analisis/analisisQueries';
 import {
+  demandaFromHoursBalances,
+  financieraFromHoursBalances,
+} from '../src/lib/analisis/analisisFromHoursBalance';
+import {
   buildInformeAnalitico,
   buildInformeSeries,
   chooseInformeSeriesBucket,
@@ -269,6 +273,39 @@ const statsD12 = buildAusenciasStats({
   capHsPerGuardPeriod: 192,
 });
 assert(!!statsD12 && statsD12.otrosHs === 12, `L cubre D12 = 12 hs no 24 (got ${statsD12?.otrosHs})`);
+
+const extractRows = [{
+  empresaId: 'e',
+  objectiveId: 'obj-a',
+  objectiveName: 'Objetivo A',
+  clientId: 'cli-a',
+  clientName: 'Cliente A',
+  year: 2026,
+  month: 8,
+  periodKey: '2026-08',
+  slaHours: 160,
+  plannedHours: 148,
+  vacantHours: 8,
+  realHours: 140,
+  ftHours: 16,
+  extHours: 4,
+  adelHours: 0,
+  opsHours: 0,
+  absenceHours: 24,
+  resultante: 168,
+  saldoPlan: 12,
+  saldoReal: 20,
+  rebuiltFrom: 'crm-bootstrap' as const,
+}];
+const demExtract = demandaFromHoursBalances(extractRows);
+assert(demExtract.totals.slaHours === 160, `extract demanda SLA 160 (got ${demExtract.totals.slaHours})`);
+assert(demExtract.totals.planHours === 148, `extract demanda plan 148 (got ${demExtract.totals.planHours})`);
+assert(demExtract.totals.ftHours === 16, `extract demanda FT 16 (got ${demExtract.totals.ftHours})`);
+assert(demExtract.totals.resultante === 168, `extract resultante 148+4+16 (got ${demExtract.totals.resultante})`);
+const finExtract = financieraFromHoursBalances(extractRows);
+assert(finExtract.length === 1 && finExtract[0].hsPlan === 148, 'extract financiera 1 objetivo plan 148');
+assert(finExtract[0].novedades.total === 24, `extract nov lump 24 (got ${finExtract[0].novedades.total})`);
+assert(finExtract[0].guards.length === 0, 'extract financiera sin guardias hasta la malla');
 
 const plus = topNPlusResto(
   [{ name: 'A', v: 10 }, { name: 'B', v: 5 }, { name: 'C', v: 3 }],
