@@ -236,6 +236,18 @@ async function fetchAusenciasAll(opts: ScopeOpts): Promise<any[]> {
   return ausenciasInflight;
 }
 
+export async function prefetchAnalisisAusencias(opts: ScopeOpts): Promise<any[]> {
+  const store = ensureStore(opts.empresaId);
+  if (store.ausenciasLoaded) return store.ausencias;
+  const rows = await fetchAusenciasAll(opts);
+  if (store.empresaId !== opts.empresaId) return rows;
+  store.ausencias = rows;
+  store.ausenciasLoaded = true;
+  store.factsAt = Date.now();
+  persistMeta(store);
+  return rows;
+}
+
 export async function fetchAnalisisCatalog(opts: ScopeOpts): Promise<{
   services: any[];
   employees: any[];

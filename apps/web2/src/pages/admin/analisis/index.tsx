@@ -18,6 +18,7 @@ import {
   shiftStartMs,
 } from '@/lib/analisis/analisisQueries';
 import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
+import { demandaFromHoursBalances, financieraFromHoursBalances } from '@/lib/analisis/analisisFromHoursBalance';
 import {
   buildAnalisisFinanciera,
   FIN_NOV_BREAKDOWN_CODES,
@@ -72,6 +73,7 @@ import { getDateKeyInTimezone, isProformaVacancyShift } from '@/lib/crm/proforma
 import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
+import { persistHoursBalancesFromTurnos } from '@/lib/hoursBalance';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
@@ -453,6 +455,9 @@ export default function AnalisisPage() {
     allAusencias,
     tiposNovedad,
     objectivesGeoById,
+    extractRows,
+    extractReady,
+    mallaReady,
     loadInit,
     loadFacts,
     loadError,
@@ -942,8 +947,20 @@ export default function AnalisisPage() {
   }, [turnos, employees, empNameById, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx]);
 
   const demanda = useMemo(
-    () =>
-      buildDemandaByObjective({
+    () => {
+      if (mallaReady) {
+        return buildDemandaByObjective({
+          turnos,
+          ausenciasStats,
+          vigenteServices,
+          periodStart: new Date(periodRange.start),
+          periodEnd: new Date(periodRange.end),
+          objectiveAliases: objectiveAliasesFromServices,
+          slaExclusionCtx,
+        });
+      }
+      if (extractReady) return demandaFromHoursBalances(extractRows);
+      return buildDemandaByObjective({
         turnos,
         ausenciasStats,
         vigenteServices,
@@ -951,13 +968,29 @@ export default function AnalisisPage() {
         periodEnd: new Date(periodRange.end),
         objectiveAliases: objectiveAliasesFromServices,
         slaExclusionCtx,
-      }),
-    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
+      });
+    },
+    [mallaReady, extractReady, extractRows, turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
   );
 
   const finBases = useMemo(
-    () =>
-      buildAnalisisFinanciera({
+    () => {
+      if (mallaReady) {
+        return buildAnalisisFinanciera({
+          turnos,
+          ausenciasStats,
+          vigenteServices,
+          periodStart: new Date(periodRange.start),
+          periodEnd: new Date(periodRange.end),
+          objectiveAliases: objectiveAliasesFromServices,
+          slaExclusionCtx,
+          turnosHistorial: allTurnos,
+          employees,
+          employeeNameById: empNameById,
+        });
+      }
+      if (extractReady) return financieraFromHoursBalances(extractRows, ausenciasStats);
+      return buildAnalisisFinanciera({
         turnos,
         ausenciasStats,
         vigenteServices,
@@ -968,10 +1001,37 @@ export default function AnalisisPage() {
         turnosHistorial: allTurnos,
         employees,
         employeeNameById: empNameById,
-      }),
-    [turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
+      });
+    },
+    [mallaReady, extractReady, extractRows, turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
   );
   const fin = useMemo(() => rollAnalisisFinanciera(finBases, finHoursMode), [finBases, finHoursMode]);
+  const extractPersistKey = useRef('');
+  useEffect(() => {
+    if (!mallaReady || !empresaId || !vigenteServices.length || !allTurnos.length) return;
+    if (extractPersistKey.current === periodKey) return;
+    extractPersistKey.current = periodKey;
+    const months: Array<{ year: number; month: number }> = [];
+    const start = new Date(periodRange.start);
+    const end = new Date(periodRange.end);
+    let y = start.getFullYear();
+    let m = start.getMonth();
+    while (y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth())) {
+      months.push({ year: y, month: m + 1 });
+      m += 1;
+      if (m > 11) {
+        m = 0;
+        y += 1;
+      }
+    }
+    void persistHoursBalancesFromTurnos({
+      empresaId,
+      services: vigenteServices,
+      turnos: allTurnos,
+      months,
+      rebuiltFrom: 'crm-bootstrap',
+    }).catch((err) => console.warn('[analisis] hours_balances', err));
+  }, [mallaReady, empresaId, vigenteServices, allTurnos, periodKey, periodRange.start, periodRange.end]);
   const finClientBars = useMemo(
     () =>
       topNPlusResto(
@@ -2015,6 +2075,17 @@ export default function AnalisisPage() {
               </div>
             </div>
           </div>
+
+          {extractReady && !mallaReady && (
+            <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3 shadow-sm">
+              <p className="text-[11px] font-black uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                Extracto mensual · actualizando malla
+              </p>
+              <p className="text-[12px] text-amber-700/90 dark:text-amber-300/80 mt-0.5">
+                Informe, Demanda y Financiera a nivel objetivo ya están. Guardias, F/RET/REF y el desglose fino de novedades llegan al terminar la malla.
+              </p>
+            </div>
+          )}
 
           {loadFacts && loadProgress && (
             <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/30 px-4 py-3 shadow-sm">
