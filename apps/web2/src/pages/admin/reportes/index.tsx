@@ -410,15 +410,14 @@ export default function ReportsPage() {
 
     const filteredPlanCatalogClients = useMemo(() => {
         const q = planClientSearch.trim().toLowerCase();
-        if (!q) return planCatalogClients;
+        if (!q || q === 'todo' || q === 'todos' || q === 'todas') return planCatalogClients;
         return planCatalogClients.filter((c) => c.name.toLowerCase().includes(q));
     }, [planCatalogClients, planClientSearch]);
 
     const planScopedObjectives = useMemo(() => {
         if (planQueryEmployeeId) return [];
-        if (!planQueryClientId) return [];
         return planCatalogObjectives;
-    }, [planCatalogObjectives, planQueryClientId, planQueryEmployeeId]);
+    }, [planCatalogObjectives, planQueryEmployeeId]);
 
     const filteredPlanCatalogObjectives = useMemo(() => {
         const q = planObjectiveSearch.trim().toLowerCase();
@@ -467,11 +466,18 @@ export default function ReportsPage() {
 
     const buildPlanFetchScope = useCallback((): ReportFetchScope | undefined => {
         const scope: ReportFetchScope = {};
-        if (planQueryEmployeeId) scope.employeeId = planQueryEmployeeId;
-        else if (planQueryObjectiveId) scope.objectiveId = planQueryObjectiveId;
-        else if (planQueryClientId) scope.clientId = planQueryClientId;
-        return Object.keys(scope).length ? scope : undefined;
-    }, [planQueryClientId, planQueryObjectiveId, planQueryEmployeeId]);
+        if (planQueryEmployeeId) {
+            scope.employeeId = planQueryEmployeeId;
+        } else if (planQueryObjectiveId) {
+            scope.objectiveId = planQueryObjectiveId;
+        } else if (planQueryClientId) {
+            scope.clientId = planQueryClientId;
+            scope.clientObjectiveIds = planCatalogObjectives.map((o) => o.id);
+        } else {
+            return undefined;
+        }
+        return scope;
+    }, [planQueryClientId, planQueryObjectiveId, planQueryEmployeeId, planCatalogObjectives]);
 
     const clearPlanFilters = useCallback(() => {
         setPlanFilterObjective('');
@@ -498,10 +504,6 @@ export default function ReportsPage() {
         }
         if (activeTab === 'PLANIFICADO') {
             const scope = buildPlanFetchScope();
-            if (!scope) {
-                toast.error('Elegí al menos un cliente, un objetivo o un empleado antes de generar.');
-                return;
-            }
             clearPlanFilters();
             generateReports(scope);
             return;
@@ -1660,8 +1662,8 @@ export default function ReportsPage() {
             return (
                 <div className="p-10 text-center bg-white rounded-xl border border-dashed border-slate-300 text-slate-400 animate-in fade-in">
                     <CalendarDays size={48} className="mx-auto mb-2 opacity-20"/>
-                    <p className="font-bold uppercase text-sm">Elegí cliente, objetivo o empleado y el rango de fechas</p>
-                    <p className="text-xs mt-2 max-w-md mx-auto">Luego presioná <strong>Generar reporte</strong>. Solo se consultan los turnos del alcance elegido (no se carga toda la empresa).</p>
+                    <p className="font-bold uppercase text-sm">Elegí el rango de fechas y Generar</p>
+                    <p className="text-xs mt-2 max-w-md mx-auto">Sin cliente = <strong>todos los clientes</strong> de la empresa. También podés acotar por un cliente, un objetivo o un legajo.</p>
                 </div>
             );
         }
@@ -2100,7 +2102,7 @@ export default function ReportsPage() {
                         <>
                             <ReportFilterSection
                                 title="Alcance del reporte"
-                                subtitle="Elegí al menos cliente, objetivo o empleado · luego Generar"
+                                subtitle="Todos los clientes, o uno. Objetivo y empleado son opcionales · luego Generar"
                             >
                                 <ReportSearchSelect
                                     step="1"
@@ -2127,7 +2129,8 @@ export default function ReportsPage() {
                                     }}
                                     disabled={!!planQueryEmployeeId}
                                     searchDisabled={!!planQueryEmployeeId}
-                                    emptyLabel="Seleccioná un cliente"
+                                    emptyLabel={`Todos los clientes (${planCatalogClients.length})`}
+                                    hint={planQueryEmployeeId ? undefined : 'Vacío = toda la empresa en el rango de fechas.'}
                                 >
                                     {filteredPlanCatalogClients.map((c) => (
                                         <option key={c.id} value={c.id}>{c.name}</option>
@@ -2147,14 +2150,26 @@ export default function ReportsPage() {
                                         const obj = planCatalogObjectives.find((o) => o.id === v);
                                         if (obj) setPlanObjectiveSearch(obj.name);
                                     }}
-                                    disabled={!!planQueryEmployeeId || !planQueryClientId}
-                                    searchDisabled={!!planQueryEmployeeId || !planQueryClientId}
-                                    emptyLabel={planQueryClientId ? 'Todos los objetivos del cliente' : 'Primero elegí cliente'}
+                                    disabled={!!planQueryEmployeeId}
+                                    searchDisabled={!!planQueryEmployeeId}
+                                    emptyLabel={
+                                        planQueryClientId
+                                            ? `Todos los objetivos del cliente (${planCatalogObjectives.length})`
+                                            : `Todos los objetivos (${planCatalogObjectives.length})`
+                                    }
                                     accentSelect
-                                    hint={!planQueryClientId ? 'Habilitado al elegir cliente en la lista.' : undefined}
+                                    hint={
+                                        planQueryEmployeeId
+                                            ? undefined
+                                            : planQueryClientId
+                                                ? 'Vacío = todos los objetivos de este cliente.'
+                                                : 'Vacío = todos. Podés elegir un cliente para acotar.'
+                                    }
                                 >
                                     {filteredPlanCatalogObjectives.map((o) => (
-                                        <option key={o.id} value={o.id}>{o.name}</option>
+                                        <option key={o.id} value={o.id}>
+                                            {planQueryClientId ? o.name : `${o.clientName} · ${o.name}`}
+                                        </option>
                                     ))}
                                 </ReportSearchSelect>
                                 <ReportSearchSelect
@@ -2167,7 +2182,7 @@ export default function ReportsPage() {
                                                 ? 'Solo guardias vinculados a este objetivo (puesto / experiencia).'
                                                 : planQueryClientId
                                                     ? 'Guardias de los objetivos del cliente. Elegí un objetivo para acotar más.'
-                                                    : 'Elegí cliente (y opcionalmente objetivo) o buscá un legajo directo.'
+                                                    : 'Vacío = toda la empresa. Elegí un cliente o un objetivo, o buscá un legajo.'
                                     }
                                     searchValue={planQueryEmployeeSearch}
                                     onSearchChange={setPlanQueryEmployeeSearch}
@@ -2187,7 +2202,7 @@ export default function ReportsPage() {
                                             ? `Todos del objetivo (${filteredPlanCatalogEmployees.length})`
                                             : planQueryClientId
                                                 ? `Todos del cliente (${filteredPlanCatalogEmployees.length})`
-                                                : 'Buscar legajo directo'
+                                                : 'Todos los guardias (o buscá un legajo)'
                                     }
                                 >
                                     {filteredPlanCatalogEmployees.map((e) => (

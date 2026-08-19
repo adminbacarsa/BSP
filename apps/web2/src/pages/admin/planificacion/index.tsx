@@ -4920,11 +4920,14 @@ export default function PlanificacionPage() {
         // Refuerzo / agregado solicitado por cliente (portal → planificación)
         const isRefuerzoCliente = notif.type === 'REFUERZO_CLIENTE_PENDIENTE';
 
+        // Vacante generada porque un guardia fue asignado a un evento
+        const isVacantePorEvento = notif.type === 'VACANTE_POR_EVENTO';
+
         // Ausencias que requieren gestión de cobertura
-        const isVacancyAbsence = !isRefuerzoCliente && notif.type &&
+        const isVacancyAbsence = !isRefuerzoCliente && !isVacantePorEvento && notif.type &&
             (notif.type === 'Vacaciones' || notif.type.includes('Licencia') || notif.type === 'PG Permiso Gremial');
 
-        const rawFechaRefuerzo = isRefuerzoCliente ? (notif.fecha || notif.date) : null;
+        const rawFechaRefuerzo = (isRefuerzoCliente || isVacantePorEvento) ? (notif.fecha || notif.date) : null;
 
         if (rawFechaRefuerzo || notif.date || notif.startDate) {
             try {
@@ -4946,6 +4949,13 @@ export default function PlanificacionPage() {
                         const instruccion = notif.description || notif.msg
                             || `Asigná ${notif.tipoSolicitud === 'TURA' ? 'TURA' : 'REF/RFZ'} en el cronograma para el ${targetDate.toLocaleDateString('es-AR')}.`;
                         toast.info(instruccion, { duration: 9000 });
+                        return;
+                    }
+
+                    if (isVacantePorEvento) {
+                        const msg = notif.description || notif.msg
+                            || `${notif.employeeName || 'Guardia'} sale al evento. Cubrí el turno ${notif.codigoTurnoOriginal || ''} en ${notif.objectiveName || 'el objetivo'} para el ${targetDate.toLocaleDateString('es-AR')}.`;
+                        toast.info(msg, { duration: 9000 });
                         return;
                     }
 
