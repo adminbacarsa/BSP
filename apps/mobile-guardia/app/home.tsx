@@ -2,16 +2,20 @@ import { useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getObjectiveForShift, getCheckInTiming, resolveCheckInUiStatus } from '@cosp/portal-core';
+import { getObjectiveForShift, getCheckInTiming, resolveCheckInUiStatus, resolveEvShiftDisplay, isEvShift } from '@cosp/portal-core';
 import { isEmulatorMode } from '../src/lib/portal';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { useEmployeeShifts } from '../src/hooks/useEmployeeShifts';
 import { useObjectivesMap } from '../src/hooks/useObjectivesMap';
 import { useCheckIn } from '../src/hooks/useCheckIn';
 import { useEmpresaBranding } from '../src/hooks/useEmpresaBranding';
+import { useConvocatoriasPendientes } from '../src/hooks/useConvocatoriasPendientes';
+import { useEventosMap } from '../src/hooks/useEventosMap';
 import { heroShift, pickTodayShiftAny } from '../src/lib/shifts';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
+import { ConvocatoriasBanner } from '../src/components/ConvocatoriasBanner';
+import { EvShiftDetails } from '../src/components/EvShiftDetails';
 import { formatHeroTimeRange, HeroShiftPanel } from '../src/components/ui/HeroShiftPanel';
 import { CheckInStatusBanner } from '../src/components/ui/CheckInStatusBanner';
 import { RequireAuth } from '../src/hooks/useRequireAuth';
@@ -44,6 +48,11 @@ function HomeScreenContent() {
   const { objectivesMap } = useObjectivesMap();
   const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival } = useCheckIn();
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
+  const { convocatoriasPendientes } = useConvocatoriasPendientes(
+    employee?.empresaId,
+    empDocId,
+  );
+  const { eventosMap } = useEventosMap(employee?.empresaId);
 
   const profileMissing = employeeProfileReady && !employee && !empDocId && !!user;
   const profileStale = employeeProfileReady && !employee && !!empDocId && !!user;
@@ -117,9 +126,14 @@ function HomeScreenContent() {
   const heroSub =
     todayAny?.isFranco || mainShift?.isFranco
       ? 'Día de descanso programado'
-      : mainShift
-        ? formatHeroTimeRange(mainShift)
-        : 'No hay turnos en el mes actual';
+      : mainShift && isEvShift(mainShift)
+        ? resolveEvShiftDisplay(mainShift, eventosMap)?.nombre || formatHeroTimeRange(mainShift)
+        : mainShift
+          ? formatHeroTimeRange(mainShift)
+          : 'No hay turnos en el mes actual';
+
+  const mainShiftEv =
+    mainShift && !mainShift.isFranco ? resolveEvShiftDisplay(mainShift, eventosMap) : null;
 
   return (
     <>
@@ -168,6 +182,13 @@ function HomeScreenContent() {
             ) : null}
           </View>
 
+          {portalFeatures.viewEvents && convocatoriasPendientes.length > 0 ? (
+            <ConvocatoriasBanner
+              convocatorias={convocatoriasPendientes}
+              onOpenEventos={() => router.push('/eventos')}
+            />
+          ) : null}
+
           {loading ? (
             <ActivityIndicator size="large" color={palette.primary} style={styles.loader} />
           ) : error ? (
@@ -198,6 +219,7 @@ function HomeScreenContent() {
               statusSlot={
                 <>
                   <CheckInStatusBanner view={checkInStatusView} />
+                  {mainShiftEv ? <EvShiftDetails ev={mainShiftEv} compact /> : null}
                   {pendingCount > 0 && !pendingShiftIds.includes(mainShift?.id ?? '') ? (
                     <Text style={styles.pendingLine}>
                       {pendingCount} fichada(s) pendientes de sincronizar (otros turnos)
@@ -240,9 +262,23 @@ function HomeScreenContent() {
                 />
               </CommandCard>
             ) : null}
+            {portalFeatures.viewEvents ? (
+              <CommandCard style={styles.quickCard}>
+                <Text style={[styles.quickTitle, { color: palette.onSurface }]}>Eventos</Text>
+                <Text style={[styles.quickSub, { color: palette.onSurfaceMuted }]}>
+                  {convocatoriasPendientes.length > 0
+                    ? `${convocatoriasPendientes.length} convocatoria(s) pendiente(s)`
+                    : 'Servicios especiales EV'}
+                </Text>
+                <CommandButton label="Ver eventos" variant="secondary" onPress={() => router.push('/eventos')} />
+              </CommandCard>
+            ) : null}
             <CommandCard style={styles.quickCard}>
               <Text style={[styles.quickTitle, { color: palette.onSurface }]}>Más servicios</Text>
-              <Text style={[styles.quickSub, { color: palette.onSurfaceMuted }]}>Ausencias, permutas, credencial</Text>
+              <Text style={[styles.quickSub, { color: palette.onSurfaceMuted }]}>
+                Ausencias, permutas, credencial
+                {convocatoriasPendientes.length > 0 ? ` · ${convocatoriasPendientes.length} conv.` : ''}
+              </Text>
               <CommandButton label="Abrir" variant="secondary" onPress={() => router.push('/mas')} />
             </CommandCard>
             <CommandCard style={styles.quickCard}>

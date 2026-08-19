@@ -9,6 +9,8 @@ import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
 import { usePortalInbox, type PortalInboxItem } from '../src/hooks/usePortalInbox';
+import { useConvocatoriasPendientes } from '../src/hooks/useConvocatoriasPendientes';
+import { routeFromNotificationData } from '../src/lib/notificationNavigation';
 import { getPortalCallables } from '../src/lib/portal';
 
 const ROADMAP = [
@@ -33,9 +35,10 @@ export default function MasScreen() {
 function MasScreenContent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { portalFeatures, user, signOut } = usePortalAuth();
+  const { portalFeatures, user, signOut, employee, empDocId } = usePortalAuth();
   const { palette, mode, setThemeMode } = useTheme();
   const { items, loading: inboxLoading, unreadCount, markRead, markAllUnreadRead } = usePortalInbox(user);
+  const { convocatoriasPendientes } = useConvocatoriasPendientes(employee?.empresaId, empDocId);
   const [testBusy, setTestBusy] = useState(false);
   const canNovedad = portalFeatures.reportAbsence || portalFeatures.requestLicense;
   const scrollBottomPad = Math.max(insets.bottom, 12) + 88;
@@ -61,9 +64,13 @@ function MasScreenContent() {
   const openInboxItem = useCallback(
     (n: PortalInboxItem) => {
       if (!n.read) void markRead(n.id);
-      if (n.type === 'CONVOCATORIA_EVENTO' || n.type === 'SWAP_REQUEST') {
-        router.push(n.type === 'CONVOCATORIA_EVENTO' ? '/eventos' : '/permutas');
-        return;
+      const route = routeFromNotificationData({
+        type: n.type,
+        solicitudId: n.solicitudId,
+        eventoId: n.eventoId,
+      });
+      if (route) {
+        router.push(route as '/eventos');
       }
     },
     [markRead, router],
@@ -146,17 +153,16 @@ function MasScreenContent() {
                       {n.body}
                     </Text>
                   ) : null}
-                  {n.type === 'CONVOCATORIA_EVENTO' ? (
+                  {routeFromNotificationData({ type: n.type }) ? (
                     <CommandButton
-                      label="Ver convocatoria"
+                      label={
+                        n.type === 'CONVOCATORIA_EVENTO'
+                          ? 'Ver convocatoria'
+                          : n.type === 'SWAP_REQUEST'
+                            ? 'Ver permutas'
+                            : 'Abrir'
+                      }
                       variant="primary"
-                      onPress={() => openInboxItem(n)}
-                      style={styles.markReadBtn}
-                    />
-                  ) : n.type === 'SWAP_REQUEST' ? (
-                    <CommandButton
-                      label="Ver permutas"
-                      variant="secondary"
                       onPress={() => openInboxItem(n)}
                       style={styles.markReadBtn}
                     />
@@ -183,10 +189,20 @@ function MasScreenContent() {
           {portalFeatures.viewEvents ? (
             <CommandCard title="Eventos (EV)">
               <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
-                Servicios especiales: solicitá cupo o respondé convocatorias del administrador (misma lógica que el
-                portal web).
+                Servicios especiales: solicitá cupo o respondé convocatorias del administrador.
+                {convocatoriasPendientes.length > 0
+                  ? ` · ${convocatoriasPendientes.length} convocatoria(s) pendiente(s)`
+                  : ''}
               </Text>
-              <CommandButton label="Eventos y convocatorias" onPress={() => router.push('/eventos')} />
+              <CommandButton
+                label={
+                  convocatoriasPendientes.length > 0
+                    ? `Responder (${convocatoriasPendientes.length})`
+                    : 'Eventos y convocatorias'
+                }
+                variant={convocatoriasPendientes.length > 0 ? 'primary' : 'secondary'}
+                onPress={() => router.push('/eventos')}
+              />
             </CommandCard>
           ) : null}
 
