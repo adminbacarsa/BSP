@@ -50,6 +50,12 @@ export {
   portalEventosDateRange,
 } from './eventos/eventoHelpers';
 export {
+  isEvShift,
+  resolveEvShiftDisplay,
+  eventosArrayToMap,
+} from './eventos/evShiftDisplay';
+export type { EvShiftDisplay } from './eventos/evShiftDisplay';
+export {
   loadEventosByEmpresaRange,
   loadSolicitudesEventoByEmpleado,
   createSolicitudEventoGuardia,

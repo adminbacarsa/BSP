@@ -1,8 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Alert, AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import { useRouter } from 'expo-router';
 import { usePortalAuth } from '../context/PortalAuthContext';
 import { getPortalFirebase } from '../lib/portal';
+import {
+  routeFromNotification,
+  routeFromNotificationData,
+} from '../lib/notificationNavigation';
 import {
   getStoredFcmToken,
   registerPushNotifications,
@@ -14,9 +19,18 @@ type PushNotificationsBootstrapProps = {
 };
 
 export function PushNotificationsBootstrap({ onStatusChange }: PushNotificationsBootstrapProps) {
+  const router = useRouter();
   const { user, empDocId, employee, employeeProfileReady } = usePortalAuth();
   const { db } = getPortalFirebase();
   const lastForegroundToastRef = useRef<string | null>(null);
+  const handledColdStartRef = useRef(false);
+
+  const openFromNotification = (notification: Notifications.Notification) => {
+    const route = routeFromNotification(notification);
+    if (route) {
+      router.push(route as '/eventos');
+    }
+  };
 
   useEffect(() => {
     if (!user || !employeeProfileReady) return;
@@ -49,6 +63,15 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   useEffect(() => {
     if (!user) return;
 
+    if (!handledColdStartRef.current) {
+      handledColdStartRef.current = true;
+      void Notifications.getLastNotificationResponseAsync().then((response) => {
+        if (response?.notification) {
+          openFromNotification(response.notification);
+        }
+      });
+    }
+
     const received = Notifications.addNotificationReceivedListener((notification) => {
       const title = notification.request.content.title ?? 'CronoApp';
       const body = notification.request.content.body ?? '';
@@ -56,19 +79,30 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
       if (lastForegroundToastRef.current === dedupeKey) return;
       lastForegroundToastRef.current = dedupeKey;
       if (AppState.currentState === 'active') {
-        Alert.alert(title, body || 'Nueva notificación');
+        const route = routeFromNotification(notification);
+        if (route) {
+          Alert.alert(title, body || 'Nueva notificación', [
+            { text: 'Después', style: 'cancel' },
+            { text: 'Abrir', onPress: () => router.push(route as '/eventos') },
+          ]);
+        } else {
+          Alert.alert(title, body || 'Nueva notificación');
+        }
       }
     });
 
-    const response = Notifications.addNotificationResponseReceivedListener(() => {
+    const response = Notifications.addNotificationResponseReceivedListener((event) => {
       lastForegroundToastRef.current = null;
+      if (event.notification) {
+        openFromNotification(event.notification);
+      }
     });
 
     return () => {
       received.remove();
       response.remove();
     };
-  }, [user?.uid]);
+  }, [user?.uid, router]);
 
   useEffect(() => {
     if (!user || !employeeProfileReady) return;
