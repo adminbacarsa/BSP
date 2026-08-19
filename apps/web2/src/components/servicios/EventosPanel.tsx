@@ -4,6 +4,8 @@ import {
     Calendar, ChevronLeft, ChevronRight, Users, CheckCircle, XCircle, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { getAuth } from 'firebase/auth';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import {
     eventoService,
     buildFechasFromServicios,
@@ -189,18 +191,18 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
 
     useEffect(() => { void loadEventos(); }, [loadEventos]);
 
-    // Cargar solicitudes de los eventos visibles
+    // Suscripción en tiempo real a solicitudes de todos los eventos visibles
     useEffect(() => {
-        if (eventos.length === 0) return;
-        Promise.all(
-            eventos.filter(ev => ev.id).map(ev =>
-                solicitudEventoService.getByEvento(ev.id!).then(sols => ({ id: ev.id!, sols }))
-            )
-        ).then(results => {
-            const map: Record<string, SolicitudEvento[]> = {};
-            results.forEach(({ id, sols }) => { map[id] = sols; });
-            setSolicitudesMap(map);
-        }).catch(() => {});
+        const evIds = eventos.map(ev => ev.id).filter(Boolean) as string[];
+        if (evIds.length === 0) { setSolicitudesMap({}); return; }
+        const unsubs = evIds.map(evId => {
+            const q = query(collection(db, 'solicitudes_evento'), where('eventoId', '==', evId));
+            return onSnapshot(q, snap => {
+                const sols = snap.docs.map(d => ({ id: d.id, ...d.data() } as SolicitudEvento));
+                setSolicitudesMap(prev => ({ ...prev, [evId]: sols }));
+            }, console.error);
+        });
+        return () => unsubs.forEach(u => u());
     }, [eventos]);
 
     const handleResponder = async (sol: SolicitudEvento, status: 'aprobada' | 'rechazada') => {
@@ -891,12 +893,13 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                         const totalCupo = (ev.servicios || []).reduce((acc, s) => acc + s.cupo, 0);
                         const nSrv = (ev.servicios || []).length;
                         const sols = solicitudesMap[ev.id!] || [];
-                        const pendientes = sols.filter(s => s.status === 'pendiente').length;
+                        const pendientes = sols.filter(s => s.status === 'pendiente' || s.status === 'convocado').length;
                         const solExpanded = expandedSolicitudes[ev.id!] || false;
                         const staffRows = staffingMap[ev.id!] || [];
                         const staffExpanded = expandedStaffing[ev.id!] || false;
                         const staffLoading = loadingStaffing[ev.id!] || false;
-                        const totalAsignados = staffRows.length;
+                        // Contar desde solicitudes aprobadas (disponible inmediatamente, sin esperar staffingMap)
+                        const totalAsignados = sols.filter(s => s.status === 'aprobada').length;
                         return (
                             <div
                                 key={ev.id}
