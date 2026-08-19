@@ -26,7 +26,7 @@ import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
 
 export default function LoginScreen() {
-  const { signIn, user, initializing, deviceVerified } = usePortalAuth();
+  const { signIn, user, initializing, deviceVerified, isSuperAdmin, isPreviewMode } = usePortalAuth();
   const { palette, isDark } = useTheme();
   const [email, setEmail] = useState(isEmulatorMode() ? 'guardia@bacarsa.com.ar' : '');
   const [password, setPassword] = useState('');
@@ -52,6 +52,9 @@ export default function LoginScreen() {
   }
 
   if (user) {
+    if (isSuperAdmin && !isPreviewMode) {
+      return <Redirect href="/preview" />;
+    }
     if (deviceVerified === false) {
       return <Redirect href="/device-blocked" />;
     }

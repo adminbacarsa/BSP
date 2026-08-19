@@ -16,6 +16,7 @@ import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../src/components/ConvocatoriasBanner';
 import { EvShiftDetails } from '../src/components/EvShiftDetails';
+import { PreviewModeBanner } from '../src/components/PreviewModeBanner';
 import { formatHeroTimeRange, HeroShiftPanel } from '../src/components/ui/HeroShiftPanel';
 import { CheckInStatusBanner } from '../src/components/ui/CheckInStatusBanner';
 import { RequireAuth } from '../src/hooks/useRequireAuth';
@@ -150,6 +151,7 @@ function HomeScreenContent() {
           ),
         }}
       />
+      <PreviewModeBanner />
       <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={['bottom']}>
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           <View style={styles.welcome}>

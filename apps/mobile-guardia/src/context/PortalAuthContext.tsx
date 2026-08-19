@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -14,6 +15,7 @@ import {
   type User,
 } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import * as Linking from 'expo-linking';
 import {
   DEFAULT_PORTAL_FEATURES,
   type PortalFeatures,
@@ -24,6 +26,8 @@ import { getPortalFirebase } from '../lib/portal';
 import { withTimeout } from '../lib/emulatorHost';
 import { getOrCreateDeviceId, getStoredDeviceId } from '../lib/deviceId';
 import { unregisterPushForUser } from '../lib/pushNotifications';
+import { parsePreviewEmpFromUrl } from '../lib/previewLinks';
+import { isSuperAdminRole, userIsSuperAdmin } from '../lib/superAdmin';
 
 const FIRESTORE_PROFILE_TIMEOUT_MS = 22_000;
 const AUTH_INIT_TIMEOUT_MS = 9_000;
@@ -36,6 +40,9 @@ function normalizeRoleKey(role: string): string {
 type PortalAuthContextValue = {
   user: User | null;
   initializing: boolean;
+  isSuperAdmin: boolean;
+  isPreviewMode: boolean;
+  previewEmpDocId: string | null;
   employeeProfileLoading: boolean;
   employeeProfileReady: boolean;
   empDocId: string | null;
@@ -46,11 +53,15 @@ type PortalAuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshEmployee: () => Promise<void>;
+  enterPreview: (empDocId: string) => Promise<void>;
+  exitPreview: () => void;
 };
 
 const PortalAuthContext = createContext<PortalAuthContextValue | null>(null);
 
 async function isEmployeeUser(user: User, db: ReturnType<typeof getPortalFirebase>['db']): Promise<boolean> {
+  if (await userIsSuperAdmin(user)) return true;
+
   const token = await user.getIdTokenResult(true);
   const claimRole = normalizeRoleKey(String(token.claims.role ?? ''));
   const claimType = normalizeRoleKey(String(token.claims.type ?? ''));
@@ -92,6 +103,8 @@ export function mapPortalAuthError(err: unknown, emulatorMode: boolean): string 
 }
 
 async function verifyDeviceForUser(user: User, db: ReturnType<typeof getPortalFirebase>['db']): Promise<boolean> {
+  if (await userIsSuperAdmin(user)) return true;
+
   const empDocId = await resolveEmpDocIdWithRetry(db, user, 2);
   if (empDocId) {
     const empSnap = await getDoc(doc(db, 'empleados', empDocId));
@@ -115,10 +128,25 @@ async function verifyDeviceForUser(user: User, db: ReturnType<typeof getPortalFi
   return data.deviceId === localId;
 }
 
+function mapEmpleadoPortal(id: string, data: Record<string, unknown>, uid: string): EmpleadoPortal {
+  return {
+    id,
+    uid,
+    email: data.email as string | undefined,
+    firstName: (data.firstName || data.nombre) as string | undefined,
+    lastName: (data.lastName || data.apellido) as string | undefined,
+    fileNumber: (data.fileNumber || data.legajo) as string | undefined,
+    empresaId: data.empresaId as string | undefined,
+    deviceId: (data.deviceId as string | null | undefined) ?? null,
+  };
+}
+
 export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const { auth, db } = getPortalFirebase();
   const [user, setUser] = useState<User | null>(null);
   const [initializing, setInitializing] = useState(true);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [previewEmpDocId, setPreviewEmpDocId] = useState<string | null>(null);
   const [employeeProfileLoading, setEmployeeProfileLoading] = useState(false);
   const [employeeProfileReady, setEmployeeProfileReady] = useState(false);
   const [empDocId, setEmpDocId] = useState<string | null>(null);
@@ -126,6 +154,49 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const [portalFeatures, setPortalFeatures] = useState<PortalFeatures>(DEFAULT_PORTAL_FEATURES);
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
   const [employeeProfileError, setEmployeeProfileError] = useState<string | null>(null);
+  const pendingPreviewRef = useRef<string | null>(null);
+
+  const loadEmployeeByDocId = useCallback(
+    async (id: string, currentUser: User) => {
+      setEmployeeProfileLoading(true);
+      setEmployeeProfileError(null);
+      try {
+        const snap = await withTimeout(
+          getDoc(doc(db, 'empleados', id)),
+          FIRESTORE_PROFILE_TIMEOUT_MS,
+          'Lectura de legajo preview',
+        );
+        if (!snap.exists()) {
+          setEmployee(null);
+          setEmpDocId(null);
+          setEmployeeProfileError('Legajo no encontrado en Firestore.');
+          return;
+        }
+        const data = snap.data();
+        setEmpDocId(id);
+        setEmployee(mapEmpleadoPortal(id, data, currentUser.uid));
+        const pf = data.portalFeatures;
+        if (pf && typeof pf === 'object') {
+          setPortalFeatures((prev) => ({ ...prev, ...pf }));
+        } else {
+          setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+        }
+      } catch (err) {
+        setEmployee(null);
+        setEmpDocId(null);
+        if (isNetworkOrFirestoreError(err)) {
+          setEmployeeProfileError('No se pudo leer el legajo de preview. Revisá la conexión y reintentá.');
+        } else {
+          const msg = err instanceof Error ? err.message : 'Error cargando legajo preview';
+          setEmployeeProfileError(msg);
+        }
+      } finally {
+        setEmployeeProfileLoading(false);
+        setEmployeeProfileReady(true);
+      }
+    },
+    [db],
+  );
 
   const loadEmployee = useCallback(
     async (currentUser: User) => {
@@ -165,16 +236,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
             /* emulador / permisos */
           }
         }
-        setEmployee({
-          id,
-          uid: currentUser.uid,
-          email: data.email,
-          firstName: data.firstName || data.nombre,
-          lastName: data.lastName || data.apellido,
-          fileNumber: data.fileNumber || data.legajo,
-          empresaId: data.empresaId,
-          deviceId: data.deviceId ?? null,
-        });
+        setEmployee(mapEmpleadoPortal(id, data, currentUser.uid));
         const pf = data.portalFeatures;
         if (pf && typeof pf === 'object') {
           setPortalFeatures((prev) => ({ ...prev, ...pf }));
@@ -199,6 +261,90 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     [db],
   );
 
+  const bootstrapSession = useCallback(
+    async (currentUser: User, previewId: string | null) => {
+      const superAdmin = await userIsSuperAdmin(currentUser);
+      setIsSuperAdmin(superAdmin);
+
+      const okEmployee = await isEmployeeUser(currentUser, db);
+      if (!okEmployee) {
+        await firebaseSignOut(auth);
+        setUser(null);
+        setIsSuperAdmin(false);
+        setDeviceVerified(null);
+        return;
+      }
+
+      if (superAdmin) {
+        setDeviceVerified(true);
+        if (previewId) {
+          setPreviewEmpDocId(previewId);
+          await loadEmployeeByDocId(previewId, currentUser);
+        } else {
+          setPreviewEmpDocId(null);
+          setEmpDocId(null);
+          setEmployee(null);
+          setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+          setEmployeeProfileReady(true);
+          setEmployeeProfileLoading(false);
+          setEmployeeProfileError(null);
+        }
+        return;
+      }
+
+      setPreviewEmpDocId(null);
+      await loadEmployee(currentUser);
+      const verified = await verifyDeviceForUser(currentUser, db);
+      setDeviceVerified(verified);
+      if (verified) {
+        const resolvedId = await resolveEmpDocIdWithRetry(db, currentUser, 2);
+        const empSnap = resolvedId ? await getDoc(doc(db, 'empleados', resolvedId)) : null;
+        const { registerPushNotifications } = await import('../lib/pushNotifications');
+        await registerPushNotifications({
+          user: currentUser,
+          db,
+          empDocId: resolvedId,
+          empresaId: (empSnap?.data()?.empresaId as string) ?? null,
+        }).catch(() => {});
+      }
+    },
+    [auth, db, loadEmployee, loadEmployeeByDocId],
+  );
+
+  const enterPreview = useCallback(
+    async (id: string) => {
+      if (!user || !isSuperAdmin) return;
+      setPreviewEmpDocId(id);
+      await loadEmployeeByDocId(id, user);
+    },
+    [user, isSuperAdmin, loadEmployeeByDocId],
+  );
+
+  const exitPreview = useCallback(() => {
+    setPreviewEmpDocId(null);
+    setEmpDocId(null);
+    setEmployee(null);
+    setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+    setEmployeeProfileError(null);
+    setEmployeeProfileReady(true);
+    setEmployeeProfileLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void Linking.getInitialURL().then((url) => {
+      const emp = parsePreviewEmpFromUrl(url);
+      if (emp) pendingPreviewRef.current = emp;
+    });
+
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      const emp = parsePreviewEmpFromUrl(url);
+      if (!emp || !user || !isSuperAdmin) return;
+      void enterPreview(emp);
+    });
+
+    return () => sub.remove();
+  }, [user, isSuperAdmin, enterPreview]);
+
   useEffect(() => {
     const authReadyTimer = setTimeout(() => {
       setInitializing(false);
@@ -208,6 +354,9 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(authReadyTimer);
       setUser(nextUser);
       if (!nextUser) {
+        setIsSuperAdmin(false);
+        setPreviewEmpDocId(null);
+        pendingPreviewRef.current = null;
         setEmpDocId(null);
         setEmployee(null);
         setEmployeeProfileReady(false);
@@ -219,33 +368,19 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const okEmployee = await isEmployeeUser(nextUser, db);
-        if (!okEmployee) {
-          await firebaseSignOut(auth);
-          setUser(null);
-          setDeviceVerified(null);
-          setInitializing(false);
-          return;
-        }
-        await loadEmployee(nextUser);
-        const verified = await verifyDeviceForUser(nextUser, db);
-        setDeviceVerified(verified);
-        if (verified) {
-          const resolvedId = await resolveEmpDocIdWithRetry(db, nextUser, 2);
-          const empSnap = resolvedId ? await getDoc(doc(db, 'empleados', resolvedId)) : null;
-          const { registerPushNotifications } = await import('../lib/pushNotifications');
-          await registerPushNotifications({
-            user: nextUser,
-            db,
-            empDocId: resolvedId,
-            empresaId: (empSnap?.data()?.empresaId as string) ?? null,
-          }).catch(() => {});
-        }
+        const previewId = pendingPreviewRef.current;
+        pendingPreviewRef.current = null;
+        await bootstrapSession(nextUser, previewId);
       } catch (err) {
         const token = await nextUser.getIdTokenResult(true).catch(() => null);
         const role = normalizeRoleKey(String(token?.claims?.role ?? ''));
         const type = normalizeRoleKey(String(token?.claims?.type ?? ''));
-        if (EMPLOYEE_ROLES.includes(role) || EMPLOYEE_ROLES.includes(type)) {
+        const superAdmin = isSuperAdminRole(token?.claims?.role) || isSuperAdminRole(token?.claims?.type);
+        if (superAdmin) {
+          setIsSuperAdmin(true);
+          setDeviceVerified(true);
+          setEmployeeProfileReady(true);
+        } else if (EMPLOYEE_ROLES.includes(role) || EMPLOYEE_ROLES.includes(type)) {
           try {
             await loadEmployee(nextUser);
           } catch {
@@ -264,31 +399,20 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(authReadyTimer);
       unsub();
     };
-  }, [auth, db, loadEmployee]);
+  }, [auth, bootstrapSession, loadEmployee]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {
       try {
         const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+        const previewId = pendingPreviewRef.current;
+        pendingPreviewRef.current = null;
         const okEmployee = await isEmployeeUser(cred.user, db);
         if (!okEmployee) {
           await firebaseSignOut(auth);
           throw new Error('Esta app es solo para vigiladores. Usá el panel web para administración.');
         }
-        await loadEmployee(cred.user);
-        const verified = await verifyDeviceForUser(cred.user, db);
-        setDeviceVerified(verified);
-        if (verified) {
-          const resolvedId = await resolveEmpDocIdWithRetry(db, cred.user, 2);
-          const empSnap = resolvedId ? await getDoc(doc(db, 'empleados', resolvedId)) : null;
-          const { registerPushNotifications } = await import('../lib/pushNotifications');
-          await registerPushNotifications({
-            user: cred.user,
-            db,
-            empDocId: resolvedId,
-            empresaId: (empSnap?.data()?.empresaId as string) ?? null,
-          }).catch(() => {});
-        }
+        await bootstrapSession(cred.user, previewId);
       } catch (err) {
         if (isNetworkOrFirestoreError(err)) {
           throw new Error(
@@ -298,7 +422,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [auth, db, loadEmployee],
+    [auth, db, bootstrapSession],
   );
 
   const signOut = useCallback(async () => {
@@ -309,24 +433,35 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     }
     await firebaseSignOut(auth);
     setUser(null);
+    setIsSuperAdmin(false);
+    setPreviewEmpDocId(null);
     setEmpDocId(null);
     setEmployee(null);
     setEmployeeProfileReady(false);
     setDeviceVerified(null);
     setEmployeeProfileError(null);
-  }, [auth, db, loadEmployee]);
+  }, [auth, db]);
 
   const refreshEmployee = useCallback(async () => {
     if (!user) return;
+    if (isSuperAdmin && previewEmpDocId) {
+      await loadEmployeeByDocId(previewEmpDocId, user);
+      return;
+    }
     await loadEmployee(user);
     const verified = await verifyDeviceForUser(user, db);
     setDeviceVerified(verified);
-  }, [user, loadEmployee, db]);
+  }, [user, isSuperAdmin, previewEmpDocId, loadEmployee, loadEmployeeByDocId, db]);
+
+  const isPreviewMode = isSuperAdmin && !!previewEmpDocId;
 
   const value = useMemo(
     () => ({
       user,
       initializing,
+      isSuperAdmin,
+      isPreviewMode,
+      previewEmpDocId,
       employeeProfileLoading,
       employeeProfileReady,
       empDocId,
@@ -337,8 +472,28 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       refreshEmployee,
+      enterPreview,
+      exitPreview,
     }),
-    [user, initializing, employeeProfileLoading, employeeProfileReady, empDocId, employee, portalFeatures, deviceVerified, employeeProfileError, signIn, signOut, refreshEmployee],
+    [
+      user,
+      initializing,
+      isSuperAdmin,
+      isPreviewMode,
+      previewEmpDocId,
+      employeeProfileLoading,
+      employeeProfileReady,
+      empDocId,
+      employee,
+      portalFeatures,
+      deviceVerified,
+      employeeProfileError,
+      signIn,
+      signOut,
+      refreshEmployee,
+      enterPreview,
+      exitPreview,
+    ],
   );
 
   return <PortalAuthContext.Provider value={value}>{children}</PortalAuthContext.Provider>;
