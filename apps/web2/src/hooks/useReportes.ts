@@ -251,6 +251,8 @@ export type ReportFetchScope = {
     clientId?: string;
     objectiveId?: string;
     employeeId?: string;
+    /** Objetivos del cliente: los turnos a menudo no tienen clientId. */
+    clientObjectiveIds?: string[];
 };
 
 export function isShiftPublishedForReports(shift: any, publishStatusMap: Record<string, boolean>): boolean {
@@ -1054,33 +1056,101 @@ export function buildPayrollExportPayload(
     };
 }
 
-function buildReportTurnosQuery(
-    startDate: Date,
-    endDate: Date,
-    empresaId: string,
-    scopeEmpresa: boolean,
-    fetchScope?: ReportFetchScope,
-) {
-    const startTs = Timestamp.fromDate(startDate);
-    const endTs = Timestamp.fromDate(endDate);
-    const col = collection(db, 'turnos');
-    const empId = String(fetchScope?.employeeId ?? '').trim();
-    const objId = String(fetchScope?.objectiveId ?? '').trim();
+function collectObjectiveIdsForTurnosQuery(
+    fetchScope: ReportFetchScope | undefined,
+    aliasLookup: Record<string, ObjectiveMeta>,
+): string[] {
+    const wanted = new Set<string>();
+    const single = String(fetchScope?.objectiveId ?? '').trim();
     const cliId = String(fetchScope?.clientId ?? '').trim();
+    if (single) {
+        wanted.add(aliasLookup[single]?.canonicalId || single);
+    } else if (cliId) {
+        (fetchScope?.clientObjectiveIds || []).forEach((id) => {
+            const k = String(id || '').trim();
+            if (k) wanted.add(aliasLookup[k]?.canonicalId || k);
+        });
+        Object.values(aliasLookup).forEach((m) => {
+            if (m.clientId === cliId && m.canonicalId) wanted.add(m.canonicalId);
+        });
+    } else {
+        Object.values(aliasLookup).forEach((m) => {
+            if (m.canonicalId) wanted.add(m.canonicalId);
+        });
+    }
+    const ids = new Set<string>();
+    wanted.forEach((c) => ids.add(c));
+    Object.entries(aliasLookup).forEach(([key, m]) => {
+        if (m.canonicalId && wanted.has(m.canonicalId) && key) ids.add(key);
+    });
+    return [...ids].filter(Boolean);
+}
+
+async function fetchTurnosForReport(opts: {
+    startDate: Date;
+    endDate: Date;
+    empresaId: string;
+    scopeEmpresa: boolean;
+    fetchScope?: ReportFetchScope;
+    aliasLookup: Record<string, ObjectiveMeta>;
+}): Promise<any[]> {
+    const startTs = Timestamp.fromDate(opts.startDate);
+    const endTs = Timestamp.fromDate(opts.endDate);
+    const col = collection(db, 'turnos');
+    const empId = String(opts.fetchScope?.employeeId ?? '').trim();
 
     if (empId) {
-        return query(col, where('employeeId', '==', empId), where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+        const snap = await getDocs(query(
+            col,
+            where('employeeId', '==', empId),
+            where('startTime', '>=', startTs),
+            where('startTime', '<=', endTs),
+        ));
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
-    if (objId) {
-        return query(col, where('objectiveId', '==', objId), where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+
+    const objectiveIds = collectObjectiveIdsForTurnosQuery(opts.fetchScope, opts.aliasLookup);
+    if (objectiveIds.length === 0) {
+        const q = opts.scopeEmpresa
+            ? query(col, where('empresaId', '==', opts.empresaId), where('startTime', '>=', startTs), where('startTime', '<=', endTs))
+            : query(col, where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+        const snap = await getDocs(q);
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
-    if (cliId) {
-        return query(col, where('clientId', '==', cliId), where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+
+    const byId = new Map<string, any>();
+    const chunkSize = 8;
+    for (let i = 0; i < objectiveIds.length; i += chunkSize) {
+        const chunk = objectiveIds.slice(i, i + chunkSize);
+        const snaps = await Promise.all(chunk.map((oid) => getDocs(query(
+            col,
+            where('objectiveId', '==', oid),
+            where('startTime', '>=', startTs),
+            where('startTime', '<=', endTs),
+        ))));
+        snaps.forEach((snap) => {
+            snap.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() }));
+        });
     }
-    if (scopeEmpresa) {
-        return query(col, where('empresaId', '==', empresaId), where('startTime', '>=', startTs), where('startTime', '<=', endTs));
-    }
-    return query(col, where('startTime', '>=', startTs), where('startTime', '<=', endTs));
+    return [...byId.values()];
+}
+
+function shiftBelongsToClient(
+    shift: any,
+    cliId: string,
+    objectiveAliases: Record<string, ObjectiveMeta>,
+    clientObjectiveIds?: string[],
+): boolean {
+    if (!cliId) return true;
+    const shiftCli = String(shift?.clientId ?? '').trim();
+    if (shiftCli && shiftCli === cliId) return true;
+    const shiftObj = String(shift?.objectiveId ?? '').trim();
+    if (!shiftObj) return false;
+    if (clientObjectiveIds?.includes(shiftObj)) return true;
+    const meta = objectiveAliases[shiftObj];
+    if (meta?.clientId === cliId) return true;
+    if (meta?.canonicalId && clientObjectiveIds?.includes(meta.canonicalId)) return true;
+    return false;
 }
 
 function shiftMatchesFetchScope(
@@ -1093,7 +1163,7 @@ function shiftMatchesFetchScope(
     const objId = String(fetchScope.objectiveId ?? '').trim();
     const cliId = String(fetchScope.clientId ?? '').trim();
     if (empId && String(shift.employeeId ?? '') !== empId) return false;
-    if (cliId && String(shift.clientId ?? '') !== cliId) return false;
+    if (cliId && !shiftBelongsToClient(shift, cliId, objectiveAliases, fetchScope.clientObjectiveIds)) return false;
     if (objId) {
         const shiftObj = String(shift.objectiveId ?? '').trim();
         if (!shiftObj) return false;
@@ -1280,6 +1350,16 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const fromCatalog = aliasLookup[canonicalId];
                 if (!cid && fromCatalog?.clientId) cid = fromCatalog.clientId;
                 if (forcedClientId && cid && cid !== forcedClientId) return;
+                const scopeCli = String(fetchScope?.clientId ?? '').trim();
+                const scopeObj = String(fetchScope?.objectiveId ?? '').trim();
+                if (scopeCli && cid && cid !== scopeCli) return;
+                if (scopeObj) {
+                    const picked = aliasLookup[scopeObj];
+                    const sameObj = canonicalId === scopeObj
+                        || matchKeys.includes(scopeObj)
+                        || (!!picked && picked.canonicalId === canonicalId);
+                    if (!sameObj) return;
+                }
 
                 const meta: ObjectiveMeta = fromCatalog ?? {
                     canonicalId,
@@ -1302,14 +1382,12 @@ export const useReportes = (forcedClientId?: string | null) => {
                 registerObjectiveMetaAliases(aliasLookup, meta, [...matchKeys, d.id]);
             });
 
-            // Consulta acotada por alcance (empleado > objetivo > cliente > empresa + fechas)
-            const q = buildReportTurnosQuery(startDate, endDate, empresaId, scopeEmpresa, fetchScope);
             const scopeEmpId = String(fetchScope?.employeeId ?? '').trim();
             const scopeObjId = String(fetchScope?.objectiveId ?? '').trim();
             const rangeStartYmd = dateRange.start;
             const rangeEndYmd = dateRange.end;
 
-            const [planifDocs, shiftsSnap, ausDocs, ajustesDocs] = await Promise.all([
+            const [planifDocs, fetchedTurnos, ausDocs, ajustesDocs] = await Promise.all([
                 fetchReportPlanificacionEstados(
                     empresaId,
                     scopeEmpresa,
@@ -1317,7 +1395,14 @@ export const useReportes = (forcedClientId?: string | null) => {
                     rangeEndYmd,
                     scopeObjId || undefined,
                 ),
-                getDocs(q),
+                fetchTurnosForReport({
+                    startDate,
+                    endDate,
+                    empresaId,
+                    scopeEmpresa,
+                    fetchScope,
+                    aliasLookup,
+                }),
                 fetchReportAusencias(
                     empresaId,
                     scopeEmpresa,
@@ -1344,8 +1429,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             });
 
             // Base sin publishFilter: necesario para detectar FT (el turno F puede ser borrador)
-            const allShiftsBase = shiftsSnap.docs
-                .map(doc => ({ id: doc.id, ...doc.data() }))
+            const allShiftsBase = fetchedTurnos
                 .filter((d: any) => {
                     // Aceptar turno si tiene tiempos planificados O tiempos reales
                     const hasPlanned = d.startTime && typeof d.startTime.toDate === 'function';

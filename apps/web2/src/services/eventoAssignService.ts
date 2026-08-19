@@ -138,28 +138,30 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
         });
     }
 
-    // 4. Notificación a planificación sobre la vacante
-    if (notifyPlannerUid && originalObjectiveId) {
+    // 4. Notificación a planificación sobre la vacante (en 'novedades' para que aparezca en el bell panel)
+    if (originalObjectiveId) {
         const [y, m, d2] = servicioFecha.split('-');
         const fechaLabel = `${d2}/${m}/${y}`;
         const notifPayload = stampEmpresaId({
-            uid:   notifyPlannerUid,
-            tipo:  'VACANTE_POR_EVENTO',
-            titulo: `Vacante por evento: ${empleadoNombre}`,
-            mensaje: `${empleadoNombre} sale al evento "${eventoNombre}" el ${fechaLabel}. `
+            type:         'VACANTE_POR_EVENTO',
+            status:       'pending',
+            viewed:       false,
+            priority:     'high',
+            actionTarget: 'PLANIFICACION',
+            title:        `Vacante por evento · ${empleadoNombre}`,
+            description:  `${empleadoNombre} sale al evento "${eventoNombre}" el ${fechaLabel}. `
                 + `Queda vacante turno ${originalCode || '—'} en ${originalObjectiveName || originalObjectiveId}.`,
             objectiveId:   originalObjectiveId,
             objectiveName: originalObjectiveName,
             fecha:         servicioFecha,
             codigoTurnoOriginal: originalCode,
-            empleadoId,
-            empleadoNombre,
+            employeeId:    empleadoId,
+            employeeName:  empleadoNombre,
             eventoId,
             eventoNombre,
-            read: false,
             createdAt: serverTimestamp(),
         } as Record<string, unknown>, empresaId);
-        batch.set(doc(collection(db, 'user_notifications')), notifPayload);
+        batch.set(doc(collection(db, 'novedades')), notifPayload);
     }
 
     await batch.commit();

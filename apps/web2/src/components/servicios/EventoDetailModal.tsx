@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     X, Calendar, Users, MapPin, Search, Send,
     CheckCircle, Clock, ChevronRight,
+    UserCheck, UserX, ClipboardCheck,
 } from 'lucide-react';
-import { collection, addDoc, getDocs, query, where, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, where, serverTimestamp, onSnapshot, updateDoc, doc } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import { empresaCollectionQuery } from '@/lib/multiempresa';
@@ -81,9 +82,11 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [sending, setSending] = useState(false);
     const [loadingAvail, setLoadingAvail] = useState(false);
-    const [tab, setTab] = useState<'convocar' | 'estado'>('convocar');
+    const [tab, setTab] = useState<'convocar' | 'estado' | 'cronograma'>('convocar');
     const [aptitudCatalog, setAptitudCatalog] = useState<AptitudType[]>([]);
     const [soloRequisitos, setSoloRequisitos] = useState(false);
+    const [evTurnos, setEvTurnos] = useState<any[]>([]);
+    const [loadingCrono, setLoadingCrono] = useState(false);
 
     const selectedSrv = evento.servicios?.find(s => s.id === selectedSrvId) || null;
 
@@ -111,6 +114,31 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     useEffect(() => {
         aptitudTypeService.ensureSeeded(empresaId).then(setAptitudCatalog).catch(() => {});
     }, [empresaId]);
+
+    // Suscripción en tiempo real a turnos EV del evento
+    useEffect(() => {
+        if (!evento.id) return;
+        setLoadingCrono(true);
+        const q = query(
+            collection(db, 'turnos'),
+            where('empresaId', '==', empresaId),
+            where('eventoId', '==', evento.id),
+        );
+        const unsub = onSnapshot(q, snap => {
+            setEvTurnos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            setLoadingCrono(false);
+        }, () => setLoadingCrono(false));
+        return unsub;
+    }, [evento.id, empresaId]);
+
+    async function handleTogglePresence(turnoId: string, field: 'isPresent' | 'isAbsent' | 'isCompleted', value: boolean) {
+        try {
+            await updateDoc(doc(db, 'turnos', turnoId), { [field]: value });
+        } catch (e) {
+            console.error(e);
+            addToast('Error al actualizar presencia', 'error');
+        }
+    }
 
     // Cargar solicitudes del evento
     const loadSolicitudes = useCallback(async () => {
@@ -322,15 +350,18 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
 
                             {/* Tabs */}
                             <div className="flex border-b border-slate-200 dark:border-slate-700 px-4 shrink-0">
-                                {(['convocar', 'estado'] as const).map(t => (
+                                {(['convocar', 'estado', 'cronograma'] as const).map(t => (
                                     <button
                                         key={t}
                                         onClick={() => setTab(t)}
                                         className={`px-4 py-2.5 text-[11px] font-black transition-colors border-b-2 flex items-center gap-1.5 ${tab === t ? 'border-yellow-500 text-yellow-700 dark:text-yellow-400' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                                     >
-                                        {t === 'convocar' ? 'Convocar guardias' : 'Estado convocatoria'}
+                                        {t === 'convocar' ? 'Convocar guardias' : t === 'estado' ? 'Estado convocatoria' : 'Cronograma'}
                                         {t === 'estado' && srvSols.length > 0 && (
                                             <span className="bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full px-1.5 py-0.5 text-[8px]">{srvSols.length}</span>
+                                        )}
+                                        {t === 'cronograma' && evTurnos.length > 0 && (
+                                            <span className="bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 rounded-full px-1.5 py-0.5 text-[8px]">{evTurnos.length}</span>
                                         )}
                                     </button>
                                 ))}
@@ -435,6 +466,79 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                             <p className="text-[11px] text-slate-400 text-center py-8">Sin resultados</p>
                                         )}
                                     </div>
+                                </div>
+                            )}
+
+                            {/* Tab: Cronograma */}
+                            {tab === 'cronograma' && (
+                                <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+                                    {loadingCrono ? (
+                                        <p className="text-[11px] text-slate-400 text-center py-10">Cargando…</p>
+                                    ) : evTurnos.length === 0 ? (
+                                        <p className="text-[11px] text-slate-400 text-center py-10">
+                                            Sin guardias asignados aún. Confirmá convocatorias desde "Estado convocatoria".
+                                        </p>
+                                    ) : (
+                                        (evento.servicios || []).map(srv => {
+                                            const srvT = evTurnos.filter(t => t.servicioId === srv.id);
+                                            if (srvT.length === 0) return null;
+                                            return (
+                                                <section key={srv.id}>
+                                                    <p className="text-[9px] font-black uppercase text-slate-400 tracking-wide mb-2 flex items-center gap-1.5">
+                                                        <span>{srv.nombre}</span>
+                                                        <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-black">{fmtFecha(srv.fecha)}</span>
+                                                        <span className="bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 px-1.5 py-0.5 rounded font-black">{horarioBadge(srv)}</span>
+                                                    </p>
+                                                    <div className="space-y-1.5">
+                                                        {srvT.map(turno => (
+                                                            <div key={turno.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">
+                                                                        {turno.employeeName || turno.employeeId}
+                                                                    </p>
+                                                                    <p className="text-[9px] text-slate-400">
+                                                                        {String(turno.startTime || '').slice(11, 16) || '—'}–{String(turno.endTime || '').slice(11, 16) || '—'}
+                                                                        {turno.replacedCode ? ` · reemplaza ${turno.replacedCode}` : ''}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center gap-1 shrink-0">
+                                                                    <button
+                                                                        onClick={() => void handleTogglePresence(turno.id, 'isPresent', !turno.isPresent)}
+                                                                        title="Marcar presente"
+                                                                        className={`p-1.5 rounded-lg transition-colors ${turno.isPresent ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 hover:bg-emerald-50'}`}
+                                                                    >
+                                                                        <UserCheck size={13}/>
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => void handleTogglePresence(turno.id, 'isAbsent', !turno.isAbsent)}
+                                                                        title="Marcar ausente"
+                                                                        className={`p-1.5 rounded-lg transition-colors ${turno.isAbsent ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 hover:bg-rose-50'}`}
+                                                                    >
+                                                                        <UserX size={13}/>
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => void handleTogglePresence(turno.id, 'isCompleted', !turno.isCompleted)}
+                                                                        title="Marcar completado"
+                                                                        className={`p-1.5 rounded-lg transition-colors ${turno.isCompleted ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 hover:bg-blue-50'}`}
+                                                                    >
+                                                                        <ClipboardCheck size={13}/>
+                                                                    </button>
+                                                                </div>
+                                                                <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-black shrink-0 ${
+                                                                    turno.isCompleted ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' :
+                                                                    turno.isPresent   ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' :
+                                                                    turno.isAbsent    ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400' :
+                                                                    'bg-slate-100 dark:bg-slate-700 text-slate-400 dark:text-slate-500'
+                                                                }`}>
+                                                                    {turno.isCompleted ? 'Completó' : turno.isPresent ? 'Presente' : turno.isAbsent ? 'Ausente' : 'Sin fichar'}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            );
+                                        })
+                                    )}
                                 </div>
                             )}
 
