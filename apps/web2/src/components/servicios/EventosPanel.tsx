@@ -48,13 +48,13 @@ function mesLabel(mes: string): string {
 
 // ── Status config ──────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<string, { label: string; ring: string; text: string }> = {
-    borrador:  { label: 'Borrador',  ring: 'bg-slate-100 dark:bg-slate-700',         text: 'text-slate-500 dark:text-slate-300' },
-    abierto:   { label: 'Abierto',   ring: 'bg-blue-100 dark:bg-blue-900/30',         text: 'text-blue-700 dark:text-blue-300' },
-    en_curso:  { label: 'En curso',  ring: 'bg-yellow-100 dark:bg-yellow-900/30',     text: 'text-yellow-700 dark:text-yellow-300' },
-    ejecutado: { label: 'Ejecutado', ring: 'bg-green-100 dark:bg-green-900/30',       text: 'text-green-700 dark:text-green-300' },
-    cancelado: { label: 'Cancelado', ring: 'bg-rose-100 dark:bg-rose-900/30',         text: 'text-rose-700 dark:text-rose-400' },
-    activo:    { label: 'Activo',    ring: 'bg-blue-100 dark:bg-blue-900/30',         text: 'text-blue-700 dark:text-blue-300' },
+const STATUS_CONFIG: Record<string, { label: string; dot: string }> = {
+    borrador:  { label: 'Borrador',  dot: 'bg-slate-400' },
+    abierto:   { label: 'Abierto',   dot: 'bg-sky-500' },
+    en_curso:  { label: 'En curso',  dot: 'bg-amber-500' },
+    ejecutado: { label: 'Ejecutado', dot: 'bg-emerald-500' },
+    cancelado: { label: 'Cancelado', dot: 'bg-rose-400' },
+    activo:    { label: 'Activo',    dot: 'bg-sky-500' },
 };
 
 const TURNO_LABELS: Record<TipoTurnoEvento, string> = {
@@ -212,6 +212,20 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
             const uid = getAuth().currentUser?.uid || '';
 
             if (status === 'aprobada') {
+                // Cupo enforcement
+                const evento = eventos.find(e => e.id === sol.eventoId);
+                const servicio = evento?.servicios?.find(s => s.id === sol.servicioId);
+                const cupoServicio = servicio?.cupo || 0;
+                if (cupoServicio > 0) {
+                    const aprobados = (solicitudesMap[sol.eventoId] || []).filter(
+                        s => s.servicioId === sol.servicioId && s.status === 'aprobada'
+                    ).length;
+                    if (aprobados >= cupoServicio) {
+                        addToast(`Cupo completo para "${servicio?.nombre || 'este servicio'}" (${aprobados}/${cupoServicio} pax)`, 'error');
+                        setRespondiendo(null);
+                        return;
+                    }
+                }
                 // Buscar el servicio para obtener horario y horas
                 const evento = eventos.find(e => e.id === sol.eventoId);
                 const servicio = evento?.servicios?.find(s => s.id === sol.servicioId);
@@ -903,52 +917,45 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                         return (
                             <div
                                 key={ev.id}
-                                className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden hover:border-yellow-300 dark:hover:border-yellow-700 transition-colors"
+                                className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
                             >
-                                <div className="p-4 space-y-3">
-                                    <div className="flex items-start justify-between gap-2">
-                                        <h3 className="text-sm font-black text-slate-800 dark:text-white leading-tight">{ev.nombre}</h3>
-                                        <div className="flex items-center gap-1.5 shrink-0">
-                                            {pendientes > 0 && (
-                                                <span className="px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 rounded-full text-[9px] font-black">
-                                                    {pendientes} sol.
-                                                </span>
-                                            )}
-                                            {totalCupo > 0 && (
-                                                <button
-                                                    onClick={() => toggleStaffing(ev)}
-                                                    className={`px-1.5 py-0.5 rounded-full text-[9px] font-black transition-colors ${totalAsignados >= totalCupo ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : totalAsignados > 0 ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}
-                                                    title="Ver personal asignado"
-                                                >
-                                                    {totalAsignados}/{totalCupo} pax
-                                                </button>
-                                            )}
-                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase whitespace-nowrap ${sc.ring} ${sc.text}`}>
-                                                {sc.label}
+                                <div className="p-4">
+                                    {/* Nombre + status */}
+                                    <div className="flex items-start justify-between gap-2 mb-1">
+                                        <h3 className="text-sm font-semibold text-slate-800 dark:text-white leading-snug">{ev.nombre}</h3>
+                                        <span className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0 mt-0.5">
+                                            <span className={`w-1.5 h-1.5 rounded-full ${sc.dot} shrink-0`}/>
+                                            {sc.label}
+                                        </span>
+                                    </div>
+                                    {/* Cliente */}
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">{ev.clienteNombre}</p>
+                                    {/* Meta */}
+                                    <div className="flex items-center gap-3 text-[11px] text-slate-400 dark:text-slate-500 mb-3 flex-wrap">
+                                        <span className="flex items-center gap-1"><Calendar size={10}/>{fmtFechaRango(ev)}</span>
+                                        {nSrv > 0 && <span>{nSrv} {nSrv === 1 ? 'servicio' : 'servicios'}</span>}
+                                        {totalCupo > 0 && <span>· {totalCupo} pax</span>}
+                                        {totalCupo > 0 && (
+                                            <span className={`flex items-center gap-1 font-mono tabular-nums ml-auto ${totalAsignados >= totalCupo ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                                                {totalAsignados >= totalCupo && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"/>}
+                                                {totalAsignados}/{totalCupo} asignados
                                             </span>
-                                        </div>
-                                    </div>
-                                    <div className="text-xs text-slate-500 dark:text-slate-400 space-y-1">
-                                        <div className="font-bold text-slate-600 dark:text-slate-300">{ev.clienteNombre}</div>
-                                        <div className="flex items-center gap-1">
-                                            <Calendar size={11}/> {fmtFechaRango(ev)}
-                                        </div>
-                                        {nSrv > 0 && (
-                                            <div className="flex items-center gap-3">
-                                                <span>{nSrv} {nSrv === 1 ? 'servicio' : 'servicios'}</span>
-                                                {totalCupo > 0 && <><span>·</span><span>{totalCupo} pax total</span></>}
-                                            </div>
-                                        )}
-                                        {ev.descripcion && (
-                                            <p className="text-slate-400 line-clamp-2 pt-0.5">{ev.descripcion}</p>
                                         )}
                                     </div>
-                                    <div className="flex items-center gap-2 pt-1 border-t border-slate-50 dark:border-slate-700">
-                                        {/* Botón principal: Gestionar (abre modal de convocatoria/asignación) */}
+                                    {pendientes > 0 && (
+                                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mb-3">
+                                            {pendientes} solicitud{pendientes !== 1 ? 'es' : ''} pendiente{pendientes !== 1 ? 's' : ''}
+                                        </p>
+                                    )}
+                                    {ev.descripcion && (
+                                        <p className="text-[11px] text-slate-400 dark:text-slate-500 line-clamp-2 mb-3">{ev.descripcion}</p>
+                                    )}
+                                    {/* Acciones */}
+                                    <div className="flex items-center gap-1 pt-3 border-t border-slate-100 dark:border-slate-700/60">
                                         {ev.status !== 'cancelado' && (ev.servicios || []).length > 0 && (
                                             <button
                                                 onClick={() => setDetailEvento(ev)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded-xl text-xs font-black uppercase transition-colors shadow-sm"
+                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-medium transition-colors"
                                             >
                                                 <Users size={11}/> Gestionar
                                             </button>
@@ -956,73 +963,83 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                         {(canUpdate || canCreate) && ev.status !== 'cancelado' && (
                                             <button
                                                 onClick={() => openEdit(ev)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-black uppercase hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
+                                                className="px-3 py-1.5 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-xs font-medium transition-colors rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50"
                                             >
-                                                <Edit2 size={11}/> Editar
+                                                Editar
                                             </button>
                                         )}
                                         {sols.length > 0 && (
                                             <button
                                                 onClick={() => setExpandedSolicitudes(prev => ({ ...prev, [ev.id!]: !solExpanded }))}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800/50 rounded-xl text-xs font-black uppercase hover:bg-yellow-100 dark:hover:bg-yellow-900/40 transition-colors ml-auto"
+                                                className="ml-auto flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors px-1"
                                             >
-                                                <Users size={11}/> {sols.length} solicitud{sols.length > 1 ? 'es' : ''}
+                                                {sols.length} solicitud{sols.length !== 1 ? 'es' : ''}
                                                 {solExpanded ? <ChevronUp size={10}/> : <ChevronDown size={10}/>}
                                             </button>
                                         )}
                                         {canDelete && ev.status !== 'cancelado' && (
                                             <button
                                                 onClick={() => void cancelEvento(ev)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 dark:bg-rose-900/20 text-rose-500 dark:text-rose-400 border border-rose-100 dark:border-rose-900/50 rounded-xl text-xs font-black uppercase hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
+                                                className="text-xs text-slate-300 dark:text-slate-600 hover:text-rose-400 dark:hover:text-rose-400 font-medium transition-colors px-2 py-1.5 rounded-lg"
                                             >
-                                                <X size={11}/> Cancelar
+                                                Cancelar
                                             </button>
                                         )}
                                         {canDelete && ev.status === 'cancelado' && (
                                             <button
                                                 onClick={() => void deleteEvento(ev)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800 rounded-xl text-xs font-black uppercase hover:bg-rose-200 dark:hover:bg-rose-900/60 transition-colors"
+                                                className="text-xs text-slate-300 dark:text-slate-600 hover:text-rose-400 dark:hover:text-rose-400 font-medium transition-colors px-2 py-1.5 rounded-lg"
                                             >
-                                                <Trash2 size={11}/> Eliminar
+                                                Eliminar
                                             </button>
                                         )}
                                     </div>
                                 </div>
-                                {/* Panel de solicitudes */}
+                                {/* Solicitudes inline */}
                                 {solExpanded && sols.length > 0 && (
-                                    <div className="border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                                        <div className="px-4 py-2 text-[10px] font-black uppercase text-slate-400 tracking-wide">Solicitudes de guardias</div>
-                                        <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                                            {sols.map(sol => (
-                                                <div key={sol.id} className="px-4 py-2.5 flex items-center justify-between gap-3">
-                                                    <div className="min-w-0">
-                                                        <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{sol.empleadoNombre}</p>
-                                                        <p className="text-[10px] text-slate-400 truncate">{sol.servicioNombre} · {sol.servicioFecha}</p>
-                                                    </div>
-                                                    {sol.status === 'pendiente' ? (
-                                                        <div className="flex items-center gap-1.5 shrink-0">
-                                                            <button
-                                                                onClick={() => void handleResponder(sol, 'aprobada')}
-                                                                disabled={respondiendo === sol.id}
-                                                                className="flex items-center gap-1 px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-lg text-[10px] font-black hover:bg-emerald-200 disabled:opacity-50 transition-colors"
-                                                            >
-                                                                <CheckCircle size={10}/> Aprobar
-                                                            </button>
-                                                            <button
-                                                                onClick={() => void handleResponder(sol, 'rechazada')}
-                                                                disabled={respondiendo === sol.id}
-                                                                className="flex items-center gap-1 px-2 py-1 bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 rounded-lg text-[10px] font-black hover:bg-rose-200 disabled:opacity-50 transition-colors"
-                                                            >
-                                                                <XCircle size={10}/> Rechazar
-                                                            </button>
+                                    <div className="border-t border-slate-100 dark:border-slate-700/60">
+                                        <div className="divide-y divide-slate-50 dark:divide-slate-700/40">
+                                            {sols.map(sol => {
+                                                const cupoServicio = (ev.servicios || []).find(s => s.id === sol.servicioId)?.cupo || 0;
+                                                const aprobadosServicio = sols.filter(s => s.servicioId === sol.servicioId && s.status === 'aprobada').length;
+                                                const cupoLleno = cupoServicio > 0 && aprobadosServicio >= cupoServicio;
+                                                const isPending = sol.status === 'pendiente' || sol.status === 'convocado';
+                                                return (
+                                                    <div key={sol.id} className="px-4 py-2.5 flex items-center gap-3">
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="text-[11px] font-medium text-slate-700 dark:text-slate-200 truncate">{sol.empleadoNombre}</p>
+                                                            <p className="text-[10px] text-slate-400 truncate">{sol.servicioNombre} · {fmtFecha(sol.servicioFecha)}</p>
                                                         </div>
-                                                    ) : (
-                                                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${sol.status === 'aprobada' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' : 'bg-rose-100 dark:bg-rose-900/30 text-rose-500 dark:text-rose-400'}`}>
-                                                            {sol.status === 'aprobada' ? 'Aprobada' : 'Rechazada'}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            ))}
+                                                        {isPending ? (
+                                                            <div className="flex items-center gap-0.5 shrink-0">
+                                                                <button
+                                                                    onClick={() => void handleResponder(sol, 'aprobada')}
+                                                                    disabled={respondiendo === sol.id || cupoLleno}
+                                                                    title={cupoLleno ? 'Cupo completo' : 'Aceptar'}
+                                                                    className="p-1.5 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                                                >
+                                                                    <CheckCircle size={13}/>
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => void handleResponder(sol, 'rechazada')}
+                                                                    disabled={respondiendo === sol.id}
+                                                                    title="Rechazar"
+                                                                    className="p-1.5 rounded text-slate-400 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 disabled:opacity-30 transition-colors"
+                                                                >
+                                                                    <XCircle size={13}/>
+                                                                </button>
+                                                                {cupoLleno && (
+                                                                    <span className="text-[9px] text-slate-400 italic ml-1">Cupo lleno</span>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <span className={`text-[10px] ${sol.status === 'aprobada' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`}>
+                                                                {sol.status === 'aprobada' ? 'Aceptada' : 'Rechazada'}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 )}
