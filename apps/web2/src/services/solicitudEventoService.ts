@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
-export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada';
+export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada' | 'cerrada' | 'reserva';
 export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca';
 
 export interface SolicitudEvento {

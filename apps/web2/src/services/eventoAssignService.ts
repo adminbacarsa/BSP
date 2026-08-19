@@ -2,6 +2,7 @@ import { db } from '@/lib/firebase';
 import {
     collection,
     doc,
+    getDoc,
     getDocs,
     query,
     where,
@@ -74,12 +75,22 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
     const originalCode = existingTurno
         ? String(existingTurno.data().code || '').toUpperCase()
         : null;
-    const originalObjectiveId = existingTurno?.data().objectiveId
-        || empleadoObjectiveId
-        || null;
-    const originalObjectiveName = existingTurno?.data().objectiveName
-        || empleadoObjectiveName
-        || null;
+
+    let originalObjectiveId: string | null = existingTurno?.data().objectiveId || empleadoObjectiveId || null;
+    let originalObjectiveName: string | null = existingTurno?.data().objectiveName || empleadoObjectiveName || null;
+
+    // Si no tenemos objectiveId (guardia sin turno ese día y sin objetivo pasado),
+    // consultamos el documento del empleado para obtener su objetivo habitual.
+    if (!originalObjectiveId) {
+        try {
+            const empSnap = await getDoc(doc(db, 'empleados', empleadoId));
+            if (empSnap.exists()) {
+                const empData = empSnap.data() as any;
+                originalObjectiveId = empData.preferredObjectiveId || empData.objectiveId || null;
+                originalObjectiveName = empData.preferredObjectiveName || empData.objectiveName || null;
+            }
+        } catch { /* continuar con null si falla */ }
+    }
 
     const batch = writeBatch(db);
 
