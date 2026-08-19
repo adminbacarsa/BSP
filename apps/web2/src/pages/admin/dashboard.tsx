@@ -16,7 +16,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
 import { calculateSlaHoursForMonth } from '@/lib/servicios/slaHoursCalculator';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
-import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
+import { buildDemandaByObjective, coveragePlannedBillableHours } from '@/lib/analisis/analisisDemanda';
 import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
@@ -824,7 +824,11 @@ function AdminDashboard() {
         objectiveAliases,
         slaExclusionCtx,
       });
-      mTotalHrs = Math.round(demandaMes.totals.planHours);
+      mTotalHrs = Math.round(coveragePlannedBillableHours(
+        demandaMes.totals.planHours,
+        demandaMes.totals.extHours,
+        demandaMes.totals.adelHours,
+      ));
 
       // Para servicios en riesgo: agrupar por objetivo
       const objRiesgoMap: Record<string, {client:string;name:string;total:number;vacantes:number;ausentes:number}> = {};

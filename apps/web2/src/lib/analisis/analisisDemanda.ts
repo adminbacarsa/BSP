@@ -29,6 +29,16 @@ function isExtensionShift(t: any): boolean {
   return t?.isExtended === true || String(t?.coverageSegmentRole || '').toUpperCase() === 'EXTENSION';
 }
 
+export function coveragePlannedBillableHours(plan: number, ext = 0, adel = 0): number {
+  return Math.round((plan + ext + adel) * 10) / 10;
+}
+
+export function coveragePlannedFromDemandaRow(
+  row: Pick<DemandaObjectiveRow, 'planHours' | 'extHours' | 'adelHours'>,
+): number {
+  return coveragePlannedBillableHours(row.planHours, row.extHours, row.adelHours);
+}
+
 export function buildDemandaByObjective(opts: {
   turnos: any[];
   ausenciasStats: AusenciasStats | null;

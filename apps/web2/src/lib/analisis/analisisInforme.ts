@@ -11,6 +11,7 @@ import {
   isVacantShift,
 } from './analisisQueries';
 import { CCT_HS_TECHO_MENSUAL } from './analisisBolsa';
+import { coveragePlannedBillableHours } from './analisisDemanda';
 import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
 
 export type InformeBalanceRow = {
@@ -102,8 +103,9 @@ export function buildInformeAnalitico(opts: {
 }): InformeAnalitico {
   const { plantel, demandaTotals: d, ausenciasStats, turnos, bolsa } = opts;
   const hsVendidas = r1(d.slaHours);
-  const hsPlanificadas = r1(d.planHours);
+  const hsPlanBase = r1(d.planHours);
   const hsExtras50 = r1(d.extHours + d.adelHours);
+  const hsPlanificadas = coveragePlannedBillableHours(d.planHours, d.extHours, d.adelHours);
   const hsFT100 = r1(d.ftHours);
   const hsOps = r1(d.opsHours);
   const hsVacante = r1(d.vacantHours);

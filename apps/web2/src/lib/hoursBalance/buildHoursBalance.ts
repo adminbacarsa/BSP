@@ -181,7 +181,7 @@ export function sumBalancesByClient(rows: HoursBalanceRow[]): Record<string, {
     const prev = acc[cid] || { sla: 0, planned: 0, real: 0, resultante: 0 };
     acc[cid] = {
       sla: round1(prev.sla + r.slaHours),
-      planned: round1(prev.planned + r.plannedHours),
+      planned: round1(prev.planned + r.plannedHours + r.extHours + r.adelHours),
       real: round1(prev.real + r.realHours),
       resultante: round1(prev.resultante + r.resultante),
     };
@@ -199,7 +199,7 @@ export function sumBalancesByPeriodKey(rows: HoursBalanceRow[]): Record<string, 
     const prev = acc[r.periodKey] || { sla: 0, planned: 0, real: 0 };
     acc[r.periodKey] = {
       sla: round1(prev.sla + r.slaHours),
-      planned: round1(prev.planned + r.plannedHours),
+      planned: round1(prev.planned + r.plannedHours + r.extHours + r.adelHours),
       real: round1(prev.real + r.realHours),
     };
   }
