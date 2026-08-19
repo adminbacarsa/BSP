@@ -116,6 +116,14 @@ export default function PlanningCronogramasOverviewModal({
 
   const totalOpenVacancies = useMemo(() => rows.reduce((acc, r) => acc + (r.openVacancies || 0), 0), [rows]);
   const objectivesWithOpenVacancies = useMemo(() => rows.filter((r) => r.openVacancies > 0).length, [rows]);
+  const totalPlannedHours = useMemo(
+    () => filtered.reduce((acc, r) => acc + (r.plannedHours || 0), 0),
+    [filtered],
+  );
+  const portfolioPlannedHours = useMemo(
+    () => rows.reduce((acc, r) => acc + (r.plannedHours || 0), 0),
+    [rows],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -265,19 +273,22 @@ export default function PlanningCronogramasOverviewModal({
             </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto rounded-2xl border border-slate-200 shadow-sm bg-white overscroll-contain">
-              <table className="w-full text-[11px] border-collapse min-w-[820px]">
+              <table className="w-full text-[11px] border-collapse min-w-[900px]">
                 <thead className="sticky top-0 z-20">
                   <tr className="bg-slate-100 border-b-2 border-slate-200 shadow-sm">
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[18%] bg-slate-100">
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[16%] bg-slate-100">
                       Cliente
                     </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[20%] bg-slate-100">
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[18%] bg-slate-100">
                       Objetivo
                     </th>
-                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[18%] bg-slate-100">
+                    <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[16%] bg-slate-100">
                       Estado
                     </th>
-                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[10%] bg-slate-100">
+                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-indigo-600 px-4 py-3 border-r border-slate-200 w-[9%] bg-indigo-50/50">
+                      Hs plan
+                    </th>
+                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[9%] bg-slate-100">
                       Turnos
                     </th>
                     <th className="text-center text-[9px] font-black uppercase tracking-wider text-orange-600 px-3 py-3 border-r border-slate-200 w-[8%] bg-orange-50/60">
@@ -339,6 +350,13 @@ export default function PlanningCronogramasOverviewModal({
                               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ESTADO_DOT[r.estado]}`} />
                               {CRONOGRAMA_ESTADO_LABEL[r.estado]}
                             </span>
+                          </td>
+                          <td className="px-4 py-2.5 border-r border-slate-100 text-right font-black tabular-nums text-indigo-700">
+                            {r.plannedHours > 0 ? (
+                              <span>{r.plannedHours.toLocaleString('es-AR')} hs</span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
                           </td>
                           <td className="px-4 py-2.5 border-r border-slate-100 text-right font-mono text-[10px]">
                             {r.totalShifts === 0 ? (
@@ -425,6 +443,16 @@ export default function PlanningCronogramasOverviewModal({
               <p className="text-[10px] font-black text-slate-600">
                 {filtered.length} de {rows.length} objetivo(s) visibles
               </p>
+              {totalPlannedHours > 0 && (
+                <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-lg tabular-nums">
+                  Σ visible: {Math.round(totalPlannedHours).toLocaleString('es-AR')} hs plan
+                </span>
+              )}
+              {portfolioPlannedHours > 0 && filtered.length !== rows.length && (
+                <span className="text-[10px] font-bold text-slate-500 tabular-nums">
+                  Total mes: {Math.round(portfolioPlannedHours).toLocaleString('es-AR')} hs
+                </span>
+              )}
               {totalOpenVacancies > 0 && (
                 <span className="flex items-center gap-1 text-[10px] font-black text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-lg">
                   <AlertTriangle size={9} />

@@ -136,6 +136,7 @@ import {
   isCrmWorkingShiftCode,
   resolveClientIdForTurno,
   resolveCrmPlannedShiftHours,
+  sumPlannedSlaBaseHoursForClient,
   sumPlannedHoursForClient,
   groupTurnosByClient,
   buildSlaCodeHoursHintFromServices,
@@ -1109,7 +1110,7 @@ export default function CRMPage() {
         const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(clientSlas);
         const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(clientSlas);
         plannedByClient[clientRef.id] = Math.round(
-          sumPlannedHoursForClient(
+          sumPlannedSlaBaseHoursForClient(
             clientTurnos,
             clientRef,
             plannedRange,

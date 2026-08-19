@@ -1,11 +1,14 @@
 import {
   calcPlanificadorShiftHours,
+  calcPlanningSlaReconciliationHours,
   isOperationalOriginShift,
   isPlanificadorPlannedHoursShift,
   shiftCoverageExtensionExtraHours,
 } from '@/lib/planificacion/planningScheduledHours';
+import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
 import { getDateKeyInTimezone } from '@/lib/crm/crmDateUtils';
 import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
+import { buildSlaCodeHoursHintByObjectiveId } from '@/lib/crm/plannedHours';
 import { slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { isProformaVacancyShift } from '@/lib/crm/proformaVacancy';
@@ -51,6 +54,8 @@ export function buildDemandaByObjective(opts: {
     slaByObj.set(canonicalId, { ...prev, sla: prev.sla + hours });
   });
 
+  const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(vigenteServices);
+
   type Acc = {
     name: string;
     client: string;
@@ -73,6 +78,9 @@ export function buildDemandaByObjective(opts: {
   };
 
   slaByObj.forEach((info, id) => touch(id, info.name, info.client));
+
+  /** Plan de cobertura = base SLA por celda (coalesce), igual que pie del planificador. */
+  const planCellGroups = new Map<string, Map<string, any[]>>();
 
   turnos.forEach((t: any) => {
     const plannedStart = t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null;
@@ -113,10 +121,25 @@ export function buildDemandaByObjective(opts: {
       if (base > 0) row.vacant += base;
       return;
     }
-    if (base > 0) row.plan += base;
     if (isFt) {
       const ftHs = coverageHoursFromShift(t) || gross;
-      if (ftHs > 0) row.ft += ftHs;
+      if (ftHs > 0) {
+        row.ft += ftHs;
+        row.plan += ftHs;
+      }
+      return;
+    }
+    if (isPlanificadorPlannedHoursShift(t) && t.employeeId && t.employeeId !== 'VACANTE' && scheduleDateKey) {
+      const empId = String(t.employeeId);
+      const cellKey = `${empId}_${scheduleDateKey}`;
+      let byCell = planCellGroups.get(ok);
+      if (!byCell) {
+        byCell = new Map();
+        planCellGroups.set(ok, byCell);
+      }
+      const list = byCell.get(cellKey) || [];
+      list.push(t);
+      byCell.set(cellKey, list);
     }
     if (extra > 0) {
       if (isAdelantoShift(t) && !isExtensionShift(t)) row.adel += extra;
@@ -125,6 +148,18 @@ export function buildDemandaByObjective(opts: {
         row.ext += extra / 2;
       } else row.ext += extra;
     }
+  });
+
+  planCellGroups.forEach((byCell, objId) => {
+    const row = byObj.get(objId);
+    if (!row) return;
+    const hint = slaCodeHoursHintByObjective[objId];
+    byCell.forEach((cellTurnos) => {
+      const merged = coalescePlannedTurnosForCell(cellTurnos, hint);
+      if (!merged) return;
+      const base = calcPlanningSlaReconciliationHours(merged, hint);
+      if (base > 0) row.plan += base;
+    });
   });
 
   (ausenciasStats?.detalle || []).forEach((ev) => {

@@ -7,6 +7,12 @@ import {
   parsePlanificacionEstadoDocId,
   planificacionPublishLookupKey,
 } from '@/lib/multiempresa';
+import {
+  buildSlaCodeHoursHintByObjectiveId,
+  sumPlannedSlaBaseHoursForObjective,
+} from '@/lib/crm/plannedHours';
+import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
+import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 
 export type CronogramaEstado =
   | 'PUBLICADO'
@@ -27,6 +33,8 @@ export interface CronogramaOverviewRow {
   totalShifts: number;
   /** Ausencias sin cobertura asignada (sin coveredBy). */
   openVacancies: number;
+  /** Horas planificadas base SLA (misma regla que pie del planificador / CRM / Análisis). */
+  plannedHours: number;
   publishedBy: string;
   publishedAt: Date | null;
   lastModifiedAt: Date | null;
@@ -176,7 +184,21 @@ export async function loadCronogramaOverview(params: {
   });
 
   const shiftCountsByObjective = new Map<string, ShiftCounts>();
+  const turnosByObjective = new Map<string, any[]>();
   const activityFromShifts = new Map<string, ActivityMeta>();
+
+  const svcSnap = await getDocs(
+    empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa),
+  );
+  const slaRaw: any[] = [];
+  svcSnap.docs.forEach((d) => {
+    const data = { id: d.id, ...d.data() };
+    if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+    slaRaw.push(data);
+  });
+  const vigenteSlas = pickVigenteSlasForPeriod(slaRaw, firstDay, lastDay);
+  const slaHintByObjective = buildSlaCodeHoursHintByObjectiveId(vigenteSlas);
+  const plannedRange = { start: firstDay, end: lastDay };
 
   const turnosQ = scopeEmpresa
     ? query(
@@ -208,6 +230,10 @@ export async function loadCronogramaOverview(params: {
     }
     shiftCountsByObjective.set(objId, counts);
 
+    const list = turnosByObjective.get(objId) || [];
+    list.push({ id: d.id, ...data });
+    turnosByObjective.set(objId, list);
+
     const createdAt = toDate(data.createdAt) ?? toDate(data.updatedAt);
     const actor = shiftActorLabel(data);
     const prev = activityFromShifts.get(objId) || { lastModifiedAt: null, lastModifiedBy: '' };
@@ -236,6 +262,15 @@ export async function loadCronogramaOverview(params: {
         shiftActivity?.lastModifiedBy ?? '',
       );
       const estado = deriveCronogramaEstado(!!(pub?.publishedAt), counts.draft, counts.published);
+      const objSlas = vigenteSlas.filter((s) => String(s.objectiveId ?? '').trim() === objectiveId);
+      const slaExclusion = buildSlaExclusionContext(objSlas, firstDay, lastDay);
+      const plannedHours = sumPlannedSlaBaseHoursForObjective(
+        turnosByObjective.get(objectiveId) || [],
+        objectiveId,
+        plannedRange,
+        slaExclusion,
+        slaHintByObjective[objectiveId],
+      );
 
       rows.push({
         clientId: client.id,
@@ -249,6 +284,7 @@ export async function loadCronogramaOverview(params: {
         publishedShifts: counts.published,
         totalShifts: counts.draft + counts.published,
         openVacancies: counts.openVacancies,
+        plannedHours,
         publishedBy: pub?.publishedBy || '',
         publishedAt: pub?.publishedAt ?? null,
         lastModifiedAt: mergedActivity.lastModifiedAt,

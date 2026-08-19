@@ -3,6 +3,7 @@ import { getDateKeyInTimezone, resolveTurnoScheduleDateKey, toDateSafe as toDate
 import { isProformaVacancyShift } from './proformaVacancy';
 import {
   calcPlanificadorShiftHours,
+  calcPlanningSlaReconciliationHours,
   isPlanificadorPlannedHoursShift,
 } from '@/lib/planificacion/planningScheduledHours';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
@@ -188,11 +189,12 @@ function turnoMatchesAnyClientObjective(t: any, client: ClientRef): boolean {
   return false;
 }
 
-export function sumPlannedHoursForObjective(
+function sumPlannedCellHoursForObjective(
   turnos: any[],
   objectiveId: string,
   range: PlannedHoursRange,
-  slaExclusion?: SlaExclusionContext,
+  slaExclusion: SlaExclusionContext | undefined,
+  measure: 'billable' | 'slaBase',
   slaCodeHoursHint?: Record<string, number>,
 ): number {
   const groups = new Map<string, any[]>();
@@ -206,17 +208,46 @@ export function sumPlannedHoursForObjective(
   }
   let total = 0;
   for (const rows of groups.values()) {
-    const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
+    if (measure === 'billable') {
+      const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
+      if (hrs > 0) total += hrs;
+      continue;
+    }
+    const merged = coalescePlannedTurnosForCell(rows, slaCodeHoursHint);
+    if (!merged) continue;
+    const hrs = calcPlanningSlaReconciliationHours(merged, slaCodeHoursHint);
     if (hrs > 0) total += hrs;
   }
-  return total;
+  return Math.round(total * 10) / 10;
 }
 
-export function sumPlannedHoursForClient(
+/** Horas base SLA por celda (cierre vs vendidas) — misma regla que pie del planificador. */
+export function sumPlannedSlaBaseHoursForObjective(
+  turnos: any[],
+  objectiveId: string,
+  range: PlannedHoursRange,
+  slaExclusion?: SlaExclusionContext,
+  slaCodeHoursHint?: Record<string, number>,
+): number {
+  return sumPlannedCellHoursForObjective(turnos, objectiveId, range, slaExclusion, 'slaBase', slaCodeHoursHint);
+}
+
+export function sumPlannedHoursForObjective(
+  turnos: any[],
+  objectiveId: string,
+  range: PlannedHoursRange,
+  slaExclusion?: SlaExclusionContext,
+  slaCodeHoursHint?: Record<string, number>,
+): number {
+  return sumPlannedCellHoursForObjective(turnos, objectiveId, range, slaExclusion, 'billable', slaCodeHoursHint);
+}
+
+function sumPlannedCellHoursForClient(
   turnos: any[],
   client: ClientRef,
   range: PlannedHoursRange,
-  slaExclusion?: SlaExclusionContext,
+  slaExclusion: SlaExclusionContext | undefined,
+  measure: 'billable' | 'slaBase',
   slaCodeHoursHint?: Record<string, number>,
   slaCodeHoursHintByObjective?: Record<string, Record<string, number>>,
 ): number {
@@ -234,10 +265,44 @@ export function sumPlannedHoursForClient(
   for (const rows of groups.values()) {
     const objId = String(rows[0]?.objectiveId ?? '').trim();
     const hint = (objId && slaCodeHoursHintByObjective?.[objId]) || slaCodeHoursHint;
-    const hrs = coalescePlannedCellBillableHours(rows, hint);
+    if (measure === 'billable') {
+      const hrs = coalescePlannedCellBillableHours(rows, hint);
+      if (hrs > 0) total += hrs;
+      continue;
+    }
+    const merged = coalescePlannedTurnosForCell(rows, hint);
+    if (!merged) continue;
+    const hrs = calcPlanningSlaReconciliationHours(merged, hint);
     if (hrs > 0) total += hrs;
   }
-  return total;
+  return Math.round(total * 10) / 10;
+}
+
+/** Horas base SLA agregadas por cliente (KPI «Planificadas» unificado). */
+export function sumPlannedSlaBaseHoursForClient(
+  turnos: any[],
+  client: ClientRef,
+  range: PlannedHoursRange,
+  slaExclusion?: SlaExclusionContext,
+  slaCodeHoursHint?: Record<string, number>,
+  slaCodeHoursHintByObjective?: Record<string, Record<string, number>>,
+): number {
+  return sumPlannedCellHoursForClient(
+    turnos, client, range, slaExclusion, 'slaBase', slaCodeHoursHint, slaCodeHoursHintByObjective,
+  );
+}
+
+export function sumPlannedHoursForClient(
+  turnos: any[],
+  client: ClientRef,
+  range: PlannedHoursRange,
+  slaExclusion?: SlaExclusionContext,
+  slaCodeHoursHint?: Record<string, number>,
+  slaCodeHoursHintByObjective?: Record<string, Record<string, number>>,
+): number {
+  return sumPlannedCellHoursForClient(
+    turnos, client, range, slaExclusion, 'billable', slaCodeHoursHint, slaCodeHoursHintByObjective,
+  );
 }
 
 export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange, slaCodeHoursHint?: Record<string, number>): number {
