@@ -497,7 +497,7 @@ const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): numb
 /** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
 function isOperationalOriginShift(data: any): boolean {
     const o = String(data?.origin || '').toUpperCase();
-    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
+    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL' || o === 'EVENTO') return true;
     if (data?.resolvedBy === 'OPERACIONES') return true;
     return false;
 }
