@@ -5,6 +5,7 @@ import AuthGuard from '@/components/auth/AuthGuard';
 import { Calendar, MapPin, Bell, FileText, CheckCircle, AlertTriangle, Navigation, BellRing, Sun, Sunset, Moon, ArrowLeftRight, Search, X, CreditCard, Star, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 import { eventoService, serviciosParaFecha, type Evento, type ServicioEvento } from '@/services/eventoService';
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
+import { assignGuardToEvent } from '@/services/eventoAssignService';
 import CredencialDigital from '@/components/empleado/CredencialDigital';
 import { app, db, functions, storage, auth, onSnapshotFresh } from '@/lib/firebase';
 import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
@@ -882,7 +883,40 @@ export default function EmployeeDashboard() {
     if (!sol.id) return;
     setRespondiendoConvId(sol.id);
     try {
-      await solicitudEventoService.responderConvocatoria(sol.id, respuesta);
+      if (respuesta === 'aprobada') {
+        // Buscar el servicio para obtener horaInicio/horaFin/horas
+        const evento = eventosDisponibles.find(e => e.id === sol.eventoId);
+        const servicio = evento?.servicios?.find(s => s.id === sol.servicioId);
+        const horaInicio = servicio?.horaInicio || '08:00';
+        const horaFin    = servicio?.horaFin    || '16:00';
+        const horas = servicio
+          ? (servicio.tipoTurno === '3x8' ? 8 : servicio.tipoTurno === '2x12' ? 12
+            : Math.round(((new Date(`2000-01-01T${horaFin}`).getTime() - new Date(`2000-01-01T${horaInicio}`).getTime()) / 3600000 + 24) % 24))
+          : 8;
+        const empNombre = empProfile?.firstName
+          ? `${empProfile.lastName || ''} ${empProfile.firstName || ''}`.trim()
+          : (user?.email || sol.empleadoId);
+
+        await assignGuardToEvent({
+          empresaId: sol.empresaId,
+          empleadoId: sol.empleadoId,
+          empleadoNombre: empNombre,
+          eventoId:     sol.eventoId,
+          eventoNombre: sol.eventoNombre,
+          clienteId:    evento?.clienteId,
+          clienteNombre: evento?.clienteNombre,
+          servicioId:     sol.servicioId,
+          servicioNombre: sol.servicioNombre,
+          servicioFecha:  sol.servicioFecha,
+          horaInicio,
+          horaFin,
+          horas,
+          solicitudId: sol.id,
+          // notifyPlannerUid: no disponible en el portal del guardia; el admin recibe la notif por otro canal
+        });
+      } else {
+        await solicitudEventoService.responderConvocatoria(sol.id, respuesta);
+      }
       setMySolicitudes(prev => prev.map(s => s.id === sol.id ? { ...s, status: respuesta } : s));
       addToast(respuesta === 'aprobada' ? '¡Confirmaste tu participación!' : 'Rechazaste la convocatoria', 'success');
     } catch {
