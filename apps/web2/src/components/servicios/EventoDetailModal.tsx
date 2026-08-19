@@ -191,7 +191,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
             await Promise.all(Array.from(selected).map(async empId => {
                 const emp = empMap[empId];
                 if (!emp) return;
-                await solicitudEventoService.convocar({
+                const solicitudId = await solicitudEventoService.convocar({
                     empresaId,
                     eventoId: evento.id!,
                     eventoNombre: evento.nombre,
@@ -202,19 +202,21 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     empleadoNombre: emp.name,
                     convocadoPor,
                 });
-                // Notificación push al portal del guardia
                 if (emp.uid) {
                     await addDoc(collection(db, 'user_notifications'), {
                         empresaId,
                         uid: emp.uid,
-                        empleadoId: empId,
-                        tipo: 'CONVOCATORIA_EVENTO',
-                        titulo: `Convocatoria: ${evento.nombre}`,
-                        mensaje: `${selectedSrv.nombre} · ${fmtFecha(selectedSrv.fecha)} · ${horarioBadge(selectedSrv)}`,
+                        employeeId: empId,
+                        type: 'CONVOCATORIA_EVENTO',
+                        target: 'employee',
+                        title: `Convocatoria: ${evento.nombre}`,
+                        body: `${selectedSrv.nombre} · ${fmtFecha(selectedSrv.fecha)} · ${horarioBadge(selectedSrv)}`,
                         eventoId: evento.id,
                         eventoNombre: evento.nombre,
                         servicioId: selectedSrv.id,
+                        solicitudId,
                         read: false,
+                        readAt: null,
                         createdAt: serverTimestamp(),
                     });
                 }

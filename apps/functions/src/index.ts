@@ -1128,6 +1128,8 @@ export {
   rejectSwapRequestSupervisor,
 } from './swap/swapPortal';
 
+export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
+
 // =========================================================
 // 13. ENVÃO DE ACCESO AL PORTAL DE EMPLEADOS
 // =========================================================

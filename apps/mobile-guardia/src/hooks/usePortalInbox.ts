@@ -14,18 +14,10 @@ import {
   type Query,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
+import { normalizePortalInboxItem, type PortalInboxNormalized } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 
-export type PortalInboxItem = {
-  id: string;
-  title?: string;
-  body?: string;
-  type?: string;
-  read?: boolean;
-  createdAt?: unknown;
-  shiftId?: string;
-  objectiveId?: string;
-};
+export type PortalInboxItem = PortalInboxNormalized;
 
 function mergeInboxBuckets(buckets: Record<string, PortalInboxItem[]>): PortalInboxItem[] {
   const merged = Object.values(buckets).flat();
@@ -80,10 +72,9 @@ export function usePortalInbox(user: User | null) {
       const unsub = onSnapshot(
         q,
         (snap) => {
-          bucketsRef.current[key] = snap.docs.map((d) => ({
-            id: d.id,
-            ...(d.data() as Omit<PortalInboxItem, 'id'>),
-          }));
+          bucketsRef.current[key] = snap.docs.map((d) =>
+            normalizePortalInboxItem(d.id, d.data() as Record<string, unknown>),
+          );
           rebuild();
         },
         (err) => {
