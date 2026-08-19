@@ -16,7 +16,9 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView } from '@/lib/multiempresa';
 import { calculateSlaHoursForMonth } from '@/lib/servicios/slaHoursCalculator';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
-import { calcPlanificadorShiftHours, isPlanificadorPlannedHoursShift } from '@/lib/planificacion/planningScheduledHours';
+import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
+import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
+import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
@@ -799,9 +801,30 @@ function AdminDashboard() {
       vacantesDetalleList.sort((a, b) => `${a.client} ${a.objective}`.localeCompare(`${b.client} ${b.objective}`, 'es'));
       ausentesDetalleList.sort((a, b) => `${a.client} ${a.empleado}`.localeCompare(`${b.client} ${b.empleado}`, 'es'));
 
-      // 7. HORAS PLANIFICADAS Y REALES DEL MES (misma regla que Análisis / CRM)
+      // 7. HORAS PLANIFICADAS Y REALES DEL MES (base SLA coalesced — misma regla que planificador / CRM / Análisis)
       let mTotalHrs = 0, mRealHrs = 0;
       const empHrsMap: Record<string,number> = {};
+
+      const monthTurnosData: any[] = [];
+      monthTurnosSnap.forEach((doc) => {
+        const s = doc.data();
+        if (!belongsToEmpresaView(s, empresaId, migracionCompleta)) return;
+        if (s.status === 'Canceled' || s.status === 'CANCELED') return;
+        monthTurnosData.push(s);
+      });
+
+      const objectiveAliases = buildObjectiveAliasesFromSla(vigenteSlas);
+      const slaExclusionCtx = buildSlaExclusionContext(slaRaw, monthStart, monthEnd);
+      const demandaMes = buildDemandaByObjective({
+        turnos: monthTurnosData,
+        ausenciasStats: null,
+        vigenteServices: vigenteSlas,
+        periodStart: monthStart,
+        periodEnd: monthEnd,
+        objectiveAliases,
+        slaExclusionCtx,
+      });
+      mTotalHrs = Math.round(demandaMes.totals.planHours);
 
       // Para servicios en riesgo: agrupar por objetivo
       const objRiesgoMap: Record<string, {client:string;name:string;total:number;vacantes:number;ausentes:number}> = {};
@@ -824,15 +847,12 @@ function AdminDashboard() {
         }
 
         if (!s.employeeId || s.employeeId === 'VACANTE') return;
-        if (isPlanificadorPlannedHoursShift(s)) {
-          const hrs = calcPlanificadorShiftHours(s);
+        if (isShiftFichado(s)) {
+          const hrs = fichadaHoursForShift(s);
           if (hrs > 0) {
-            mTotalHrs += hrs;
+            mRealHrs += hrs;
             empHrsMap[s.employeeId] = (empHrsMap[s.employeeId] || 0) + hrs;
           }
-        }
-        if (isShiftFichado(s)) {
-          mRealHrs += fichadaHoursForShift(s);
         }
       });
 

@@ -965,61 +965,37 @@ export default function AnalisisPage() {
     };
   }, [turnos, employees, empNameById, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx]);
 
+  const turnosLive = useMemo(
+    () => {
+      if (turnos.length > 0) return turnos;
+      return filterTurnosInRange(allTurnos, periodRange.start, periodRange.end);
+    },
+    [turnos, allTurnos, periodRange.start, periodRange.end],
+  );
+
   const demanda = useMemo(
     () => {
-      if (mallaReady) {
-        return buildDemandaByObjective({
-          turnos,
-          ausenciasStats,
-          vigenteServices,
-          periodStart: new Date(periodRange.start),
-          periodEnd: new Date(periodRange.end),
-          objectiveAliases: objectiveAliasesFromServices,
-          slaExclusionCtx,
-        });
-      }
-      if (extractReady) return demandaFromHoursBalances(extractRows, liveSlaByObjective);
-      return buildDemandaByObjective({
-        turnos,
+      const liveOpts = {
+        turnos: turnosLive,
         ausenciasStats,
         vigenteServices,
         periodStart: new Date(periodRange.start),
         periodEnd: new Date(periodRange.end),
         objectiveAliases: objectiveAliasesFromServices,
         slaExclusionCtx,
-      });
+      };
+      const live = () => buildDemandaByObjective(liveOpts);
+      if (turnosLive.length > 0) return live();
+      if (extractReady) return demandaFromHoursBalances(extractRows, liveSlaByObjective);
+      return live();
     },
-    [mallaReady, extractReady, extractRows, liveSlaByObjective, turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
+    [turnosLive, extractReady, extractRows, liveSlaByObjective, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
   );
 
   const finBases = useMemo(
     () => {
-      if (mallaReady) {
-        return buildAnalisisFinanciera({
-          turnos,
-          ausenciasStats,
-          vigenteServices,
-          allServices: services,
-          periodStart: new Date(periodRange.start),
-          periodEnd: new Date(periodRange.end),
-          objectiveAliases: objectiveAliasesFromServices,
-          slaExclusionCtx,
-          turnosHistorial: allTurnos,
-          employees,
-          employeeNameById: empNameById,
-        });
-      }
-      if (extractReady) {
-        return financieraFromHoursBalances(extractRows, ausenciasStats, liveSlaByObjective, {
-          objectiveAliases: objectiveAliasesFromServices,
-          allServices: services,
-          turnos,
-          turnosHistorial: allTurnos,
-          employees,
-        });
-      }
-      return buildAnalisisFinanciera({
-        turnos,
+      const liveOpts = {
+        turnos: turnosLive,
         ausenciasStats,
         vigenteServices,
         allServices: services,
@@ -1030,15 +1006,27 @@ export default function AnalisisPage() {
         turnosHistorial: allTurnos,
         employees,
         employeeNameById: empNameById,
-      });
+      };
+      const live = () => buildAnalisisFinanciera(liveOpts);
+      if (turnosLive.length > 0) return live();
+      if (extractReady) {
+        return financieraFromHoursBalances(extractRows, ausenciasStats, liveSlaByObjective, {
+          objectiveAliases: objectiveAliasesFromServices,
+          allServices: services,
+          turnos: turnosLive,
+          turnosHistorial: allTurnos,
+          employees,
+        });
+      }
+      return live();
     },
-    [mallaReady, extractReady, extractRows, liveSlaByObjective, turnos, ausenciasStats, vigenteServices, services, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
+    [turnosLive, extractReady, extractRows, liveSlaByObjective, turnos, ausenciasStats, vigenteServices, services, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
   );
   const fin = useMemo(() => rollAnalisisFinanciera(finBases, finHoursMode), [finBases, finHoursMode]);
   const finCols = useMemo(() => computeFinTableColumns(fin), [fin]);
   const extractPersistKey = useRef('');
   useEffect(() => {
-    if (!mallaReady || !empresaId || !vigenteServices.length || !allTurnos.length) return;
+    if ((!mallaReady && turnosLive.length === 0) || !empresaId || !vigenteServices.length || !allTurnos.length) return;
     if (extractPersistKey.current === periodKey) return;
     extractPersistKey.current = periodKey;
     const months: Array<{ year: number; month: number }> = [];
@@ -1061,7 +1049,7 @@ export default function AnalisisPage() {
       months,
       rebuiltFrom: 'crm-bootstrap',
     }).catch((err) => console.warn('[analisis] hours_balances', err));
-  }, [mallaReady, empresaId, vigenteServices, allTurnos, periodKey, periodRange.start, periodRange.end]);
+  }, [mallaReady, turnosLive.length, empresaId, vigenteServices, allTurnos, periodKey, periodRange.start, periodRange.end]);
   const finClientBars = useMemo(
     () =>
       topNPlusResto(
@@ -2223,13 +2211,13 @@ export default function AnalisisPage() {
                   <p className="text-[9px] font-black uppercase text-slate-400">Extras / FT / ops</p>
                 </div>
               </div>
-              {!loadTurnos && informe.hsVendidas > 0 && turnos.length === 0 && (
+              {!loadTurnos && informe.hsVendidas > 0 && turnosLive.length === 0 && (
                 <p className="mt-3 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
                   Hay {informe.hsVendidas.toLocaleString('es-AR')} hs SLA y <strong>0 turnos</strong> en {periodRange.labelShort}.
                   Si el mes está planificado, recargá el header. Si no hay malla en Firestore para este período, la financiera no puede calcular consumo.
                 </p>
               )}
-              {!loadTurnos && turnos.length > 0 && informe.hsPlanificadas === 0 && (
+              {!loadTurnos && turnosLive.length > 0 && informe.hsPlanificadas === 0 && (
                 <p className="mt-3 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
                   {turnos.length.toLocaleString('es-AR')} turnos en el período pero 0 hs de malla (códigos no computables o exclusiones SLA).
                 </p>

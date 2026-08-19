@@ -5,7 +5,7 @@ import {
   buildSlaCodeHoursHintByObjectiveId,
   buildSlaCodeHoursHintFromServices,
   resolveClientIdForTurno,
-  sumPlannedHoursForClient,
+  sumPlannedSlaBaseHoursForClient,
   type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
 import { sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
@@ -43,7 +43,7 @@ export function aggregateCrmPortfolioHours(
     const clientTurnos = turnosByClient?.get(clientRef.id) ?? allTurnos;
     const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(clientSlas);
     const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(clientSlas);
-    planned += sumPlannedHoursForClient(
+    planned += sumPlannedSlaBaseHoursForClient(
       clientTurnos,
       clientRef,
       plannedRange,
@@ -99,7 +99,7 @@ export function aggregateCrmHoursByClient(
     const clientTurnos = turnosByClient?.get(clientRef.id) ?? allTurnos;
     const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(clientSlas);
     const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(clientSlas);
-    const planned = sumPlannedHoursForClient(
+    const planned = sumPlannedSlaBaseHoursForClient(
       clientTurnos,
       clientRef,
       plannedRange,
