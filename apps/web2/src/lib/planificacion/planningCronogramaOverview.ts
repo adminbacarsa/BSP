@@ -8,9 +8,10 @@ import {
   planificacionPublishLookupKey,
 } from '@/lib/multiempresa';
 import {
-  buildSlaCodeHoursHintByObjectiveId,
-  sumPlannedSlaBaseHoursForObjective,
-} from '@/lib/crm/plannedHours';
+  buildDemandaByObjective,
+  coveragePlannedFromDemandaRow,
+} from '@/lib/analisis/analisisDemanda';
+import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 
@@ -197,7 +198,8 @@ export async function loadCronogramaOverview(params: {
     slaRaw.push(data);
   });
   const vigenteSlas = pickVigenteSlasForPeriod(slaRaw, firstDay, lastDay);
-  const slaHintByObjective = buildSlaCodeHoursHintByObjectiveId(vigenteSlas);
+  const objectiveAliases = buildObjectiveAliasesFromSla(vigenteSlas);
+  const slaExclusionCtx = buildSlaExclusionContext(vigenteSlas, firstDay, lastDay);
   const plannedRange = { start: firstDay, end: lastDay };
 
   const turnosQ = scopeEmpresa
@@ -240,6 +242,20 @@ export async function loadCronogramaOverview(params: {
     activityFromShifts.set(objId, pickLaterActivity(prev, createdAt, actor));
   });
 
+  const allObjectiveTurnos = [...turnosByObjective.values()].flat();
+  const demandaOverview = buildDemandaByObjective({
+    turnos: allObjectiveTurnos,
+    ausenciasStats: null,
+    vigenteServices: vigenteSlas,
+    periodStart: firstDay,
+    periodEnd: lastDay,
+    objectiveAliases,
+    slaExclusionCtx,
+  });
+  const plannedByObjective = new Map<string, number>(
+    demandaOverview.rows.map((r) => [r.id, coveragePlannedFromDemandaRow(r)]),
+  );
+
   const rows: CronogramaOverviewRow[] = [];
 
   for (const client of clients) {
@@ -262,15 +278,7 @@ export async function loadCronogramaOverview(params: {
         shiftActivity?.lastModifiedBy ?? '',
       );
       const estado = deriveCronogramaEstado(!!(pub?.publishedAt), counts.draft, counts.published);
-      const objSlas = vigenteSlas.filter((s) => String(s.objectiveId ?? '').trim() === objectiveId);
-      const slaExclusion = buildSlaExclusionContext(objSlas, firstDay, lastDay);
-      const plannedHours = sumPlannedSlaBaseHoursForObjective(
-        turnosByObjective.get(objectiveId) || [],
-        objectiveId,
-        plannedRange,
-        slaExclusion,
-        slaHintByObjective[objectiveId],
-      );
+      const plannedHours = plannedByObjective.get(objectiveId) || 0;
 
       rows.push({
         clientId: client.id,

@@ -1,14 +1,13 @@
 import type { ClientRef } from '@/lib/crm/clientDataMatch';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { fichadaAnchorDate, fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
+import { resolveClientIdForTurno } from '@/lib/crm/plannedHours';
+import { sumVigenteSlaHoursInRange, pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import {
-  buildSlaCodeHoursHintByObjectiveId,
-  buildSlaCodeHoursHintFromServices,
-  resolveClientIdForTurno,
-  sumPlannedSlaBaseHoursForClient,
-  type PlannedHoursRange,
-} from '@/lib/crm/plannedHours';
-import { sumVigenteSlaHoursInRange } from '@/lib/crm/slaObjectiveHours';
+  buildDemandaByObjective,
+  coveragePlannedFromDemandaRow,
+} from '@/lib/analisis/analisisDemanda';
+import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
 
 export type CrmPortfolioHours = {
   sla: number;
@@ -22,6 +21,39 @@ export type CrmClientHours = {
   real: number;
 };
 
+function clientIdForDemandaClientName(name: string, clientRefs: ClientRef[]): string | null {
+  const key = String(name || '').trim().toLowerCase();
+  if (!key) return null;
+  for (const c of clientRefs) {
+    const n = String(c.name || '').trim().toLowerCase();
+    const ln = String(c.legalName || '').trim().toLowerCase();
+    if (n === key || ln === key) return c.id;
+  }
+  return null;
+}
+
+function buildDemandaForCrmAggregate(
+  clientRefs: ClientRef[],
+  slaDocsByClient: Map<string, any[]>,
+  allTurnos: any[],
+  start: Date,
+  end: Date,
+) {
+  const allSlas = clientRefs.flatMap((c) => slaDocsByClient.get(c.id) || []);
+  const vigente = pickVigenteSlasForPeriod(allSlas, start, end);
+  const aliases = buildObjectiveAliasesFromSla(allSlas);
+  const slaExclusionCtx = buildSlaExclusionContext(allSlas, start, end);
+  return buildDemandaByObjective({
+    turnos: allTurnos,
+    ausenciasStats: null,
+    vigenteServices: vigente,
+    periodStart: start,
+    periodEnd: end,
+    objectiveAliases: aliases,
+    slaExclusionCtx,
+  });
+}
+
 export function aggregateCrmPortfolioHours(
   clientRefs: ClientRef[],
   slaDocsByClient: Map<string, any[]>,
@@ -30,28 +62,17 @@ export function aggregateCrmPortfolioHours(
   start: Date,
   end: Date,
   tenantClientIds: Set<string>,
-  turnosByClient?: Map<string, any[]>,
+  _turnosByClient?: Map<string, any[]>,
 ): CrmPortfolioHours {
   let sla = 0;
-  let planned = 0;
-  const plannedRange: PlannedHoursRange = { start, end };
 
   for (const clientRef of clientRefs) {
     const clientSlas = slaDocsByClient.get(clientRef.id) || [];
     sla += sumVigenteSlaHoursInRange(clientSlas, start, end, clientRef.id);
-    const slaExclusion = buildSlaExclusionContext(clientSlas, start, end);
-    const clientTurnos = turnosByClient?.get(clientRef.id) ?? allTurnos;
-    const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(clientSlas);
-    const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(clientSlas);
-    planned += sumPlannedSlaBaseHoursForClient(
-      clientTurnos,
-      clientRef,
-      plannedRange,
-      slaExclusion,
-      slaCodeHoursHint,
-      slaCodeHoursHintByObjective,
-    );
   }
+
+  const demanda = buildDemandaForCrmAggregate(clientRefs, slaDocsByClient, allTurnos, start, end);
+  const planned = coveragePlannedFromDemandaRow(demanda.totals);
 
   let executed = 0;
   for (const t of allTurnos) {
@@ -87,27 +108,20 @@ export function aggregateCrmHoursByClient(
   start: Date,
   end: Date,
   tenantClientIds: Set<string>,
-  turnosByClient?: Map<string, any[]>,
+  _turnosByClient?: Map<string, any[]>,
 ): Record<string, CrmClientHours> {
   const out: Record<string, CrmClientHours> = {};
-  const plannedRange: PlannedHoursRange = { start, end };
-
   for (const clientRef of clientRefs) {
     const clientSlas = slaDocsByClient.get(clientRef.id) || [];
     const sla = sumVigenteSlaHoursInRange(clientSlas, start, end, clientRef.id);
-    const slaExclusion = buildSlaExclusionContext(clientSlas, start, end);
-    const clientTurnos = turnosByClient?.get(clientRef.id) ?? allTurnos;
-    const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(clientSlas);
-    const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(clientSlas);
-    const planned = sumPlannedSlaBaseHoursForClient(
-      clientTurnos,
-      clientRef,
-      plannedRange,
-      slaExclusion,
-      slaCodeHoursHint,
-      slaCodeHoursHintByObjective,
-    );
-    out[clientRef.id] = { sla: Math.round(sla), planned: Math.round(planned), real: 0 };
+    out[clientRef.id] = { sla: Math.round(sla), planned: 0, real: 0 };
+  }
+
+  const demanda = buildDemandaForCrmAggregate(clientRefs, slaDocsByClient, allTurnos, start, end);
+  for (const row of demanda.rows) {
+    const cid = clientIdForDemandaClientName(row.client, clientRefs);
+    if (!cid || !out[cid]) continue;
+    out[cid].planned = Math.round(out[cid].planned + coveragePlannedFromDemandaRow(row));
   }
 
   for (const t of allTurnos) {

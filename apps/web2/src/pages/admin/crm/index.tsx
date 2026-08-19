@@ -136,7 +136,6 @@ import {
   isCrmWorkingShiftCode,
   resolveClientIdForTurno,
   resolveCrmPlannedShiftHours,
-  sumPlannedSlaBaseHoursForClient,
   sumPlannedHoursForClient,
   groupTurnosByClient,
   buildSlaCodeHoursHintFromServices,
@@ -157,6 +156,9 @@ import {
 } from '@/lib/refuerzo/refuerzoProforma';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+/** Incrementar cuando cambia la fórmula de KPIs (plan = base + ext + adel) para invalidar snapshot/cache. */
+const CRM_DASHBOARD_METRICS_VERSION = 2;
 
 type ClientListSort = 'name' | 'burn_desc' | 'sla_desc' | 'plan_gap';
 type ClientListFilter = 'all' | 'activos' | 'con_sla' | 'burn_alerta';
@@ -762,7 +764,7 @@ export default function CRMPage() {
 
   const calculateDashboardMetrics = async () => {
     const runId = ++metricsRunRef.current;
-    const cacheKey = `${empresaId}__${rangeMode}__${rangeMonth}__${rangeYear}`;
+    const cacheKey = `${empresaId}__v${CRM_DASHBOARD_METRICS_VERSION}__${rangeMode}__${rangeMonth}__${rangeYear}`;
     const bucketsEarly = buildCrmTrendBuckets(rangeMode, rangeMonth, rangeYear);
     const selectedPeriodKey = `${rangeYear}-${String(rangeMonth + 1).padStart(2, '0')}`;
     const cached = metricsCache.current.get(cacheKey);
@@ -1101,24 +1103,18 @@ export default function CRMPage() {
       setCrmTrendSeries(trendSeries);
       bumpProgress(92, 'Armando resumen…');
 
+      const selectedByClientHours = aggregateCrmHoursByClient(
+        clientRefs,
+        slaDocsByClient,
+        allTurnos,
+        validEmp,
+        start ?? new Date(2000, 0, 1),
+        end ?? new Date(2099, 11, 31, 23, 59, 59, 999),
+        tenantClientIds,
+        turnosByClient,
+      );
       clientRefs.forEach((clientRef) => {
-        const clientSlas = slaDocsByClient.get(clientRef.id) || [];
-        const clientTurnos = turnosByClient.get(clientRef.id) || [];
-        const exStart = start ?? new Date(2000, 0, 1);
-        const exEnd = end ?? new Date(2099, 11, 31);
-        const slaExclusion = buildSlaExclusionContext(clientSlas, exStart, exEnd);
-        const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(clientSlas);
-        const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(clientSlas);
-        plannedByClient[clientRef.id] = Math.round(
-          sumPlannedSlaBaseHoursForClient(
-            clientTurnos,
-            clientRef,
-            plannedRange,
-            slaExclusion,
-            slaCodeHoursHint,
-            slaCodeHoursHintByObjective,
-          ),
-        );
+        plannedByClient[clientRef.id] = selectedByClientHours[clientRef.id]?.planned || 0;
       });
 
       allTurnos.forEach((t) => {

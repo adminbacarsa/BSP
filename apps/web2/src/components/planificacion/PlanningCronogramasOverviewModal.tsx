@@ -116,14 +116,6 @@ export default function PlanningCronogramasOverviewModal({
 
   const totalOpenVacancies = useMemo(() => rows.reduce((acc, r) => acc + (r.openVacancies || 0), 0), [rows]);
   const objectivesWithOpenVacancies = useMemo(() => rows.filter((r) => r.openVacancies > 0).length, [rows]);
-  const totalPlannedHours = useMemo(
-    () => filtered.reduce((acc, r) => acc + (r.plannedHours || 0), 0),
-    [filtered],
-  );
-  const portfolioPlannedHours = useMemo(
-    () => rows.reduce((acc, r) => acc + (r.plannedHours || 0), 0),
-    [rows],
-  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -138,6 +130,15 @@ export default function PlanningCronogramasOverviewModal({
       );
     });
   }, [rows, filterEstado, filterOpenVacancies, search]);
+
+  const totalPlannedHours = useMemo(
+    () => filtered.reduce((acc, r) => acc + (r.plannedHours || 0), 0),
+    [filtered],
+  );
+  const portfolioPlannedHours = useMemo(
+    () => rows.reduce((acc, r) => acc + (r.plannedHours || 0), 0),
+    [rows],
+  );
 
   const grouped = useMemo(() => groupByClient(filtered), [filtered]);
 
