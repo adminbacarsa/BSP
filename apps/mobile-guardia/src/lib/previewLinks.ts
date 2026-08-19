@@ -1,12 +1,26 @@
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 
+function expoDevHostPort(): string | null {
+  const hostUri = Constants.expoConfig?.hostUri?.trim();
+  if (hostUri) return hostUri.replace(/^exp:\/\//i, '').split('/')[0] ?? null;
+  const debuggerHost = (Constants as { manifest2?: { extra?: { expoGo?: { debuggerHost?: string } } } })
+    .manifest2?.extra?.expoGo?.debuggerHost;
+  if (debuggerHost) return debuggerHost.trim();
+  return null;
+}
+
 export function buildMobilePreviewDeepLink(empDocId: string): string {
   const trimmed = empDocId.trim();
   const customBase = process.env.EXPO_PUBLIC_MOBILE_PREVIEW_LINK_BASE?.trim();
   if (customBase) {
     const separator = customBase.includes('?') ? '&' : '?';
     return `${customBase}${separator}emp=${encodeURIComponent(trimmed)}`;
+  }
+
+  const devHost = expoDevHostPort();
+  if (devHost && __DEV__) {
+    return `exp://${devHost}/--/preview?emp=${encodeURIComponent(trimmed)}`;
   }
 
   const schemeRaw = Constants.expoConfig?.scheme;
