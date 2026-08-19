@@ -2,6 +2,7 @@
  * Smoke del motor puro de Análisis (rangos, ausencias, demanda).
  * Uso: npx tsx scripts/eval-analisis-queries.ts  (desde apps/web2)
  */
+import './eval-bootstrap-env';
 import {
   envelopingRange,
   gapsToFetch,
@@ -817,6 +818,51 @@ const finHist = buildAnalisisFinanciera({
   turnosHistorial: histTurnos,
 });
 assert((finHist.find((r) => r.id === 'obj-b')?.novedades.vac || 0) === 8, 'vacaciones sin oid usan último puesto del historial 3m');
+
+const histTurnosClient = [{
+  id: 'hist-ago',
+  employeeId: 'g4',
+  employeeName: 'Guardia Cuatro',
+  objectiveId: 'obj-casino',
+  objectiveName: 'Casino Embalse',
+  clientId: 'cli-casisa',
+  clientName: 'CASISA',
+  code: 'M',
+  hours: 8,
+  startTime: { seconds: new Date(2026, 6, 15, 7, 0).getTime() / 1000 },
+  endTime: { seconds: new Date(2026, 6, 15, 15, 0).getTime() / 1000 },
+}];
+const vacCasino = buildAusenciasStats({
+  ausencias: [{
+    id: 'vac-casino',
+    employeeId: 'g4',
+    employeeName: 'Guardia Cuatro',
+    type: 'Vacaciones',
+    absenceType: 'V',
+    startDate: '2026-08-10',
+    endDate: '2026-08-10',
+    status: 'Autorizada',
+  }],
+  turnos: [],
+  employees: [{ id: 'g4' }],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  capHsPerGuardPeriod: 192,
+});
+const finCasino = buildAnalisisFinanciera({
+  turnos: [],
+  ausenciasStats: vacCasino,
+  vigenteServices: [],
+  periodStart: new Date(2026, 7, 1),
+  periodEnd: new Date(2026, 7, 31, 23, 59, 59, 999),
+  objectiveAliases: { 'obj-casino': { canonicalId: 'obj-casino', name: 'Casino Embalse' } },
+  slaExclusionCtx: null,
+  turnosHistorial: histTurnosClient,
+});
+const casinoRow = finCasino.find((r) => r.id === 'obj-casino');
+assert(!!casinoRow && casinoRow.client === 'CASISA', `novedad hereda cliente de malla historial (got ${casinoRow?.client})`);
+const finCasinoRoll = rollAnalisisFinanciera(finCasino, 'planned');
+assert(finCasinoRoll.clients.every((c) => c.name !== 'Sin Cliente'), 'financiera no agrupa objetivos bajo Sin Cliente si hay cliente en malla');
 
 if (failed) {
   console.error(`\n${failed} assertion(s) failed`);

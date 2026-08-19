@@ -4,10 +4,22 @@
  * F/RET/REF, desglose SUS/V/E y guardias llegan cuando carga la malla.
  */
 
-import type { HoursBalanceRow } from '@/lib/hoursBalance';
+import type { HoursBalanceRow } from '@/lib/hoursBalance/types';
+import {
+  buildObjectiveClientIndex,
+  resolveObjectiveClientForId,
+  resolveObjectiveDisplayName,
+  type ObjectiveMeta,
+} from '@/lib/crm/objectiveIdentity';
 import { coverageResultanteHours, type DemandaObjectiveRow } from './analisisQueries';
 import type { AusenciasStats } from './analisisQueries';
 import type { FinNovedades, FinObjectiveBase } from './analisisFinanciera';
+import {
+  homeFromEmployees,
+  homeObjectiveByEmployee,
+  resolveLeaveObjective,
+  SIN_OBJETIVO,
+} from './analisisLeaveAttribution';
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -206,11 +218,35 @@ export function demandaFromHoursBalances(
 function overlayNovedades(
   bases: FinObjectiveBase[],
   ausenciasStats: AusenciasStats | null,
+  opts?: {
+    objectiveAliases?: Record<string, ObjectiveMeta>;
+    allServices?: any[];
+    turnos?: any[];
+    turnosHistorial?: any[];
+    employees?: any[];
+  },
 ): FinObjectiveBase[] {
   if (!ausenciasStats?.detalle?.length) return bases;
+  const aliases = opts?.objectiveAliases || {};
+  const turnos = opts?.turnos || [];
+  const historial = opts?.turnosHistorial && opts.turnosHistorial.length ? opts.turnosHistorial : turnos;
+  const catalogServices = opts?.allServices || [];
+  const clientIndex = buildObjectiveClientIndex(aliases, catalogServices, [...turnos, ...historial]);
+  const homeByEmp = homeObjectiveByEmployee(turnos, aliases);
+  const homeLookback = homeObjectiveByEmployee(historial, aliases);
+  const employeeHome = homeFromEmployees(opts?.employees || []);
+
   const byOid = new Map<string, FinNovedades>();
   ausenciasStats.detalle.forEach((ev) => {
-    const oid = String(ev.objectiveId || '').trim() || 'SIN_OBJETIVO';
+    const { oid } = resolveLeaveObjective(
+      ev,
+      homeByEmp,
+      homeLookback,
+      turnos,
+      historial,
+      aliases,
+      employeeHome,
+    );
     const n = byOid.get(oid) || emptyNov();
     const hs = Number(ev.hs) || 0;
     if (ev.category === 'vac') n.vac += hs;
@@ -245,11 +281,17 @@ function overlayNovedades(
   });
   byOid.forEach((n, oid) => {
     if (used.has(oid)) return;
+    const cm = resolveObjectiveClientForId(oid, aliases, clientIndex);
+    const alias = aliases[oid];
     out.push({
       id: oid,
-      name: oid === 'SIN_OBJETIVO' ? 'Sin objetivo (licencia sin puesto en malla)' : oid,
-      clientId: '',
-      client: oid === 'SIN_OBJETIVO' ? 'Sin asignar' : 'Sin Cliente',
+      name: oid === SIN_OBJETIVO
+        ? 'Sin objetivo (licencia sin puesto en malla)'
+        : resolveObjectiveDisplayName({ objectiveId: oid, objectiveName: alias?.name }, aliases),
+      clientId: String(alias?.clientId || cm.clientId || '').trim(),
+      client: oid === SIN_OBJETIVO
+        ? 'Sin asignar'
+        : (cm.clientName || alias?.clientName || 'Sin Cliente'),
       slaHours: 0,
       hsPlan: 0,
       hsReal: 0,
@@ -282,6 +324,13 @@ export function financieraFromHoursBalances(
   rows: HoursBalanceRow[],
   ausenciasStats?: AusenciasStats | null,
   liveSlaByObjective?: Record<string, number>,
+  enrich?: {
+    objectiveAliases?: Record<string, ObjectiveMeta>;
+    allServices?: any[];
+    turnos?: any[];
+    turnosHistorial?: any[];
+    employees?: any[];
+  },
 ): FinObjectiveBase[] {
   const bases: FinObjectiveBase[] = overlayLiveSlaHours(
     sumHoursBalancesByObjective(rows),
@@ -312,5 +361,5 @@ export function financieraFromHoursBalances(
       guards: [],
     };
   });
-  return overlayNovedades(bases, ausenciasStats || null);
+  return overlayNovedades(bases, ausenciasStats || null, enrich);
 }

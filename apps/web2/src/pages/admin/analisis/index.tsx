@@ -22,7 +22,7 @@ import { demandaFromHoursBalances, financieraFromHoursBalances } from '@/lib/ana
 import {
   buildAnalisisFinanciera,
   FIN_NOV_BREAKDOWN_CODES,
-  FIN_NOV_HEAD_COLS,
+  computeFinTableColumns,
   finGuardConsumo,
   finGuardNovCode,
   finGuardNovOtros,
@@ -30,6 +30,7 @@ import {
   finNovCode,
   finNovOtros,
   finPlanHours,
+  finSumadaValue,
   finSumadasHours,
   rollAnalisisFinanciera,
   type FinHoursMode,
@@ -739,9 +740,9 @@ export default function AnalisisPage() {
   }, [ausenciasStats, loadFacts, periodKey]);
 
   const objectiveAliasesFromServices = useMemo(() => {
-    const aliases: Record<string, { canonicalId: string; name: string; clientId?: string }> = {};
+    const aliases: Record<string, { canonicalId: string; name: string; clientId?: string; clientName?: string }> = {};
     const register = (
-      meta: { canonicalId: string; name: string; clientId?: string },
+      meta: { canonicalId: string; name: string; clientId?: string; clientName?: string },
       key: string,
     ) => {
       const k = String(key || '').trim();
@@ -749,11 +750,12 @@ export default function AnalisisPage() {
     };
     for (const srv of services) {
       const cid = String(srv.clientId ?? '').trim();
+      const cname = String(srv.clientName ?? '').trim();
       const oid = String(srv.objectiveId ?? '').trim();
       const name = String(srv.objectiveName ?? oid).trim();
       const canonicalId = oid || name;
       if (!canonicalId) continue;
-      const meta = { canonicalId, name, clientId: cid };
+      const meta = { canonicalId, name, clientId: cid, clientName: cname };
       register(meta, canonicalId);
       if (oid) register(meta, oid);
       if (name) register(meta, name);
@@ -997,6 +999,7 @@ export default function AnalisisPage() {
           turnos,
           ausenciasStats,
           vigenteServices,
+          allServices: services,
           periodStart: new Date(periodRange.start),
           periodEnd: new Date(periodRange.end),
           objectiveAliases: objectiveAliasesFromServices,
@@ -1006,11 +1009,20 @@ export default function AnalisisPage() {
           employeeNameById: empNameById,
         });
       }
-      if (extractReady) return financieraFromHoursBalances(extractRows, ausenciasStats, liveSlaByObjective);
+      if (extractReady) {
+        return financieraFromHoursBalances(extractRows, ausenciasStats, liveSlaByObjective, {
+          objectiveAliases: objectiveAliasesFromServices,
+          allServices: services,
+          turnos,
+          turnosHistorial: allTurnos,
+          employees,
+        });
+      }
       return buildAnalisisFinanciera({
         turnos,
         ausenciasStats,
         vigenteServices,
+        allServices: services,
         periodStart: new Date(periodRange.start),
         periodEnd: new Date(periodRange.end),
         objectiveAliases: objectiveAliasesFromServices,
@@ -1020,9 +1032,10 @@ export default function AnalisisPage() {
         employeeNameById: empNameById,
       });
     },
-    [mallaReady, extractReady, extractRows, liveSlaByObjective, turnos, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
+    [mallaReady, extractReady, extractRows, liveSlaByObjective, turnos, ausenciasStats, vigenteServices, services, objectiveAliasesFromServices, slaExclusionCtx, periodKey, allTurnos, employees, empNameById],
   );
   const fin = useMemo(() => rollAnalisisFinanciera(finBases, finHoursMode), [finBases, finHoursMode]);
+  const finCols = useMemo(() => computeFinTableColumns(fin), [fin]);
   const extractPersistKey = useRef('');
   useEffect(() => {
     if (!mallaReady || !empresaId || !vigenteServices.length || !allTurnos.length) return;
@@ -2676,41 +2689,44 @@ export default function AnalisisPage() {
                     <p className="text-sm font-bold">Sin consumo calculable en este período</p>
                   </div>
                 ) : (
-                  <div className="overflow-auto max-h-[70vh] rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                    <table className="w-full min-w-[1680px] text-sm border-collapse">
+                  <div className="overflow-y-auto overflow-x-hidden max-h-[70vh] rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                    <table className="w-full table-fixed text-xs border-collapse">
                       <thead className="sticky top-0 z-10">
                         <tr className="bg-slate-800 text-white text-[10px] font-black uppercase tracking-wide">
-                          <th rowSpan={2} className="sticky left-0 z-20 bg-slate-800 p-3 text-left min-w-[180px] border-b border-slate-700">Cliente</th>
-                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Obj.</th>
-                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">SLA hs</th>
-                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700 bg-slate-700/80">Hs plan</th>
-                          <th colSpan={FIN_NOV_HEAD_COLS} className="p-2 text-center border-b border-l border-slate-600 bg-violet-900/80">Novedades</th>
-                          <th colSpan={6} className="p-2 text-center border-b border-l border-slate-600 bg-slate-700">Otras sumadas</th>
-                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Σ</th>
-                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Consumo</th>
-                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Vacante</th>
-                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">G</th>
-                          <th rowSpan={2} className="p-3 text-right border-b border-slate-700">Hs / g</th>
-                          <th rowSpan={2} className="p-3 text-right pr-4 border-b border-slate-700">Δ vs SLA</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="sticky left-0 z-20 bg-slate-800 p-2 text-left w-[18%] max-w-[14rem] border-b border-slate-700">Cliente</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[4%]">Obj.</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[6%]">SLA</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 bg-slate-700/80 w-[6%]">Plan</th>
+                          {finCols.novHeadCols > 0 && (
+                            <th colSpan={finCols.novHeadCols} className="p-1.5 text-center border-b border-l border-slate-600 bg-violet-900/80">Novedades</th>
+                          )}
+                          {finCols.sumadas.length > 0 && (
+                            <th colSpan={finCols.sumadas.length} className="p-1.5 text-center border-b border-l border-slate-600 bg-slate-700">Sumadas</th>
+                          )}
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[5%]">Σ</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[6%]">Consumo</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[5%]">Vac.</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[4%]">G</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[5%]">Hs/g</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right pr-3 border-b border-slate-700 w-[5%]">Δ</th>
                         </tr>
+                        {(finCols.novHeadCols > 0 || finCols.sumadas.length > 0) && (
                         <tr className="bg-slate-700 text-white text-[9px] font-black uppercase tracking-wide">
-                          {FIN_NOV_BREAKDOWN_CODES.map((c, i) => (
-                            <th key={c} className={`p-2 text-right ${i === 0 ? 'border-l border-slate-600' : ''}`}>{c}</th>
+                          {finCols.novCodes.map((c, i) => (
+                            <th key={c} className={`p-1 text-right ${i === 0 ? 'border-l border-slate-600' : ''}`}>{c}</th>
                           ))}
-                          <th className="p-2 text-right">Otr.</th>
-                          <th className="p-2 text-right border-l border-slate-600">EV</th>
-                          <th className="p-2 text-right">FT</th>
-                          <th className="p-2 text-right">Extra</th>
-                          <th className="p-2 text-right">F</th>
-                          <th className="p-2 text-right">RET</th>
-                          <th className="p-2 text-right">REF</th>
+                          {finCols.showNovOtros && <th className="p-1 text-right">Otr</th>}
+                          {finCols.sumadas.map(({ key, label }, i) => (
+                            <th key={key} className={`p-1 text-right ${i === 0 ? 'border-l border-slate-600' : ''}`}>{label}</th>
+                          ))}
                         </tr>
+                        )}
                       </thead>
                       <tbody>
                         {fin.clients.map((cli, idx) => {
                           const open = expandedFinClientId === cli.id;
                           const hsCell = (n: number, extra = '') => (
-                            <td className={`p-2.5 text-right tabular-nums ${extra}`}>
+                            <td className={`p-1.5 text-right tabular-nums ${extra}`}>
                               {n === 0 ? <span className="text-slate-300 dark:text-slate-600">—</span> : n.toLocaleString('es-AR')}
                             </td>
                           );
@@ -2726,31 +2742,28 @@ export default function AnalisisPage() {
                                 } hover:bg-indigo-50 dark:hover:bg-indigo-950/30`}
                                 onClick={() => setExpandedFinClientId(open ? null : cli.id)}
                               >
-                                <td className={`sticky left-0 z-10 p-2.5 font-bold text-slate-800 dark:text-white text-xs ${open ? 'bg-indigo-50 dark:bg-indigo-950' : idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-800'}`}>
-                                  <span className="inline-flex items-center gap-1.5">
-                                    {open ? <ChevronDown size={14} className="text-indigo-500 shrink-0"/> : <ChevronRight size={14} className="text-slate-400 shrink-0"/>}
-                                    <span className="uppercase tracking-wide">{cli.name}</span>
+                                <td className={`sticky left-0 z-10 p-1.5 font-bold text-slate-800 dark:text-white text-[11px] truncate max-w-[14rem] ${open ? 'bg-indigo-50 dark:bg-indigo-950' : idx % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-800'}`}>
+                                  <span className="inline-flex items-center gap-1 min-w-0">
+                                    {open ? <ChevronDown size={13} className="text-indigo-500 shrink-0"/> : <ChevronRight size={13} className="text-slate-400 shrink-0"/>}
+                                    <span className="uppercase tracking-wide truncate">{cli.name}</span>
                                   </span>
                                 </td>
                                 {hsCell(cli.objetivos, 'text-slate-500')}
                                 {hsCell(cli.slaHours, 'text-slate-700 dark:text-slate-200')}
                                 {hsCell(finPlanHours(cli, finHoursMode), 'font-semibold')}
-                                {FIN_NOV_BREAKDOWN_CODES.map((c) => (
+                                {finCols.novCodes.map((c) => (
                                   <React.Fragment key={c}>{hsCell(finNovCode(cli.novedades, c))}</React.Fragment>
                                 ))}
-                                {hsCell(finNovOtros(cli.novedades))}
-                                {hsCell(cli.hsEv)}
-                                {hsCell(cli.hsFt)}
-                                {hsCell(cli.hsExtra + cli.hsOps)}
-                                {hsCell(cli.hsFranco)}
-                                {hsCell(cli.hsRet)}
-                                {hsCell(cli.hsDespliegue)}
+                                {finCols.showNovOtros && hsCell(finNovOtros(cli.novedades))}
+                                {finCols.sumadas.map(({ key }) => (
+                                  <React.Fragment key={key}>{hsCell(finSumadaValue(cli, key))}</React.Fragment>
+                                ))}
                                 {hsCell(finSumadasHours(cli), 'font-bold text-slate-700 dark:text-slate-200')}
                                 {hsCell(cli.hsConsumo, 'font-black text-slate-900 dark:text-white')}
                                 {hsCell(cli.hsVacante)}
                                 {hsCell(cli.guardias, 'text-slate-500')}
                                 {hsCell(cli.hsConsumoPorGuardia, 'font-semibold')}
-                                <td className={`p-2.5 pr-4 text-right tabular-nums font-black ${
+                                <td className={`p-1.5 pr-3 text-right tabular-nums font-black ${
                                   cli.deltaVsSla > 4 ? 'text-rose-600' : cli.deltaVsSla < -4 ? 'text-amber-600' : 'text-emerald-600'
                                 }`}>
                                   {cli.deltaVsSla > 0 ? '+' : ''}{cli.deltaVsSla.toLocaleString('es-AR')}
@@ -2758,41 +2771,42 @@ export default function AnalisisPage() {
                               </tr>
                               {open && (
                                 <tr>
-                                  <td colSpan={16 + FIN_NOV_HEAD_COLS} className="p-0 bg-slate-100/90 dark:bg-slate-950/50">
-                                    <table className="w-full min-w-[1680px] text-sm border-collapse">
+                                  <td colSpan={finCols.clientColSpan} className="p-0 bg-slate-100/90 dark:bg-slate-950/50">
+                                    <table className="w-full table-fixed text-xs border-collapse">
                                       <thead>
                                         <tr className="bg-slate-200/80 dark:bg-slate-800 text-[9px] uppercase font-black tracking-wide text-slate-600 dark:text-slate-300">
-                                          <th rowSpan={2} className="p-2 pl-10 text-left border-b border-slate-300 dark:border-slate-700">Objetivo</th>
-                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">SLA hs</th>
-                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Hs plan</th>
-                                          <th colSpan={FIN_NOV_HEAD_COLS} className="p-1.5 text-center border-b border-l border-slate-300 dark:border-slate-600">Novedades</th>
-                                          <th colSpan={6} className="p-1.5 text-center border-b border-l border-slate-300 dark:border-slate-600">Otras sumadas</th>
-                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Σ</th>
-                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Consumo</th>
-                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Vacante</th>
-                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">G</th>
-                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">Hs / g</th>
-                                          <th rowSpan={2} className="p-2 text-right border-b border-slate-300 dark:border-slate-700">SLA / g</th>
-                                          <th rowSpan={2} className="p-2 text-right pr-4 border-b border-slate-300 dark:border-slate-700">Δ</th>
+                                          <th rowSpan={2} className="p-1.5 pl-8 text-left border-b border-slate-300 dark:border-slate-700 w-[22%]">Objetivo</th>
+                                          <th rowSpan={2} className="p-1.5 text-right border-b border-slate-300 dark:border-slate-700">SLA</th>
+                                          <th rowSpan={2} className="p-1.5 text-right border-b border-slate-300 dark:border-slate-700">Plan</th>
+                                          {finCols.novHeadCols > 0 && (
+                                            <th colSpan={finCols.novHeadCols} className="p-1 text-center border-b border-l border-slate-300 dark:border-slate-600">Novedades</th>
+                                          )}
+                                          {finCols.sumadas.length > 0 && (
+                                            <th colSpan={finCols.sumadas.length} className="p-1 text-center border-b border-l border-slate-300 dark:border-slate-600">Sumadas</th>
+                                          )}
+                                          <th rowSpan={2} className="p-1.5 text-right border-b border-slate-300 dark:border-slate-700">Σ</th>
+                                          <th rowSpan={2} className="p-1.5 text-right border-b border-slate-300 dark:border-slate-700">Consumo</th>
+                                          <th rowSpan={2} className="p-1.5 text-right border-b border-slate-300 dark:border-slate-700">Vac.</th>
+                                          <th rowSpan={2} className="p-1.5 text-right border-b border-slate-300 dark:border-slate-700">G</th>
+                                          <th rowSpan={2} className="p-1.5 text-right border-b border-slate-300 dark:border-slate-700">Hs/g</th>
+                                          <th rowSpan={2} className="p-1.5 text-right border-b border-slate-300 dark:border-slate-700">SLA/g</th>
+                                          <th rowSpan={2} className="p-1.5 text-right pr-3 border-b border-slate-300 dark:border-slate-700">Δ</th>
                                         </tr>
                                         <tr className="bg-slate-300/70 dark:bg-slate-700 text-[9px] uppercase font-black tracking-wide text-slate-600 dark:text-slate-300">
-                                          {FIN_NOV_BREAKDOWN_CODES.map((c, i) => (
-                                            <th key={c} className={`p-1.5 text-right ${i === 0 ? 'border-l border-slate-300 dark:border-slate-600' : ''}`}>{c}</th>
+                                          {finCols.novCodes.map((c, i) => (
+                                            <th key={c} className={`p-1 text-right ${i === 0 ? 'border-l border-slate-300 dark:border-slate-600' : ''}`}>{c}</th>
                                           ))}
-                                          <th className="p-1.5 text-right">Otr.</th>
-                                          <th className="p-1.5 text-right border-l border-slate-300 dark:border-slate-600">EV</th>
-                                          <th className="p-1.5 text-right">FT</th>
-                                          <th className="p-1.5 text-right">Extra</th>
-                                          <th className="p-1.5 text-right">F</th>
-                                          <th className="p-1.5 text-right">RET</th>
-                                          <th className="p-1.5 text-right">REF</th>
+                                          {finCols.showNovOtros && <th className="p-1 text-right">Otr</th>}
+                                          {finCols.sumadas.map(({ key, label }, i) => (
+                                            <th key={key} className={`p-1 text-right ${i === 0 ? 'border-l border-slate-300 dark:border-slate-600' : ''}`}>{label}</th>
+                                          ))}
                                         </tr>
                                       </thead>
                                       <tbody>
                                         {cli.rows.map((obj, oidx) => {
                                           const objOpen = expandedFinObjId === obj.id;
                                           const oCell = (n: number, extra = '') => (
-                                            <td className={`p-2 text-right tabular-nums ${extra}`}>
+                                            <td className={`p-1.5 text-right tabular-nums ${extra}`}>
                                               {n === 0 ? <span className="text-slate-300 dark:text-slate-600">—</span> : n.toLocaleString('es-AR')}
                                             </td>
                                           );
@@ -2804,31 +2818,28 @@ export default function AnalisisPage() {
                                                 } hover:bg-white dark:hover:bg-slate-800`}
                                                 onClick={(e) => { e.stopPropagation(); setExpandedFinObjId(objOpen ? null : obj.id); }}
                                               >
-                                                <td className="p-2 pl-10 font-bold text-xs text-slate-700 dark:text-slate-100">
-                                                  <span className="inline-flex items-center gap-1">
+                                                <td className="p-1.5 pl-8 font-bold text-[11px] text-slate-700 dark:text-slate-100 truncate max-w-[16rem]">
+                                                  <span className="inline-flex items-center gap-1 min-w-0">
                                                     {objOpen ? <ChevronDown size={12} className="text-indigo-500 shrink-0"/> : <ChevronRight size={12} className="text-slate-400 shrink-0"/>}
-                                                    {obj.name}
+                                                    <span className="truncate">{obj.name}</span>
                                                   </span>
                                                 </td>
                                                 {oCell(obj.slaHours)}
                                                 {oCell(finPlanHours(obj, finHoursMode), 'font-semibold')}
-                                                {FIN_NOV_BREAKDOWN_CODES.map((c) => (
+                                                {finCols.novCodes.map((c) => (
                                                   <React.Fragment key={c}>{oCell(finNovCode(obj.novedades, c))}</React.Fragment>
                                                 ))}
-                                                {oCell(finNovOtros(obj.novedades))}
-                                                {oCell(obj.hsEv)}
-                                                {oCell(obj.hsFt)}
-                                                {oCell(obj.hsExtra + obj.hsOps)}
-                                                {oCell(obj.hsFranco)}
-                                                {oCell(obj.hsRet)}
-                                                {oCell(obj.hsDespliegue)}
+                                                {finCols.showNovOtros && oCell(finNovOtros(obj.novedades))}
+                                                {finCols.sumadas.map(({ key }) => (
+                                                  <React.Fragment key={key}>{oCell(finSumadaValue(obj, key))}</React.Fragment>
+                                                ))}
                                                 {oCell(finSumadasHours(obj), 'font-bold')}
                                                 {oCell(obj.hsConsumo, 'font-black')}
                                                 {oCell(obj.hsVacante)}
                                                 {oCell(obj.guardias, 'text-slate-500')}
                                                 {oCell(obj.hsConsumoPorGuardia, 'font-semibold')}
                                                 {oCell(obj.hsSlaPorGuardia, 'text-slate-500')}
-                                                <td className={`p-2 pr-4 text-right tabular-nums font-black ${
+                                                <td className={`p-1.5 pr-3 text-right tabular-nums font-black ${
                                                   obj.deltaVsSla > 4 ? 'text-rose-600' : obj.deltaVsSla < -4 ? 'text-amber-600' : 'text-emerald-600'
                                                 }`}>
                                                   {obj.deltaVsSla > 0 ? '+' : ''}{obj.deltaVsSla.toLocaleString('es-AR')}
@@ -2836,8 +2847,8 @@ export default function AnalisisPage() {
                                               </tr>
                                               {objOpen && (
                                                 <tr>
-                                                  <td colSpan={16 + FIN_NOV_HEAD_COLS} className="px-10 py-3 bg-white dark:bg-slate-800">
-                                                    <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-9 gap-2 mb-3">
+                                                  <td colSpan={finCols.objColSpan} className="px-6 py-3 bg-white dark:bg-slate-800">
+                                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-3">
                                                       {([
                                                         { k: 'V Vacaciones', v: finNovCode(obj.novedades, 'V') },
                                                         { k: 'E Enfermedad', v: finNovCode(obj.novedades, 'E') },
@@ -2849,7 +2860,7 @@ export default function AnalisisPage() {
                                                         { k: 'Otras nov.', v: finNovOtros(obj.novedades) },
                                                         { k: 'EV Evento', v: obj.hsEv },
                                                         { k: 'RET', v: obj.hsRet },
-                                                      ]).map((n) => (
+                                                      ]).filter((n) => n.v > 0).map((n) => (
                                                         <div key={n.k} className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 shadow-sm">
                                                           <p className="text-[9px] font-black uppercase text-slate-400">{n.k}</p>
                                                           <p className="text-sm font-black tabular-nums">{n.v.toLocaleString('es-AR')} hs</p>
@@ -2857,43 +2868,39 @@ export default function AnalisisPage() {
                                                       ))}
                                                     </div>
                                                     <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Hs-hombre por guardia</p>
-                                                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                                                      <table className="w-full text-xs border-collapse">
+                                                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                                      <table className="w-full table-fixed text-[10px] border-collapse">
                                                         <thead>
                                                           <tr className="bg-slate-100 dark:bg-slate-700 text-[9px] uppercase font-black text-slate-500">
-                                                            <th className="p-2 text-left">Guardia</th>
-                                                            <th className="p-2 text-right">Hs plan</th>
-                                                            {FIN_NOV_BREAKDOWN_CODES.map((c) => (
-                                                              <th key={c} className="p-2 text-right">{c}</th>
+                                                            <th className="p-1.5 text-left w-[24%]">Guardia</th>
+                                                            <th className="p-1.5 text-right">Plan</th>
+                                                            {finCols.novCodes.map((c) => (
+                                                              <th key={c} className="p-1.5 text-right">{c}</th>
                                                             ))}
-                                                            <th className="p-2 text-right">Otr.</th>
-                                                            <th className="p-2 text-right">EV</th>
-                                                            <th className="p-2 text-right">FT</th>
-                                                            <th className="p-2 text-right">Extra</th>
-                                                            <th className="p-2 text-right">F</th>
-                                                            <th className="p-2 text-right">RET</th>
-                                                            <th className="p-2 text-right">REF</th>
-                                                            <th className="p-2 text-right">Σ</th>
-                                                            <th className="p-2 text-right pr-3">Consumo</th>
+                                                            {finCols.showNovOtros && <th className="p-1.5 text-right">Otr</th>}
+                                                            {finCols.sumadas.map(({ key, label }) => (
+                                                              <th key={key} className="p-1.5 text-right">{label}</th>
+                                                            ))}
+                                                            <th className="p-1.5 text-right">Σ</th>
+                                                            <th className="p-1.5 text-right pr-2">Consumo</th>
                                                           </tr>
                                                         </thead>
                                                         <tbody>
                                                           {obj.guards.map((g, gi) => (
                                                             <tr key={g.employeeId} className={`border-t border-slate-100 dark:border-slate-700 ${gi % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-900/40'}`}>
-                                                              <td className="p-2 font-bold">{empNameById[g.employeeId] || g.name}</td>
-                                                              <td className="p-2 text-right tabular-nums">{finPlanHours(g, finHoursMode).toLocaleString('es-AR')}</td>
-                                                              {FIN_NOV_BREAKDOWN_CODES.map((c) => (
-                                                                <td key={c} className="p-2 text-right tabular-nums">{finGuardNovCode(g, c) === 0 ? '—' : finGuardNovCode(g, c).toLocaleString('es-AR')}</td>
+                                                              <td className="p-1.5 font-bold truncate">{empNameById[g.employeeId] || g.name}</td>
+                                                              <td className="p-1.5 text-right tabular-nums">{finPlanHours(g, finHoursMode).toLocaleString('es-AR')}</td>
+                                                              {finCols.novCodes.map((c) => (
+                                                                <td key={c} className="p-1.5 text-right tabular-nums">{finGuardNovCode(g, c) === 0 ? '—' : finGuardNovCode(g, c).toLocaleString('es-AR')}</td>
                                                               ))}
-                                                              <td className="p-2 text-right tabular-nums">{finGuardNovOtros(g) === 0 ? '—' : finGuardNovOtros(g).toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-right tabular-nums">{g.hsEv === 0 ? '—' : g.hsEv.toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-right tabular-nums">{g.hsFt === 0 ? '—' : g.hsFt.toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-right tabular-nums">{(g.hsExtra + g.hsOps) === 0 ? '—' : (g.hsExtra + g.hsOps).toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-right tabular-nums">{g.hsFranco === 0 ? '—' : g.hsFranco.toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-right tabular-nums">{g.hsRet === 0 ? '—' : g.hsRet.toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-right tabular-nums">{g.hsDespliegue === 0 ? '—' : g.hsDespliegue.toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 text-right tabular-nums font-bold">{finSumadasHours(g) === 0 ? '—' : finSumadasHours(g).toLocaleString('es-AR')}</td>
-                                                              <td className="p-2 pr-3 text-right tabular-nums font-black">{finGuardConsumo(g, finHoursMode).toLocaleString('es-AR')}</td>
+                                                              {finCols.showNovOtros && (
+                                                                <td className="p-1.5 text-right tabular-nums">{finGuardNovOtros(g) === 0 ? '—' : finGuardNovOtros(g).toLocaleString('es-AR')}</td>
+                                                              )}
+                                                              {finCols.sumadas.map(({ key }) => (
+                                                                <td key={key} className="p-1.5 text-right tabular-nums">{finSumadaValue(g, key) === 0 ? '—' : finSumadaValue(g, key).toLocaleString('es-AR')}</td>
+                                                              ))}
+                                                              <td className="p-1.5 text-right tabular-nums font-bold">{finSumadasHours(g) === 0 ? '—' : finSumadasHours(g).toLocaleString('es-AR')}</td>
+                                                              <td className="p-1.5 pr-2 text-right tabular-nums font-black">{finGuardConsumo(g, finHoursMode).toLocaleString('es-AR')}</td>
                                                             </tr>
                                                           ))}
                                                         </tbody>
@@ -2916,26 +2923,25 @@ export default function AnalisisPage() {
                       </tbody>
                       <tfoot className="sticky bottom-0">
                         <tr className="bg-slate-800 text-white text-xs font-black">
-                          <td className="sticky left-0 z-10 bg-slate-800 p-3">Total empresa · {fin.clientes} clientes</td>
-                          <td className="p-3 text-right tabular-nums">{fin.objetivos}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.slaHours.toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{finPlanHours(fin, finHoursMode).toLocaleString('es-AR')}</td>
-                          {FIN_NOV_BREAKDOWN_CODES.map((c) => (
-                            <td key={c} className="p-3 text-right tabular-nums">{finNovCode(fin.novedades, c).toLocaleString('es-AR')}</td>
+                          <td className="sticky left-0 z-10 bg-slate-800 p-2 truncate max-w-[14rem]">Total empresa · {fin.clientes} clientes</td>
+                          <td className="p-2 text-right tabular-nums">{fin.objetivos}</td>
+                          <td className="p-2 text-right tabular-nums">{fin.slaHours.toLocaleString('es-AR')}</td>
+                          <td className="p-2 text-right tabular-nums">{finPlanHours(fin, finHoursMode).toLocaleString('es-AR')}</td>
+                          {finCols.novCodes.map((c) => (
+                            <td key={c} className="p-2 text-right tabular-nums">{finNovCode(fin.novedades, c).toLocaleString('es-AR')}</td>
                           ))}
-                          <td className="p-3 text-right tabular-nums">{finNovOtros(fin.novedades).toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.hsEv.toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.hsFt.toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{(fin.hsExtra + fin.hsOps).toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.hsFranco.toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.hsRet.toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.hsDespliegue.toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{finSumadasHours(fin).toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.hsConsumo.toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.hsVacante.toLocaleString('es-AR')}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.guardias}</td>
-                          <td className="p-3 text-right tabular-nums">{fin.hsConsumoPorGuardia.toLocaleString('es-AR')}</td>
-                          <td className={`p-3 pr-4 text-right tabular-nums ${fin.deltaVsSla > 4 ? 'text-rose-300' : fin.deltaVsSla < -4 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                          {finCols.showNovOtros && (
+                            <td className="p-2 text-right tabular-nums">{finNovOtros(fin.novedades).toLocaleString('es-AR')}</td>
+                          )}
+                          {finCols.sumadas.map(({ key }) => (
+                            <td key={key} className="p-2 text-right tabular-nums">{finSumadaValue(fin, key).toLocaleString('es-AR')}</td>
+                          ))}
+                          <td className="p-2 text-right tabular-nums">{finSumadasHours(fin).toLocaleString('es-AR')}</td>
+                          <td className="p-2 text-right tabular-nums">{fin.hsConsumo.toLocaleString('es-AR')}</td>
+                          <td className="p-2 text-right tabular-nums">{fin.hsVacante.toLocaleString('es-AR')}</td>
+                          <td className="p-2 text-right tabular-nums">{fin.guardias}</td>
+                          <td className="p-2 text-right tabular-nums">{fin.hsConsumoPorGuardia.toLocaleString('es-AR')}</td>
+                          <td className={`p-2 pr-3 text-right tabular-nums ${fin.deltaVsSla > 4 ? 'text-rose-300' : fin.deltaVsSla < -4 ? 'text-amber-300' : 'text-emerald-300'}`}>
                             {fin.deltaVsSla > 0 ? '+' : ''}{fin.deltaVsSla.toLocaleString('es-AR')}
                           </td>
                         </tr>
