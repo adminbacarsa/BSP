@@ -6,6 +6,7 @@ import { Calendar, MapPin, Bell, FileText, CheckCircle, AlertTriangle, Navigatio
 import { eventoService, serviciosParaFecha, type Evento, type ServicioEvento } from '@/services/eventoService';
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
 import CredencialDigital from '@/components/empleado/CredencialDigital';
+import { MobilePreviewQrPanel } from '@/components/empleado/MobilePreviewQrPanel';
 import { app, db, functions, storage, auth, onSnapshotFresh } from '@/lib/firebase';
 import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -278,6 +279,7 @@ export default function EmployeeDashboard() {
   const [previewSearch, setPreviewSearch] = useState('');
   const [showPreviewPicker, setShowPreviewPicker] = useState(false);
   const [previewEmpresaFilter, setPreviewEmpresaFilter] = useState<string | null>(null);
+  const [previewMobileQrEmpId, setPreviewMobileQrEmpId] = useState<string | null>(null);
 
   const previousShiftRef = useRef<Map<string, Shift>>(new Map());
   const shiftInitialLoadDone = useRef(false);
@@ -297,6 +299,13 @@ export default function EmployeeDashboard() {
       }));
     }).catch(() => {});
   }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin || !router.isReady) return;
+    if (router.query.picker === '1') {
+      setShowPreviewPicker(true);
+    }
+  }, [isSuperAdmin, router.isReady, router.query.picker]);
 
   const startPressTimer = () => {
     pressTimerRef.current = setTimeout(() => setShowLogoutMenu(true), 1500);
@@ -1863,6 +1872,48 @@ export default function EmployeeDashboard() {
     <AuthGuard>
       <Head><title>Portal Empleado | CronoApp</title></Head>
 
+      {isSuperAdmin && !isPreviewMode && !showPreviewPicker && (
+        <div className="sticky top-0 z-50 flex flex-wrap items-center gap-2 bg-indigo-950 border-b border-indigo-800 px-3 py-2.5 text-white text-xs font-bold">
+          <svg className="w-4 h-4 shrink-0 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+          <span className="flex-1 min-w-[140px]">SuperAdmin · elegí un guardia para vista previa</span>
+          <button
+            type="button"
+            onClick={() => setShowPreviewPicker(true)}
+            className="shrink-0 bg-orange-600 hover:bg-orange-500 px-3 py-1 rounded-lg text-[10px] font-black uppercase"
+          >
+            Elegir guardia + QR app
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push('/admin/configuracion')}
+            className="shrink-0 bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[10px] font-black uppercase"
+          >
+            Config
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push('/admin')}
+            className="shrink-0 bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-[10px] font-black uppercase"
+          >
+            ← Admin
+          </button>
+        </div>
+      )}
+
+      {isPreviewMode && previewEmpId && (
+        <div className="sticky top-0 z-40 px-3 py-2 bg-slate-950 border-b border-slate-800">
+          <MobilePreviewQrPanel
+            empDocId={previewEmpId}
+            employeeName={
+              empProfile
+                ? `${empProfile.lastName || ''} ${empProfile.firstName || ''}`.trim() || previewEmpId
+                : previewEmpId
+            }
+            compact
+          />
+        </div>
+      )}
+
       {/* ── Superadmin preview banner ── */}
       {isPreviewMode && (
         <div className="sticky top-0 z-50 flex items-center gap-2 bg-orange-600 px-3 py-2 text-white text-xs font-bold">
@@ -1888,7 +1939,11 @@ export default function EmployeeDashboard() {
               <svg className="w-5 h-5 text-orange-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
               <div className="flex-1 min-w-0">
                 <h2 className="text-white font-black text-sm">Vista previa portal empleado</h2>
-                <p className="text-slate-500 text-[11px]">{filtered.length} empleado{filtered.length !== 1 ? 's' : ''}{previewEmpresaFilter ? ` · ${previewEmpresaFilter}` : ` · ${empresas.length} empresa${empresas.length !== 1 ? 's' : ''}`}</p>
+                <p className="text-slate-500 text-[11px]">
+                  {filtered.length} empleado{filtered.length !== 1 ? 's' : ''}
+                  {previewEmpresaFilter ? ` · ${previewEmpresaFilter}` : empresas.length ? ` · ${empresas.length} empresa${empresas.length !== 1 ? 's' : ''}` : ''}
+                  {' · '}QR app a la derecha de cada fila
+                </p>
               </div>
               {isPreviewMode
                 ? <button onClick={() => setShowPreviewPicker(false)} className="text-slate-400 hover:text-white p-1"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>
@@ -1929,24 +1984,34 @@ export default function EmployeeDashboard() {
             {/* Employee list */}
             <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1">
               {filtered.slice(0, 80).map(emp => (
-                <button
-                  key={emp.id}
-                  onClick={() => { setShowPreviewPicker(false); setPreviewSearch(''); router.push(`/empleado/dashboard?preview=${emp.id}`); }}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 transition-colors ${previewEmpId === emp.id ? 'bg-orange-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-200 hover:bg-slate-800'}`}
-                >
-                  <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-black text-white shrink-0">
-                    {emp.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold truncate">{emp.name}</p>
-                    <p className="text-[10px] text-slate-400 truncate">
-                      {emp.fileNumber ? <span className="text-slate-300 font-mono">#{emp.fileNumber}</span> : null}
-                      {emp.fileNumber && emp.empresa ? <span className="mx-1">·</span> : null}
-                      {emp.empresa ? <span>{emp.empresa}</span> : null}
-                    </p>
-                  </div>
-                  {previewEmpId === emp.id && <svg className="w-4 h-4 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>}
-                </button>
+                <div key={emp.id} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowPreviewPicker(false); setPreviewSearch(''); setPreviewMobileQrEmpId(null); router.push(`/empleado/dashboard?preview=${emp.id}`); }}
+                    className={`flex-1 text-left px-3 py-2.5 rounded-xl flex items-center gap-3 transition-colors ${previewEmpId === emp.id ? 'bg-orange-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-200 hover:bg-slate-800'}`}
+                  >
+                    <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-black text-white shrink-0">
+                      {emp.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold truncate">{emp.name}</p>
+                      <p className="text-[10px] text-slate-400 truncate">
+                        {emp.fileNumber ? <span className="text-slate-300 font-mono">#{emp.fileNumber}</span> : null}
+                        {emp.fileNumber && emp.empresa ? <span className="mx-1">·</span> : null}
+                        {emp.empresa ? <span>{emp.empresa}</span> : null}
+                      </p>
+                    </div>
+                    {previewEmpId === emp.id && <svg className="w-4 h-4 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>}
+                  </button>
+                  <button
+                    type="button"
+                    title="QR app móvil"
+                    onClick={() => setPreviewMobileQrEmpId(previewMobileQrEmpId === emp.id ? null : emp.id)}
+                    className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${previewMobileQrEmpId === emp.id ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h2M4 12h2m14 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                  </button>
+                </div>
               ))}
               {filtered.length === 0 && previewEmployees.length === 0 && (
                 <p className="text-slate-500 text-sm text-center py-10">Cargando empleados...</p>
@@ -1958,6 +2023,15 @@ export default function EmployeeDashboard() {
                 <p className="text-slate-600 text-[11px] text-center py-3">Mostrando 80 de {filtered.length} — refiná la búsqueda</p>
               )}
             </div>
+            {previewMobileQrEmpId ? (() => {
+              const qrEmp = previewEmployees.find(e => e.id === previewMobileQrEmpId);
+              if (!qrEmp) return null;
+              return (
+                <div className="px-4 py-3 border-t border-slate-800 shrink-0">
+                  <MobilePreviewQrPanel empDocId={qrEmp.id} employeeName={qrEmp.name} />
+                </div>
+              );
+            })() : null}
           </div>
         );
       })()}

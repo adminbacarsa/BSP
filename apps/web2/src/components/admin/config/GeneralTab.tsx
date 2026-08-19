@@ -277,9 +277,9 @@ export default function GeneralTab() {
                     <div className="p-3 rounded-xl" style={{ backgroundColor: 'var(--surf2)', color: 'var(--company-primary,#6366f1)' }}><ExternalLink size={24}/></div>
                     PORTALES DE ACCESO
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     <Link
-                        href="/empleado/dashboard"
+                        href={isSuperAdmin ? '/empleado/dashboard?picker=1' : '/empleado/dashboard'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="group flex flex-col gap-3 p-5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-indigo-300 hover:shadow-md transition-all"
@@ -289,12 +289,38 @@ export default function GeneralTab() {
                         </div>
                         <div>
                             <p className="font-black text-slate-800 dark:text-white text-sm uppercase">Portal Empleado</p>
-                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">Turnos, presencia y novedades del guardia</p>
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                                {isSuperAdmin
+                                    ? 'Vista previa por guardia · selector + QR app móvil'
+                                    : 'Turnos, presencia y novedades del guardia'}
+                            </p>
                         </div>
                         <span className="text-[10px] font-black text-indigo-500 uppercase flex items-center gap-1 mt-auto">
-                            Abrir <ArrowRight size={11}/>
+                            {isSuperAdmin ? 'Abrir selector' : 'Abrir'} <ArrowRight size={11}/>
                         </span>
                     </Link>
+
+                    {isSuperAdmin ? (
+                        <Link
+                            href="/empleado/dashboard?picker=1"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="group flex flex-col gap-3 p-5 bg-orange-50 dark:bg-orange-950/40 border-2 border-orange-200 dark:border-orange-800 rounded-2xl hover:border-orange-400 hover:shadow-md transition-all sm:col-span-2 lg:col-span-1"
+                        >
+                            <div className="w-10 h-10 bg-orange-100 dark:bg-orange-900/60 rounded-xl flex items-center justify-center text-orange-600 dark:text-orange-400 group-hover:bg-orange-200 transition-colors">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h2M4 12h2m14 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                            </div>
+                            <div>
+                                <p className="font-black text-orange-800 dark:text-orange-200 text-sm uppercase">QR app móvil guardia</p>
+                                <p className="text-[11px] text-orange-600/80 dark:text-orange-300/80 font-medium mt-0.5">
+                                    Elegí guardia → ícono QR → escaneá con COSP Guardia (SuperAdmin logueado)
+                                </p>
+                            </div>
+                            <span className="text-[10px] font-black text-orange-600 uppercase flex items-center gap-1 mt-auto">
+                                Abrir selector <ArrowRight size={11}/>
+                            </span>
+                        </Link>
+                    ) : null}
 
                     <Link
                         href="/objetivo/dashboard"
