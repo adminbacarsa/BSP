@@ -107,7 +107,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     return { id: d.id, uid: dat.uid || '', name, fileNumber: dat.fileNumber || dat.legajo || '', aptitudes: dat.aptitudes || [] };
                 })
                 .sort((a, b) => a.name.localeCompare(b.name, 'es'));
-            setEmpleados(rows);
+            // Deduplicar por legajo (puede haber docs duplicados en Firestore)
+            const seen = new Set<string>();
+            const unique = rows.filter(r => {
+                const key = r.fileNumber || r.id;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+            setEmpleados(unique);
         }).catch(console.error);
     }, [empresaId]);
 
