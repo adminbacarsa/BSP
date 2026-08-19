@@ -39,8 +39,6 @@ import {
   buildInformeAnalitico,
   buildInformeSeries,
   chooseInformeSeriesBucket,
-  estimarCostoInforme,
-  formatArs,
   iterateInformeBuckets,
 } from '@/lib/analisis/analisisInforme';
 import {
@@ -418,7 +416,6 @@ export default function AnalisisPage() {
   const [periodMonth, setPeriodMonth] = useState(now.getMonth());
   const [periodDay, setPeriodDay] = useState(now.getDate());
   const [activeTab,      setActiveTab]      = usePersistedState('cosp:analisis:tab', 'informe' as AnalisisTab);
-  const [valorHoraBasica, setValorHoraBasica] = usePersistedState('cosp:analisis:valorHora', 0);
   const [vialSrvId,      setVialSrvId]      = useState('');
   const efectiveHours = CCT_HS_MENSUAL;
   const [expandedObjId,    setExpandedObjId]    = useState(null as string | null);
@@ -461,6 +458,7 @@ export default function AnalisisPage() {
     mallaReady,
     loadInit,
     loadFacts,
+    loadPeriod,
     loadError,
     loadProgress,
     factsAt,
@@ -477,8 +475,20 @@ export default function AnalisisPage() {
   });
   const loadTurnos = loadFacts;
   const loadAus = loadFacts;
+  const [periodClickLock, setPeriodClickLock] = useState(false);
+  const periodNavLocked = periodClickLock || loadInit || loadFacts || loadPeriod;
 
   const periodKey = `${periodMode}:${periodRange.start.getTime()}:${periodRange.end.getTime()}`;
+
+  useEffect(() => {
+    if (loadInit || loadFacts || loadPeriod) return;
+    setPeriodClickLock(false);
+  }, [loadInit, loadFacts, loadPeriod, periodKey]);
+
+  useEffect(() => {
+    setAnalDateFrom(formatYmdLocal(new Date(periodRange.start)));
+    setAnalDateTo(formatYmdLocal(new Date(periodRange.end)));
+  }, [periodKey]);
 
   const slaDemandDaysInPeriod = useMemo(
     () => countSlaDemandDaysInRange(services, periodRange.start, periodRange.end),
@@ -493,6 +503,8 @@ export default function AnalisisPage() {
   const guardQuotaHs = capHsPerGuardPeriod;
 
   const shiftPeriod = (dir: -1 | 1) => {
+    if (periodNavLocked) return;
+    setPeriodClickLock(true);
     if (periodMode === 'day') {
       const cur = new Date(periodYear, periodMonth, periodDay);
       cur.setDate(cur.getDate() + dir);
@@ -535,6 +547,8 @@ export default function AnalisisPage() {
   };
 
   const setPeriodModeSafe = (mode: PeriodMode) => {
+    if (periodNavLocked) return;
+    setPeriodClickLock(true);
     setPeriodMode(mode);
     if (mode === 'year') {
       setPeriodMonth(0);
@@ -1145,10 +1159,6 @@ export default function AnalisisPage() {
         },
       }),
     [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista],
-  );
-  const costoEstimado = useMemo(
-    () => estimarCostoInforme(informe, Number(valorHoraBasica) || 0),
-    [informe, valorHoraBasica],
   );
 
   const informeSeriesMeta = useMemo(() => {
@@ -2052,7 +2062,7 @@ export default function AnalisisPage() {
             <div className="flex items-center gap-3 flex-wrap justify-end">
               {/* Período: modo + navegación */}
               <div className="flex items-center gap-2 flex-wrap justify-end">
-                <div className="flex items-center gap-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-0.5">
+                <div className={`flex items-center gap-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-0.5 ${periodNavLocked ? 'opacity-60 pointer-events-none' : ''}`}>
                   {([
                     { id: 'day' as PeriodMode, label: 'Día' },
                     { id: 'week' as PeriodMode, label: 'Sem.' },
@@ -2064,8 +2074,9 @@ export default function AnalisisPage() {
                     <button
                       key={id}
                       type="button"
+                      disabled={periodNavLocked}
                       onClick={() => setPeriodModeSafe(id)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide transition-all ${
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide transition-all disabled:cursor-not-allowed ${
                         periodMode === id
                           ? 'bg-violet-600 text-white shadow-sm'
                           : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700'
@@ -2075,15 +2086,32 @@ export default function AnalisisPage() {
                     </button>
                   ))}
                 </div>
-                <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => shiftPeriod(-1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 transition-colors"><ChevronLeft size={16}/></button>
-                  <span className="text-sm font-black text-slate-700 dark:text-white uppercase min-w-[140px] max-w-[280px] text-center leading-tight">{periodRange.labelShort}</span>
-                  <button type="button" onClick={() => shiftPeriod(1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 transition-colors"><ChevronRight size={16}/></button>
+                <div className={`flex items-center gap-2 ${periodNavLocked ? 'opacity-60' : ''}`}>
+                  <button
+                    type="button"
+                    disabled={periodNavLocked}
+                    onClick={() => shiftPeriod(-1)}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 transition-colors disabled:cursor-not-allowed disabled:pointer-events-none"
+                  >
+                    <ChevronLeft size={16}/>
+                  </button>
+                  <span className="text-sm font-black text-slate-700 dark:text-white uppercase min-w-[140px] max-w-[280px] text-center leading-tight flex items-center justify-center gap-1.5">
+                    {periodNavLocked && <RefreshCw size={12} className="animate-spin text-violet-500 shrink-0"/>}
+                    {periodRange.labelShort}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={periodNavLocked}
+                    onClick={() => shiftPeriod(1)}
+                    className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 transition-colors disabled:cursor-not-allowed disabled:pointer-events-none"
+                  >
+                    <ChevronRight size={16}/>
+                  </button>
                 </div>
                 <button
                   type="button"
                   onClick={() => void reloadAll()}
-                  disabled={loadInit || loadFacts}
+                  disabled={periodNavLocked}
                   title={factsAt ? `Última carga ${new Date(factsAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}` : 'Recargar catálogo y hechos'}
                   className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-500 disabled:opacity-50 text-[10px] font-black uppercase tracking-wide"
                 >
@@ -2105,7 +2133,7 @@ export default function AnalisisPage() {
             </div>
           )}
 
-          {loadFacts && loadProgress && (
+          {(loadFacts || loadPeriod) && loadProgress && (
             <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/30 px-4 py-3 shadow-sm">
               <div className="flex items-center justify-between gap-3 mb-2">
                 <p className="text-[11px] font-black uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
@@ -2276,7 +2304,7 @@ export default function AnalisisPage() {
                           { id: 'informe', label: 'Informe', icon: FileText, alert: informe.desvioRealVsVendido < -8 || informe.hsVacante > 8 },
                           { id: 'demanda', label: 'Demanda', icon: Wallet, alert: demanda.totals.deltaSla < -8 || demanda.totals.vacantHours > 0 },
                           { id: 'cobertura', label: 'Cobertura', icon: Target, alert: vacancyPct > 20 },
-                          { id: 'capacidad', label: 'Dist. horas', icon: BarChart3, alert: false },
+                          { id: 'capacidad', label: 'Capacidad y bandas', icon: BarChart3, alert: false },
                         ]
                 ).map((t) => {
                   const Icon = t.icon;
@@ -2573,6 +2601,9 @@ export default function AnalisisPage() {
           ══════════════════════════════════════════════════════════════ */}
           {activeTab === 'financiera' && (
             <div className="space-y-4">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/40 px-4 py-3">
+                <strong className="text-slate-700 dark:text-slate-200">Solo horas.</strong> Consumo hs-hombre, novedades CCT y eficiencia SLA — sin importes, tarifas ni liquidación. Para pesos usá el módulo de Liquidaciones.
+              </p>
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-3xl leading-relaxed">
                   Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
@@ -2619,7 +2650,7 @@ export default function AnalisisPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Target} color="#4f46e5" label="SLA empresa" value={fin.slaHours.toLocaleString('es-AR')} unit="hs" subtext={`${fin.clientes} clientes · ${fin.objetivos} objetivos`}/>
                 <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Hs plan (fichada)' : 'Hs plan'} value={finPlanHours(fin, finHoursMode).toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fin.hsPlan.toLocaleString('es-AR')} hs` : 'Cobertura de malla, sin novedades'}/>
-                <KpiCard icon={Wallet} color="#0f766e" label="Consumo hs-hombre" value={fin.hsConsumo.toLocaleString('es-AR')} unit="hs" subtext={`Plan ${finPlanHours(fin, finHoursMode).toLocaleString('es-AR')} + sumadas ${finSumadasHours(fin).toLocaleString('es-AR')}`} alert={fin.deltaVsSla > 8}/>
+                <KpiCard icon={Layers} color="#0f766e" label="Consumo hs-hombre" value={fin.hsConsumo.toLocaleString('es-AR')} unit="hs" subtext={`Plan ${finPlanHours(fin, finHoursMode).toLocaleString('es-AR')} + sumadas ${finSumadasHours(fin).toLocaleString('es-AR')}`} alert={fin.deltaVsSla > 8}/>
                 <KpiCard icon={Users} color="#0891b2" label="Hs / guardia" value={fin.hsConsumoPorGuardia.toLocaleString('es-AR')} unit="hs" subtext={`${fin.guardias} guardias · SLA ${fin.hsSlaPorGuardia.toLocaleString('es-AR')} hs/c/u`}/>
                 <KpiCard icon={AlertTriangle} color="#ea580c" label="FT + extras + no usadas" value={(fin.hsFt + fin.hsExtra + fin.hsOps + finIdleHours(fin)).toLocaleString('es-AR')} unit="hs" subtext={`FT ${fin.hsFt.toLocaleString('es-AR')} · ext ${fin.hsExtra.toLocaleString('es-AR')} · ops ${fin.hsOps.toLocaleString('es-AR')} · F ${fin.hsFranco.toLocaleString('es-AR')} · RET ${fin.hsRet.toLocaleString('es-AR')} · REF/ESC ${fin.hsDespliegue.toLocaleString('es-AR')}`}/>
                 <KpiCard icon={Activity} color={fin.eficienciaPct >= 90 ? '#059669' : fin.eficienciaPct >= 75 ? '#d97706' : '#dc2626'} label="Eficiencia SLA/consumo" value={`${fin.eficienciaPct}%`} subtext={`Novedades ${fin.novedades.total.toLocaleString('es-AR')} · vacante ${fin.hsVacante.toLocaleString('es-AR')}`} alert={fin.eficienciaPct < 75}/>
@@ -2952,18 +2983,6 @@ export default function AnalisisPage() {
                   {' '}Jornada de referencia (viabilidad) = {CCT_HS_MENSUAL} hs; no se mezcla con el techo 200.
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <label className="flex items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2">
-                    <span className="text-[9px] font-black uppercase text-slate-400">Valor hora $</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={100}
-                      value={valorHoraBasica || ''}
-                      onChange={(e) => setValorHoraBasica(Number(e.target.value) || 0)}
-                      placeholder="0"
-                      className="w-24 text-xs font-black text-right bg-transparent text-slate-700 dark:text-white outline-none"
-                    />
-                  </label>
                   <button
                     type="button"
                     onClick={() => void exportInforme()}
@@ -3138,36 +3157,33 @@ export default function AnalisisPage() {
               </SectionCard>
               )}
 
-              <SectionCard title="3. Costo real en horas (y estimado en $)" icon={Wallet}>
+              <SectionCard title="3. Costo operativo en horas (recargos CCT)" icon={Clock}>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-5">
                   <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-3">
                     <p className="text-[9px] font-black uppercase text-slate-400">Normales (100%)</p>
                     <p className="text-lg font-black text-slate-800 dark:text-white">{informe.hsNormales.toLocaleString('es-AR')} hs</p>
-                    {costoEstimado && <p className="text-[10px] font-bold text-emerald-600">{formatArs(costoEstimado.normales)}</p>}
+                    <p className="text-[10px] text-slate-400 mt-1">Cobertura estándar de malla</p>
                   </div>
                   <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-3">
                     <p className="text-[9px] font-black uppercase text-slate-400">Extras / ext+adel (50%)</p>
                     <p className="text-lg font-black text-violet-600">{informe.hsExtras50.toLocaleString('es-AR')} hs</p>
-                    {costoEstimado && <p className="text-[10px] font-bold text-violet-600">{formatArs(costoEstimado.extras50)}</p>}
+                    <p className="text-[10px] text-slate-400 mt-1">Extensiones y adelantos</p>
                   </div>
                   <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-3">
                     <p className="text-[9px] font-black uppercase text-slate-400">FT (100%)</p>
                     <p className="text-lg font-black text-orange-600">{informe.hsFT100.toLocaleString('es-AR')} hs</p>
-                    {costoEstimado && <p className="text-[10px] font-bold text-orange-600">{formatArs(costoEstimado.ft100)}</p>}
+                    <p className="text-[10px] text-slate-400 mt-1">Franco trabajado</p>
                   </div>
                   <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/20 p-3">
                     <p className="text-[9px] font-black uppercase text-indigo-400">Costo cobertura ausentismo</p>
                     <p className="text-lg font-black text-indigo-700 dark:text-indigo-300">
                       {(informe.hsAusencias + informe.hsFT100).toLocaleString('es-AR')} hs
                     </p>
-                    <p className="text-[10px] text-slate-500">No trabajadas + FT para cubrir</p>
-                    {costoEstimado && <p className="text-[10px] font-bold text-indigo-600">{formatArs(costoEstimado.ausentismo)}</p>}
+                    <p className="text-[10px] text-slate-500">Novedades no trabajadas + FT para cubrir</p>
                   </div>
                 </div>
                 <p className="px-5 pb-4 text-[10px] text-slate-400">
-                  {costoEstimado
-                    ? <>Estimación total (normales + extra 50% + FT 100%): <strong className="text-slate-600 dark:text-slate-200">{formatArs(costoEstimado.total)}</strong>. No reemplaza la liquidación CCT (bolsa 200 hs por legajo).</>
-                    : 'Cargá un valor hora básica para ver el estimado en pesos. Sin tarifa única en el sistema: el $ es what-if, no liquidación.'}
+                  Desglose en <strong className="text-slate-600 dark:text-slate-300">horas hombre</strong> según recargos CCT. No incluye importes — ver Financiera (consumo) y Liquidaciones para pesos.
                 </p>
               </SectionCard>
 
@@ -4664,8 +4680,8 @@ export default function AnalisisPage() {
                 </p>
 
                 <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                  El universo del header usa el período <strong>{periodRange.labelShort}</strong>.
-                  Analítica lee el mismo snapshot: si el rango de abajo ya está cubierto, no hay otro viaje a Firestore.
+                  Rango alineado al período del header: <strong>{periodRange.labelShort}</strong>.
+                  Si ampliás las fechas manualmente, podés cargar más turnos del snapshot.
                 </p>
 
                 {/* Fila 1: rango de fechas + botón */}
@@ -4686,9 +4702,9 @@ export default function AnalisisPage() {
                     setAnalDateFrom(f);
                     setAnalDateTo(t);
                     void loadAnalytics(f, t);
-                  }} disabled={loadAnal}
+                  }} disabled={loadAnal || periodNavLocked}
                     className="flex items-center gap-1.5 border border-indigo-300 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 disabled:opacity-60 text-indigo-800 dark:text-indigo-200 text-xs font-black px-3 py-1.5 rounded-lg transition-colors">
-                    Igualar al período y cargar
+                    Restablecer período del header
                   </button>
                   <button onClick={() => void loadAnalytics()} disabled={loadAnal}
                     className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-xs font-black px-3 py-1.5 rounded-lg transition-colors">

@@ -30,7 +30,6 @@ import {
   buildInformeAnalitico,
   buildInformeSeries,
   chooseInformeSeriesBucket,
-  estimarCostoInforme,
   iterateInformeBuckets,
 } from '../src/lib/analisis/analisisInforme';
 import {
@@ -348,8 +347,7 @@ assert(inf.desvioRealVsVendido === -992, 'desvio = fichadas − vendido (no se f
 assert(inf.bolsaInicial === 2000, 'informe sin bolsa = techo 10×200 (no 192)');
 assert(inf.bolsaModo === 'sin_indice', 'sin objeto bolsa → sin índice');
 assert(inf.conclusiones.length >= 1, 'informe genera conclusiones');
-assert(estimarCostoInforme(inf, 0) === null, 'sin valor hora no estima $');
-assert(!!estimarCostoInforme(inf, 5000), 'con valor hora estima $');
+assert(inf.hsNormales >= 0 && inf.hsExtras50 >= 0 && inf.hsFT100 >= 0, 'informe costo operativo en hs');
 
 assert(isShiftFichado({ isPresent: true, code: 'M' }), 'fichado por isPresent');
 assert(isShiftFichado({

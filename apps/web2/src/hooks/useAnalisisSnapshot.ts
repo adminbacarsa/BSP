@@ -59,6 +59,7 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
   const [catalogReady, setCatalogReady] = useState(false);
   const [loadInit, setLoadInit] = useState(true);
   const [loadFacts, setLoadFacts] = useState(false);
+  const [loadPeriod, setLoadPeriod] = useState(false);
   const [loadError, setLoadError] = useState(null as string | null);
   const [loadProgress, setLoadProgress] = useState(null as AnalisisLoadProgress | null);
   const [extractRows, setExtractRows] = useState([] as HoursBalanceRow[]);
@@ -182,15 +183,20 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     const extractOk = allowExtractPaint(periodStartMs, periodEndMs)
       && peeked.length > 0
       && balancesCoverPeriodKeys(peeked, keys);
-    if (storeCoversRange(getAnalisisMemoryStore(), env.start, env.end) || extractOk) {
+    if (storeCoversRange(getAnalisisMemoryStore(), env.start, env.end)) {
       setLoadInit(false);
-      if (storeCoversRange(getAnalisisMemoryStore(), env.start, env.end)) return;
+      setLoadPeriod(false);
+      return;
     }
+    if (extractOk) setLoadInit(false);
+
     let cancelled = false;
     const gen = ++periodGenRef.current;
-    if (!extractOk && !storeCoversRange(getAnalisisMemoryStore(), env.start, env.end)) {
-      setLoadInit(true);
-    }
+    setLoadPeriod(true);
+    setLoadFacts(true);
+    setLoadProgress({ pct: 6, label: 'Cargando período…', phase: 'malla', docs: 0 });
+    if (!extractOk) setLoadInit(true);
+
     (async () => {
       try {
         if (!extractOk && keys.length && oids.length) {
@@ -231,6 +237,11 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
         console.error(e);
         if (!cancelled && gen === periodGenRef.current) {
           setLoadError(e instanceof Error ? e.message : 'No se pudo cargar el mes de Análisis.');
+        }
+      } finally {
+        if (!cancelled && gen === periodGenRef.current) {
+          setLoadPeriod(false);
+          setLoadFacts(false);
         }
       }
     })();
@@ -364,6 +375,7 @@ export function useAnalisisSnapshot(args: UseAnalisisSnapshotArgs) {
     mallaReady,
     loadInit,
     loadFacts,
+    loadPeriod,
     loadError,
     loadProgress,
     catalogAt: store?.catalogAt ?? null,
