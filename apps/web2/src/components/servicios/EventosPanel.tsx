@@ -13,6 +13,7 @@ import {
     type TipoTurnoEvento,
 } from '@/services/eventoService';
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
+import { assignGuardToEvent } from '@/services/eventoAssignService';
 import { aptitudTypeService } from '@/services/aptitudTypeService';
 import { type AptitudType } from '@/lib/rrhh/aptitudTypes';
 import { slaService } from '@/services/slaService';
@@ -207,14 +208,44 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
         setRespondiendo(sol.id);
         try {
             const uid = getAuth().currentUser?.uid || '';
-            await solicitudEventoService.responder(sol.id, status, uid);
+
+            if (status === 'aprobada') {
+                // Buscar el servicio para obtener horario y horas
+                const evento = eventos.find(e => e.id === sol.eventoId);
+                const servicio = evento?.servicios?.find(s => s.id === sol.servicioId);
+                const horaInicio = servicio?.horaInicio || '08:00';
+                const horaFin    = servicio?.horaFin    || '16:00';
+                const horas = servicio ? calcHorasServicio(servicio) : 8;
+
+                await assignGuardToEvent({
+                    empresaId,
+                    empleadoId:    sol.empleadoId,
+                    empleadoNombre: sol.empleadoNombre,
+                    eventoId:      sol.eventoId,
+                    eventoNombre:  sol.eventoNombre,
+                    clienteId:     evento?.clienteId,
+                    clienteNombre: evento?.clienteNombre,
+                    servicioId:    sol.servicioId,
+                    servicioNombre: sol.servicioNombre,
+                    servicioFecha: sol.servicioFecha,
+                    horaInicio,
+                    horaFin,
+                    horas,
+                    solicitudId:  sol.id,
+                    respondidoPor: uid,
+                    notifyPlannerUid: uid,
+                });
+            } else {
+                await solicitudEventoService.responder(sol.id, status, uid);
+            }
+
             setSolicitudesMap(prev => {
                 const sols = (prev[sol.eventoId] || []).map(s =>
                     s.id === sol.id ? { ...s, status } : s
                 );
                 return { ...prev, [sol.eventoId]: sols };
             });
-            addToast(status === 'aprobada' ? 'Solicitud aprobada' : 'Solicitud rechazada', 'success');
+            addToast(status === 'aprobada' ? 'Solicitud aprobada — turno asignado' : 'Solicitud rechazada', 'success');
         } catch {
             addToast('Error al responder la solicitud', 'error');
         } finally {
