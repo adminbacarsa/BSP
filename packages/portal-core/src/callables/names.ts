@@ -12,6 +12,7 @@ export const PORTAL_CALLABLES = {
   cancelSwapRequest: 'cancelSwapRequest',
   deleteMyTokens: 'deleteMyTokens',
   sendTestNotification: 'sendTestNotification',
+  respondEventoConvocatoria: 'respondEventoConvocatoria',
 } as const;
 
 export type PortalCallableName = (typeof PORTAL_CALLABLES)[keyof typeof PORTAL_CALLABLES];

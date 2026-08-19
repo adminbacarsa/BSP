@@ -196,6 +196,18 @@ service cloud.firestore {
       return isSuperAdmin() || docEmpresaId(data) == '' || tenantMatches(data);
     }
 
+    function empleadoDocOwnedByAuth(empleadoId) {
+      return request.auth != null && (
+        empleadoId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/empleados/$(empleadoId)) &&
+         get(/databases/$(database)/documents/empleados/$(empleadoId)).data.get('uid', '') == request.auth.uid)
+      );
+    }
+
+    function eventoActivoReadable(data) {
+      return data.status == 'activo' || data.status == 'abierto' || data.status == 'en_curso';
+    }
+
     function roleReadable(data) {
       return isSuperAdmin() || docEmpresaId(data) == '' || docEmpresaId(data) == userEmpresaId();
     }
@@ -631,7 +643,8 @@ service cloud.firestore {
     }
 
     match /eventos/{eventoId} {
-      allow read:   if tenantAdminRead();
+      allow read:   if tenantAdminRead()
+                       || (isEmployeeClaim() && tenantMatches(resource.data) && eventoActivoReadable(resource.data));
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
@@ -640,12 +653,12 @@ service cloud.firestore {
     // Solicitudes de guardia para trabajar en un servicio de evento.
     // El guardia puede crear y leer las propias; el admin responde.
     match /solicitudes_evento/{solicitudId} {
-      allow read:   if tenantAdminRead() || (request.auth != null && resource.data.empleadoId == request.auth.uid);
+      allow read:   if tenantAdminRead() || empleadoDocOwnedByAuth(resource.data.empleadoId);
       allow create: if tenantAdminCreate()
                        || (request.auth != null && tenantMatches(request.resource.data)
-                           && request.resource.data.empleadoId == request.auth.uid);
+                           && empleadoDocOwnedByAuth(request.resource.data.empleadoId));
       allow update: if tenantAdminUpdate()
-                       || (request.auth != null && resource.data.empleadoId == request.auth.uid);
+                       || empleadoDocOwnedByAuth(resource.data.empleadoId);
       allow delete: if tenantAdminDelete();
     }
   }

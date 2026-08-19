@@ -31,9 +31,9 @@
 | **F7** | Publicación en stores | `PENDIENTE` | 12 | 0/12 | — |
 | | **TOTAL** | | **88** | **32/88** | |
 
-**Fase activa recomendada:** F4-08 E2E permutas (Paso 1 roadmap) → F5-07 + EAS preview  
-**Última actualización:** 2026-08-04  
-**Última tarea completada:** F5-05/06 UX offline, errores y loading temático
+**Fase activa recomendada:** Paso 0.5 eventos (validar) → F4-08 E2E permutas → F5-07 + EAS preview  
+**Última actualización:** 2026-08-19  
+**Última tarea completada:** Eventos EV + convocatorias en app + fix notificaciones
 
 ---
 
@@ -45,7 +45,8 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **F4-08** | Prueba E2E permuta | Dos guardias + supervisor en prod/lab | F4 |
+| **Eventos EV** | Validar convocatoria admin → app → Acepto (Paso 0.5) | Pre-F4 |
+| **F4-08** | Prueba E2E permuta (dos guardias + supervisor) | F4 |
 
 ### Bloqueantes actuales
 
@@ -65,8 +66,9 @@
 | Ausencias + adjuntos | ✅ | ⬜ | F3 |
 | Licencias | ✅ | ⬜ | F3 |
 | Push notifications | ✅ (web) | ⬜ | F3 |
-| Permutas | ✅ | ⬜ | F4 |
-| Credencial digital | ✅ | ⬜ | F5 |
+| Permutas | ✅ | ✅ | F4 |
+| Eventos EV (convocatoria / solicitud) | ✅ | ✅ | Pre-F4 |
+| Credencial digital | ✅ | ✅ | F5 |
 | Flags `portalFeatures` | ✅ | ⬜ | F1 |
 
 ---
@@ -76,6 +78,8 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-08-19 | Eventos EV | App /eventos, convocatorias Acepto/No puedo, solicitud cupo, inbox normalizado, firestore.rules empleado, notif convocatoria title/body/employeeId
+2026-08-04 | F4-08 prep | seed-swap-peer + checklist E2E permutas
 2026-08-04 | F5-05/06 | Banner sin conexión, PortalErrorPanel, novedad temática, LoadingScreen
 2026-08-03 | F5-01..04 | Credencial digital: QR, código 60s, foto cámara, cache AsyncStorage
 2026-08-03 | F4 | Permutas app + callables swap + supervisor en planificación
@@ -283,6 +287,8 @@ npm run dev:mobile
 | F4-08 | Prueba E2E permuta | Dos guardias + supervisor (`approveSwapRequest`) | ⬜ Pendiente | — |
 
 ### Checklist E2E F4-08 (lab)
+
+> **Antes:** validar **Paso 0.5 Eventos** (convocatoria admin → app → Acepto → turno EV).
 
 **Preparación (emulador)**
 

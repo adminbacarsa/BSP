@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,7 +8,7 @@ import { CommandCard } from '../src/components/ui/CommandCard';
 import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
-import { usePortalInbox } from '../src/hooks/usePortalInbox';
+import { usePortalInbox, type PortalInboxItem } from '../src/hooks/usePortalInbox';
 import { getPortalCallables } from '../src/lib/portal';
 
 const ROADMAP = [
@@ -17,6 +17,7 @@ const ROADMAP = [
   { title: 'Ausencias y licencias', status: 'Formulario activo', done: true },
   { title: 'Adjunto certificado', status: 'Cámara y galería', done: true },
   { title: 'Notificaciones push', status: 'Auto al login', done: true },
+  { title: 'Eventos EV', status: 'Convocatorias + solicitud', done: true },
   { title: 'Permutas', status: 'Con supervisor', done: true },
   { title: 'Credencial digital', status: 'QR + verificación', done: true },
 ];
@@ -56,6 +57,17 @@ function MasScreenContent() {
       setTestBusy(false);
     }
   }, [user]);
+
+  const openInboxItem = useCallback(
+    (n: PortalInboxItem) => {
+      if (!n.read) void markRead(n.id);
+      if (n.type === 'CONVOCATORIA_EVENTO' || n.type === 'SWAP_REQUEST') {
+        router.push(n.type === 'CONVOCATORIA_EVENTO' ? '/eventos' : '/permutas');
+        return;
+      }
+    },
+    [markRead, router],
+  );
 
   return (
     <>
@@ -134,7 +146,21 @@ function MasScreenContent() {
                       {n.body}
                     </Text>
                   ) : null}
-                  {!n.read ? (
+                  {n.type === 'CONVOCATORIA_EVENTO' ? (
+                    <CommandButton
+                      label="Ver convocatoria"
+                      variant="primary"
+                      onPress={() => openInboxItem(n)}
+                      style={styles.markReadBtn}
+                    />
+                  ) : n.type === 'SWAP_REQUEST' ? (
+                    <CommandButton
+                      label="Ver permutas"
+                      variant="secondary"
+                      onPress={() => openInboxItem(n)}
+                      style={styles.markReadBtn}
+                    />
+                  ) : !n.read ? (
                     <CommandButton
                       label="Marcar leída"
                       variant="secondary"
@@ -153,6 +179,16 @@ function MasScreenContent() {
             </Text>
             <CommandButton label="Ver credencial" onPress={() => router.push('/credencial')} />
           </CommandCard>
+
+          {portalFeatures.viewEvents ? (
+            <CommandCard title="Eventos (EV)">
+              <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+                Servicios especiales: solicitá cupo o respondé convocatorias del administrador (misma lógica que el
+                portal web).
+              </Text>
+              <CommandButton label="Eventos y convocatorias" onPress={() => router.push('/eventos')} />
+            </CommandCard>
+          ) : null}
 
           {portalFeatures.swapShifts ? (
             <CommandCard title="Permutas de turno">
@@ -179,6 +215,7 @@ function MasScreenContent() {
               <Flag label="Ausencias" on={portalFeatures.reportAbsence} />
               <Flag label="Licencias" on={portalFeatures.requestLicense} />
               <Flag label="Permutas" on={portalFeatures.swapShifts} />
+              <Flag label="Eventos" on={portalFeatures.viewEvents} />
             </View>
           </CommandCard>
 

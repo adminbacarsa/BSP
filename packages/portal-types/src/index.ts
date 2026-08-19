@@ -16,6 +16,11 @@ export type Shift = {
   objectiveName?: string;
   clientName?: string;
   positionName?: string;
+  code?: string;
+  eventoId?: string;
+  eventoNombre?: string;
+  servicioId?: string;
+  servicioNombre?: string;
   status?: string;
   isPresent?: boolean;
   isCompleted?: boolean;
@@ -33,6 +38,7 @@ export type PortalFeatures = {
   requestLicense: boolean;
   swapShifts: boolean;
   viewSchedule: boolean;
+  viewEvents: boolean;
 };
 
 export const DEFAULT_PORTAL_FEATURES: PortalFeatures = {
@@ -41,7 +47,10 @@ export const DEFAULT_PORTAL_FEATURES: PortalFeatures = {
   requestLicense: true,
   swapShifts: true,
   viewSchedule: true,
+  viewEvents: true,
 };
+
+export * from './eventos';
 
 export type ObjectiveLocation = {
   lat: number;

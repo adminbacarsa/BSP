@@ -40,3 +40,22 @@ export {
   filterAbsenceTypesForFeatures,
 } from './absences/employeeAbsence';
 export type { AbsenceType, AbsenceCase, ClassifiedAbsence } from './absences/employeeAbsence';
+export {
+  isEventoActivo,
+  calcHorasEvento,
+  calcHorasServicio,
+  horarioBadgeServicio,
+  servicioUbicacionLabel,
+  serviciosDisponiblesPortal,
+  portalEventosDateRange,
+} from './eventos/eventoHelpers';
+export {
+  loadEventosByEmpresaRange,
+  loadSolicitudesEventoByEmpleado,
+  createSolicitudEventoGuardia,
+  rejectConvocatoriaEvento,
+  assignGuardToEvent,
+} from './eventos/eventoPortal';
+export type { AssignGuardToEventParams } from './eventos/eventoPortal';
+export { normalizePortalInboxItem, solicitudEventoStatusLabel } from './notifications/inboxNormalize';
+export type { PortalInboxNormalized } from './notifications/inboxNormalize';

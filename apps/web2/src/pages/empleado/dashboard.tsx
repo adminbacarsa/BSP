@@ -5,7 +5,6 @@ import AuthGuard from '@/components/auth/AuthGuard';
 import { Calendar, MapPin, Bell, FileText, CheckCircle, AlertTriangle, Navigation, BellRing, Sun, Sunset, Moon, ArrowLeftRight, Search, X, CreditCard, Star, ChevronDown, ChevronUp, Clock } from 'lucide-react';
 import { eventoService, serviciosParaFecha, type Evento, type ServicioEvento } from '@/services/eventoService';
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
-import { assignGuardToEvent } from '@/services/eventoAssignService';
 import CredencialDigital from '@/components/empleado/CredencialDigital';
 import { app, db, functions, storage, auth, onSnapshotFresh } from '@/lib/firebase';
 import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
@@ -265,6 +264,7 @@ export default function EmployeeDashboard() {
     requestLicense: true,
     swapShifts: true,
     viewSchedule: true,
+    viewEvents: true,
   });
 
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
@@ -884,36 +884,8 @@ export default function EmployeeDashboard() {
     setRespondiendoConvId(sol.id);
     try {
       if (respuesta === 'aprobada') {
-        // Buscar el servicio para obtener horaInicio/horaFin/horas
-        const evento = eventosDisponibles.find(e => e.id === sol.eventoId);
-        const servicio = evento?.servicios?.find(s => s.id === sol.servicioId);
-        const horaInicio = servicio?.horaInicio || '08:00';
-        const horaFin    = servicio?.horaFin    || '16:00';
-        const horas = servicio
-          ? (servicio.tipoTurno === '3x8' ? 8 : servicio.tipoTurno === '2x12' ? 12
-            : Math.round(((new Date(`2000-01-01T${horaFin}`).getTime() - new Date(`2000-01-01T${horaInicio}`).getTime()) / 3600000 + 24) % 24))
-          : 8;
-        const empNombre = empProfile?.firstName
-          ? `${empProfile.lastName || ''} ${empProfile.firstName || ''}`.trim()
-          : (user?.email || sol.empleadoId);
-
-        await assignGuardToEvent({
-          empresaId: sol.empresaId,
-          empleadoId: sol.empleadoId,
-          empleadoNombre: empNombre,
-          eventoId:     sol.eventoId,
-          eventoNombre: sol.eventoNombre,
-          clienteId:    evento?.clienteId,
-          clienteNombre: evento?.clienteNombre,
-          servicioId:     sol.servicioId,
-          servicioNombre: sol.servicioNombre,
-          servicioFecha:  sol.servicioFecha,
-          horaInicio,
-          horaFin,
-          horas,
-          solicitudId: sol.id,
-          // notifyPlannerUid: no disponible en el portal del guardia; el admin recibe la notif por otro canal
-        });
+        const callable = httpsCallable(functions, 'respondEventoConvocatoria');
+        await callable({ solicitudId: sol.id, accept: true });
       } else {
         await solicitudEventoService.responderConvocatoria(sol.id, respuesta);
       }
@@ -2031,8 +2003,8 @@ export default function EmployeeDashboard() {
               <div className="mt-4 max-h-72 overflow-y-auto space-y-2">
                 {unreadInbox.map((n: any) => (
                   <div key={n.id} className="border border-slate-800 rounded-xl p-3 bg-slate-950/50">
-                    <div className="text-xs font-bold">{n.title || 'Notificación'}</div>
-                    <div className="text-[11px] text-slate-300 mt-1">{n.body || n.message || ''}</div>
+                    <div className="text-xs font-bold">{n.title || n.titulo || 'Notificación'}</div>
+                    <div className="text-[11px] text-slate-300 mt-1">{n.body || n.mensaje || n.message || ''}</div>
                     <div className="flex items-center justify-between mt-2">
                       <span className="text-[10px] text-rose-500 font-bold">No leída</span>
                       <button onClick={() => markNotificationRead(n.id)} className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-800 text-white">Marcar leída</button>
@@ -2078,8 +2050,8 @@ export default function EmployeeDashboard() {
                           className={`border border-slate-800 rounded-xl cursor-pointer p-3 ${n.read ? 'bg-slate-950/60' : 'bg-indigo-950/30 border-indigo-800/40'}`}>
                           <div className="flex items-start justify-between gap-2">
                             <div>
-                              <div className="text-xs font-black text-slate-200 uppercase">{n.title || 'CronoApp'}</div>
-                              <div className="text-[11px] text-slate-400">{actionLabel}: {n.body || ''}</div>
+                              <div className="text-xs font-black text-slate-200 uppercase">{n.title || n.titulo || 'CronoApp'}</div>
+                              <div className="text-[11px] text-slate-400">{actionLabel}: {n.body || n.mensaje || ''}</div>
                               <div className="text-[10px] mt-1">
                                 <span className="text-slate-500">{formatDate(n.createdAt)} · {formatTime(n.createdAt)}</span>
                                 <span className={`ml-2 font-bold ${n.read ? 'text-slate-600' : 'text-rose-400'}`}>{n.read ? 'Leída' : 'No leída'}</span>
