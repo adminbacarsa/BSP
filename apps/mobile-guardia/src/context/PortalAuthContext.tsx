@@ -155,6 +155,23 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
   const [employeeProfileError, setEmployeeProfileError] = useState<string | null>(null);
   const pendingPreviewRef = useRef<string | null>(null);
+  const initialUrlHandledRef = useRef(false);
+
+  const resolvePendingPreviewId = useCallback(async (): Promise<string | null> => {
+    if (!initialUrlHandledRef.current) {
+      initialUrlHandledRef.current = true;
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        const fromUrl = parsePreviewEmpFromUrl(initialUrl);
+        if (fromUrl) pendingPreviewRef.current = fromUrl;
+      } catch {
+        /* ignore */
+      }
+    }
+    const id = pendingPreviewRef.current;
+    pendingPreviewRef.current = null;
+    return id;
+  }, []);
 
   const loadEmployeeByDocId = useCallback(
     async (id: string, currentUser: User) => {
@@ -331,15 +348,14 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void Linking.getInitialURL().then((url) => {
-      const emp = parsePreviewEmpFromUrl(url);
-      if (emp) pendingPreviewRef.current = emp;
-    });
-
     const sub = Linking.addEventListener('url', ({ url }) => {
       const emp = parsePreviewEmpFromUrl(url);
-      if (!emp || !user || !isSuperAdmin) return;
-      void enterPreview(emp);
+      if (!emp) return;
+      if (user && isSuperAdmin) {
+        void enterPreview(emp);
+        return;
+      }
+      pendingPreviewRef.current = emp;
     });
 
     return () => sub.remove();
@@ -368,8 +384,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const previewId = pendingPreviewRef.current;
-        pendingPreviewRef.current = null;
+        const previewId = await resolvePendingPreviewId();
         await bootstrapSession(nextUser, previewId);
       } catch (err) {
         const token = await nextUser.getIdTokenResult(true).catch(() => null);
@@ -399,19 +414,18 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(authReadyTimer);
       unsub();
     };
-  }, [auth, bootstrapSession, loadEmployee]);
+  }, [auth, bootstrapSession, loadEmployee, resolvePendingPreviewId]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {
       try {
         const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-        const previewId = pendingPreviewRef.current;
-        pendingPreviewRef.current = null;
         const okEmployee = await isEmployeeUser(cred.user, db);
         if (!okEmployee) {
           await firebaseSignOut(auth);
           throw new Error('Esta app es solo para vigiladores. Usá el panel web para administración.');
         }
+        const previewId = await resolvePendingPreviewId();
         await bootstrapSession(cred.user, previewId);
       } catch (err) {
         if (isNetworkOrFirestoreError(err)) {
@@ -422,7 +436,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [auth, db, bootstrapSession],
+    [auth, db, bootstrapSession, resolvePendingPreviewId],
   );
 
   const signOut = useCallback(async () => {

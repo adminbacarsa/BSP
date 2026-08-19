@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Redirect, Stack, useRouter } from 'expo-router';
+import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
@@ -29,6 +29,8 @@ type PreviewEmployee = {
 
 export default function PreviewPickerScreen() {
   const router = useRouter();
+  const { emp: empParam } = useLocalSearchParams<{ emp?: string | string[] }>();
+  const deepLinkEmpId = typeof empParam === 'string' ? empParam : Array.isArray(empParam) ? empParam[0] : undefined;
   const { palette } = useTheme();
   const { user, initializing, isSuperAdmin, enterPreview, signOut } = usePortalAuth();
   const [employees, setEmployees] = useState<PreviewEmployee[]>([]);
@@ -94,6 +96,22 @@ export default function PreviewPickerScreen() {
   const selectedEmployee = employees.find((e) => e.id === selectedId) ?? null;
   const previewLink = selectedId ? buildMobilePreviewDeepLink(selectedId) : null;
 
+  useEffect(() => {
+    if (initializing || !isSuperAdmin || !deepLinkEmpId?.trim()) return;
+    let cancelled = false;
+    setEntering(true);
+    void enterPreview(deepLinkEmpId.trim())
+      .then(() => {
+        if (!cancelled) router.replace('/home');
+      })
+      .finally(() => {
+        if (!cancelled) setEntering(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initializing, isSuperAdmin, deepLinkEmpId, enterPreview, router]);
+
   async function handleEnter(empId: string) {
     setEntering(true);
     try {
@@ -104,8 +122,8 @@ export default function PreviewPickerScreen() {
     }
   }
 
-  if (initializing) {
-    return <LoadingScreen label="Iniciando COSP Guardia…" />;
+  if (initializing || (deepLinkEmpId && entering)) {
+    return <LoadingScreen label="Abriendo vista previa…" />;
   }
 
   if (!user) {
@@ -207,7 +225,7 @@ export default function PreviewPickerScreen() {
           <View style={[styles.qrPanel, { backgroundColor: palette.card, borderColor: palette.cardBorder }]}>
             <Text style={[styles.qrTitle, { color: palette.onSurface }]}>QR para ingresar en la app</Text>
             <Text style={[styles.qrHint, { color: palette.onSurfaceMuted }]}>
-              Escaneá con otro celular (SuperAdmin logueado) o usá Entrar abajo en este dispositivo.
+              Modo Expo Go: escaneá con otro celular (SuperAdmin logueado). Requiere npm run dev:mobile en la PC.
             </Text>
             <View style={styles.qrWrap}>
               <QRCode value={previewLink} size={148} backgroundColor="#fff" color="#0f172a" />
