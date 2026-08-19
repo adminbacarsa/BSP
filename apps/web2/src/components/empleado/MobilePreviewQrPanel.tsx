@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 
-const EXPO_HOST_STORAGE_KEY = 'cosp_expo_preview_host';
+export const EXPO_HOST_STORAGE_KEY = 'cosp_expo_preview_host';
+
+const DEFAULT_ORIGIN = 'https://comtroldata.web.app';
 
 export function buildApkPreviewUrl(empDocId: string): string {
   const base = process.env.NEXT_PUBLIC_MOBILE_PREVIEW_LINK_BASE?.trim();
@@ -18,6 +20,27 @@ export function buildExpoGoPreviewUrl(hostPort: string, empDocId: string): strin
   const withoutPath = raw.split('/')[0] ?? raw;
   const normalized = withoutPath.includes(':') ? withoutPath : `${withoutPath}:8081`;
   return `exp://${normalized}/--/preview?emp=${encodeURIComponent(empDocId)}`;
+}
+
+/** Preview web SuperAdmin (navegador). */
+export function buildWebPreviewUrl(origin: string, empDocId: string): string {
+  const base = origin.replace(/\/+$/, '') || DEFAULT_ORIGIN;
+  return `${base}/empleado/dashboard?preview=${encodeURIComponent(empDocId)}`;
+}
+
+/**
+ * Enlace HTTPS recomendado para QR: abre comtroldata.web.app y redirige a app o web.
+ * Escaneable con cualquier lector QR (cámara del celular).
+ */
+export function buildAppBridgeUrl(origin: string, empDocId: string, metroHost?: string): string {
+  const base = origin.replace(/\/+$/, '') || DEFAULT_ORIGIN;
+  const params = new URLSearchParams({ emp: empDocId });
+  const metro = metroHost?.trim();
+  if (metro) {
+    const normalized = metro.replace(/^exp:\/\//i, '').split('/')[0] ?? metro;
+    params.set('metro', normalized);
+  }
+  return `${base}/empleado/app-preview?${params.toString()}`;
 }
 
 export function readStoredExpoHost(): string {
@@ -40,22 +63,36 @@ type Props = {
   compact?: boolean;
 };
 
-type QrMode = 'expo' | 'apk';
+type QrMode = 'bridge' | 'web' | 'expo' | 'apk';
 
 export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
-  const [mode, setMode] = useState<QrMode>('expo');
+  const [mode, setMode] = useState<QrMode>('bridge');
   const [expoHost, setExpoHost] = useState('');
+  const [origin, setOrigin] = useState(DEFAULT_ORIGIN);
 
   useEffect(() => {
     setExpoHost(readStoredExpoHost());
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin || DEFAULT_ORIGIN);
+    }
   }, []);
 
   const url = useMemo(() => {
-    if (mode === 'apk') return buildApkPreviewUrl(empDocId);
-    if (!expoHost.trim()) return '';
-    return buildExpoGoPreviewUrl(expoHost, empDocId);
-  }, [mode, expoHost, empDocId]);
+    switch (mode) {
+      case 'web':
+        return buildWebPreviewUrl(origin, empDocId);
+      case 'bridge':
+        return buildAppBridgeUrl(origin, empDocId, expoHost);
+      case 'apk':
+        return buildApkPreviewUrl(empDocId);
+      case 'expo':
+        if (!expoHost.trim()) return '';
+        return buildExpoGoPreviewUrl(expoHost, empDocId);
+      default:
+        return '';
+    }
+  }, [mode, expoHost, empDocId, origin]);
 
   useEffect(() => {
     if (!url) {
@@ -79,53 +116,69 @@ export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props)
     storeExpoHost(expoHost);
   }
 
+  const needsMetro = mode === 'expo' || mode === 'bridge';
+
   return (
     <div className={`rounded-2xl border border-slate-800 bg-slate-900/80 ${compact ? 'p-3' : 'p-4'} flex flex-col gap-2`}>
       <div className="flex flex-wrap items-center gap-2 self-stretch">
         <p className="text-[11px] font-black uppercase tracking-wide text-orange-400 flex-1 min-w-[120px]">
-          App móvil · QR ingreso
+          QR ingreso · {employeeName}
         </p>
-        <div className="flex rounded-lg overflow-hidden border border-slate-700 text-[10px] font-black uppercase">
-          <button
-            type="button"
-            onClick={() => setMode('expo')}
-            className={`px-2.5 py-1 ${mode === 'expo' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400'}`}
-          >
-            Expo Go
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('apk')}
-            className={`px-2.5 py-1 ${mode === 'apk' ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400'}`}
-          >
-            APK
-          </button>
+        <div className="flex flex-wrap rounded-lg overflow-hidden border border-slate-700 text-[9px] font-black uppercase">
+          {(
+            [
+              ['bridge', 'App HTTPS'],
+              ['web', 'Solo web'],
+              ['expo', 'Expo'],
+              ['apk', 'APK'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setMode(key)}
+              className={`px-2 py-1 ${mode === key ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
       <p className="text-[11px] text-slate-400 leading-snug">
-        {mode === 'expo' ? (
+        {mode === 'bridge' && (
           <>
-            <span className="text-amber-300 font-bold">Expo Go:</span> mismo Wi‑Fi,{' '}
-            <code className="text-slate-300">npm run dev:mobile</code> activo y SuperAdmin logueado en la app.
-            Preview como <span className="text-slate-200 font-bold">{employeeName}</span>.
+            <span className="text-emerald-300 font-bold">Recomendado:</span> enlace{' '}
+            <code className="text-slate-300">comtroldata.web.app/empleado/app-preview</code>. La cámara del celular
+            abre el navegador e intenta lanzar la app (Expo o APK). Si no hay app, cae al portal web.
           </>
-        ) : (
+        )}
+        {mode === 'web' && (
           <>
-            <span className="text-slate-300 font-bold">APK instalado</span> (no Expo Go). Scheme{' '}
-            <code className="text-slate-400">cosp-guardia://</code>
+            Solo navegador:{' '}
+            <code className="text-slate-300">/empleado/dashboard?preview=…</code> (vista previa SuperAdmin web).
+          </>
+        )}
+        {mode === 'expo' && (
+          <>
+            Directo a Expo Go (<code className="text-slate-400">exp://</code>). Requiere Metro en la PC y misma Wi‑Fi.
+          </>
+        )}
+        {mode === 'apk' && (
+          <>
+            Directo al APK instalado (<code className="text-slate-400">cosp-guardia://</code>). No funciona con Expo Go.
           </>
         )}
       </p>
 
-      {mode === 'expo' ? (
+      {needsMetro ? (
         <div className="flex gap-2 items-center self-stretch">
           <input
             type="text"
             value={expoHost}
             onChange={(e) => setExpoHost(e.target.value)}
             onBlur={saveHost}
-            placeholder="192.168.0.49:8081"
+            placeholder="IP Metro opcional · 192.168.0.49:8081"
             className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-white font-mono placeholder-slate-600"
           />
           <button
@@ -142,7 +195,7 @@ export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props)
         <img src={dataUrl} alt={`QR preview ${employeeName}`} className="rounded-xl bg-white p-2 self-center" />
       ) : mode === 'expo' && !expoHost.trim() ? (
         <p className="text-[11px] text-amber-400 text-center py-4">
-          Ingresá la IP:puerto de Metro (la misma del QR de Expo en la PC, ej. 192.168.0.49:8081)
+          Ingresá IP:puerto de Metro (ej. 192.168.0.49:8081)
         </p>
       ) : (
         <div className="w-[148px] h-[148px] rounded-xl bg-slate-800 animate-pulse self-center" />
@@ -155,4 +208,4 @@ export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props)
   );
 }
 
-export { buildApkPreviewUrl as buildMobilePreviewUrl };
+export { buildAppBridgeUrl as buildMobilePreviewUrl };
