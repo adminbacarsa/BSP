@@ -313,7 +313,7 @@ export default function GeneralTab() {
                             <div>
                                 <p className="font-black text-orange-800 dark:text-orange-200 text-sm uppercase">QR app móvil guardia</p>
                                 <p className="text-[11px] text-orange-600/80 dark:text-orange-300/80 font-medium mt-0.5">
-                                    Elegí guardia → ícono QR → escaneá con COSP Guardia (SuperAdmin logueado)
+                                    Preview web en comtroldata.web.app (producción). App APK nativa: pendiente build EAS.
                                 </p>
                             </div>
                             <span className="text-[10px] font-black text-orange-600 uppercase flex items-center gap-1 mt-auto">
