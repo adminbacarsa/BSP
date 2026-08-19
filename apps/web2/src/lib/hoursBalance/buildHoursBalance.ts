@@ -29,7 +29,7 @@ export function buildObjectiveAliasesFromSla(services: SlaPlanningRow[]): Record
     const name = String(srv.objectiveName ?? oid).trim();
     const canonicalId = oid || name;
     if (!canonicalId) continue;
-    const meta: ObjectiveMeta = { canonicalId, name, clientId: cid };
+    const meta: ObjectiveMeta = { canonicalId, name, clientId: cid, clientName: String(srv.clientName ?? '').trim() };
     register(meta, canonicalId);
     if (oid) register(meta, oid);
     if (name) register(meta, name);

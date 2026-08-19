@@ -2,6 +2,7 @@ export type ObjectiveMeta = {
   canonicalId: string;
   name: string;
   clientId?: string;
+  clientName?: string;
 };
 
 export function fallbackObjectiveKey(clientId: string, objectiveName: string): string {
@@ -246,4 +247,62 @@ export function formatProformaObjectiveLabel(objectiveId: string, objectiveName:
   if (!id) return 'Objetivo sin nombre';
   const short = id.length > 16 ? `${id.slice(0, 14)}…` : id;
   return `Objetivo sin nombre · ${short}`;
+}
+
+export type ObjectiveClientMeta = {
+  clientId: string;
+  clientName: string;
+};
+
+/** Índice objetivo → cliente desde alias, SLA y malla (turnos). */
+export function buildObjectiveClientIndex(
+  aliases: Record<string, ObjectiveMeta>,
+  services: Array<{ clientId?: unknown; clientName?: unknown; objectiveId?: unknown; objectiveName?: unknown }>,
+  turnos: Array<{ clientId?: unknown; clientName?: unknown; objectiveId?: unknown; objectiveName?: unknown }>,
+): Map<string, ObjectiveClientMeta> {
+  const idx = new Map<string, ObjectiveClientMeta>();
+  const put = (oid: string, clientId: string, clientName: string) => {
+    const id = String(oid || '').trim();
+    if (!id) return;
+    const prev = idx.get(id) || { clientId: '', clientName: '' };
+    idx.set(id, {
+      clientId: clientId || prev.clientId,
+      clientName: clientName || prev.clientName,
+    });
+  };
+  for (const meta of Object.values(aliases)) {
+    if (!meta?.canonicalId) continue;
+    put(meta.canonicalId, String(meta.clientId ?? '').trim(), String(meta.clientName ?? '').trim());
+  }
+  for (const srv of services) {
+    const oid = resolveCanonicalObjectiveId(srv, aliases) || String(srv.objectiveId ?? '').trim();
+    if (!oid) continue;
+    put(oid, String(srv.clientId ?? '').trim(), String(srv.clientName ?? '').trim());
+  }
+  for (const t of turnos) {
+    const oid = resolveCanonicalObjectiveId(t, aliases) || String(t.objectiveId ?? '').trim();
+    if (!oid) continue;
+    put(oid, String(t.clientId ?? '').trim(), String(t.clientName ?? '').trim());
+  }
+  return idx;
+}
+
+/** Cliente de un objetivo: alias → SLA → turnos de malla. */
+export function resolveObjectiveClientForId(
+  oid: string,
+  aliases: Record<string, ObjectiveMeta>,
+  clientIndex: Map<string, ObjectiveClientMeta>,
+): ObjectiveClientMeta {
+  const id = String(oid || '').trim();
+  if (!id) return { clientId: '', clientName: '' };
+  const hit = clientIndex.get(id);
+  if (hit?.clientId || hit?.clientName) return hit;
+  const alias = aliases[id] || aliases[id.toLowerCase()] || findMetaByObjectiveName(aliases, id);
+  if (alias) {
+    return {
+      clientId: String(alias.clientId ?? '').trim(),
+      clientName: String(alias.clientName ?? '').trim(),
+    };
+  }
+  return { clientId: '', clientName: '' };
 }
