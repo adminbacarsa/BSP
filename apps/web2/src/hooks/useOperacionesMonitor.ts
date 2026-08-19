@@ -371,7 +371,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Solo mostrar turnos de planificación publicada. Los turnos operativos
             // (retén, cobertura, auto-reportados) y los ya procesados (presentes/ausentes)
             // siempre se muestran sin importar el estado de publicación.
-            const isOperationalOrigin = shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'SLA_VIRTUAL' || shift.origin === 'CLIENT_REQUEST' || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
+            const isOperationalOrigin = shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'SLA_VIRTUAL' || shift.origin === 'CLIENT_REQUEST' || shift.origin === 'EVENTO' || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
             // isAbsent incluido: un turno ausente de planificación no publicada igual debe mostrarse
             // para que PATH-B detecte la vacante. Sin esto, allPosShifts queda vacío → sin vacante.
             const isAlreadyProcessed = !!shift.isPresent || shift.status === 'PRESENT' || shift.status === 'COMPLETED' || !!shift.isReportedToPlanning || !!shift.isReported || !!shift.isAbsent;
