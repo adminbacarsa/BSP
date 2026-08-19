@@ -226,9 +226,6 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                         return;
                     }
                 }
-                // Buscar el servicio para obtener horario y horas
-                const evento = eventos.find(e => e.id === sol.eventoId);
-                const servicio = evento?.servicios?.find(s => s.id === sol.servicioId);
                 const horaInicio = servicio?.horaInicio || '08:00';
                 const horaFin    = servicio?.horaFin    || '16:00';
                 const horas = servicio ? calcHorasServicio(servicio) : 8;
