@@ -122,7 +122,6 @@ import {
   peekHoursBalances,
   persistHoursBalancesFromTurnos,
   sumBalancesByClient,
-  sumBalancesByPeriodKey,
   balancesCoverObjectives,
   overlayLiveSlaOnBalanceRows,
 } from '@/lib/hoursBalance';
@@ -158,7 +157,7 @@ import {
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 /** Incrementar cuando cambia la fórmula de KPIs (plan = base + ext + adel) para invalidar snapshot/cache. */
-const CRM_DASHBOARD_METRICS_VERSION = 2;
+const CRM_DASHBOARD_METRICS_VERSION = 3;
 
 type ClientListSort = 'name' | 'burn_desc' | 'sla_desc' | 'plan_gap';
 type ClientListFilter = 'all' | 'activos' | 'con_sla' | 'burn_alerta';
@@ -734,6 +733,17 @@ export default function CRMPage() {
     return built;
   };
 
+  const trendSeriesFromBuckets = (buckets: { key: string; label: string }[]): CrmTrendPoint[] =>
+    buckets.map((b) => {
+      const e = periodMetricsRef.current.get(periodCacheKey(b.key));
+      return {
+        label: b.label,
+        sla: Math.round(e?.totals.totalSold ?? 0),
+        planificado: Math.round(e?.totals.totalPlanned ?? 0),
+        ejecutado: Math.round(e?.totals.totalExecuted ?? 0),
+      };
+    });
+
   const applyPeriodCache = (
     periodKey: string,
     buckets: { key: string; label: string }[],
@@ -741,15 +751,7 @@ export default function CRMPage() {
   ) => {
     const hit = periodMetricsRef.current.get(periodCacheKey(periodKey));
     if (!hit) return false;
-    const trendSeries = buckets.map((b) => {
-      const e = periodMetricsRef.current.get(periodCacheKey(b.key));
-      return {
-        label: b.label,
-        sla: e?.totals.totalSold ?? 0,
-        planificado: e?.totals.totalPlanned ?? 0,
-        ejecutado: e?.totals.totalExecuted ?? 0,
-      };
-    });
+    const trendSeries = trendSeriesFromBuckets(buckets);
     setClientMetricsMap(hit.metrics);
     setGlobalMetrics({ ...hit.totals, criticalClients: [] });
     setCrmTrendSeries(trendSeries);
@@ -874,21 +876,15 @@ export default function CRMPage() {
           const selectedLive = overlayLiveSlaOnBalanceRows(selectedRows, slaRows);
           const balancesLive = overlayLiveSlaOnBalanceRows(balanceRows, slaRows);
           const byClient = sumBalancesByClient(selectedLive);
-          const byPeriod = sumBalancesByPeriodKey(balancesLive);
-          const { metrics, totalSold, totalPlanned, totalExecuted } = storePeriodMetrics(
-            selectedPeriodKey,
-            byClient,
-            contractedByClient,
-            closedByClient,
-          );
+          const builtSelected = rangeMode === 'month'
+            ? storePeriodMetrics(selectedPeriodKey, byClient, contractedByClient, closedByClient)
+            : buildMetricsFromHours(byClient, contractedByClient, closedByClient);
+          const { metrics, totalSold, totalPlanned, totalExecuted } = builtSelected;
           new Set(balanceRows.map((r) => r.periodKey)).forEach((pk) => {
-            if (pk === selectedPeriodKey) return;
+            if (rangeMode === 'month' && pk === selectedPeriodKey) return;
             storePeriodMetrics(pk, sumBalancesByClient(balancesLive.filter((r) => r.periodKey === pk)));
           });
-          const trendSeries = bucketsEarly.map((b) => {
-            const p = byPeriod[b.key] || { sla: 0, planned: 0, real: 0 };
-            return { label: b.label, sla: Math.round(p.sla), planificado: Math.round(p.planned), ejecutado: Math.round(p.real) };
-          });
+          const trendSeries = trendSeriesFromBuckets(bucketsEarly);
           setClientMetricsMap(metrics);
           setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
           setCrmTrendSeries(trendSeries);
@@ -1071,35 +1067,22 @@ export default function CRMPage() {
 
       const turnosByClient = groupTurnosByClient(allTurnos, clientRefs, tenantClientIds);
 
-      // Pre-indexar turnos por mes para no iterar allTurnos N veces en el grafico
-      const turnosByBucketKey = new Map<string, any[]>();
-      for (const t of allTurnos) {
-        const rs = toDateSafe(t.realStartTime) ?? toDateSafe(t.startTime);
-        if (!rs) continue;
-        const bk = `${rs.getFullYear()}-${String(rs.getMonth() + 1).padStart(2, '0')}`;
-        if (!turnosByBucketKey.has(bk)) turnosByBucketKey.set(bk, []);
-        turnosByBucketKey.get(bk)!.push(t);
-      }
-
-      const trendSeries: CrmTrendPoint[] = buckets.map((b) => {
-        const byClientHours = aggregateCrmHoursByClient(
-          clientRefs,
-          slaDocsByClient,
-          turnosByBucketKey.get(b.key) ?? [],
-          validEmp,
-          b.start,
-          b.end,
-          tenantClientIds,
-          turnosByClient,
+      buckets.forEach((b) => {
+        storePeriodMetrics(
+          b.key,
+          aggregateCrmHoursByClient(
+            clientRefs,
+            slaDocsByClient,
+            allTurnos,
+            validEmp,
+            b.start,
+            b.end,
+            tenantClientIds,
+            turnosByClient,
+          ),
         );
-        const built = storePeriodMetrics(b.key, byClientHours);
-        return {
-          label: b.label,
-          sla: built.totalSold,
-          planificado: built.totalPlanned,
-          ejecutado: built.totalExecuted,
-        };
       });
+      let trendSeries = trendSeriesFromBuckets(buckets);
       setCrmTrendSeries(trendSeries);
       bumpProgress(92, 'Armando resumen…');
 
@@ -1186,12 +1169,13 @@ export default function CRMPage() {
           closedByClient,
         );
       }
+      trendSeries = trendSeriesFromBuckets(buckets);
+      setCrmTrendSeries(trendSeries);
 
       setClientMetricsMap(metrics);
       setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
       const now = new Date();
       setMetricsUpdatedAt(now);
-      // Guardar en cache en memoria y en Firestore (C1)
       metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now });
       if (empresaId && slaRows.length && allTurnos.length) {
         void persistHoursBalancesFromTurnos({
