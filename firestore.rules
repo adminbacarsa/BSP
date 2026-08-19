@@ -641,9 +641,11 @@ service cloud.firestore {
     // El guardia puede crear y leer las propias; el admin responde.
     match /solicitudes_evento/{solicitudId} {
       allow read:   if tenantAdminRead() || (request.auth != null && resource.data.empleadoId == request.auth.uid);
-      allow create: if request.auth != null && tenantMatches(request.resource.data)
-                       && request.resource.data.empleadoId == request.auth.uid;
-      allow update: if tenantAdminUpdate();
+      allow create: if tenantAdminCreate()
+                       || (request.auth != null && tenantMatches(request.resource.data)
+                           && request.resource.data.empleadoId == request.auth.uid);
+      allow update: if tenantAdminUpdate()
+                       || (request.auth != null && resource.data.empleadoId == request.auth.uid);
       allow delete: if tenantAdminDelete();
     }
   }
