@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 
 export const EXPO_HOST_STORAGE_KEY = 'cosp_expo_preview_host';
-export const PANEL_VERSION = 'v4';
+export const PANEL_VERSION = 'v5';
 
 const DEFAULT_ORIGIN = 'https://comtroldata.web.app';
 
@@ -15,6 +15,7 @@ export function buildApkPreviewUrl(empDocId: string): string {
   return `cosp-guardia://preview?emp=${encodeURIComponent(empDocId)}`;
 }
 
+/** Escaneá ESTE con la app Expo Go → abre COSP Guardia nativo. */
 export function buildExpoGoPreviewUrl(hostPort: string, empDocId: string): string {
   const raw = hostPort.trim().replace(/^exp:\/\//i, '').replace(/\/+$/, '');
   const withoutPath = raw.split('/')[0] ?? raw;
@@ -27,7 +28,7 @@ export function buildWebPreviewUrl(origin: string, empDocId: string): string {
   return `${base}/empleado/dashboard?preview=${encodeURIComponent(empDocId)}`;
 }
 
-/** Único QR válido para la cámara del celular (HTTPS). */
+/** Escaneá con la cámara del celular → abre Chrome/Safari. */
 export function buildAppBridgeUrl(origin: string, empDocId: string, metroHost?: string): string {
   const base = (origin || DEFAULT_ORIGIN).replace(/\/+$/, '');
   const params = new URLSearchParams({ emp: empDocId });
@@ -59,7 +60,7 @@ type Props = {
   compact?: boolean;
 };
 
-function CopyButton({ text, label }: { text: string; label?: string }) {
+function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -70,15 +71,54 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
           window.setTimeout(() => setCopied(false), 2000);
         });
       }}
-      className="shrink-0 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-[10px] font-bold text-white"
+      className="px-2 py-1 rounded-md bg-slate-700 hover:bg-slate-600 text-[9px] font-bold text-white"
     >
-      {copied ? 'Copiado ✓' : label || 'Copiar enlace'}
+      {copied ? '✓' : label}
     </button>
   );
 }
 
+function QrBlock({
+  title,
+  subtitle,
+  borderClass,
+  titleClass,
+  dataUrl,
+  url,
+  emptyHint,
+}: {
+  title: string;
+  subtitle: string;
+  borderClass: string;
+  titleClass: string;
+  dataUrl: string | null;
+  url: string;
+  emptyHint?: string;
+}) {
+  return (
+    <div className={`flex-1 min-w-[140px] rounded-xl border-2 ${borderClass} p-3 flex flex-col items-center gap-2`}>
+      <p className={`text-[10px] font-black uppercase text-center ${titleClass}`}>{title}</p>
+      <p className="text-[9px] text-slate-400 text-center leading-snug">{subtitle}</p>
+      {dataUrl ? (
+        <img src={dataUrl} alt={title} className="rounded-lg bg-white p-2 w-[130px] h-[130px] object-contain" />
+      ) : (
+        <div className="w-[130px] h-[130px] rounded-lg bg-slate-800 flex items-center justify-center p-2">
+          <p className="text-[9px] text-amber-400 text-center">{emptyHint || '…'}</p>
+        </div>
+      )}
+      {url ? (
+        <>
+          <p className="text-[8px] text-slate-500 font-mono break-all text-center leading-tight">{url}</p>
+          <CopyButton text={url} label="Copiar" />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props) {
-  const [cameraQr, setCameraQr] = useState<string | null>(null);
+  const [httpsQr, setHttpsQr] = useState<string | null>(null);
+  const [expoQr, setExpoQr] = useState<string | null>(null);
   const [expoHost, setExpoHost] = useState('');
   const [origin, setOrigin] = useState(DEFAULT_ORIGIN);
 
@@ -89,101 +129,91 @@ export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props)
     }
   }, []);
 
-  const cameraUrl = useMemo(
+  const httpsUrl = useMemo(
     () => buildAppBridgeUrl(origin, empDocId, expoHost),
     [origin, empDocId, expoHost],
   );
-
-  const webUrl = useMemo(() => buildWebPreviewUrl(origin, empDocId), [origin, empDocId]);
 
   const expoUrl = useMemo(() => {
     if (!expoHost.trim()) return '';
     return buildExpoGoPreviewUrl(expoHost, empDocId);
   }, [expoHost, empDocId]);
 
+  const webUrl = useMemo(() => buildWebPreviewUrl(origin, empDocId), [origin, empDocId]);
+
   useEffect(() => {
     let cancelled = false;
-    QRCode.toDataURL(cameraUrl, { width: compact ? 140 : 168, margin: 2, errorCorrectionLevel: 'M' })
-      .then((v) => { if (!cancelled) setCameraQr(v); })
-      .catch(() => { if (!cancelled) setCameraQr(null); });
+    QRCode.toDataURL(httpsUrl, { width: 140, margin: 2, errorCorrectionLevel: 'M' })
+      .then((v) => { if (!cancelled) setHttpsQr(v); })
+      .catch(() => { if (!cancelled) setHttpsQr(null); });
     return () => { cancelled = true; };
-  }, [cameraUrl, compact]);
+  }, [httpsUrl]);
+
+  useEffect(() => {
+    if (!expoUrl) {
+      setExpoQr(null);
+      return;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(expoUrl, { width: 140, margin: 2, errorCorrectionLevel: 'M' })
+      .then((v) => { if (!cancelled) setExpoQr(v); })
+      .catch(() => { if (!cancelled) setExpoQr(null); });
+    return () => { cancelled = true; };
+  }, [expoUrl]);
 
   function saveHost() {
     storeExpoHost(expoHost);
   }
 
   return (
-    <div className={`rounded-2xl border-2 border-emerald-700/60 bg-slate-900/95 ${compact ? 'p-3' : 'p-4'} flex flex-col gap-3`}>
+    <div className={`rounded-2xl border border-slate-700 bg-slate-900/95 ${compact ? 'p-3' : 'p-4'} flex flex-col gap-3`}>
       <div>
-        <p className="text-[11px] font-black uppercase tracking-wide text-emerald-400">
-          QR para cámara del celular · {employeeName}
-        </p>
-        <p className="text-[10px] text-slate-500 mt-0.5">Panel {PANEL_VERSION}</p>
+        <p className="text-[11px] font-black uppercase text-orange-400">App móvil · {employeeName}</p>
+        <p className="text-[10px] text-slate-500">Panel {PANEL_VERSION} · Ctrl+Shift+R si no ves dos QR</p>
       </div>
 
-      <div className="rounded-xl bg-emerald-950/50 border border-emerald-800/50 px-3 py-2">
-        <p className="text-[11px] text-emerald-200 leading-relaxed font-semibold">
-          Escaneá SOLO este QR con la app Cámara. Abre Chrome/Safari con un enlace https:// (no exp:// ni cosp-guardia://).
-        </p>
-        <p className="text-[10px] text-slate-400 mt-1">
-          Si el teléfono dice «no hay aplicación», estás escaneando otro QR (Expo/APK) o tenés caché vieja — Ctrl+Shift+R.
-        </p>
+      <div className="flex gap-2 items-center">
+        <input
+          type="text"
+          value={expoHost}
+          onChange={(e) => setExpoHost(e.target.value)}
+          onBlur={saveHost}
+          placeholder="IP Metro · 192.168.0.49:8081"
+          className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-white font-mono"
+        />
+        <button type="button" onClick={saveHost} className="px-2 py-1.5 rounded-lg bg-slate-700 text-[10px] font-bold text-white">
+          Guardar
+        </button>
       </div>
 
-      {cameraQr ? (
-        <img src={cameraQr} alt={`QR HTTPS ${employeeName}`} className="rounded-xl bg-white p-3 self-center shadow-lg" />
-      ) : (
-        <div className="w-[168px] h-[168px] rounded-xl bg-slate-800 animate-pulse self-center" />
-      )}
-
-      <p className="text-[10px] text-emerald-300/90 font-mono break-all text-center leading-relaxed">{cameraUrl}</p>
-
-      <div className="flex flex-wrap gap-2 justify-center">
-        <CopyButton text={cameraUrl} label="Copiar enlace HTTPS" />
-        <a
-          href={cameraUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-[10px] font-bold text-white"
-        >
-          Abrir enlace
-        </a>
+      <div className={`flex gap-3 ${compact ? 'flex-col' : 'flex-row flex-wrap'}`}>
+        <QrBlock
+          title="① Cámara / Chrome"
+          subtitle="Escaneá con la app Cámara. Abre el portal web en el navegador."
+          borderClass="border-emerald-700/70"
+          titleClass="text-emerald-400"
+          dataUrl={httpsQr}
+          url={httpsUrl}
+        />
+        <QrBlock
+          title="② Expo Go"
+          subtitle="Abrí Expo Go → Scan QR → escaneá ESTE código (no el verde)."
+          borderClass="border-orange-600/70"
+          titleClass="text-orange-400"
+          dataUrl={expoQr}
+          url={expoUrl}
+          emptyHint="Cargá IP Metro arriba y Guardar"
+        />
       </div>
 
-      <div className="border-t border-slate-800 pt-3 space-y-2">
-        <p className="text-[10px] font-black uppercase text-slate-500">IP Metro (opcional, lab Expo Go)</p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={expoHost}
-            onChange={(e) => setExpoHost(e.target.value)}
-            onBlur={saveHost}
-            placeholder="192.168.0.49:8081"
-            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-white font-mono"
-          />
-          <button type="button" onClick={saveHost} className="px-2 py-1.5 rounded-lg bg-slate-700 text-[10px] font-bold text-white">
-            Guardar
-          </button>
-        </div>
-        <p className="text-[10px] text-slate-500 leading-relaxed">
-          Tras escanear el QR HTTPS, en la página elegí «Abrir en Expo Go» o copiá este enlace en Expo Go → Enter URL manually:
-        </p>
-        {expoUrl ? (
-          <div className="flex gap-2 items-start">
-            <p className="text-[9px] text-orange-300/80 font-mono break-all flex-1">{expoUrl}</p>
-            <CopyButton text={expoUrl} label="Copiar exp://" />
-          </div>
-        ) : (
-          <p className="text-[10px] text-amber-500">Cargá IP Metro para ver el enlace exp://</p>
-        )}
-        <p className="text-[10px] text-slate-600">
-          exp:// no funciona con la cámara — solo dentro de Expo Go o pegando la URL.
-        </p>
+      <div className="rounded-lg bg-amber-950/40 border border-amber-800/50 px-3 py-2 text-[10px] text-amber-200 leading-relaxed">
+        <span className="font-black">Importante:</span> si escaneás el QR verde (https) con Expo Go, te manda a la web — es normal.
+        Para la app nativa usá el QR naranja <span className="font-bold">②</span> dentro de Expo Go, con{' '}
+        <code className="text-amber-100">npm run dev:mobile</code> corriendo en la PC.
       </div>
 
       <a href={webUrl} className="text-center text-[11px] font-bold text-indigo-400 hover:text-indigo-300 underline">
-        Preview web directo (esta pestaña)
+        Preview web en esta pestaña
       </a>
     </div>
   );
