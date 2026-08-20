@@ -292,6 +292,13 @@ const formatYmdLocal = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
+/** Financiera: siempre enteros (sin decimales) en formato AR. */
+const fmtFinHs = (n: number): string => Math.round(Number(n) || 0).toLocaleString('es-AR');
+const fmtFinDelta = (n: number): string => {
+  const r = Math.round(Number(n) || 0);
+  return `${r > 0 ? '+' : ''}${r.toLocaleString('es-AR')}`;
+};
+
 // ─── CUSTOM TOOLTIP ───────────────────────────────────────────────────────────
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -2087,54 +2094,55 @@ export default function AnalisisPage() {
 
   const exportFinanciera = async () => {
     const XLSX = await import('xlsx');
+    const r = (n: number) => Math.round(Number(n) || 0);
     const wb = XLSX.utils.book_new();
     const modo = finHoursMode === 'real' ? 'Real / fichado' : 'Planificado';
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ['Financiera hs-hombre', periodRange.labelShort, modo],
-      ['SLA empresa', fin.slaHours],
-      ['Hs plan', finPlanHours(fin, finHoursMode)],
-      ['Horas sumadas', finSumadasHours(fin)],
-      ['Consumo', fin.hsConsumo],
-      ...FIN_NOV_BREAKDOWN_CODES.map((c) => [c, finNovCode(fin.novedades, c)]),
-      ['Otras novedades', finNovOtros(fin.novedades)],
-      ['EV', fin.hsEv],
-      ['FT', fin.hsFt],
-      ['Extras', fin.hsExtra],
-      ['Ops', fin.hsOps],
-      ['Francos F/FF', fin.hsFranco],
-      ['RET no usado', fin.hsRet],
-      ['REF / ESC', fin.hsDespliegue],
-      ['Vacante', fin.hsVacante],
+      ['SLA empresa', r(fin.slaHours)],
+      ['Hs plan', r(finPlanHours(fin, finHoursMode))],
+      ['Horas sumadas', r(finSumadasHours(fin))],
+      ['Consumo', r(fin.hsConsumo)],
+      ...FIN_NOV_BREAKDOWN_CODES.map((c) => [c, r(finNovCode(fin.novedades, c))]),
+      ['Otras novedades', r(finNovOtros(fin.novedades))],
+      ['EV', r(fin.hsEv)],
+      ['FT', r(fin.hsFt)],
+      ['Extras', r(fin.hsExtra)],
+      ['Ops', r(fin.hsOps)],
+      ['Francos F/FF', r(fin.hsFranco)],
+      ['RET no usado', r(fin.hsRet)],
+      ['REF / ESC', r(fin.hsDespliegue)],
+      ['Vacante', r(fin.hsVacante)],
       ['Guardias', fin.guardias],
-      ['Hs/guardia', fin.hsConsumoPorGuardia],
-      ['SLA/guardia', fin.hsSlaPorGuardia],
-      ['Eficiencia SLA/consumo %', fin.eficienciaPct],
+      ['Hs/guardia', r(fin.hsConsumoPorGuardia)],
+      ['SLA/guardia', r(fin.hsSlaPorGuardia)],
+      ['Eficiencia SLA/consumo %', Math.round(fin.eficienciaPct)],
     ]), 'Empresa');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ['Cliente', 'Objetivos', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'Δ SLA'],
       ...fin.clients.map((c) => [
-        c.name, c.objetivos, c.slaHours, finPlanHours(c, finHoursMode),
-        ...FIN_NOV_BREAKDOWN_CODES.map((code) => finNovCode(c.novedades, code)),
-        finNovOtros(c.novedades), c.hsEv, c.hsFt, c.hsExtra, c.hsOps, c.hsFranco, c.hsRet, c.hsDespliegue,
-        finSumadasHours(c), c.hsConsumo, c.hsVacante, c.guardias, c.hsConsumoPorGuardia, c.deltaVsSla,
+        c.name, c.objetivos, r(c.slaHours), r(finPlanHours(c, finHoursMode)),
+        ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finNovCode(c.novedades, code))),
+        r(finNovOtros(c.novedades)), r(c.hsEv), r(c.hsFt), r(c.hsExtra), r(c.hsOps), r(c.hsFranco), r(c.hsRet), r(c.hsDespliegue),
+        r(finSumadasHours(c)), r(c.hsConsumo), r(c.hsVacante), c.guardias, r(c.hsConsumoPorGuardia), r(c.deltaVsSla),
       ]),
     ]), 'Clientes');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ['Cliente', 'Objetivo', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'SLA/g', 'Δ SLA'],
       ...fin.clients.flatMap((c) => c.rows.map((o) => [
-        c.name, o.name, o.slaHours, finPlanHours(o, finHoursMode),
-        ...FIN_NOV_BREAKDOWN_CODES.map((code) => finNovCode(o.novedades, code)),
-        finNovOtros(o.novedades), o.hsEv, o.hsFt, o.hsExtra, o.hsOps, o.hsFranco, o.hsRet, o.hsDespliegue,
-        finSumadasHours(o), o.hsConsumo, o.hsVacante, o.guardias, o.hsConsumoPorGuardia, o.hsSlaPorGuardia, o.deltaVsSla,
+        c.name, o.name, r(o.slaHours), r(finPlanHours(o, finHoursMode)),
+        ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finNovCode(o.novedades, code))),
+        r(finNovOtros(o.novedades)), r(o.hsEv), r(o.hsFt), r(o.hsExtra), r(o.hsOps), r(o.hsFranco), r(o.hsRet), r(o.hsDespliegue),
+        r(finSumadasHours(o)), r(o.hsConsumo), r(o.hsVacante), o.guardias, r(o.hsConsumoPorGuardia), r(o.hsSlaPorGuardia), r(o.deltaVsSla),
       ])),
     ]), 'Objetivos');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ['Cliente', 'Objetivo', 'Guardia', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo'],
       ...fin.clients.flatMap((c) => c.rows.flatMap((o) => o.guards.map((g) => [
-        c.name, o.name, empNameById[g.employeeId] || g.name, finPlanHours(g, finHoursMode),
-        ...FIN_NOV_BREAKDOWN_CODES.map((code) => finGuardNovCode(g, code)),
-        finGuardNovOtros(g), g.hsEv, g.hsFt, g.hsExtra, g.hsOps, g.hsFranco, g.hsRet, g.hsDespliegue,
-        finSumadasHours(g), finGuardConsumo(g, finHoursMode),
+        c.name, o.name, empNameById[g.employeeId] || g.name, r(finPlanHours(g, finHoursMode)),
+        ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finGuardNovCode(g, code))),
+        r(finGuardNovOtros(g)), r(g.hsEv), r(g.hsFt), r(g.hsExtra), r(g.hsOps), r(g.hsFranco), r(g.hsRet), r(g.hsDespliegue),
+        r(finSumadasHours(g)), r(finGuardConsumo(g, finHoursMode)),
       ]))),
     ]), 'Guardias');
     XLSX.writeFile(wb, `financiera-hs-${periodRange.labelShort.replace(/[^\w]+/g, '-')}.xlsx`);
@@ -2836,12 +2844,12 @@ export default function AnalisisPage() {
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                <KpiCard icon={Target} color="#4f46e5" label="SLA empresa" value={fin.slaHours.toLocaleString('es-AR')} unit="hs" subtext={`${fin.clientes} clientes · ${fin.objetivos} objetivos`}/>
-                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Hs plan (fichada)' : 'Hs plan'} value={finPlanHours(fin, finHoursMode).toLocaleString('es-AR')} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fin.hsPlan.toLocaleString('es-AR')} hs` : 'Cobertura de malla, sin novedades'}/>
-                <KpiCard icon={Layers} color="#0f766e" label="Consumo hs-hombre" value={fin.hsConsumo.toLocaleString('es-AR')} unit="hs" subtext={`Plan ${finPlanHours(fin, finHoursMode).toLocaleString('es-AR')} + sumadas ${finSumadasHours(fin).toLocaleString('es-AR')}`} alert={fin.deltaVsSla > 8}/>
-                <KpiCard icon={Users} color="#0891b2" label="Hs / guardia" value={fin.hsConsumoPorGuardia.toLocaleString('es-AR')} unit="hs" subtext={`${fin.guardias} guardias · SLA ${fin.hsSlaPorGuardia.toLocaleString('es-AR')} hs/c/u`}/>
-                <KpiCard icon={AlertTriangle} color="#ea580c" label="FT + extras + no usadas" value={(fin.hsFt + fin.hsExtra + fin.hsOps + finIdleHours(fin)).toLocaleString('es-AR')} unit="hs" subtext={`FT ${fin.hsFt.toLocaleString('es-AR')} · ext ${fin.hsExtra.toLocaleString('es-AR')} · ops ${fin.hsOps.toLocaleString('es-AR')} · F ${fin.hsFranco.toLocaleString('es-AR')} · RET ${fin.hsRet.toLocaleString('es-AR')} · REF/ESC ${fin.hsDespliegue.toLocaleString('es-AR')}`}/>
-                <KpiCard icon={Activity} color={fin.eficienciaPct >= 90 ? '#059669' : fin.eficienciaPct >= 75 ? '#d97706' : '#dc2626'} label="Eficiencia SLA/consumo" value={`${fin.eficienciaPct}%`} subtext={`Novedades ${fin.novedades.total.toLocaleString('es-AR')} · vacante ${fin.hsVacante.toLocaleString('es-AR')}`} alert={fin.eficienciaPct < 75}/>
+                <KpiCard icon={Target} color="#4f46e5" label="SLA empresa" value={fmtFinHs(fin.slaHours)} unit="hs" subtext={`${fin.clientes} clientes · ${fin.objetivos} objetivos`}/>
+                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Hs plan (fichada)' : 'Hs plan'} value={fmtFinHs(finPlanHours(fin, finHoursMode))} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fmtFinHs(fin.hsPlan)} hs` : 'Cobertura de malla, sin novedades'}/>
+                <KpiCard icon={Layers} color="#0f766e" label="Consumo hs-hombre" value={fmtFinHs(fin.hsConsumo)} unit="hs" subtext={`Plan ${fmtFinHs(finPlanHours(fin, finHoursMode))} + sumadas ${fmtFinHs(finSumadasHours(fin))}`} alert={fin.deltaVsSla > 8}/>
+                <KpiCard icon={Users} color="#0891b2" label="Hs / guardia" value={fmtFinHs(fin.hsConsumoPorGuardia)} unit="hs" subtext={`${fin.guardias} guardias · SLA ${fmtFinHs(fin.hsSlaPorGuardia)} hs/c/u`}/>
+                <KpiCard icon={AlertTriangle} color="#ea580c" label="FT + extras + no usadas" value={fmtFinHs(fin.hsFt + fin.hsExtra + fin.hsOps + finIdleHours(fin))} unit="hs" subtext={`FT ${fmtFinHs(fin.hsFt)} · ext ${fmtFinHs(fin.hsExtra)} · ops ${fmtFinHs(fin.hsOps)} · F ${fmtFinHs(fin.hsFranco)} · RET ${fmtFinHs(fin.hsRet)} · REF/ESC ${fmtFinHs(fin.hsDespliegue)}`}/>
+                <KpiCard icon={Activity} color={fin.eficienciaPct >= 90 ? '#059669' : fin.eficienciaPct >= 75 ? '#d97706' : '#dc2626'} label="Eficiencia SLA/consumo" value={`${Math.round(fin.eficienciaPct)}%`} subtext={`Novedades ${fmtFinHs(fin.novedades.total)} · vacante ${fmtFinHs(fin.hsVacante)}`} alert={fin.eficienciaPct < 75}/>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
@@ -2857,7 +2865,7 @@ export default function AnalisisPage() {
                 ]).map((n) => (
                   <div key={n.k} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 shadow-sm">
                     <p className="text-[9px] font-black uppercase text-slate-400">{n.k}</p>
-                    <p className="text-lg font-black" style={{ color: n.c }}>{n.v.toLocaleString('es-AR')} <span className="text-[10px] font-bold text-slate-400">hs</span></p>
+                    <p className="text-lg font-black" style={{ color: n.c }}>{fmtFinHs(n.v)} <span className="text-[10px] font-bold text-slate-400">hs</span></p>
                   </div>
                 ))}
               </div>
@@ -2896,35 +2904,35 @@ export default function AnalisisPage() {
                     <p className="text-sm font-bold">Sin consumo calculable en este período</p>
                   </div>
                 ) : (
-                  <div className="overflow-y-auto overflow-x-hidden max-h-[70vh] rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
-                    <table className="w-full table-fixed text-xs border-collapse">
+                  <div className="overflow-auto max-h-[70vh] rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
+                    <table className="w-full min-w-[1100px] text-xs border-collapse">
                       <thead className="sticky top-0 z-10">
                         <tr className="bg-slate-800 text-white text-[10px] font-black uppercase tracking-wide">
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="sticky left-0 z-20 bg-slate-800 p-2 text-left w-[18%] max-w-[14rem] border-b border-slate-700">Cliente</th>
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[4%]">Obj.</th>
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[6%]">SLA</th>
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 bg-slate-700/80 w-[6%]">Plan</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="sticky left-0 z-20 bg-slate-800 p-2 text-left min-w-[11rem] border-b border-slate-700">Cliente</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 whitespace-nowrap">Obj.</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 whitespace-nowrap">SLA</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 bg-slate-700/80 whitespace-nowrap">Plan</th>
                           {finCols.novHeadCols > 0 && (
                             <th colSpan={finCols.novHeadCols} className="p-1.5 text-center border-b border-l border-slate-600 bg-violet-900/80">Novedades</th>
                           )}
                           {finCols.sumadas.length > 0 && (
                             <th colSpan={finCols.sumadas.length} className="p-1.5 text-center border-b border-l border-slate-600 bg-slate-700">Sumadas</th>
                           )}
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[5%]">Σ</th>
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[6%]">Consumo</th>
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[5%]">Vac.</th>
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[4%]">G</th>
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 w-[5%]">Hs/g</th>
-                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right pr-3 border-b border-slate-700 w-[5%]">Δ</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 whitespace-nowrap">Σ</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 whitespace-nowrap">Consumo</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 whitespace-nowrap">Vac.</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 whitespace-nowrap">G</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right border-b border-slate-700 whitespace-nowrap">Hs/g</th>
+                          <th rowSpan={finCols.novHeadCols > 0 || finCols.sumadas.length > 0 ? 2 : 1} className="p-2 text-right pr-3 border-b border-slate-700 whitespace-nowrap">Δ</th>
                         </tr>
                         {(finCols.novHeadCols > 0 || finCols.sumadas.length > 0) && (
                         <tr className="bg-slate-700 text-white text-[9px] font-black uppercase tracking-wide">
                           {finCols.novCodes.map((c, i) => (
-                            <th key={c} className={`p-1 text-right ${i === 0 ? 'border-l border-slate-600' : ''}`}>{c}</th>
+                            <th key={c} className={`px-1.5 py-1 text-right whitespace-nowrap ${i === 0 ? 'border-l border-slate-600' : ''}`}>{c}</th>
                           ))}
-                          {finCols.showNovOtros && <th className="p-1 text-right">Otr</th>}
+                          {finCols.showNovOtros && <th className="px-1.5 py-1 text-right whitespace-nowrap">Otr</th>}
                           {finCols.sumadas.map(({ key, label }, i) => (
-                            <th key={key} className={`p-1 text-right ${i === 0 ? 'border-l border-slate-600' : ''}`}>{label}</th>
+                            <th key={key} className={`px-1.5 py-1 text-right whitespace-nowrap ${i === 0 ? 'border-l border-slate-600' : ''}`}>{label}</th>
                           ))}
                         </tr>
                         )}
@@ -2933,8 +2941,8 @@ export default function AnalisisPage() {
                         {fin.clients.map((cli, idx) => {
                           const open = expandedFinClientId === cli.id;
                           const hsCell = (n: number, extra = '') => (
-                            <td className={`p-1.5 text-right tabular-nums ${extra}`}>
-                              {n === 0 ? <span className="text-slate-300 dark:text-slate-600">—</span> : n.toLocaleString('es-AR')}
+                            <td className={`px-1.5 py-1.5 text-right tabular-nums whitespace-nowrap ${extra}`}>
+                              {Math.round(n || 0) === 0 ? <span className="text-slate-300 dark:text-slate-600">—</span> : fmtFinHs(n)}
                             </td>
                           );
                           return (
@@ -2970,16 +2978,16 @@ export default function AnalisisPage() {
                                 {hsCell(cli.hsVacante)}
                                 {hsCell(cli.guardias, 'text-slate-500')}
                                 {hsCell(cli.hsConsumoPorGuardia, 'font-semibold')}
-                                <td className={`p-1.5 pr-3 text-right tabular-nums font-black ${
+                                <td className={`px-1.5 py-1.5 pr-3 text-right tabular-nums whitespace-nowrap font-black ${
                                   cli.deltaVsSla > 4 ? 'text-rose-600' : cli.deltaVsSla < -4 ? 'text-amber-600' : 'text-emerald-600'
                                 }`}>
-                                  {cli.deltaVsSla > 0 ? '+' : ''}{cli.deltaVsSla.toLocaleString('es-AR')}
+                                  {fmtFinDelta(cli.deltaVsSla)}
                                 </td>
                               </tr>
                               {open && (
                                 <tr>
                                   <td colSpan={finCols.clientColSpan} className="p-0 bg-slate-100/90 dark:bg-slate-950/50">
-                                    <table className="w-full table-fixed text-xs border-collapse">
+                                    <table className="w-full min-w-[900px] text-xs border-collapse">
                                       <thead>
                                         <tr className="bg-slate-200/80 dark:bg-slate-800 text-[9px] uppercase font-black tracking-wide text-slate-600 dark:text-slate-300">
                                           <th rowSpan={2} className="p-1.5 pl-8 text-left border-b border-slate-300 dark:border-slate-700 w-[22%]">Objetivo</th>
@@ -3013,8 +3021,8 @@ export default function AnalisisPage() {
                                         {cli.rows.map((obj, oidx) => {
                                           const objOpen = expandedFinObjId === obj.id;
                                           const oCell = (n: number, extra = '') => (
-                                            <td className={`p-1.5 text-right tabular-nums ${extra}`}>
-                                              {n === 0 ? <span className="text-slate-300 dark:text-slate-600">—</span> : n.toLocaleString('es-AR')}
+                                            <td className={`px-1.5 py-1.5 text-right tabular-nums whitespace-nowrap ${extra}`}>
+                                              {Math.round(n || 0) === 0 ? <span className="text-slate-300 dark:text-slate-600">—</span> : fmtFinHs(n)}
                                             </td>
                                           );
                                           return (
@@ -3046,10 +3054,10 @@ export default function AnalisisPage() {
                                                 {oCell(obj.guardias, 'text-slate-500')}
                                                 {oCell(obj.hsConsumoPorGuardia, 'font-semibold')}
                                                 {oCell(obj.hsSlaPorGuardia, 'text-slate-500')}
-                                                <td className={`p-1.5 pr-3 text-right tabular-nums font-black ${
+                                                <td className={`px-1.5 py-1.5 pr-3 text-right tabular-nums whitespace-nowrap font-black ${
                                                   obj.deltaVsSla > 4 ? 'text-rose-600' : obj.deltaVsSla < -4 ? 'text-amber-600' : 'text-emerald-600'
                                                 }`}>
-                                                  {obj.deltaVsSla > 0 ? '+' : ''}{obj.deltaVsSla.toLocaleString('es-AR')}
+                                                  {fmtFinDelta(obj.deltaVsSla)}
                                                 </td>
                                               </tr>
                                               {objOpen && (
@@ -3070,7 +3078,7 @@ export default function AnalisisPage() {
                                                       ]).filter((n) => n.v > 0).map((n) => (
                                                         <div key={n.k} className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 shadow-sm">
                                                           <p className="text-[9px] font-black uppercase text-slate-400">{n.k}</p>
-                                                          <p className="text-sm font-black tabular-nums">{n.v.toLocaleString('es-AR')} hs</p>
+                                                          <p className="text-sm font-black tabular-nums">{fmtFinHs(n.v)} hs</p>
                                                         </div>
                                                       ))}
                                                     </div>
@@ -3096,18 +3104,18 @@ export default function AnalisisPage() {
                                                           {obj.guards.map((g, gi) => (
                                                             <tr key={g.employeeId} className={`border-t border-slate-100 dark:border-slate-700 ${gi % 2 === 0 ? 'bg-white dark:bg-slate-800' : 'bg-slate-50 dark:bg-slate-900/40'}`}>
                                                               <td className="p-1.5 font-bold truncate">{empNameById[g.employeeId] || g.name}</td>
-                                                              <td className="p-1.5 text-right tabular-nums">{finPlanHours(g, finHoursMode).toLocaleString('es-AR')}</td>
+                                                              <td className="p-1.5 text-right tabular-nums whitespace-nowrap">{fmtFinHs(finPlanHours(g, finHoursMode))}</td>
                                                               {finCols.novCodes.map((c) => (
-                                                                <td key={c} className="p-1.5 text-right tabular-nums">{finGuardNovCode(g, c) === 0 ? '—' : finGuardNovCode(g, c).toLocaleString('es-AR')}</td>
+                                                                <td key={c} className="p-1.5 text-right tabular-nums whitespace-nowrap">{Math.round(finGuardNovCode(g, c) || 0) === 0 ? '—' : fmtFinHs(finGuardNovCode(g, c))}</td>
                                                               ))}
                                                               {finCols.showNovOtros && (
-                                                                <td className="p-1.5 text-right tabular-nums">{finGuardNovOtros(g) === 0 ? '—' : finGuardNovOtros(g).toLocaleString('es-AR')}</td>
+                                                                <td className="p-1.5 text-right tabular-nums whitespace-nowrap">{Math.round(finGuardNovOtros(g) || 0) === 0 ? '—' : fmtFinHs(finGuardNovOtros(g))}</td>
                                                               )}
                                                               {finCols.sumadas.map(({ key }) => (
-                                                                <td key={key} className="p-1.5 text-right tabular-nums">{finSumadaValue(g, key) === 0 ? '—' : finSumadaValue(g, key).toLocaleString('es-AR')}</td>
+                                                                <td key={key} className="p-1.5 text-right tabular-nums whitespace-nowrap">{Math.round(finSumadaValue(g, key) || 0) === 0 ? '—' : fmtFinHs(finSumadaValue(g, key))}</td>
                                                               ))}
-                                                              <td className="p-1.5 text-right tabular-nums font-bold">{finSumadasHours(g) === 0 ? '—' : finSumadasHours(g).toLocaleString('es-AR')}</td>
-                                                              <td className="p-1.5 pr-2 text-right tabular-nums font-black">{finGuardConsumo(g, finHoursMode).toLocaleString('es-AR')}</td>
+                                                              <td className="p-1.5 text-right tabular-nums whitespace-nowrap font-bold">{Math.round(finSumadasHours(g) || 0) === 0 ? '—' : fmtFinHs(finSumadasHours(g))}</td>
+                                                              <td className="p-1.5 pr-2 text-right tabular-nums whitespace-nowrap font-black">{fmtFinHs(finGuardConsumo(g, finHoursMode))}</td>
                                                             </tr>
                                                           ))}
                                                         </tbody>
@@ -3129,27 +3137,27 @@ export default function AnalisisPage() {
                         })}
                       </tbody>
                       <tfoot className="sticky bottom-0">
-                        <tr className="bg-slate-800 text-white text-xs font-black">
-                          <td className="sticky left-0 z-10 bg-slate-800 p-2 truncate max-w-[14rem]">Total empresa · {fin.clientes} clientes</td>
-                          <td className="p-2 text-right tabular-nums">{fin.objetivos}</td>
-                          <td className="p-2 text-right tabular-nums">{fin.slaHours.toLocaleString('es-AR')}</td>
-                          <td className="p-2 text-right tabular-nums">{finPlanHours(fin, finHoursMode).toLocaleString('es-AR')}</td>
+                        <tr className="bg-slate-800 text-white text-[10px] font-black">
+                          <td className="sticky left-0 z-10 bg-slate-800 px-2 py-2.5 truncate min-w-[11rem]">Total empresa · {fin.clientes} clientes</td>
+                          <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap">{fin.objetivos}</td>
+                          <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap">{fmtFinHs(fin.slaHours)}</td>
+                          <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap">{fmtFinHs(finPlanHours(fin, finHoursMode))}</td>
                           {finCols.novCodes.map((c) => (
-                            <td key={c} className="p-2 text-right tabular-nums">{finNovCode(fin.novedades, c).toLocaleString('es-AR')}</td>
+                            <td key={c} className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-slate-700/60 first:border-l-0">{fmtFinHs(finNovCode(fin.novedades, c))}</td>
                           ))}
                           {finCols.showNovOtros && (
-                            <td className="p-2 text-right tabular-nums">{finNovOtros(fin.novedades).toLocaleString('es-AR')}</td>
+                            <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap">{fmtFinHs(finNovOtros(fin.novedades))}</td>
                           )}
-                          {finCols.sumadas.map(({ key }) => (
-                            <td key={key} className="p-2 text-right tabular-nums">{finSumadaValue(fin, key).toLocaleString('es-AR')}</td>
+                          {finCols.sumadas.map(({ key }, i) => (
+                            <td key={key} className={`px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap ${i === 0 ? 'border-l border-slate-600' : ''}`}>{fmtFinHs(finSumadaValue(fin, key))}</td>
                           ))}
-                          <td className="p-2 text-right tabular-nums">{finSumadasHours(fin).toLocaleString('es-AR')}</td>
-                          <td className="p-2 text-right tabular-nums">{fin.hsConsumo.toLocaleString('es-AR')}</td>
-                          <td className="p-2 text-right tabular-nums">{fin.hsVacante.toLocaleString('es-AR')}</td>
-                          <td className="p-2 text-right tabular-nums">{fin.guardias}</td>
-                          <td className="p-2 text-right tabular-nums">{fin.hsConsumoPorGuardia.toLocaleString('es-AR')}</td>
-                          <td className={`p-2 pr-3 text-right tabular-nums ${fin.deltaVsSla > 4 ? 'text-rose-300' : fin.deltaVsSla < -4 ? 'text-amber-300' : 'text-emerald-300'}`}>
-                            {fin.deltaVsSla > 0 ? '+' : ''}{fin.deltaVsSla.toLocaleString('es-AR')}
+                          <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap border-l border-slate-600">{fmtFinHs(finSumadasHours(fin))}</td>
+                          <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap">{fmtFinHs(fin.hsConsumo)}</td>
+                          <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap">{fmtFinHs(fin.hsVacante)}</td>
+                          <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap">{fin.guardias}</td>
+                          <td className="px-1.5 py-2.5 text-right tabular-nums whitespace-nowrap">{fmtFinHs(fin.hsConsumoPorGuardia)}</td>
+                          <td className={`px-1.5 py-2.5 pr-3 text-right tabular-nums whitespace-nowrap ${fin.deltaVsSla > 4 ? 'text-rose-300' : fin.deltaVsSla < -4 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                            {fmtFinDelta(fin.deltaVsSla)}
                           </td>
                         </tr>
                       </tfoot>
