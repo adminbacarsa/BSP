@@ -10,15 +10,16 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { BarChart3, Calendar, CheckCircle, Loader2, ShieldCheck, TrendingUp } from 'lucide-react';
-import type { CrmRangeMode } from '@/lib/crm/crmDashboardBuckets';
+import { BarChart3, Building2, Calendar, CheckCircle, Loader2, MapPin, ShieldCheck, TrendingUp, AlertTriangle, Briefcase } from 'lucide-react';
+import { crmCalendarQuarter, crmCalendarSemester, type CrmRangeMode } from '@/lib/crm/crmDashboardBuckets';
+import type { CrmCommercialStats } from '@/lib/crm/crmCommercialStats';
 
 const MONTHS_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto',
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
-export type ClientListFilter = 'all' | 'activos' | 'con_sla' | 'burn_alerta';
+export type ClientListFilter = 'all' | 'activos' | 'con_sla' | 'burn_alerta' | 'sla_sin_plan' | 'hueco_plan' | 'sin_fichadas';
 export type ClientListSort = 'name' | 'burn_desc' | 'sla_desc' | 'plan_gap';
 
 export type CrmTrendPoint = {
@@ -47,6 +48,7 @@ type Props = {
   metricsUpdatedAt: Date | null;
   clientsCount: number;
   conSlaCount: number;
+  commercial: CrmCommercialStats;
   clientListFilter: ClientListFilter;
   clientListSort: ClientListSort;
   onClientListFilterChange: (v: ClientListFilter) => void;
@@ -99,6 +101,7 @@ export default function CrmDashboardSummary({
   metricsUpdatedAt,
   clientsCount,
   conSlaCount,
+  commercial,
   clientListFilter,
   clientListSort,
   onClientListFilterChange,
@@ -166,6 +169,8 @@ export default function CrmDashboardSummary({
             onChange={(e) => onRangeModeChange(e.target.value as CrmRangeMode)}
           >
             <option value="month">Mes calendario</option>
+            <option value="quarter">Trimestre</option>
+            <option value="semester">Semestre</option>
             <option value="year">Año</option>
             <option value="all">Histórico</option>
           </select>
@@ -197,6 +202,30 @@ export default function CrmDashboardSummary({
               ))}
             </select>
           )}
+          {rangeMode === 'quarter' && (
+            <select
+              aria-label="Trimestre del período"
+              className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900"
+              value={crmCalendarQuarter(rangeMonth)}
+              onChange={(e) => onRangeMonthChange(Number(e.target.value) * 3)}
+            >
+              <option value={0}>T1 Ene–Mar</option>
+              <option value={1}>T2 Abr–Jun</option>
+              <option value={2}>T3 Jul–Sep</option>
+              <option value={3}>T4 Oct–Dic</option>
+            </select>
+          )}
+          {rangeMode === 'semester' && (
+            <select
+              aria-label="Semestre del período"
+              className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900"
+              value={crmCalendarSemester(rangeMonth)}
+              onChange={(e) => onRangeMonthChange(Number(e.target.value) * 6)}
+            >
+              <option value={0}>S1 Ene–Jun</option>
+              <option value={1}>S2 Jul–Dic</option>
+            </select>
+          )}
         </div>
       </div>
 
@@ -219,7 +248,91 @@ export default function CrmDashboardSummary({
             label="Δ real. − SLA"
             value={`${gapEjecSla >= 0 ? '+' : ''}${gapEjecSla.toLocaleString('es-AR')} hs`}
           />
-          <MiniStat label="Clientes con SLA" value={`${conSlaCount} / ${clientsCount}`} />
+          <MiniStat label="Hs SLA / cliente" value={commercial.avgSlaPerClient > 0 ? `${commercial.avgSlaPerClient.toLocaleString('es-AR')} hs` : '—'} />
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-3">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/30">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+              <Briefcase size={12} className="text-indigo-500" aria-hidden />
+              Cartera
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <DetailStat
+                icon={Building2}
+                label="Clientes activos"
+                value={`${commercial.clientsActive} / ${commercial.clientsTotal}`}
+                hint="padrón"
+                active={clientListFilter === 'activos'}
+                onClick={() => onClientListFilterChange(clientListFilter === 'activos' ? 'all' : 'activos')}
+              />
+              <DetailStat
+                icon={MapPin}
+                label="Sedes"
+                value={
+                  commercial.slaObjectives != null
+                    ? `${commercial.slaObjectives} / ${commercial.catalogObjectives}`
+                    : String(commercial.catalogObjectives)
+                }
+                hint={commercial.slaObjectives != null ? 'con SLA / padrón' : 'en padrón'}
+              />
+              <DetailStat
+                icon={ShieldCheck}
+                label="Con contrato SLA"
+                value={`${commercial.clientsWithSla} / ${commercial.clientsTotal}`}
+                hint="en el período"
+                active={clientListFilter === 'con_sla'}
+                onClick={() => onClientListFilterChange(clientListFilter === 'con_sla' ? 'all' : 'con_sla')}
+              />
+              <DetailStat
+                icon={Briefcase}
+                label="Puestos vendidos"
+                value={commercial.slaPositions != null ? String(commercial.slaPositions) : '—'}
+                hint="pax en SLA vigente"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/30">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
+              <AlertTriangle size={12} className="text-amber-500" aria-hidden />
+              Atención comercial
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <AlertChip
+                count={commercial.clientsSlaNoPlan}
+                label="SLA sin plan"
+                hint="vendido, sin malla"
+                tone="amber"
+                active={clientListFilter === 'sla_sin_plan'}
+                onClick={() => onClientListFilterChange(clientListFilter === 'sla_sin_plan' ? 'all' : 'sla_sin_plan')}
+              />
+              <AlertChip
+                count={commercial.clientsUnderplanned}
+                label="Hueco de cobertura"
+                hint="plan menor al SLA"
+                tone="rose"
+                active={clientListFilter === 'hueco_plan'}
+                onClick={() => onClientListFilterChange(clientListFilter === 'hueco_plan' ? 'all' : 'hueco_plan')}
+              />
+              <AlertChip
+                count={commercial.clientsNoExecution}
+                label="Sin fichadas"
+                hint="con SLA o plan"
+                tone="slate"
+                active={clientListFilter === 'sin_fichadas'}
+                onClick={() => onClientListFilterChange(clientListFilter === 'sin_fichadas' ? 'all' : 'sin_fichadas')}
+              />
+              <AlertChip
+                count={commercial.clientsBurnAlert}
+                label="Burn ≥ 90%"
+                hint="consumo vs vendido"
+                tone="rose"
+                active={clientListFilter === 'burn_alerta'}
+                onClick={() => onClientListFilterChange(clientListFilter === 'burn_alerta' ? 'all' : 'burn_alerta')}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 dark:border-slate-700 dark:bg-slate-900/30">
@@ -316,7 +429,10 @@ export default function CrmDashboardSummary({
           <option value="all">Todos ({clientsCount})</option>
           <option value="activos">Solo activos</option>
           <option value="con_sla">Con SLA en período ({conSlaCount})</option>
-          <option value="burn_alerta">Burn ≥ 90%</option>
+          <option value="sla_sin_plan">SLA sin plan ({commercial.clientsSlaNoPlan})</option>
+          <option value="hueco_plan">Hueco de cobertura ({commercial.clientsUnderplanned})</option>
+          <option value="sin_fichadas">Sin fichadas ({commercial.clientsNoExecution})</option>
+          <option value="burn_alerta">Burn ≥ 90% ({commercial.clientsBurnAlert})</option>
         </select>
         <select
           aria-label="Ordenar clientes"
@@ -367,5 +483,80 @@ function MiniStat({ label, value }: { label: string; value: string }) {
       <p className="text-[8px] font-bold uppercase text-slate-400">{label}</p>
       <p className="text-xs font-black text-slate-800 dark:text-white tabular-nums">{value}</p>
     </div>
+  );
+}
+
+function DetailStat({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  active,
+  onClick,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  hint: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const cls = `rounded-xl border px-3 py-2.5 text-left shadow-sm transition-colors ${
+    active
+      ? 'border-indigo-300 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/40'
+      : 'border-slate-100 bg-white dark:border-slate-700 dark:bg-slate-800/80'
+  } ${onClick ? 'hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer' : ''}`;
+  const inner = (
+    <>
+      <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+        <Icon size={12} className="text-indigo-500 shrink-0" aria-hidden />
+        <span className="truncate">{label}</span>
+      </div>
+      <p className="text-lg font-black tabular-nums text-slate-900 dark:text-white mt-1">{value}</p>
+      <p className="text-[9px] font-medium text-slate-400">{hint}</p>
+    </>
+  );
+  if (!onClick) return <div className={cls}>{inner}</div>;
+  return (
+    <button type="button" className={cls} onClick={onClick}>
+      {inner}
+    </button>
+  );
+}
+
+function AlertChip({
+  count,
+  label,
+  hint,
+  tone,
+  active,
+  onClick,
+}: {
+  count: number;
+  label: string;
+  hint: string;
+  tone: 'amber' | 'rose' | 'slate';
+  active: boolean;
+  onClick: () => void;
+}) {
+  const idle = count === 0;
+  const tones = {
+    amber: idle ? 'text-slate-400' : 'text-amber-700 dark:text-amber-300',
+    rose: idle ? 'text-slate-400' : 'text-rose-700 dark:text-rose-300',
+    slate: idle ? 'text-slate-400' : 'text-slate-700 dark:text-slate-200',
+  };
+  const border = active
+    ? 'border-indigo-300 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/40'
+    : 'border-slate-100 bg-white dark:border-slate-700 dark:bg-slate-800/80';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl border px-3 py-2.5 text-left shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${border}`}
+    >
+      <p className={`text-lg font-black tabular-nums ${tones[tone]}`}>{count}</p>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">{label}</p>
+      <p className="text-[9px] font-medium text-slate-400">{hint}</p>
+    </button>
   );
 }
