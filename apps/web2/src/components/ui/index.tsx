@@ -203,6 +203,7 @@ export interface ModuleShellProps<T extends ModuleShellItem> {
   renderExpanded: (item: T, close: () => void) => React.ReactNode;
   accentFn?: (item: T) => string; // Tailwind bg class, e.g. 'bg-emerald-500'
   defaultView?: 'card' | 'list';
+  compact?: boolean;
 }
 
 export function ModuleShell<T extends ModuleShellItem>({
@@ -210,7 +211,7 @@ export function ModuleShell<T extends ModuleShellItem>({
   action, topContent, items, loading = false, emptyText = 'Sin resultados.',
   searchPlaceholder = 'Buscar...', searchFn,
   renderCardSummary, renderRowSummary, renderExpanded,
-  accentFn, defaultView = 'card',
+  accentFn, defaultView = 'card', compact = false,
 }: ModuleShellProps<T>) {
   const [view, setView] = useState<'card' | 'list'>(defaultView);
   const [query, setQuery] = useState('');
@@ -226,19 +227,20 @@ export function ModuleShell<T extends ModuleShellItem>({
   const close = () => setExpandedId(null);
 
   return (
-    <div className="min-h-screen p-6 pb-20 animate-in fade-in" style={{ backgroundColor: 'var(--app-bg)' }}>
+    <div className={`${compact ? 'min-h-screen p-4 pb-16' : 'min-h-screen p-6 pb-20'} animate-in fade-in`} style={{ backgroundColor: 'var(--app-bg)' }}>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <div className={`flex flex-col sm:flex-row sm:items-center justify-between ${compact ? 'gap-2 mb-3' : 'gap-4 mb-6'}`}>
         <div className="flex items-center gap-3">
           <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+            className={`${compact ? 'w-8 h-8' : 'w-10 h-10'} rounded-xl flex items-center justify-center shrink-0`}
             style={{ background: 'var(--company-primary, #6366f1)' }}
           >
-            <Icon size={20} className="text-white" aria-hidden="true" />
+            <Icon size={compact ? 16 : 20} className="text-white" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight uppercase" style={{ color: 'var(--txt)' }}>{title}</h1>
-            {subtitle && <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>{subtitle}</p>}
+            <h1 className={`${compact ? 'text-lg' : 'text-2xl'} font-black tracking-tight uppercase leading-tight`} style={{ color: 'var(--txt)' }}>{title}</h1>
+            {subtitle && !compact && <p className="text-xs font-medium mt-0.5" style={{ color: 'var(--txt3)' }}>{subtitle}</p>}
+            {subtitle && compact && <p className="text-[10px] font-medium leading-none mt-0.5" style={{ color: 'var(--txt3)' }}>{subtitle}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -247,12 +249,12 @@ export function ModuleShell<T extends ModuleShellItem>({
       </div>
 
       {/* Optional content between header and toolbar */}
-      {topContent && <div className="mb-6">{topContent}</div>}
+      {topContent && <div className={compact ? 'mb-3' : 'mb-6'}>{topContent}</div>}
 
       {/* Toolbar: search + view toggle */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className={`flex items-center gap-3 ${compact ? 'mb-3' : 'mb-6'}`}>
         <div
-          className="flex-1 rounded-xl border flex items-center gap-3 px-4 py-3"
+          className={`flex-1 rounded-xl border flex items-center gap-3 px-4 ${compact ? 'py-2' : 'py-3'}`}
           style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}
         >
           <Search size={16} style={{ color: 'var(--txt3)' }} className="shrink-0" aria-hidden="true" />
@@ -301,7 +303,7 @@ export function ModuleShell<T extends ModuleShellItem>({
 
       {/* Count */}
       {!loading && (
-        <p className="text-[10px] font-black uppercase mb-4 tracking-widest" style={{ color: 'var(--txt3)' }}>
+        <p className={`text-[10px] font-black uppercase tracking-widest ${compact ? 'mb-2' : 'mb-4'}`} style={{ color: 'var(--txt3)' }}>
           {filtered.length} {filtered.length === 1 ? 'resultado' : 'resultados'}
           {query && ` para "${query}"`}
         </p>

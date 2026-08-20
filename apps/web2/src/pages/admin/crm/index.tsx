@@ -143,7 +143,7 @@ import {
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange, pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { buildCrmTrendBuckets, crmTrendChartTitle, crmRangeLabel, crmRangeSpan, crmMetricsCacheKey, type CrmRangeMode } from '@/lib/crm/crmDashboardBuckets';
-import { aggregateCrmHoursByClient, buildCrmDailyTrendSeries } from '@/lib/crm/crmDashboardAggregate';
+import { aggregateCrmHoursByClient } from '@/lib/crm/crmDashboardAggregate';
 import type { CrmTrendPoint, ClientListFilter, ClientListSort } from '@/components/crm/CrmDashboardSummary';
 import { slaFootprintFromServices, summarizeCrmCommercial, type CrmSlaFootprint } from '@/lib/crm/crmCommercialStats';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
@@ -156,7 +156,7 @@ import {
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 /** Incrementar cuando cambia la fórmula de KPIs (plan = base + ext + adel) para invalidar snapshot/cache. */
-const CRM_DASHBOARD_METRICS_VERSION = 5;
+const CRM_DASHBOARD_METRICS_VERSION = 6;
 
 function crmBurnVisual(burnRate: number) {
   const burn = Math.round(burnRate || 0);
@@ -893,40 +893,10 @@ export default function CRMPage() {
           });
           const { totalSold, totalPlanned, totalExecuted } = totalsFromClientMetrics(metrics);
           const footprint = slaFootprintFromServices(slaRows, start, end);
+          const trendSeries = trendSeriesFromBuckets(bucketsEarly);
           setClientMetricsMap(metrics);
           setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
           setSlaFootprint(footprint);
-          bumpProgress(72, 'Tendencia diaria…');
-          const tenantClientIds = new Set(clients.map((c) => c.id));
-          const slaDocsByClient = indexSlaRowsByClients(slaRows, clientRefs);
-          const [turnosRaw, sEmployees] = await Promise.all([
-            fetchCrmDashboardTurnos(empresaId, scopeEmpresa, start, end, clientRefs),
-            getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
-          ]);
-          if (runId !== metricsRunRef.current) return;
-          const validEmp: Record<string, boolean> = {};
-          sEmployees.forEach((d) => {
-            const e = d.data() as any;
-            if (!belongsToEmpresaView(e, empresaId, migracionCompleta)) return;
-            validEmp[d.id] = true;
-          });
-          const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
-          const allTurnos = turnosRaw.filter((t) => {
-            if (!scopeEmpresa) return true;
-            const cid = String(t.clientId ?? '').trim();
-            if (cid && tenantAliasSet.has(cid)) return true;
-            if (clientRefs.some((c) => clientRowMatchesClient(t, c))) return true;
-            return belongsToEmpresaView(t, empresaId, migracionCompleta);
-          });
-          const trendSeries = buildCrmDailyTrendSeries(
-            clientRefs,
-            slaDocsByClient,
-            allTurnos,
-            validEmp,
-            start,
-            end,
-            tenantClientIds,
-          );
           setCrmTrendSeries(trendSeries);
           const now = new Date();
           setMetricsUpdatedAt(now);
@@ -1120,17 +1090,7 @@ export default function CRMPage() {
           ),
         );
       });
-      const trendStart = start ?? buckets[0]?.start ?? new Date(2000, 0, 1);
-      const trendEnd = end ?? buckets[buckets.length - 1]?.end ?? new Date(2099, 11, 31, 23, 59, 59, 999);
-      const trendSeries = buildCrmDailyTrendSeries(
-        clientRefs,
-        slaDocsByClient,
-        allTurnos,
-        validEmp,
-        trendStart,
-        trendEnd,
-        tenantClientIds,
-      );
+      const trendSeries = trendSeriesFromBuckets(buckets);
       const metrics = mergeClientMetricsFromBuckets(buckets);
       clients.forEach((c) => {
         const row = metrics[c.id] || { sla: 0, planned: 0, real: 0 };
@@ -2228,6 +2188,7 @@ export default function CRMPage() {
           subtitle="Gestión comercial y contratos"
           icon={Building2}
           iconColor="bg-indigo-600"
+          compact
           items={clientsForList as ClientItem[]}
           loading={loadingClients && clients.length === 0}
           emptyText={

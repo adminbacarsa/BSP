@@ -109,17 +109,17 @@ export function buildCrmTrendBuckets(
 }
 
 export function crmTrendChartTitle(mode: CrmRangeMode, month: number, year: number): string {
-  if (mode === 'year') return `Tendencia diaria · ${year}`;
+  if (mode === 'year') return `SLA vs plan vs reales · ${year}`;
   if (mode === 'quarter') {
     const q = crmCalendarQuarter(month);
-    return `Tendencia diaria · T${q + 1} ${year}`;
+    return `SLA vs plan vs reales · T${q + 1} ${year}`;
   }
   if (mode === 'semester') {
     const s = crmCalendarSemester(month);
-    return `Tendencia diaria · S${s + 1} ${year}`;
+    return `SLA vs plan vs reales · S${s + 1} ${year}`;
   }
-  if (mode === 'month') return `Tendencia diaria · ${MONTHS_ES[month]} ${year}`;
-  return 'Tendencia diaria · últimos 12 meses';
+  if (mode === 'month') return `SLA vs plan vs reales · ${MONTHS_ES[month]} ${year}`;
+  return 'SLA vs plan vs reales · últimos 12 meses';
 }
 
 export function crmMetricsCacheKey(
