@@ -2,7 +2,7 @@ import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 
 export type AppUpdateResult = {
-  status: 'disabled' | 'upToDate' | 'ready' | 'error';
+  status: 'disabled' | 'upToDate' | 'ready' | 'downloaded' | 'error';
   message: string;
   reloading?: boolean;
 };
@@ -14,8 +14,8 @@ export function getAppVersionLabel(): string {
 }
 
 /**
- * Busca update OTA (EAS Update). En __DEV__ o builds sin updates: disabled.
- * Si hay update y apply=true: descarga y reinicia con pantalla de carga (evita gris).
+ * Busca / descarga OTA. NO llama a reloadAsync (en varios Android queda pantalla gris).
+ * Tras descargar, el usuario debe cerrar la app por completo y volver a abrirla.
  */
 export async function checkAndApplyAppUpdate(opts?: {
   apply?: boolean;
@@ -49,23 +49,16 @@ export async function checkAndApplyAppUpdate(opts?: {
     if (!apply) {
       return {
         status: 'ready',
-        message: 'Hay una actualización disponible. Tocá Buscar actualización para instalarla.',
+        message: 'Hay una actualización disponible. Tocá Buscar actualización para descargarla.',
       };
     }
 
     await Updates.fetchUpdateAsync();
-    await Updates.reloadAsync({
-      reloadScreenOptions: {
-        backgroundColor: '#f9f9ff',
-        spinner: {
-          color: '#4f46e5',
-        },
-      },
-    });
     return {
-      status: 'ready',
-      message: 'Actualización aplicada. Reiniciando…',
-      reloading: true,
+      status: 'downloaded',
+      message:
+        'Actualización descargada. Cerrá COSP Guardia por completo (quitar de recientes) y volvé a abrirla. No uses «Actualizar» otra vez.',
+      reloading: false,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'No se pudo comprobar la actualización';

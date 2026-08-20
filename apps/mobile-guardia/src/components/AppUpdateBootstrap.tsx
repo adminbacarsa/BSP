@@ -4,8 +4,7 @@ import * as Updates from 'expo-updates';
 import { checkAndApplyAppUpdate } from '../lib/appUpdate';
 
 /**
- * Aviso diferido de OTA (no corre en el primer frame: evita carrera con checkAutomatically nativo).
- * Solo prompt manual-friendly; no aplica solo.
+ * Solo avisa si hay update. Nunca aplica solo ni llama reloadAsync.
  */
 export function AppUpdateBootstrap() {
   const promptedRef = useRef(false);
@@ -18,8 +17,7 @@ export function AppUpdateBootstrap() {
     const maybePrompt = async () => {
       if (cancelled || promptedRef.current) return;
       try {
-        // Esperar a que termine el boot nativo / splash
-        await new Promise((r) => setTimeout(r, 4000));
+        await new Promise((r) => setTimeout(r, 5000));
         if (cancelled || promptedRef.current) return;
         const result = await checkAndApplyAppUpdate({ apply: false });
         if (cancelled || result.status !== 'ready') return;
@@ -27,10 +25,13 @@ export function AppUpdateBootstrap() {
         Alert.alert('Actualización disponible', result.message, [
           { text: 'Después', style: 'cancel' },
           {
-            text: 'Actualizar ahora',
+            text: 'Descargar',
             onPress: () => {
               void checkAndApplyAppUpdate({ apply: true }).then((r) => {
-                if (r.status === 'error') Alert.alert('Actualización', r.message);
+                Alert.alert(
+                  r.status === 'downloaded' ? 'Listo' : 'Actualización',
+                  r.message,
+                );
               });
             },
           },
