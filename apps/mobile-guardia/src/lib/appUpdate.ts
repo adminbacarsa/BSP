@@ -4,22 +4,18 @@ import Constants from 'expo-constants';
 export type AppUpdateResult = {
   status: 'disabled' | 'upToDate' | 'ready' | 'error';
   message: string;
-  /** true si se llamó reloadAsync (la app se reinicia) */
   reloading?: boolean;
 };
 
 export function getAppVersionLabel(): string {
   const v = Constants.expoConfig?.version ?? '—';
-  const channel =
-    Updates.channel ||
-    (Constants.expoConfig?.extra as { eas?: { channel?: string } } | undefined)?.eas?.channel ||
-    null;
+  const channel = Updates.channel || null;
   return channel ? `v${v} · canal ${channel}` : `v${v}`;
 }
 
 /**
  * Busca update OTA (EAS Update). En __DEV__ o builds sin updates: disabled.
- * Si hay update: descarga y reinicia la app.
+ * Si hay update y apply=true: descarga y reinicia con pantalla de carga (evita gris).
  */
 export async function checkAndApplyAppUpdate(opts?: {
   apply?: boolean;
@@ -58,7 +54,14 @@ export async function checkAndApplyAppUpdate(opts?: {
     }
 
     await Updates.fetchUpdateAsync();
-    await Updates.reloadAsync();
+    await Updates.reloadAsync({
+      reloadScreenOptions: {
+        backgroundColor: '#f9f9ff',
+        spinner: {
+          color: '#4f46e5',
+        },
+      },
+    });
     return {
       status: 'ready',
       message: 'Actualización aplicada. Reiniciando…',

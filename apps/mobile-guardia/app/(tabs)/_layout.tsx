@@ -1,23 +1,21 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
 import { useTheme } from '../../src/theme/ThemeContext';
-
-const TAB_BAR_CONTENT_HEIGHT = 52;
 
 export default function TabsLayout() {
   const { palette, isDark } = useTheme();
   const { user, portalFeatures } = usePortalAuth();
   const { unreadCount } = usePortalInbox(user);
   const insets = useSafeAreaInsets();
-  /** Espacio real de la barra de gestos / 3 botones de Android */
-  const bottomInset = Math.max(insets.bottom, 12);
+  // En Android con 3 botones el inset suele ser ~48; nunca bajar de 16
+  const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 12);
 
   return (
     <Tabs
-      safeAreaInsets={{ bottom: 0, top: 0, left: 0, right: 0 }}
       screenOptions={{
         headerStyle: { backgroundColor: palette.header },
         headerTintColor: palette.headerTint,
@@ -25,15 +23,16 @@ export default function TabsLayout() {
         headerShadowVisible: !isDark,
         tabBarActiveTintColor: palette.primary,
         tabBarInactiveTintColor: palette.onSurfaceMuted,
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
           backgroundColor: palette.card,
           borderTopColor: palette.cardBorder,
-          height: TAB_BAR_CONTENT_HEIGHT + bottomInset,
-          paddingBottom: bottomInset,
+          borderTopWidth: 1,
           paddingTop: 6,
+          paddingBottom: bottomPad,
+          minHeight: 52 + bottomPad,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
-        tabBarItemStyle: { paddingVertical: 2 },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700', marginBottom: 2 },
       }}
     >
       <Tabs.Screen
@@ -49,7 +48,7 @@ export default function TabsLayout() {
         name="agenda"
         options={{
           title: 'Agenda',
-          href: portalFeatures.viewSchedule ? undefined : null,
+          href: portalFeatures.viewSchedule === false ? null : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar" size={size} color={color} />
           ),

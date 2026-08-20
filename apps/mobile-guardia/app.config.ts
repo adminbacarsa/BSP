@@ -17,7 +17,8 @@ const config: ExpoConfig = {
   updates: {
     url: `https://u.expo.dev/${projectId}`,
     fallbackToCacheTimeout: 0,
-    checkAutomatically: 'ON_LOAD',
+    // Evita carrera con check JS al boot (pantalla gris / hang)
+    checkAutomatically: 'ON_ERROR_RECOVERY',
   },
   ios: {
     supportsTablet: true,
