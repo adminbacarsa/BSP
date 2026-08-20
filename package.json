@@ -37,6 +37,7 @@
     "dev:web2": "npm --prefix apps/web2 run dev",
     "dev:mobile": "npm --prefix apps/mobile-guardia run start",
     "mobile:build:preview": "npm --prefix apps/mobile-guardia exec eas build -- --profile preview --platform android",
+    "mobile:update:preview": "npm --prefix apps/mobile-guardia exec eas update -- --channel preview --environment preview",
     "mobile:android": "npm --prefix apps/mobile-guardia run android",
     "mobile:ios": "npm --prefix apps/mobile-guardia run ios",
     "serve:final": "node iniciar.js",

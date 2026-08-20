@@ -1,6 +1,7 @@
 import { Redirect } from 'expo-router';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { LoadingScreen } from '../src/components/LoadingScreen';
+import { appRoutes } from '../src/lib/appRoutes';
 
 export default function IndexScreen() {
   const { user, initializing, deviceVerified, isSuperAdmin, isPreviewMode } = usePortalAuth();
@@ -10,16 +11,16 @@ export default function IndexScreen() {
   }
 
   if (!user) {
-    return <Redirect href="/login" />;
+    return <Redirect href={appRoutes.login} />;
   }
 
   if (isSuperAdmin && !isPreviewMode) {
-    return <Redirect href="/preview" />;
+    return <Redirect href={appRoutes.preview} />;
   }
 
   if (deviceVerified === false) {
     return <Redirect href="/device-blocked" />;
   }
 
-  return <Redirect href="/home" />;
+  return <Redirect href={appRoutes.hoy} />;
 }
