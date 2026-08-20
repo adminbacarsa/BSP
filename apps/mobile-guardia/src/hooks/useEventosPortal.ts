@@ -19,8 +19,10 @@ export function useEventosPortal(
   empresaId: string | undefined,
   empDocId: string | null,
   employeeName: string,
+  opts?: { isPreviewMode?: boolean },
 ) {
   const { db } = getPortalFirebase();
+  const isPreviewMode = !!opts?.isPreviewMode;
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [solicitudes, setSolicitudes] = useState<SolicitudEvento[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,9 +120,22 @@ export function useEventosPortal(
       try {
         if (acepta) {
           const callables = getPortalCallables();
-          await callables.respondEventoConvocatoria({ solicitudId: sol.id, accept: true });
+          await callables.respondEventoConvocatoria({
+            solicitudId: sol.id,
+            accept: true,
+            ...(isPreviewMode && empDocId ? { asEmployeeId: empDocId } : {}),
+          });
         } else {
-          await rejectConvocatoriaEvento(db, sol.id);
+          if (isPreviewMode && empDocId) {
+            const callables = getPortalCallables();
+            await callables.respondEventoConvocatoria({
+              solicitudId: sol.id,
+              accept: false,
+              asEmployeeId: empDocId,
+            });
+          } else {
+            await rejectConvocatoriaEvento(db, sol.id);
+          }
         }
         setSolicitudes((prev) =>
           prev.map((s) =>
@@ -140,7 +155,7 @@ export function useEventosPortal(
         setBusyId(null);
       }
     },
-    [db],
+    [db, empDocId, isPreviewMode],
   );
 
   return {

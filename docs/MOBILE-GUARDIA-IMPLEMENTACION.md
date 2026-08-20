@@ -45,8 +45,8 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **Eventos EV** | Validar convocatoria admin → app → Acepto (Paso 0.5) | Pre-F4 |
-| **F4-08** | Prueba E2E permuta (dos guardias + supervisor) | F4 |
+| **Eventos EV** | Ejecutar checklist Paso 0.5 (abajo) en APK 1.1.1 + prod | Pre-F4 |
+| **F3-12** | Prueba FCM en APK (después de Eventos) | F3 |
 
 ### Bloqueantes actuales
 
@@ -288,6 +288,27 @@ npm run dev:mobile
 | F4-06 | Confirmar / cancelar | `confirmSwapRequest` → `PENDING_SUPERVISOR` | ✅ Hecha | 2026-08-03 |
 | F4-07 | Notificación de permuta | `user_notifications` en cada paso | ✅ Hecha | 2026-08-03 |
 | F4-08 | Prueba E2E permuta | Dos guardias + supervisor (`approveSwapRequest`) | ⬜ Pendiente | — |
+
+### Checklist E2E Eventos EV (Paso 0.5) — producción / APK
+
+**Actores**
+
+| Rol | Dónde |
+|-----|--------|
+| Admin | Web → Servicios → Eventos → detalle → **Convocar guardias** |
+| Guardia | App COSP Guardia **logueado como ese legajo** (no preview SuperAdmin si la APK es &lt; fix asEmployeeId) |
+
+**Pasos**
+
+1. **Admin** — Elegí un evento con servicio en fecha cercana → Convocar → seleccioná al guardia de prueba → enviar.
+2. **App** — Login del guardia → Hoy (banner convocatoria) o **Más → Eventos** / tab atajo.
+3. Ver convocatoria pendiente → **Acepto**.
+4. Verificar: solicitud `aprobada`; turno del día con código **EV** / datos del evento; alerta «Evento confirmado».
+5. Opcional: otra convocatoria → **No puedo** → status `rechazada`.
+
+**Criterio OK:** Acepto sin error; turno EV visible en Hoy/Agenda; push o bandeja Alertas con confirmación.
+
+**Nota preview SuperAdmin:** la callable `respondEventoConvocatoria` acepta `asEmployeeId` solo con claim SUPERADMIN (app ≥ fix + functions desplegada). Hasta entonces, probar con login de vigilador real.
 
 ### Checklist E2E F4-08 (lab)
 
