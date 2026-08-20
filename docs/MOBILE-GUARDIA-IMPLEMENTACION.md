@@ -32,8 +32,8 @@
 | | **TOTAL** | | **88** | **32/88** | |
 
 **Fase activa recomendada:** Paso 0.5 eventos (validar) → F4-08 E2E permutas → F5-07 + EAS preview  
-**Última actualización:** 2026-08-19  
-**Última tarea completada:** Eventos EV + convocatorias en app + fix notificaciones
+**Última actualización:** 2026-08-20  
+**Última tarea completada:** UX-2/3 + OTA (expo-updates) listo para build único v1.1.0
 
 ---
 
@@ -78,6 +78,9 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-08-20 | UX-2/3+OTA | Hoy chip alertas; Alertas filtros dominio; expo-updates + Más «Buscar actualización»; v1.1.0 canal preview; AppUpdateBootstrap
+2026-08-20 | UX-1 | Agenda calendario Día/Semana/Mes (default Mes); Cliente·Objetivo·Puesto; nav período; useEmployeeShifts por mes
+2026-08-20 | UX-0 | Bottom tabs Hoy·Agenda·Alertas·Más; resolveShiftPlacement (Cliente·Objetivo·Puesto); tab Alertas + deep links FCM; Agenda default Mes (calendario = UX-1)
 2026-08-19 | Eventos EV | App /eventos, convocatorias Acepto/No puedo, solicitud cupo, inbox normalizado, firestore.rules empleado, notif convocatoria title/body/employeeId
 2026-08-04 | F4-08 prep | seed-swap-peer + checklist E2E permutas
 2026-08-04 | F5-05/06 | Banner sin conexión, PortalErrorPanel, novedad temática, LoadingScreen

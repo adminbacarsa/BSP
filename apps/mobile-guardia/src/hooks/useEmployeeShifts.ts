@@ -11,16 +11,16 @@ import type { Shift } from '@cosp/portal-types';
 import { getPortalFirebase } from '../lib/portal';
 import { sortShiftsByStart } from '../lib/shifts';
 
-function monthRange(now = new Date()) {
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+function monthRange(anchor: Date) {
+  const start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   start.setHours(0, 0, 0, 0);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const end = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
   end.setHours(23, 59, 59, 999);
   return { start, end };
 }
 
-function buildMonthQuery(employeeKey: string): Query {
-  const { start, end } = monthRange();
+function buildMonthQuery(employeeKey: string, anchor: Date): Query {
+  const { start, end } = monthRange(anchor);
   const { db } = getPortalFirebase();
   return query(
     collection(db, 'turnos'),
@@ -40,7 +40,11 @@ function mergeShiftLists(lists: Shift[][]): Shift[] {
   return sortShiftsByStart([...map.values()]);
 }
 
-export function useEmployeeShifts(empDocId: string | null, authUid: string | null) {
+export function useEmployeeShifts(
+  empDocId: string | null,
+  authUid: string | null,
+  monthAnchor: Date = new Date(),
+) {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +55,8 @@ export function useEmployeeShifts(empDocId: string | null, authUid: string | nul
     if (authUid?.trim()) keys.add(authUid.trim());
     return [...keys];
   }, [empDocId, authUid]);
+
+  const monthKey = `${monthAnchor.getFullYear()}-${monthAnchor.getMonth()}`;
 
   useEffect(() => {
     if (employeeKeys.length === 0) {
@@ -63,6 +69,7 @@ export function useEmployeeShifts(empDocId: string | null, authUid: string | nul
     setLoading(true);
     const buckets: Record<string, Shift[]> = {};
     let errorMessage: string | null = null;
+    const anchor = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1);
 
     const publish = () => {
       const lists = employeeKeys.map((k) => buckets[k] ?? []);
@@ -72,7 +79,7 @@ export function useEmployeeShifts(empDocId: string | null, authUid: string | nul
     };
 
     const unsubs = employeeKeys.map((key) => {
-      const q = buildMonthQuery(key);
+      const q = buildMonthQuery(key, anchor);
       return onSnapshot(
         q,
         (snap) => {
@@ -92,7 +99,7 @@ export function useEmployeeShifts(empDocId: string | null, authUid: string | nul
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [employeeKeys.join('|')]);
+  }, [employeeKeys.join('|'), monthKey]);
 
   return { shifts, loading, error, hasEmployeeKey: employeeKeys.length > 0 };
 }

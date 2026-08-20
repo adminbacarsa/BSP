@@ -21,6 +21,7 @@ import {
   isEmulatorHostMisconfiguredForDevice,
   isEmulatorMode,
 } from '../src/lib/portal';
+import { appRoutes } from '../src/lib/appRoutes';
 import { useEmulatorReachability } from '../src/hooks/useEmulatorReachability';
 import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
@@ -53,12 +54,12 @@ export default function LoginScreen() {
 
   if (user) {
     if (isSuperAdmin && !isPreviewMode) {
-      return <Redirect href="/preview" />;
+      return <Redirect href={appRoutes.preview} />;
     }
     if (deviceVerified === false) {
       return <Redirect href="/device-blocked" />;
     }
-    return <Redirect href="/home" />;
+    return <Redirect href={appRoutes.hoy} />;
   }
 
   const shell = (

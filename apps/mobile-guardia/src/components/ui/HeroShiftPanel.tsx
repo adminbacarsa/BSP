@@ -1,17 +1,22 @@
 import type { ReactNode } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
+import type { Shift } from '@cosp/portal-types';
 import { formatTimeAr } from '@cosp/portal-core';
 import { radius, shadow, typography } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
 import { CommandBadge } from './CommandButton';
+import type { ShiftPlacement } from '../../lib/shiftPlacement';
+import { resolveShiftPlacement } from '../../lib/shiftPlacement';
 
 type Props = {
   headline: string;
   subline: string;
   shift?: Shift;
-  objective?: ObjectiveLocation | null;
+  /** Preferido: Cliente · Objetivo · Puesto ya resuelto */
+  placement?: ShiftPlacement;
+  /** @deprecated usar placement */
+  objective?: ShiftPlacement['objectiveLocation'];
   empresaNombre?: string;
   footer?: ReactNode;
   statusSlot?: ReactNode;
@@ -21,17 +26,22 @@ export function HeroShiftPanel({
   headline,
   subline,
   shift,
+  placement: placementProp,
   objective,
   empresaNombre,
   footer,
   statusSlot,
 }: Props) {
   const { palette, isDark } = useTheme();
+  const placement =
+    placementProp ||
+    resolveShiftPlacement(shift, objective ? { [objective.name]: objective } : {});
+  const mapsTarget = placement.objectiveLocation || objective || null;
   const mapsUrl =
-    objective?.lat && objective?.lng
-      ? `https://www.google.com/maps?q=${objective.lat},${objective.lng}`
-      : objective?.address
-        ? `https://www.google.com/maps/search/${encodeURIComponent(objective.address)}`
+    mapsTarget?.lat && mapsTarget?.lng
+      ? `https://www.google.com/maps?q=${mapsTarget.lat},${mapsTarget.lng}`
+      : mapsTarget?.address
+        ? `https://www.google.com/maps/search/${encodeURIComponent(mapsTarget.address)}`
         : null;
 
   const inner = (
@@ -57,19 +67,13 @@ export function HeroShiftPanel({
 
       {shift && !shift.isFranco ? (
         <View style={styles.chips}>
-          <CommandBadge>{objective?.name || shift.objectiveName || 'Objetivo'}</CommandBadge>
-          {shift.clientName || objective?.clientName ? (
-            <View style={[styles.chip, { backgroundColor: palette.chipBg }]}>
-              <Text style={[styles.chipText, { color: palette.chipText }]}>
-                {shift.clientName || objective?.clientName}
-              </Text>
-            </View>
-          ) : null}
-          {shift.positionName ? (
-            <View style={[styles.chip, { backgroundColor: palette.chipBg }]}>
-              <Text style={[styles.chipText, { color: palette.chipText }]}>{shift.positionName}</Text>
-            </View>
-          ) : null}
+          <CommandBadge>{placement.client}</CommandBadge>
+          <View style={[styles.chip, { backgroundColor: palette.chipBg }]}>
+            <Text style={[styles.chipText, { color: palette.chipText }]}>{placement.objective}</Text>
+          </View>
+          <View style={[styles.chip, { backgroundColor: palette.chipBg }]}>
+            <Text style={[styles.chipText, { color: palette.chipText }]}>{placement.position}</Text>
+          </View>
         </View>
       ) : null}
 

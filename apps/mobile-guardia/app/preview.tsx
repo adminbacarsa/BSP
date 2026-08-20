@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { appRoutes } from '../src/lib/appRoutes';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
@@ -102,7 +103,7 @@ export default function PreviewPickerScreen() {
     setEntering(true);
     void enterPreview(deepLinkEmpId.trim())
       .then(() => {
-        if (!cancelled) router.replace('/home');
+        if (!cancelled) router.replace(appRoutes.hoy);
       })
       .finally(() => {
         if (!cancelled) setEntering(false);
@@ -116,7 +117,7 @@ export default function PreviewPickerScreen() {
     setEntering(true);
     try {
       await enterPreview(empId);
-      router.replace('/home');
+      router.replace(appRoutes.hoy);
     } finally {
       setEntering(false);
     }

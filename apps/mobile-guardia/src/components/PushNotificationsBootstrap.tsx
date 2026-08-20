@@ -6,8 +6,8 @@ import { usePortalAuth } from '../context/PortalAuthContext';
 import { getPortalFirebase } from '../lib/portal';
 import {
   routeFromNotification,
-  routeFromNotificationData,
 } from '../lib/notificationNavigation';
+import { appRoutes } from '../lib/appRoutes';
 import {
   getStoredFcmToken,
   registerPushNotifications,
@@ -17,6 +17,18 @@ import {
 type PushNotificationsBootstrapProps = {
   onStatusChange?: (status: PushRegistrationStatus) => void;
 };
+
+function hrefFromRoute(route: string) {
+  if (route === '/(tabs)' || route === '/(tabs)/') return appRoutes.hoy;
+  if (route === '/(tabs)/agenda') return appRoutes.agenda;
+  if (route === '/(tabs)/alertas') return appRoutes.alertas;
+  if (route === '/(tabs)/mas') return appRoutes.mas;
+  if (route === '/eventos') return appRoutes.eventos;
+  if (route === '/permutas') return appRoutes.permutas;
+  if (route === '/novedad') return appRoutes.novedad;
+  if (route === '/credencial') return appRoutes.credencial;
+  return appRoutes.alertas;
+}
 
 export function PushNotificationsBootstrap({ onStatusChange }: PushNotificationsBootstrapProps) {
   const router = useRouter();
@@ -28,7 +40,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   const openFromNotification = (notification: Notifications.Notification) => {
     const route = routeFromNotification(notification);
     if (route) {
-      router.push(route as '/eventos');
+      router.push(hrefFromRoute(route));
     }
   };
 
@@ -83,7 +95,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
         if (route) {
           Alert.alert(title, body || 'Nueva notificación', [
             { text: 'Después', style: 'cancel' },
-            { text: 'Abrir', onPress: () => router.push(route as '/eventos') },
+            { text: 'Abrir', onPress: () => router.push(hrefFromRoute(route)) },
           ]);
         } else {
           Alert.alert(title, body || 'Nueva notificación');

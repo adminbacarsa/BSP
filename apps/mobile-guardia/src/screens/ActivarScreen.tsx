@@ -13,6 +13,7 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { getMobilePlatform, getOrCreateDeviceId } from '../lib/deviceId';
 import { getDeviceInfo } from '../lib/deviceInfo';
 import { getPortalCallables, getPortalFirebase } from '../lib/portal';
+import { appRoutes } from '../lib/appRoutes';
 import { PasswordField } from '../components/ui/PasswordField';
 
 type Props = {
@@ -58,7 +59,7 @@ export function ActivarScreen({ token }: Props) {
       <View style={styles.center}>
         <Text style={styles.successTitle}>¡Cuenta activada!</Text>
         <Text style={styles.successBody}>Ya podés usar el portal del vigilador en este dispositivo.</Text>
-        <Pressable style={styles.btn} onPress={() => router.replace('/home')}>
+        <Pressable style={styles.btn} onPress={() => router.replace(appRoutes.hoy)}>
           <Text style={styles.btnText}>Continuar</Text>
         </Pressable>
       </View>

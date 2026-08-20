@@ -1,15 +1,24 @@
 import type { ExpoConfig } from 'expo/config';
 
 const useEmulator = process.env.EXPO_PUBLIC_USE_EMULATOR === 'true';
+const projectId = '79b445af-b6a7-456b-b1be-87cf25a20bd5';
 
 const config: ExpoConfig = {
   name: 'COSP Guardia',
   slug: 'cosp-guardia',
-  version: '1.0.0',
+  version: '1.1.0',
   orientation: 'portrait',
   scheme: 'cosp-guardia',
   userInterfaceStyle: 'light',
   icon: './assets/icon.png',
+  runtimeVersion: {
+    policy: 'appVersion',
+  },
+  updates: {
+    url: `https://u.expo.dev/${projectId}`,
+    fallbackToCacheTimeout: 0,
+    checkAutomatically: 'ON_LOAD',
+  },
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.grupobacar.cosp.guardia',
@@ -39,6 +48,7 @@ const config: ExpoConfig = {
     'expo-asset',
     'expo-font',
     'expo-secure-store',
+    'expo-updates',
     [
       'expo-location',
       {
@@ -70,7 +80,7 @@ const config: ExpoConfig = {
   },
   extra: {
     eas: {
-      projectId: '79b445af-b6a7-456b-b1be-87cf25a20bd5',
+      projectId,
     },
     useEmulator: process.env.EXPO_PUBLIC_USE_EMULATOR === 'true',
     emulatorHost: process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST || '127.0.0.1',
