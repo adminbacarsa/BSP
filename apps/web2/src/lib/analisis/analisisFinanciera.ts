@@ -77,6 +77,13 @@ export const FIN_NOV_BREAKDOWN_CODES = ['V', 'E', 'L', 'A', 'AA', 'PG', 'SUS'] a
 /** Columnas de novedad en tabla: códigos + Otr. */
 export const FIN_NOV_HEAD_COLS = FIN_NOV_BREAKDOWN_CODES.length + 1;
 
+/** Etiqueta UI para códigos de novedad (A → ART). */
+export function finNovLabel(code: string): string {
+  const c = String(code || '').trim().toUpperCase();
+  if (c === 'A') return 'ART';
+  return c || '—';
+}
+
 export type FinSumadaColKey = 'ev' | 'ft' | 'extra' | 'franco' | 'ret' | 'ref';
 
 type FinSumadaRow = Pick<
