@@ -119,7 +119,6 @@ import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/servi
 import { callableErrorText } from '@/lib/callableError';
 import {
   fetchHoursBalances,
-  peekHoursBalances,
   persistHoursBalancesFromTurnos,
   sumBalancesByClient,
   balancesCoverObjectives,
@@ -144,7 +143,7 @@ import {
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange, pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { buildCrmTrendBuckets, crmTrendChartTitle, crmRangeLabel, crmRangeSpan, crmMetricsCacheKey, type CrmRangeMode } from '@/lib/crm/crmDashboardBuckets';
-import { aggregateCrmHoursByClient } from '@/lib/crm/crmDashboardAggregate';
+import { aggregateCrmHoursByClient, buildCrmDailyTrendSeries } from '@/lib/crm/crmDashboardAggregate';
 import type { CrmTrendPoint, ClientListFilter, ClientListSort } from '@/components/crm/CrmDashboardSummary';
 import { slaFootprintFromServices, summarizeCrmCommercial, type CrmSlaFootprint } from '@/lib/crm/crmCommercialStats';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
@@ -157,7 +156,7 @@ import {
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 /** Incrementar cuando cambia la fórmula de KPIs (plan = base + ext + adel) para invalidar snapshot/cache. */
-const CRM_DASHBOARD_METRICS_VERSION = 4;
+const CRM_DASHBOARD_METRICS_VERSION = 5;
 
 function crmBurnVisual(burnRate: number) {
   const burn = Math.round(burnRate || 0);
@@ -810,31 +809,6 @@ export default function CRMPage() {
       setDashboardIsStale(false);
       return;
     }
-    if (applyPeriodCache(bucketsEarly, cacheKey)) {
-      setCalculatingMetrics(false);
-      setMetricsLoadProgress(null);
-      setDashboardIsStale(false);
-      return;
-    }
-    if (rangeMode !== 'all' && empresaId) {
-      const memRows = peekHoursBalances({
-        empresaId,
-        periodKeys: bucketsEarly.map((b) => b.key),
-      });
-      if (memRows.length > 0) {
-        const memKeys = new Set(memRows.map((r) => r.periodKey));
-        memKeys.forEach((pk) => {
-          if (periodMetricsRef.current.has(periodCacheKey(pk))) return;
-          storePeriodMetrics(pk, sumBalancesByClient(memRows.filter((r) => r.periodKey === pk)));
-        });
-        if (applyPeriodCache(bucketsEarly, cacheKey)) {
-          setCalculatingMetrics(false);
-          setMetricsLoadProgress(null);
-          setDashboardIsStale(false);
-          return;
-        }
-      }
-    }
     setCalculatingMetrics(true);
     setMetricsLoadProgress({ pct: 8, label: 'Cargando información…' });
     const bumpProgress = (pct: number, label: string) => {
@@ -905,7 +879,6 @@ export default function CRMPage() {
           bucketKeys.forEach((pk) => {
             storePeriodMetrics(pk, sumBalancesByClient(balancesLive.filter((r) => r.periodKey === pk)));
           });
-          const trendSeries = trendSeriesFromBuckets(bucketsEarly);
           const metrics = mergeClientMetricsFromBuckets(bucketsEarly);
           clients.forEach((c) => {
             const row = metrics[c.id] || { sla: 0, planned: 0, real: 0 };
@@ -922,8 +895,39 @@ export default function CRMPage() {
           const footprint = slaFootprintFromServices(slaRows, start, end);
           setClientMetricsMap(metrics);
           setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
-          setCrmTrendSeries(trendSeries);
           setSlaFootprint(footprint);
+          bumpProgress(72, 'Tendencia diaria…');
+          const tenantClientIds = new Set(clients.map((c) => c.id));
+          const slaDocsByClient = indexSlaRowsByClients(slaRows, clientRefs);
+          const [turnosRaw, sEmployees] = await Promise.all([
+            fetchCrmDashboardTurnos(empresaId, scopeEmpresa, start, end, clientRefs),
+            getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+          ]);
+          if (runId !== metricsRunRef.current) return;
+          const validEmp: Record<string, boolean> = {};
+          sEmployees.forEach((d) => {
+            const e = d.data() as any;
+            if (!belongsToEmpresaView(e, empresaId, migracionCompleta)) return;
+            validEmp[d.id] = true;
+          });
+          const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
+          const allTurnos = turnosRaw.filter((t) => {
+            if (!scopeEmpresa) return true;
+            const cid = String(t.clientId ?? '').trim();
+            if (cid && tenantAliasSet.has(cid)) return true;
+            if (clientRefs.some((c) => clientRowMatchesClient(t, c))) return true;
+            return belongsToEmpresaView(t, empresaId, migracionCompleta);
+          });
+          const trendSeries = buildCrmDailyTrendSeries(
+            clientRefs,
+            slaDocsByClient,
+            allTurnos,
+            validEmp,
+            start,
+            end,
+            tenantClientIds,
+          );
+          setCrmTrendSeries(trendSeries);
           const now = new Date();
           setMetricsUpdatedAt(now);
           metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now, footprint });
@@ -1116,7 +1120,17 @@ export default function CRMPage() {
           ),
         );
       });
-      const trendSeries = trendSeriesFromBuckets(buckets);
+      const trendStart = start ?? buckets[0]?.start ?? new Date(2000, 0, 1);
+      const trendEnd = end ?? buckets[buckets.length - 1]?.end ?? new Date(2099, 11, 31, 23, 59, 59, 999);
+      const trendSeries = buildCrmDailyTrendSeries(
+        clientRefs,
+        slaDocsByClient,
+        allTurnos,
+        validEmp,
+        trendStart,
+        trendEnd,
+        tenantClientIds,
+      );
       const metrics = mergeClientMetricsFromBuckets(buckets);
       clients.forEach((c) => {
         const row = metrics[c.id] || { sla: 0, planned: 0, real: 0 };
