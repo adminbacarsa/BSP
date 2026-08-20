@@ -43,10 +43,10 @@ export function createPortalCallables(functions: Functions) {
       PORTAL_CALLABLES.confirmSwapRequest,
     ),
     cancelSwapRequest: httpsCallable<{ requestId: string }, unknown>(functions, PORTAL_CALLABLES.cancelSwapRequest),
-    respondEventoConvocatoria: httpsCallable<{ solicitudId: string; accept: boolean }, { success?: boolean; status?: string }>(
-      functions,
-      PORTAL_CALLABLES.respondEventoConvocatoria,
-    ),
+    respondEventoConvocatoria: httpsCallable<
+      { solicitudId: string; accept: boolean; asEmployeeId?: string },
+      { success?: boolean; status?: string }
+    >(functions, PORTAL_CALLABLES.respondEventoConvocatoria),
   };
 }
 

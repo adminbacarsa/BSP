@@ -36,7 +36,7 @@ export default function EventosScreen() {
 function EventosScreenContent() {
   const insets = useSafeAreaInsets();
   const { palette } = useTheme();
-  const { employee, empDocId, portalFeatures, user } = usePortalAuth();
+  const { employee, empDocId, portalFeatures, user, isPreviewMode } = usePortalAuth();
 
   const displayName = useMemo(() => {
     if (employee?.lastName || employee?.firstName) {
@@ -55,7 +55,9 @@ function EventosScreenContent() {
     reload,
     solicitar,
     responderConvocatoria,
-  } = useEventosPortal(employee?.empresaId, empDocId, displayName);
+  } = useEventosPortal(employee?.empresaId, empDocId, displayName, {
+    isPreviewMode,
+  });
 
   const scrollBottomPad = Math.max(insets.bottom, 12) + 24;
 
