@@ -36,7 +36,7 @@ import ExperienciaObjetivosPanel from '@/components/admin/employees/ExperienciaO
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { countExperienciaObjetivos } from '@/lib/planificacion/experienciaObjetivos';
 import { normalizeArgPhone } from '@/lib/whatsapp';
-import { inferAbsenceCode, RRHH_ABSENCE_LABEL_TO_CODE, validateAbsenceDateRange, toCalendarDateStr, absenceNeedsMedicalVerification, absenceReplicatesToPlanning } from '@/lib/planificacion/absenceCodes';
+import { inferAbsenceCode, RRHH_ABSENCE_LABEL_TO_CODE, validateAbsenceDateRange, toCalendarDateStr, absenceNeedsMedicalVerification, absenceReplicatesToPlanning, absenceOverlapsYearMonth, yearMonthsSpannedByAbsence } from '@/lib/planificacion/absenceCodes';
 import { normalizeGeneroImport } from '@/lib/planificacion/genderPreference';
 import {
   NOVEDAD_TYPE_LABELS_FALLBACK,
@@ -643,10 +643,7 @@ export default function EmployeesPage() {
     const sinEmail   = activos.filter(e => !e.email);
     const sinPortal  = activos.filter(e => e.email && !(e as any).portalInvite?.sent);
     // ausencias del mes actual
-    const ausMonth = absences.filter(a => {
-      const d = toDate(a.startDate);
-      return d && d >= monthStart && d <= monthEnd;
-    });
+    const ausMonth = absences.filter(a => absenceOverlapsYearMonth(a.startDate, a.endDate || a.startDate, `${y}-${String(m + 1).padStart(2, '0')}`));
     const injust = ausMonth.filter(a => {
       const t = (a.type || '').toLowerCase();
       return t.includes('injust') || t === 'aa' || t === 'no_presentacion' || t.includes('no presentaci');
@@ -663,7 +660,11 @@ export default function EmployeesPage() {
   const absencePeriods = useMemo(() => {
     const monthNames = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
     const seen = new Set<string>();
-    absences.forEach(a => { if (a.startDate) { const [y, m] = a.startDate.split('-'); if (y && m) seen.add(`${y}-${m}`); } });
+    const now = new Date();
+    seen.add(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+    absences.forEach((a) => {
+      yearMonthsSpannedByAbsence(a.startDate, a.endDate || a.startDate).forEach((ym) => seen.add(ym));
+    });
     return Array.from(seen).sort().reverse().map(v => {
       const [y, m] = v.split('-');
       return { value: v, label: `${monthNames[parseInt(m, 10) - 1]} ${y}` };
@@ -700,10 +701,14 @@ export default function EmployeesPage() {
       const matchesStatus = !absenceStatusFilter || a.status === absenceStatusFilter;
       const end = a.endDate || a.startDate || '';
       const matchesDate = absenceDateFilterMode === 'month'
-        ? (!absencePeriodFilter || (a.startDate && a.startDate.startsWith(absencePeriodFilter)))
+        ? (!absencePeriodFilter || absenceOverlapsYearMonth(a.startDate, end, absencePeriodFilter))
         : (absenceSelectedDays.size === 0
-          ? (a.startDate && a.startDate.startsWith(absenceCalendarMonth))
-          : [...absenceSelectedDays].some((day) => a.startDate && day >= a.startDate && day <= end));
+          ? absenceOverlapsYearMonth(a.startDate, end, absenceCalendarMonth)
+          : [...absenceSelectedDays].some((day) => {
+              const start = toCalendarDateStr(a.startDate);
+              const fin = toCalendarDateStr(end) || start;
+              return !!(start && fin && day >= start && day <= fin);
+            }));
       return matchesSearch && matchesType && matchesStatus && matchesDate;
     }));
     setSelectedAbsenceIds(new Set());
@@ -1802,9 +1807,8 @@ export default function EmployeesPage() {
 
     const today   = new Date(); today.setHours(0,0,0,0);
     const inMonth = absences.filter(a => {
-      const s = new Date(a.startDate + 'T00:00:00');
-      const e = new Date(a.endDate   + 'T00:00:00');
-      return s.getMonth() === today.getMonth() && s.getFullYear() === today.getFullYear();
+      const ym = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+      return absenceOverlapsYearMonth(a.startDate, a.endDate || a.startDate, ym);
     });
     const absActive = absences.filter(a => {
       const s = new Date(a.startDate + 'T00:00:00');
