@@ -477,6 +477,10 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    match /system_secrets/{docId} {
+      allow read, write: if false;
+    }
+
     match /scheduled_job_logs/{docId} {
       allow read: if isAdmin();
       allow write: if false;

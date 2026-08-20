@@ -1,0 +1,41 @@
+name: EAS Mobile Preview APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger:
+        description: Origen del disparo
+        required: false
+        default: manual
+  repository_dispatch:
+    types: [cosp-mobile-preview-build]
+
+jobs:
+  build-preview-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile-guardia
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/mobile-guardia/package-lock.json
+
+      - name: Install mobile-guardia deps
+        run: npm ci
+        working-directory: apps/mobile-guardia
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@16
+
+      - name: EAS Build preview APK
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas build --profile preview --platform android --non-interactive

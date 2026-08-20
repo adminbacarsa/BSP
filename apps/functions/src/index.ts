@@ -56,6 +56,13 @@ import {
   getEmpresaAfipConfigHandler,
   saveEmpresaAfipCredentialsHandler,
 } from './afip/empresaAfipCredentialsHandler';
+import {
+  getMobileAppConfigHandler,
+  saveMobileAppConfigHandler,
+  syncMobileAppEasEnvHandler,
+  triggerMobileAppPreviewBuildHandler,
+  refreshMobileAppBuildStatusHandler,
+} from './mobileApp/mobileAppHandlers';
 
 // InicializaciÃ³n de Firebase Admin
 if (!admin.apps.length) {
@@ -3328,6 +3335,16 @@ export const lookupClientByCuit = functionsEmulator
 
 export const saveEmpresaAfipCredentials = functions.https.onCall(saveEmpresaAfipCredentialsHandler);
 export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigHandler);
+
+export const getMobileAppConfig = functions.https.onCall(getMobileAppConfigHandler);
+export const saveMobileAppConfig = functions.https.onCall(saveMobileAppConfigHandler);
+export const syncMobileAppEasEnv = functions.https.onCall(syncMobileAppEasEnvHandler);
+export const triggerMobileAppPreviewBuild = functionsEmulator
+  ? functions.https.onCall(triggerMobileAppPreviewBuildHandler)
+  : functions
+      .runWith({ secrets: ['GITHUB_DISPATCH_TOKEN'], timeoutSeconds: 60, memory: '256MB' })
+      .https.onCall(triggerMobileAppPreviewBuildHandler);
+export const refreshMobileAppBuildStatus = functions.https.onCall(refreshMobileAppBuildStatusHandler);
 
 // =========================================================
 // 19. SCHEDULER: AUTO-INJUSTIFICADA a las 23:45 ARG

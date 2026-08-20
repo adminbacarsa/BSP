@@ -2,9 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
 
 export const EXPO_HOST_STORAGE_KEY = 'cosp_expo_preview_host';
-export const PANEL_VERSION = 'prod-1';
+export const PANEL_VERSION = 'prod-2';
 
-const PROD_ORIGIN = 'https://comtroldata.web.app';
+const FALLBACK_ORIGIN = 'https://comtroldata.web.app';
+
+export function getPreviewOrigin(): string {
+  if (typeof window !== 'undefined' && window.location.origin) {
+    return window.location.origin;
+  }
+  return FALLBACK_ORIGIN;
+}
 
 export function buildApkPreviewUrl(empDocId: string): string {
   return `cosp-guardia://preview?emp=${encodeURIComponent(empDocId)}`;
@@ -22,13 +29,14 @@ export function normalizeMetroHost(input: string): string {
   return `${match[1]}:${match[2] || '8081'}`;
 }
 
-/** Preview SuperAdmin en producción (navegador). */
-export function buildWebPreviewUrl(_origin: string, empDocId: string): string {
-  return `${PROD_ORIGIN}/empleado/dashboard?preview=${encodeURIComponent(empDocId)}`;
+/** Preview SuperAdmin en producción (mismo dominio donde estás logueado). */
+export function buildWebPreviewUrl(origin: string, empDocId: string): string {
+  const base = origin || getPreviewOrigin();
+  return `${base}/empleado/dashboard?preview=${encodeURIComponent(empDocId)}`;
 }
 
-export function buildAppBridgeUrl(_origin: string, empDocId: string, _metroHost?: string): string {
-  return `${PROD_ORIGIN}/empleado/dashboard?preview=${encodeURIComponent(empDocId)}`;
+export function buildAppBridgeUrl(origin: string, empDocId: string, _metroHost?: string): string {
+  return buildWebPreviewUrl(origin, empDocId);
 }
 
 export function readStoredExpoHost(): string {
@@ -71,12 +79,14 @@ export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props)
   const [showDev, setShowDev] = useState(false);
   const [expoHost, setExpoHost] = useState('');
   const [expoQr, setExpoQr] = useState<string | null>(null);
+  const [origin, setOrigin] = useState(FALLBACK_ORIGIN);
 
-  const prodUrl = useMemo(() => buildWebPreviewUrl(PROD_ORIGIN, empDocId), [empDocId]);
+  const prodUrl = useMemo(() => buildWebPreviewUrl(origin, empDocId), [origin, empDocId]);
   const expoUrl = useMemo(() => (expoHost ? buildExpoGoPreviewUrl(expoHost, empDocId) : ''), [expoHost, empDocId]);
-  const pickerUrl = `${PROD_ORIGIN}/empleado/dashboard?picker=1`;
+  const pickerUrl = `${origin}/empleado/dashboard?picker=1`;
 
   useEffect(() => {
+    setOrigin(getPreviewOrigin());
     setExpoHost(readStoredExpoHost());
   }, []);
 
@@ -104,14 +114,14 @@ export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props)
     <div className={`rounded-2xl border border-indigo-700/50 bg-slate-900/95 ${compact ? 'p-3' : 'p-4'} flex flex-col gap-3`}>
       <div>
         <p className="text-[11px] font-black uppercase text-indigo-300">Producción · {employeeName}</p>
-        <p className="text-[10px] text-slate-500 mt-0.5">Panel {PANEL_VERSION} · Sin notebook · Firebase comtroldata</p>
+        <p className="text-[10px] text-slate-500 mt-0.5">Panel {PANEL_VERSION} · Producción · {origin.replace(/^https?:\/\//, '')}</p>
       </div>
 
       <div className="rounded-xl bg-indigo-950/60 border border-indigo-800/40 px-3 py-2.5 text-[11px] text-indigo-100 leading-relaxed">
         <p className="font-bold text-white mb-1">Preview web en producción</p>
         <p>
           Escaneá con la cámara del celular o abrí el enlace. Entrás al portal del guardia en{' '}
-          <strong>comtroldata.web.app</strong> (misma nube que el admin). Necesitás sesión SuperAdmin.
+          <strong>{origin.replace(/^https?:\/\//, '')}</strong> (producción, misma sesión SuperAdmin).
         </p>
       </div>
 
