@@ -8,42 +8,58 @@ import {
     where,
     writeBatch,
     serverTimestamp,
+    Timestamp,
+    type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
 export interface AssignGuardToEventParams {
     empresaId: string;
-    // Guardia
     empleadoId: string;
     empleadoNombre: string;
-    empleadoObjectiveId?: string;   // objetivo habitual del guardia
+    empleadoObjectiveId?: string;
     empleadoObjectiveName?: string;
-    // Evento / servicio
     eventoId: string;
     eventoNombre: string;
     clienteId?: string;
     clienteNombre?: string;
     servicioId: string;
     servicioNombre: string;
-    servicioFecha: string;          // YYYY-MM-DD
+    servicioFecha: string;
     horaInicio: string;
     horaFin: string;
     horas: number;
-    // Opcional: solicitud a marcar 'aprobada'
     solicitudId?: string;
-    respondidoPor?: string;         // uid del admin que aprueba (flujo admin)
-    // Opcional: notificar al planificador sobre la vacante generada
+    respondidoPor?: string;
     notifyPlannerUid?: string;
+}
+
+const AR_OFFSET = '-03:00';
+
+function pad2(n: number): string {
+    return String(n).padStart(2, '0');
+}
+
+function arDateTimeTs(fecha: string, hhmm: string): Timestamp {
+    const time = /^\d{1,2}:\d{2}$/.test(hhmm) ? hhmm : '08:00';
+    const [hRaw, mRaw] = time.split(':');
+    return Timestamp.fromDate(
+        new Date(`${fecha}T${pad2(Number(hRaw))}:${pad2(Number(mRaw))}:00.000${AR_OFFSET}`),
+    );
+}
+
+function arDayBounds(fecha: string) {
+    return {
+        startTs: Timestamp.fromDate(new Date(`${fecha}T00:00:00.000${AR_OFFSET}`)),
+        endTs: Timestamp.fromDate(new Date(`${fecha}T23:59:59.999${AR_OFFSET}`)),
+        startStr: `${fecha}T00:00:00`,
+        endStr: `${fecha}T23:59:59`,
+    };
 }
 
 /**
  * Asigna un guardia a un evento.
- *
- * Batch atómico:
- *   1. Busca turno existente del guardia en esa fecha
- *   2. Actualiza ese turno a EV (o crea uno nuevo si no tenía)
- *   3. Actualiza solicitudes_evento a 'aprobada' (si viene del flujo convocatoria)
- *   4. Crea notificación a planificación sobre la vacante generada
+ * Escribe startTime/endTime como Timestamp (la app móvil consulta por Timestamp).
  */
 export async function assignGuardToEvent(params: AssignGuardToEventParams): Promise<void> {
     const {
@@ -54,20 +70,22 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
         servicioId, servicioNombre, servicioFecha,
         horaInicio, horaFin, horas,
         solicitudId, respondidoPor,
-        notifyPlannerUid,
     } = params;
 
-    // 1. Buscar turno existente del guardia en esa fecha
-    const turnosSnap = await getDocs(query(
-        collection(db, 'turnos'),
-        where('empresaId', '==', empresaId),
-        where('employeeId', '==', empleadoId),
-        where('startTime', '>=', `${servicioFecha}T00:00:00`),
-        where('startTime', '<=', `${servicioFecha}T23:59:59`),
-    ));
+    const { startTs, endTs, startStr, endStr } = arDayBounds(servicioFecha);
+    const base = query(collection(db, 'turnos'), where('employeeId', '==', empleadoId));
+    const [tsSnap, strSnap] = await Promise.all([
+        getDocs(query(base, where('startTime', '>=', startTs), where('startTime', '<=', endTs))),
+        getDocs(query(base, where('startTime', '>=', startStr), where('startTime', '<=', endStr))),
+    ]);
 
-    // Ignorar turnos ya EV (duplicado) y francos (no generan vacante operativa)
-    const existingTurno = turnosSnap.docs.find(d => {
+    const byId = new Map<string, QueryDocumentSnapshot>();
+    for (const d of [...tsSnap.docs, ...strSnap.docs]) {
+        if (empresaId && d.data().empresaId && String(d.data().empresaId) !== empresaId) continue;
+        byId.set(d.id, d);
+    }
+
+    const existingTurno = [...byId.values()].find(d => {
         const c = String(d.data().code || '').toUpperCase();
         return c !== 'EV' && c !== 'F' && c !== 'FF' && c !== 'FP';
     }) ?? null;
@@ -79,8 +97,6 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
     let originalObjectiveId: string | null = existingTurno?.data().objectiveId || empleadoObjectiveId || null;
     let originalObjectiveName: string | null = existingTurno?.data().objectiveName || empleadoObjectiveName || null;
 
-    // Si no tenemos objectiveId (guardia sin turno ese día y sin objetivo pasado),
-    // consultamos el documento del empleado para obtener su objetivo habitual.
     if (!originalObjectiveId) {
         try {
             const empSnap = await getDoc(doc(db, 'empleados', empleadoId));
@@ -89,12 +105,17 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
                 originalObjectiveId = empData.preferredObjectiveId || empData.objectiveId || null;
                 originalObjectiveName = empData.preferredObjectiveName || empData.objectiveName || null;
             }
-        } catch { /* continuar con null si falla */ }
+        } catch { /* continuar */ }
+    }
+
+    let startTime = arDateTimeTs(servicioFecha, horaInicio);
+    let endTime = arDateTimeTs(servicioFecha, horaFin);
+    if (endTime.toMillis() <= startTime.toMillis()) {
+        endTime = Timestamp.fromDate(new Date(endTime.toDate().getTime() + 24 * 60 * 60 * 1000));
     }
 
     const batch = writeBatch(db);
 
-    // 2a. Si tiene turno ese día: actualizarlo a EV conservando el docId
     if (existingTurno) {
         batch.update(existingTurno.ref, {
             code: 'EV',
@@ -103,8 +124,8 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
             eventoNombre,
             servicioId,
             servicioNombre,
-            startTime: `${servicioFecha}T${horaInicio}:00`,
-            endTime:   `${servicioFecha}T${horaFin}:00`,
+            startTime,
+            endTime,
             hours: horas,
             isPresent:   false,
             isAbsent:    false,
@@ -113,7 +134,6 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
             replacedCode: originalCode,
         });
     } else {
-        // 2b. No tenía turno ese día — crear turno EV nuevo
         const payload = stampEmpresaId({
             code: 'EV',
             origin: 'EVENTO',
@@ -127,8 +147,8 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
             eventoNombre,
             servicioId,
             servicioNombre,
-            startTime: `${servicioFecha}T${horaInicio}:00`,
-            endTime:   `${servicioFecha}T${horaFin}:00`,
+            startTime,
+            endTime,
             hours: horas,
             isPresent:   false,
             isAbsent:    false,
@@ -140,7 +160,6 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
         batch.set(doc(collection(db, 'turnos')), payload);
     }
 
-    // 3. Actualizar solicitud_evento → 'aprobada'
     if (solicitudId) {
         batch.update(doc(db, 'solicitudes_evento', solicitudId), {
             status: 'aprobada',
@@ -149,7 +168,6 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
         });
     }
 
-    // 4. Notificación a planificación sobre la vacante (en 'novedades' para que aparezca en el bell panel)
     if (originalObjectiveId) {
         const [y, m, d2] = servicioFecha.split('-');
         const fechaLabel = `${d2}/${m}/${y}`;
