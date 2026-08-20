@@ -304,6 +304,60 @@ export function validateAbsenceDateRange(
     return { ok: true, startDate, endDate };
 }
 
+/** True si el rango de la carpeta solapa el mes calendario YYYY-MM. */
+export function absenceOverlapsYearMonth(
+    startVal: unknown,
+    endVal: unknown,
+    yearMonth: string,
+): boolean {
+    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) return false;
+    const start = toCalendarDateStr(startVal);
+    const end = toCalendarDateStr(endVal) || start;
+    if (!start || !end) return false;
+    const [y, m] = yearMonth.split('-').map(Number);
+    const monthStart = `${yearMonth}-01`;
+    const last = new Date(y, m, 0).getDate();
+    const monthEnd = `${yearMonth}-${String(last).padStart(2, '0')}`;
+    return end >= monthStart && start <= monthEnd;
+}
+
+/** Meses YYYY-MM que cubre la carpeta (inicio y fin inclusive). */
+export function yearMonthsSpannedByAbsence(startVal: unknown, endVal: unknown): string[] {
+    const start = toCalendarDateStr(startVal);
+    const end = toCalendarDateStr(endVal) || start;
+    if (!start) return [];
+    const [sy, sm] = start.split('-').map(Number);
+    const [ey, em] = (end || start).split('-').map(Number);
+    if (!sy || !sm) return [];
+    const out: string[] = [];
+    let y = sy;
+    let m = sm;
+    const endY = ey || sy;
+    const endM = em || sm;
+    while (y < endY || (y === endY && m <= endM)) {
+        out.push(`${y}-${String(m).padStart(2, '0')}`);
+        m += 1;
+        if (m > 12) {
+            m = 1;
+            y += 1;
+        }
+    }
+    return out;
+}
+
+export function isArtAbsence(doc: { type?: unknown; absenceType?: unknown; code?: unknown } | null | undefined): boolean {
+    const type = String(doc?.type ?? '').trim().toLowerCase();
+    if (type === 'art' || type.startsWith('art ') || type.startsWith('art/')) return true;
+    const code = String(doc?.absenceType ?? doc?.code ?? '').trim().toUpperCase();
+    return code === 'ART';
+}
+
+/** Texto de celda en planificación. ART no se confunde con A (autorizada). */
+export function absenceGridDisplayCode(doc: any): string {
+    if (isArtAbsence(doc)) return 'ART';
+    return inferAbsenceCode(doc);
+}
+
 /** Lista inclusive de fechas YYYY-MM-DD entre start y end. */
 export function iterateCalendarDateRange(startStr: string, endStr: string): string[] {
     if (compareCalendarDateStr(endStr, startStr) < 0) return [];

@@ -179,7 +179,7 @@ import {
     formatDayDemandSummary,
     type ObjectiveCoveragePreflight,
 } from '@/lib/planificacion/objectiveCoverageDemand';
-import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange } from '@/lib/planificacion/absenceCodes';
+import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange, absenceGridDisplayCode } from '@/lib/planificacion/absenceCodes';
 import { isEmployeeOnLeave, shouldShowLeaveConflictSiren } from '@/lib/planificacion/leaveCoverage';
 import {
     listDateRangeInclusive,
@@ -279,7 +279,7 @@ import {
     type PlanningCellHoursContext,
 } from '@/lib/planificacion/planningEmployeeCellHours';
 
-const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'E', 'AA', 'LT', 'SGS', 'SUS']);
+const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'ART', 'E', 'AA', 'LT', 'SGS', 'SUS']);
 
 function resolveTitularCoverageName(
     titularEmpId: string,
@@ -332,6 +332,7 @@ const SHIFT_STYLES: any = {
     'F':   'bg-green-500 text-white border-green-600 font-black shadow-sm',
     'PU':  'bg-white text-pink-700 border-pink-400 font-bold',
     'A':   'bg-white text-red-700 border-red-400 font-black pattern-diagonal',
+    'ART': 'bg-white text-red-700 border-red-400 font-black pattern-diagonal',
     'V':   'bg-emerald-700 text-white border-emerald-800 font-black shadow-sm',
     'L':   'bg-white text-purple-700 border-purple-400 font-black',
     'E':   'bg-white text-rose-700 border-rose-400 font-black',
@@ -386,7 +387,8 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'TURA': 'Turno Agregado por cliente (facturable)',
     'ESC': 'Escuela / formación (no cuenta cobertura SLA ni horas planificadas)',
     'PU': 'Puesto Único / Especial',
-    'A': 'ART',
+    'A': 'ART / Autorizada',
+    'ART': 'ART (carpeta)',
     'V': 'Vacaciones',
     'L': 'Licencia Esp.',
     'E': 'Enfermedad',
@@ -9608,7 +9610,7 @@ export default function PlanificacionPage() {
                                         const isOtherObjectiveShift = _rawOtherObj
                                             && !_cellIsRetAtOtherObj
                                             && !(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds.includes(_activeShiftObjId));
-                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); content = absCode; style = SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
+                                        if (absence) { const absCode = absence.inferredCode || inferAbsenceCode(absence); const displayCode = absenceGridDisplayCode(absence); content = displayCode; style = SHIFT_STYLES[displayCode] || SHIFT_STYLES[absCode] || 'bg-rose-50 text-rose-700 font-bold border-rose-200'; }
                                         if (isOtherObjectiveShift && content != null) {
                                             style = OTHER_OBJECTIVE_CELL_STYLE;
                                         }
@@ -9663,7 +9665,7 @@ export default function PlanificacionPage() {
                                         const isExclusionCol = !!excludedOnDay?.length;
                                         const cellPosExcluded = !!(cellPosName && excludedOnDay?.includes(cellPosName));
                                         const leaveCellCode = absence
-                                            ? String(absence.inferredCode || inferAbsenceCode(absence) || content || '').toUpperCase()
+                                            ? String(absenceGridDisplayCode(absence) || content || '').toUpperCase()
                                             : String(cellCode || '').toUpperCase();
                                         const isLeaveCell = !!absence || LEAVE_CELL_CODES.has(leaveCellCode);
                                         const _covSegHint = isEarly || covRole === 'EARLY_START'
