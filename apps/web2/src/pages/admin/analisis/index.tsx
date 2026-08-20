@@ -31,6 +31,7 @@ import {
   finGuardNovOtros,
   finIdleHours,
   finNovCode,
+  finNovLabel,
   finNovOtros,
   finPlanHours,
   finSumadaValue,
@@ -2077,7 +2078,7 @@ export default function AnalisisPage() {
       wb,
       XLSX.utils.aoa_to_sheet([
         ['Rubro', 'Código', 'Horas', 'Eventos', 'Impacto'],
-        ...informe.novedades.map((r) => [r.rubro, r.code, r.horas, r.eventos, r.impacto]),
+        ...informe.novedades.map((r) => [r.rubro, finNovLabel(r.code), r.horas, r.eventos, r.impacto]),
       ]),
       'Novedades',
     );
@@ -2119,7 +2120,7 @@ export default function AnalisisPage() {
       ['Eficiencia SLA/consumo %', Math.round(fin.eficienciaPct)],
     ]), 'Empresa');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivos', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'Δ SLA'],
+      ['Cliente', 'Objetivos', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'Δ SLA'],
       ...fin.clients.map((c) => [
         c.name, c.objetivos, r(c.slaHours), r(finPlanHours(c, finHoursMode)),
         ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finNovCode(c.novedades, code))),
@@ -2128,7 +2129,7 @@ export default function AnalisisPage() {
       ]),
     ]), 'Clientes');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivo', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'SLA/g', 'Δ SLA'],
+      ['Cliente', 'Objetivo', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'SLA/g', 'Δ SLA'],
       ...fin.clients.flatMap((c) => c.rows.map((o) => [
         c.name, o.name, r(o.slaHours), r(finPlanHours(o, finHoursMode)),
         ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finNovCode(o.novedades, code))),
@@ -2137,7 +2138,7 @@ export default function AnalisisPage() {
       ])),
     ]), 'Objetivos');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivo', 'Guardia', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES, 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo'],
+      ['Cliente', 'Objetivo', 'Guardia', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo'],
       ...fin.clients.flatMap((c) => c.rows.flatMap((o) => o.guards.map((g) => [
         c.name, o.name, empNameById[g.employeeId] || g.name, r(finPlanHours(g, finHoursMode)),
         ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finGuardNovCode(g, code))),
@@ -2763,7 +2764,7 @@ export default function AnalisisPage() {
                                       a.code==='AA'?'bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400':
                                       'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
                                     }`}>
-                                      {a.code || a.tipo}
+                                      {a.code ? finNovLabel(a.code) : (a.tipo || '—')}
                                     </span>
                                   </td>
                                   <td className="px-3 py-1.5 text-center text-slate-500">{a.days}</td>
@@ -2803,7 +2804,7 @@ export default function AnalisisPage() {
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-3xl leading-relaxed">
                   Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
-                  <strong>hs plan</strong> (cobertura de malla) + <strong>horas sumadas</strong> (novedades V/L/E/A/AA/PG + FT + extra/ops + francos F/FF y RET/REF/ESC no usados).
+                  <strong>hs plan</strong> (cobertura de malla) + <strong>horas sumadas</strong> (novedades V/L/E/ART/AA/PG + FT + extra/ops + francos F/FF y RET/REF/ESC no usados).
                   El SLA no incluye esas horas extra. Si el RET se usó el mismo día (M/T/N), no se duplica.
                   Las novedades se atribuyen al puesto (malla / historial / legajo).
                   Sin precios. Pirámide empresa → cliente → objetivo.
@@ -2857,7 +2858,7 @@ export default function AnalisisPage() {
                   { k: 'V Vacaciones', v: finNovCode(fin.novedades, 'V'), c: '#7c3aed' },
                   { k: 'E Enfermedad', v: finNovCode(fin.novedades, 'E'), c: '#dc2626' },
                   { k: 'L Licencia', v: finNovCode(fin.novedades, 'L'), c: '#0891b2' },
-                  { k: 'A ART', v: finNovCode(fin.novedades, 'A'), c: '#d97706' },
+                  { k: 'ART', v: finNovCode(fin.novedades, 'A'), c: '#d97706' },
                   { k: 'AA Injust.', v: finNovCode(fin.novedades, 'AA'), c: '#64748b' },
                   { k: 'PG Gremial', v: finNovCode(fin.novedades, 'PG'), c: '#0f766e' },
                   { k: 'SUS Suspensión', v: finNovCode(fin.novedades, 'SUS'), c: '#be123c' },
@@ -2928,7 +2929,7 @@ export default function AnalisisPage() {
                         {(finCols.novHeadCols > 0 || finCols.sumadas.length > 0) && (
                         <tr className="bg-slate-700 text-white text-[9px] font-black uppercase tracking-wide">
                           {finCols.novCodes.map((c, i) => (
-                            <th key={c} className={`px-1.5 py-1 text-right whitespace-nowrap ${i === 0 ? 'border-l border-slate-600' : ''}`}>{c}</th>
+                            <th key={c} className={`px-1.5 py-1 text-right whitespace-nowrap ${i === 0 ? 'border-l border-slate-600' : ''}`}>{finNovLabel(c)}</th>
                           ))}
                           {finCols.showNovOtros && <th className="px-1.5 py-1 text-right whitespace-nowrap">Otr</th>}
                           {finCols.sumadas.map(({ key, label }, i) => (
@@ -3009,7 +3010,7 @@ export default function AnalisisPage() {
                                         </tr>
                                         <tr className="bg-slate-300/70 dark:bg-slate-700 text-[9px] uppercase font-black tracking-wide text-slate-600 dark:text-slate-300">
                                           {finCols.novCodes.map((c, i) => (
-                                            <th key={c} className={`p-1 text-right ${i === 0 ? 'border-l border-slate-300 dark:border-slate-600' : ''}`}>{c}</th>
+                                            <th key={c} className={`p-1 text-right ${i === 0 ? 'border-l border-slate-300 dark:border-slate-600' : ''}`}>{finNovLabel(c)}</th>
                                           ))}
                                           {finCols.showNovOtros && <th className="p-1 text-right">Otr</th>}
                                           {finCols.sumadas.map(({ key, label }, i) => (
@@ -3068,7 +3069,7 @@ export default function AnalisisPage() {
                                                         { k: 'V Vacaciones', v: finNovCode(obj.novedades, 'V') },
                                                         { k: 'E Enfermedad', v: finNovCode(obj.novedades, 'E') },
                                                         { k: 'L Licencia', v: finNovCode(obj.novedades, 'L') },
-                                                        { k: 'A ART', v: finNovCode(obj.novedades, 'A') },
+                                                        { k: 'ART', v: finNovCode(obj.novedades, 'A') },
                                                         { k: 'AA Injust.', v: finNovCode(obj.novedades, 'AA') },
                                                         { k: 'PG Gremial', v: finNovCode(obj.novedades, 'PG') },
                                                         { k: 'SUS Suspensión', v: finNovCode(obj.novedades, 'SUS') },
@@ -3090,7 +3091,7 @@ export default function AnalisisPage() {
                                                             <th className="p-1.5 text-left w-[24%]">Guardia</th>
                                                             <th className="p-1.5 text-right">Plan</th>
                                                             {finCols.novCodes.map((c) => (
-                                                              <th key={c} className="p-1.5 text-right">{c}</th>
+                                                              <th key={c} className="p-1.5 text-right">{finNovLabel(c)}</th>
                                                             ))}
                                                             {finCols.showNovOtros && <th className="p-1.5 text-right">Otr</th>}
                                                             {finCols.sumadas.map(({ key, label }) => (
@@ -3336,7 +3337,7 @@ export default function AnalisisPage() {
                         <tr key={row.rubro}>
                           <td className="p-4 font-bold text-slate-700 dark:text-white text-xs">{row.rubro}</td>
                           <td className="p-4 text-center">
-                            <span className="px-1.5 py-0.5 rounded font-black text-[8px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{row.code}</span>
+                            <span className="px-1.5 py-0.5 rounded font-black text-[8px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{finNovLabel(row.code)}</span>
                           </td>
                           <td className="p-4 text-center text-slate-500">{row.eventos}</td>
                           <td className="p-4 text-center font-black text-rose-600">{row.horas > 0 ? row.horas.toLocaleString('es-AR') : '—'}</td>

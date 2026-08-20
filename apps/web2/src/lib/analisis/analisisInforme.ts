@@ -223,7 +223,7 @@ export function buildInformeAnalitico(opts: {
       impacto: 'Parte de enfermo: activa coberturas de emergencia (ext, ops o FT).',
     },
     {
-      rubro: 'ART / autorizada',
+      rubro: 'ART',
       code: 'A',
       horas: ausenciasStats?.artHs ?? 0,
       eventos: countCat('art'),
