@@ -6,6 +6,7 @@ import {
     updateDoc,
     deleteDoc,
     getDocs,
+    writeBatch,
     query,
     where,
     orderBy,
@@ -210,7 +211,42 @@ export const eventoService = {
     },
 
     delete: async (id: string): Promise<void> => {
-        await deleteDoc(doc(db, 'eventos', id));
+        const [turnosSnap, solsSnap] = await Promise.all([
+            getDocs(query(collection(db, 'turnos'), where('eventoId', '==', id))),
+            getDocs(query(collection(db, 'solicitudes_evento'), where('eventoId', '==', id))),
+        ]);
+
+        type Op = { type: 'delete'; ref: Parameters<ReturnType<typeof writeBatch>['delete']>[0] }
+                | { type: 'update'; ref: Parameters<ReturnType<typeof writeBatch>['update']>[0]; data: Record<string, unknown> };
+
+        const ops: Op[] = [];
+
+        turnosSnap.docs.forEach(d => {
+            const replaced = d.data().replacedCode;
+            if (replaced) {
+                ops.push({ type: 'update', ref: d.ref, data: {
+                    code: replaced, origin: null,
+                    eventoId: null, eventoNombre: null,
+                    servicioId: null, servicioNombre: null,
+                    replacedCode: null,
+                }});
+            } else {
+                ops.push({ type: 'delete', ref: d.ref });
+            }
+        });
+
+        solsSnap.docs.forEach(d => ops.push({ type: 'delete', ref: d.ref }));
+        ops.push({ type: 'delete', ref: doc(db, 'eventos', id) });
+
+        const LIMIT = 490;
+        let batch = writeBatch(db);
+        let count = 0;
+        for (const op of ops) {
+            if (op.type === 'delete') batch.delete(op.ref);
+            else batch.update(op.ref, op.data);
+            if (++count >= LIMIT) { await batch.commit(); batch = writeBatch(db); count = 0; }
+        }
+        if (count > 0) await batch.commit();
     },
 
     /** Turnos EV asignados para un evento (para mostrar personal en EventosPanel). */
