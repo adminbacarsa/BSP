@@ -140,13 +140,13 @@ import {
   buildSlaCodeHoursHintFromServices,
   buildSlaCodeHoursHintByObjectiveId,
   toDateSafe,
-  type PlannedHoursRange,
 } from '@/lib/crm/plannedHours';
 import { slaHoursForServiceInRange, sumVigenteSlaHoursInRange, pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
-import { buildCrmTrendBuckets, crmTrendChartTitle } from '@/lib/crm/crmDashboardBuckets';
+import { buildCrmTrendBuckets, crmTrendChartTitle, crmRangeLabel, crmRangeSpan, crmMetricsCacheKey, type CrmRangeMode } from '@/lib/crm/crmDashboardBuckets';
 import { aggregateCrmHoursByClient } from '@/lib/crm/crmDashboardAggregate';
-import type { CrmTrendPoint } from '@/components/crm/CrmDashboardSummary';
+import type { CrmTrendPoint, ClientListFilter, ClientListSort } from '@/components/crm/CrmDashboardSummary';
+import { slaFootprintFromServices, summarizeCrmCommercial, type CrmSlaFootprint } from '@/lib/crm/crmCommercialStats';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   applyRefuerzoHorasVendidasToGrids,
@@ -157,10 +157,7 @@ import {
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 /** Incrementar cuando cambia la fórmula de KPIs (plan = base + ext + adel) para invalidar snapshot/cache. */
-const CRM_DASHBOARD_METRICS_VERSION = 3;
-
-type ClientListSort = 'name' | 'burn_desc' | 'sla_desc' | 'plan_gap';
-type ClientListFilter = 'all' | 'activos' | 'con_sla' | 'burn_alerta';
+const CRM_DASHBOARD_METRICS_VERSION = 4;
 
 function crmBurnVisual(burnRate: number) {
   const burn = Math.round(burnRate || 0);
@@ -252,7 +249,7 @@ const clampDateRange = (start: Date | null, end: Date | null, min: Date | null, 
   return { start: s, end: e };
 };
 
-type RangeMode = 'month' | 'year' | 'all';
+type RangeMode = CrmRangeMode;
 type ViewMode = 'grid' | 'list';
 type ProformaBase = 'requested' | 'planned' | 'executed';
 
@@ -279,7 +276,7 @@ export default function CRMPage() {
   const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null);
   const metricsRunRef = useRef(0);
   const clientsFetchGenRef = useRef(0);
-  const metricsCache = useRef<Map<string, { metrics: any; trend: any[]; updatedAt: Date }>>(new Map());
+  const metricsCache = useRef<Map<string, { metrics: any; trend: any[]; updatedAt: Date; footprint?: CrmSlaFootprint | null }>>(new Map());
   const periodMetricsRef = useRef<Map<string, {
     metrics: Record<string, any>;
     totals: { totalSold: number; totalPlanned: number; totalExecuted: number };
@@ -305,6 +302,7 @@ export default function CRMPage() {
   const [globalMetrics, setGlobalMetrics] = useState({ totalSold: 0, totalPlanned: 0, totalExecuted: 0, criticalClients: [] as any[] });
   const [clientMetricsMap, setClientMetricsMap] = useState<Record<string, any>>({});
   const [crmTrendSeries, setCrmTrendSeries] = useState<CrmTrendPoint[]>([]);
+  const [slaFootprint, setSlaFootprint] = useState<CrmSlaFootprint | null>(null);
 
   // --- INFO ---
   const [isEditingInfo, setIsEditingInfo] = useState(false);
@@ -659,17 +657,9 @@ export default function CRMPage() {
       .catch(() => setForeignRelatedCounts({ servicios_sla: 0, turnos: 0 }));
   };
 
-  const getRangeLabel = () => {
-    if (rangeMode === 'all') return 'Todo el histórico';
-    if (rangeMode === 'year') return `Año ${rangeYear}`;
-    return `${MONTHS_ES[rangeMonth]} ${rangeYear} (1–${new Date(rangeYear, rangeMonth + 1, 0).getDate()})`;
-  };
+  const getRangeLabel = () => crmRangeLabel(rangeMode, rangeMonth, rangeYear);
 
-  const getRangeDates = () => {
-    if (rangeMode === 'all') return { start: null as Date | null, end: null as Date | null };
-    if (rangeMode === 'year') return { start: new Date(rangeYear, 0, 1), end: new Date(rangeYear, 11, 31, 23, 59, 59, 999) };
-    return { start: new Date(rangeYear, rangeMonth, 1), end: new Date(rangeYear, rangeMonth + 1, 0, 23, 59, 59, 999) };
-  };
+  const getRangeDates = () => crmRangeSpan(rangeMode, rangeMonth, rangeYear);
 
   const periodCacheKey = (periodKey: string) => `${empresaId}__${periodKey}`;
 
@@ -744,29 +734,68 @@ export default function CRMPage() {
       };
     });
 
+  const mergeClientMetricsFromBuckets = (buckets: { key: string }[]) => {
+    const metrics: Record<string, any> = {};
+    clients.forEach((c) => {
+      let sla = 0;
+      let planned = 0;
+      let real = 0;
+      let contracted = 0;
+      let contractClosed = 0;
+      buckets.forEach((b) => {
+        const hit = periodMetricsRef.current.get(periodCacheKey(b.key));
+        const m = hit?.metrics?.[c.id];
+        sla += Number(m?.sla) || 0;
+        planned += Number(m?.planned) || 0;
+        real += Number(m?.real) || 0;
+        contracted += Number(m?.contracted) || 0;
+        contractClosed += Number(m?.contractClosed) || 0;
+      });
+      metrics[c.id] = {
+        sla,
+        planned,
+        real,
+        contracted,
+        contractClosed,
+        contractMismatch: contractClosed > 0 && contractClosed !== sla,
+        burnRate: sla > 0 ? (real / sla) * 100 : 0,
+        hasActivity: sla > 0 || planned > 0 || real > 0,
+      };
+    });
+    return metrics;
+  };
+
   const applyPeriodCache = (
-    periodKey: string,
     buckets: { key: string; label: string }[],
     cacheKey: string,
   ) => {
-    const hit = periodMetricsRef.current.get(periodCacheKey(periodKey));
-    if (!hit) return false;
+    if (!buckets.length) return false;
+    if (!buckets.every((b) => periodMetricsRef.current.has(periodCacheKey(b.key)))) return false;
     const trendSeries = trendSeriesFromBuckets(buckets);
-    setClientMetricsMap(hit.metrics);
-    setGlobalMetrics({ ...hit.totals, criticalClients: [] });
+    const metrics = mergeClientMetricsFromBuckets(buckets);
+    const totals = totalsFromClientMetrics(metrics);
+    const updatedAt = buckets.reduce((latest, b) => {
+      const t = periodMetricsRef.current.get(periodCacheKey(b.key))?.updatedAt;
+      if (!t) return latest;
+      return !latest || t > latest ? t : latest;
+    }, null as Date | null) || new Date();
+    setClientMetricsMap(metrics);
+    setGlobalMetrics({ ...totals, criticalClients: [] });
     setCrmTrendSeries(trendSeries);
-    setMetricsUpdatedAt(hit.updatedAt);
+    setMetricsUpdatedAt(updatedAt);
+    setSlaFootprint(null);
     metricsCache.current.set(cacheKey, {
-      metrics: hit.metrics,
+      metrics,
       trend: trendSeries,
-      updatedAt: hit.updatedAt,
+      updatedAt,
+      footprint: null,
     });
     return true;
   };
 
   const calculateDashboardMetrics = async () => {
     const runId = ++metricsRunRef.current;
-    const cacheKey = `${empresaId}__v${CRM_DASHBOARD_METRICS_VERSION}__${rangeMode}__${rangeMonth}__${rangeYear}`;
+    const cacheKey = crmMetricsCacheKey(empresaId || '', CRM_DASHBOARD_METRICS_VERSION, rangeMode, rangeMonth, rangeYear);
     const bucketsEarly = buildCrmTrendBuckets(rangeMode, rangeMonth, rangeYear);
     const selectedPeriodKey = `${rangeYear}-${String(rangeMonth + 1).padStart(2, '0')}`;
     const cached = metricsCache.current.get(cacheKey);
@@ -775,18 +804,19 @@ export default function CRMPage() {
       setCrmTrendSeries(cached.trend);
       setGlobalMetrics({ ...totalsFromClientMetrics(cached.metrics), criticalClients: [] });
       setMetricsUpdatedAt(cached.updatedAt);
+      setSlaFootprint(cached.footprint ?? null);
       setCalculatingMetrics(false);
       setMetricsLoadProgress(null);
       setDashboardIsStale(false);
       return;
     }
-    if (rangeMode === 'month' && applyPeriodCache(selectedPeriodKey, bucketsEarly, cacheKey)) {
+    if (applyPeriodCache(bucketsEarly, cacheKey)) {
       setCalculatingMetrics(false);
       setMetricsLoadProgress(null);
       setDashboardIsStale(false);
       return;
     }
-    if (rangeMode === 'month' && empresaId) {
+    if (rangeMode !== 'all' && empresaId) {
       const memRows = peekHoursBalances({
         empresaId,
         periodKeys: bucketsEarly.map((b) => b.key),
@@ -797,7 +827,7 @@ export default function CRMPage() {
           if (periodMetricsRef.current.has(periodCacheKey(pk))) return;
           storePeriodMetrics(pk, sumBalancesByClient(memRows.filter((r) => r.periodKey === pk)));
         });
-        if (applyPeriodCache(selectedPeriodKey, bucketsEarly, cacheKey)) {
+        if (applyPeriodCache(bucketsEarly, cacheKey)) {
           setCalculatingMetrics(false);
           setMetricsLoadProgress(null);
           setDashboardIsStale(false);
@@ -822,6 +852,7 @@ export default function CRMPage() {
           objetivos: c.objetivos || [],
         }));
         const { start, end } = getRangeDates();
+        if (!start || !end) throw new Error('rango CRM sin fechas');
         const objectiveIds = [
           ...new Set(
             clients.flatMap((c) =>
@@ -840,16 +871,13 @@ export default function CRMPage() {
           fetchSlaRowsForCrmDashboard(clientRefs, { empresaId, scopeEmpresa, migracionCompleta }),
           fetchContractsForCrmDashboard(clientRefs, { empresaId, scopeEmpresa }),
         ]);
-        const selectedRows = rangeMode === 'year'
-          ? balanceRows.filter((r) => r.year === rangeYear)
-          : balanceRows.filter((r) => r.periodKey === selectedPeriodKey);
+        const bucketKeys = bucketsEarly.map((b) => b.key);
+        const selectedRows = balanceRows.filter((r) => bucketKeys.includes(r.periodKey));
         const vigente = pickVigenteSlasForPeriod(slaRows, start, end);
         const neededIds = vigente
           .map((s) => String(s.objectiveId ?? '').trim())
           .filter(Boolean);
-        const coverKeys = rangeMode === 'year'
-          ? bucketsEarly.map((b) => b.key)
-          : [selectedPeriodKey];
+        const coverKeys = bucketKeys;
         bumpProgress(36, 'Revisando extracto…');
         const extractReady = balancesCoverObjectives(selectedRows, coverKeys, neededIds);
         if (extractReady && runId === metricsRunRef.current) {
@@ -869,28 +897,36 @@ export default function CRMPage() {
             const cStart = c.startDate ? new Date(c.startDate) : null;
             const cEnd = c.endDate ? new Date(c.endDate) : null;
             const clamped = clampDateRange(cStart, cEnd, start, end);
-            if (!clamped && (cStart || cEnd) && rangeMode !== 'year') return;
+            if (!clamped && (cStart || cEnd) && rangeMode !== 'all') return;
             contractedByClient[canonical] = (contractedByClient[canonical] || 0) + totalHours;
             if (c.type === 'cerrado') closedByClient[canonical] = (closedByClient[canonical] || 0) + totalHours;
           });
-          const selectedLive = overlayLiveSlaOnBalanceRows(selectedRows, slaRows);
           const balancesLive = overlayLiveSlaOnBalanceRows(balanceRows, slaRows);
-          const byClient = sumBalancesByClient(selectedLive);
-          const builtSelected = rangeMode === 'month'
-            ? storePeriodMetrics(selectedPeriodKey, byClient, contractedByClient, closedByClient)
-            : buildMetricsFromHours(byClient, contractedByClient, closedByClient);
-          const { metrics, totalSold, totalPlanned, totalExecuted } = builtSelected;
-          new Set(balanceRows.map((r) => r.periodKey)).forEach((pk) => {
-            if (rangeMode === 'month' && pk === selectedPeriodKey) return;
+          bucketKeys.forEach((pk) => {
             storePeriodMetrics(pk, sumBalancesByClient(balancesLive.filter((r) => r.periodKey === pk)));
           });
           const trendSeries = trendSeriesFromBuckets(bucketsEarly);
+          const metrics = mergeClientMetricsFromBuckets(bucketsEarly);
+          clients.forEach((c) => {
+            const row = metrics[c.id] || { sla: 0, planned: 0, real: 0 };
+            const contracted = Math.round(contractedByClient[c.id] || 0);
+            const contractClosed = Math.round(closedByClient[c.id] || 0);
+            metrics[c.id] = {
+              ...row,
+              contracted,
+              contractClosed,
+              contractMismatch: contractClosed > 0 && contractClosed !== row.sla,
+            };
+          });
+          const { totalSold, totalPlanned, totalExecuted } = totalsFromClientMetrics(metrics);
+          const footprint = slaFootprintFromServices(slaRows, start, end);
           setClientMetricsMap(metrics);
           setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
           setCrmTrendSeries(trendSeries);
+          setSlaFootprint(footprint);
           const now = new Date();
           setMetricsUpdatedAt(now);
-          metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now });
+          metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now, footprint });
           setCalculatingMetrics(false);
           setMetricsLoadProgress(null);
           setDashboardIsStale(false);
@@ -913,11 +949,13 @@ export default function CRMPage() {
           const m = snap.clientMetricsMap ?? {};
           const t = snap.trendSeries ?? [];
           const g = snap.globalMetrics ?? { totalSold: 0, totalPlanned: 0, totalExecuted: 0 };
+          const footprint = (snap.slaFootprint as CrmSlaFootprint | undefined) ?? null;
           setClientMetricsMap(m);
           setGlobalMetrics({ ...g, criticalClients: [] });
           setCrmTrendSeries(t);
+          setSlaFootprint(footprint);
           setMetricsUpdatedAt(computedAt);
-          metricsCache.current.set(cacheKey, { metrics: m, trend: t, updatedAt: computedAt });
+          metricsCache.current.set(cacheKey, { metrics: m, trend: t, updatedAt: computedAt, footprint });
           if (rangeMode === 'month') {
             periodMetricsRef.current.set(periodCacheKey(selectedPeriodKey), {
               metrics: m,
@@ -1053,10 +1091,6 @@ export default function CRMPage() {
       });
       sharedEmpMetaRef.current = sharedMeta;
 
-      const plannedByClient: Record<string, number> = {};
-      const executedByClient: Record<string, number> = {};
-      const plannedRange: PlannedHoursRange = { start, end };
-
       const allTurnos = turnosRaw.filter((t) => {
         if (!scopeEmpresa) return true;
         const cid = String(t.clientId ?? '').trim();
@@ -1082,101 +1116,30 @@ export default function CRMPage() {
           ),
         );
       });
-      let trendSeries = trendSeriesFromBuckets(buckets);
-      setCrmTrendSeries(trendSeries);
-      bumpProgress(92, 'Armando resumen…');
-
-      const selectedByClientHours = aggregateCrmHoursByClient(
-        clientRefs,
-        slaDocsByClient,
-        allTurnos,
-        validEmp,
-        start ?? new Date(2000, 0, 1),
-        end ?? new Date(2099, 11, 31, 23, 59, 59, 999),
-        tenantClientIds,
-        turnosByClient,
-      );
-      clientRefs.forEach((clientRef) => {
-        plannedByClient[clientRef.id] = selectedByClientHours[clientRef.id]?.planned || 0;
-      });
-
-      allTurnos.forEach((t) => {
-        if (String(t.type || '').toUpperCase() === 'NOVEDAD') return;
-
-        const status = String(t.status || '').toLowerCase();
-        if (status.includes('cancel') || status.includes('delet')) return;
-
-        const cid = resolveClientIdForTurno(t, clientRefs);
-        if (!cid) return;
-        if (scopeEmpresa && !tenantClientIds.has(cid)) return;
-
-        const realStart = toDateSafe(t.realStartTime);
-        const realEnd = toDateSafe(t.realEndTime);
-
-        if (realStart && realEnd && (!start || (realStart >= start && realStart <= (end as Date)))) {
-          if (!validEmp[t.employeeId]) return;
-          const code = String((t.code || t.type || '')).trim().toUpperCase();
-          if (!isWorkingCode(code)) return;
-          let hrs = getDurationHours(realStart, realEnd);
-          if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
-          if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
-          executedByClient[cid] = (executedByClient[cid] || 0) + hrs;
-        }
-      });
-
-      const metrics: Record<string, any> = {};
-      let totalSold = 0;
-      let totalPlanned = 0;
-      let totalExecuted = 0;
-
+      const trendSeries = trendSeriesFromBuckets(buckets);
+      const metrics = mergeClientMetricsFromBuckets(buckets);
       clients.forEach((c) => {
-        const sla = Math.round(slaByClient[c.id] || 0);
-        const planned = Math.round(plannedByClient[c.id] || 0);
-        const real = Math.round(executedByClient[c.id] || 0);
+        const row = metrics[c.id] || { sla: 0, planned: 0, real: 0 };
         const contracted = Math.round(contractedByClient[c.id] || 0);
         const contractClosed = Math.round(closedByClient[c.id] || 0);
-        const burnRate = sla > 0 ? (real / sla) * 100 : 0;
-
-        totalSold += sla;
-        totalPlanned += planned;
-        totalExecuted += real;
-
         metrics[c.id] = {
-          sla,
-          planned,
-          real,
+          ...row,
           contracted,
           contractClosed,
-          contractMismatch: contractClosed > 0 && contractClosed !== sla,
-          burnRate,
-          hasActivity: sla > 0 || planned > 0 || real > 0,
+          contractMismatch: contractClosed > 0 && contractClosed !== row.sla,
         };
       });
-      if (rangeMode === 'month') {
-        storePeriodMetrics(
-          selectedPeriodKey,
-          Object.fromEntries(
-            clients.map((c) => [
-              c.id,
-              {
-                sla: slaByClient[c.id] || 0,
-                planned: plannedByClient[c.id] || 0,
-                real: executedByClient[c.id] || 0,
-              },
-            ]),
-          ),
-          contractedByClient,
-          closedByClient,
-        );
-      }
-      trendSeries = trendSeriesFromBuckets(buckets);
+      const { totalSold, totalPlanned, totalExecuted } = totalsFromClientMetrics(metrics);
+      const footprint = slaFootprintFromServices(slaRows, start, end);
+      bumpProgress(92, 'Armando resumen…');
       setCrmTrendSeries(trendSeries);
 
       setClientMetricsMap(metrics);
       setGlobalMetrics({ totalSold, totalPlanned, totalExecuted, criticalClients: [] });
+      setSlaFootprint(footprint);
       const now = new Date();
       setMetricsUpdatedAt(now);
-      metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now });
+      metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now, footprint });
       if (empresaId && slaRows.length && allTurnos.length) {
         void persistHoursBalancesFromTurnos({
           empresaId,
@@ -1192,6 +1155,7 @@ export default function CRMPage() {
         globalMetrics: { totalSold, totalPlanned, totalExecuted },
         clientMetricsMap: metrics,
         trendSeries,
+        slaFootprint: footprint,
       }).catch(() => { /* escritura no crítica */ });
     } catch (e) {
       console.error(e);
@@ -1562,6 +1526,7 @@ export default function CRMPage() {
     if (clients.length === 0) {
       setClientMetricsMap({});
       setCrmTrendSeries([]);
+      setSlaFootprint(null);
       setGlobalMetrics({ totalSold: 0, totalPlanned: 0, totalExecuted: 0, criticalClients: [] });
       return;
     }
@@ -1575,6 +1540,21 @@ export default function CRMPage() {
       list = list.filter((c) => isClientStatusActivo(c.status));
     } else if (clientListFilter === 'con_sla') {
       list = list.filter((c) => (clientMetricsMap[c.id]?.sla || 0) > 0);
+    } else if (clientListFilter === 'sla_sin_plan') {
+      list = list.filter((c) => (clientMetricsMap[c.id]?.sla || 0) > 0 && Math.round(clientMetricsMap[c.id]?.planned || 0) <= 0);
+    } else if (clientListFilter === 'hueco_plan') {
+      list = list.filter((c) => {
+        const sla = Math.round(clientMetricsMap[c.id]?.sla || 0);
+        const planned = Math.round(clientMetricsMap[c.id]?.planned || 0);
+        return sla > 0 && planned > 0 && planned < sla;
+      });
+    } else if (clientListFilter === 'sin_fichadas') {
+      list = list.filter((c) => {
+        const sla = Math.round(clientMetricsMap[c.id]?.sla || 0);
+        const planned = Math.round(clientMetricsMap[c.id]?.planned || 0);
+        const real = Math.round(clientMetricsMap[c.id]?.real || 0);
+        return (sla > 0 || planned > 0) && real <= 0;
+      });
     } else if (clientListFilter === 'burn_alerta') {
       list = list.filter((c) => (clientMetricsMap[c.id]?.burnRate || 0) >= 90);
     }
@@ -2216,6 +2196,11 @@ export default function CRMPage() {
     [clients, clientMetricsMap],
   );
 
+  const commercial = useMemo(
+    () => summarizeCrmCommercial(clients, clientMetricsMap, slaFootprint, globalMetrics.totalSold),
+    [clients, clientMetricsMap, slaFootprint, globalMetrics.totalSold],
+  );
+
   type ClientItem = { id: string } & Record<string, any>;
 
   return (
@@ -2232,7 +2217,13 @@ export default function CRMPage() {
           items={clientsForList as ClientItem[]}
           loading={loadingClients && clients.length === 0}
           emptyText={
-            clientListFilter === 'con_sla'
+            clientListFilter === 'sla_sin_plan'
+              ? 'Ningún cliente con SLA sin malla en este período.'
+              : clientListFilter === 'hueco_plan'
+                ? 'Ningún cliente con plan menor al SLA en este período.'
+                : clientListFilter === 'sin_fichadas'
+                  ? 'Ningún cliente sin fichadas (con SLA o plan) en este período.'
+              : clientListFilter === 'con_sla'
               ? 'Ningún cliente con horas SLA en este período. Elegí otro mes o usá filtro «Todos».'
               : 'Sin clientes para mostrar.'
           }
@@ -2267,6 +2258,7 @@ export default function CRMPage() {
               metricsUpdatedAt={metricsUpdatedAt}
               clientsCount={clients.length}
               conSlaCount={conSlaCount}
+              commercial={commercial}
               clientListFilter={clientListFilter}
               clientListSort={clientListSort}
               onClientListFilterChange={setClientListFilter}
