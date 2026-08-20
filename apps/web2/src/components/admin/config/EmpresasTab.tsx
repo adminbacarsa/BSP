@@ -1,5 +1,5 @@
 ﻿import React, { useState, useRef } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
@@ -170,6 +170,24 @@ export default function EmpresasTab() {
       toast.error('Error al guardar');
     } finally {
       setGuardandoAsistente(false);
+    }
+  };
+
+  const [guardandoCc, setGuardandoCc] = useState(false);
+  const ccActivo = empresa?.centroControlEnabled !== false;
+
+  const handleToggleCentroControl = async () => {
+    if (!empresa) return;
+    setGuardandoCc(true);
+    try {
+      await guardarEmpresa(empresa.id, { centroControlEnabled: !ccActivo } as any);
+      toast.success(ccActivo
+        ? 'Centro de Control desactivado: no genera ausencias automáticas ni alertas'
+        : 'Centro de Control activado');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setGuardandoCc(false);
     }
   };
 
@@ -509,6 +527,42 @@ export default function EmpresasTab() {
                 className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors"
               >
                 {guardandoEdit ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Guardar cambios
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {empresa && (
+        <div className={`rounded-2xl border p-6 shadow-sm ${ccActivo ? 'bg-white border-slate-200' : 'bg-slate-50 border-amber-200'}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3 min-w-0">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${ccActivo ? 'bg-cyan-500/15' : 'bg-slate-200'}`}>
+                <Radio size={18} className={ccActivo ? 'text-cyan-600' : 'text-slate-400'} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Centro de Control</h3>
+                <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                  Motor de Operaciones: ausencias automáticas (T+30), vacantes, retención y avisos de llegada tarde.
+                  Si no usás el módulo, desactivalo para que no genere novedades ni consuma lecturas cada 5 minutos.
+                </p>
+                <p className={`text-[10px] font-black uppercase tracking-wider mt-2 ${ccActivo ? 'text-emerald-600' : 'text-amber-700'}`}>
+                  {ccActivo ? 'Activo — genera alertas y cierra turnos' : 'Pausado — sin alertas automáticas'}
+                </p>
+              </div>
+            </div>
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={handleToggleCentroControl}
+                disabled={guardandoCc}
+                role="switch"
+                aria-checked={ccActivo}
+                aria-label="Activar o pausar Centro de Control"
+                className={`relative h-8 w-14 rounded-full shrink-0 transition-colors disabled:opacity-60 ${ccActivo ? 'bg-cyan-600' : 'bg-slate-300'}`}
+              >
+                <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${ccActivo ? 'translate-x-6' : 'translate-x-0'}`} />
+                {guardandoCc && <Loader2 size={12} className="absolute inset-0 m-auto animate-spin text-white" />}
               </button>
             )}
           </div>

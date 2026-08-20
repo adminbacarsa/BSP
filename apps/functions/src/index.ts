@@ -35,6 +35,7 @@ import { EmployeeService } from './data-management/employee.service';
 import { SystemUserService } from './data-management/system-user.service';
 import { AbsenceService } from './data-management/absence.service';
 import { migrateAbsenceCertificateToDrive } from './rrhh/migrateAbsenceCertificateToDrive';
+import { loadCentroControlState } from './ops/centroControlGuard';
 import { PatternService } from './scheduling/pattern.service';
 import { LaborAgreementService } from './data-management/labor-agreement.service';
 
@@ -1092,6 +1093,11 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
 
         const shiftData = shiftSnap.data() as any;
 
+        const cc = await loadCentroControlState(db);
+        if (!cc.isEnabled(shiftData.empresaId)) {
+            return { success: true, skipped: 'centro_control_off' };
+        }
+
         await shiftRef.update({
             lateArrivalAt: now,
             checkInStatus: 'LATE_PENDING',
@@ -1719,6 +1725,7 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
+export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
 
 // =========================================================
 // Payroll API (HTTP) — para sistemas de liquidación externos
@@ -1822,13 +1829,29 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
   const uid = context.auth.uid;
   const tokensSnap = await db.collection('device_tokens').where('uid', '==', uid).get();
   const tokens = tokensSnap.docs
-    .map(d => d.data()?.token)
+    .map((d) => d.data()?.token)
     .filter((t): t is string => typeof t === 'string' && t.length > 10);
-  if (!tokens.length) throw new functions.https.HttpsError('not-found', 'No device tokens found');
+  if (!tokens.length) {
+    throw new functions.https.HttpsError(
+      'not-found',
+      'No hay tokens FCM para esta cuenta. Abrí la app en el teléfono, aceptá notificaciones y reintentá.',
+    );
+  }
   const title: string = data?.title || 'CronoApp';
-  const body: string  = data?.body  || 'NotificaciÃ³n de prueba';
+  const body: string = data?.body || 'Notificación de prueba';
+  const notifType = String(data?.type || 'SYSTEM_TEST').trim() || 'SYSTEM_TEST';
   const message: admin.messaging.MulticastMessage = {
     notification: { title, body },
+    data: {
+      type: notifType,
+      link: '/empleado/dashboard',
+    },
+    android: {
+      priority: 'high',
+      notification: {
+        channelId: 'default',
+      },
+    },
     webpush: {
       notification: { title, body, icon: '/icons/icon-192x192.png', requireInteraction: false },
       fcmOptions: { link: '/empleado/dashboard' },
@@ -1851,6 +1874,11 @@ export const autoCompletarTurnos = functions
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
     const db = admin.firestore();
+    const cc = await loadCentroControlState(db);
+    if (!cc.anyEnabled) {
+      console.log('[autoCompletarTurnos] Centro de Control desactivado en todas las empresas');
+      return null;
+    }
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
 
@@ -1874,6 +1902,7 @@ export const autoCompletarTurnos = functions
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
+      if (!cc.isEnabled(shift.empresaId)) continue;
       if ((shift.status || '') === 'INTERRUPTED') continue;
 
       // Retenciones automáticas (autoRetentionAt existe): cerrar si llevan >2h sin cambio
@@ -2205,6 +2234,11 @@ export const detectarAusencias = functions
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
     const db = admin.firestore();
+    const cc = await loadCentroControlState(db);
+    if (!cc.anyEnabled) {
+      console.log('[detectarAusencias] Centro de Control desactivado en todas las empresas');
+      return null;
+    }
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
 
@@ -2221,6 +2255,7 @@ export const detectarAusencias = functions
 
     for (const earlyDoc of earlySnap.docs) {
       const s = earlyDoc.data();
+      if (!cc.isEnabled(s.empresaId)) continue;
       if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent) continue;
       if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE') continue;
       if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
@@ -2292,6 +2327,7 @@ export const detectarAusencias = functions
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
+      if (!cc.isEnabled(shift.empresaId)) continue;
       // Saltar si ya estÃ¡ resuelto o si es una vacante (vacantes tienen su propio flujo)
       if (shift.draft === true) continue;              // borrador no publicado
       if (SKIP_STATUSES.has(shift.status || '')) continue;
@@ -2566,6 +2602,11 @@ export const gestionarVacantes = functions
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
     const db = admin.firestore();
+    const cc = await loadCentroControlState(db);
+    if (!cc.anyEnabled) {
+      console.log('[gestionarVacantes] Centro de Control desactivado en todas las empresas');
+      return null;
+    }
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
 
@@ -2587,6 +2628,7 @@ export const gestionarVacantes = functions
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
 
+      if (!cc.isEnabled(shift.empresaId)) continue;
       // Solo vacantes sin asignación
       if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE') continue;
 
@@ -2744,6 +2786,7 @@ export const gestionarVacantes = functions
     let autoClosed = 0;
     for (const nDoc of staleProtos.docs) {
       const n = nDoc.data();
+      if (!cc.isEnabled(n.empresaId)) continue;
 
       // Verificar que el turno original no fue cubierto
       if (n.shiftId) {
