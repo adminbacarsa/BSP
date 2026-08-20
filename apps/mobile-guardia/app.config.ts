@@ -6,7 +6,7 @@ const projectId = '79b445af-b6a7-456b-b1be-87cf25a20bd5';
 const config: ExpoConfig = {
   name: 'COSP Guardia',
   slug: 'cosp-guardia',
-  version: '1.1.1',
+  version: '1.1.2',
   orientation: 'portrait',
   scheme: 'cosp-guardia',
   userInterfaceStyle: 'light',
