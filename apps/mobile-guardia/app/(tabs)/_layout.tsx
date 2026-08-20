@@ -1,18 +1,17 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
 import { useTheme } from '../../src/theme/ThemeContext';
 
+/**
+ * Tab bar estable (misma base que el APK 1.1.0).
+ * El padding extra de Android se suma sin height fijo ni APIs raras (evita crash OTA).
+ */
 export default function TabsLayout() {
   const { palette, isDark } = useTheme();
   const { user, portalFeatures } = usePortalAuth();
   const { unreadCount } = usePortalInbox(user);
-  const insets = useSafeAreaInsets();
-  // En Android con 3 botones el inset suele ser ~48; nunca bajar de 16
-  const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 12);
 
   return (
     <Tabs
@@ -23,16 +22,16 @@ export default function TabsLayout() {
         headerShadowVisible: !isDark,
         tabBarActiveTintColor: palette.primary,
         tabBarInactiveTintColor: palette.onSurfaceMuted,
-        tabBarHideOnKeyboard: true,
         tabBarStyle: {
           backgroundColor: palette.card,
           borderTopColor: palette.cardBorder,
-          borderTopWidth: 1,
-          paddingTop: 6,
-          paddingBottom: bottomPad,
-          minHeight: 52 + bottomPad,
+          // Sin height fijo: React Navigation + safe area nativo manejan la barra Android
+          paddingTop: 4,
+          paddingBottom: 10,
+          minHeight: 64,
         },
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700', marginBottom: 2 },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
+        tabBarSafeAreaInsets: { bottom: 16 },
       }}
     >
       <Tabs.Screen
@@ -48,7 +47,7 @@ export default function TabsLayout() {
         name="agenda"
         options={{
           title: 'Agenda',
-          href: portalFeatures.viewSchedule === false ? null : undefined,
+          href: portalFeatures.viewSchedule ? undefined : null,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar" size={size} color={color} />
           ),
