@@ -55,7 +55,7 @@ import {
   Loader2, BarChart3, Target, ChevronLeft, ChevronRight,
   Shield, AlertCircle, ArrowUp, ArrowDown, Minus, Calendar, ChevronDown,
   Filter, PieChart as PieIcon, BarChart2, Download, RefreshCw, Scale,
-  MapPin, Wallet, FileText, FileSpreadsheet, Building2, Layers, Briefcase,
+  MapPin, Wallet, FileText, FileSpreadsheet, Building2, Layers, Briefcase, ExternalLink,
 } from 'lucide-react';
 import { buildViabilityRangeReport } from '@/utils/viabilityAnalysis';
 import {
@@ -133,6 +133,22 @@ function art12EmployeeCoordsForDistance(
 }
 
 type ObjectiveGeoEntry = { lat: number; lng: number; name: string; clientName: string };
+
+/** Deep-link a Planificación con objetivo (y mes) preseleccionados. */
+function hrefPlanificacion(opts: {
+  objectiveId: string;
+  clientId?: string;
+  year?: number;
+  /** Mes 1–12 */
+  month?: number;
+}): string {
+  const q = new URLSearchParams();
+  q.set('objectiveId', opts.objectiveId);
+  if (opts.clientId) q.set('clientId', opts.clientId);
+  if (opts.year && opts.year > 2000) q.set('year', String(opts.year));
+  if (opts.month && opts.month >= 1 && opts.month <= 12) q.set('month', String(opts.month));
+  return `/admin/planificacion/?${q.toString()}`;
+}
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 type PeriodMode = 'day' | 'week' | 'month' | 'quarter' | 'semester' | 'year';
@@ -1861,28 +1877,59 @@ export default function AnalisisPage() {
   }, [projection, aplicarAusentismo, hsRealesGuardia, availableGuards]);
 
   // ── Chart data ───────────────────────────────────────────────────────────────
-  // Capacidad: donut coverage
+  // Capacidad: donut — misma fuente que Demanda (plan facturable + vacante vs SLA)
   const coverageDonut = useMemo(() => {
-    const prog  = actual.scheduledHours;
-    const vac   = actual.vacantHours;
-    const noSrv = Math.max(0, theoretical.totalHours - prog - vac);
+    const prog = coveragePlannedFromDemandaRow(demanda.totals);
+    const vac = Math.round(demanda.totals.vacantHours || 0);
+    const sla = Math.round(demanda.totals.slaHours || theoretical.totalHours || 0);
+    const noSrv = Math.max(0, sla - prog - vac);
     return [
-      { name: 'Programadas', value: prog,  color: '#4f46e5' },
-      { name: 'Vacantes',    value: vac,   color: '#f59e0b' },
-      { name: 'Sin cubrir',  value: noSrv, color: '#e2e8f0' },
-    ].filter(d => d.value > 0);
-  }, [actual.scheduledHours, actual.vacantHours, theoretical.totalHours]);
+      { name: 'Planificadas', value: prog, color: '#4f46e5' },
+      { name: 'Vacantes', value: vac, color: '#f59e0b' },
+      { name: 'Gap vs SLA', value: noSrv, color: '#e2e8f0' },
+    ].filter((d) => d.value > 0);
+  }, [demanda.totals, theoretical.totalHours]);
 
-  // Capacidad: grouped bars per service
-  const capacidadBars = useMemo(() => theoretical.active.map(srv => {
-    const obj = actual.byObjective.find(o => o.id === srv.objectiveId);
+  // Capacidad: barras por servicio SLA + demanda del objetivo
+  const capacidadBars = useMemo(() => theoretical.active.map((srv) => {
+    const canon = resolveCanonicalObjectiveId(srv, objectiveAliasesFromServices)
+      || String(srv.objectiveId ?? '').trim();
+    const row = demanda.rows.find((r) => r.id === canon || r.id === String(srv.objectiveId ?? ''));
     return {
-      name: shortName(srv.objectiveName||srv.clientName, 13),
-      'Teóricas':    srv.monthHours,
-      'Programadas': Math.round(obj?.scheduled??0),
-      'Vacantes':    Math.round(obj?.vacant??0),
+      name: shortName(srv.objectiveName || srv.clientName, 13),
+      Teóricas: srv.monthHours,
+      Programadas: row ? Math.round(coveragePlannedFromDemandaRow(row)) : 0,
+      Vacantes: Math.round(row?.vacantHours ?? 0),
     };
-  }), [theoretical.active, actual.byObjective]);
+  }), [theoretical.active, demanda.rows, objectiveAliasesFromServices]);
+
+  const clientIdByObjectiveId = useMemo(() => {
+    const m = new Map<string, string>();
+    vigenteServices.forEach((srv: any) => {
+      const canon = resolveCanonicalObjectiveId(srv, objectiveAliasesFromServices)
+        || String(srv.objectiveId ?? '').trim();
+      const cid = String(srv.clientId ?? '').trim();
+      if (canon && cid) {
+        m.set(canon, cid);
+        if (srv.objectiveId) m.set(String(srv.objectiveId), cid);
+      }
+    });
+    return m;
+  }, [vigenteServices, objectiveAliasesFromServices]);
+
+  const planifPeriod = useMemo(() => ({
+    year: periodRange.start.getFullYear(),
+    month: periodRange.start.getMonth() + 1,
+  }), [periodRange.start]);
+
+  const openPlanificacion = (objectiveId: string) => {
+    window.location.href = hrefPlanificacion({
+      objectiveId,
+      clientId: clientIdByObjectiveId.get(objectiveId),
+      year: planifPeriod.year,
+      month: planifPeriod.month,
+    });
+  };
 
   // Guardias: band donut
   const bandDonut = useMemo(() => [
@@ -1930,13 +1977,17 @@ export default function AnalisisPage() {
 
   const decisionAlerts = useMemo(() => {
     const items: Array<{ id: string; tone: 'risk' | 'warn' | 'info'; text: string; actionLabel: string; onAction: () => void }> = [];
+    const topVac = coberturaByObjective.find((o) => o.vacant > 0);
     if (demanda.totals.vacantHours > 8 || vacancyPct > 20) {
       items.push({
         id: 'vacante',
         tone: 'risk',
-        text: `${Math.round(demanda.totals.vacantHours).toLocaleString('es-AR')} hs vacantes (${vacancyPct}% vs SLA). Priorizá cobertura en Planificación.`,
-        actionLabel: 'Ver Cobertura',
-        onAction: () => setActiveTab('cobertura'),
+        text: `${Math.round(demanda.totals.vacantHours).toLocaleString('es-AR')} hs vacantes (${vacancyPct}% vs SLA)${topVac ? ` · peor: ${topVac.name}` : ''}. Priorizá cobertura en Planificación.`,
+        actionLabel: topVac ? 'Abrir Planificación' : 'Ver Cobertura',
+        onAction: () => {
+          if (topVac) openPlanificacion(topVac.id);
+          else setActiveTab('cobertura');
+        },
       });
     }
     if (demanda.totals.deltaSla < -8) {
@@ -1975,6 +2026,9 @@ export default function AnalisisPage() {
     informe.hsPlanificadas,
     loadTurnos,
     superavitGlobal,
+    coberturaByObjective,
+    clientIdByObjectiveId,
+    planifPeriod,
   ]);
 
   // Proyección: area chart (current + 3 months) — respeta el toggle de ausentismo
@@ -3416,7 +3470,10 @@ export default function AnalisisPage() {
                           </div>
                         </div>
                       ))}
-                      <p className="text-[9px] text-slate-400 pt-1">Hs vendidas (SLA): <strong className="text-slate-600 dark:text-slate-300">{theoretical.totalHours.toLocaleString('es-AR')} hs</strong> en {theoretical.active.length} servicios vigentes</p>
+                      <p className="text-[9px] text-slate-400 pt-1">
+                        Hs vendidas (SLA): <strong className="text-slate-600 dark:text-slate-300">{(demanda.totals.slaHours || theoretical.totalHours).toLocaleString('es-AR')} hs</strong>
+                        {' '}· misma fórmula que Demanda · {theoretical.active.length} servicios vigentes
+                      </p>
                     </div>
                   </div>
                 </SectionCard>
@@ -3649,18 +3706,20 @@ export default function AnalisisPage() {
                           <th className="p-4 text-center">Cobertura</th>
                           <th className="p-4 text-center text-amber-600">Hs vacantes</th>
                           <th className="p-4 text-center text-violet-600" title={`Horas sobrantes del último guardia (G. mín. × ${guardQuotaHs} − Hs teóricas). Es el margen disponible para cubrir francos, licencias y reemplazos sin contratar otro guardia.`}>Colchón hs</th>
+                          <th className="p-4 text-center w-20">Planif.</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                         {theoretical.active.map(srv => {
                           const srvCanon = resolveCanonicalObjectiveId(srv, objectiveAliasesFromServices)
                             || String(srv.objectiveId ?? '').trim();
-                          const obj = actual.byObjective.find(o =>
-                            o.id === srvCanon
-                            || o.id === srv.objectiveId
-                            || o.name === srv.objectiveName,
+                          const row = demanda.rows.find((r) =>
+                            r.id === srvCanon
+                            || r.id === String(srv.objectiveId ?? '')
+                            || r.name === srv.objectiveName,
                           );
-                          const scheduled = obj?.scheduled??0, vacant = obj?.vacant??0;
+                          const scheduled = row ? coveragePlannedFromDemandaRow(row) : 0;
+                          const vacant = Math.round(row?.vacantHours ?? 0);
                           const cov = srv.monthHours>0 ? Math.round(scheduled/srv.monthHours*100) : 0;
                           return (
                             <tr key={srv.id} className="hover:bg-indigo-50/20 dark:hover:bg-indigo-900/10">
@@ -3686,13 +3745,25 @@ export default function AnalisisPage() {
                               </td>
                               <td className="p-4 text-center">
                                 {!loadTurnos && (vacant>0
-                                  ? <span className="text-[10px] font-black text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded-full">{Math.round(vacant)} hs</span>
+                                  ? <span className="text-[10px] font-black text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded-full">{vacant} hs</span>
                                   : <span className="text-slate-300 dark:text-slate-600">—</span>)}
                               </td>
                               <td className="p-4 text-center">
                                 {srv.surplusHs > 0
                                   ? <span className="text-[10px] font-black text-violet-600 bg-violet-50 dark:bg-violet-900/20 px-2 py-0.5 rounded-full">{srv.surplusHs} hs</span>
                                   : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                              </td>
+                              <td className="p-4 text-center">
+                                {srvCanon ? (
+                                  <button
+                                    type="button"
+                                    title="Abrir en Planificación"
+                                    onClick={() => openPlanificacion(srvCanon)}
+                                    className="inline-flex items-center justify-center w-8 h-8 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 hover:bg-indigo-100 active:scale-95 transition-all"
+                                  >
+                                    <ExternalLink size={13}/>
+                                  </button>
+                                ) : null}
                               </td>
                             </tr>
                           );
@@ -3701,12 +3772,13 @@ export default function AnalisisPage() {
                       <tfoot className="bg-slate-900 text-white font-black text-xs uppercase">
                         <tr>
                           <td className="p-4 text-right" colSpan={2}>Total</td>
-                          <td className="p-4 text-center text-emerald-400">{theoretical.totalHours.toLocaleString('es-AR')}</td>
+                          <td className="p-4 text-center text-emerald-400">{(demanda.totals.slaHours || theoretical.totalHours).toLocaleString('es-AR')}</td>
                           <td className="p-4 text-center">{theoretical.totalGuards}</td>
-                          <td className="p-4 text-center">{actual.scheduledHours.toLocaleString('es-AR')}</td>
+                          <td className="p-4 text-center">{Math.round(coveragePlannedFromDemandaRow(demanda.totals)).toLocaleString('es-AR')}</td>
                           <td className="p-4 text-center">{coveragePct}%</td>
-                          <td className="p-4 text-center text-amber-400">{actual.vacantHours.toLocaleString('es-AR')}</td>
+                          <td className="p-4 text-center text-amber-400">{Math.round(demanda.totals.vacantHours).toLocaleString('es-AR')}</td>
                           <td className="p-4 text-center text-violet-300">{theoretical.totalSurplus.toLocaleString('es-AR')} hs</td>
+                          <td className="p-4"/>
                         </tr>
                       </tfoot>
                     </table>
@@ -4006,6 +4078,7 @@ export default function AnalisisPage() {
                           <th className="p-4 text-center">Total hs</th>
                           <th className="p-4 text-center">% Vacancia</th>
                           <th className="p-4 text-center">Δ SLA</th>
+                          <th className="p-4 text-center w-20">Planif.</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -4049,10 +4122,20 @@ export default function AnalisisPage() {
                                 }`}>
                                   {obj.deltaSla > 0 ? '+' : ''}{obj.deltaSla}
                                 </td>
+                                <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    title="Abrir en Planificación"
+                                    onClick={() => openPlanificacion(obj.id)}
+                                    className="inline-flex items-center justify-center w-8 h-8 rounded-xl border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 hover:bg-indigo-100 active:scale-95 transition-all"
+                                  >
+                                    <ExternalLink size={13}/>
+                                  </button>
+                                </td>
                               </tr>
                               {isExpanded && (
                                 <tr>
-                                  <td colSpan={7} className="p-0">
+                                  <td colSpan={8} className="p-0">
                                     <div className="bg-indigo-50/60 dark:bg-indigo-900/10 border-b-2 border-indigo-200 dark:border-indigo-700/50 px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-5">
                                       {!det ? (
                                         <p className="text-[11px] text-slate-500 col-span-2">
