@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import {
-  Bar,
-  BarChart,
+  Area,
+  AreaChart,
   CartesianGrid,
   Legend,
   ResponsiveContainer,
@@ -119,6 +119,17 @@ export default function CrmDashboardSummary({
     () => trendSeries.some((p) => p.sla > 0 || p.planificado > 0 || p.ejecutado > 0),
     [trendSeries],
   );
+  const chartData = useMemo(() => {
+    if (trendSeries.length !== 1) return trendSeries;
+    const p = trendSeries[0];
+    const last = new Date(rangeYear, rangeMonth + 1, 0).getDate();
+    const short = MONTHS_ES[rangeMonth].slice(0, 3);
+    return [
+      { ...p, label: `1 ${short}` },
+      { ...p, label: `${last} ${short}` },
+    ];
+  }, [trendSeries, rangeMonth, rangeYear]);
+  const showDots = chartData.length <= 6;
   const selectCls = 'text-[9px] font-bold uppercase border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900';
 
   return (
@@ -286,7 +297,21 @@ export default function CrmDashboardSummary({
                 </div>
               )}
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trendSeries} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="28%" barGap={3}>
+                <AreaChart data={chartData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="crmAreaSla" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#4f46e5" stopOpacity={0.38} />
+                      <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.04} />
+                    </linearGradient>
+                    <linearGradient id="crmAreaPlan" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#64748b" stopOpacity={0.32} />
+                      <stop offset="100%" stopColor="#64748b" stopOpacity={0.03} />
+                    </linearGradient>
+                    <linearGradient id="crmAreaReal" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#059669" stopOpacity={0.42} />
+                      <stop offset="100%" stopColor="#059669" stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
                   <XAxis
                     dataKey="label"
@@ -297,10 +322,10 @@ export default function CrmDashboardSummary({
                   <YAxis tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} width={44} />
                   <Tooltip content={<ChartTooltip />} />
                   <Legend wrapperStyle={{ fontSize: 9, fontWeight: 700, paddingTop: 0 }} iconType="circle" iconSize={7} />
-                  <Bar dataKey="sla" name="SLA vendidas" fill="#4f46e5" radius={[5, 5, 0, 0]} maxBarSize={42} />
-                  <Bar dataKey="planificado" name="Planificadas" fill="#64748b" radius={[5, 5, 0, 0]} maxBarSize={42} />
-                  <Bar dataKey="ejecutado" name="Realizadas" fill="#059669" radius={[5, 5, 0, 0]} maxBarSize={42} />
-                </BarChart>
+                  <Area type="monotone" dataKey="sla" name="SLA vendidas" stroke="#4f46e5" fill="url(#crmAreaSla)" strokeWidth={2} dot={showDots ? { r: 3, fill: '#4f46e5', strokeWidth: 0 } : false} activeDot={{ r: 4 }} />
+                  <Area type="monotone" dataKey="planificado" name="Planificadas" stroke="#64748b" fill="url(#crmAreaPlan)" strokeWidth={1.8} strokeDasharray="5 3" dot={showDots ? { r: 3, fill: '#64748b', strokeWidth: 0 } : false} activeDot={{ r: 4 }} />
+                  <Area type="monotone" dataKey="ejecutado" name="Realizadas" stroke="#059669" fill="url(#crmAreaReal)" strokeWidth={2} dot={showDots ? { r: 3, fill: '#059669', strokeWidth: 0 } : false} activeDot={{ r: 4 }} />
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           )}
