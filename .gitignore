@@ -28,6 +28,8 @@ backups/
 *.mov
 *.pdf
 *.png
+!apps/mobile-guardia/assets/**
+!apps/mobile-guardia/assets/**/*.png
 *.jpg
 *.jpeg
 *.gif
