@@ -4,7 +4,7 @@ import {
     CheckCircle, Clock,
     UserCheck, UserX, ClipboardCheck,
 } from 'lucide-react';
-import { collection, addDoc, getDocs, query, where, serverTimestamp, onSnapshot, updateDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, getDoc, query, where, serverTimestamp, onSnapshot, updateDoc, doc, Timestamp } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import { empresaCollectionQuery } from '@/lib/multiempresa';
@@ -167,22 +167,63 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
         if (!selectedSrv?.fecha) return;
         setLoadingAvail(true);
         const fecha = selectedSrv.fecha;
-        getDocs(
-            query(
-                collection(db, 'turnos'),
+        const [y, mo, d2] = fecha.split('-').map(Number);
+        const dayStart = Timestamp.fromDate(new Date(y, mo - 1, d2, 0, 0, 0));
+        const dayEnd   = Timestamp.fromDate(new Date(y, mo - 1, d2, 23, 59, 59));
+
+        Promise.all([
+            getDocs(query(collection(db, 'turnos'),
+                where('empresaId', '==', empresaId),
+                where('startTime', '>=', dayStart),
+                where('startTime', '<=', dayEnd),
+            )),
+            getDocs(query(collection(db, 'turnos'),
                 where('empresaId', '==', empresaId),
                 where('startTime', '>=', `${fecha}T00:00:00`),
                 where('startTime', '<=', `${fecha}T23:59:59`),
-            )
-        ).then(snap => {
+            )),
+        ]).then(async ([snapTs, snapStr]) => {
+            const seen = new Set<string>();
+            const allDocs = [...snapTs.docs, ...snapStr.docs].filter(d3 => {
+                if (seen.has(d3.id)) return false;
+                seen.add(d3.id);
+                return true;
+            });
+
+            // Recolectar eventoIds de turnos EV para verificar cuáles siguen existiendo
+            const evEventoIds = new Set<string>();
+            allDocs.forEach(d3 => {
+                const t = d3.data();
+                if (!t.draft && t.employeeId && String(t.code || '').toUpperCase() === 'EV' && t.eventoId && t.eventoId !== evento.id) {
+                    evEventoIds.add(t.eventoId);
+                }
+            });
+
+            // Verificar existencia de cada evento referenciado
+            const existingEvIds = new Set<string>([evento.id]);
+            await Promise.all([...evEventoIds].map(async eid => {
+                try {
+                    const snap2 = await getDoc(doc(db, 'eventos', eid));
+                    if (snap2.exists()) existingEvIds.add(eid);
+                } catch { /* continuar */ }
+            }));
+
             const map: Record<string, string> = {};
-            snap.docs.forEach(d => {
-                const t = d.data();
-                if (t.employeeId && !t.draft) map[t.employeeId] = t.code || 'ocupado';
+            allDocs.forEach(d3 => {
+                const t = d3.data();
+                if (!t.employeeId || t.draft) return;
+                const code = String(t.code || '').toUpperCase();
+                if (code === 'EV' && t.eventoId && !existingEvIds.has(t.eventoId)) {
+                    // Turno EV huérfano (evento eliminado) → usar replacedCode o libre
+                    const restored = t.replacedCode ? String(t.replacedCode).toUpperCase() : 'libre';
+                    map[t.employeeId] = restored;
+                } else {
+                    map[t.employeeId] = t.code || 'ocupado';
+                }
             });
             setAvailMap(map);
         }).catch(console.error).finally(() => setLoadingAvail(false));
-    }, [selectedSrvId, empresaId, selectedSrv?.fecha]);
+    }, [selectedSrvId, empresaId, selectedSrv?.fecha, evento.id]);
 
     // Convocar guardias seleccionados
     async function handleConvocar() {
