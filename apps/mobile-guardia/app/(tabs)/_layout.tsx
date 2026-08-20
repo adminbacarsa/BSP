@@ -1,16 +1,23 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
 import { useTheme } from '../../src/theme/ThemeContext';
+
+const TAB_BAR_CONTENT_HEIGHT = 52;
 
 export default function TabsLayout() {
   const { palette, isDark } = useTheme();
   const { user, portalFeatures } = usePortalAuth();
   const { unreadCount } = usePortalInbox(user);
+  const insets = useSafeAreaInsets();
+  /** Espacio real de la barra de gestos / 3 botones de Android */
+  const bottomInset = Math.max(insets.bottom, 12);
 
   return (
     <Tabs
+      safeAreaInsets={{ bottom: 0, top: 0, left: 0, right: 0 }}
       screenOptions={{
         headerStyle: { backgroundColor: palette.header },
         headerTintColor: palette.headerTint,
@@ -21,11 +28,12 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: palette.card,
           borderTopColor: palette.cardBorder,
-          height: 60,
-          paddingBottom: 6,
-          paddingTop: 4,
+          height: TAB_BAR_CONTENT_HEIGHT + bottomInset,
+          paddingBottom: bottomInset,
+          paddingTop: 6,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700' },
+        tabBarItemStyle: { paddingVertical: 2 },
       }}
     >
       <Tabs.Screen
