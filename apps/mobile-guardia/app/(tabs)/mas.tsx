@@ -55,12 +55,12 @@ function MasScreenContent() {
 
         <CommandCard title="Actualización de la app">
           <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
-            Sin desinstalar: descarga mejoras de pantallas y lógica (OTA). Si cambia algo nativo, hace
-            falta una APK nueva.
+            Descarga mejoras sin desinstalar. Después de descargar, cerrá la app por completo
+            (recientes) y volvé a abrirla. No reinicia sola (evita pantalla gris en Android).
           </Text>
           <Text style={[styles.versionLine, { color: palette.onSurface }]}>{getAppVersionLabel()}</Text>
           <CommandButton
-            label={updateBusy ? 'Buscando…' : 'Buscar actualización'}
+            label={updateBusy ? 'Descargando…' : 'Descargar actualización'}
             variant="primary"
             loading={updateBusy}
             onPress={onCheckUpdate}
