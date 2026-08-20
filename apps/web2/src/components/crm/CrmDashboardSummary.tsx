@@ -1,10 +1,9 @@
 import React, { useMemo } from 'react';
 import {
-  Area,
+  Bar,
+  BarChart,
   CartesianGrid,
-  ComposedChart,
   Legend,
-  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -120,40 +119,36 @@ export default function CrmDashboardSummary({
     () => trendSeries.some((p) => p.sla > 0 || p.planificado > 0 || p.ejecutado > 0),
     [trendSeries],
   );
-  const chartTickEvery = Math.max(1, Math.ceil(trendSeries.length / 10));
-  const chartShowDots = trendSeries.length <= 20;
   const selectCls = 'text-[9px] font-bold uppercase border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900';
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-lg overflow-hidden dark:border-slate-700 dark:bg-slate-800">
-      <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-800/80">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest text-slate-500">
-            <BarChart3 size={12} className="text-indigo-600" aria-hidden />
-            Centro de mando
-            {calculatingMetrics && (
-              <span className="inline-flex items-center gap-1 text-indigo-600">
-                <Loader2 className="animate-spin" size={12} aria-hidden />
-                <span className="normal-case tracking-normal font-semibold text-slate-500 truncate">
-                  {loadProgress?.label || 'Cargando…'}
-                </span>
-                <span className="tabular-nums font-black">
-                  {Math.max(0, Math.min(100, Math.round(loadProgress?.pct ?? 0)))}%
-                </span>
+      <div className="px-3 py-1.5 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-800/80">
+        <div className="min-w-0 flex items-center gap-2 flex-wrap">
+          <BarChart3 size={12} className="text-indigo-600 shrink-0" aria-hidden />
+          <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500">Centro de mando</span>
+          <h2 className="text-sm font-black text-slate-900 dark:text-white leading-none">{rangeLabel}</h2>
+          {calculatingMetrics && (
+            <span className="inline-flex items-center gap-1 text-indigo-600 text-[9px] font-semibold">
+              <Loader2 className="animate-spin" size={12} aria-hidden />
+              <span className="normal-case tracking-normal text-slate-500 truncate">
+                {loadProgress?.label || 'Cargando…'}
               </span>
-            )}
-            {metricsUpdatedAt && !calculatingMetrics && (
-              <span className="normal-case tracking-normal font-medium text-slate-400">
-                {metricsUpdatedAt.toLocaleString('es-AR', {
-                  day: '2-digit',
-                  month: '2-digit',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
+              <span className="tabular-nums font-black">
+                {Math.max(0, Math.min(100, Math.round(loadProgress?.pct ?? 0)))}%
               </span>
-            )}
-          </div>
-          <h2 className="text-sm font-black text-slate-900 dark:text-white leading-tight">{rangeLabel}</h2>
+            </span>
+          )}
+          {metricsUpdatedAt && !calculatingMetrics && (
+            <span className="text-[9px] font-medium text-slate-400">
+              {metricsUpdatedAt.toLocaleString('es-AR', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
           <select aria-label="Período del resumen" className={selectCls} value={rangeMode} onChange={(e) => onRangeModeChange(e.target.value as CrmRangeMode)}>
@@ -194,11 +189,11 @@ export default function CrmDashboardSummary({
         </div>
       </div>
 
-      <div className="px-4 py-3 space-y-2.5">
+      <div className="px-3 py-2 space-y-2">
         <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5">
-          <KpiCompact icon={ShieldCheck} label="SLA vendidas" value={totalSold} unit="hs" tone="text-indigo-600" />
-          <KpiCompact icon={Calendar} label="Planificadas" value={totalPlanned} unit="hs" tone="text-slate-800 dark:text-white" />
-          <KpiCompact icon={CheckCircle} label="Realizadas" value={totalExecuted} unit="hs" tone="text-emerald-600" />
+          <KpiCompact featured icon={ShieldCheck} label="SLA vendidas" value={totalSold} unit="hs" tone="text-indigo-600" />
+          <KpiCompact featured icon={Calendar} label="Planificadas" value={totalPlanned} unit="hs" tone="text-slate-800 dark:text-white" />
+          <KpiCompact featured icon={CheckCircle} label="Realizadas" value={totalExecuted} unit="hs" tone="text-emerald-600" />
           <KpiCompact icon={TrendingUp} label="Burn" value={burn} unit="%" tone={burnTone} />
           <KpiCompact label="Plan ÷ SLA" value={planVsSla} unit="%" tone="text-slate-700 dark:text-slate-200" />
           <KpiCompact label="Real. ÷ plan" value={execVsPlan} unit="%" tone="text-slate-700 dark:text-slate-200" />
@@ -279,11 +274,11 @@ export default function CrmDashboardSummary({
             {trendTitle}
           </p>
           {!hasChartData ? (
-            <div className="flex items-center justify-center h-[150px] text-xs font-semibold text-slate-400">
+            <div className="flex items-center justify-center h-[168px] text-xs font-semibold text-slate-400">
               Sin horas en el rango del gráfico
             </div>
           ) : (
-            <div className="relative h-[150px] w-full">
+            <div className="relative h-[168px] w-full">
               {isStale && (
                 <div className="absolute top-1 right-1 z-10 flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50/90 px-2 py-0.5 shadow-sm dark:border-amber-700/50 dark:bg-amber-900/40">
                   <Loader2 size={9} className="animate-spin text-amber-600" />
@@ -291,29 +286,21 @@ export default function CrmDashboardSummary({
                 </div>
               )}
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={trendSeries} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="crmSlaGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.28} />
-                      <stop offset="100%" stopColor="#6366f1" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
+                <BarChart data={trendSeries} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="28%" barGap={3}>
                   <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
                   <XAxis
                     dataKey="label"
-                    interval={chartTickEvery - 1}
                     tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }}
                     axisLine={false}
                     tickLine={false}
-                    minTickGap={8}
                   />
                   <YAxis tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} width={44} />
                   <Tooltip content={<ChartTooltip />} />
                   <Legend wrapperStyle={{ fontSize: 9, fontWeight: 700, paddingTop: 0 }} iconType="circle" iconSize={7} />
-                  <Area type="monotone" dataKey="sla" name="SLA vendidas" stroke="#4f46e5" fill="url(#crmSlaGrad)" strokeWidth={2} dot={chartShowDots ? { r: 2, fill: '#4f46e5' } : false} />
-                  <Line type="monotone" dataKey="planificado" name="Planificadas" stroke="#64748b" strokeWidth={1.8} strokeDasharray="5 3" dot={chartShowDots ? { r: 2, fill: '#64748b' } : false} />
-                  <Line type="monotone" dataKey="ejecutado" name="Realizadas" stroke="#059669" strokeWidth={1.8} dot={chartShowDots ? { r: 2, fill: '#059669' } : false} />
-                </ComposedChart>
+                  <Bar dataKey="sla" name="SLA vendidas" fill="#4f46e5" radius={[5, 5, 0, 0]} maxBarSize={42} />
+                  <Bar dataKey="planificado" name="Planificadas" fill="#64748b" radius={[5, 5, 0, 0]} maxBarSize={42} />
+                  <Bar dataKey="ejecutado" name="Realizadas" fill="#059669" radius={[5, 5, 0, 0]} maxBarSize={42} />
+                </BarChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -364,22 +351,24 @@ function KpiCompact({
   value,
   unit,
   tone,
+  featured,
 }: {
   icon?: React.ElementType;
   label: string;
   value: number;
   unit: string;
   tone: string;
+  featured?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-slate-100 bg-white px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
-      <div className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-wide text-slate-500">
-        {Icon ? <Icon size={10} className="text-indigo-500 shrink-0" aria-hidden /> : null}
+    <div className={`rounded-lg border border-slate-100 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800/80 ${featured ? 'px-2.5 py-2' : 'px-2 py-1.5'}`}>
+      <div className={`flex items-center gap-1 font-bold uppercase tracking-wide text-slate-500 ${featured ? 'text-[9px]' : 'text-[8px]'}`}>
+        {Icon ? <Icon size={featured ? 12 : 10} className="text-indigo-500 shrink-0" aria-hidden /> : null}
         <span className="truncate">{label}</span>
       </div>
-      <p className={`text-sm font-black tabular-nums leading-tight ${tone}`}>
+      <p className={`font-black tabular-nums leading-tight ${featured ? 'text-[17px]' : 'text-sm'} ${tone}`}>
         {value.toLocaleString('es-AR')}
-        <span className="text-[9px] font-bold text-slate-400 ml-0.5">{unit}</span>
+        <span className={`${featured ? 'text-[10px]' : 'text-[9px]'} font-bold text-slate-400 ml-0.5`}>{unit}</span>
       </p>
     </div>
   );
