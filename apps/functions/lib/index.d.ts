@@ -28,6 +28,7 @@ export declare const registrarFichadaManual: functions.HttpsFunction & functions
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const notificarLlegadaTarde: functions.HttpsFunction & functions.Runnable<any>;
 export { getSwapPeople, getSwapCandidates, createSwapRequest, respondSwapRequest, confirmSwapRequest, cancelSwapRequest, approveSwapRequest, rejectSwapRequestSupervisor, } from './swap/swapPortal';
+export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateDevice: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateAndSetPassword: functions.HttpsFunction & functions.Runnable<any>;
@@ -87,6 +88,11 @@ export declare const updateBackupSchedule: import("firebase-functions/v2/https")
 export declare const lookupClientByCuit: functions.HttpsFunction & functions.Runnable<any>;
 export declare const saveEmpresaAfipCredentials: functions.HttpsFunction & functions.Runnable<any>;
 export declare const getEmpresaAfipConfig: functions.HttpsFunction & functions.Runnable<any>;
+export declare const getMobileAppConfig: functions.HttpsFunction & functions.Runnable<any>;
+export declare const saveMobileAppConfig: functions.HttpsFunction & functions.Runnable<any>;
+export declare const syncMobileAppEasEnv: functions.HttpsFunction & functions.Runnable<any>;
+export declare const triggerMobileAppPreviewBuild: functions.HttpsFunction & functions.Runnable<any>;
+export declare const refreshMobileAppBuildStatus: functions.HttpsFunction & functions.Runnable<any>;
 export declare const scheduledAutoInjustificada: functions.CloudFunction<unknown>;
 export declare const onAusenciaCertificado: functions.CloudFunction<functions.Change<functions.firestore.QueryDocumentSnapshot>>;
 export declare const cleanupSlaDevueltas: functions.HttpsFunction;

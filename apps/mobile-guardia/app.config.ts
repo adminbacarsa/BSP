@@ -69,6 +69,9 @@ const config: ExpoConfig = {
     typedRoutes: true,
   },
   extra: {
+    eas: {
+      projectId: '79b445af-b6a7-456b-b1be-87cf25a20bd5',
+    },
     useEmulator: process.env.EXPO_PUBLIC_USE_EMULATOR === 'true',
     emulatorHost: process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST || '127.0.0.1',
     firebase: {

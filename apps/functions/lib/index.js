@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = void 0;
+exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -35,6 +35,7 @@ const runEquilibrarCrono_1 = require("./scheduling/runEquilibrarCrono");
 const planificacionEstadoKeys_1 = require("./assistant/planificacionEstadoKeys");
 const lookupClientByCuitHandler_1 = require("./afip/lookupClientByCuitHandler");
 const empresaAfipCredentialsHandler_1 = require("./afip/empresaAfipCredentialsHandler");
+const mobileAppHandlers_1 = require("./mobileApp/mobileAppHandlers");
 if (!admin.apps.length) {
     admin.initializeApp();
 }
@@ -913,6 +914,8 @@ Object.defineProperty(exports, "confirmSwapRequest", { enumerable: true, get: fu
 Object.defineProperty(exports, "cancelSwapRequest", { enumerable: true, get: function () { return swapPortal_1.cancelSwapRequest; } });
 Object.defineProperty(exports, "approveSwapRequest", { enumerable: true, get: function () { return swapPortal_1.approveSwapRequest; } });
 Object.defineProperty(exports, "rejectSwapRequestSupervisor", { enumerable: true, get: function () { return swapPortal_1.rejectSwapRequestSupervisor; } });
+var eventoPortalCallables_1 = require("./eventos/eventoPortalCallables");
+Object.defineProperty(exports, "respondEventoConvocatoria", { enumerable: true, get: function () { return eventoPortalCallables_1.respondEventoConvocatoria; } });
 const nodemailer = require("nodemailer");
 function buildPortalEmailHtml(activationLink, empresaNombre) {
     const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
@@ -2772,6 +2775,15 @@ exports.lookupClientByCuit = functionsEmulator
     : functions.runWith(lookupClientByCuitRuntime).https.onCall(lookupClientByCuitHandler_1.lookupClientByCuitHandler);
 exports.saveEmpresaAfipCredentials = functions.https.onCall(empresaAfipCredentialsHandler_1.saveEmpresaAfipCredentialsHandler);
 exports.getEmpresaAfipConfig = functions.https.onCall(empresaAfipCredentialsHandler_1.getEmpresaAfipConfigHandler);
+exports.getMobileAppConfig = functions.https.onCall(mobileAppHandlers_1.getMobileAppConfigHandler);
+exports.saveMobileAppConfig = functions.https.onCall(mobileAppHandlers_1.saveMobileAppConfigHandler);
+exports.syncMobileAppEasEnv = functions.https.onCall(mobileAppHandlers_1.syncMobileAppEasEnvHandler);
+exports.triggerMobileAppPreviewBuild = functionsEmulator
+    ? functions.https.onCall(mobileAppHandlers_1.triggerMobileAppPreviewBuildHandler)
+    : functions
+        .runWith({ secrets: ['GITHUB_DISPATCH_TOKEN'], timeoutSeconds: 60, memory: '256MB' })
+        .https.onCall(mobileAppHandlers_1.triggerMobileAppPreviewBuildHandler);
+exports.refreshMobileAppBuildStatus = functions.https.onCall(mobileAppHandlers_1.refreshMobileAppBuildStatusHandler);
 exports.scheduledAutoInjustificada = functions
     .region('us-central1')
     .runWith({ timeoutSeconds: 300, memory: '256MB' })
