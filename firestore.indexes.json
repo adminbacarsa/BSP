@@ -143,6 +143,14 @@
       "collectionGroup": "turnos",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "eventoId",  "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "turnos",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "clientId",  "order": "ASCENDING" },
         { "fieldPath": "startTime", "order": "ASCENDING" }
       ]
