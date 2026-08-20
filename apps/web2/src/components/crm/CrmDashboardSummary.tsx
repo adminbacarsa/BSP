@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { BarChart3, Building2, Calendar, CheckCircle, Loader2, MapPin, ShieldCheck, TrendingUp, AlertTriangle, Briefcase } from 'lucide-react';
+import { BarChart3, Building2, Calendar, CheckCircle, Loader2, MapPin, ShieldCheck, TrendingUp, Briefcase } from 'lucide-react';
 import { crmCalendarQuarter, crmCalendarSemester, type CrmRangeMode } from '@/lib/crm/crmDashboardBuckets';
 import type { CrmCommercialStats } from '@/lib/crm/crmCommercialStats';
 
@@ -120,95 +120,65 @@ export default function CrmDashboardSummary({
     () => trendSeries.some((p) => p.sla > 0 || p.planificado > 0 || p.ejecutado > 0),
     [trendSeries],
   );
+  const chartTickEvery = Math.max(1, Math.ceil(trendSeries.length / 10));
+  const chartShowDots = trendSeries.length <= 20;
+  const selectCls = 'text-[9px] font-bold uppercase border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900';
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-lg overflow-hidden dark:border-slate-700 dark:bg-slate-800">
-      <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-800/80">
-        <div>
-          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-            <BarChart3 size={14} className="text-indigo-600" aria-hidden />
-            Centro de mando comercial
+      <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-800/80">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest text-slate-500">
+            <BarChart3 size={12} className="text-indigo-600" aria-hidden />
+            Centro de mando
             {calculatingMetrics && (
-              <span className="inline-flex items-center gap-1.5 text-indigo-600">
-                <Loader2 className="animate-spin" size={14} aria-hidden />
-                <span className="normal-case tracking-normal font-semibold text-slate-500">
-                  {loadProgress?.label || 'Cargando información…'}
+              <span className="inline-flex items-center gap-1 text-indigo-600">
+                <Loader2 className="animate-spin" size={12} aria-hidden />
+                <span className="normal-case tracking-normal font-semibold text-slate-500 truncate">
+                  {loadProgress?.label || 'Cargando…'}
                 </span>
                 <span className="tabular-nums font-black">
                   {Math.max(0, Math.min(100, Math.round(loadProgress?.pct ?? 0)))}%
                 </span>
               </span>
             )}
+            {metricsUpdatedAt && !calculatingMetrics && (
+              <span className="normal-case tracking-normal font-medium text-slate-400">
+                {metricsUpdatedAt.toLocaleString('es-AR', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </span>
+            )}
           </div>
-          <h2 className="text-lg font-black text-slate-900 dark:text-white mt-0.5">{rangeLabel}</h2>
-          {calculatingMetrics && (
-            <div className="mt-2 h-1.5 w-48 max-w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden shadow-inner">
-              <div
-                className="h-full rounded-full bg-indigo-600 transition-all duration-300"
-                style={{ width: `${Math.max(4, Math.min(100, loadProgress?.pct ?? 8))}%` }}
-              />
-            </div>
-          )}
-          {metricsUpdatedAt && (
-            <p className="text-[10px] font-medium text-slate-400 mt-0.5">
-              Actualizado{' '}
-              {metricsUpdatedAt.toLocaleString('es-AR', {
-                day: '2-digit',
-                month: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </p>
-          )}
+          <h2 className="text-sm font-black text-slate-900 dark:text-white leading-tight">{rangeLabel}</h2>
         </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
-          <select
-            aria-label="Período del resumen"
-            className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900"
-            value={rangeMode}
-            onChange={(e) => onRangeModeChange(e.target.value as CrmRangeMode)}
-          >
-            <option value="month">Mes calendario</option>
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          <select aria-label="Período del resumen" className={selectCls} value={rangeMode} onChange={(e) => onRangeModeChange(e.target.value as CrmRangeMode)}>
+            <option value="month">Mes</option>
             <option value="quarter">Trimestre</option>
             <option value="semester">Semestre</option>
             <option value="year">Año</option>
             <option value="all">Histórico</option>
           </select>
           {rangeMode !== 'all' && (
-            <select
-              aria-label="Año del período"
-              className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900"
-              value={rangeYear}
-              onChange={(e) => onRangeYearChange(Number(e.target.value))}
-            >
+            <select aria-label="Año del período" className={selectCls} value={rangeYear} onChange={(e) => onRangeYearChange(Number(e.target.value))}>
               {[rangeYear - 2, rangeYear - 1, rangeYear, rangeYear + 1].map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
+                <option key={y} value={y}>{y}</option>
               ))}
             </select>
           )}
           {rangeMode === 'month' && (
-            <select
-              aria-label="Mes del período"
-              className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900"
-              value={rangeMonth}
-              onChange={(e) => onRangeMonthChange(Number(e.target.value))}
-            >
+            <select aria-label="Mes del período" className={selectCls} value={rangeMonth} onChange={(e) => onRangeMonthChange(Number(e.target.value))}>
               {MONTHS_ES.map((m, idx) => (
-                <option key={m} value={idx}>
-                  {m}
-                </option>
+                <option key={m} value={idx}>{m}</option>
               ))}
             </select>
           )}
           {rangeMode === 'quarter' && (
-            <select
-              aria-label="Trimestre del período"
-              className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900"
-              value={crmCalendarQuarter(rangeMonth)}
-              onChange={(e) => onRangeMonthChange(Number(e.target.value) * 3)}
-            >
+            <select aria-label="Trimestre del período" className={selectCls} value={crmCalendarQuarter(rangeMonth)} onChange={(e) => onRangeMonthChange(Number(e.target.value) * 3)}>
               <option value={0}>T1 Ene–Mar</option>
               <option value={1}>T2 Abr–Jun</option>
               <option value={2}>T3 Jul–Sep</option>
@@ -216,12 +186,7 @@ export default function CrmDashboardSummary({
             </select>
           )}
           {rangeMode === 'semester' && (
-            <select
-              aria-label="Semestre del período"
-              className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400/40 dark:border-slate-600 dark:bg-slate-900"
-              value={crmCalendarSemester(rangeMonth)}
-              onChange={(e) => onRangeMonthChange(Number(e.target.value) * 6)}
-            >
+            <select aria-label="Semestre del período" className={selectCls} value={crmCalendarSemester(rangeMonth)} onChange={(e) => onRangeMonthChange(Number(e.target.value) * 6)}>
               <option value={0}>S1 Ene–Jun</option>
               <option value={1}>S2 Jul–Dic</option>
             </select>
@@ -229,8 +194,8 @@ export default function CrmDashboardSummary({
         </div>
       </div>
 
-      <div className="p-6 space-y-5">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="px-4 py-3 space-y-2.5">
+        <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5">
           <KpiCompact icon={ShieldCheck} label="SLA vendidas" value={totalSold} unit="hs" tone="text-indigo-600" />
           <KpiCompact icon={Calendar} label="Planificadas" value={totalPlanned} unit="hs" tone="text-slate-800 dark:text-white" />
           <KpiCompact icon={CheckCircle} label="Realizadas" value={totalExecuted} unit="hs" tone="text-emerald-600" />
@@ -239,172 +204,115 @@ export default function CrmDashboardSummary({
           <KpiCompact label="Real. ÷ plan" value={execVsPlan} unit="%" tone="text-slate-700 dark:text-slate-200" />
         </div>
 
-        <div className="grid sm:grid-cols-3 gap-2 text-center">
-          <MiniStat
-            label="Δ plan − SLA"
-            value={`${deltaPlanSla >= 0 ? '+' : ''}${deltaPlanSla.toLocaleString('es-AR')} hs`}
-          />
-          <MiniStat
-            label="Δ real. − SLA"
-            value={`${gapEjecSla >= 0 ? '+' : ''}${gapEjecSla.toLocaleString('es-AR')} hs`}
-          />
+        <div className="grid grid-cols-3 gap-1.5 text-center">
+          <MiniStat label="Δ plan − SLA" value={`${deltaPlanSla >= 0 ? '+' : ''}${deltaPlanSla.toLocaleString('es-AR')} hs`} />
+          <MiniStat label="Δ real. − SLA" value={`${gapEjecSla >= 0 ? '+' : ''}${gapEjecSla.toLocaleString('es-AR')} hs`} />
           <MiniStat label="Hs SLA / cliente" value={commercial.avgSlaPerClient > 0 ? `${commercial.avgSlaPerClient.toLocaleString('es-AR')} hs` : '—'} />
         </div>
 
-        <div className="grid lg:grid-cols-2 gap-3">
-          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/30">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
-              <Briefcase size={12} className="text-indigo-500" aria-hidden />
-              Cartera
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <DetailStat
-                icon={Building2}
-                label="Clientes activos"
-                value={`${commercial.clientsActive} / ${commercial.clientsTotal}`}
-                hint="padrón"
-                active={clientListFilter === 'activos'}
-                onClick={() => onClientListFilterChange(clientListFilter === 'activos' ? 'all' : 'activos')}
-              />
-              <DetailStat
-                icon={MapPin}
-                label="Sedes"
-                value={
-                  commercial.slaObjectives != null
-                    ? `${commercial.slaObjectives} / ${commercial.catalogObjectives}`
-                    : String(commercial.catalogObjectives)
-                }
-                hint={commercial.slaObjectives != null ? 'con SLA / padrón' : 'en padrón'}
-              />
-              <DetailStat
-                icon={ShieldCheck}
-                label="Con contrato SLA"
-                value={`${commercial.clientsWithSla} / ${commercial.clientsTotal}`}
-                hint="en el período"
-                active={clientListFilter === 'con_sla'}
-                onClick={() => onClientListFilterChange(clientListFilter === 'con_sla' ? 'all' : 'con_sla')}
-              />
-              <DetailStat
-                icon={Briefcase}
-                label="Puestos vendidos"
-                value={commercial.slaPositions != null ? String(commercial.slaPositions) : '—'}
-                hint="pax en SLA vigente"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/30">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
-              <AlertTriangle size={12} className="text-amber-500" aria-hidden />
-              Atención comercial
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <AlertChip
-                count={commercial.clientsSlaNoPlan}
-                label="SLA sin plan"
-                hint="vendido, sin malla"
-                tone="amber"
-                active={clientListFilter === 'sla_sin_plan'}
-                onClick={() => onClientListFilterChange(clientListFilter === 'sla_sin_plan' ? 'all' : 'sla_sin_plan')}
-              />
-              <AlertChip
-                count={commercial.clientsUnderplanned}
-                label="Hueco de cobertura"
-                hint="plan menor al SLA"
-                tone="rose"
-                active={clientListFilter === 'hueco_plan'}
-                onClick={() => onClientListFilterChange(clientListFilter === 'hueco_plan' ? 'all' : 'hueco_plan')}
-              />
-              <AlertChip
-                count={commercial.clientsNoExecution}
-                label="Sin fichadas"
-                hint="con SLA o plan"
-                tone="slate"
-                active={clientListFilter === 'sin_fichadas'}
-                onClick={() => onClientListFilterChange(clientListFilter === 'sin_fichadas' ? 'all' : 'sin_fichadas')}
-              />
-              <AlertChip
-                count={commercial.clientsBurnAlert}
-                label="Burn ≥ 90%"
-                hint="consumo vs vendido"
-                tone="rose"
-                active={clientListFilter === 'burn_alerta'}
-                onClick={() => onClientListFilterChange(clientListFilter === 'burn_alerta' ? 'all' : 'burn_alerta')}
-              />
-            </div>
-          </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-1.5">
+          <DetailStat
+            icon={Building2}
+            label="Activos"
+            value={`${commercial.clientsActive}/${commercial.clientsTotal}`}
+            hint="clientes"
+            active={clientListFilter === 'activos'}
+            onClick={() => onClientListFilterChange(clientListFilter === 'activos' ? 'all' : 'activos')}
+          />
+          <DetailStat
+            icon={MapPin}
+            label="Sedes"
+            value={commercial.slaObjectives != null ? `${commercial.slaObjectives}/${commercial.catalogObjectives}` : String(commercial.catalogObjectives)}
+            hint={commercial.slaObjectives != null ? 'SLA / padrón' : 'padrón'}
+          />
+          <DetailStat
+            icon={ShieldCheck}
+            label="Con SLA"
+            value={`${commercial.clientsWithSla}/${commercial.clientsTotal}`}
+            hint="contrato"
+            active={clientListFilter === 'con_sla'}
+            onClick={() => onClientListFilterChange(clientListFilter === 'con_sla' ? 'all' : 'con_sla')}
+          />
+          <DetailStat
+            icon={Briefcase}
+            label="Puestos"
+            value={commercial.slaPositions != null ? String(commercial.slaPositions) : '—'}
+            hint="pax vendidos"
+          />
+          <AlertChip
+            count={commercial.clientsSlaNoPlan}
+            label="Sin plan"
+            hint="SLA sin malla"
+            tone="amber"
+            active={clientListFilter === 'sla_sin_plan'}
+            onClick={() => onClientListFilterChange(clientListFilter === 'sla_sin_plan' ? 'all' : 'sla_sin_plan')}
+          />
+          <AlertChip
+            count={commercial.clientsUnderplanned}
+            label="Hueco"
+            hint="plan < SLA"
+            tone="rose"
+            active={clientListFilter === 'hueco_plan'}
+            onClick={() => onClientListFilterChange(clientListFilter === 'hueco_plan' ? 'all' : 'hueco_plan')}
+          />
+          <AlertChip
+            count={commercial.clientsNoExecution}
+            label="Sin fichadas"
+            hint="con SLA o plan"
+            tone="slate"
+            active={clientListFilter === 'sin_fichadas'}
+            onClick={() => onClientListFilterChange(clientListFilter === 'sin_fichadas' ? 'all' : 'sin_fichadas')}
+          />
+          <AlertChip
+            count={commercial.clientsBurnAlert}
+            label="Burn ≥ 90%"
+            hint="consumo"
+            tone="rose"
+            active={clientListFilter === 'burn_alerta'}
+            onClick={() => onClientListFilterChange(clientListFilter === 'burn_alerta' ? 'all' : 'burn_alerta')}
+          />
         </div>
 
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-4 dark:border-slate-700 dark:bg-slate-900/30">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
-            <TrendingUp size={12} className="text-indigo-500" />
+        <div className="rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/30">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+            <TrendingUp size={11} className="text-indigo-500" />
             {trendTitle}
           </p>
           {!hasChartData ? (
-            <div className="flex items-center justify-center h-[300px] text-sm font-semibold text-slate-400">
+            <div className="flex items-center justify-center h-[150px] text-xs font-semibold text-slate-400">
               Sin horas en el rango del gráfico
             </div>
           ) : (
-            <div className="relative h-[300px] w-full">
+            <div className="relative h-[150px] w-full">
               {isStale && (
-                <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50/90 px-2.5 py-1 shadow-sm backdrop-blur-sm dark:border-amber-700/50 dark:bg-amber-900/40">
-                  <Loader2 size={10} className="animate-spin text-amber-600 dark:text-amber-400" />
-                  <span className="text-[9px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">actualizando…</span>
+                <div className="absolute top-1 right-1 z-10 flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50/90 px-2 py-0.5 shadow-sm dark:border-amber-700/50 dark:bg-amber-900/40">
+                  <Loader2 size={9} className="animate-spin text-amber-600" />
+                  <span className="text-[8px] font-bold uppercase text-amber-700 dark:text-amber-300">actualizando…</span>
                 </div>
               )}
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={trendSeries} margin={{ top: 8, right: 12, left: -8, bottom: 4 }}>
+                <ComposedChart data={trendSeries} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
                   <defs>
                     <linearGradient id="crmSlaGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.35} />
+                      <stop offset="0%" stopColor="#6366f1" stopOpacity={0.28} />
                       <stop offset="100%" stopColor="#6366f1" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#e2e8f0" />
                   <XAxis
                     dataKey="label"
-                    tick={{ fontSize: 10, fill: '#64748b', fontWeight: 600 }}
+                    interval={chartTickEvery - 1}
+                    tick={{ fontSize: 9, fill: '#64748b', fontWeight: 600 }}
                     axisLine={false}
                     tickLine={false}
+                    minTickGap={8}
                   />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: '#64748b' }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={48}
-                  />
+                  <YAxis tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} width={44} />
                   <Tooltip content={<ChartTooltip />} />
-                  <Legend
-                    wrapperStyle={{ fontSize: 10, fontWeight: 700, paddingTop: 8 }}
-                    iconType="circle"
-                    iconSize={8}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="sla"
-                    name="SLA (vendidas)"
-                    stroke="#4f46e5"
-                    fill="url(#crmSlaGrad)"
-                    strokeWidth={2.5}
-                    dot={{ r: 3, fill: '#4f46e5' }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="planificado"
-                    name="Planificadas"
-                    stroke="#64748b"
-                    strokeWidth={2}
-                    strokeDasharray="6 4"
-                    dot={{ r: 3, fill: '#64748b' }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="ejecutado"
-                    name="Realizadas"
-                    stroke="#059669"
-                    strokeWidth={2}
-                    dot={{ r: 3, fill: '#059669' }}
-                  />
+                  <Legend wrapperStyle={{ fontSize: 9, fontWeight: 700, paddingTop: 0 }} iconType="circle" iconSize={7} />
+                  <Area type="monotone" dataKey="sla" name="SLA vendidas" stroke="#4f46e5" fill="url(#crmSlaGrad)" strokeWidth={2} dot={chartShowDots ? { r: 2, fill: '#4f46e5' } : false} />
+                  <Line type="monotone" dataKey="planificado" name="Planificadas" stroke="#64748b" strokeWidth={1.8} strokeDasharray="5 3" dot={chartShowDots ? { r: 2, fill: '#64748b' } : false} />
+                  <Line type="monotone" dataKey="ejecutado" name="Realizadas" stroke="#059669" strokeWidth={1.8} dot={chartShowDots ? { r: 2, fill: '#059669' } : false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -413,16 +321,16 @@ export default function CrmDashboardSummary({
       </div>
 
       {!calculatingMetrics && clientsCount > 0 && totalSold === 0 && totalPlanned === 0 && totalExecuted === 0 && (
-        <p className="px-6 py-3 text-xs font-semibold text-amber-800 bg-amber-50 border-t border-amber-100 dark:bg-amber-900/20 dark:border-amber-900/40 dark:text-amber-200">
+        <p className="px-4 py-1.5 text-[11px] font-semibold text-amber-800 bg-amber-50 border-t border-amber-100 dark:bg-amber-900/20 dark:border-amber-900/40 dark:text-amber-200">
           Sin horas en {rangeLabel}. Probá otro mes calendario (mismo criterio que pre-factura).
         </p>
       )}
 
-      <div className="px-6 py-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-3 bg-slate-50/50 dark:bg-slate-900/30">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Listado</span>
+      <div className="px-4 py-1.5 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-2 bg-slate-50/50 dark:bg-slate-900/30">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">Listado</span>
         <select
           aria-label="Filtrar clientes"
-          className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 dark:border-slate-600 dark:bg-slate-900"
+          className="text-[9px] font-bold uppercase border border-slate-200 rounded-lg px-2 py-1 dark:border-slate-600 dark:bg-slate-900"
           value={clientListFilter}
           onChange={(e) => onClientListFilterChange(e.target.value as ClientListFilter)}
         >
@@ -436,7 +344,7 @@ export default function CrmDashboardSummary({
         </select>
         <select
           aria-label="Ordenar clientes"
-          className="text-[10px] font-bold uppercase border border-slate-200 rounded-xl px-3 py-2 dark:border-slate-600 dark:bg-slate-900"
+          className="text-[9px] font-bold uppercase border border-slate-200 rounded-lg px-2 py-1 dark:border-slate-600 dark:bg-slate-900"
           value={clientListSort}
           onChange={(e) => onClientListSortChange(e.target.value as ClientListSort)}
         >
@@ -464,14 +372,14 @@ function KpiCompact({
   tone: string;
 }) {
   return (
-    <div className="rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
-      <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
-        {Icon ? <Icon size={12} className="text-indigo-500 shrink-0" aria-hidden /> : null}
+    <div className="rounded-lg border border-slate-100 bg-white px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-800/80">
+      <div className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-wide text-slate-500">
+        {Icon ? <Icon size={10} className="text-indigo-500 shrink-0" aria-hidden /> : null}
         <span className="truncate">{label}</span>
       </div>
-      <p className={`text-xl font-black tabular-nums mt-1 ${tone}`}>
+      <p className={`text-sm font-black tabular-nums leading-tight ${tone}`}>
         {value.toLocaleString('es-AR')}
-        <span className="text-[10px] font-bold text-slate-400 ml-0.5">{unit}</span>
+        <span className="text-[9px] font-bold text-slate-400 ml-0.5">{unit}</span>
       </p>
     </div>
   );
@@ -479,9 +387,9 @@ function KpiCompact({
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-100 bg-white px-2 py-2 dark:border-slate-700 dark:bg-slate-800/50">
-      <p className="text-[8px] font-bold uppercase text-slate-400">{label}</p>
-      <p className="text-xs font-black text-slate-800 dark:text-white tabular-nums">{value}</p>
+    <div className="rounded-lg border border-slate-100 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-800/50">
+      <p className="text-[7px] font-bold uppercase text-slate-400">{label}</p>
+      <p className="text-[11px] font-black text-slate-800 dark:text-white tabular-nums">{value}</p>
     </div>
   );
 }
@@ -501,19 +409,19 @@ function DetailStat({
   active?: boolean;
   onClick?: () => void;
 }) {
-  const cls = `rounded-xl border px-3 py-2.5 text-left shadow-sm transition-colors ${
+  const cls = `rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors ${
     active
       ? 'border-indigo-300 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/40'
       : 'border-slate-100 bg-white dark:border-slate-700 dark:bg-slate-800/80'
   } ${onClick ? 'hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer' : ''}`;
   const inner = (
     <>
-      <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
-        <Icon size={12} className="text-indigo-500 shrink-0" aria-hidden />
+      <div className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-wide text-slate-500">
+        <Icon size={10} className="text-indigo-500 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
       </div>
-      <p className="text-lg font-black tabular-nums text-slate-900 dark:text-white mt-1">{value}</p>
-      <p className="text-[9px] font-medium text-slate-400">{hint}</p>
+      <p className="text-sm font-black tabular-nums text-slate-900 dark:text-white leading-tight">{value}</p>
+      <p className="text-[8px] font-medium text-slate-400">{hint}</p>
     </>
   );
   if (!onClick) return <div className={cls}>{inner}</div>;
@@ -552,11 +460,11 @@ function AlertChip({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-xl border px-3 py-2.5 text-left shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${border}`}
+      className={`rounded-lg border px-2 py-1.5 text-left shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors ${border}`}
     >
-      <p className={`text-lg font-black tabular-nums ${tones[tone]}`}>{count}</p>
-      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">{label}</p>
-      <p className="text-[9px] font-medium text-slate-400">{hint}</p>
+      <p className={`text-sm font-black tabular-nums leading-tight ${tones[tone]}`}>{count}</p>
+      <p className="text-[8px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">{label}</p>
+      <p className="text-[8px] font-medium text-slate-400">{hint}</p>
     </button>
   );
 }
