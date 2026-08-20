@@ -182,9 +182,13 @@ export default function PreviewPickerScreen() {
           <ActivityIndicator color={palette.primary} style={styles.loader} />
         ) : (
           <FlatList
-            data={filtered.slice(0, 80)}
+            style={styles.listFlex}
+            data={filtered}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+            initialNumToRender={24}
+            windowSize={10}
             ListEmptyComponent={
               <Text style={[styles.empty, { color: palette.onSurfaceMuted }]}>
                 {employees.length === 0 ? 'Cargando empleados…' : `Sin resultados para "${search}"`}
