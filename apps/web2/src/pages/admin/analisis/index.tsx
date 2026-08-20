@@ -17,7 +17,10 @@ import {
   isVacantShift,
   shiftStartMs,
 } from '@/lib/analisis/analisisQueries';
-import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
+import {
+  buildDemandaByObjective,
+  coveragePlannedFromDemandaRow,
+} from '@/lib/analisis/analisisDemanda';
 import { demandaFromHoursBalances, financieraFromHoursBalances } from '@/lib/analisis/analisisFromHoursBalance';
 import {
   buildAnalisisFinanciera,
@@ -1785,8 +1788,35 @@ export default function AnalisisPage() {
   const guardiasNoDispLicencia = disponibilidadGuardias.licenciaCount;
 
   const gap                = theoretical.totalGuards - availableGuards;
-  const coveragePct        = theoretical.totalHours > 0 ? Math.round(actual.scheduledHours / theoretical.totalHours * 100) : 0;
-  const vacancyPct         = theoretical.totalHours > 0 ? Math.round(actual.vacantHours    / theoretical.totalHours * 100) : 0;
+  /** Misma fuente que Demanda / Informe (no el motor `actual` de drill-down). */
+  const coveragePct = demanda.totals.slaHours > 0
+    ? Math.round(coveragePlannedFromDemandaRow(demanda.totals) / demanda.totals.slaHours * 100)
+    : 0;
+  const vacancyPct = demanda.totals.slaHours > 0
+    ? Math.round(demanda.totals.vacantHours / demanda.totals.slaHours * 100)
+    : 0;
+  const coberturaByObjective = useMemo(
+    () =>
+      demanda.rows
+        .map((r) => {
+          const planned = coveragePlannedFromDemandaRow(r);
+          const vacant = Math.round(r.vacantHours || 0);
+          const total = planned + vacant;
+          return {
+            id: r.id,
+            name: r.name,
+            client: r.client,
+            scheduled: planned,
+            vacant,
+            total,
+            vacPct: total > 0 ? Math.round((vacant / total) * 100) : 0,
+            deltaSla: Math.round(r.deltaSla || 0),
+          };
+        })
+        .filter((r) => r.total > 0 || r.scheduled > 0 || r.vacant > 0)
+        .sort((a, b) => b.vacPct - a.vacPct || b.total - a.total),
+    [demanda.rows],
+  );
 
   // ── Ajuste por ausentismo aplicado a "Guardias necesarios" y "Brecha" ────────
   const guardiasAjustados = hsRealesGuardia > 0 ? Math.ceil(theoretical.totalHours / hsRealesGuardia) : 0;
@@ -1877,19 +1907,75 @@ export default function AnalisisPage() {
   })), [actual.byGuard]);
   const guardMaxH = useMemo(() => Math.max(220, ...actual.byGuard.map(g=>g.hours))+20, [actual.byGuard]);
 
-  // Cobertura: treemap
-  const treemapData = useMemo(() => actual.byObjective.map(obj => ({
-    name:   obj.name,
-    size:   Math.round(obj.scheduled+obj.vacant),
-    vacPct: (obj.scheduled+obj.vacant)>0 ? Math.round(obj.vacant/(obj.scheduled+obj.vacant)*100) : 0,
-  })).filter(d => d.size > 0), [actual.byObjective]);
+  // Cobertura: treemap / barras — misma fuente que Demanda (plan + vacante)
+  const treemapData = useMemo(
+    () =>
+      coberturaByObjective.map((obj) => ({
+        name: obj.name,
+        size: obj.total,
+        vacPct: obj.vacPct,
+      })).filter((d) => d.size > 0),
+    [coberturaByObjective],
+  );
 
-  // Cobertura: stacked bars
-  const coberturaBars = useMemo(() => actual.byObjective.slice(0,20).map(obj => ({
-    name:         shortName(obj.name, 13),
-    'Programadas': Math.round(obj.scheduled),
-    'Vacantes':    Math.round(obj.vacant),
-  })), [actual.byObjective]);
+  const coberturaBars = useMemo(
+    () =>
+      coberturaByObjective.slice(0, 20).map((obj) => ({
+        name: shortName(obj.name, 13),
+        Programadas: obj.scheduled,
+        Vacantes: obj.vacant,
+      })),
+    [coberturaByObjective],
+  );
+
+  const decisionAlerts = useMemo(() => {
+    const items: Array<{ id: string; tone: 'risk' | 'warn' | 'info'; text: string; actionLabel: string; onAction: () => void }> = [];
+    if (demanda.totals.vacantHours > 8 || vacancyPct > 20) {
+      items.push({
+        id: 'vacante',
+        tone: 'risk',
+        text: `${Math.round(demanda.totals.vacantHours).toLocaleString('es-AR')} hs vacantes (${vacancyPct}% vs SLA). Priorizá cobertura en Planificación.`,
+        actionLabel: 'Ver Cobertura',
+        onAction: () => setActiveTab('cobertura'),
+      });
+    }
+    if (demanda.totals.deltaSla < -8) {
+      items.push({
+        id: 'delta-sla',
+        tone: 'warn',
+        text: `Resultante ${demanda.totals.deltaSla.toLocaleString('es-AR')} hs vs SLA. Revisá Demanda por objetivo.`,
+        actionLabel: 'Ver Demanda',
+        onAction: () => setActiveTab('demanda'),
+      });
+    }
+    if (informe.hsRealizadas === 0 && informe.hsPlanificadas > 0 && !loadTurnos) {
+      items.push({
+        id: 'sin-fichada',
+        tone: 'info',
+        text: `Hay ${informe.hsPlanificadas.toLocaleString('es-AR')} hs planificadas y 0 fichadas. Operaciones debe marcar presencia.`,
+        actionLabel: 'Ir a Operaciones',
+        onAction: () => { window.location.href = '/admin/operaciones/'; },
+      });
+    }
+    if (superavitGlobal < 0) {
+      items.push({
+        id: 'viabilidad',
+        tone: 'warn',
+        text: `Brecha de capacidad: faltan ${Math.abs(Math.round(superavitGlobal)).toLocaleString('es-AR')} hs de plantel vs SLA.`,
+        actionLabel: 'Ver Viabilidad',
+        onAction: () => setActiveTab('viabilidad'),
+      });
+    }
+    return items.slice(0, 3);
+  }, [
+    demanda.totals.vacantHours,
+    demanda.totals.deltaSla,
+    vacancyPct,
+    informe.hsRealizadas,
+    informe.hsPlanificadas,
+    loadTurnos,
+    superavitGlobal,
+  ]);
 
   // Proyección: area chart (current + 3 months) — respeta el toggle de ausentismo
   const areaData = useMemo(() => [
@@ -2211,45 +2297,93 @@ export default function AnalisisPage() {
             </div>
           )}
 
-          {/* ── Lectura real del período ─────────────────────────────── */}
+          {/* ── Lectura ejecutiva del período (una sola fila; detalle en solapas) ── */}
           {theoretical.totalHours > 0 && (
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm p-4">
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">
-                {periodRange.labelShort} · {universo.clientes} clientes · {universo.objetivos} objetivos · {universo.puestos} pax en puesto · {universo.slotsPeriodo.toLocaleString('es-AR')} slots SLA · pico {universo.picoSimultaneo} · plantel {universo.plantel}
-              </p>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="text-center">
-                  <p className="text-xl font-black text-indigo-600">{informe.hsVendidas.toLocaleString('es-AR')}</p>
-                  <p className="text-[9px] font-black uppercase text-slate-400">Vendidas</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xl font-black text-sky-600">{informe.hsPlanificadas.toLocaleString('es-AR')}</p>
-                  <p className="text-[9px] font-black uppercase text-slate-400">Planificadas</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xl font-black text-emerald-600">{informe.hsRealizadas.toLocaleString('es-AR')}</p>
-                  <p className="text-[9px] font-black uppercase text-slate-400">Realizadas</p>
-                </div>
-                <div className="text-center">
-                  <p className={`text-xl font-black ${informe.hsVacante > 0 ? 'text-amber-600' : 'text-slate-700 dark:text-white'}`}>{informe.hsVacante.toLocaleString('es-AR')}</p>
-                  <p className="text-[9px] font-black uppercase text-slate-400">Vacante</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xl font-black text-orange-600">{informe.desvioExtras.toLocaleString('es-AR')}</p>
-                  <p className="text-[9px] font-black uppercase text-slate-400">Extras / FT / ops</p>
-                </div>
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 shrink-0">
+                  {periodRange.labelShort}
+                </span>
+                <span className="font-black text-indigo-600 tabular-nums">
+                  {informe.hsVendidas.toLocaleString('es-AR')} <span className="font-bold text-slate-400 uppercase text-[9px]">SLA</span>
+                </span>
+                <span className="text-slate-300 dark:text-slate-600">·</span>
+                <span className="font-black text-sky-600 tabular-nums">
+                  {informe.hsPlanificadas.toLocaleString('es-AR')} <span className="font-bold text-slate-400 uppercase text-[9px]">Plan</span>
+                </span>
+                <span className="text-slate-300 dark:text-slate-600">·</span>
+                <span className="font-black text-emerald-600 tabular-nums">
+                  {informe.hsRealizadas.toLocaleString('es-AR')} <span className="font-bold text-slate-400 uppercase text-[9px]">Real</span>
+                </span>
+                <span className="text-slate-300 dark:text-slate-600">·</span>
+                <span className={`font-black tabular-nums ${informe.hsVacante > 0 ? 'text-amber-600' : 'text-slate-600 dark:text-slate-300'}`}>
+                  {informe.hsVacante.toLocaleString('es-AR')} <span className="font-bold text-slate-400 uppercase text-[9px]">Vac</span>
+                </span>
+                <span className="text-slate-300 dark:text-slate-600">·</span>
+                <span className="font-black text-orange-600 tabular-nums">
+                  {informe.desvioExtras.toLocaleString('es-AR')} <span className="font-bold text-slate-400 uppercase text-[9px]">Ext/FT</span>
+                </span>
+                <span className="text-slate-300 dark:text-slate-600">·</span>
+                <span className={`font-black tabular-nums ${demanda.totals.deltaSla < -8 ? 'text-rose-600' : demanda.totals.deltaSla > 8 ? 'text-emerald-600' : 'text-slate-600'}`}>
+                  {demanda.totals.deltaSla > 0 ? '+' : ''}{demanda.totals.deltaSla.toLocaleString('es-AR')} <span className="font-bold text-slate-400 uppercase text-[9px]">Δ SLA</span>
+                </span>
+                <span className="ml-auto text-[9px] font-bold text-slate-400 hidden sm:inline">
+                  {universo.clientes} cli · {universo.objetivos} obj · pico {universo.picoSimultaneo} · plantel {universo.plantel}
+                </span>
               </div>
               {!loadTurnos && informe.hsVendidas > 0 && turnosLive.length === 0 && (
-                <p className="mt-3 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
+                <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
                   Hay {informe.hsVendidas.toLocaleString('es-AR')} hs SLA y <strong>0 turnos</strong> en {periodRange.labelShort}.
-                  Si el mes está planificado, recargá el header. Si no hay malla en Firestore para este período, la financiera no puede calcular consumo.
+                  Si el mes está planificado, recargá el header.
                 </p>
               )}
               {!loadTurnos && turnosLive.length > 0 && informe.hsPlanificadas === 0 && (
-                <p className="mt-3 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
+                <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
                   {turnos.length.toLocaleString('es-AR')} turnos en el período pero 0 hs de malla (códigos no computables o exclusiones SLA).
                 </p>
               )}
+            </div>
+          )}
+
+          {decisionAlerts.length > 0 && !loadTurnos && (
+            <div className="space-y-2">
+              {decisionAlerts.map((a) => (
+                <div
+                  key={a.id}
+                  className={`rounded-2xl border px-4 py-3 shadow-sm flex flex-col sm:flex-row sm:items-center gap-3 ${
+                    a.tone === 'risk'
+                      ? 'border-rose-200 dark:border-rose-800 bg-rose-50/80 dark:bg-rose-950/30'
+                      : a.tone === 'warn'
+                        ? 'border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30'
+                        : 'border-sky-200 dark:border-sky-800 bg-sky-50/80 dark:bg-sky-950/30'
+                  }`}
+                >
+                  <AlertTriangle
+                    size={16}
+                    className={`shrink-0 ${
+                      a.tone === 'risk' ? 'text-rose-600' : a.tone === 'warn' ? 'text-amber-600' : 'text-sky-600'
+                    }`}
+                  />
+                  <p className={`flex-1 text-[12px] font-medium leading-snug ${
+                    a.tone === 'risk' ? 'text-rose-800 dark:text-rose-200' : a.tone === 'warn' ? 'text-amber-800 dark:text-amber-200' : 'text-sky-800 dark:text-sky-200'
+                  }`}>
+                    {a.text}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={a.onAction}
+                    className={`shrink-0 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wide border shadow-sm active:scale-95 transition-all ${
+                      a.tone === 'risk'
+                        ? 'bg-white border-rose-200 text-rose-700 hover:bg-rose-100'
+                        : a.tone === 'warn'
+                          ? 'bg-white border-amber-200 text-amber-700 hover:bg-amber-100'
+                          : 'bg-white border-sky-200 text-sky-700 hover:bg-sky-100'
+                    }`}
+                  >
+                    {a.actionLabel}
+                  </button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -3852,7 +3986,10 @@ export default function AnalisisPage() {
 
               {/* Tabla */}
               <SectionCard title={`Cobertura por objetivo · ${periodRange.labelShort}`} icon={Target} loading={loadTurnos}>
-                {!loadTurnos && actual.byObjective.length === 0 ? (
+                <p className="px-5 pt-3 text-[10px] text-slate-400">
+                  Plan y vacante = misma fórmula que Demanda. Expandí una fila para ver códigos y guardias (detalle de malla).
+                </p>
+                {!loadTurnos && coberturaByObjective.length === 0 ? (
                   <div className="py-16 text-center text-slate-400">
                     <Target size={36} className="mx-auto mb-2 opacity-20"/>
                     <p className="text-sm font-bold">Sin datos de cobertura en este período</p>
@@ -3864,18 +4001,17 @@ export default function AnalisisPage() {
                         <tr>
                           <th className="p-4">Objetivo</th>
                           <th className="p-4">Cliente</th>
-                          <th className="p-4 text-center text-indigo-600">Hs prog.</th>
+                          <th className="p-4 text-center text-indigo-600">Hs plan</th>
                           <th className="p-4 text-center text-amber-600">Hs vacantes</th>
                           <th className="p-4 text-center">Total hs</th>
                           <th className="p-4 text-center">% Vacancia</th>
+                          <th className="p-4 text-center">Δ SLA</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {actual.byObjective.map(obj => {
-                          const total      = obj.scheduled+obj.vacant;
-                          const vacPct     = total>0 ? Math.round(obj.vacant/total*100) : 0;
+                        {coberturaByObjective.map((obj) => {
                           const isExpanded = expandedObjId === obj.id;
-                          const det        = actual.byObjDetail.get(obj.id);
+                          const det = actual.byObjDetail.get(obj.id);
                           return (
                             <React.Fragment key={obj.id}>
                               <tr
@@ -3883,36 +4019,48 @@ export default function AnalisisPage() {
                                 className={`cursor-pointer select-none transition-colors
                                   ${isExpanded
                                     ? 'bg-indigo-50 dark:bg-indigo-900/20'
-                                    : vacPct>20
+                                    : obj.vacPct > 20
                                       ? 'bg-rose-50/30 dark:bg-rose-900/10 hover:bg-rose-50/60 dark:hover:bg-rose-900/20'
                                       : 'hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10'
-                                  }`}>
+                                  }`}
+                              >
                                 <td className="p-4">
                                   <div className="flex items-center gap-2">
-                                    <ChevronDown size={13} className={`shrink-0 text-slate-400 transition-transform duration-200 ${isExpanded?'rotate-180':''}`}/>
+                                    <ChevronDown size={13} className={`shrink-0 text-slate-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}/>
                                     <span className="font-bold text-slate-700 dark:text-white uppercase text-xs">{obj.name}</span>
                                   </div>
                                 </td>
                                 <td className="p-4 text-slate-500 text-xs font-bold">{obj.client}</td>
-                                <td className="p-4 text-center font-black text-indigo-600">{Math.round(obj.scheduled)}</td>
+                                <td className="p-4 text-center font-black text-indigo-600">{obj.scheduled}</td>
                                 <td className="p-4 text-center font-bold text-amber-600">
-                                  {obj.vacant>0 ? Math.round(obj.vacant) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                                  {obj.vacant > 0 ? obj.vacant : <span className="text-slate-300 dark:text-slate-600">—</span>}
                                 </td>
-                                <td className="p-4 text-center text-slate-500">{Math.round(total)}</td>
+                                <td className="p-4 text-center text-slate-500">{obj.total}</td>
                                 <td className="p-4 text-center">
                                   <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                                    vacPct===0?'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                    :vacPct<=20?'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                                    :'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}`}>
-                                    {vacPct}%
+                                    obj.vacPct === 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                    : obj.vacPct <= 20 ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                                    : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'}`}>
+                                    {obj.vacPct}%
                                   </span>
                                 </td>
+                                <td className={`p-4 text-center font-black text-xs tabular-nums ${
+                                  obj.deltaSla < -4 ? 'text-rose-600' : obj.deltaSla > 4 ? 'text-emerald-600' : 'text-slate-500'
+                                }`}>
+                                  {obj.deltaSla > 0 ? '+' : ''}{obj.deltaSla}
+                                </td>
                               </tr>
-                              {isExpanded && det && (
+                              {isExpanded && (
                                 <tr>
-                                  <td colSpan={6} className="p-0">
+                                  <td colSpan={7} className="p-0">
                                     <div className="bg-indigo-50/60 dark:bg-indigo-900/10 border-b-2 border-indigo-200 dark:border-indigo-700/50 px-6 py-4 grid grid-cols-1 md:grid-cols-2 gap-5">
-
+                                      {!det ? (
+                                        <p className="text-[11px] text-slate-500 col-span-2">
+                                          Detalle por código/guardia disponible cuando termina la malla.
+                                          {!mallaReady && ' (Malla aún cargando…)'}
+                                        </p>
+                                      ) : (
+                                        <>
                                       {/* Breakdown por tipo de turno */}
                                       <div>
                                         <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1.5">
@@ -3971,9 +4119,7 @@ export default function AnalisisPage() {
                                           <div className="space-y-1.5">
                                             {[...det.guards.entries()]
                                               .sort((a,b) => b[1].hours-a[1].hours)
-                                              .map(([gid, gd]) => {
-                                                const usePct = Math.min(Math.round(gd.hours/total*100*det.guards.size),100);
-                                                return (
+                                              .map(([gid, gd]) => (
                                                   <div key={gid} className="flex items-center gap-2.5 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 shadow-sm">
                                                     <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center shrink-0">
                                                       <Shield size={12} className="text-indigo-500"/>
@@ -3982,12 +4128,12 @@ export default function AnalisisPage() {
                                                     <span className="text-[9px] text-slate-400 shrink-0">{gd.shifts} turnos</span>
                                                     <span className="text-sm font-black text-indigo-600 shrink-0 w-14 text-right">{Math.round(gd.hours)} hs</span>
                                                   </div>
-                                                );
-                                              })}
+                                              ))}
                                           </div>
                                         )}
                                       </div>
-
+                                        </>
+                                      )}
                                     </div>
                                   </td>
                                 </tr>
@@ -4022,7 +4168,7 @@ export default function AnalisisPage() {
                   subtext={`${Math.round(demanda.totals.vacantHours)} vac · ${Math.round(demanda.totals.absenceHours)} aus`}/>
               </div>
               <p className="text-[10px] text-slate-400 px-1">
-                Horas comparables con pre-factura / cierre SLA. El costo en pesos queda para una fase posterior (tarifas CCT por código).
+                Horas comparables con pre-factura / cierre SLA. Solo hs-hombre — sin importes.
               </p>
 
               {!loadTurnos && demandaCompareBars.length > 0 && (
