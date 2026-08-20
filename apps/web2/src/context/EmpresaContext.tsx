@@ -19,6 +19,7 @@ export interface Empresa {
   primaryColor?: string;
   brandColor?: string;
   assistantEnabled?: boolean;
+  centroControlEnabled?: boolean;
   migracionCompleta?: boolean;
 }
 

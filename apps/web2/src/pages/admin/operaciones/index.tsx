@@ -1842,11 +1842,12 @@ export default function OperacionesPage() {
     const { assignedClientId, userRole, isSuperAdmin } = useAuth();
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
+    const centroControlEnabled = empresa?.centroControlEnabled !== false;
     const logic = useOperacionesMonitor(assignedClientId);
     const session = useOperatorSession();
     const elapsed = useElapsedTime(session.mySession?.startTime || null);
     useAutoMonitor({
-        isActive: true,
+        isActive: centroControlEnabled,
         isAutoMode: session.isAutoMode,
         empresaId,
         activeOperatorId: session.mySession?.operatorId || null,
@@ -1860,6 +1861,7 @@ export default function OperacionesPage() {
     // Auto-inicio de guardia para rol OPERADOR cuando data está lista
     const autoStartedRef = useRef(false);
     useEffect(() => {
+        if (!centroControlEnabled) return;
         if (!isCCOperator) return;
         if (!logic.isReady) return;
         if (session.loading) return;
@@ -1867,7 +1869,7 @@ export default function OperacionesPage() {
         if (autoStartedRef.current) return;
         autoStartedRef.current = true;
         session.startSession().catch(e => console.warn('[CC auto-start]', e));
-    }, [isCCOperator, logic.isReady, session.loading, session.isMySession]);
+    }, [centroControlEnabled, isCCOperator, logic.isReady, session.loading, session.isMySession]);
 
     // Audit log: registra cada vez que el modo automático cambia (operador entra/sale de guardia)
     const prevAutoModeRef = useRef<boolean | null>(null);
@@ -3364,6 +3366,13 @@ export default function OperacionesPage() {
             <Toaster position="top-right" />
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <style>{POPUP_STYLES}</style>
+            {!centroControlEnabled && (
+                <div className="mx-2 mt-2 mb-1 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-bold text-amber-800">
+                        Centro de Control pausado: no se generan ausencias automáticas ni avisos. Activalo en Configuración → Empresas.
+                    </p>
+                </div>
+            )}
             
             {/* â"€â"€ Banda Estado del Día â"€â"€ */}
             {(logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0 && (() => {
