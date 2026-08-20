@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useMemo, useRef, useTransition, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageHeader, SupervisorPinInput } from '@/components/ui';
 import { openCronoPopout } from '@/lib/planificacion/openCronoPopout';
@@ -960,6 +961,7 @@ export default function PlanificacionPage() {
         () => planningHourLimits(planningRules),
         [planningRules],
     );
+    const router = useRouter();
     const { isSuperAdmin, rolePermissions, loading: sessionAuthLoading, user: authUser } = useAuth();
     const canPublishPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('publish');
     const canCorrectPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('correct');
@@ -1062,6 +1064,33 @@ export default function PlanificacionPage() {
             m: currentDate.getMonth(),
         });
     }, [planViewReady, selectedClient, selectedObjective, currentDate]);
+    /** Deep-link desde Análisis: ?objectiveId=&clientId=&year=&month= (mes 1–12) */
+    const deepLinkAppliedRef = useRef(false);
+    useEffect(() => {
+        if (!planViewReady || !clients.length || deepLinkAppliedRef.current || !router.isReady) return;
+        const oid = String(router.query.objectiveId ?? '').trim();
+        if (!oid) return;
+        deepLinkAppliedRef.current = true;
+        let clientId = String(router.query.clientId ?? '').trim();
+        if (!clientId) {
+            for (const c of clients) {
+                const objs = (c.objetivos || []) as any[];
+                if (objs.some((o) => String(o.id || o.name || '').trim() === oid)) {
+                    clientId = c.id;
+                    break;
+                }
+            }
+        }
+        if (clientId) setSelectedClient(clientId);
+        setSelectedObjective(oid);
+        setSelectedGrupo(null);
+        const y = Number(router.query.year);
+        const m = Number(router.query.month);
+        if (Number.isFinite(y) && y > 2000 && Number.isFinite(m) && m >= 1 && m <= 12) {
+            setCurrentDate(new Date(y, m - 1, 1));
+        }
+        void router.replace('/admin/planificacion/', undefined, { shallow: true });
+    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month]);
     const [grupos, setGrupos] = useState<GrupoObjetivos[]>([]);
     const [showGrupoForm, setShowGrupoForm] = useState(false);
     const [grupoFormMode, setGrupoFormMode] = useState<'new' | 'edit'>('new');
