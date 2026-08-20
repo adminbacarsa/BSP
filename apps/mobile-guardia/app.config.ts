@@ -6,7 +6,7 @@ const projectId = '79b445af-b6a7-456b-b1be-87cf25a20bd5';
 const config: ExpoConfig = {
   name: 'COSP Guardia',
   slug: 'cosp-guardia',
-  version: '1.1.0',
+  version: '1.1.1',
   orientation: 'portrait',
   scheme: 'cosp-guardia',
   userInterfaceStyle: 'light',
@@ -17,8 +17,8 @@ const config: ExpoConfig = {
   updates: {
     url: `https://u.expo.dev/${projectId}`,
     fallbackToCacheTimeout: 0,
-    // Evita carrera con check JS al boot (pantalla gris / hang)
-    checkAutomatically: 'ON_ERROR_RECOVERY',
+    // Sin auto-fetch al boot: evita 2º arranque roto. Update solo manual.
+    checkAutomatically: 'NEVER',
   },
   ios: {
     supportsTablet: true,
@@ -35,11 +35,16 @@ const config: ExpoConfig = {
   android: {
     package: 'com.grupobacar.cosp.guardia',
     permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION', 'CAMERA'],
+    softwareKeyboardLayoutMode: 'resize',
     ...(useEmulator ? { usesCleartextTraffic: true } : {}),
     adaptiveIcon: {
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundColor: '#312e81',
     },
+  },
+  androidNavigationBar: {
+    backgroundColor: '#ffffff',
+    barStyle: 'dark-content',
   },
   web: {
     favicon: './assets/favicon.png',
