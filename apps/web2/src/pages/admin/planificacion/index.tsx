@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef, useTransition, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useRef, useTransition, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -47,6 +47,10 @@ function buildDotacionMapsFromEmployees(employees: { id: string; planificacionDo
 const DOTACION_NEARBY_KM_DEFAULT = 10;
 const DOTACION_NEARBY_KM_MIN = 5;
 const DOTACION_NEARBY_KM_MAX = 100;
+const DOTACION_NEARBY_ROW_CAP = 40;
+const DOTACION_NEARBY_SCAN_CAP = 150;
+const ASSIGN_SEARCH_LIMIT = 50;
+const ROSTER_KM_PRESETS = [5, 10, 20, 40, 80] as const;
 const NEARBY_KM_STORAGE_KEY = 'planif_nearby_km';
 
 function clampNearbyKm(v: number): number {
@@ -133,7 +137,7 @@ import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/sl
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { rebuildHoursBalanceForObjectiveMonth } from '@/lib/hoursBalance';
 import { useAuth } from '@/context/AuthContext';
-import { Toaster, toast } from 'sonner';
+import { toast } from 'sonner';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
@@ -149,6 +153,13 @@ import ObjectiveServiceAnalysisCard from '@/components/planificacion/ObjectiveSe
 import { resolveCronogramPlanningRules } from '@/lib/planificacion/cronogramPlanningRules';
 import { dominantDotacionFromPlanningCells } from '@/lib/planificacion/seedDotacionFromPrevMonth';
 import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
+import { matchesEmployeeSearch } from '@/lib/planificacion/employeeSearch';
+import {
+    adjacentPlanningMonths,
+    getCachedPlanningMonth,
+    planningMonthCacheKey,
+    setCachedPlanningMonth,
+} from '@/lib/planificacion/planningMonthCache';
 import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnosIngest';
 import {
     compareObjectiveMonthSchedules,
@@ -980,10 +991,13 @@ export default function PlanificacionPage() {
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
+    const [dotacionPoolReady, setDotacionPoolReady] = useState(false);
     const [showVolantes, setShowVolantes] = useState(false);
     const [nearbyKmRadius, setNearbyKmRadius] = useState(DOTACION_NEARBY_KM_DEFAULT);
     const [nearbyKmDraft, setNearbyKmDraft] = useState(String(DOTACION_NEARBY_KM_DEFAULT));
-    const [isShowAllPending, startShowAllTransition] = useTransition();
+    const [dotacionPoolType, setDotacionPoolType] = useState<'RET' | 'F' | 'LIBRE' | null>('RET');
+    const [dotacionPoolSearch, setDotacionPoolSearch] = useState('');
+    const deferredDotacionPoolSearch = useDeferredValue(dotacionPoolSearch);
     const [isFilterPending, startFilterTransition] = useTransition();
     const [showAjustarCronoModal, setShowAjustarCronoModal] = useState(false);
     const [showEquilibrarModal, setShowEquilibrarModal] = useState(false);
@@ -1165,6 +1179,8 @@ export default function PlanificacionPage() {
 
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showGuardiaSearch, setShowGuardiaSearch] = useState(false);
+    const [highlightEmpId, setHighlightEmpId] = useState<string | null>(null);
     const [pinnedExternalEmpIds, setPinnedExternalEmpIds] = useState<Set<string>>(new Set());
     const [cellTargetObjectiveId, setCellTargetObjectiveId] = useState<string | null>(null);
     /** Objetivo destino al asignar en masa a colaboradores EXT (grupo unificado). */
@@ -1177,6 +1193,8 @@ export default function PlanificacionPage() {
     const [bulkEmpPositionFilter, setBulkEmpPositionFilter] = useState<Record<string, string>>({});
     const [bandFilter, setBandFilter] = useState<string | null>(null);
     const [addSearchTerm, setAddSearchTerm] = useState('');
+    const deferredSearchTerm = useDeferredValue(searchTerm);
+    const deferredAddSearchTerm = useDeferredValue(addSearchTerm);
     const [selectedCell, setSelectedCell] = useState<any>(null);
 
     const [authModal, setAuthModal] = useState<{
@@ -1635,29 +1653,6 @@ export default function PlanificacionPage() {
         setNearbyKmDraft(String(km));
     }, []);
 
-    const countEmployeesWithinKm = useCallback((km: number) => {
-        if (!selectedObjective || !selectedObjectiveData) return 0;
-        const objLat = Number(selectedObjectiveData.lat ?? 0);
-        const objLng = Number(selectedObjectiveData.lng ?? 0);
-        const hasCoords = !!(objLat && objLng);
-        let count = 0;
-        for (const e of employees) {
-            if (e.status === 'inactivo') continue;
-            if (
-                e.preferredObjectiveId === selectedObjective ||
-                slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
-                activeGuestIdsForObjective.has(e.id)
-            ) {
-                count++;
-                continue;
-            }
-            if (!hasCoords) continue;
-            const d = employeeKmToObjective(e, objLat, objLng);
-            if (d !== null && d <= km) count++;
-        }
-        return count;
-    }, [employees, selectedObjective, selectedObjectiveData, slaIdToObjId, activeGuestIdsForObjective]);
-
     const isEmployeeOnSelectedObjective = useCallback((e: { id: string; preferredObjectiveId?: string }) => {
         if (!selectedObjective) return false;
         if (
@@ -1709,76 +1704,43 @@ export default function PlanificacionPage() {
         return resolveNativeObjectiveInGrupo(emp);
     }, [pendingChanges, resolveNativeObjectiveInGrupo, slaIdToObjId]);
 
-    const clearNearbyCustomOrder = useCallback(() => {
-        if (!selectedObjective) return;
-        setCustomOrderMap(m => {
-            const nm = { ...m };
-            delete nm[selectedObjective];
-            try { localStorage.setItem('planif_emp_order', JSON.stringify(nm)); } catch { /* ignore */ }
-            return nm;
-        });
-    }, [selectedObjective]);
-
-    const applyNearbyKm = useCallback((raw: number, opts?: { silent?: boolean }) => {
+    const persistNearbyKm = useCallback((raw: number) => {
         const km = clampNearbyKm(raw);
         setNearbyKmRadius(km);
         setNearbyKmDraft(String(km));
         try { localStorage.setItem(NEARBY_KM_STORAGE_KEY, String(km)); } catch { /* ignore */ }
-        startShowAllTransition(() => {
-            setForceShowAll(true);
-            clearNearbyCustomOrder();
-        });
-        if (opts?.silent) return;
-        const count = countEmployeesWithinKm(km);
-        if (count === 0) {
-            toast.warning(`Ningún empleado a ≤${km} km. Ampliá el radio y volvé a buscar.`);
-        }
-    }, [clearNearbyCustomOrder, countEmployeesWithinKm]);
+        return km;
+    }, []);
 
-    const activateNearbyMode = useCallback(() => {
-        startShowAllTransition(() => {
-            setForceShowAll(true);
-            clearNearbyCustomOrder();
-        });
-        const count = countEmployeesWithinKm(nearbyKmRadius);
-        if (count === 0) {
-            toast.warning(`Ningún empleado a ≤${nearbyKmRadius} km. Ampliá el radio y volvé a buscar.`);
+    useEffect(() => {
+        if (!forceShowAll) {
+            setDotacionPoolReady(false);
+            return;
         }
-    }, [clearNearbyCustomOrder, countEmployeesWithinKm, nearbyKmRadius]);
+        const id = window.requestAnimationFrame(() => setDotacionPoolReady(true));
+        return () => window.cancelAnimationFrame(id);
+    }, [forceShowAll]);
 
     const dotacionBaseEmployees = useMemo(() => {
-        if (!selectedObjective && !forceShowAll) return [];
+        if (!selectedObjective) return [];
         let list = employees.filter(e => e.status !== 'inactivo');
-        if (selectedObjective && !forceShowAll) {
-            if (selectedGrupo && grupoUnifiedMode) {
-                // Modo grupo unificado: incluir todos los empleados de cualquier objetivo del grupo
-                list = list.filter(e =>
-                    selectedGrupo.objectiveIds.some(objId =>
-                        e.preferredObjectiveId === objId ||
-                        slaIdToObjId[e.preferredObjectiveId] === objId,
-                    ) || activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id),
-                );
-            } else {
-                list = list.filter(e =>
-                    e.preferredObjectiveId === selectedObjective ||
-                    slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
-                    activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id) ||
-                    (showVolantes && (e.volante || []).includes(selectedObjective)),
-                );
-            }
-        } else if (selectedObjective && forceShowAll) {
-            const objLat = Number(selectedObjectiveData?.lat ?? 0);
-            const objLng = Number(selectedObjectiveData?.lng ?? 0);
-            const hasCoords = !!(objLat && objLng);
-            list = list.filter(e => {
-                if (isEmployeeOnSelectedObjective(e)) return true;
-                if (!hasCoords) return false;
-                const km = employeeKmToObjective(e, objLat, objLng);
-                return km !== null && km <= nearbyKmRadius;
-            });
+        if (selectedGrupo && grupoUnifiedMode) {
+            list = list.filter(e =>
+                selectedGrupo.objectiveIds.some(objId =>
+                    e.preferredObjectiveId === objId ||
+                    slaIdToObjId[e.preferredObjectiveId] === objId,
+                ) || activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id),
+            );
+        } else {
+            list = list.filter(e =>
+                e.preferredObjectiveId === selectedObjective ||
+                slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
+                activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id) ||
+                (showVolantes && (e.volante || []).includes(selectedObjective)),
+            );
         }
         return list;
-    }, [employees, selectedObjective, forceShowAll, showVolantes, slaIdToObjId, activeGuestIdsForObjective, pinnedExternalEmpIds, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective, selectedGrupo, grupoUnifiedMode]);
+    }, [employees, selectedObjective, showVolantes, slaIdToObjId, activeGuestIdsForObjective, pinnedExternalEmpIds, selectedGrupo, grupoUnifiedMode]);
 
     const employeeMonthStats = useMemo(() => {
         const stats: Record<string, { shiftCount: number; dominantBand: string | null }> = {};
@@ -1807,41 +1769,84 @@ export default function PlanificacionPage() {
         return stats;
     }, [dotacionBaseEmployees, daysInMonth, pendingChanges, shiftsMap, selectedObjective, BAND_FILTERABLE]);
 
+    const empHasDotacionCode = (emp: any, code: string) => {
+        const map = emp?.planificacionDotacion as PlanificacionDotacionMap | undefined;
+        if (!map) return false;
+        const needle = code.toUpperCase();
+        return Object.values(map).some((cfg) => String(cfg?.shiftCode || '').toUpperCase() === needle);
+    };
+
+    const dotacionPoolCandidates = useMemo(() => {
+        if (!forceShowAll || !dotacionPoolReady || !selectedObjective) return [] as Array<any & { _km: number | null; _kind: string }>;
+        const gridIds = new Set(dotacionBaseEmployees.map((e: any) => e.id));
+        const objLat = Number(selectedObjectiveData?.lat ?? 0);
+        const objLng = Number(selectedObjectiveData?.lng ?? 0);
+        const hasCoords = !!(objLat && objLng);
+        const q = deferredDotacionPoolSearch.trim();
+        const nearby: Array<{ emp: any; km: number | null }> = [];
+        for (const e of employees) {
+            if (e.status === 'inactivo' || gridIds.has(e.id)) continue;
+            if (q && !matchesEmployeeSearch(e, q)) continue;
+            const km = hasCoords ? employeeKmToObjective(e, objLat, objLng) : null;
+            if (hasCoords && (km === null || km > nearbyKmRadius)) continue;
+            nearby.push({ emp: e, km });
+        }
+        nearby.sort((a, b) => {
+            const da = a.km ?? Infinity;
+            const db = b.km ?? Infinity;
+            if (da !== db) return da - db;
+            return String(a.emp.name || '').localeCompare(String(b.emp.name || ''));
+        });
+        const scan = nearby.slice(0, DOTACION_NEARBY_SCAN_CAP);
+        const dateKeys = daysInMonth.map((d: Date) => getDateKey(d));
+        const out: Array<any & { _km: number | null; _kind: string }> = [];
+        for (const { emp: e, km } of scan) {
+            let shiftCount = 0;
+            let hasRet = false;
+            let hasFranco = false;
+            for (const dateStr of dateKeys) {
+                const key = `${e.id}_${dateStr}`;
+                const pending = pendingChanges[key];
+                const sh = pending && !pending.isDeleted ? pending : shiftsMap[key];
+                if (!sh || sh.isDeleted) continue;
+                shiftCount += 1;
+                const code = String(sh.code || sh.shiftCode || '').toUpperCase();
+                if (code === 'RET') hasRet = true;
+                if (code === 'F' || code === 'FF' || code === 'FP') hasFranco = true;
+            }
+            const isRet = hasRet || empHasDotacionCode(e, 'RET');
+            const isFranco = hasFranco || empHasDotacionCode(e, 'F');
+            const isLibre = shiftCount === 0;
+            if (dotacionPoolType === 'RET' && !isRet) continue;
+            if (dotacionPoolType === 'F' && !isFranco) continue;
+            if (dotacionPoolType === 'LIBRE' && !isLibre) continue;
+            const kind = isRet ? 'RET' : isFranco ? 'F' : isLibre ? 'Sin turno' : 'Turno';
+            out.push({ ...e, _km: km, _kind: kind, _fromDotacionPool: true });
+            if (out.length >= DOTACION_NEARBY_ROW_CAP) break;
+        }
+        return out;
+    }, [forceShowAll, dotacionPoolReady, selectedObjective, selectedObjectiveData, employees, dotacionBaseEmployees, nearbyKmRadius, deferredDotacionPoolSearch, dotacionPoolType, daysInMonth, pendingChanges, shiftsMap]);
+
     const displayedEmployees = useMemo(() => {
         let list = dotacionBaseEmployees;
         if (bandFilter) {
             list = list.filter(e => employeeMonthStats[e.id]?.dominantBand === bandFilter);
         }
-        if (forceShowAll && selectedObjective && selectedObjectiveData) {
-            const objLat = Number(selectedObjectiveData.lat ?? 0);
-            const objLng = Number(selectedObjectiveData.lng ?? 0);
-            const hasCoords = !!(objLat && objLng);
-            return [...list].sort((a, b) => {
-                const aAssigned = isEmployeeOnSelectedObjective(a);
-                const bAssigned = isEmployeeOnSelectedObjective(b);
-                if (aAssigned !== bAssigned) return aAssigned ? -1 : 1;
-                if (!aAssigned && hasCoords) {
-                    const da = employeeKmToObjective(a, objLat, objLng) ?? Infinity;
-                    const db = employeeKmToObjective(b, objLat, objLng) ?? Infinity;
-                    if (da !== db) return da - db;
-                }
-                return a.name.localeCompare(b.name);
-            });
-        }
         const orderKey = selectedObjective || '__all__';
         const customOrder = customOrderMap[orderKey];
+        let sorted: any[];
         if (customOrder && customOrder.length > 0) {
             const orderMap: Record<string, number> = {};
             customOrder.forEach((id: string, i: number) => { orderMap[id] = i; });
-            return [...list].sort((a: any, b: any) => {
+            sorted = [...list].sort((a: any, b: any) => {
                 const ai = orderMap[a.id] !== undefined ? orderMap[a.id] : 9999;
                 const bi = orderMap[b.id] !== undefined ? orderMap[b.id] : 9999;
                 return ai - bi;
             });
-        }
+        } else {
         const BAND_ORDER: Record<string, number> = { M: 0, T: 1, N: 2, D12: 3, N12: 4, RET: 5 };
         const dir = sortDir === 'asc' ? 1 : -1;
-        return [...list].sort((a, b) => {
+        sorted = [...list].sort((a, b) => {
             if (sortBy === 'activity') {
                 const countA = employeeMonthStats[a.id]?.shiftCount ?? 0;
                 const countB = employeeMonthStats[b.id]?.shiftCount ?? 0;
@@ -1870,11 +1875,15 @@ export default function PlanificacionPage() {
             }
             return a.name.localeCompare(b.name) * dir;
         });
-    }, [dotacionBaseEmployees, searchTerm, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, selectedObjectiveData, isEmployeeOnSelectedObjective]);
+        }
+        if (!forceShowAll || dotacionPoolCandidates.length === 0) return sorted;
+        const ids = new Set(sorted.map((e: any) => e.id));
+        return [...sorted, ...dotacionPoolCandidates.filter((e: any) => !ids.has(e.id))];
+    }, [dotacionBaseEmployees, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, dotacionPoolCandidates]);
 
     /** Guardias activos en dotación (excluye REF/ESC asignados como rol — no entran al auto ni al conteo). */
     const planningDotacionEmployees = useMemo(
-        () => displayedEmployees.filter((e: any) => !isEmpExcludedFromPlanningDotacion(e, selectedObjective)),
+        () => displayedEmployees.filter((e: any) => !e._fromDotacionPool && !isEmpExcludedFromPlanningDotacion(e, selectedObjective)),
         [displayedEmployees, selectedObjective],
     );
 
@@ -2089,30 +2098,92 @@ export default function PlanificacionPage() {
     }, [rfzTodos, selectedObjective, currentDate]);
 
     const addModalEmployeeCandidates = useMemo(() => {
-        const q = addSearchTerm.toLowerCase();
-        let list = employees.filter(e => e.status !== 'inactivo' && e.name.toLowerCase().includes(q));
-        if (!selectedObjective || !selectedObjectiveData) return list;
-        const objLat = Number(selectedObjectiveData.lat ?? 0);
-        const objLng = Number(selectedObjectiveData.lng ?? 0);
+        const q = deferredAddSearchTerm.trim();
+        const searching = q.length >= 1;
+        const objLat = Number(selectedObjectiveData?.lat ?? 0);
+        const objLng = Number(selectedObjectiveData?.lng ?? 0);
         const hasCoords = !!(objLat && objLng);
-        list = list.filter(e => {
-            if (isEmployeeOnSelectedObjective(e)) return true;
-            if (!hasCoords) return false;
-            const km = employeeKmToObjective(e, objLat, objLng);
-            return km !== null && km <= nearbyKmRadius;
-        });
-        return [...list].sort((a, b) => {
+        let list = employees.filter((e: any) => e.status !== 'inactivo');
+        if (searching) {
+            list = list.filter((e: any) => matchesEmployeeSearch(e, q));
+        } else {
+            list = list.filter((e: any) => {
+                if (isEmployeeOnSelectedObjective(e)) return true;
+                if (!hasCoords) return false;
+                const km = employeeKmToObjective(e, objLat, objLng);
+                return km !== null && km <= nearbyKmRadius;
+            });
+        }
+        const ranked = [...list].sort((a: any, b: any) => {
             const aAssigned = isEmployeeOnSelectedObjective(a);
             const bAssigned = isEmployeeOnSelectedObjective(b);
             if (aAssigned !== bAssigned) return aAssigned ? -1 : 1;
-            if (!aAssigned && hasCoords) {
+            if (hasCoords) {
                 const da = employeeKmToObjective(a, objLat, objLng) ?? Infinity;
                 const db = employeeKmToObjective(b, objLat, objLng) ?? Infinity;
                 if (da !== db) return da - db;
             }
-            return a.name.localeCompare(b.name);
+            return String(a.name || '').localeCompare(String(b.name || ''));
         });
-    }, [employees, addSearchTerm, selectedObjective, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective]);
+        return ranked.slice(0, ASSIGN_SEARCH_LIMIT);
+    }, [employees, deferredAddSearchTerm, selectedObjective, selectedObjectiveData, nearbyKmRadius, isEmployeeOnSelectedObjective]);
+
+    const addModalMatchCount = useMemo(() => {
+        const q = deferredAddSearchTerm.trim();
+        if (q.length < 1) return addModalEmployeeCandidates.length;
+        return employees.filter((e: any) => e.status !== 'inactivo' && matchesEmployeeSearch(e, q)).length;
+    }, [employees, deferredAddSearchTerm, addModalEmployeeCandidates.length]);
+
+    const guardiaSearchMatches = useMemo(() => {
+        const q = deferredSearchTerm.trim();
+        if (q.length < 2) return { inGrid: [] as any[], external: [] as any[] };
+        const gridIds = new Set(displayedEmployees.map((e: any) => e.id));
+        const inGrid: any[] = [];
+        const external: any[] = [];
+        for (const e of employees) {
+            if (e.status === 'inactivo') continue;
+            if (!matchesEmployeeSearch(e, q)) continue;
+            if (gridIds.has(e.id) || pinnedExternalEmpIds.has(e.id)) inGrid.push(e);
+            else external.push(e);
+        }
+        return { inGrid: inGrid.slice(0, 8), external: external.slice(0, 8) };
+    }, [employees, deferredSearchTerm, displayedEmployees, pinnedExternalEmpIds]);
+
+    const scrollToEmployeeRow = useCallback((empId: string) => {
+        setHighlightEmpId(empId);
+        requestAnimationFrame(() => {
+            document.getElementById(`plan-emp-${empId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+        window.setTimeout(() => {
+            setHighlightEmpId((prev) => (prev === empId ? null : prev));
+        }, 2500);
+    }, []);
+
+    useEffect(() => {
+        if (!forceShowAll) return;
+        const poolIds = new Set(dotacionPoolCandidates.map((e: any) => e.id));
+        if (poolIds.size === 0) return;
+        const toPin: string[] = [];
+        for (const key of Object.keys(pendingChanges)) {
+            const entry = pendingChanges[key];
+            if (!entry || entry.isDeleted) continue;
+            const sep = key.lastIndexOf('_');
+            const empId = sep > 0 ? key.slice(0, sep) : '';
+            if (empId && poolIds.has(empId)) toPin.push(empId);
+        }
+        if (toPin.length === 0) return;
+        setPinnedExternalEmpIds((prev) => {
+            let changed = false;
+            const next = new Set(prev);
+            toPin.forEach((id) => {
+                if (!next.has(id)) {
+                    next.add(id);
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+    }, [forceShowAll, pendingChanges, dotacionPoolCandidates]);
 
     // Horas por código custom (RO, RON, etc.) según definición del SLA activo.
     // Fallback en calcShiftHours para turnos guardados sin campo `hours` explícito.
@@ -3351,7 +3422,7 @@ export default function PlanificacionPage() {
     const swapCandidates = useMemo(() => { 
         if (!showSwapModal) return []; 
         return employees.filter(e => e.id !== swapConfig?.empId)
-                        .filter(e => e.name.toLowerCase().includes(swapSearchTerm.toLowerCase()))
+                        .filter(e => matchesEmployeeSearch(e, swapSearchTerm))
                         .sort((a, b) => a.name.localeCompare(b.name)); 
     }, [employees, showSwapModal, swapSearchTerm, swapConfig]);
 
@@ -3402,6 +3473,8 @@ export default function PlanificacionPage() {
 
     const activeServiceStatus = useMemo(() => {
         if (!selectedClient || !selectedObjective) return { status: 'IDLE', msg: '', icon: null };
+        const catalogReady = !loadingEmpresa && (clients.length > 0 || !isDataSyncing);
+        if (!catalogReady) return { status: 'IDLE', msg: '', icon: null };
         const client = clients.find(c => c.id === selectedClient);
         if (!client) return { status: 'DELETED', msg: 'CLIENTE NO ENCONTRADO', icon: <Ghost size={20}/> };
         
@@ -3425,9 +3498,14 @@ export default function PlanificacionPage() {
             }
         }
         return { status: 'ACTIVE', msg: 'OK', icon: <CheckCircle size={20}/> };
-    }, [selectedClient, selectedObjective, clients, currentDate, hasActiveSLA, slaPlanningHint]);
+    }, [selectedClient, selectedObjective, clients, currentDate, hasActiveSLA, slaPlanningHint, loadingEmpresa, isDataSyncing]);
 
     const isServiceLocked = activeServiceStatus.status !== 'ACTIVE' && activeServiceStatus.status !== 'IDLE';
+
+    const catalogReady = !loadingEmpresa && (clients.length > 0 || !isDataSyncing);
+    const planningBusyLabel = !catalogReady
+        ? 'Cargando…'
+        : (selectedObjective && !shiftsMapLoaded ? 'Cargando turnos…' : null);
 
     // ============================================================================
     // 5. MOTORES DE CÁLCULO (NIVEL 4 - SLA INTELLIGENCE V9.00)
@@ -3988,7 +4066,7 @@ export default function PlanificacionPage() {
         setConflictNeighbors({ prev, next });
     };
 
-    const handleContextChange = (newClient: string, newObjective: string) => { if (Object.keys(pendingChanges).length > 0) { if (!confirm(`⚠️ TIENES CAMBIOS SIN GUARDAR.\n¿Descartar y cambiar de objetivo?`)) return; setPendingChanges({}); setPendingNovedades({}); clearUndoStack(); } setSelectedGrupo(null); setSelectedClient(newClient); setSelectedObjective(newObjective); setSearchTerm(''); setPinnedExternalEmpIds(new Set()); setBandFilter(null); setSelection({start: null, end: null}); setComparingSnapshot(null); setOpenDrop(null); setAutoGeneratedReady(false); };
+    const handleContextChange = (newClient: string, newObjective: string) => { if (Object.keys(pendingChanges).length > 0) { if (!confirm(`⚠️ TIENES CAMBIOS SIN GUARDAR.\n¿Descartar y cambiar de objetivo?`)) return; setPendingChanges({}); setPendingNovedades({}); clearUndoStack(); } setSelectedGrupo(null); setSelectedClient(newClient); setSelectedObjective(newObjective); setSearchTerm(''); setShowGuardiaSearch(false); setPinnedExternalEmpIds(new Set()); setBandFilter(null); setForceShowAll(false); setDotacionPoolSearch(''); setSelection({start: null, end: null}); setComparingSnapshot(null); setOpenDrop(null); setAutoGeneratedReady(false); };
 
     const handleGrupoChange = (grupo: GrupoObjetivos | null) => {
         if (Object.keys(pendingChanges).length > 0) {
@@ -4006,8 +4084,11 @@ export default function PlanificacionPage() {
             setSelectedObjective('');
         }
         setSearchTerm('');
+        setShowGuardiaSearch(false);
         setPinnedExternalEmpIds(new Set());
         setBandFilter(null);
+        setForceShowAll(false);
+        setDotacionPoolSearch('');
         setSelection({ start: null, end: null });
         setComparingSnapshot(null);
         setOpenDrop(null);
@@ -4104,7 +4185,10 @@ export default function PlanificacionPage() {
         setSelectedObjective(objectiveId);
         setCurrentDate(new Date(year, month - 1, 1));
         setSearchTerm('');
+        setShowGuardiaSearch(false);
         setBandFilter(null);
+        setForceShowAll(false);
+        setDotacionPoolSearch('');
         setSelection({ start: null, end: null });
         setComparingSnapshot(null);
         setOpenDrop(null);
@@ -4539,9 +4623,16 @@ export default function PlanificacionPage() {
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
                 .map(d => {
                     const data = d.data();
+                    const firstName = String(data.firstName || '').trim();
+                    const lastName = String(data.lastName || '').trim();
+                    const composedName = `${lastName} ${firstName}`.trim() || `${firstName} ${lastName}`.trim();
                     return {
                         id: d.id,
-                        name: data.name || data.firstName + ' ' + data.lastName,
+                        name: String(data.name || '').trim() || composedName,
+                        firstName,
+                        lastName,
+                        fileNumber: String(data.fileNumber || data.legajo || '').trim(),
+                        dni: String(data.dni || '').trim(),
                         preferredObjectiveId: data.preferredObjectiveId,
                         planificacionDotacion: (data.planificacionDotacion || {}) as PlanificacionDotacionMap,
                         genero: data.genero || '',
@@ -4688,9 +4779,28 @@ export default function PlanificacionPage() {
         }
         const viewYear = currentDate.getFullYear();
         const viewMonth = currentDate.getMonth() + 1;
-        setShiftsMapLoaded(false);
-        setRfzVacantes([]);
-        setRfzTodos([]);
+        const cacheKey = planningMonthCacheKey(empresaId, viewYear, viewMonth);
+        let prefetchTimer: number | undefined;
+
+        const applyIngested = (ingested: ReturnType<typeof ingestPlanningTurnosSnapshot>) => {
+            setShiftsMap(ingested.shiftsMap);
+            setCellTurnosMap(ingested.cellTurnosMap);
+            setAllShiftIds(ingested.allShiftIds);
+            setTuraMap(ingested.turaMap);
+            setSecondBlockMap(ingested.secondBlockMap);
+            setRfzVacantes(ingested.rfzVacantes);
+            setRfzTodos(ingested.rfzTodos);
+            setShiftsMapLoaded(true);
+        };
+
+        const cached = getCachedPlanningMonth(cacheKey);
+        if (cached) {
+            applyIngested(cached);
+        } else {
+            setShiftsMapLoaded(false);
+            setRfzVacantes([]);
+            setRfzTodos([]);
+        }
 
         const mergeRfzLists = (prev: any[], extra: any[]) => {
             if (extra.length === 0) return prev;
@@ -4706,14 +4816,24 @@ export default function PlanificacionPage() {
                 migracionCompleta,
                 getDateKey,
             );
-            setShiftsMap(ingested.shiftsMap);
-            setCellTurnosMap(ingested.cellTurnosMap);
-            setAllShiftIds(ingested.allShiftIds);
-            setTuraMap(ingested.turaMap);
-            setSecondBlockMap(ingested.secondBlockMap);
-            setRfzVacantes(ingested.rfzVacantes);
-            setRfzTodos(ingested.rfzTodos);
-            setShiftsMapLoaded(true);
+            setCachedPlanningMonth(cacheKey, ingested);
+            applyIngested(ingested);
+            if (!prefetchTimer) {
+                prefetchTimer = window.setTimeout(() => {
+                    adjacentPlanningMonths(viewYear, viewMonth).forEach(({ year, month }) => {
+                        const key = planningMonthCacheKey(empresaId, year, month);
+                        if (getCachedPlanningMonth(key)) return;
+                        getDocs(buildPlanningMonthTurnosQuery({ empresaId, scopeEmpresa, year, month }))
+                            .then((adjSnap) => {
+                                setCachedPlanningMonth(
+                                    key,
+                                    ingestPlanningTurnosSnapshot(adjSnap.docs, empresaId, migracionCompleta, getDateKey),
+                                );
+                            })
+                            .catch(() => {});
+                    });
+                }, 600);
+            }
         };
 
         const turnosQ = buildPlanningMonthTurnosQuery({
@@ -4756,6 +4876,7 @@ export default function PlanificacionPage() {
         return () => {
             unsubS();
             unsubRfz();
+            if (prefetchTimer) window.clearTimeout(prefetchTimer);
         };
     }, [empresaId, migracionCompleta, scopeEmpresa, currentDate.getFullYear(), currentDate.getMonth()]);
 
@@ -7108,7 +7229,7 @@ export default function PlanificacionPage() {
         setPendingAssignment(null);
         setSwapConfig(null);
         setShowSwapModal(false);
-        toast.info("Cambio aplicado");
+        toast.info("Cambio aplicado", { id: 'plan-cambio-aplicado' });
     };
 
     const applyRecompositionPackage = (
@@ -9442,24 +9563,36 @@ export default function PlanificacionPage() {
                     );
                     const isVolante = isGuest && selectedObjective && (emp.volante || []).includes(selectedObjective);
                     const homeObjectiveName = getObjectiveName(emp.preferredObjectiveId);
+                    const isPoolRow = !!emp._fromDotacionPool;
+                    const showPoolDivider = isPoolRow && (idx === 0 || !gridEmployees[idx - 1]?._fromDotacionPool);
                     
                     return (
                         <React.Fragment key={emp.id}>
-                            {/* FILA ACTUAL (Editable) - Solo se muestra si NO es vista de snapshot */}
+                            {showPoolDivider && !isSnapshotView && (
+                                <tr className="no-print">
+                                    <td
+                                        colSpan={1 + daysInMonth.length}
+                                        className="sticky left-0 z-20 bg-amber-100 border-y border-amber-200 px-2 py-1 text-[9px] font-black uppercase tracking-wide text-amber-800"
+                                    >
+                                        Candidatos {dotacionPoolType === 'RET' ? 'RET' : dotacionPoolType === 'F' ? 'franco' : dotacionPoolType === 'LIBRE' ? 'sin turno' : ''} ≤{nearbyKmRadius} km — asigná en esta grilla
+                                    </td>
+                                </tr>
+                            )}
                             {!isSnapshotView && (
                                 <tr
-                                    className={`group ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
-                                    onDragOver={forceShowAll ? undefined : (e) => handleRowDragOver(e, idx)}
-                                    onDrop={forceShowAll ? undefined : (e) => handleRowDrop(e, idx)}
-                                    onDragEnd={forceShowAll ? undefined : () => setDragOverVisual(null)}
+                                    id={`plan-emp-${emp.id}`}
+                                    className={`group ${isPoolRow ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''} ${highlightEmpId === emp.id ? 'ring-2 ring-inset ring-indigo-400 bg-indigo-50 dark:bg-indigo-900/30' : ''} ${dragOverVisual === idx ? 'border-t-2 border-t-indigo-400' : ''} ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-900/30' : 'hover:bg-slate-50 dark:hover:bg-slate-700/40'}`}
+                                    onDragOver={(e) => handleRowDragOver(e, idx)}
+                                    onDrop={(e) => handleRowDrop(e, idx)}
+                                    onDragEnd={() => setDragOverVisual(null)}
                                 >
                                     <td
-                                        draggable={!forceShowAll}
-                                        onDragStart={forceShowAll ? undefined : (e) => handleRowDragStart(e, idx)}
+                                        draggable
+                                        onDragStart={(e) => handleRowDragStart(e, idx)}
                                         onClick={() => !isSnapshotView && handleRowHeaderClick(idx)}
-                                        title={forceShowAll ? 'Modo cercanos: ordenado por distancia' : 'Clic para seleccionar fila completa'}
+                                        title="Clic para seleccionar fila completa"
                                         style={{ width: nameColWidth, minWidth: nameColWidth }}
-                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 ${forceShowAll ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
+                                        className={`sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 cursor-grab active:cursor-grabbing dark:border-slate-700 ${(empMonthlyHours[emp.id] || 0) >= planningLimits.monthly ? 'bg-red-50 group-hover:bg-red-100 dark:bg-red-950/30 dark:group-hover:bg-red-900/30' : 'bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/60'}`}
                                     >
                                         {(() => {
                                             if (compareCompact) {
@@ -9492,7 +9625,7 @@ export default function PlanificacionPage() {
                                                         <Grip size={8} className="shrink-0 text-slate-200 group-hover:text-slate-400 transition-colors mr-0.5" />
                                                         <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
                                                         {isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Volante — base: ${homeObjectiveName}`}><Shuffle size={8} /> VOL</div>)}
-                                        {isGuest && !isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> EXT</div>)}
+                                        {isGuest && !isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> {emp._kind || 'EXT'}</div>)}
                                                         {selectedGrupo && grupoUnifiedMode && (() => {
                                                             const _native = selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId)
                                                                 ? emp.preferredObjectiveId
@@ -9931,14 +10064,13 @@ export default function PlanificacionPage() {
     return (
         <DashboardLayout>
             <Head><title>Planificador</title></Head>
-            {(loadingEmpresa || (isDataSyncing && clients.length === 0 && employees.length === 0)) && (
+            {planningBusyLabel && (
                 <div className="fixed top-4 right-16 z-[9998] flex items-center gap-1.5 bg-slate-800 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg pointer-events-none opacity-80">
-                    <svg className="animate-spin w-3 h-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/></svg>
-                    Actualizando
+                    <Loader2 size={12} className="animate-spin"/>
+                    {planningBusyLabel}
                 </div>
             )}
             <style>{`.pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb); background-size: 10px 10px; background-position: 0 0, 5px 5px; } .sla-excluded-day-col { background-image: repeating-linear-gradient(-45deg, transparent, transparent 4px, rgba(251, 113, 133, 0.07) 4px, rgba(251, 113, 133, 0.07) 8px); } .planning-grid-table { border-collapse: separate; border-spacing: 0; } .planning-grid-table thead th { box-shadow: 0 1px 0 rgba(148,163,184,0.35); } .planning-grid-table .planning-sticky-corner { position: sticky; left: 0; top: 0; z-index: 50; } @media print { @page { size: A4 landscape; margin: 5mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: white !important; } #printable-section { position: absolute; left: 0; top: 0; width: 100%; min-width: 100%; transform: none; background: white; } .no-print { display: none !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }`}</style>
-            <Toaster position="top-center" />
             <div className="no-print px-2 max-w-[1600px] mx-auto">
                 <SwapSupervisorQueue empresaId={empresaId} />
             </div>
@@ -10125,9 +10257,9 @@ export default function PlanificacionPage() {
                                     <button
                                         onClick={() => saveEmpPos(empPosPicker.empId, p.positionName, null)}
                                         className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-colors ${isSelPos && !selShift ? 'bg-slate-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}
-                                        title="Asignar al puesto sin preferencia de turno — el auto-scheduler elige"
+                                        title="Asignar al puesto sin preferencia de banda"
                                     >
-                                        AUTO
+                                        · · ·
                                     </button>
                                     {codes.map((sc:string) => {
                                         const saveCode = NORM[sc] ?? sc;
@@ -10651,41 +10783,14 @@ export default function PlanificacionPage() {
                                 {/* < MES > — siempre visible */}
                                 <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className="px-3 font-black text-xs w-24 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
 
-                                {/* AUTO — siempre visible */}
-                                <div className="flex items-center gap-0.5" title="Automatización del cronograma (motor COSP)">
-                                    <button
-                                        onClick={applyPrevMonthTemplate}
-                                        disabled={!selectedObjective || prevMonthLoading}
-                                        title="Copiar planificación del mes anterior como plantilla"
-                                        className="p-2 bg-slate-100 rounded-l-lg hover:bg-teal-50 hover:text-teal-600 transition-colors disabled:opacity-40 border-r border-slate-200"
-                                    >
-                                        {prevMonthLoading ? <Loader2 size={18} className="animate-spin text-teal-600"/> : <CalendarSearch size={18}/>}
-                                    </button>
-                                    {(() => {
-                                        const _pubKey = selectedObjective ? planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1) : '';
-                                        const _isPublished = !!(_pubKey && isPlanificacionPublished(publishStatusMap[_pubKey]));
-                                        const _blocked = _isPublished && !correctionMode;
-                                        return (
-                                    <button
-                                        onClick={() => {
-                                            setAutoV2Report(null);
-                                            setAutoWizardStep('configure');
-                                            setAutoWizardPersonalize(true);
-                                            setShowAutoV2Modal(true);
-                                            setCapOverflowEmps([]);
-                                            authorizedOver200IdsRef.current = new Set();
-                                            setAuthorizedOver200Ids(new Set());
-                                        }}
-                                        disabled={!selectedObjective || autoV2Loading || _blocked}
-                                        title={_blocked ? 'Crono publicado — entrá en CORREGIR para usar AUTO' : 'Automatizar: viabilidad + generación según SLA, CCT 200h, cobertura y dotación'}
-                                        className="p-2 bg-slate-100 rounded-r-lg hover:bg-amber-50 hover:text-amber-600 transition-colors disabled:opacity-40 border-l border-slate-200 flex items-center gap-1.5 px-2.5"
-                                    >
-                                        {autoV2Loading
-                                            ? <Loader2 size={18} className="animate-spin text-amber-600"/>
-                                            : <><Wand2 size={16} className="text-amber-600 shrink-0"/><span className="text-[10px] font-black text-amber-700 uppercase tracking-tight hidden sm:inline">Auto</span></>}
-                                    </button>
-                                        ); })()}
-                                </div>
+                                <button
+                                    onClick={applyPrevMonthTemplate}
+                                    disabled={!selectedObjective || prevMonthLoading}
+                                    title="Copiar planificación del mes anterior como plantilla"
+                                    className="p-2 bg-slate-100 rounded-lg hover:bg-teal-50 hover:text-teal-600 transition-colors disabled:opacity-40"
+                                >
+                                    {prevMonthLoading ? <Loader2 size={18} className="animate-spin text-teal-600"/> : <CalendarSearch size={18}/>}
+                                </button>
 
                                 {/* === ACCIONES SECUNDARIAS — se ocultan al colapsar === */}
                                 {!toolbarCollapsed && (
@@ -10828,7 +10933,7 @@ export default function PlanificacionPage() {
                                         </div>
 
                                         {/* BAND FILTER */}
-                                        <div className="relative" title="Filtrar por banda horaria">
+                                        <div className="relative" title="Ver el cronograma por banda">
                                             {(() => {
                                                 const BAND_COLORS: Record<string, string> = {
                                                     M: 'text-blue-700 border-blue-400 bg-blue-50',
@@ -10866,74 +10971,21 @@ export default function PlanificacionPage() {
                                             })()}
                                         </div>
 
-                                        {customOrderMap[selectedObjective || '__all__'] && !forceShowAll && (
+                                        {customOrderMap[selectedObjective || '__all__'] && (
                                             <button onClick={clearCustomOrder} className="p-2 bg-indigo-100 text-indigo-600 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors text-[9px] font-black uppercase flex items-center gap-1" title="Hay orden personalizado — click para restablecer orden automático"><Grip size={12}/><X size={10}/></button>
                                         )}
                                     </>
                                 )}
 
-                                {/* DOTACIÓN — siempre visible */}
-                                {forceShowAll ? (
-                                    <div className="flex items-center gap-0.5 px-1.5 py-1 rounded-xl border bg-amber-100 text-amber-700 border-amber-200">
-                                        <button
-                                            type="button"
-                                            onClick={() => startShowAllTransition(() => setForceShowAll(false))}
-                                            className="p-1.5 rounded-lg hover:bg-amber-200/70 transition-colors"
-                                            title="Volver a dotación del objetivo"
-                                        >
-                                            <Eye size={14}/>
-                                        </button>
-                                        <span className="text-[10px] font-black uppercase">≤</span>
-                                        <input
-                                            type="number"
-                                            min={DOTACION_NEARBY_KM_MIN}
-                                            max={DOTACION_NEARBY_KM_MAX}
-                                            value={nearbyKmDraft}
-                                            onChange={e => setNearbyKmDraft(e.target.value)}
-                                            onKeyDown={e => {
-                                                if (e.key === 'Enter') applyNearbyKm(parseInt(nearbyKmDraft, 10));
-                                            }}
-                                            className="w-11 text-center text-xs font-black bg-white/90 border border-amber-300 rounded-lg px-1 py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                            title={`Radio en km (${DOTACION_NEARBY_KM_MIN}–${DOTACION_NEARBY_KM_MAX})`}
-                                        />
-                                        <span className="text-[10px] font-black uppercase">km</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => applyNearbyKm(parseInt(nearbyKmDraft, 10))}
-                                            className="p-1.5 rounded-lg hover:bg-amber-200/70 transition-colors"
-                                            title="Buscar con este radio"
-                                        >
-                                            <Search size={13}/>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => applyNearbyKm(nearbyKmRadius + 5)}
-                                            className="px-1.5 py-1 rounded-lg text-[9px] font-black uppercase hover:bg-amber-200/70 transition-colors"
-                                            title={`Ampliar a ${clampNearbyKm(nearbyKmRadius + 5)} km`}
-                                        >
-                                            +5
-                                        </button>
-                                        {displayedEmployees.length > 0 && (
-                                            <span className="px-1.5 text-[9px] font-black text-amber-800/80" title="Empleados visibles">
-                                                {displayedEmployees.length}
-                                            </span>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={activateNearbyMode}
-                                        title={`Buscar personal a ≤${nearbyKmRadius} km del objetivo`}
-                                        className="px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 border transition-colors bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700"
-                                    >
-                                        <EyeOff size={14}/> Dotación
-                                    </button>
-                                )}
-                                {forceShowAll && displayedEmployees.length === 0 && (
-                                    <span className="text-[9px] font-bold text-amber-600 max-w-[140px] leading-tight">
-                                        Sin personal a ≤{nearbyKmRadius} km
-                                    </span>
-                                )}
+                                {/* DOTACIÓN — filtros arriba, candidatos en la grilla */}
+                                <button
+                                    type="button"
+                                    onClick={() => setForceShowAll(v => !v)}
+                                    title={forceShowAll ? 'Cerrar buscador de dotación' : `Buscar RET / franco / sin turno a ≤${nearbyKmRadius} km en el cronograma`}
+                                    className={`px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 border transition-colors ${forceShowAll ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700'}`}
+                                >
+                                    {forceShowAll ? <Eye size={14}/> : <EyeOff size={14}/>} Dotación
+                                </button>
 
 
                                 {/* VOLANTE — mostrar/ocultar guardias volante sin turno */}
@@ -10950,16 +11002,23 @@ export default function PlanificacionPage() {
                                 {/* BUSCAR EXTERNO — activa la barra de búsqueda encima del grid */}
                                 {selectedObjective && (
                                     <button
-                                        onClick={() => setSearchTerm(searchTerm ? '' : ' ')}
-                                        title="Buscar guardia externo para agregar al cronograma"
-                                        className={`p-2 rounded-xl border text-xs transition-colors ${searchTerm || pinnedExternalEmpIds.size > 0 ? 'bg-indigo-100 border-indigo-300 text-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600'}`}
+                                        onClick={() => {
+                                            if (showGuardiaSearch) {
+                                                setShowGuardiaSearch(false);
+                                                setSearchTerm('');
+                                            } else {
+                                                setShowGuardiaSearch(true);
+                                            }
+                                        }}
+                                        title="Buscar guardia en el cronograma o en toda la plantilla"
+                                        className={`p-2 rounded-xl border text-xs transition-colors ${showGuardiaSearch || pinnedExternalEmpIds.size > 0 ? 'bg-indigo-100 border-indigo-300 text-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600'}`}
                                     >
                                         <Search size={14}/>
                                     </button>
                                 )}
 
                                 {/* ASIGNAR — siempre visible */}
-                                <button onClick={() => setShowAddModal(true)} disabled={!selectedObjective || isServiceLocked} className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-slate-800 disabled:opacity-50"><UserPlus size={14}/> Asignar</button>
+                                <button onClick={() => { setAddSearchTerm(''); setShowAddModal(true); }} disabled={!selectedObjective || isServiceLocked} className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-slate-800 disabled:opacity-50"><UserPlus size={14}/> Asignar</button>
 
                                 {/* PANTALLA COMPLETA — siempre visible */}
                                 <button
@@ -11045,25 +11104,83 @@ export default function PlanificacionPage() {
                             )}
                             </>
                         )}
-                        {/* BUSCAR GUARDIA EXTERNO — barra encima del grid, solo cuando hay objetivo */}
+                        {forceShowAll && selectedObjective && !comparingSnapshot && (
+                            <div className="mx-2 mb-1 shrink-0 rounded-2xl border border-amber-200 bg-amber-50 px-2.5 py-1.5 shadow-sm no-print">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-[10px] font-black uppercase text-amber-800 flex items-center gap-1.5">
+                                        <Users size={12}/> Dotación
+                                    </span>
+                                    {([
+                                        { id: 'RET' as const, label: 'RET' },
+                                        { id: 'LIBRE' as const, label: 'Sin turno' },
+                                        { id: 'F' as const, label: 'F' },
+                                        { id: null, label: 'Todos' },
+                                    ]).map((opt) => {
+                                        const active = dotacionPoolType === opt.id;
+                                        return (
+                                            <button
+                                                key={opt.label}
+                                                type="button"
+                                                onClick={() => setDotacionPoolType(opt.id)}
+                                                className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase border ${active ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-amber-800 border-amber-200 hover:bg-amber-100'}`}
+                                            >
+                                                {opt.label}
+                                            </button>
+                                        );
+                                    })}
+                                    <span className="text-[10px] font-black uppercase text-amber-700 ml-1">≤</span>
+                                    <input
+                                        type="number"
+                                        min={DOTACION_NEARBY_KM_MIN}
+                                        max={DOTACION_NEARBY_KM_MAX}
+                                        value={nearbyKmDraft}
+                                        onChange={e => setNearbyKmDraft(e.target.value)}
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') persistNearbyKm(parseInt(nearbyKmDraft, 10));
+                                        }}
+                                        className="w-12 text-center text-xs font-black bg-white border border-amber-300 rounded-lg px-1 py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    />
+                                    <span className="text-[10px] font-black uppercase text-amber-700">km</span>
+                                    {ROSTER_KM_PRESETS.map((km) => (
+                                        <button
+                                            key={km}
+                                            type="button"
+                                            onClick={() => persistNearbyKm(km)}
+                                            className={`px-1.5 py-1 rounded-lg text-[9px] font-black ${nearbyKmRadius === km ? 'bg-amber-600 text-white' : 'bg-white text-amber-800 border border-amber-200'}`}
+                                        >{km}</button>
+                                    ))}
+                                    <input
+                                        type="text"
+                                        value={dotacionPoolSearch}
+                                        onChange={e => setDotacionPoolSearch(e.target.value)}
+                                        placeholder="Nombre o legajo…"
+                                        className="ml-auto min-w-[140px] flex-1 max-w-[220px] bg-white border border-amber-200 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-700"
+                                    />
+                                    <span className="text-[10px] font-black text-amber-800/80">
+                                        {dotacionPoolReady ? `${dotacionPoolCandidates.length} en grilla` : 'Buscando…'}
+                                    </span>
+                                    <button type="button" onClick={() => setForceShowAll(false)} className="p-1 text-amber-700 hover:text-amber-900" title="Cerrar">
+                                        <X size={14}/>
+                                    </button>
+                                </div>
+                                {dotacionPoolReady && dotacionPoolCandidates.length === 0 && (
+                                    <p className="text-[11px] font-bold text-amber-800/70 px-1 pt-1.5">
+                                        No hay candidatos con ese filtro a ≤{nearbyKmRadius} km. Ampliá el radio o cambiá el tipo.
+                                    </p>
+                                )}
+                            </div>
+                        )}
                         {selectedObjective && !comparingSnapshot && (() => {
-                            const dotacionIds = new Set(dotacionBaseEmployees.map((e: any) => e.id));
                             const q = searchTerm.trim();
-                            const externalMatches = q.length >= 2
-                                ? employees.filter((e: any) =>
-                                    e.status !== 'inactivo' &&
-                                    !dotacionIds.has(e.id) &&
-                                    e.name.toLowerCase().includes(q.toLowerCase()),
-                                  ).slice(0, 8)
-                                : [];
+                            const { inGrid, external } = guardiaSearchMatches;
                             const hasPinned = pinnedExternalEmpIds.size > 0;
-                            if (!searchTerm && !hasPinned) return null;
+                            if (!showGuardiaSearch && !hasPinned) return null;
                             return (
                                 <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl mb-1 relative">
                                     <Search size={12} className="text-indigo-400 shrink-0"/>
                                     <input
                                         type="text"
-                                        placeholder="Buscar externo para agregar…"
+                                        placeholder="Nombre, apellido o legajo…"
                                         value={searchTerm}
                                         onChange={e => setSearchTerm(e.target.value)}
                                         autoFocus
@@ -11083,28 +11200,51 @@ export default function PlanificacionPage() {
                                             })}
                                         </div>
                                     )}
-                                    {searchTerm && (
-                                        <button onClick={() => setSearchTerm('')} className="text-indigo-400 hover:text-indigo-600 shrink-0"><X size={12}/></button>
+                                    {(searchTerm || showGuardiaSearch) && (
+                                        <button onClick={() => { setSearchTerm(''); setShowGuardiaSearch(false); }} className="text-indigo-400 hover:text-indigo-600 shrink-0"><X size={12}/></button>
                                     )}
-                                    {externalMatches.length > 0 && (
-                                        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl w-64 overflow-hidden">
-                                            <div className="px-2.5 py-1.5 text-[9px] font-black uppercase text-slate-400 bg-slate-50 border-b border-slate-100">
-                                                Agregar al cronograma (temporal)
-                                            </div>
-                                            {externalMatches.map((emp: any) => (
-                                                <button
-                                                    key={emp.id}
-                                                    className="w-full px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2"
-                                                    onClick={() => { setPinnedExternalEmpIds(prev => new Set([...prev, emp.id])); setSearchTerm(''); }}
-                                                >
-                                                    <UserPlus size={11} className="text-indigo-400 shrink-0"/>
-                                                    <span className="truncate">{emp.name}</span>
-                                                </button>
-                                            ))}
+                                    {q.length >= 2 && (inGrid.length > 0 || external.length > 0) && (
+                                        <div className="absolute top-full left-0 mt-1 z-50 bg-white border border-slate-200 rounded-xl shadow-xl w-72 overflow-hidden max-h-72 overflow-y-auto">
+                                            {inGrid.length > 0 && (
+                                                <>
+                                                    <div className="px-2.5 py-1.5 text-[9px] font-black uppercase text-slate-400 bg-slate-50 border-b border-slate-100">
+                                                        En este cronograma
+                                                    </div>
+                                                    {inGrid.map((emp: any) => (
+                                                        <button
+                                                            key={`g-${emp.id}`}
+                                                            className="w-full px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2"
+                                                            onClick={() => { scrollToEmployeeRow(emp.id); setSearchTerm(''); }}
+                                                        >
+                                                            <User size={11} className="text-emerald-500 shrink-0"/>
+                                                            <span className="truncate flex-1">{emp.name}</span>
+                                                            {emp.fileNumber && <span className="text-[9px] font-mono text-slate-400">{emp.fileNumber}</span>}
+                                                        </button>
+                                                    ))}
+                                                </>
+                                            )}
+                                            {external.length > 0 && (
+                                                <>
+                                                    <div className="px-2.5 py-1.5 text-[9px] font-black uppercase text-slate-400 bg-slate-50 border-b border-slate-100">
+                                                        Agregar al cronograma
+                                                    </div>
+                                                    {external.map((emp: any) => (
+                                                        <button
+                                                            key={`x-${emp.id}`}
+                                                            className="w-full px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2"
+                                                            onClick={() => { setPinnedExternalEmpIds(prev => new Set([...prev, emp.id])); setSearchTerm(''); window.setTimeout(() => scrollToEmployeeRow(emp.id), 120); }}
+                                                        >
+                                                            <UserPlus size={11} className="text-indigo-400 shrink-0"/>
+                                                            <span className="truncate flex-1">{emp.name}</span>
+                                                            {emp.fileNumber && <span className="text-[9px] font-mono text-slate-400">{emp.fileNumber}</span>}
+                                                        </button>
+                                                    ))}
+                                                </>
+                                            )}
                                         </div>
                                     )}
-                                    {q.length >= 2 && externalMatches.length === 0 && (
-                                        <span className="text-[10px] text-indigo-400 font-bold">Sin resultados externos</span>
+                                    {q.length >= 2 && inGrid.length === 0 && external.length === 0 && (
+                                        <span className="text-[10px] text-indigo-400 font-bold">Sin resultados</span>
                                     )}
                                 </div>
                             );
@@ -11131,7 +11271,7 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
                         ) : (
-                            <div className={`flex-1 min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || isShowAllPending) ? 'opacity-60' : ''} ${correctionMode ? 'pb-2' : ''}`}>
+                            <div className={`relative flex-1 min-h-0 overflow-auto custom-scrollbar rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 transition-opacity duration-150 ${(isFilterPending || (selectedObjective && !shiftsMapLoaded)) ? 'opacity-70' : ''} ${correctionMode ? 'pb-2' : ''}`}>
                                 {renderGrid(false, undefined, undefined, undefined, correctionMode ? { highlightCoverageFooter: true } : undefined)}
                             </div>
                         )}
@@ -13044,7 +13184,7 @@ export default function PlanificacionPage() {
                             <>
                                 <input
                                     type="text"
-                                    placeholder="Buscar compañero..."
+                                    placeholder="Nombre, apellido o legajo…"
                                     className="w-full bg-slate-50 border p-3 rounded-xl mb-3 text-sm font-bold"
                                     value={swapSearchTerm}
                                     onChange={e => setSwapSearchTerm(e.target.value)}
@@ -13110,7 +13250,97 @@ export default function PlanificacionPage() {
                         </div>
                     </div>
                 )}
-                {showAddModal && (<div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowAddModal(false)}><div className="bg-white p-6 rounded-xl shadow-2xl w-[420px]" onClick={e => e.stopPropagation()}><h3 className="font-black text-lg mb-1">Asignar Colaborador</h3><p className="text-xs text-slate-400 font-bold mb-4">Colaboradores a ≤{nearbyKmRadius} km de <span className="text-indigo-600">{getObjectiveName(selectedObjective)}</span> (más cerca primero). Al seleccionar se cambia su objetivo preferido.</p><input autoFocus className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-4 text-sm font-bold" placeholder="Escriba nombre..." value={addSearchTerm} onChange={e => setAddSearchTerm(e.target.value)}/><div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">{addModalEmployeeCandidates.map(emp => { const alreadyAssigned = emp.preferredObjectiveId === selectedObjective; return (<button key={emp.id} onClick={async () => { if (!emp.id) return; await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); setAddSearchTerm(''); setShowAddModal(false); toast.success(`${emp.name} asignado a ${getObjectiveName(selectedObjective)}`); }} className="w-full p-3 text-left hover:bg-indigo-50 rounded-lg flex items-center gap-3 text-sm font-medium text-slate-700 group"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-black text-xs text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600">{emp.name.substring(0,2)}</div><div className="flex-1 min-w-0"><div className="font-bold truncate">{emp.name}</div>{alreadyAssigned && <div className="text-[10px] text-emerald-600 font-black">Ya asignado aquí</div>}</div>{alreadyAssigned && <CheckCircle size={14} className="text-emerald-500 shrink-0"/>}</button>); })}</div></div></div>)}
+                {showAddModal && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { setShowAddModal(false); setAddSearchTerm(''); }}>
+                        <div className="bg-white p-6 rounded-2xl shadow-2xl w-[440px]" onClick={e => e.stopPropagation()}>
+                            <h3 className="font-black text-lg mb-1">Asignar Colaborador</h3>
+                            <p className="text-xs text-slate-400 font-bold mb-2">
+                                {addSearchTerm.trim()
+                                    ? <>Busca en toda la plantilla. Al elegir se asigna a <span className="text-indigo-600">{getObjectiveName(selectedObjective)}</span>.</>
+                                    : <>Cercanos a ≤{nearbyKmRadius} km. Escribí para buscar en toda la plantilla.</>}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                                <MapPin size={12} className="text-amber-600 shrink-0"/>
+                                {ROSTER_KM_PRESETS.map((km) => (
+                                    <button
+                                        key={km}
+                                        type="button"
+                                        onClick={() => persistNearbyKm(km)}
+                                        className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase border ${nearbyKmRadius === km ? 'bg-amber-600 text-white border-amber-600' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700'}`}
+                                    >
+                                        {km} km
+                                    </button>
+                                ))}
+                                <input
+                                    type="number"
+                                    min={DOTACION_NEARBY_KM_MIN}
+                                    max={DOTACION_NEARBY_KM_MAX}
+                                    value={nearbyKmDraft}
+                                    onChange={e => setNearbyKmDraft(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key === 'Enter') persistNearbyKm(parseInt(nearbyKmDraft, 10));
+                                    }}
+                                    onBlur={() => persistNearbyKm(parseInt(nearbyKmDraft, 10))}
+                                    className="w-12 text-center text-[11px] font-black bg-slate-50 border border-slate-200 rounded-lg px-1 py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    title={`Radio ${DOTACION_NEARBY_KM_MIN}–${DOTACION_NEARBY_KM_MAX} km`}
+                                />
+                            </div>
+                            <input
+                                autoFocus
+                                className="w-full bg-slate-50 border border-slate-200 p-3 rounded-xl mb-3 text-sm font-bold"
+                                placeholder="Nombre, apellido o legajo…"
+                                value={addSearchTerm}
+                                onChange={e => setAddSearchTerm(e.target.value)}
+                            />
+                            <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1">
+                                {addModalEmployeeCandidates.length === 0 && (
+                                    <p className="text-xs text-slate-400 font-bold px-1 py-4 text-center">
+                                        {addSearchTerm.trim() ? 'Sin coincidencias en la plantilla' : `No hay cercanos a ≤${nearbyKmRadius} km. Ampliá el radio o escribí un nombre.`}
+                                    </p>
+                                )}
+                                {addModalEmployeeCandidates.map(emp => {
+                                    const alreadyAssigned = emp.preferredObjectiveId === selectedObjective;
+                                    const objLat = Number(selectedObjectiveData?.lat ?? 0);
+                                    const objLng = Number(selectedObjectiveData?.lng ?? 0);
+                                    const km = (objLat && objLng) ? employeeKmToObjective(emp, objLat, objLng) : null;
+                                    const home = alreadyAssigned ? null : getObjectiveName(emp.preferredObjectiveId);
+                                    return (
+                                        <button
+                                            key={emp.id}
+                                            onClick={async () => {
+                                                if (!emp.id) return;
+                                                await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective });
+                                                setAddSearchTerm('');
+                                                setShowAddModal(false);
+                                                toast.success(`${emp.name} asignado a ${getObjectiveName(selectedObjective)}`);
+                                            }}
+                                            className="w-full p-3 text-left hover:bg-indigo-50 rounded-lg flex items-center gap-3 text-sm font-medium text-slate-700 group"
+                                        >
+                                            <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-black text-xs text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600">
+                                                {String(emp.name || '').substring(0, 2)}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-bold truncate">{emp.name}</div>
+                                                <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400">
+                                                    {emp.fileNumber && <span className="font-mono">{emp.fileNumber}</span>}
+                                                    {alreadyAssigned && <span className="text-emerald-600 font-black">Ya asignado aquí</span>}
+                                                    {!alreadyAssigned && home && home !== 'Desconocido' && <span className="truncate">{home}</span>}
+                                                    {km != null && <span className="text-amber-600 shrink-0">{formatKmLabel(km)}</span>}
+                                                </div>
+                                            </div>
+                                            {alreadyAssigned && <CheckCircle size={14} className="text-emerald-500 shrink-0"/>}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {addSearchTerm.trim() && addModalMatchCount > addModalEmployeeCandidates.length && (
+                                <p className="text-[10px] font-bold text-slate-400 mt-2">
+                                    Mostrando {addModalEmployeeCandidates.length} de {addModalMatchCount}. Seguí escribiendo para acotar.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                )}
                 {showVacancyModal && (() => {
                     const absType = vacancyData?.type || '';
                     const absenceDateRange = vacancyData?.startDate
