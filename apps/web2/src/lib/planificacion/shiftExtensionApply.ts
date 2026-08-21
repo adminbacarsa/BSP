@@ -6,6 +6,7 @@ import { resolveEmployeeShift } from './planningRecompositionApply';
 import { applyOperationalGapCloseToChanges, type OperationalGapCloseInput } from './operationalGapCoverage';
 import { shiftTimeWindowFromSla, type VacancyPositionSla } from './vacancySplitBands';
 import { normalizePlanningPositionName } from './positionCoverageUnits';
+import { listVacancyGapBandOptions } from './vacancyGapBands';
 
 const NON_WORK = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET', 'REF', 'ESC', 'PAST', 'LOCKED']);
 
@@ -50,6 +51,8 @@ export type SingleShiftExtensionInput = {
   extraHours: number;
   coversBandCode?: string | null;
   coversPositionName?: string | null;
+  /** Horas de la banda SLA a cerrar; si extraHours las cubre → FULL_BAND. */
+  gapBandHours?: number | null;
 };
 
 export function applySingleShiftExtension(
@@ -78,6 +81,14 @@ export function applySingleShiftExtension(
   const segFrom = slaEnd;
   const pkgId = `shift_ext_${input.empId}_${input.dateStr}_${Date.now()}`;
 
+  const gapH = Number(input.gapBandHours);
+  const coversFullBand = !!(
+    input.coversBandCode
+    && Number.isFinite(gapH)
+    && gapH > 0
+    && input.extraHours + 0.05 >= gapH
+  );
+
   const next = {
     ...base,
     isTemp: true,
@@ -86,18 +97,26 @@ export function applySingleShiftExtension(
     isEarlyStart: false,
     adjustedEndTime: segTo,
     segmentFromTime: segFrom,
-    segmentToTime: segTo,
+    segmentToTime: coversFullBand
+      ? (() => {
+          const opt = listVacancyGapBandOptions(ctx.positionStructure, input.coversPositionName || base.positionName)
+            .find((o) => String(o.code).toUpperCase() === String(input.coversBandCode || '').toUpperCase());
+          return opt?.endTime || segTo;
+        })()
+      : segTo,
     coveragePackageId: pkgId,
     coverageType: 'ABSENCE_COVERAGE',
     coverageSegmentRole: 'EXTENSION',
-    coverageMode: 'SPLIT',
-    coverageStatus: input.coversBandCode ? 'PARTIAL' : undefined,
+    coverageMode: coversFullBand ? 'FULL_BAND' : (input.coversBandCode ? 'SPLIT' : 'SPLIT'),
+    coverageStatus: coversFullBand ? 'COVERED' : (input.coversBandCode ? 'PARTIAL' : undefined),
     coversBandCode: input.coversBandCode || undefined,
     coversPositionName: input.coversPositionName || base.positionName,
     extExtraHours: input.extraHours,
-    coverageNote: input.coversBandCode
-      ? `Ext +${input.extraHours}h (${segFrom}–${segTo}) · aporte banda ${input.coversBandCode}`
-      : `Extensión +${input.extraHours}h (${segFrom}–${segTo})`,
+    coverageNote: coversFullBand
+      ? `Ext +${input.extraHours}h · cierra banda ${input.coversBandCode} completa (${segFrom}–${segTo})`
+      : input.coversBandCode
+        ? `Ext +${input.extraHours}h (${segFrom}–${segTo}) · aporte banda ${input.coversBandCode}`
+        : `Extensión +${input.extraHours}h (${segFrom}–${segTo})`,
   };
 
   return { ...baseChanges, [key]: next };
@@ -153,14 +172,18 @@ export function synchronizeDualExtensionPackage(
   }
 
   const pkgId = sharedPkg || `sla_ext_pair_${dateStr}_${band}_${posNorm}`;
+  const alreadyFull =
+    String(cur.coverageMode || '').toUpperCase() === 'FULL_BAND'
+    && cur.coverageStatus === 'COVERED'
+    && !!cur.coversBandCode;
   const sharedMeta = {
     coveragePackageId: pkgId,
     coversBandCode: band,
     coversPositionName: gapPosition,
     coverageType: 'ABSENCE_COVERAGE',
-    coverageMode: 'SPLIT',
+    coverageMode: partnerKey ? 'SPLIT' : (alreadyFull ? 'FULL_BAND' : 'SPLIT'),
     coverageSegmentRole: 'EXTENSION',
-    coverageStatus: partnerKey ? 'COVERED' : 'PARTIAL',
+    coverageStatus: partnerKey || alreadyFull ? 'COVERED' : 'PARTIAL',
   };
 
   const patch: Record<string, any> = { ...changes };
@@ -228,6 +251,10 @@ export function applyShiftExtensionFromCell(
     extraHours: opts.primaryExtraHours,
     coversBandCode: opts.gapBand,
     coversPositionName: opts.gapPosition,
+    gapBandHours: opts.gapBand
+      ? (listVacancyGapBandOptions(opts.positionStructure, opts.gapPosition)
+          .find((o) => String(o.code).toUpperCase() === String(opts.gapBand).toUpperCase())?.hours ?? null)
+      : null,
   });
 
   if (opts.gapBand && opts.gapPosition) {

@@ -209,7 +209,7 @@ export default function PlanningSlaGapCloseModal({
         return;
       }
       if (!extId || !secondId) {
-        toast.error('Elegí una persona para las 8 h, o un guardia por tramo, o un franco trabajado.');
+        toast.error(`Elegí una persona para las ${titular.hours} h, o un guardia por tramo, o un franco trabajado.`);
         return;
       }
       if (extId === secondId) {
@@ -305,7 +305,7 @@ export default function PlanningSlaGapCloseModal({
               {titular.scheduleLabel !== '—' && <> · {titular.scheduleLabel}</>}
             </p>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              Una persona cubre las 8 h, o se reparte 4+4 (extensión del turno anterior + adelanto del siguiente).
+              Una persona cubre las {titular.hours} h de la banda, o se reparte entre extensión del turno anterior + adelanto del siguiente.
             </p>
             {splitPlan && (
               <p className="text-[9px] font-bold text-rose-800 mt-1">
@@ -368,7 +368,7 @@ export default function PlanningSlaGapCloseModal({
               }}
               className={`flex-1 py-2 rounded-xl text-[10px] font-black border ${coverMode === 'solo' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white border-slate-200 text-slate-600'}`}
             >
-              Una persona · 8 h
+              Una persona · {titular.hours} h
             </button>
             <button
               type="button"
@@ -385,7 +385,7 @@ export default function PlanningSlaGapCloseModal({
           {coverMode === 'solo' && (
           <div>
             <div className="text-[10px] font-black uppercase text-slate-500 mb-1">
-              Cubre {titular.scheduleLabel !== '—' ? titular.scheduleLabel : 'las 8 h'}
+              Cubre {titular.scheduleLabel !== '—' ? titular.scheduleLabel : `${titular.hours} h`}
             </div>
             <p className="text-[9px] font-bold text-slate-500 mb-1.5">
               Solo banda anterior ({splitPlan?.extBand || 'M'}) o siguiente ({splitPlan?.adelBand || 'N'}). No se adelanta un turno ya pasado.
@@ -393,7 +393,7 @@ export default function PlanningSlaGapCloseModal({
             <div className="space-y-1 max-h-40 overflow-y-auto rounded-xl border border-slate-100 p-1">
               {poolSolo.length === 0 ? (
                 <p className="text-[10px] font-bold text-amber-800 px-2 py-3">
-                  No hay guardia en la banda anterior o siguiente para cubrir las 8 h.
+                  No hay guardia en la banda anterior o siguiente para cubrir las {titular.hours} h.
                 </p>
               ) : poolSolo.map((c) => (
                 <button
@@ -408,7 +408,7 @@ export default function PlanningSlaGapCloseModal({
                 >
                   {c.name} · {c.code} · {c.positionName}
                   <span className="block text-[9px] font-bold text-slate-500">
-                    {c.soloRole === 'ext' ? 'Extiende' : 'Adelanta'} {titular.scheduleLabel !== '—' ? titular.scheduleLabel : '8 h'}
+                    {c.soloRole === 'ext' ? 'Extiende' : 'Adelanta'} {titular.scheduleLabel !== '—' ? titular.scheduleLabel : `${titular.hours} h`}
                   </span>
                 </button>
               ))}
@@ -545,7 +545,7 @@ export default function PlanningSlaGapCloseModal({
             onClick={tryApply}
             className="flex-1 py-3 rounded-xl font-black text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 shadow-lg shadow-rose-200"
           >
-            {ftId ? 'Aplicar franco trabajado' : coverMode === 'solo' ? 'Aplicar 8 h' : 'Aplicar y cerrar banda'}
+            {ftId ? 'Aplicar franco trabajado' : coverMode === 'solo' ? `Aplicar ${titular.hours} h` : 'Aplicar y cerrar banda'}
           </button>
         </div>
       </div>
