@@ -30,6 +30,8 @@ function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
         coversEmployeeId: data.coversEmployeeId,
         coversBandCode: data.coversBandCode,
         coverageStatus: data.coverageStatus,
+        coverageMode: data.coverageMode,
+        coverageType: data.coverageType,
         coverageNote: data.coverageNote,
         deploymentRole: data.deploymentRole,
         deploymentBand: data.deploymentBand,

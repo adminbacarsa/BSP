@@ -25,7 +25,7 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { Toaster, toast } from 'sonner';
+import { toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -2180,7 +2180,6 @@ export default function CRMPage() {
   return (
     <DashboardLayout>
       <Head><title>CRM Clientes | CronoApp</title></Head>
-      <Toaster position="top-center" richColors />
 
       {view === 'list' && (
         <ModuleShell<ClientItem>

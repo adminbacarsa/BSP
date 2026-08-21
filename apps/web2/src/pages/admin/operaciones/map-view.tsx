@@ -4,7 +4,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
-import { Toaster, toast } from 'sonner';
+import { toast } from 'sonner';
 import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, waitForPendingWrites, getDocs } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
@@ -1286,7 +1286,6 @@ export default function TacticalMapView() {
         <div className="h-screen w-screen overflow-hidden bg-slate-900 relative">
             <Head><title>COSP TACTICAL V1.0 · 31b309b</title></Head>
             <style>{POPUP_STYLES}</style>
-            <Toaster position="top-center" theme="dark" />
             
             <div className="absolute top-4 left-4 right-4 z-[1000] flex gap-2 justify-between pointer-events-none">
                 <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-2 flex items-center gap-3 border border-slate-200 pointer-events-auto">

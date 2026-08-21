@@ -7,7 +7,6 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { auth, db, onSnapshotFresh } from '@/lib/firebase';
 import { collection, query, where, writeBatch, doc, getDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
-import { Toaster } from 'sonner';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
@@ -710,8 +709,6 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
       {/* ── BOTTOM NAVIGATION (mobile) ────────────────────────────────── */}
       {!isSupervisionApp && <BottomNav />}
-
-      <Toaster position="top-right" richColors closeButton visibleToasts={3} />
     </>
   );
 }

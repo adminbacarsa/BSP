@@ -11,7 +11,7 @@ import {
     MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle,
     FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer
 } from 'lucide-react';
-import { Toaster, toast } from 'sonner';
+import { toast } from 'sonner';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
@@ -3363,7 +3363,6 @@ export default function OperacionesPage() {
 
     return (
         <DashboardLayout>
-            <Toaster position="top-right" />
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <style>{POPUP_STYLES}</style>
             {!centroControlEnabled && (
