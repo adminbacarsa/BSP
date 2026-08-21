@@ -21,7 +21,7 @@ const SUPERADMIN_MODULE_KEYS = [
 function fullSuperAdminPermissions(): Record<string, string[]> {
   const perms: Record<string, string[]> = {};
   SUPERADMIN_MODULE_KEYS.forEach((m) => { perms[m] = ['read', 'create', 'update', 'delete']; });
-  perms['PLANNING'] = ['read', 'create', 'update', 'delete', 'publish', 'correct', 'auto_lab'];
+  perms['PLANNING'] = ['read', 'create', 'update', 'delete', 'publish', 'correct', 'auto_lab', 'assign_ft'];
   perms['RRHH'] = ['read', 'create', 'update', 'delete', 'adjust'];
   return perms;
 }

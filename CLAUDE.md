@@ -156,6 +156,8 @@ Definidos en `apps/web2/src/config/modules.ts`:
 | `CONFIG` | Configuración Global | `/admin/configuracion` |
 
 Acciones por módulo: `read`, `create`, `update`, `delete`.
+`PLANNING` además: `publish`, `correct`, `auto_lab`, `assign_ft` (Franco Trabajado).
+`RRHH` además: `adjust`.
 `isSuperAdmin` bypasea todos los permisos.
 
 **Centro de Control (kill switch):** campo `empresas/{id}.centroControlEnabled` (default ON). SuperAdmin lo apaga en Configuración → Empresas. Si está en `false`, los crons `detectarAusencias`, `gestionarVacantes` y `autoCompletarTurnos` no generan novedades/AUTO_T30/avisos para esa empresa; tampoco el aviso de llegada tarde ni el auto-monitor del front.
