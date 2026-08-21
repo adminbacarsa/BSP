@@ -138,6 +138,14 @@ import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { rebuildHoursBalanceForObjectiveMonth } from '@/lib/hoursBalance';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
+import {
+    planToastBulk,
+    planToastChangeApplied,
+    planToastSaveError,
+    planToastSaved,
+    planToastSaving,
+    planToastWarnMany,
+} from '@/lib/planificacion/planToast';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
@@ -5564,7 +5572,7 @@ export default function PlanificacionPage() {
         newChanges[key] = { isDeleted: true };
         commitPendingChanges(newChanges);
         setSelectedCell(null);
-        toast.info("Marcado para borrar.");
+        toast.info("Marcado para borrar.", { id: 'plan-cambio', duration: 2000 });
     };
     const getSafeTime = (input: any) => { if (!input) return [6, 0]; if (typeof input === 'string') return input.split(':').map(Number); if (input.toDate) { const d = input.toDate(); return [d.getHours(), d.getMinutes()]; } if (input.seconds) { const d = new Date(input.seconds * 1000); return [d.getHours(), d.getMinutes()]; } if (input instanceof Date) return [input.getHours(), input.getMinutes()]; return [6, 0]; };
     
@@ -5698,7 +5706,7 @@ export default function PlanificacionPage() {
             clearUndoStack();
             setBackgroundSaveCount((c) => c + 1);
 
-            const toastId = toast.loading(`Guardando ${jobCount} cambios en segundo plano…`);
+            planToastSaving(jobCount);
 
             void (async () => {
             let batch = writeBatch(db);
@@ -5910,18 +5918,27 @@ export default function PlanificacionPage() {
                             ...deploymentFieldsForFirestore(change),
                         };
 
-                        if (change.coveragePackageId) {
-                            turnoPayload.coveragePackageId = change.coveragePackageId;
-                            turnoPayload.coverageType = change.coverageType || null;
-                            turnoPayload.coverageSegmentRole = change.coverageSegmentRole || null;
-                            turnoPayload.coverageNote = change.coverageNote || null;
-                            turnoPayload.coverageStatus = change.coverageStatus || null;
-                            turnoPayload.coverageMode = change.coverageMode || null;
-                            turnoPayload.liberationReason = change.liberationReason || null;
-                            turnoPayload.redeployNote = change.redeployNote || null;
-                            turnoPayload.coversEmployeeId = change.coversEmployeeId || null;
-                            turnoPayload.coversPositionName = change.coversPositionName || null;
-                            turnoPayload.coversBandCode = change.coversBandCode || null;
+                        if (
+                            change.coveragePackageId
+                            || change.coverageMode
+                            || change.coversBandCode
+                            || change.coversPositionName
+                            || change.coverageSegmentRole
+                            || change.coverageStatus
+                            || change.isExtended
+                            || change.isEarlyStart
+                        ) {
+                            if (change.coveragePackageId) turnoPayload.coveragePackageId = change.coveragePackageId;
+                            if (change.coverageType) turnoPayload.coverageType = change.coverageType;
+                            if (change.coverageSegmentRole) turnoPayload.coverageSegmentRole = change.coverageSegmentRole;
+                            if (change.coverageNote) turnoPayload.coverageNote = change.coverageNote;
+                            if (change.coverageStatus) turnoPayload.coverageStatus = change.coverageStatus;
+                            if (change.coverageMode) turnoPayload.coverageMode = change.coverageMode;
+                            if (change.liberationReason) turnoPayload.liberationReason = change.liberationReason;
+                            if (change.redeployNote) turnoPayload.redeployNote = change.redeployNote;
+                            if (change.coversEmployeeId) turnoPayload.coversEmployeeId = change.coversEmployeeId;
+                            if (change.coversPositionName) turnoPayload.coversPositionName = change.coversPositionName;
+                            if (change.coversBandCode) turnoPayload.coversBandCode = change.coversBandCode;
                             if (change.segmentFromTime) turnoPayload.segmentFromTime = change.segmentFromTime;
                             if (change.segmentToTime) turnoPayload.segmentToTime = change.segmentToTime;
                         }
@@ -6039,7 +6056,7 @@ export default function PlanificacionPage() {
                 if (isPublished) {
                     setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
                 }
-                toast.success(`${jobCount} cambios guardados`, { id: toastId });
+                planToastSaved(jobCount);
 
                 const postSaveTasks: Promise<unknown>[] = [
                     addDoc(collection(db, 'planificaciones_historial'), {
@@ -6152,7 +6169,7 @@ export default function PlanificacionPage() {
             } catch(e) {
                 console.error(e);
                 restorePendingOnFailure();
-                toast.error('Error al guardar — cambios restaurados en pendientes', { id: toastId });
+                planToastSaveError();
             } finally {
                 setBackgroundSaveCount((c) => Math.max(0, c - 1));
             }
@@ -6846,7 +6863,7 @@ export default function PlanificacionPage() {
                     blockedEmps.add(emp.name);
                     continue;
                 }
-                if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 }));
+                if (warnings.length > 0) planToastWarnMany(warnings, 8000);
                 if (isBulkCovBlocked(emp.id, assignPos, codeUpper)) { skippedCoverage++; continue; }
                 let cellIsFT = false;
                 if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') {
@@ -6868,9 +6885,11 @@ export default function PlanificacionPage() {
             }
         }
         if (blockedEmps.size > 0) toast.error(`🚫 Bloqueados (objetivo excluido): ${[...blockedEmps].join(', ')}`, { duration: 10000 });
-        if (skippedExt > 0) toast.warning(`${skippedExt} fila(s) omitida(s): elegí objetivo para EXT`, { duration: 8000 });
-        if (skippedExcluded > 0) toast.warning(`${skippedExcluded} celda(s) omitida(s): puesto excluido por SLA ese día`, { duration: 8000 });
-        if (skippedCoverage > 0) toast.warning(`${skippedCoverage} celda(s) omitida(s): cobertura SLA ya completa o cupo del turno lleno`, { duration: 9000 });
+        const bulkWarns: string[] = [];
+        if (skippedExt > 0) bulkWarns.push(`${skippedExt} omitida(s): elegí objetivo EXT`);
+        if (skippedExcluded > 0) bulkWarns.push(`${skippedExcluded} omitida(s): puesto excluido SLA`);
+        if (skippedCoverage > 0) bulkWarns.push(`${skippedCoverage} omitida(s): cobertura completa`);
+        planToastWarnMany(bulkWarns);
         commitPendingChanges(newChanges);
         if (count > 0) {
             const codeLabel = shiftConfig ? String(shiftConfig.code || '').toUpperCase() : 'BORRAR';
@@ -6879,13 +6898,11 @@ export default function PlanificacionPage() {
                     return shiftConfig.positionName || '';
                 })()
                 : '';
-            toast.info(shiftConfig
+            planToastBulk(shiftConfig
                 ? `${count} celda(s) · ${codeLabel}${samplePos ? ` → ${samplePos}` : ''}`
                 : `${count} celda(s) marcadas para borrar`);
-        } else if (skippedCoverage > 0 || skippedExcluded > 0) {
-            toast.info('Ninguna celda aplicada');
-        } else {
-            toast.info(`${count} celdas`);
+        } else if (skippedCoverage > 0 || skippedExcluded > 0 || skippedExt > 0) {
+            planToastBulk('Ninguna celda aplicada');
         }
     };
 
@@ -7055,7 +7072,7 @@ export default function PlanificacionPage() {
                 if (isBlocked(dateStr, String(sh.code || ''), hours, newChanges)) { skippedCoverage++; continue; }
                 const { blocked, warnings } = checkRestricciones(emp, dateStr, posName, sh.code, covObjId, empStructure);
                 if (blocked) continue;
-                if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 8000 }));
+                if (warnings.length > 0) planToastWarnMany(warnings, 8000);
                 if (isBulkCovBlocked(emp.id, posName, String(sh.code || ''))) { skippedCoverage++; continue; }
                 newChanges[key] = {
                     code: sh.code,
@@ -7072,10 +7089,12 @@ export default function PlanificacionPage() {
             }
         }
         commitPendingChanges(newChanges);
-        if (skippedNoPos > 0) toast.warning(`${skippedNoPos} fila(s) omitida(s): el puesto no existe en el SLA del objetivo`, { duration: 8000 });
-        if (skippedCoverage > 0) toast.warning(`${skippedCoverage} celda(s) omitida(s): cobertura completa`, { duration: 8000 });
-        if (skippedExcluded > 0) toast.warning(`${skippedExcluded} celda(s) omitida(s): día excluido`, { duration: 8000 });
-        toast.info(count > 0 ? `${count} celda(s) · puesto ${posName}` : 'Ninguna celda aplicada');
+        planToastWarnMany([
+            skippedNoPos > 0 ? `${skippedNoPos} omitida(s): puesto no existe en SLA` : '',
+            skippedCoverage > 0 ? `${skippedCoverage} omitida(s): cobertura completa` : '',
+            skippedExcluded > 0 ? `${skippedExcluded} omitida(s): día excluido` : '',
+        ]);
+        planToastBulk(count > 0 ? `${count} celda(s) · puesto ${posName}` : 'Ninguna celda aplicada');
     };
 
     const checkRestricciones = (emp: any, dateStr: string, positionName?: string | null, shiftCode?: string | null, objectiveIdOverride?: string | null, structureOverride?: any[]): { blocked: boolean; warnings: string[] } => {
@@ -7144,7 +7163,7 @@ export default function PlanificacionPage() {
         if (emp && config && !config.isDeleted) {
             const assignPos = config.positionName || activePosition || 'General';
             const { blocked, warnings } = checkRestricciones(emp, selectedCell.dateStr, assignPos, config.code);
-            if (warnings.length > 0) warnings.forEach(w => toast.warning(w, { duration: 10000 }));
+            if (warnings.length > 0) planToastWarnMany(warnings, 8000);
             if (blocked) return;
         }
         const newChanges = { ...pendingChanges };
@@ -7229,7 +7248,7 @@ export default function PlanificacionPage() {
         setPendingAssignment(null);
         setSwapConfig(null);
         setShowSwapModal(false);
-        toast.info("Cambio aplicado", { id: 'plan-cambio-aplicado' });
+        planToastChangeApplied();
     };
 
     const applyRecompositionPackage = (

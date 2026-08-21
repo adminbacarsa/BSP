@@ -135,9 +135,8 @@ export default function PlanningShiftExtendModal({
   }
 
   const commit = (authorizeFranco: boolean) => {
-    const bandForMeta = secondId
-      ? uiBand
-      : (data.suggestedGapBand || gapBand || null);
+    // Siempre la banda que muestra el select (uiBand), no solo suggestedGapBand/gapBand state.
+    const bandForMeta = uiBand || data.suggestedGapBand || gapBand || null;
     try {
       const changes = applyShiftExtensionFromCell(pendingChanges, {
         objectiveId,
@@ -179,9 +178,9 @@ export default function PlanningShiftExtendModal({
       commit(conflicts.length > 0);
       return;
     }
-    if (uiBand) {
-      toast.message('Solo extendiste a este guardia', {
-        description: `Para cerrar banda ${uiBand} en ${gapPositionName}, elegí un 2.º guardia abajo o usá «Cerrar banda» en el pie del día.`,
+    if (uiBand && !soloCoversFullBand) {
+      toast.message('Extensión parcial', {
+        description: `Para cerrar banda ${uiBand} en ${gapPositionName} hacen falta ${gapBandHours}h (o un 2.º guardia).`,
       });
     }
     commit(false);

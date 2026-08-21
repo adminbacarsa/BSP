@@ -5,7 +5,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'; 
 import { getAuth } from 'firebase/auth';
-import { Toaster, toast } from 'sonner';
+import { toast } from 'sonner';
 import { 
     Calculator, Settings, Users, Package, Clock, Trash2, Save, AlertTriangle, 
     X, CheckCircle, ArrowLeft, Shield, RefreshCw, Database,
@@ -369,7 +369,6 @@ export default function SmartCostingPage() {
     return (
         <DashboardLayout>
             <Head><title>Smart Costing</title></Head>
-            <Toaster position="top-center" />
             
             <div className="max-w-7xl mx-auto p-4 md:p-6 bg-slate-50 min-h-screen relative pb-32 animate-in fade-in">
                 

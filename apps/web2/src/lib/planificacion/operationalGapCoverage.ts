@@ -176,6 +176,7 @@ export function applySingleWorkerFullGapCloseToChanges(
   const shortName = String(emp?.name || empId).split(',')[0];
   const key = `${empId}_${applyDate}`;
   const roleLabel = isExt ? 'extiende' : 'adelanta';
+  const pkgId = `sla_full_${input.dateStr}_${band}_${empId}_${Date.now()}`;
 
   return {
     ...baseChanges,
@@ -186,6 +187,7 @@ export function applySingleWorkerFullGapCloseToChanges(
       isEarlyStart: isAdel && !isExt,
       extExtraHours: hours,
       isTemp: true,
+      coveragePackageId: pkgId,
       coverageType: 'ABSENCE_COVERAGE',
       coverageMode: 'FULL_BAND',
       coverageSegmentRole: isExt ? 'EXTENSION' : 'EARLY_START',
@@ -248,6 +250,7 @@ export function applyFrancoTrabajadoGapCloseToChanges(
   const key = `${empId}_${input.dateStr}`;
   const emp = ctx.employeesById[empId];
   const name = emp?.name || empId;
+  const pkgId = `sla_ft_${input.dateStr}_${band}_${empId}_${Date.now()}`;
 
   return {
     ...baseChanges,
@@ -266,6 +269,7 @@ export function applyFrancoTrabajadoGapCloseToChanges(
       isExtended: false,
       isEarlyStart: false,
       isTemp: true,
+      coveragePackageId: pkgId,
       coverageType: 'ABSENCE_COVERAGE',
       coverageMode: 'FRANCO_TRABAJADO',
       coverageSegmentRole: 'SUBSTITUTE',

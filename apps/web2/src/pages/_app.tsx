@@ -1,9 +1,9 @@
-
 import '@/styles/globals.css';
 import type { AppProps } from 'next/app';
 import dynamic from 'next/dynamic';
 import { useEffect } from 'react';
 import { useRouter } from 'next/router';
+import { Toaster } from 'sonner';
 import { ToastProvider } from '@/context/ToastContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { EmpresaProvider } from '@/context/EmpresaContext';
@@ -70,6 +70,7 @@ export default function App({ Component, pageProps }: AppProps) {
         <AdminFcmRegistrar />
         <Component {...pageProps} />
         {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
+        <Toaster position="top-center" richColors closeButton visibleToasts={2} duration={3200} />
       </ToastProvider>
       </EmpresaProvider>
     </AuthProvider>

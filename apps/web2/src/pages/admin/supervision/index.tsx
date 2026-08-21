@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Head from 'next/head';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { Toaster, toast } from 'sonner';
+import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -762,7 +762,6 @@ export default function SupervisionPage() {
   return (
     <DashboardLayout>
       <Head><title>Supervisión — COSP</title></Head>
-      <Toaster richColors position="top-center"/>
 
       <div className="flex flex-col min-h-[calc(100dvh-3.5rem)] lg:min-h-0 -mx-3 sm:-mx-5 lg:mx-0">
         <div className="sticky top-0 z-40 bg-[var(--app-bg)]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-700/80 px-4 py-3 lg:rounded-2xl lg:mx-0 lg:mb-4 lg:border lg:shadow-sm">
