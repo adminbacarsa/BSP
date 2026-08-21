@@ -19,6 +19,8 @@ export type PlanningShiftSlice = {
     isDeleted?: boolean;
     coveragePackageId?: string;
     coverageSegmentRole?: string;
+    /** FULL_BAND = una persona cubre toda la banda faltante; SPLIT = ext+adel o aporte parcial. */
+    coverageMode?: string;
     coversPositionName?: string;
     coversEmployeeId?: string;
     coversBandCode?: string;
@@ -26,6 +28,7 @@ export type PlanningShiftSlice = {
     coveredBy?: string;
     isExtended?: boolean;
     isEarlyStart?: boolean;
+    extExtraHours?: number;
 };
 
 type ShiftRow = PlanningShiftSlice & { employeeId: string };
@@ -69,6 +72,26 @@ export function assessSplitPackageStatus(rows: PlanningShiftSlice[]): 'COVERED' 
         r.coverageSegmentRole === 'EARLY_START' || (!!r.isEarlyStart && !r.isExtended));
     const hasBandMeta = !!rows.find((r) => r.coversBandCode);
     const hasPackage = !!rows.find((r) => r.coveragePackageId);
+
+    // Una sola persona cubre la banda completa (ej. M2 extendido cierra T2 de 6h).
+    const fullBandCover = rows.some((r) => {
+        const mode = String(r.coverageMode || '').toUpperCase();
+        if (mode !== 'FULL_BAND') return false;
+        if (!r.coversBandCode) return false;
+        if (r.coverageStatus === 'PARTIAL') return false;
+        return r.coverageStatus === 'COVERED' || !r.coverageStatus;
+    });
+    if (fullBandCover && (extLike.length > 0 || adelLike.length > 0)) {
+        return 'COVERED';
+    }
+
+    // Compat: segmento único marcado COVERED + coversBandCode (sin exigir 2.º guardia).
+    if ((extLike.length === 1 && adelLike.length === 0) || (adelLike.length === 1 && extLike.length === 0)) {
+        const explicitSolo = rows.find((r) => r.coverageStatus === 'COVERED' && !!r.coversBandCode);
+        if (explicitSolo && (hasBandMeta || hasPackage || String(explicitSolo.coverageMode || '').toUpperCase() === 'FULL_BAND')) {
+            return 'COVERED';
+        }
+    }
 
     if (extLike.length >= 2 && adelLike.length === 0 && (hasBandMeta || hasPackage)) {
         const explicit = rows.find((r) => r.coverageStatus === 'COVERED' || r.coverageStatus === 'PARTIAL')?.coverageStatus;
@@ -190,6 +213,22 @@ function creditSplitPackage(
 
     if (!credits[posName]) credits[posName] = {};
     credits[posName][bandCode] = (credits[posName][bandCode] || 0) + 1;
+
+    // Si el guardia es de otro puesto (ej. Refuerzo) y cubre FULL_BAND, también acreditar
+    // su banda base en el puesto cubierto (M2+T2 necesita M2 y T2).
+    const isFullBand = rows.some((r) => String(r.coverageMode || '').toUpperCase() === 'FULL_BAND');
+    if (isFullBand) {
+        const anchor = rows.find((r) => r.isExtended || r.isEarlyStart || r.coverageSegmentRole === 'EXTENSION' || r.coverageSegmentRole === 'EARLY_START') || rows[0];
+        const homePos = normalizePlanningPositionName(anchor?.positionName || '');
+        const coverPos = normalizePlanningPositionName(posName);
+        if (homePos && coverPos && homePos !== coverPos) {
+            const baseCode = normBandCode(anchor?.code);
+            if (baseCode && baseCode !== bandCode && !PLANNING_NON_BILLABLE_CODES.has(baseCode) && !ABSENCE_CODES.has(baseCode)) {
+                credits[posName][baseCode] = (credits[posName][baseCode] || 0) + 1;
+            }
+        }
+    }
+
     return rows
         .filter(r => r.isExtended || r.isEarlyStart || r.coverageSegmentRole === 'EXTENSION' || r.coverageSegmentRole === 'EARLY_START')
         .map(r => r.employeeId);

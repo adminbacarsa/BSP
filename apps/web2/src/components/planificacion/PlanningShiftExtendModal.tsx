@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X, Clock, Timer } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -61,6 +61,7 @@ export default function PlanningShiftExtendModal({
   const [secondId, setSecondId] = useState('');
   const [gapBand, setGapBand] = useState(data.suggestedGapBand || '');
   const [q, setQ] = useState('');
+  const [gapHoursSynced, setGapHoursSynced] = useState(false);
 
   const shift = resolveEmployeeShift(data.empId, data.dateStr, shiftsMap, pendingChanges);
   const homePosition = String(shift?.positionName || positionStructure[0]?.positionName || 'General');
@@ -69,17 +70,26 @@ export default function PlanningShiftExtendModal({
   /** Banda SLA a cerrar (hueco del día). No confundir con el turno base E1/E2 del guardia. */
   const slaGapBand = gapBand || data.suggestedGapBand || '';
   const uiBand = slaGapBand || gapOptions[0]?.code || '';
+  const selectedGapOpt = gapOptions.find((o) => o.code === uiBand);
+  const gapBandHours = selectedGapOpt?.hours ?? 8;
+
+  useEffect(() => {
+    if (gapHoursSynced || !selectedGapOpt?.hours || selectedGapOpt.hours <= 0) return;
+    setPrimaryExtraH(selectedGapOpt.hours);
+    setGapHoursSynced(true);
+  }, [selectedGapOpt?.hours, gapHoursSynced]);
 
   const slaEnd = slaEndForShift(shift, positionStructure);
   const primaryEnd = endTimeAfterExtraHours(slaEnd, primaryExtraH);
+  const soloCoversFullBand = !secondId && primaryExtraH + 0.05 >= gapBandHours;
 
   const titularStub: TitularVacancyWorkShift | null = uiBand
     ? {
       code: uiBand,
       bandLabel: uiBand,
       positionName: gapPositionName,
-      scheduleLabel: gapOptions.find((o) => o.code === uiBand)?.scheduleLabel || '—',
-      hours: 8,
+      scheduleLabel: selectedGapOpt?.scheduleLabel || '—',
+      hours: gapBandHours,
       source: 'user_selected',
       sourceLabel: 'Banda SLA',
     }
@@ -205,7 +215,7 @@ export default function PlanningShiftExtendModal({
           <div className="rounded-xl border border-red-200 bg-red-50/80 px-3 py-2.5">
             <div className="text-[10px] font-black uppercase text-red-900 mb-1">Este guardia (+horas)</div>
             <div className="flex flex-wrap gap-1.5 mb-2">
-              {[1, 2, 3, 4].map((h) => (
+              {[1, 2, 3, 4, 6, 8].map((h) => (
                 <button
                   key={h}
                   type="button"
@@ -215,9 +225,25 @@ export default function PlanningShiftExtendModal({
                   +{h}h
                 </button>
               ))}
+              <input
+                type="number"
+                min={0.5}
+                max={16}
+                step={0.5}
+                className="w-16 rounded-lg border border-slate-200 px-1.5 py-1 text-[10px] font-black"
+                title="Horas libres"
+                value={primaryExtraH}
+                onChange={(e) => setPrimaryExtraH(Math.max(0.5, Number(e.target.value) || 0.5))}
+              />
             </div>
             <p className="text-[10px] font-bold text-red-800">
               Fin efectivo: <span className="font-mono">{slaEnd}</span> → <span className="font-mono">{primaryEnd}</span>
+              {uiBand && (
+                <span className="block text-[9px] text-red-700/80 mt-0.5">
+                  Banda {uiBand}: {gapBandHours}h ({selectedGapOpt?.scheduleLabel || '—'})
+                  {soloCoversFullBand ? ' · alcanza para cerrar el puesto' : ' · faltan horas para cerrar solo'}
+                </span>
+              )}
             </p>
           </div>
 
@@ -231,16 +257,23 @@ export default function PlanningShiftExtendModal({
                 <span className="text-amber-700"> · guardia en {homePosition}</span>
               )}
             </p>
-            <p className="text-[9px] text-slate-500">Sin 2.º guardia no se acredita la banda SLA. Con 2.º guardia cerrás el hueco (ej. T en puesto 136).</p>
+            <p className="text-[9px] text-slate-500">
+              Sin 2.º guardia: extendé al menos las <span className="font-black">{gapBandHours}h</span> de la banda para cerrar el hueco.
+              Con 2.º guardia repartís el tramo (ext + adel).
+            </p>
             {gapOptions.length > 0 && (
               <select
                 className="w-full rounded-xl border border-slate-200 px-2 py-2 text-xs font-bold"
                 value={uiBand}
-                onChange={(e) => setGapBand(e.target.value)}
+                onChange={(e) => {
+                  setGapBand(e.target.value);
+                  const hrs = gapOptions.find((o) => o.code === e.target.value)?.hours;
+                  if (hrs && hrs > 0) setPrimaryExtraH(hrs);
+                }}
               >
                 {gapOptions.map((o) => (
                   <option key={o.code} value={o.code}>
-                    {o.code} · {o.scheduleLabel}
+                    {o.code} · {o.scheduleLabel} · {o.hours}h
                   </option>
                 ))}
               </select>

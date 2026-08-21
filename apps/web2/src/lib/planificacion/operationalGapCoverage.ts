@@ -137,7 +137,7 @@ export type SingleWorkerGapCloseInput = {
   positionStructure?: VacancyPositionSla[];
 };
 
-/** Una sola persona cubre las 8 h del hueco (extiende M o adelanta N). */
+/** Una sola persona cubre toda la banda del hueco (extiende M o adelanta N). */
 export function applySingleWorkerFullGapCloseToChanges(
   baseChanges: Record<string, any>,
   input: SingleWorkerGapCloseInput,
@@ -147,7 +147,7 @@ export function applySingleWorkerFullGapCloseToChanges(
   },
 ): Record<string, any> {
   const empId = String(input.employeeId || '').trim();
-  if (!empId) throw new Error('Elegí un guardia para cubrir las 8 h.');
+  if (!empId) throw new Error('Elegí un guardia para cubrir la banda completa.');
   const applyDate = input.applyDateStr || input.dateStr;
   const base = resolveEmployeeShift(empId, applyDate, ctx.shiftsMap, baseChanges);
   if (!base || base.isDeleted) {
@@ -163,12 +163,13 @@ export function applySingleWorkerFullGapCloseToChanges(
   const hours = opt?.hours || 8;
   const from = opt?.startTime || '15:00';
   const to = opt?.endTime || '23:00';
+  const hoursLabel = Number.isInteger(hours) ? String(hours) : hours.toFixed(1);
   const neighbors = neighborBandsForVacancyGap(input.positionStructure, input.gapPosition, band);
   const code = String(base.code || '').toUpperCase();
   const isExt = code === String(neighbors.extensionBand || '').toUpperCase();
   const isAdel = code === String(neighbors.earlyStartBand || '').toUpperCase();
   if (!isExt && !isAdel) {
-    throw new Error(`Solo se puede cubrir las 8 h desde la banda anterior (${neighbors.extensionBand}) o la siguiente (${neighbors.earlyStartBand}).`);
+    throw new Error(`Solo se puede cubrir la banda completa desde la banda anterior (${neighbors.extensionBand}) o la siguiente (${neighbors.earlyStartBand}).`);
   }
 
   const emp = ctx.employeesById[empId];
@@ -195,7 +196,7 @@ export function applySingleWorkerFullGapCloseToChanges(
       adjustedStartTime: isAdel && !isExt ? from : base.adjustedStartTime,
       segmentFromTime: from,
       segmentToTime: to,
-      coverageNote: `${shortName} ${roleLabel} ${from}–${to} · cubre ${input.gapPosition} ${band} (8 h)`,
+      coverageNote: `${shortName} ${roleLabel} ${from}–${to} · cubre ${input.gapPosition} ${band} (${hoursLabel} h)`,
       comments: `Cubre hueco SLA completo · ${input.gapPosition} ${band} ${from}–${to}`,
     },
   };
