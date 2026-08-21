@@ -922,10 +922,11 @@ function shiftsActiveOnDay(pos: V2PositionDef, dayLetter: string, dateStr?: stri
 
 
 /**
- * Bandas activas del puesto para un día, filtradas según el ciclo elegido:
- *  - 4+2 → 48h/4días = 12h/turno → preferir D12/N12
- *  - 6+x / 5+1 → 48h/6-5días = 8h/turno → preferir M/T/N
- * Fallback: si el SLA no tiene bandas del tipo preferido, se usan las disponibles.
+ * Bandas activas del puesto para un día.
+ *
+ * - **24hs:** el ciclo elige esquema alternativo 8h (M+T+N) vs 12h (D12+N12).
+ * - **Custom / resto:** todas las bandas del día son demanda acumulativa
+ *   (ej. SM 6h + SMT 12h el sábado = 18h, no “solo las de <12h”).
  */
 export function effectiveShiftsForPositionDay(
     pos: V2PositionDef,
@@ -936,6 +937,12 @@ export function effectiveShiftsForPositionDay(
     if (!positionIsActiveOn(pos, dayLetter, dateStr)) return [];
     const dayShifts = shiftsActiveOnDay(pos, dayLetter, dateStr);
     if (dayShifts.length === 0) return [];
+
+    // Custom y otros no-24hs: no filtrar por preferencia de ciclo 8h/12h.
+    if (!is24hsCoverage(pos)) {
+        return dayShifts;
+    }
+
     const { key: cycleKey } = pickRepresentativeCycle(autoCycles || []);
     if (cycleKey === '4+2') {
         // Ciclo puro 4+2 → 48h/4días = 12h/turno → D12/N12

@@ -12862,8 +12862,13 @@ export default function PlanificacionPage() {
                                                             const gap = coverageData.current + (Number(s.hours) || 0) - coverageData.target;
                                                             const blockTitle = isExcludedDay
                                                                 ? 'Puesto excluido por SLA este día'
-                                                                : disabledByCoverage ? 'Puesto cerrado — esquema SLA completo (M+T+N o D12+N12).'
-                                                                : isBlocked ? 'No se puede mezclar con turnos ya asignados en este puesto/día (solo 8h con 8h, 12h con 12h)' : undefined;
+                                                                : disabledByCoverage
+                                                                    ? (coverageData.schemeLabel
+                                                                        ? `Puesto cerrado — esquema completo (${coverageData.schemeLabel}).`
+                                                                        : 'Puesto cerrado — esquema SLA completo.')
+                                                                : isBlocked
+                                                                    ? 'Cupo lleno o esquema de cobertura ya completo para este turno'
+                                                                    : undefined;
                                                             return (
                                                                 <button
                                                                     key={s.code}

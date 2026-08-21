@@ -177,6 +177,35 @@ async function main(): Promise<void> {
     if (!mixOk) failed++;
     console.log(`${mixOk ? '✓' : '✗'} 24hs qty=2 M+T+N + D12+N12: ${uMix.closed}/${uMix.required}`);
 
+    // Custom sábado SM 6h + SMT 12h con ciclo 6+2: ambas bandas (no filtrar SMT por <12h)
+    const { effectiveShiftsForPositionDay } = await import('../src/lib/planificacion/autoScheduleEngineV2');
+    const {
+        positionSchemeLabelForDay,
+    } = await import('../src/lib/planificacion/positionCoverageUnits');
+    const sabado18 = {
+        positionName: 'Sabado',
+        qty: 1,
+        coverageType: 'custom' as const,
+        activeDays: ['S'],
+        shifts: [
+            { code: 'SM', hours: 6, days: ['S'], quantity: 1 },
+            { code: 'SMT', hours: 12, days: ['S'], quantity: 1 },
+        ],
+    };
+    const effS = effectiveShiftsForPositionDay(sabado18 as any, 'S', CYCLES);
+    const effCodes = effS.map((s) => String(s.code).toUpperCase()).sort().join('+');
+    const labelS = positionSchemeLabelForDay(sabado18, 'S', CYCLES);
+    const onlySm = countPositionClosedUnitsFromShifts(sabado18, 'S', { SM: 1 }, CYCLES, true);
+    const both = countPositionClosedUnitsFromShifts(sabado18, 'S', { SM: 1, SMT: 1 }, CYCLES, true);
+    const sabOk = effCodes === 'SM+SMT'
+        && String(labelS).includes('SM')
+        && String(labelS).includes('SMT')
+        && onlySm.closed === 0
+        && both.closed === 1
+        && both.required === 1;
+    if (!sabOk) failed++;
+    console.log(`${sabOk ? '✓' : '✗'} Custom sábado SM+SMT (ciclo 6+2): eff=${effCodes} label=${labelS} soloSM=${onlySm.closed}/${onlySm.required} ambos=${both.closed}/${both.required}`);
+
     if (failed > 0) {
         console.error(`\n${failed} escenario(s) fallaron`);
         process.exit(1);
