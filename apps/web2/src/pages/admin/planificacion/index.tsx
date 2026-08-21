@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
+import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
 import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
 import { db, getDocsOnce } from '@/lib/firebase';
 import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
@@ -968,6 +969,7 @@ export default function PlanificacionPage() {
     const canPublishPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('publish');
     const canCorrectPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('correct');
     const canAutoLab = canAccessAutoLab(isSuperAdmin, rolePermissions);
+    const canAssignFT = canAssignFrancoTrabajado(isSuperAdmin, rolePermissions);
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
@@ -7179,6 +7181,11 @@ export default function PlanificacionPage() {
         const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
         const existing = selectedCell.currentShift;
         const isFT = !correctionMode && francoMode === 'FT_SELECTION';
+        if (isFT && !canAssignFT) {
+            toast.error('Sin permiso para asignar Franco Trabajado (FT). Activá «Franco FT» en el rol de Planificación.');
+            setFrancoMode('NONE');
+            return;
+        }
         const newAssignCode = String(shiftConfig.code || '').toUpperCase();
         if (
             existing &&
@@ -7231,7 +7238,19 @@ export default function PlanificacionPage() {
         applyToPending({ ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
     };
 
-    const confirmPendingAssignment = () => { if (!pendingAssignment) return; applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad }); setPendingAssignment(null); setAuthWarningMessage(''); };
+    const confirmPendingAssignment = () => {
+        if (!pendingAssignment) return;
+        if (francoMode === 'FT_SELECTION' && !canAssignFT) {
+            toast.error('Sin permiso para asignar Franco Trabajado (FT). Activá «Franco FT» en el rol de Planificación.');
+            setFrancoMode('NONE');
+            setPendingAssignment(null);
+            setAuthWarningMessage('');
+            return;
+        }
+        applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
+        setPendingAssignment(null);
+        setAuthWarningMessage('');
+    };
 
     const getShiftFor = (empId: string, dateStr: string) => {
         const k = `${empId}_${dateStr}`;
@@ -12415,7 +12434,7 @@ export default function PlanificacionPage() {
                                             {correctionMode && previewIsPublished && renderDayCoverageClosures(selectedCell.dateStr)}
 
                                             {/* Acciones */}
-                                            {isCrossObjectiveShift && isFrancoShift && (
+                                            {isCrossObjectiveShift && isFrancoShift && canAssignFT && (
                                                 <button
                                                     onClick={() => { setFrancoMode('FT_SELECTION'); setCellEditMode(true); }}
                                                     disabled={isServiceLocked}
@@ -12442,7 +12461,7 @@ export default function PlanificacionPage() {
                                                             <Trash2 size={14}/>
                                                         </button>
                                                     </div>
-                                                    {isFrancoShift && isSuperAdmin && (
+                                                    {isFrancoShift && canAssignFT && (
                                                         <button
                                                             onClick={() => { setFrancoMode('FT_SELECTION'); setCellEditMode(true); }}
                                                             disabled={isServiceLocked}
@@ -12457,6 +12476,7 @@ export default function PlanificacionPage() {
                                             {previewIsPublished && !correctionMode && (
                                                 <div className="flex flex-col gap-2">
                                                     {isFrancoShift ? (
+                                                        canAssignFT ? (
                                                         <button
                                                             onClick={() => { setFrancoMode('FT_SELECTION'); setCellEditMode(true); }}
                                                             disabled={isServiceLocked}
@@ -12464,6 +12484,11 @@ export default function PlanificacionPage() {
                                                         >
                                                             <ArrowRightCircle size={14}/> Asignar FT (Franco Trabajado)
                                                         </button>
+                                                        ) : (
+                                                            <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                                                                <LockKeyhole size={12}/> Sin permiso para asignar FT (pedí Franco FT en el rol).
+                                                            </div>
+                                                        )
                                                     ) : (
                                                         <button
                                                             onClick={() => { if (!confirm(`¿Dar Franco Compensatorio a ${employeeName} el ${selectedCell.dateStr}?`)) return; applyToPending({ code: 'FF', name: 'Franco Compensatorio', isFrancoCompensatorio: true, isFranco: true, hours: 0, startTime: '00:00', positionName: coveredPosition }); }}

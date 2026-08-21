@@ -11,6 +11,8 @@ interface IRole { id: string; name: string; permissions: Record<string, string[]
 const actionBadgeLabel = (action: string) => {
     if (action === 'publish') return 'Pub';
     if (action === 'correct') return 'Cor';
+    if (action === 'auto_lab') return 'Lab';
+    if (action === 'assign_ft') return 'FT';
     if (action === 'adjust') return 'Aju';
     return action.charAt(0);
 };
@@ -22,6 +24,8 @@ const actionBadgeClass = (action: string) => {
     if (action === 'delete') return 'bg-rose-100 text-rose-700';
     if (action === 'publish') return 'bg-indigo-100 text-indigo-700';
     if (action === 'correct') return 'bg-violet-100 text-violet-700';
+    if (action === 'auto_lab') return 'bg-fuchsia-100 text-fuchsia-700';
+    if (action === 'assign_ft') return 'bg-amber-100 text-amber-800';
     if (action === 'adjust') return 'bg-teal-100 text-teal-700';
     return 'bg-slate-100 text-slate-700';
 };
