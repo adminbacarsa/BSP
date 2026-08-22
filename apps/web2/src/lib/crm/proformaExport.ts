@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import type { ProformaExportBundle, ProformaObjectiveGrid } from './proformaTypes';
+import type { ProformaExportBundle, ProformaObjectiveGrid, ProformaEvento } from './proformaTypes';
 import { formatHoursColonTotal, pdfDayLetter, pdfDayNumber, shortDayHeader } from './proformaGrid';
 
 const PDF_PAGE_W = 297;
@@ -220,6 +220,32 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
     doc.text(`Fecha de emisión: ${issued.split(',')[0]}  ·  Hora: ${issued.split(',')[1]?.trim() || ''}`, PDF_MARGIN_X + 6, y2 + 6);
   });
 
+  if (bundle.eventos && bundle.eventos.length > 0) {
+    const evTotalHoras = bundle.eventos.reduce((a, e) => a + e.totalHoras, 0);
+    doc.addPage();
+    drawPdfHeaderBar(doc, empresa, `EVENTOS — ${bundle.clientName}`, bundle.periodLabel);
+    const evRows: (string | number)[][] = [];
+    bundle.eventos.forEach((ev: ProformaEvento) => {
+      ev.servicios.forEach((srv) => {
+        srv.guardias.forEach((g) => {
+          evRows.push([ev.eventoNombre, srv.servicioNombre, g.name, g.fecha, formatHoursColonTotal(g.hours)]);
+        });
+      });
+      evRows.push(['', '', `Subtotal ${ev.eventoNombre}`, '', formatHoursColonTotal(ev.totalHoras)]);
+    });
+    autoTable(doc, {
+      startY: PDF_CONTENT_TOP,
+      head: [['Evento', 'Servicio', 'Guardia', 'Fecha', 'Horas']],
+      body: evRows,
+      foot: [['', '', 'Total eventos', '', formatHoursColonTotal(evTotalHoras)]],
+      styles: { fontSize: 7.5, cellPadding: 1.5 },
+      headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold' },
+      footStyles: { fillColor: [241, 245, 249], fontStyle: 'bold', fontSize: 7.5, textColor: [30, 41, 59] },
+      theme: 'grid',
+      showFoot: 'lastPage',
+    });
+  }
+
   const fname = `Prefactura_${sanitizeFilename(bundle.clientName)}_${bundle.periodLabel.replace(/\//g, '-')}.pdf`;
   doc.save(fname);
 }
@@ -253,6 +279,22 @@ export function exportProformaCsv(bundle: ProformaExportBundle) {
     objectiveTableBody(grid).forEach((row) => lines.push(row.map(esc).join(',')));
     lines.push('');
   });
+
+  if (bundle.eventos && bundle.eventos.length > 0) {
+    lines.push('EVENTOS');
+    lines.push(['Evento', 'Servicio', 'Guardia', 'Fecha', 'Horas'].map(esc).join(','));
+    bundle.eventos.forEach((ev) => {
+      ev.servicios.forEach((srv) => {
+        srv.guardias.forEach((g) => {
+          lines.push([ev.eventoNombre, srv.servicioNombre, g.name, g.fecha, formatHoursColonTotal(g.hours)].map(esc).join(','));
+        });
+      });
+      lines.push(['', '', `Subtotal ${ev.eventoNombre}`, '', formatHoursColonTotal(ev.totalHoras)].map(esc).join(','));
+    });
+    const evTotal = bundle.eventos.reduce((a, e) => a + e.totalHoras, 0);
+    lines.push(['', '', 'Total eventos', '', formatHoursColonTotal(evTotal)].map(esc).join(','));
+    lines.push('');
+  }
 
   const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   downloadBlob(blob, `Prefactura_${sanitizeFilename(bundle.clientName)}_${bundle.periodLabel.replace(/\//g, '-')}.csv`);
@@ -295,6 +337,24 @@ export function exportProformaExcel(bundle: ProformaExportBundle) {
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sheetName);
   });
+
+  if (bundle.eventos && bundle.eventos.length > 0) {
+    const evRows: (string | number)[][] = [
+      [bundle.empresaName || 'COSP', 'EVENTOS', bundle.periodLabel],
+      [],
+      ['Evento', 'Servicio', 'Guardia', 'Fecha', 'Horas'],
+    ];
+    bundle.eventos.forEach((ev) => {
+      ev.servicios.forEach((srv) => {
+        srv.guardias.forEach((g) => {
+          evRows.push([ev.eventoNombre, srv.servicioNombre, g.name, g.fecha, formatHoursColonTotal(g.hours)]);
+        });
+      });
+      evRows.push(['', '', `Subtotal ${ev.eventoNombre}`, '', formatHoursColonTotal(ev.totalHoras)]);
+    });
+    evRows.push(['', '', 'Total eventos', '', formatHoursColonTotal(bundle.eventos.reduce((a, e) => a + e.totalHoras, 0))]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(evRows), 'Eventos');
+  }
 
   XLSX.writeFile(wb, `Prefactura_${sanitizeFilename(bundle.clientName)}_${bundle.periodLabel.replace(/\//g, '-')}.xlsx`);
 }

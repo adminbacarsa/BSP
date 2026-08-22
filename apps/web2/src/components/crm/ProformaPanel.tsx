@@ -84,6 +84,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
   const [openSummary, setOpenSummary] = useState(true);
   const [openGridsSection, setOpenGridsSection] = useState(false);
   const [openBreakdown, setOpenBreakdown] = useState(false);
+  const [openEventos, setOpenEventos] = useState(false);
   const [openGrids, setOpenGrids] = useState<Record<string, boolean>>({});
   const [openObjectives, setOpenObjectives] = useState<Record<string, boolean>>({});
 
@@ -590,6 +591,57 @@ export default function ProformaPanel(props: ProformaPanelProps) {
         </div>
         )}
       </div>
+
+      {/* Eventos */}
+      {proformaBundle?.eventos && proformaBundle.eventos.length > 0 && (
+        <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setOpenEventos((v) => !v)}
+            className="w-full px-6 py-4 border-b bg-slate-50 flex items-center justify-between gap-2 text-left hover:bg-slate-100 transition-colors"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-black uppercase text-slate-500">Eventos</p>
+              <p className="text-xs font-bold text-slate-400 mt-0.5">
+                {proformaBundle.eventos.length} evento(s) ·{' '}
+                {proformaBundle.eventos.reduce((a, e) => a + e.servicios.reduce((b, s) => b + s.guardias.length, 0), 0)} guardia(s)
+              </p>
+            </div>
+            <span className="text-sm font-bold text-slate-700 shrink-0">
+              {proformaBundle.eventos.reduce((a, e) => a + e.totalHoras, 0)} hs
+            </span>
+            {openEventos ? <ChevronUp size={18} className="text-slate-400 shrink-0" /> : <ChevronDown size={18} className="text-slate-400 shrink-0" />}
+          </button>
+          {openEventos && (
+            <div className="p-6 space-y-3">
+              {proformaBundle.eventos.map((ev) => (
+                <div key={ev.eventoId} className="border rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 bg-slate-50 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-black text-slate-800">{ev.eventoNombre}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">{ev.servicios.length} servicio(s)</p>
+                    </div>
+                    <span className="text-sm font-black text-slate-700">{ev.totalHoras} hs</span>
+                  </div>
+                  {ev.servicios.map((srv) => (
+                    <div key={srv.servicioId} className="border-t px-4 py-2">
+                      <p className="text-xs font-black text-slate-600 mb-1">{srv.servicioNombre} · {srv.fecha}</p>
+                      <div className="space-y-0.5">
+                        {srv.guardias.map((g, i) => (
+                          <div key={`${g.employeeId}-${i}`} className="flex justify-between text-xs font-bold text-slate-500">
+                            <span>{g.name}</span>
+                            <span>{g.hours} hs</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

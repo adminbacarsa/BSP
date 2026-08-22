@@ -35,6 +35,28 @@ export type ProformaSummaryRow = {
   slaHours?: number;
 };
 
+export type ProformaEventoGuardia = {
+  employeeId: string;
+  name: string;
+  fecha: string;
+  hours: number;
+};
+
+export type ProformaEventoServicio = {
+  servicioId: string;
+  servicioNombre: string;
+  fecha: string;
+  guardias: ProformaEventoGuardia[];
+  totalHoras: number;
+};
+
+export type ProformaEvento = {
+  eventoId: string;
+  eventoNombre: string;
+  servicios: ProformaEventoServicio[];
+  totalHoras: number;
+};
+
 export type ProformaExportBundle = {
   clientName: string;
   legalName: string;
@@ -47,6 +69,7 @@ export type ProformaExportBundle = {
   empresaName: string;
   summary: ProformaSummaryRow[];
   objectives: ProformaObjectiveGrid[];
+  eventos?: ProformaEvento[];
   /** Trazabilidad de lectura Firestore (solo UI pre-factura). */
   sourceDebug?: {
     clientId: string;

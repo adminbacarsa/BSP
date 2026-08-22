@@ -2046,6 +2046,34 @@ export default function CRMPage() {
         if (oid) slaHoursByObjectiveId[oid] = (slaHoursByObjectiveId[oid] || 0) + slaHoursForServiceInRange(srv, start, end);
       }
       const summary = buildProformaSummary(grids, slaHoursByObjectiveId);
+      const startKey = getDateKeyInTimezone(start);
+      const endKey = getDateKeyInTimezone(end);
+      const evByEvento = new Map<string, { nombre: string; srvs: Map<string, any> }>();
+      turnosEnriched.forEach((t: any) => {
+        if (String(t.code || '').toUpperCase() !== 'EV') return;
+        const eventoId = String(t.eventoId || '');
+        if (!eventoId) return;
+        if (t.clientId && t.clientId !== selectedClient.id) return;
+        const plannedStart = toDateSafe(t.startTime);
+        if (!plannedStart) return;
+        const dateKey = getDateKeyInTimezone(plannedStart);
+        if (dateKey < startKey || dateKey > endKey) return;
+        if (!evByEvento.has(eventoId)) evByEvento.set(eventoId, { nombre: t.eventoNombre || eventoId, srvs: new Map() });
+        const ev = evByEvento.get(eventoId)!;
+        const srvKey = String(t.servicioId || '_');
+        if (!ev.srvs.has(srvKey)) {
+          ev.srvs.set(srvKey, { servicioId: srvKey, servicioNombre: t.servicioNombre || 'Servicio', fecha: dateKey, guardias: [], totalHoras: 0 });
+        }
+        const srv = ev.srvs.get(srvKey)!;
+        const hrs = Number(t.hours) || 0;
+        srv.guardias.push({ employeeId: String(t.employeeId || ''), name: String(t.employeeName || t.employeeId || ''), fecha: dateKey, hours: hrs });
+        srv.totalHoras += hrs;
+      });
+      const eventosProforma = Array.from(evByEvento.entries()).map(([eventoId, ev]) => {
+        const servicios = Array.from(ev.srvs.values());
+        return { eventoId, eventoNombre: ev.nombre, servicios, totalHoras: servicios.reduce((a: number, s: any) => a + s.totalHoras, 0) };
+      });
+
       setProformaBundle({
         clientName: selectedClient.name || '',
         legalName: selectedClient.legalName || '',
@@ -2058,6 +2086,7 @@ export default function CRMPage() {
         empresaName: (empresa as any)?.name || 'COSP',
         summary,
         objectives: grids,
+        eventos: eventosProforma.length > 0 ? eventosProforma : undefined,
         sourceDebug: {
           clientId: selectedClient.id,
           turnosLoaded: turnosList.length,
