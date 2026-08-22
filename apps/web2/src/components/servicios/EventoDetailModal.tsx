@@ -639,10 +639,20 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             <div key={turno.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
                                                                 <div className="flex-1 min-w-0">
                                                                     <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">
-                                                                        {turno.employeeName || turno.employeeId}
+                                                                        {turno.employeeName || empleados.find(e => e.id === turno.employeeId)?.name || turno.employeeId}
                                                                     </p>
                                                                     <p className="text-[9px] text-slate-400">
-                                                                        {String(turno.startTime || '').slice(11, 16) || '—'}–{String(turno.endTime || '').slice(11, 16) || '—'}
+                                                                        {(() => {
+                                                                            const fmt = (t: any) => {
+                                                                                if (!t) return '—';
+                                                                                if (typeof t.toDate === 'function') {
+                                                                                    const d = t.toDate();
+                                                                                    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                                                                                }
+                                                                                return String(t).slice(11, 16) || '—';
+                                                                            };
+                                                                            return `${fmt(turno.startTime)}–${fmt(turno.endTime)}`;
+                                                                        })()}
                                                                         {turno.replacedCode ? ` · reemplaza ${turno.replacedCode}` : ''}
                                                                     </p>
                                                                 </div>

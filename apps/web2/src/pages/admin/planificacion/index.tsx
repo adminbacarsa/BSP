@@ -22,8 +22,10 @@ import {
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
 import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
-import { db, getDocsOnce } from '@/lib/firebase';
+import { db, getDocsOnce, functions } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
+import { assignGuardToEvent } from '@/services/eventoAssignService';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 
@@ -12075,6 +12077,29 @@ export default function PlanificacionPage() {
                                                             ) : (
                                                                 <p className="text-[9px] text-indigo-500 font-bold mt-0.5">Sin leer</p>
                                                             )}
+                                                            {isSuperAdmin && n.employeeId ? (
+                                                                <button
+                                                                    type="button"
+                                                                    className="mt-1 text-[9px] font-black uppercase text-indigo-600 hover:text-indigo-800 underline-offset-2 hover:underline"
+                                                                    onClick={async () => {
+                                                                        try {
+                                                                            const call = httpsCallable(functions, 'sendTestNotification');
+                                                                            const res = await call({
+                                                                                employeeId: n.employeeId,
+                                                                                title: 'Prueba FCM (panel)',
+                                                                                body: `Push de prueba para ${empName}. App cerrada = bandeja del sistema.`,
+                                                                                type: 'SYSTEM_TEST',
+                                                                            });
+                                                                            const data = (res?.data || {}) as { successCount?: number; failureCount?: number };
+                                                                            toast.success(`FCM → ${empName}: OK ${data.successCount || 0}${data.failureCount ? ` · fallidas ${data.failureCount}` : ''}`);
+                                                                        } catch (e: any) {
+                                                                            toast.error(e?.message || 'No se pudo enviar push de prueba');
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    Probar FCM
+                                                                </button>
+                                                            ) : null}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -12960,23 +12985,53 @@ export default function PlanificacionPage() {
                                                             const srvsDia = serviciosParaFecha(eventos, selectedCell.dateStr, true);
                                                             if (srvsDia.length === 0) return null;
                                                             const isPickerOpen = eventoPickerKey === cellKey;
-                                                            const assignServicio = ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {
+                                                            const assignServicio = async ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {
                                                                 if (isServiceLocked) return;
-                                                                // Para 3x8/2x12 cada guardia trabaja su banda (8h o 12h), no las 24h totales del servicio
                                                                 const guardHours = servicio.tipoTurno === '3x8' ? 8
                                                                     : servicio.tipoTurno === '2x12' ? 12
                                                                     : calcHorasEvento(servicio.horaInicio, servicio.horaFin);
-                                                                handleAssignShift({
-                                                                    code: 'EV',
-                                                                    name: servicio.nombre,
-                                                                    hours: guardHours,
-                                                                    startTime: servicio.horaInicio,
-                                                                    endTime: servicio.horaFin,
-                                                                    eventoId: evento.id,
-                                                                    eventoNombre: evento.nombre,
-                                                                    servicioId: servicio.id,
-                                                                    servicioNombre: servicio.nombre,
-                                                                }, 'Evento');
+                                                                const emp = (displayedEmployees as any[]).find((e: any) => e.id === selectedCell.empId);
+                                                                const empNombre = emp?.name || selectedCell.empId;
+                                                                try {
+                                                                    const uid = getAuth().currentUser?.uid || '';
+                                                                    const solicitudRef = await addDoc(collection(db, 'solicitudes_evento'), {
+                                                                        empresaId,
+                                                                        eventoId: evento.id,
+                                                                        eventoNombre: evento.nombre,
+                                                                        servicioId: servicio.id,
+                                                                        servicioNombre: servicio.nombre,
+                                                                        servicioFecha: servicio.fecha,
+                                                                        empleadoId: selectedCell.empId,
+                                                                        empleadoNombre: empNombre,
+                                                                        status: 'aprobada',
+                                                                        tipo: 'admin_asigna',
+                                                                        convocadoPor: uid,
+                                                                        respondidoPor: uid,
+                                                                        respondidoAt: serverTimestamp(),
+                                                                        creadoAt: serverTimestamp(),
+                                                                    });
+                                                                    await assignGuardToEvent({
+                                                                        empresaId,
+                                                                        empleadoId: selectedCell.empId,
+                                                                        empleadoNombre: empNombre,
+                                                                        empleadoObjectiveId: emp?.preferredObjectiveId || emp?.objectiveId,
+                                                                        empleadoObjectiveName: emp?.preferredObjectiveName || emp?.objectiveName,
+                                                                        eventoId: evento.id!,
+                                                                        eventoNombre: evento.nombre,
+                                                                        clienteId: evento.clienteId,
+                                                                        clienteNombre: evento.clienteNombre,
+                                                                        servicioId: servicio.id,
+                                                                        servicioNombre: servicio.nombre,
+                                                                        servicioFecha: servicio.fecha,
+                                                                        horaInicio: servicio.horaInicio,
+                                                                        horaFin: servicio.horaFin,
+                                                                        horas: guardHours,
+                                                                        solicitudId: solicitudRef.id,
+                                                                        respondidoPor: uid,
+                                                                    });
+                                                                } catch (e) {
+                                                                    console.error('Error asignando guardia a evento:', e);
+                                                                }
                                                                 setEventoPickerKey(null);
                                                             };
                                                             return (
@@ -12985,7 +13040,7 @@ export default function PlanificacionPage() {
                                                                         onClick={() => {
                                                                             if (isServiceLocked) return;
                                                                             if (srvsDia.length === 1) {
-                                                                                assignServicio(srvsDia[0]);
+                                                                                void assignServicio(srvsDia[0]);
                                                                             } else {
                                                                                 setEventoPickerKey(isPickerOpen ? null : cellKey);
                                                                             }
@@ -13010,7 +13065,7 @@ export default function PlanificacionPage() {
                                                                                 return (
                                                                                     <button
                                                                                         key={servicio.id}
-                                                                                        onClick={() => assignServicio({ evento, servicio })}
+                                                                                        onClick={() => { void assignServicio({ evento, servicio }); }}
                                                                                         className="text-left px-2 py-2 rounded text-xs font-bold text-yellow-900 hover:bg-yellow-200 border-b border-yellow-100 last:border-0"
                                                                                     >
                                                                                         <div className="flex items-center justify-between gap-2">
