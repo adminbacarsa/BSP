@@ -124,10 +124,12 @@ export function eventosParaFecha(eventos: Evento[], fecha: string): Evento[] {
 export function serviciosParaFecha(
     eventos: Evento[],
     fecha: string,
+    includeDraft = false,
 ): Array<{ evento: Evento; servicio: ServicioEvento }> {
     const result: Array<{ evento: Evento; servicio: ServicioEvento }> = [];
     for (const ev of eventos) {
-        if (!isEventoActivo(ev)) continue;
+        if (ev.status === 'cancelado' || ev.status === 'ejecutado') continue;
+        if (!includeDraft && !isEventoActivo(ev)) continue;
         const servicios = ev.servicios ?? [];
         if (servicios.length > 0) {
             servicios

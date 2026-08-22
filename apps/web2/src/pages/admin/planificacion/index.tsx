@@ -1584,7 +1584,9 @@ export default function PlanificacionPage() {
         const fromDate = `${yr}-${String(mo).padStart(2, '0')}-01`;
         const lastDay = new Date(yr, mo, 0).getDate();
         const toDate = `${yr}-${String(mo).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-        eventoService.getByEmpresaAndRange(empresaId, fromDate, toDate).then(setEventos).catch(console.error);
+        eventoService.getByEmpresaAndRange(empresaId, fromDate, toDate, true)
+            .then(evs => setEventos(evs.filter(ev => ev.status !== 'cancelado' && ev.status !== 'ejecutado')))
+            .catch(console.error);
     }, [empresaId, currentDate]);
 
     // ============================================================================
@@ -4714,12 +4716,18 @@ export default function PlanificacionPage() {
             (snap) => {
                 const rows = snap.docs
                     .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                    .filter((d) => {
+                        const t = String(d.data()?.target || '').toLowerCase();
+                        return t !== 'admin' && t !== 'ops' && t !== 'operaciones';
+                    })
                     .map(d => {
                     const data: any = d.data();
                     const ts = data.createdAt?.toDate ? data.createdAt.toDate()
                         : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000) : new Date());
                     const readTs = data.readAt?.toDate ? data.readAt.toDate()
                         : (data.readAt?.seconds ? new Date(data.readAt.seconds * 1000) : null);
+                    const ackTs = data.ackedAt?.toDate ? data.ackedAt.toDate()
+                        : (data.ackedAt?.seconds ? new Date(data.ackedAt.seconds * 1000) : null);
                     return {
                         id: d.id,
                         timestamp: ts.getTime(),
@@ -4729,6 +4737,9 @@ export default function PlanificacionPage() {
                         type: data.type || '',
                         read: !!data.read,
                         readAt: readTs ? readTs.getTime() : null,
+                        requiresAck: data.requiresAck === true,
+                        ackedAt: ackTs ? ackTs.getTime() : null,
+                        ackedByUid: data.ackedByUid || null,
                     };
                 })
                     .sort((a, b) => b.timestamp - a.timestamp)
@@ -11961,7 +11972,13 @@ export default function PlanificacionPage() {
                                     className={`px-4 py-2 text-xs font-black uppercase rounded-t-lg transition-colors flex items-center gap-1 ${activityTab === 'notifs' ? 'bg-indigo-50 text-indigo-700 border-b-2 border-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
                                 >
                                     <Bell size={11}/> Notificaciones
-                                    {notifLogs.filter(n => !n.read).length > 0 && <span className="ml-1 bg-rose-500 text-white px-1.5 py-0.5 rounded-full text-[9px]">{notifLogs.filter(n => !n.read).length} sin leer</span>}
+                                    {notifLogs.filter(n => !n.ackedAt && (n.requiresAck || !n.read)).length > 0 && (
+                                        <span className="ml-1 bg-rose-500 text-white px-1.5 py-0.5 rounded-full text-[9px]">
+                                            {notifLogs.filter(n => n.requiresAck && !n.ackedAt).length > 0
+                                                ? `${notifLogs.filter(n => n.requiresAck && !n.ackedAt).length} sin enterarse`
+                                                : `${notifLogs.filter(n => !n.read).length} sin leer`}
+                                        </span>
+                                    )}
                                 </button>
                             </div>
                             <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
@@ -11990,31 +12007,44 @@ export default function PlanificacionPage() {
                                     )
                                 ) : (
                                     notifLogs.length === 0 ? (
-                                        <div className="text-sm text-slate-400 italic">Sin notificaciones recientes.</div>
+                                        <div className="text-sm text-slate-400 italic">Sin notificaciones a vigiladores.</div>
                                     ) : (
                                         notifLogs.map((n) => {
                                             const emp = employees.find(e => e.id === n.employeeId);
-                                            const empName = emp?.name || n.employeeId;
+                                            const empName = emp?.name || n.employeeId || '—';
                                             const typeColors: Record<string, string> = {
                                                 TURNO_NUEVO: 'bg-indigo-100 text-indigo-700',
                                                 TURNO_MODIFICADO: 'bg-amber-100 text-amber-700',
                                                 TURNO_ELIMINADO: 'bg-rose-100 text-rose-700',
                                                 FRANCO_ASIGNADO: 'bg-emerald-100 text-emerald-700',
+                                                CRONOGRAMA_PUBLICADO: 'bg-violet-100 text-violet-700',
+                                                CONVOCATORIA_EVENTO: 'bg-yellow-100 text-yellow-800',
+                                                EVENTO_CONFIRMADO: 'bg-emerald-100 text-emerald-800',
                                             };
                                             const typeLabel: Record<string, string> = {
                                                 TURNO_NUEVO: 'Nuevo turno',
                                                 TURNO_MODIFICADO: 'Modificado',
                                                 TURNO_ELIMINADO: 'Eliminado',
                                                 FRANCO_ASIGNADO: 'Franco',
+                                                CRONOGRAMA_PUBLICADO: 'Cronograma',
+                                                CONVOCATORIA_EVENTO: 'Convocatoria',
+                                                EVENTO_CONFIRMADO: 'Evento OK',
                                             };
+                                            const pendingAck = !!(n.requiresAck || ['CRONOGRAMA_PUBLICADO','TURNO_NUEVO','TURNO_MODIFICADO','TURNO_ELIMINADO','FRANCO_ASIGNADO','CONVOCATORIA_EVENTO','EVENTO_CONFIRMADO'].includes(n.type)) && !n.ackedAt;
                                             return (
-                                                <div key={n.id} className={`p-3 border rounded-xl transition-colors ${n.read ? 'bg-white' : 'bg-indigo-50 border-indigo-200'}`}>
+                                                <div key={n.id} className={`p-3 border rounded-2xl shadow-sm transition-colors ${
+                                                    pendingAck ? 'bg-amber-50 border-amber-200' : n.ackedAt ? 'bg-emerald-50/40 border-emerald-100' : n.read ? 'bg-white' : 'bg-indigo-50 border-indigo-200'
+                                                }`}>
                                                     <div className="flex items-start justify-between gap-3">
                                                         <div className="flex items-start gap-2 min-w-0 flex-1">
                                                             <div className="mt-0.5 shrink-0">
-                                                                {n.read
-                                                                    ? <CheckCircle size={14} className="text-emerald-500"/>
-                                                                    : <Bell size={14} className="text-indigo-500"/>
+                                                                {n.ackedAt
+                                                                    ? <CheckCircle size={14} className="text-emerald-600"/>
+                                                                    : pendingAck
+                                                                        ? <Bell size={14} className="text-amber-600"/>
+                                                                        : n.read
+                                                                            ? <CheckCircle size={14} className="text-slate-400"/>
+                                                                            : <Bell size={14} className="text-indigo-500"/>
                                                                 }
                                                             </div>
                                                             <div className="min-w-0">
@@ -12024,17 +12054,25 @@ export default function PlanificacionPage() {
                                                                     </span>
                                                                     <span className="text-xs font-bold text-slate-700">{empName}</span>
                                                                 </div>
+                                                                {n.title ? (
+                                                                    <p className="text-[11px] font-semibold text-slate-800 truncate">{n.title}</p>
+                                                                ) : null}
                                                                 <p className="text-xs text-slate-600 truncate">{n.body}</p>
                                                             </div>
                                                         </div>
                                                         <div className="text-right shrink-0">
                                                             <p className="text-[10px] font-mono text-slate-400">{new Date(n.timestamp).toLocaleString()}</p>
-                                                            {n.read && n.readAt && (
+                                                            {n.ackedAt ? (
+                                                                <p className="text-[9px] text-emerald-700 font-black mt-0.5">
+                                                                    ✓ Enterado {new Date(n.ackedAt).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                                                </p>
+                                                            ) : pendingAck ? (
+                                                                <p className="text-[9px] text-amber-700 font-black mt-0.5">Pendiente «Me enteré»</p>
+                                                            ) : n.read && n.readAt ? (
                                                                 <p className="text-[9px] text-emerald-600 font-bold mt-0.5">
                                                                     ✓ Leído {new Date(n.readAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
                                                                 </p>
-                                                            )}
-                                                            {!n.read && (
+                                                            ) : (
                                                                 <p className="text-[9px] text-indigo-500 font-bold mt-0.5">Sin leer</p>
                                                             )}
                                                         </div>
@@ -12919,7 +12957,7 @@ export default function PlanificacionPage() {
                                                         {/* Botón EV: aparece si hay servicios de evento activos ese día */}
                                                         {(() => {
                                                             const cellKey = `${selectedCell.empId}_${selectedCell.dateStr}`;
-                                                            const srvsDia = serviciosParaFecha(eventos, selectedCell.dateStr);
+                                                            const srvsDia = serviciosParaFecha(eventos, selectedCell.dateStr, true);
                                                             if (srvsDia.length === 0) return null;
                                                             const isPickerOpen = eventoPickerKey === cellKey;
                                                             const assignServicio = ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {

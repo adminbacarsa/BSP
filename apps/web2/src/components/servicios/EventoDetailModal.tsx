@@ -246,24 +246,24 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     empleadoNombre: emp.name,
                     convocadoPor,
                 });
-                if (emp.uid) {
-                    await addDoc(collection(db, 'user_notifications'), {
-                        empresaId,
-                        uid: emp.uid,
-                        employeeId: empId,
-                        type: 'CONVOCATORIA_EVENTO',
-                        target: 'employee',
-                        title: `Convocatoria: ${evento.nombre}`,
-                        body: `${selectedSrv.nombre} · ${fmtFecha(selectedSrv.fecha)} · ${horarioBadge(selectedSrv)}`,
-                        eventoId: evento.id,
-                        eventoNombre: evento.nombre,
-                        servicioId: selectedSrv.id,
-                        solicitudId,
-                        read: false,
-                        readAt: null,
-                        createdAt: serverTimestamp(),
-                    });
-                }
+                // Bandeja + FCM (trigger onEmployeeNotificationCreated). employeeId siempre;
+                // uid si el legajo tiene Auth vinculado.
+                await addDoc(collection(db, 'user_notifications'), {
+                    empresaId,
+                    uid: emp.uid || null,
+                    employeeId: empId,
+                    type: 'CONVOCATORIA_EVENTO',
+                    target: 'employee',
+                    title: `Convocatoria: ${evento.nombre}`,
+                    body: `${selectedSrv.nombre} · ${fmtFecha(selectedSrv.fecha)} · ${horarioBadge(selectedSrv)}`,
+                    eventoId: evento.id,
+                    eventoNombre: evento.nombre,
+                    servicioId: selectedSrv.id,
+                    solicitudId,
+                    read: false,
+                    readAt: null,
+                    createdAt: serverTimestamp(),
+                });
             }));
             addToast(`Convocatoria enviada a ${selected.size} guardia${selected.size !== 1 ? 's' : ''}`, 'success');
             setSelected(new Set());
@@ -277,8 +277,8 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
         }
     }
 
-    // Derivados del servicio seleccionado
-    const srvSols = solicitudes.filter(s => s.servicioId === selectedSrvId);
+    // Derivados del servicio seleccionado (selectedSrvId='' = todos los servicios)
+    const srvSols = selectedSrvId ? solicitudes.filter(s => s.servicioId === selectedSrvId) : solicitudes;
     const aceptaron = srvSols.filter(s => s.status === 'aprobada');
     const pendientes = srvSols.filter(s => s.status === 'convocado' || s.status === 'pendiente');
     const rechazaron = srvSols.filter(s => s.status === 'rechazada');
@@ -348,6 +348,21 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     <div className="w-52 shrink-0 border-r border-slate-200 dark:border-slate-700 flex flex-col">
                         <p className="px-3 pt-3 pb-1.5 text-[9px] font-black uppercase text-slate-400 tracking-widest">Servicios</p>
                         <div className="flex-1 overflow-y-auto px-2 pb-3 space-y-1.5">
+                            {(evento.servicios || []).length > 1 && (
+                                <button
+                                    onClick={() => { setSelectedSrvId(''); setTab('estado'); setSearch(''); setSelected(new Set()); }}
+                                    className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${selectedSrvId === '' ? 'bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}
+                                >
+                                    <div className="flex items-center justify-between gap-1">
+                                        <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Todos</p>
+                                        {selectedSrvId === '' && <span className="w-1 h-1 rounded-full bg-slate-500 dark:bg-slate-400 shrink-0"/>}
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                        {solicitudes.filter(s => s.status === 'aprobada').length > 0 && <span className="text-[9px] text-emerald-600 dark:text-emerald-400">{solicitudes.filter(s => s.status === 'aprobada').length} acept.</span>}
+                                        <span className="text-[9px] text-slate-400 ml-auto">{(evento.servicios || []).reduce((n, s) => n + (s.cupo || 0), 0)} pax</span>
+                                    </div>
+                                </button>
+                            )}
                             {(evento.servicios || []).map(srv => {
                                 const sSols = solicitudes.filter(s => s.servicioId === srv.id);
                                 const pend = sSols.filter(s => s.status === 'convocado' || s.status === 'pendiente').length;
@@ -379,10 +394,11 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     </div>
 
                     {/* Panel principal */}
-                    {selectedSrv ? (
+                    {(selectedSrv || selectedSrvId === '') ? (
                         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
                             {/* Cabecera del servicio */}
+                            {selectedSrv ? (
                             <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 shrink-0">
                                 <div className="flex flex-wrap items-center gap-2.5">
                                     <span className="font-semibold text-slate-800 dark:text-white text-sm">{selectedSrv.nombre}</span>
@@ -417,10 +433,30 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                     <span className="text-[9px] text-slate-400 shrink-0">{aceptaron.length}/{cupo} confirmados</span>
                                 </div>
                             </div>
+                            ) : (
+                            <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 shrink-0">
+                                <div className="flex flex-wrap items-center gap-2.5">
+                                    <span className="font-semibold text-slate-800 dark:text-white text-sm">Todos los servicios</span>
+                                    <span className="text-[10px] text-slate-400 flex items-center gap-1"><Users size={9}/>{(evento.servicios || []).reduce((n, s) => n + (s.cupo || 0), 0)} pax total</span>
+                                </div>
+                                <div className="mt-2 flex items-center gap-2">
+                                    <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                        <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: '0%' }}/>
+                                    </div>
+                                    <span className="text-[9px] text-slate-400 shrink-0">{aceptaron.length}/{(evento.servicios || []).reduce((n, s) => n + (s.cupo || 0), 0)} confirmados</span>
+                                </div>
+                            </div>
+                            )}
 
                             {/* Tabs */}
                             <div className="flex border-b border-slate-200 dark:border-slate-700 px-4 shrink-0">
-                                {(['convocar', 'estado', 'cronograma'] as const).map(t => (
+                                {(['convocar', 'estado', 'cronograma'] as const)
+                                    .filter(t => !(t === 'convocar' && !selectedSrv))
+                                    .map(t => {
+                                    const cronoCount = selectedSrvId
+                                        ? evTurnos.filter(x => x.servicioId === selectedSrvId).length
+                                        : evTurnos.length;
+                                    return (
                                     <button
                                         key={t}
                                         onClick={() => setTab(t)}
@@ -430,11 +466,12 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         {t === 'estado' && srvSols.length > 0 && (
                                             <span className="bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full px-1.5 py-0.5 text-[8px]">{srvSols.length}</span>
                                         )}
-                                        {t === 'cronograma' && evTurnos.length > 0 && (
-                                            <span className="bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 rounded-full px-1.5 py-0.5 text-[8px]">{evTurnos.length}</span>
+                                        {t === 'cronograma' && cronoCount > 0 && (
+                                            <span className="bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-400 rounded-full px-1.5 py-0.5 text-[8px]">{cronoCount}</span>
                                         )}
                                     </button>
-                                ))}
+                                    );
+                                })}
                             </div>
 
                             {/* Tab: Convocar */}
@@ -584,7 +621,10 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                             Sin guardias asignados aún. Confirmá convocatorias desde "Estado convocatoria".
                                         </p>
                                     ) : (
-                                        (evento.servicios || []).map(srv => {
+                                        (selectedSrvId
+                                            ? (evento.servicios || []).filter(s => s.id === selectedSrvId)
+                                            : (evento.servicios || [])
+                                        ).map(srv => {
                                             const srvT = evTurnos.filter(t => t.servicioId === srv.id);
                                             if (srvT.length === 0) return null;
                                             return (
@@ -651,7 +691,32 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                             {tab === 'estado' && (
                                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
                                     {srvSols.length === 0 ? (
-                                        <p className="text-[11px] text-slate-400 text-center py-10">Sin convocatorias para este servicio. Usá la solapa "Convocar guardias" para invitar.</p>
+                                        <p className="text-[11px] text-slate-400 text-center py-10">Sin convocatorias. Seleccioná un servicio y usá "Convocar guardias" para invitar.</p>
+                                    ) : !selectedSrvId ? (
+                                        // Modo "todos": agrupar por servicio
+                                        (evento.servicios || []).map(srv => {
+                                            const sSols = solicitudes.filter(s => s.servicioId === srv.id);
+                                            if (sSols.length === 0) return null;
+                                            return (
+                                                <section key={srv.id}>
+                                                    <p className="text-[9px] font-black uppercase text-slate-400 tracking-wide mb-2 flex items-center gap-1.5">
+                                                        <span>{srv.nombre}</span>
+                                                        <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-black">{fmtFecha(srv.fecha)}</span>
+                                                    </p>
+                                                    <div className="space-y-1">
+                                                        {sSols.map(sol => (
+                                                            <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
+                                                                {sol.status === 'aprobada' ? <CheckCircle size={12} className="text-emerald-500 shrink-0"/> : <Clock size={12} className="text-slate-400 shrink-0"/>}
+                                                                <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">{sol.empleadoNombre}</p>
+                                                                <span className={`text-[10px] shrink-0 ${sol.status === 'aprobada' ? 'text-emerald-600 dark:text-emerald-400' : sol.status === 'rechazada' ? 'text-rose-400' : 'text-slate-400'}`}>
+                                                                    {sol.status === 'aprobada' ? 'Aceptada' : sol.status === 'rechazada' ? 'Rechazó' : 'Pendiente'}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            );
+                                        })
                                     ) : (
                                         <>
                                             {aceptaron.length > 0 && (
