@@ -46,6 +46,9 @@ export type ProformaEventoServicio = {
   servicioId: string;
   servicioNombre: string;
   fecha: string;
+  horaInicio?: string;
+  horaFin?: string;
+  cupo?: number;
   guardias: ProformaEventoGuardia[];
   totalHoras: number;
 };
