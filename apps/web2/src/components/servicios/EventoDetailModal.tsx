@@ -284,8 +284,14 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const rechazaron = srvSols.filter(s => s.status === 'rechazada');
     const yaEnviadosIds = new Set(srvSols.map(s => s.empleadoId));
 
+    // EV turnos del servicio sin solicitud correspondiente (asignados directo desde planificador)
+    const srvEvTurnos = evTurnos.filter(t => selectedSrvId ? t.servicioId === selectedSrvId : true);
+    const solsEmpleadoIds = new Set(srvSols.map(s => s.empleadoId));
+    const turnosDirectos = srvEvTurnos.filter(t => !solsEmpleadoIds.has(t.employeeId));
+    const totalConfirmados = aceptaron.length + turnosDirectos.length;
+
     const cupo = selectedSrv?.cupo || 0;
-    const cupoLleno = cupo > 0 && aceptaron.length >= cupo;
+    const cupoLleno = cupo > 0 && totalConfirmados >= cupo;
 
     const aptitudesRequeridas = selectedSrv?.aptitudesRequeridas || [];
 
@@ -358,7 +364,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         {selectedSrvId === '' && <span className="w-1 h-1 rounded-full bg-slate-500 dark:bg-slate-400 shrink-0"/>}
                                     </div>
                                     <div className="flex items-center gap-2 mt-0.5">
-                                        {solicitudes.filter(s => s.status === 'aprobada').length > 0 && <span className="text-[9px] text-emerald-600 dark:text-emerald-400">{solicitudes.filter(s => s.status === 'aprobada').length} acept.</span>}
+                                        {evTurnos.length > 0 && <span className="text-[9px] text-emerald-600 dark:text-emerald-400">{evTurnos.length} asignados</span>}
                                         <span className="text-[9px] text-slate-400 ml-auto">{(evento.servicios || []).reduce((n, s) => n + (s.cupo || 0), 0)} pax</span>
                                     </div>
                                 </button>
@@ -366,7 +372,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                             {(evento.servicios || []).map(srv => {
                                 const sSols = solicitudes.filter(s => s.servicioId === srv.id);
                                 const pend = sSols.filter(s => s.status === 'convocado' || s.status === 'pendiente').length;
-                                const acept = sSols.filter(s => s.status === 'aprobada').length;
+                                const srvTotalAsig = evTurnos.filter(t => t.servicioId === srv.id).length;
                                 const isActive = srv.id === selectedSrvId;
                                 return (
                                     <button
@@ -384,7 +390,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         </div>
                                         <div className="flex items-center gap-2 mt-1">
                                             {pend > 0 && <span className="text-[9px] text-amber-600 dark:text-amber-400">{pend} pend.</span>}
-                                            {acept > 0 && <span className="text-[9px] text-emerald-600 dark:text-emerald-400">{acept} acept.</span>}
+                                            {srvTotalAsig > 0 && <span className="text-[9px] text-emerald-600 dark:text-emerald-400">{srvTotalAsig} asignados</span>}
                                             <span className="text-[9px] text-slate-400 ml-auto">{srv.cupo} pax</span>
                                         </div>
                                     </button>
@@ -427,10 +433,10 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                     <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                                         <div
                                             className="h-full bg-emerald-500 rounded-full transition-all"
-                                            style={{ width: cupo > 0 ? `${Math.min(100, Math.round(aceptaron.length / cupo * 100))}%` : '0%' }}
+                                            style={{ width: cupo > 0 ? `${Math.min(100, Math.round(totalConfirmados / cupo * 100))}%` : '0%' }}
                                         />
                                     </div>
-                                    <span className="text-[9px] text-slate-400 shrink-0">{aceptaron.length}/{cupo} confirmados</span>
+                                    <span className="text-[9px] text-slate-400 shrink-0">{totalConfirmados}/{cupo} confirmados</span>
                                 </div>
                             </div>
                             ) : (
@@ -441,9 +447,9 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                 </div>
                                 <div className="mt-2 flex items-center gap-2">
                                     <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                                        <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: '0%' }}/>
+                                        <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: (() => { const tot = (evento.servicios || []).reduce((n, s) => n + (s.cupo || 0), 0); return tot > 0 ? `${Math.min(100, Math.round(evTurnos.length / tot * 100))}%` : '0%'; })() }}/>
                                     </div>
-                                    <span className="text-[9px] text-slate-400 shrink-0">{aceptaron.length}/{(evento.servicios || []).reduce((n, s) => n + (s.cupo || 0), 0)} confirmados</span>
+                                    <span className="text-[9px] text-slate-400 shrink-0">{evTurnos.length}/{(evento.servicios || []).reduce((n, s) => n + (s.cupo || 0), 0)} confirmados</span>
                                 </div>
                             </div>
                             )}
@@ -700,13 +706,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                             {/* Tab: Estado */}
                             {tab === 'estado' && (
                                 <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-                                    {srvSols.length === 0 ? (
+                                    {srvSols.length === 0 && turnosDirectos.length === 0 ? (
                                         <p className="text-[11px] text-slate-400 text-center py-10">Sin convocatorias. Seleccioná un servicio y usá "Convocar guardias" para invitar.</p>
                                     ) : !selectedSrvId ? (
                                         // Modo "todos": agrupar por servicio
                                         (evento.servicios || []).map(srv => {
                                             const sSols = solicitudes.filter(s => s.servicioId === srv.id);
-                                            if (sSols.length === 0) return null;
+                                            const sSolsIds = new Set(sSols.map(s => s.empleadoId));
+                                            const sTurnDir = evTurnos.filter(t => t.servicioId === srv.id && !sSolsIds.has(t.employeeId));
+                                            if (sSols.length === 0 && sTurnDir.length === 0) return null;
                                             return (
                                                 <section key={srv.id}>
                                                     <p className="text-[9px] font-black uppercase text-slate-400 tracking-wide mb-2 flex items-center gap-1.5">
@@ -721,6 +729,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                                 <span className={`text-[10px] shrink-0 ${sol.status === 'aprobada' ? 'text-emerald-600 dark:text-emerald-400' : sol.status === 'rechazada' ? 'text-rose-400' : 'text-slate-400'}`}>
                                                                     {sol.status === 'aprobada' ? 'Aceptada' : sol.status === 'rechazada' ? 'Rechazó' : 'Pendiente'}
                                                                 </span>
+                                                            </div>
+                                                        ))}
+                                                        {sTurnDir.map(t => (
+                                                            <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
+                                                                <CheckCircle size={12} className="text-emerald-500 shrink-0"/>
+                                                                <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">
+                                                                    {t.employeeName || empleados.find((e: EmpRow) => e.id === t.employeeId)?.name || t.employeeId}
+                                                                </p>
+                                                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Planificador</span>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -738,6 +755,22 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                                 <CheckCircle size={12} className="text-emerald-500 shrink-0"/>
                                                                 <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">{sol.empleadoNombre}</p>
                                                                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Aceptada</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            )}
+                                            {turnosDirectos.length > 0 && (
+                                                <section>
+                                                    <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">Asignados desde planificador — {turnosDirectos.length}</p>
+                                                    <div className="space-y-1">
+                                                        {turnosDirectos.map(t => (
+                                                            <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
+                                                                <CheckCircle size={12} className="text-emerald-500 shrink-0"/>
+                                                                <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">
+                                                                    {t.employeeName || empleados.find((e: EmpRow) => e.id === t.employeeId)?.name || t.employeeId}
+                                                                </p>
+                                                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Planificador</span>
                                                             </div>
                                                         ))}
                                                     </div>
