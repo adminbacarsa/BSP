@@ -43,7 +43,7 @@ export const PERIOD_ONLY_CODES = new Set(['V']);
 export const PAID_DAY_LEAVE_CODES = new Set(['L', 'PG', 'E', 'A']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'AA']);
 // REF/ESC liquidan al empleado (8h) pero no son cobertura de puesto en reporte por objetivo.
-const OBJECTIVE_NON_BILLABLE_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET', 'REF', 'ESC']);
+const OBJECTIVE_NON_BILLABLE_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET', 'REF', 'ESC', 'EV']);
 const isOperativeCode = (code: string) => !NON_WORK_CODES.has((code || '').trim().toUpperCase());
 const isObjectiveBillableCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has((code || '').trim().toUpperCase());
 
@@ -765,7 +765,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             const rawCode = (d.code || '').trim().toUpperCase();
             const isFT = isFrancoTrabajadoShift(d);
-            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode) && !isFT) return;
+            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'EV'].includes(rawCode) && !isFT) return;
             if (rawCode === 'F' && !isFT) return;
             // Doc F sin fichada: liquida en el turno de cobertura si ese dÃ­a tiene fichada
             if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d) && francoDocSkipIds.has(d.id)) return;

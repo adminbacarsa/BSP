@@ -7,7 +7,7 @@ import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
 import { resolveTitularVacancyWorkShift } from './vacancyCoverage';
 
 export const PLANNING_NON_BILLABLE_CODES = new Set([
-    'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC', 'SUS', 'SGS',
+    'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC', 'SUS', 'SGS', 'EV',
 ]);
 
 const ABSENCE_CODES = new Set(['V', 'L', 'A', 'E', 'AA', 'PG']);
