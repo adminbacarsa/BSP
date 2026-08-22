@@ -604,40 +604,92 @@ export default function ProformaPanel(props: ProformaPanelProps) {
               <p className="text-[10px] font-black uppercase text-slate-500">Eventos</p>
               <p className="text-xs font-bold text-slate-400 mt-0.5">
                 {proformaBundle.eventos.length} evento(s) ·{' '}
-                {proformaBundle.eventos.reduce((a, e) => a + e.servicios.reduce((b, s) => b + s.guardias.length, 0), 0)} guardia(s)
+                {proformaBundle.eventos.reduce((a, e) => a + e.servicios.reduce((b, s) => b + s.guardias.length, 0), 0)} guardia(s) ·{' '}
+                {proformaBundle.eventos.reduce((a, e) => a + e.totalHoras, 0)} hs
               </p>
             </div>
-            <span className="text-sm font-bold text-slate-700 shrink-0">
-              {proformaBundle.eventos.reduce((a, e) => a + e.totalHoras, 0)} hs
-            </span>
             {openEventos ? <ChevronUp size={18} className="text-slate-400 shrink-0" /> : <ChevronDown size={18} className="text-slate-400 shrink-0" />}
           </button>
           {openEventos && (
-            <div className="p-6 space-y-3">
-              {proformaBundle.eventos.map((ev) => (
-                <div key={ev.eventoId} className="border rounded-xl overflow-hidden">
-                  <div className="px-4 py-3 bg-slate-50 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-black text-slate-800">{ev.eventoNombre}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">{ev.servicios.length} servicio(s)</p>
-                    </div>
-                    <span className="text-sm font-black text-slate-700">{ev.totalHoras} hs</span>
-                  </div>
-                  {ev.servicios.map((srv) => (
-                    <div key={srv.servicioId} className="border-t px-4 py-2">
-                      <p className="text-xs font-black text-slate-600 mb-1">{srv.servicioNombre} · {srv.fecha}</p>
-                      <div className="space-y-0.5">
-                        {srv.guardias.map((g, i) => (
-                          <div key={`${g.employeeId}-${i}`} className="flex justify-between text-xs font-bold text-slate-500">
-                            <span>{g.name}</span>
-                            <span>{g.hours} hs</span>
-                          </div>
-                        ))}
+            <div className="p-6 space-y-4">
+              {proformaBundle.eventos.map((ev) => {
+                const evTotalGuardias = ev.servicios.reduce((a, s) => a + s.guardias.length, 0);
+                return (
+                  <div key={ev.eventoId} className="border rounded-xl overflow-hidden">
+                    {/* Encabezado del evento */}
+                    <div className="px-4 py-3 bg-slate-800 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-black text-white">{ev.eventoNombre}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
+                          {ev.servicios.length} servicio(s) · {evTotalGuardias} guardia(s)
+                        </p>
                       </div>
+                      <span className="text-sm font-black text-amber-400">{ev.totalHoras} hs</span>
                     </div>
-                  ))}
+
+                    {/* Servicios */}
+                    {ev.servicios.map((srv, sIdx) => {
+                      const paxCubierto = srv.guardias.length;
+                      const paxReq = srv.cupo ?? '—';
+                      const horario = srv.horaInicio && srv.horaFin ? `${srv.horaInicio}–${srv.horaFin}` : null;
+                      return (
+                        <div key={srv.servicioId} className={sIdx > 0 ? 'border-t' : ''}>
+                          {/* Subencabezado servicio */}
+                          <div className="px-4 py-2 bg-slate-100 flex flex-wrap items-center gap-x-4 gap-y-0.5">
+                            <p className="text-xs font-black text-slate-700">{srv.servicioNombre}</p>
+                            <span className="text-[11px] font-bold text-slate-500">{srv.fecha}</span>
+                            {horario && <span className="text-[11px] font-bold text-slate-500">{horario}</span>}
+                            <span className="text-[11px] font-bold text-slate-500">
+                              PAX: <span className={paxCubierto >= Number(srv.cupo ?? 0) && srv.cupo ? 'text-green-600' : 'text-slate-600'}>{paxCubierto}</span>
+                              {srv.cupo != null ? ` / ${srv.cupo}` : ''}
+                            </span>
+                          </div>
+
+                          {/* Tabla guardias */}
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b bg-slate-50/60">
+                                <th className="text-left px-4 py-1.5 font-black text-slate-500 uppercase text-[10px]">Guardia</th>
+                                <th className="text-right px-4 py-1.5 font-black text-slate-500 uppercase text-[10px]">Hs</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {srv.guardias.map((g, i) => (
+                                <tr key={`${g.employeeId}-${i}`} className="border-b border-slate-50 hover:bg-slate-50/40">
+                                  <td className="px-4 py-1.5 font-bold text-slate-700">{g.name}</td>
+                                  <td className="px-4 py-1.5 font-bold text-slate-600 text-right tabular-nums">{g.hours}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="bg-slate-100/80">
+                                <td className="px-4 py-1.5 font-black text-slate-600 text-right text-[11px] uppercase">Subtotal</td>
+                                <td className="px-4 py-1.5 font-black text-slate-800 text-right tabular-nums">{srv.totalHoras}</td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      );
+                    })}
+
+                    {/* Total evento */}
+                    <div className="px-4 py-2 bg-slate-800/10 flex justify-between items-center border-t border-slate-200">
+                      <span className="text-xs font-black text-slate-600 uppercase">Total {ev.eventoNombre}</span>
+                      <span className="text-sm font-black text-slate-800 tabular-nums">{ev.totalHoras} hs</span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Gran total eventos */}
+              {proformaBundle.eventos.length > 1 && (
+                <div className="flex justify-between items-center pt-2 border-t border-slate-300">
+                  <span className="text-xs font-black text-slate-600 uppercase">Total todos los eventos</span>
+                  <span className="text-sm font-black text-slate-800 tabular-nums">
+                    {proformaBundle.eventos.reduce((a, e) => a + e.totalHoras, 0)} hs
+                  </span>
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>

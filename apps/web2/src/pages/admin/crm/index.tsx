@@ -2069,6 +2069,24 @@ export default function CRMPage() {
         srv.guardias.push({ employeeId: String(t.employeeId || ''), name: String(t.employeeName || t.employeeId || ''), fecha: dateKey, hours: hrs });
         srv.totalHoras += hrs;
       });
+      // Enriquecer servicios con cupo/horario desde el doc del evento
+      const eventoIds = Array.from(evByEvento.keys());
+      if (eventoIds.length > 0) {
+        await Promise.all(eventoIds.map(async (eid) => {
+          const snap = await getDoc(doc(db, 'eventos', eid));
+          if (!snap.exists()) return;
+          const srvList: any[] = snap.data()?.servicios || [];
+          const ev = evByEvento.get(eid)!;
+          srvList.forEach((s: any) => {
+            const srvKey = String(s.id || '');
+            if (!srvKey || !ev.srvs.has(srvKey)) return;
+            const srv = ev.srvs.get(srvKey)!;
+            srv.cupo = typeof s.cupo === 'number' ? s.cupo : undefined;
+            srv.horaInicio = s.horaInicio || undefined;
+            srv.horaFin = s.horaFin || undefined;
+          });
+        }));
+      }
       const eventosProforma = Array.from(evByEvento.entries()).map(([eventoId, ev]) => {
         const servicios = Array.from(ev.srvs.values());
         return { eventoId, eventoNombre: ev.nombre, servicios, totalHoras: servicios.reduce((a: number, s: any) => a + s.totalHoras, 0) };
