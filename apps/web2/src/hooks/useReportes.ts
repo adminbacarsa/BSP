@@ -1185,6 +1185,14 @@ export const useReportes = (forcedClientId?: string | null) => {
         [empresaId, migracionCompleta],
     );
     const [loading, setLoading] = useState(false);
+    const [loadingProgress, setLoadingProgress] = useState<{ pct: number; label: string } | null>(null);
+
+    const reportProgress = (pct: number, label: string) => {
+        setLoadingProgress({
+            pct: Math.min(100, Math.max(0, Math.round(pct))),
+            label,
+        });
+    };
 
     const initialCctPeriod = getCctPayrollPeriodByOffset(0);
     const savedRpt = typeof window !== 'undefined'
@@ -1304,10 +1312,12 @@ export const useReportes = (forcedClientId?: string | null) => {
     const generateReports = async (fetchScope?: ReportFetchScope) => {
         if (!dateRange.start || !dateRange.end) return toast.error("Seleccione un rango de fechas");
         setLoading(true);
+        setLoadingProgress({ pct: 0, label: 'Iniciando…' });
         setEmployeeReport([]);
         setObjectiveReport([]);
 
         try {
+            reportProgress(5, 'Validando período');
             // FIX CRÃTICO DE FECHAS: Usar formato ISO Local
             const startDate = new Date(`${dateRange.start}T00:00:00`);
             const endDate = new Date(`${dateRange.end}T23:59:59.999`);
@@ -1315,9 +1325,11 @@ export const useReportes = (forcedClientId?: string | null) => {
             if (startDate > endDate) {
                 toast.error("La fecha 'Desde' no puede ser mayor a 'Hasta'");
                 setLoading(false);
+                setLoadingProgress(null);
                 return;
             }
 
+            reportProgress(12, 'Cargando contratos de servicio');
             // Cargar contratos de servicio para cruzar Hs. Vendidas por objetivo
             const slaSnap = await getDocs(query(empresaScopedQuery('servicios_sla', empresaId, scopeEmpresa) as ReturnType<typeof query>, limit(500)));
             const slaMap: Record<string, number> = {};
@@ -1387,6 +1399,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             const rangeStartYmd = dateRange.start;
             const rangeEndYmd = dateRange.end;
 
+            reportProgress(28, 'Descargando turnos, ausencias y planificación');
             const [planifDocs, fetchedTurnos, ausDocs, ajustesDocs] = await Promise.all([
                 fetchReportPlanificacionEstados(
                     empresaId,
@@ -1418,6 +1431,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 ),
             ]);
 
+            reportProgress(45, 'Procesando turnos y novedades');
             const publishStatusMap: Record<string, boolean> = {};
             planifDocs.forEach(d => {
                 if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
@@ -1589,6 +1603,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             }
 
             // 3. Procesamiento por Empleado (excluir vacantes/desconocidos)
+            reportProgress(58, 'Calculando liquidación por legajo');
             const empGroups: any = {};
             rawShifts.forEach((s: any) => {
                 if (!s.employeeId || !empMap[s.employeeId]) return;
@@ -1600,7 +1615,16 @@ export const useReportes = (forcedClientId?: string | null) => {
                 empGroups[s.employeeId].push(enrichShift(sWithFT));
             });
 
-            const empRows = Object.keys(empGroups).map(empId => {
+            const empIds = Object.keys(empGroups);
+            const empRows: any[] = [];
+            for (let i = 0; i < empIds.length; i++) {
+                const empId = empIds[i]!;
+                if (empIds.length > 1 && (i === 0 || i === empIds.length - 1 || i % Math.max(1, Math.floor(empIds.length / 8)) === 0)) {
+                    reportProgress(
+                        58 + Math.round(((i + 1) / empIds.length) * 14),
+                        `Liquidando legajos (${i + 1}/${empIds.length})`,
+                    );
+                }
                 const shifts = prepareShiftsForEmployeeLiquidation(
                     dedupeShiftsByAbsencePriority(
                         propagateFrancoTrabajadoFlags(empGroups[empId], { usePlannedHours }),
@@ -1613,7 +1637,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const ffCount = shifts.filter((s:any) => s.isFrancoCompensatorio || s.code === 'FF').length;
                 const novedadesRRHH = countNovedadesRRHHFromShifts(shifts);
 
-                return {
+                empRows.push({
                     id: empId,
                     type: 'EMPLOYEE',
                     name: empMap[empId] || 'Desconocido',
@@ -1635,8 +1659,8 @@ export const useReportes = (forcedClientId?: string | null) => {
                     ftCount,
                     ffCount,
                     rawShifts: shifts
-                };
-            });
+                });
+            }
 
             // Ajustes de horas manuales â€” sumar/restar del total teÃ³rico del empleado
             const ajustesByEmp: Record<string, number> = {};
@@ -1665,6 +1689,7 @@ export const useReportes = (forcedClientId?: string | null) => {
             }
 
             // 4. Procesamiento por Objetivo
+            reportProgress(78, 'Armando reporte por objetivo');
             const objGroups: Record<string, { shifts: any[]; clientId?: string }> = {};
             rawShifts.forEach((s: any) => {
                 const enriched = enrichShift(s);
@@ -1777,12 +1802,14 @@ export const useReportes = (forcedClientId?: string | null) => {
             });
 
             setObjectiveReport(objRows.filter(Boolean) as any[]);
+            reportProgress(100, 'Listo');
 
         } catch (err) {
             console.error('Error generando reporte:', err);
             toast.error('Error al generar el reporte');
         } finally {
             setLoading(false);
+            setLoadingProgress(null);
         }
     };
 
@@ -1811,6 +1838,7 @@ export const useReportes = (forcedClientId?: string | null) => {
 
     return {
         loading,
+        loadingProgress,
         dateRange,
         setDateRange,
         publishFilter,
