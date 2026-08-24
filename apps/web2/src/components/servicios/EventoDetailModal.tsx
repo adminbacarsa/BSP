@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     X, Calendar, Users, MapPin, Search, Send,
     CheckCircle, Clock,
-    UserCheck, UserX, ClipboardCheck,
+    UserCheck, UserX, ClipboardCheck, UserMinus,
 } from 'lucide-react';
-import { collection, addDoc, getDocs, getDoc, query, where, serverTimestamp, onSnapshot, updateDoc, doc, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, getDocs, getDoc, query, where, serverTimestamp, onSnapshot, updateDoc, doc, Timestamp } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import { empresaCollectionQuery } from '@/lib/multiempresa';
@@ -141,6 +141,40 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
         }, () => setLoadingCrono(false));
         return unsub;
     }, [evento.id, empresaId]);
+
+    async function handleUnassignGuard(turno: any) {
+        const nombre = turno.employeeName || turno.employeeId;
+        if (!window.confirm(`¿Desasignar a ${nombre} de este evento?`)) return;
+        try {
+            if (turno.replacedCode) {
+                // Había un turno previo — revertir al código original
+                await updateDoc(doc(db, 'turnos', turno.id), {
+                    code: turno.replacedCode,
+                    origin: null,
+                    eventoId: null,
+                    eventoNombre: null,
+                    servicioId: null,
+                    servicioNombre: null,
+                    replacedCode: null,
+                });
+            } else {
+                await deleteDoc(doc(db, 'turnos', turno.id));
+            }
+            // Revertir/eliminar solicitud si existe
+            const sol = solicitudes.find(s => s.empleadoId === turno.employeeId && s.servicioId === turno.servicioId);
+            if (sol) {
+                if ((sol as any).tipo === 'admin_asigna') {
+                    await deleteDoc(doc(db, 'solicitudes_evento', sol.id));
+                } else {
+                    await updateDoc(doc(db, 'solicitudes_evento', sol.id), { status: 'convocado' });
+                }
+            }
+            addToast(`${nombre} desasignado del evento`, 'success');
+        } catch (e) {
+            console.error(e);
+            addToast('Error al desasignar', 'error');
+        }
+    }
 
     async function handleTogglePresence(turnoId: string, field: 'isPresent' | 'isAbsent' | 'isCompleted', value: boolean) {
         try {
@@ -683,6 +717,13 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                                         className={`p-1.5 rounded-lg transition-colors ${turno.isCompleted ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'bg-slate-100 dark:bg-slate-700 text-slate-400 hover:bg-blue-50'}`}
                                                                     >
                                                                         <ClipboardCheck size={13}/>
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => void handleUnassignGuard(turno)}
+                                                                        title="Desasignar del evento"
+                                                                        className="p-1.5 rounded-lg transition-colors bg-slate-100 dark:bg-slate-700 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/30 dark:hover:text-rose-400"
+                                                                    >
+                                                                        <UserMinus size={13}/>
                                                                     </button>
                                                                 </div>
                                                                 <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-black shrink-0 ${
