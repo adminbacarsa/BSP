@@ -55,8 +55,9 @@ export function collectSnapshotEmployeeIds(
 }
 
 /**
- * Snapshot liviano: solo celdas en pendingChanges (estado visible pre-guardado).
- * Evita recorrer empleados × días del mes completo en guardados masivos.
+ * Snapshot liviano: solo celdas en pendingChanges.
+ * Útil para métricas delta; **no** usar para historial de versiones
+ * (el Histórico necesita `buildPlanningSnapshotFromGrid` del mes completo).
  */
 export function buildPlanningSnapshotForPendingChanges(
   pendingChanges: Record<string, PlanningSnapshotCell & { isDeleted?: boolean; objectiveId?: string } | undefined>,
@@ -166,6 +167,23 @@ export function buildPlanningSnapshotFromGrid(args: {
     }
   }
   return out;
+}
+
+/**
+ * Versiones guardadas con snapshot liviano (solo celdas tocadas) vs mes completo.
+ * Heurística: pocas claves frente a emp × días del mes visible.
+ */
+export function isSparsePlanningSnapshot(
+  data: PlanningSnapshot | null | undefined,
+  employeeCount: number,
+  dayCount: number,
+): boolean {
+  if (!data || employeeCount <= 0 || dayCount <= 0) return false;
+  const keys = Object.keys(data).length;
+  if (keys === 0) return true;
+  const expected = employeeCount * dayCount;
+  // Menos del 35% de la grilla ⇒ casi seguro era snapshot delta.
+  return keys < Math.max(12, Math.floor(expected * 0.35));
 }
 
 export function diffPlanningSnapshots(
