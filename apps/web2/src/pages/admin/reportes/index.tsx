@@ -4,7 +4,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import {
     Users, Building, Download, Printer,
     Calendar, User, X, ChevronRight, ChevronDown, Sun, Moon, BarChart3, FileText, CalendarDays, TrendingUp,
-    Shield, CheckCircle2, Minus, RotateCw, Zap, Search
+    Shield, CheckCircle2, Minus, RotateCw, Zap, Search, Loader2
 } from 'lucide-react';
 import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import {
@@ -148,7 +148,7 @@ export default function ReportsPage() {
     const { assignedClientId } = useAuth();
     const { empresaId } = useEmpresa();
     const {
-        loading, dateRange, setDateRange, publishFilter, setPublishFilter,
+        loading, loadingProgress, dateRange, setDateRange, publishFilter, setPublishFilter,
         usePlannedHours, setUsePlannedHours,
         generateReports, loadAudit,
         employeeReport, objectiveReport, auditLogs,
@@ -1929,6 +1929,37 @@ export default function ReportsPage() {
     return (
         <DashboardLayout>
             <Head><title>Reportes | COSP V1.0</title></Head>
+            {loading && (
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm no-print">
+                    <div className="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg px-6 py-5">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 rounded-xl bg-indigo-100 dark:bg-indigo-900/40">
+                                <Loader2 size={20} className="text-indigo-600 dark:text-indigo-400 animate-spin" />
+                            </div>
+                            <div className="min-w-0">
+                                <p className="text-sm font-black uppercase tracking-wide text-slate-800 dark:text-white">
+                                    Generando liquidación
+                                </p>
+                                <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">
+                                    {loadingProgress?.label || 'Procesando…'}
+                                </p>
+                            </div>
+                            <span className="ml-auto text-2xl font-black tabular-nums text-indigo-600 dark:text-indigo-400">
+                                {loadingProgress?.pct ?? 0}%
+                            </span>
+                        </div>
+                        <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                            <div
+                                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-indigo-600 transition-[width] duration-300 ease-out"
+                                style={{ width: `${loadingProgress?.pct ?? 0}%` }}
+                            />
+                        </div>
+                        <p className="mt-3 text-[10px] font-bold text-slate-400 text-center">
+                            No cierres esta pestaña hasta que termine
+                        </p>
+                    </div>
+                </div>
+            )}
             <PrintStyles />
             <PageShell>
                 <div className="max-w-7xl mx-auto space-y-6">
@@ -2340,9 +2371,12 @@ export default function ReportsPage() {
                     <button
                         type="button"
                         onClick={handleGenerateReport}
-                        className="h-11 px-8 rounded-2xl bg-slate-900 dark:bg-indigo-600 text-white font-black text-xs uppercase tracking-wide hover:bg-slate-800 dark:hover:bg-indigo-500 transition-colors shadow-lg shrink-0"
+                        disabled={loading}
+                        className="h-11 px-8 rounded-2xl bg-slate-900 dark:bg-indigo-600 text-white font-black text-xs uppercase tracking-wide hover:bg-slate-800 dark:hover:bg-indigo-500 transition-colors shadow-lg shrink-0 disabled:opacity-70 disabled:cursor-wait"
                     >
-                        {loading ? 'Procesando…' : 'Generar reporte'}
+                        {loading
+                            ? `Procesando… ${loadingProgress?.pct ?? 0}%`
+                            : 'Generar reporte'}
                     </button>
                     </div>
                 </ContentCard>
