@@ -272,9 +272,10 @@ import { usePlanningRules } from '@/hooks/usePlanningRules';
 import { enabledPlanningCycles, planningHourLimits } from '@/lib/planning/planning-rules.runtime';
 import {
     buildPlanningSnapshotForKeys,
-    buildPlanningSnapshotForPendingChanges,
     buildPlanningSnapshotFromGrid,
+    collectSnapshotEmployeeIds,
     diffPlanningSnapshots,
+    isSparsePlanningSnapshot,
 } from '@/lib/planificacion/planningSnapshotDiff';
 import {
     buildDeploymentShiftConfig,
@@ -5194,7 +5195,16 @@ export default function PlanificacionPage() {
     };
 
     const loadHistory = async () => { if (!selectedObjective) { toast.error("Seleccione un objetivo"); return; } try { const q = query(collection(db, 'planificaciones_historial'), where('period', '==', `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`)); const snap = await getDocs(q); const versions = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((v: any) => v.objectiveId === selectedObjective).sort((a:any, b:any) => b.timestamp.seconds - a.timestamp.seconds); setHistoryVersions(versions); setShowHistoryModal(true); } catch (e) { toast.error("Error historial"); } };
-    const handleViewSnapshot = (v: any) => { try { const data = JSON.parse(v.snapshot); setComparingSnapshot({ id: v.id, date: new Date(v.timestamp.seconds*1000), user: v.user, data: data }); setShowHistoryModal(false); } catch(e) { toast.error("Error al cargar versión histórica"); } };
+    const handleViewSnapshot = (v: any) => {
+        try {
+            const data = JSON.parse(v.snapshot);
+            setCompareShowOnlyDiffs(false);
+            setComparingSnapshot({ id: v.id, date: new Date(v.timestamp.seconds * 1000), user: v.user, data });
+            setShowHistoryModal(false);
+        } catch (e) {
+            toast.error('Error al cargar versión histórica');
+        }
+    };
     const exitSnapshotMode = () => {
         setComparingSnapshot(null);
         setCompareShowOnlyDiffs(false);
@@ -5705,6 +5715,20 @@ export default function PlanificacionPage() {
                 if (shiftsMap[key]) jobShiftsMap[key] = shiftsMap[key];
                 if (allShiftIds[key]?.length) jobAllShiftIds[key] = [...allShiftIds[key]];
             }
+            // Snapshot completo del mes (para historial): estado post-guardado = grilla + pendientes.
+            // No usar solo pending: eso deja el Histórico vacío y parece «Solo cambios» permanente.
+            const snapDateKeys = daysInMonth.map((d) => getDateKey(d));
+            const snapEmpIds = new Set([
+                ...collectSnapshotEmployeeIds(jobPending, shiftsMap, selectedObjective),
+                ...displayedEmployees.map((e: { id: string }) => e.id),
+            ]);
+            const snapshotData = buildPlanningSnapshotFromGrid({
+                employeeIds: [...snapEmpIds],
+                dateKeys: snapDateKeys,
+                shiftsMap,
+                pendingChanges: jobPending,
+                objectiveId: selectedObjective,
+            });
             const jobNovedades = { ...pendingNovedades };
             const jobPackages = [...pendingRecompositionPackages];
             const jobCount = jobKeys.length;
@@ -5746,9 +5770,9 @@ export default function PlanificacionPage() {
             const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
             const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
             const logData: { empId: string; date: string; action: string; detail: string }[] = [];
-            const snapshotData = buildPlanningSnapshotForPendingChanges(jobPending, jobShiftsMap, selectedObjective);
             const employeesById: Record<string, any> = {};
             employees.forEach((e: any) => { employeesById[e.id] = e; });
+            // snapshotData ya armado en doSave (grilla completa del mes)
             const savedPendingChanges = jobPending;
             const savedPendingNovedades = jobNovedades;
             const savedRecompositionPackages = jobPackages;
@@ -10065,6 +10089,14 @@ export default function PlanificacionPage() {
     };
 
     const compareDiffKeys = planningCompareDiff?.changedKeys ?? null;
+    const compareSnapshotSparse = !!(
+        comparingSnapshot?.data
+        && isSparsePlanningSnapshot(
+            comparingSnapshot.data,
+            compareGridEmployees.length || displayedEmployees.length,
+            daysInMonth.length,
+        )
+    );
     const compareGridOpts = { hideFooter: true, minimalHeader: true, compactRows: true } as const;
     const compareSnapshotLabel = comparingSnapshot
         ? new Date(comparingSnapshot.date).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -11282,7 +11314,13 @@ export default function PlanificacionPage() {
                             );
                         })()}
                         {comparingSnapshot ? (
-                            <div className={`flex h-full min-h-0 gap-1 p-0.5 ${compareLayout === 'side' ? 'flex-col xl:flex-row' : 'flex-col'}`}>
+                            <div className="flex h-full min-h-0 flex-col gap-0.5 p-0.5">
+                                {compareSnapshotSparse && (
+                                    <div className="shrink-0 px-2 py-1 rounded-lg bg-amber-50 border border-amber-300 text-[9px] font-bold text-amber-900">
+                                        Esta versión antigua solo guardó celdas modificadas (no el mes completo). Los próximos GUARDAR ya dejan el histórico completo. «Solo cambios» solo filtra filas con diferencias.
+                                    </div>
+                                )}
+                                <div className={`flex flex-1 min-h-0 gap-1 ${compareLayout === 'side' ? 'flex-col xl:flex-row' : 'flex-col'}`}>
                                 <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden rounded-lg border-2 border-amber-400 bg-white">
                                     <div className="shrink-0 px-2 py-0.5 bg-amber-100 border-b border-amber-200 flex items-center justify-between gap-2">
                                         <span className="text-[9px] font-black text-amber-900 uppercase flex items-center gap-1"><History size={10}/> Histórico</span>
@@ -11300,6 +11338,7 @@ export default function PlanificacionPage() {
                                     <div className="flex-1 min-h-0 overflow-auto custom-scrollbar">
                                         {renderGrid(false, undefined, compareDiffKeys, compareGridEmployees, compareGridOpts)}
                                     </div>
+                                </div>
                                 </div>
                             </div>
                         ) : (
