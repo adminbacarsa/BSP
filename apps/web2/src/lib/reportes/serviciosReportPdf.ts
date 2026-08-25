@@ -108,7 +108,13 @@ function rowHours(s: ServiciosReportPdfRow): number {
 
 function rowPuestos(s: ServiciosReportPdfRow): number {
   if (!Array.isArray(s.positions)) return 0;
-  return s.positions.reduce((acc: number, p: any) => acc + (Number(p?.quantity) > 0 ? Number(p.quantity) : 1), 0);
+  let total = 0;
+  for (const raw of s.positions) {
+    const p = raw as { quantity?: unknown };
+    const q = Number(p?.quantity);
+    total += Number.isFinite(q) && q > 0 ? q : 1;
+  }
+  return total;
 }
 
 function rowPuestoSlots(s: ServiciosReportPdfRow): number {
