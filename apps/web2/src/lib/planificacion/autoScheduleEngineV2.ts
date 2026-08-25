@@ -1498,10 +1498,11 @@ function hasMtnRotationBands(pos: V2PositionDef): boolean {
     return codes.has('M') && codes.has('T') && codes.has('N');
 }
 
-function explicitCoverageType(pos: V2PositionDef): '24hs' | 'custom' | null {
+function explicitCoverageType(pos: V2PositionDef): '24hs' | 'custom' | 'encargado' | null {
     const cov = String(pos.coverageType || '').toLowerCase().trim();
     if (cov === '24hs' || cov === '24' || cov === '24h') return '24hs';
     if (cov === 'custom') return 'custom';
+    if (cov === 'encargado') return 'encargado';
     return null;
 }
 
@@ -1512,7 +1513,7 @@ function explicitCoverageType(pos: V2PositionDef): '24hs' | 'custom' | null {
 export function isCustomCoverPosition(pos: V2PositionDef): boolean {
     const explicit = explicitCoverageType(pos);
     if (explicit === 'custom') return true;
-    if (explicit === '24hs') return false;
+    if (explicit === '24hs' || explicit === 'encargado') return false;
     if (hasMtnRotationBands(pos)) return false;
     const working = (pos.shifts || []).filter(s => !FRANCO_SET.has(String(s.code ?? '').toUpperCase()));
     if (working.length === 0) return false;
@@ -1526,7 +1527,7 @@ export function isCustomCoverPosition(pos: V2PositionDef): boolean {
 export function is24hsRotationPosition(pos: V2PositionDef): boolean {
     const explicit = explicitCoverageType(pos);
     if (explicit === '24hs') return true;
-    if (explicit === 'custom') return false;
+    if (explicit === 'custom' || explicit === 'encargado') return false;
     return hasMtnRotationBands(pos);
 }
 

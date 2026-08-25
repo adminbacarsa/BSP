@@ -38,6 +38,7 @@ import {
 } from './plannerDotacionValidator';
 import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
 import { applySlaContractDotacion, assessSlaContractReadiness, buildPositionAssignmentsByEmp } from './slaContractPlanning';
+import { mergeEncargadoIntoAssignments } from '@/lib/servicios/encargadoPosition';
 import { cronogramSlaRuleWarnings, resolveCronogramPlanningRules } from './cronogramPlanningRules';
 import {
     extractPoolCycleAnchorsFromRotations,
@@ -224,10 +225,15 @@ export async function loadAutoLabRealServiceBundle(params: {
     );
     const { vigente, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, year, month - 1);
     const monthHasSla = planningMonthHasActiveSla(matching, year, month - 1);
-    const srv = vigente ?? fallback;
+    let srv = vigente ?? fallback;
 
     if (!srv) {
         throw new Error(`Sin contrato SLA vigente para ${objective.objectiveName} en ${month}/${year}.`);
+    }
+
+    const mergedAssignments = mergeEncargadoIntoAssignments(srv);
+    if (mergedAssignments) {
+        srv = { ...srv, positionAssignments: mergedAssignments };
     }
 
     const { structure } = buildPlanningPositionStructure(srv, { monthHasSla, hasExactMatch });
@@ -284,9 +290,11 @@ export async function loadAutoLabRealServiceBundle(params: {
     const turnoOnlyIds = new Set<string>();
     const employees: V2EmployeeDef[] = [];
 
+    const encargadoId = String(srv.encargadoEmployeeId || '').trim();
+
     for (const row of empRows) {
         if (!isActiveEmployee(row)) continue;
-        if (!employeeBelongsToObjective(row, objective.objectiveId, rosterFromTurnos)) continue;
+        if (!employeeBelongsToObjective(row, objective.objectiveId, rosterFromTurnos) && row.id !== encargadoId) continue;
         employees.push({
             id: row.id,
             nombre: employeeDisplayName(row, row.id),
@@ -307,7 +315,8 @@ export async function loadAutoLabRealServiceBundle(params: {
             defaultShiftByEmp[row.id] = String(cfg.shiftCode).toUpperCase();
         }
         if (String(row.preferredObjectiveId || '') === objective.objectiveId
-            || (row.planificacionDotacion && objective.objectiveId in (row.planificacionDotacion as object))) {
+            || (row.planificacionDotacion && objective.objectiveId in (row.planificacionDotacion as object))
+            || row.id === encargadoId) {
             dotacionIds.add(row.id);
         } else {
             turnoOnlyIds.add(row.id);

@@ -181,6 +181,7 @@ import {
     type AutoPlanningBrainResult,
 } from '@/lib/planificacion/autoPlanningBrain';
 import { applySlaContractDotacion, buildPositionAssignmentsByEmp, buildSlaRotationByDate } from '@/lib/planificacion/slaContractPlanning';
+import { mergeEncargadoIntoAssignments } from '@/lib/servicios/encargadoPosition';
 import { applyRotationsForMonth } from '@/lib/planificacion/slaRotationMonthPlanner';
 import {
     countPositionClosedUnitsFromShifts,
@@ -469,7 +470,7 @@ const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
 const PLANNING_ENGINE_VERSION = '2.8';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
-    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'RFZ': 8, 'TURA': 8, 'ESC': 8, 'C': 8, 'EV': 8,
+    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'ENC': 8, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'RFZ': 8, 'TURA': 8, 'ESC': 8, 'C': 8, 'EV': 8,
 };
 
 /**
@@ -1734,6 +1735,8 @@ export default function PlanificacionPage() {
         return () => window.cancelAnimationFrame(id);
     }, [forceShowAll]);
 
+    const slaEncargadoEmployeeId = String(activePlanningSlaRow?.encargadoEmployeeId || '').trim();
+
     const dotacionBaseEmployees = useMemo(() => {
         if (!selectedObjective) return [];
         let list = employees.filter(e => e.status !== 'inactivo');
@@ -1742,18 +1745,22 @@ export default function PlanificacionPage() {
                 selectedGrupo.objectiveIds.some(objId =>
                     e.preferredObjectiveId === objId ||
                     slaIdToObjId[e.preferredObjectiveId] === objId,
-                ) || activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id),
+                ) || activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id)
+                || (slaEncargadoEmployeeId && e.id === slaEncargadoEmployeeId)
+                || !!(e.planificacionDotacion && selectedObjective && e.planificacionDotacion[selectedObjective]),
             );
         } else {
             list = list.filter(e =>
                 e.preferredObjectiveId === selectedObjective ||
                 slaIdToObjId[e.preferredObjectiveId] === selectedObjective ||
                 activeGuestIdsForObjective.has(e.id) || pinnedExternalEmpIds.has(e.id) ||
-                (showVolantes && (e.volante || []).includes(selectedObjective)),
+                (showVolantes && (e.volante || []).includes(selectedObjective))
+                || (slaEncargadoEmployeeId && e.id === slaEncargadoEmployeeId)
+                || !!(e.planificacionDotacion && selectedObjective && e.planificacionDotacion[selectedObjective]),
             );
         }
         return list;
-    }, [employees, selectedObjective, showVolantes, slaIdToObjId, activeGuestIdsForObjective, pinnedExternalEmpIds, selectedGrupo, grupoUnifiedMode]);
+    }, [employees, selectedObjective, showVolantes, slaIdToObjId, activeGuestIdsForObjective, pinnedExternalEmpIds, selectedGrupo, grupoUnifiedMode, slaEncargadoEmployeeId]);
 
     const employeeMonthStats = useMemo(() => {
         const stats: Record<string, { shiftCount: number; dominantBand: string | null }> = {};
@@ -4461,7 +4468,12 @@ export default function PlanificacionPage() {
                 setHasActiveSLA(monthHasSla);
                 setPositionStructure(structure);
                 setActivePlanningSlaRow(srvForStructure ?? null);
-                setActiveSlaPositionAssignments(srvForStructure?.positionAssignments ?? null);
+                setActiveSlaPositionAssignments(mergeEncargadoIntoAssignments({
+                    positionAssignments: srvForStructure?.positionAssignments,
+                    encargadoEmployeeId: typeof srvForStructure?.encargadoEmployeeId === 'string' ? srvForStructure.encargadoEmployeeId : undefined,
+                    encargadoEmployeeName: typeof srvForStructure?.encargadoEmployeeName === 'string' ? srvForStructure.encargadoEmployeeName : undefined,
+                    positions: srvForStructure?.positions,
+                }) ?? null);
                 setActiveSlaServiceRules(srvForStructure?.serviceRules ?? null);
                 const _loadedRot = srvForStructure?.serviceRotations ?? null;
                 console.log('[CRONO rot] slaId:', srvForStructure?.id, '| serviceRotations:', _loadedRot?.length ?? 'null', _loadedRot?.map((r: any) => ({ id: r.id, mode: r.cycleMode, entries: r.periods?.[0]?.entries?.map((e: any) => ({ eid: e.employeeId, sc: e.shiftCode })) })));

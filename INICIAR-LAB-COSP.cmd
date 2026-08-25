@@ -15,12 +15,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-cosp-lab
 
 if errorlevel 1 (
   echo.
-  echo  ERROR en el arranque. Revisá JDK 21+, Node, firebase-tools y GEMINI_API_KEY en apps\functions\.env
+  echo  ERROR en el arranque. Si ves timeout de Auth/Functions, un Java viejo puede haber
+  echo  quedado en el puerto 8080. Reintentá: npm run lab:restart
+  echo  Tambien revisá JDK 21+, Node, firebase-tools y GEMINI_API_KEY en apps\functions\.env
   pause
   exit /b 1
 )
 
 echo.
-echo  Ventanas abiertas: "COSP Emulators" y "COSP Next :3000"
+echo  Ventanas abiertas: "COSP Emulators" y "COSP Next :3001"
 echo  Cerrá esas ventanas para detener el lab.
 timeout /t 8 >nul

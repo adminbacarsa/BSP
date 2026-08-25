@@ -196,7 +196,7 @@ export function computePositionDayComposition(
     addVariant(STANDARD_SHIFT_VARIANTS.D12);
   } else if (pos.coverageType === '12hs_nocturno') {
     addVariant(STANDARD_SHIFT_VARIANTS.N12);
-  } else if (pos.coverageType === 'custom') {
+  } else if (pos.coverageType === 'custom' || pos.coverageType === 'encargado') {
     (pos.allowedShiftTypes || []).forEach((shift) => {
       const sd: string[] | undefined = (shift as any).specificDates;
       if (Array.isArray(sd) && sd.length > 0) {

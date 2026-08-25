@@ -558,6 +558,9 @@ export function countPositionClosedUnitsFromShifts(
     if (!isActiveOnDay) return { closed: 0, required: 0, schemeLabel };
 
     const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
+    if (coverageType === 'encargado') {
+        return { closed: 0, required: 0, schemeLabel: 'Encargado (sin cobertura)' };
+    }
     const allShifts = Array.isArray(pos?.shifts) ? pos.shifts : [];
     const fullSkip = new Set(
         dateStr && pos.excludedShiftDates?.[dateStr]

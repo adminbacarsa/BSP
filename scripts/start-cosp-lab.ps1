@@ -146,15 +146,16 @@ if ($Restart) {
   Stop-PortListeners @(8080, 9099, 5001, 4000, 4400, 3010, 8081, 9199)
 }
 
-$emulatorsUp = (Test-TcpPort 8080) -and (Test-TcpPort 9099)
+$firestoreUp = Test-TcpPort 8080
+$authUp = Test-TcpPort 9099
 $functionsUp = Test-TcpPort 5001
+$emulatorsUp = $firestoreUp -and $authUp -and $functionsUp
+$partialLab = ($firestoreUp -or $authUp -or $functionsUp -or (Test-TcpPort 4000) -or (Test-TcpPort 4400)) -and -not $emulatorsUp
 
-if (-not $emulatorsUp -or (-not $functionsUp -and -not $Restart)) {
-  if ($emulatorsUp -and -not $functionsUp) {
-    Write-Step 'Firestore/Auth activos pero Functions (:5001) no — relanzando emuladores completos...' 'Yellow'
-    Stop-PortListeners @(8080, 9099, 5001, 4000, 4400)
-    $emulatorsUp = $false
-  }
+if ($partialLab) {
+  Write-Step 'Lab incompleto o colgado (ej. Java en :8080 sin Auth/Functions) — liberando puertos...' 'Yellow'
+  Stop-PortListeners @(8080, 9099, 5001, 4000, 4400)
+  $emulatorsUp = $false
 }
 
 if (-not $emulatorsUp) {
