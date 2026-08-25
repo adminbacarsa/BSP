@@ -122,6 +122,41 @@ export function resolveDeploymentStatHours(t: Parameters<typeof deploymentStatKi
     return deploymentShiftHours(t) || RET_STANDBY_REFERENCE_HOURS;
 }
 
+/**
+ * Horas RET/REF/ESC fuera de cobertura SLA (costo / liquidación / pool).
+ * No suman «plan cobertura»; se muestran aparte en CRM/Dashboard/Análisis.
+ */
+export function sumOutsideCoverageDeploymentHours(turnos: any[]): {
+  ret: number;
+  ref: number;
+  esc: number;
+  total: number;
+} {
+  let ret = 0;
+  let ref = 0;
+  let esc = 0;
+  for (const t of turnos || []) {
+    if (!t) continue;
+    if (String(t.type || '').toUpperCase() === 'NOVEDAD') continue;
+    const status = String(t.status || '').toLowerCase();
+    if (status.includes('cancel') || status.includes('delet')) continue;
+    const kind = deploymentStatKind(t);
+    if (!kind) continue;
+    const hs = resolveDeploymentStatHours(t);
+    if (!(hs > 0)) continue;
+    if (kind === 'RET') ret += hs;
+    else if (kind === 'ESC') esc += hs;
+    else ref += hs;
+  }
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  return {
+    ret: r1(ret),
+    ref: r1(ref),
+    esc: r1(esc),
+    total: r1(ret + ref + esc),
+  };
+}
+
 /** Turno operativo real (M/T/N…) que reemplaza el pago stand-by RET del mismo día. */
 export function isRegularLiquidationWorkShift(t: {
     code?: unknown;

@@ -155,8 +155,8 @@ import {
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-/** Incrementar cuando cambia la fórmula de KPIs (plan = base + ext + adel) para invalidar snapshot/cache. */
-const CRM_DASHBOARD_METRICS_VERSION = 6;
+/** Incrementar cuando cambia la fórmula de KPIs (plan = cobertura viva, no extracto stale). */
+const CRM_DASHBOARD_METRICS_VERSION = 7;
 
 function crmBurnVisual(burnRate: number) {
   const burn = Math.round(burnRate || 0);
@@ -855,7 +855,9 @@ export default function CRMPage() {
         bumpProgress(36, 'Revisando extracto…');
         const extractReady = balancesCoverObjectives(selectedRows, coverKeys, neededIds);
         if (extractReady && runId === metricsRunRef.current) {
-          bumpProgress(88, 'Armando resumen…');
+          // Extracto sirve para SLA, pero el PLAN debe ser malla en vivo (misma demanda que Dashboard).
+          // Antes se devolvía planned del extracto → KPI CRM desfasado (p.ej. 16.284 vs 21.692).
+          bumpProgress(48, 'Cargando turnos (plan cobertura)…');
           const contractedByClient: Record<string, number> = {};
           const closedByClient: Record<string, number> = {};
           contractRows.forEach((c: any) => {
@@ -875,10 +877,63 @@ export default function CRMPage() {
             contractedByClient[canonical] = (contractedByClient[canonical] || 0) + totalHours;
             if (c.type === 'cerrado') closedByClient[canonical] = (closedByClient[canonical] || 0) + totalHours;
           });
+
           const balancesLive = overlayLiveSlaOnBalanceRows(balanceRows, slaRows);
-          bucketKeys.forEach((pk) => {
-            storePeriodMetrics(pk, sumBalancesByClient(balancesLive.filter((r) => r.periodKey === pk)));
+          const tenantClientIds = new Set(clients.map((c) => c.id));
+          let turnoStart = start;
+          let turnoEnd = end;
+          for (const b of bucketsEarly) {
+            if (b.start < turnoStart) turnoStart = b.start;
+            if (b.end > turnoEnd) turnoEnd = b.end;
+          }
+
+          const [turnosRaw, sEmployees] = await Promise.all([
+            fetchCrmDashboardTurnos(empresaId, scopeEmpresa, turnoStart, turnoEnd, clientRefs),
+            getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
+          ]);
+          if (runId !== metricsRunRef.current) return;
+
+          bumpProgress(72, 'Calculando plan cobertura…');
+          const slaDocsByClient = indexSlaRowsByClients(slaRows, clientRefs);
+          const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
+          const validEmp: Record<string, boolean> = {};
+          sEmployees.forEach((d) => {
+            const e = d.data() as any;
+            if (!belongsToEmpresaView(e, empresaId, migracionCompleta)) return;
+            validEmp[d.id] = true;
           });
+          const allTurnos = turnosRaw.filter((t) => {
+            if (!scopeEmpresa) return true;
+            const cid = String(t.clientId ?? '').trim();
+            if (cid && tenantAliasSet.has(cid)) return true;
+            if (clientRefs.some((c) => clientRowMatchesClient(t, c))) return true;
+            return belongsToEmpresaView(t, empresaId, migracionCompleta);
+          });
+
+          bucketsEarly.forEach((b) => {
+            const fromExtract = sumBalancesByClient(balancesLive.filter((r) => r.periodKey === b.key));
+            const live = aggregateCrmHoursByClient(
+              clientRefs,
+              slaDocsByClient,
+              allTurnos,
+              validEmp,
+              b.start,
+              b.end,
+              tenantClientIds,
+            );
+            const merged: Record<string, { sla: number; planned: number; real: number }> = {};
+            clients.forEach((c) => {
+              const ex = fromExtract[c.id] || { sla: 0, planned: 0, real: 0 };
+              const lv = live[c.id] || { sla: 0, planned: 0, real: 0 };
+              merged[c.id] = {
+                sla: Math.round(lv.sla || ex.sla || 0),
+                planned: Math.round(lv.planned || 0),
+                real: Math.round(lv.real || 0),
+              };
+            });
+            storePeriodMetrics(b.key, merged);
+          });
+
           const metrics = mergeClientMetricsFromBuckets(bucketsEarly);
           clients.forEach((c) => {
             const row = metrics[c.id] || { sla: 0, planned: 0, real: 0 };
@@ -901,6 +956,23 @@ export default function CRMPage() {
           const now = new Date();
           setMetricsUpdatedAt(now);
           metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now, footprint });
+          if (empresaId && slaRows.length && allTurnos.length) {
+            void persistHoursBalancesFromTurnos({
+              empresaId,
+              services: slaRows as any,
+              turnos: allTurnos,
+              months: bucketsEarly.map((b) => ({ year: b.start.getFullYear(), month: b.start.getMonth() + 1 })),
+              rebuiltFrom: 'crm-live-plan',
+            }).catch((err) => console.warn('[crm] hours_balances live-plan', err));
+          }
+          setDoc(snapRef, {
+            empresaId,
+            computedAt: serverTimestamp(),
+            globalMetrics: { totalSold, totalPlanned, totalExecuted },
+            clientMetricsMap: metrics,
+            trendSeries,
+            slaFootprint: footprint,
+          }).catch(() => { /* escritura no crítica */ });
           setCalculatingMetrics(false);
           setMetricsLoadProgress(null);
           setDashboardIsStale(false);

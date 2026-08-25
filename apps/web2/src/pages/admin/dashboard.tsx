@@ -1242,8 +1242,9 @@ function AdminDashboard() {
                       <p className="text-2xl font-black" style={{ color: 'var(--txt)' }}>{fmt(realHoursMonth)}<span className="text-sm font-bold ml-1">hs</span></p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold" style={{ color: 'var(--txt3)' }}>Planificadas</p>
+                      <p className="text-[10px] font-bold" style={{ color: 'var(--txt3)' }}>Plan cobertura</p>
                       <p className="text-2xl font-black" style={{ color: 'var(--txt3)' }}>{fmt(plannedHrsMonth)}<span className="text-sm font-bold ml-1">hs</span></p>
+                      <p className="text-[9px] mt-0.5" style={{ color: 'var(--txt3)' }}>Sin RET/REF/ESC (fuera de cobertura)</p>
                     </div>
                     {plannedHrsMonth > 0 && (
                       <div className="ml-auto text-right">
