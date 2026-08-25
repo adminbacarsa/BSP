@@ -44,6 +44,53 @@ export interface ServicePosition {
    */
   excludedShiftPaxDates?: Record<string, Record<string, number>>;
   preferenciaGenero?: 'M' | 'F' | 'INDISTINTO';
+  /** Soft-delete del puesto: deja de exigir cobertura / horas desde `inactiveFrom`. */
+  status?: 'ACTIVE' | 'INACTIVE';
+  inactiveFrom?: string;
+  inactiveReason?: string;
+  inactiveBy?: string;
+}
+
+export type SlaChangeAction =
+  | 'REFUERZO_ESTRUCTURAL'
+  | 'REVERT_REFUERZO'
+  | 'CANCEL_SERVICE'
+  | 'BAJA_PUESTO'
+  | 'REACTIVAR_PUESTO';
+
+export interface SlaChangeLogEntry {
+  at: string;
+  byUid?: string;
+  byName?: string;
+  action: SlaChangeAction;
+  detail: string;
+  solicitudId?: string;
+  positionId?: string;
+  positionName?: string;
+  shiftCode?: string;
+  paxDelta?: number;
+}
+
+export function isPositionActiveOnDate(
+  pos: { status?: string; inactiveFrom?: string } | null | undefined,
+  dateStr: string,
+): boolean {
+  const st = String(pos?.status || 'ACTIVE').toUpperCase();
+  if (st !== 'INACTIVE' && st !== 'INACTIVO') return true;
+  const from = String(pos?.inactiveFrom || '').slice(0, 10);
+  if (!from) return false;
+  return String(dateStr || '').slice(0, 10) < from;
+}
+
+export function appendSlaChangeLog(
+  existing: SlaChangeLogEntry[] | undefined,
+  entry: Omit<SlaChangeLogEntry, 'at'> & { at?: string },
+): SlaChangeLogEntry[] {
+  const next: SlaChangeLogEntry = {
+    ...entry,
+    at: entry.at || new Date().toISOString(),
+  };
+  return [...(existing || []), next].slice(-80);
 }
 
 /** Una versión del horario de bandas vigente a partir de `desde`. */
@@ -154,6 +201,11 @@ export interface ServiceSLA {
   /** Persona asignada al puesto Encargado de este servicio (no es flag de legajo). */
   encargadoEmployeeId?: string;
   encargadoEmployeeName?: string;
+  changeLog?: SlaChangeLogEntry[];
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelledByUid?: string;
+  cancelReason?: string;
 }
 
 /**

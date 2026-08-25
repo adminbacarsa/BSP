@@ -1,7 +1,7 @@
 ﻿import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
-import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry } from '@/services/slaService';
+import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry, appendSlaChangeLog } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
 import { db, getDocsOnce } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -11,7 +11,7 @@ import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy, Zap,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
-  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck, User
+  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck, User, Ban
 } from 'lucide-react';
 import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSchemeModal';
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
@@ -837,6 +837,68 @@ export default function ServiciosSLAPage() {
       setForm({ ...form, positions: updatedPositions });
   };
 
+  const actorLabel = () => {
+    const currentUser = getAuth().currentUser;
+    return {
+      name: currentUser?.displayName || currentUser?.email || 'Sistema',
+      uid: currentUser?.uid || 'SYSTEM',
+    };
+  };
+
+  const bajaPosition = (id: string) => {
+    const pos = form.positions.find((p) => p.id === id);
+    if (!pos) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const from = window.prompt(`Baja de «${pos.name}» desde (AAAA-MM-DD):`, today)?.trim();
+    if (!from || !/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+      if (from) addToast('Fecha inválida (usá AAAA-MM-DD)', 'error');
+      return;
+    }
+    const reason = window.prompt('Motivo de baja del puesto:')?.trim();
+    if (!reason) return;
+    const actor = actorLabel();
+    setForm({
+      ...form,
+      positions: form.positions.map((p) =>
+        p.id === id
+          ? { ...p, status: 'INACTIVE', inactiveFrom: from, inactiveReason: reason, inactiveBy: actor.name }
+          : p,
+      ),
+      changeLog: appendSlaChangeLog(form.changeLog, {
+        action: 'BAJA_PUESTO',
+        detail: `Baja de ${pos.name} desde ${from}: ${reason}`,
+        positionId: pos.id,
+        positionName: pos.name,
+        byUid: actor.uid,
+        byName: actor.name,
+      }),
+    });
+    addToast('Puesto marcado de baja. Guardá el contrato para persistir.', 'success');
+  };
+
+  const reactivarPosition = (id: string) => {
+    const pos = form.positions.find((p) => p.id === id);
+    if (!pos) return;
+    const actor = actorLabel();
+    setForm({
+      ...form,
+      positions: form.positions.map((p) =>
+        p.id === id
+          ? { ...p, status: 'ACTIVE', inactiveFrom: undefined, inactiveReason: undefined, inactiveBy: undefined }
+          : p,
+      ),
+      changeLog: appendSlaChangeLog(form.changeLog, {
+        action: 'REACTIVAR_PUESTO',
+        detail: `Reactivó el puesto ${pos.name}`,
+        positionId: pos.id,
+        positionName: pos.name,
+        byUid: actor.uid,
+        byName: actor.name,
+      }),
+    });
+    addToast('Puesto reactivado. Guardá el contrato para persistir.', 'success');
+  };
+
   // ── Cobertura de dotación ──────────────────────────────────────────────
   const startEditCoverage = (empId: string) => {
     const existing = (form.positionAssignments || []).find(a => a.employeeId === empId);
@@ -1313,6 +1375,45 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       addToast(`Servicio eliminado con ${r.deletedTurnos} turno(s)`, 'success');
     } catch (e) {
       addToast(e instanceof TenantIsolationError ? e.message : 'Error al eliminar servicio', 'error');
+    }
+  };
+
+  const handleCancelService = async (id: string) => {
+    if (!canUpdateService) { addToast('Sin permiso para dar de baja servicios', 'error'); return; }
+    const srv = services.find(s => s.id === id);
+    if (!srv) return;
+    if (!isSlaContractActive(srv.status)) {
+      addToast('El servicio ya está dado de baja', 'info');
+      return;
+    }
+    const reason = window.prompt(`Motivo de baja de "${srv.clientName} - ${srv.objectiveName}":`)?.trim();
+    if (!reason) return;
+    if (!confirm('Se da de baja el contrato. Los turnos ya cargados NO se borran.\n\n¿Continuar?')) return;
+    const actor = actorLabel();
+    try {
+      const patch = {
+        status: 'inactive' as const,
+        cancelledAt: new Date().toISOString(),
+        cancelledBy: actor.name,
+        cancelledByUid: actor.uid,
+        cancelReason: reason,
+        changeLog: appendSlaChangeLog(srv.changeLog, {
+          action: 'CANCEL_SERVICE',
+          detail: reason,
+          byUid: actor.uid,
+          byName: actor.name,
+        }),
+      };
+      await slaService.update(id, patch, { empresaId, migracionCompleta });
+      await registrarAuditoria('CANCEL_CONTRACT', `Baja de contrato: ${srv.clientName} - ${srv.objectiveName}. Motivo: ${reason}`);
+      setServices(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+      if (form.id === id) {
+        setForm(prev => ({ ...prev, ...patch }));
+        setView('list');
+      }
+      addToast('Servicio dado de baja. Los turnos se conservan.', 'success');
+    } catch (e) {
+      addToast(e instanceof TenantIsolationError ? e.message : 'Error al dar de baja el servicio', 'error');
     }
   };
 
@@ -1924,6 +2025,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <Edit2 size={11}/>
                                   </button>
                                   )}
+                                  {canUpdateService && isSlaContractActive(currentSrv.status) && (
+                                  <button onClick={() => currentSrv.id && handleCancelService(currentSrv.id)} title="Dar de baja (conserva turnos)" className="p-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors">
+                                    <Ban size={11}/>
+                                  </button>
+                                  )}
                                   {canDeleteService && (
                                   <button onClick={() => currentSrv.id && handleDelete(currentSrv.id)} title="Eliminar" className="p-1.5 rounded-lg bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
                                     <Trash2 size={11}/>
@@ -2098,6 +2204,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     {canUpdateService && (
                                     <button onClick={() => { handleEdit(srv); }} title="Editar" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
                                       <Edit2 size={11}/>
+                                    </button>
+                                    )}
+                                    {canUpdateService && isSlaContractActive(srv.status) && (
+                                    <button onClick={() => { srv.id && handleCancelService(srv.id); }} title="Dar de baja (conserva turnos)" className="p-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors">
+                                      <Ban size={11}/>
                                     </button>
                                     )}
                                     {canDeleteService && (
@@ -2423,6 +2534,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   {canUpdateService && (
                   <button onClick={() => { handleEdit(srv); close(); }} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-black text-xs uppercase hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-colors">
                     <Edit2 size={13}/> Editar
+                  </button>
+                  )}
+                  {canUpdateService && isSlaContractActive(srv.status) && (
+                  <button onClick={() => { srv.id && handleCancelService(srv.id); close(); }} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 font-black text-xs uppercase hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
+                    <Ban size={13}/> Dar de baja
                   </button>
                   )}
                   {canDeleteService && (
@@ -2992,9 +3108,17 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   </div>
                   <div className="space-y-3">
                      {form.positions.map((pos) => (
-                        <div key={pos.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border dark:border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div key={pos.id} className={`bg-white dark:bg-slate-800 p-4 rounded-xl border dark:border-slate-700 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4 ${pos.status === 'INACTIVE' ? 'opacity-60' : ''}`}>
                            <div className="flex-1 text-left">
-                              <div className="flex items-center gap-3"><h4 className="font-bold text-slate-800 dark:text-white text-sm uppercase">{pos.name}</h4><span className="bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-black uppercase">{formatPositionPaxLabel(pos)}</span></div>
+                              <div className="flex items-center gap-3 flex-wrap">
+                                <h4 className="font-bold text-slate-800 dark:text-white text-sm uppercase">{pos.name}</h4>
+                                <span className="bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 px-2 py-0.5 rounded text-[9px] font-black uppercase">{formatPositionPaxLabel(pos)}</span>
+                                {pos.status === 'INACTIVE' && (
+                                  <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[9px] font-black uppercase">
+                                    Baja{pos.inactiveFrom ? ` desde ${pos.inactiveFrom.slice(8, 10)}/${pos.inactiveFrom.slice(5, 7)}/${pos.inactiveFrom.slice(0, 4)}` : ''}
+                                  </span>
+                                )}
+                              </div>
                               <div className="mt-1 flex items-center gap-2 flex-wrap">
                                 <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/50 px-2 rounded">{pos.coverageType === '24hs' ? '24 HS' : pos.coverageType.toUpperCase()}</span>
                                 {pos.preferenciaGenero === 'M' && <span className="text-[10px] font-black text-blue-700 bg-blue-100 px-2 py-0.5 rounded" title="Solo masculino">♂ M</span>}
@@ -3036,7 +3160,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                setPositionForm({ ...pos, allowedShiftTypes: nextAllowed });
                                setShowPositionModal(true);
                              }} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-indigo-500 hover:bg-indigo-100 transition-colors"><Edit2 size={14}/></button>
-                             <button onClick={() => removePosition(pos.id)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-rose-500 hover:bg-rose-100 transition-colors"><X size={14}/></button>
+                             {pos.status === 'INACTIVE' ? (
+                               <button onClick={() => reactivarPosition(pos.id)} title="Reactivar puesto" className="p-2 bg-emerald-50 dark:bg-slate-700 rounded-lg text-emerald-600 hover:bg-emerald-100 transition-colors"><CheckCircle size={14}/></button>
+                             ) : (
+                               <button onClick={() => bajaPosition(pos.id)} title="Dar de baja puesto" className="p-2 bg-amber-50 dark:bg-slate-700 rounded-lg text-amber-700 hover:bg-amber-100 transition-colors"><Ban size={14}/></button>
+                             )}
+                             <button onClick={() => removePosition(pos.id)} title="Quitar del formulario" className="p-2 bg-slate-100 dark:bg-slate-700 rounded-lg text-rose-500 hover:bg-rose-100 transition-colors"><X size={14}/></button>
                            </div>
                         </div>
                      ))}
@@ -3132,6 +3261,34 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 </div>
               )}
             </div>
+
+            {(form.changeLog?.length || form.cancelReason) ? (
+              <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
+                <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2 mb-3">
+                  <FileText size={16} className="text-indigo-500"/> Trazabilidad
+                </h3>
+                {form.cancelReason && (
+                  <p className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3">
+                    Baja del servicio: {form.cancelReason}
+                    {form.cancelledBy ? ` · ${form.cancelledBy}` : ''}
+                    {form.cancelledAt ? ` · ${form.cancelledAt.slice(8, 10)}/${form.cancelledAt.slice(5, 7)}/${form.cancelledAt.slice(0, 4)}` : ''}
+                  </p>
+                )}
+                <div className="space-y-2 max-h-56 overflow-y-auto">
+                  {[...(form.changeLog || [])].slice().reverse().map((entry, idx) => {
+                    const d = String(entry.at || '').slice(0, 10);
+                    const fecha = d.length === 10 ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : d;
+                    return (
+                      <div key={`${entry.at}-${idx}`} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 px-3 py-2">
+                        <p className="text-[10px] font-black uppercase text-indigo-500">{entry.action.replace(/_/g, ' ')}</p>
+                        <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{entry.detail}</p>
+                        <p className="text-[9px] text-slate-400">{fecha}{entry.byName ? ` · ${entry.byName}` : ''}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             {/* ── Cobertura de dotación ── */}
             <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
@@ -4206,7 +4363,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               </div>
             )}
 
-            <div className="mt-8 flex justify-end gap-4 border-t dark:border-slate-700 pt-6"><button onClick={() => setView('list')} className="text-slate-400 font-bold uppercase text-xs hover:text-slate-600 transition-colors">Cancelar</button><button onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-sm transition-transform active:scale-95"><Save size={16} className="mr-2 inline"/> Guardar</button></div>
+            <div className="mt-8 flex justify-end gap-4 border-t dark:border-slate-700 pt-6">
+              <button onClick={() => setView('list')} className="text-slate-400 font-bold uppercase text-xs hover:text-slate-600 transition-colors">Cancelar</button>
+              {isEditing && form.id && canUpdateService && isSlaContractActive(form.status) && (
+                <button
+                  type="button"
+                  onClick={() => handleCancelService(form.id!)}
+                  className="text-amber-700 font-black uppercase text-xs hover:text-amber-900 flex items-center gap-1"
+                >
+                  <Ban size={14}/> Dar de baja servicio
+                </button>
+              )}
+              <button onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-sm transition-transform active:scale-95"><Save size={16} className="mr-2 inline"/> Guardar</button>
+            </div>
             </div>
           </div>
         </PageShell>

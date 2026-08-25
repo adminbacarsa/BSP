@@ -317,6 +317,10 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const [pendientesCount, setPendientesCount] = useState(0);
   const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
   const [rfzPlanifIds, setRfzPlanifIds] = useState<string[]>([]);
+  const [rfzEstructuralCount, setRfzEstructuralCount] = useState(0);
+  const [rfzEstructuralIds, setRfzEstructuralIds] = useState<string[]>([]);
+  const [opsTaskCount, setOpsTaskCount] = useState(0);
+  const [opsTaskIds, setOpsTaskIds] = useState<string[]>([]);
   const [serviciosTaskCount, setServiciosTaskCount] = useState(0);
   useEffect(() => {
     const path = router.pathname;
@@ -348,6 +352,8 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const canViewSupervision = canReadModule('SUPERVISION');
   const canViewPlanning = canReadModule('PLANNING');
   const canViewServices = canReadModule('SERVICES') || canReadModule('CLIENTS');
+  const canViewOps = canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING');
+  const canViewRrhh = canReadModule('RRHH');
 
   useEffect(() => {
     if (!empresaId || !canViewSupervision || !user?.uid) return;
@@ -395,6 +401,36 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     }, () => {});
     return unsub;
   }, [empresaId, canViewPlanning]);
+
+  useEffect(() => {
+    if (!empresaId || !(canViewPlanning || canViewRrhh)) return;
+    const q = query(
+      collection(db, 'novedades'),
+      where('empresaId', '==', empresaId),
+      where('type', '==', 'REFUERZO_ESTRUCTURAL'),
+      where('status', '==', 'pending'),
+    );
+    const unsub = onSnapshotFresh(q, snap => {
+      setRfzEstructuralCount(snap.size);
+      setRfzEstructuralIds(snap.docs.map(d => d.id));
+    }, () => {});
+    return unsub;
+  }, [empresaId, canViewPlanning, canViewRrhh]);
+
+  useEffect(() => {
+    if (!empresaId || !canViewOps) return;
+    const q = query(
+      collection(db, 'novedades'),
+      where('empresaId', '==', empresaId),
+      where('type', '==', 'VACANTE_OPERATIVA'),
+      where('status', '==', 'pending'),
+    );
+    const unsub = onSnapshotFresh(q, snap => {
+      setOpsTaskCount(snap.size);
+      setOpsTaskIds(snap.docs.map(d => d.id));
+    }, () => {});
+    return unsub;
+  }, [empresaId, canViewOps]);
 
   useEffect(() => {
     if (!empresaId || !canViewServices) return;
@@ -531,10 +567,26 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {(canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING')) && (
             <Link href="/admin/operaciones" prefetch={false} title="Centro Control"
-              className={getLinkHoverClass('/admin/operaciones')}
+              className={`${getLinkHoverClass('/admin/operaciones')} relative`}
               style={getLinkStyle('/admin/operaciones', true)}>
               <Radio size={18} className="shrink-0" />
-              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Centro Control</span>}
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Centro Control</span>}
+              {opsTaskCount > 0 && (
+                <button
+                  type="button"
+                  title="Marcar vacantes operativas como leídas"
+                  onClick={async e => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (!opsTaskIds.length) return;
+                    const batch = writeBatch(db);
+                    opsTaskIds.forEach(id => batch.update(doc(db, 'novedades', id), { status: 'read', viewed: true }));
+                    await batch.commit();
+                  }}
+                  className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-red-500 hover:bg-red-700 text-white text-[9px] font-black rounded-full flex items-center justify-center transition-colors cursor-pointer`}
+                >
+                  {opsTaskCount > 99 ? '99+' : opsTaskCount}
+                </button>
+              )}
             </Link>
           )}
 
@@ -544,20 +596,21 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               style={getLinkStyle('/admin/planificacion')}>
               <Calendar size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Planificador</span>}
-              {rfzPlanifCount > 0 && (
+              {(rfzPlanifCount + rfzEstructuralCount) > 0 && (
                 <button
                   type="button"
                   title="Marcar notificaciones RFZ como leídas"
                   onClick={async e => {
                     e.preventDefault(); e.stopPropagation();
-                    if (!rfzPlanifIds.length) return;
+                    const ids = [...rfzPlanifIds, ...rfzEstructuralIds];
+                    if (!ids.length) return;
                     const batch = writeBatch(db);
-                    rfzPlanifIds.forEach(id => batch.update(doc(db, 'novedades', id), { status: 'read', viewed: true }));
+                    ids.forEach(id => batch.update(doc(db, 'novedades', id), { status: 'read', viewed: true }));
                     await batch.commit();
                   }}
                   className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-red-500 hover:bg-red-700 text-white text-[9px] font-black rounded-full flex items-center justify-center transition-colors cursor-pointer`}
                 >
-                  {rfzPlanifCount > 99 ? '99+' : rfzPlanifCount}
+                  {(rfzPlanifCount + rfzEstructuralCount) > 99 ? '99+' : (rfzPlanifCount + rfzEstructuralCount)}
                 </button>
               )}
             </Link>
@@ -636,10 +689,26 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {canReadModule('RRHH') && (
             <Link href="/admin/rrhh" prefetch={false} title="RRHH"
-              className={getLinkHoverClass('/admin/rrhh')}
+              className={`${getLinkHoverClass('/admin/rrhh')} relative`}
               style={getLinkStyle('/admin/rrhh')}>
               <Users size={18} className="shrink-0" />
-              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">RRHH</span>}
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">RRHH</span>}
+              {rfzEstructuralCount > 0 && (
+                <button
+                  type="button"
+                  title="Cambio de pax en SLA — marcar como visto"
+                  onClick={async e => {
+                    e.preventDefault(); e.stopPropagation();
+                    if (!rfzEstructuralIds.length) return;
+                    const batch = writeBatch(db);
+                    rfzEstructuralIds.forEach(id => batch.update(doc(db, 'novedades', id), { status: 'read', viewed: true }));
+                    await batch.commit();
+                  }}
+                  className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-amber-500 hover:bg-amber-700 text-white text-[9px] font-black rounded-full flex items-center justify-center transition-colors cursor-pointer`}
+                >
+                  {rfzEstructuralCount > 99 ? '99+' : rfzEstructuralCount}
+                </button>
+              )}
             </Link>
           )}
 
