@@ -156,7 +156,7 @@ import {
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 /** Incrementar cuando cambia la fórmula de KPIs (plan = cobertura viva, no extracto stale). */
-const CRM_DASHBOARD_METRICS_VERSION = 7;
+const CRM_DASHBOARD_METRICS_VERSION = 8;
 
 function crmBurnVisual(burnRate: number) {
   const burn = Math.round(burnRate || 0);
@@ -895,20 +895,17 @@ export default function CRMPage() {
 
           bumpProgress(72, 'Calculando plan cobertura…');
           const slaDocsByClient = indexSlaRowsByClients(slaRows, clientRefs);
-          const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
           const validEmp: Record<string, boolean> = {};
           sEmployees.forEach((d) => {
             const e = d.data() as any;
             if (!belongsToEmpresaView(e, empresaId, migracionCompleta)) return;
             validEmp[d.id] = true;
           });
-          const allTurnos = turnosRaw.filter((t) => {
-            if (!scopeEmpresa) return true;
-            const cid = String(t.clientId ?? '').trim();
-            if (cid && tenantAliasSet.has(cid)) return true;
-            if (clientRefs.some((c) => clientRowMatchesClient(t, c))) return true;
-            return belongsToEmpresaView(t, empresaId, migracionCompleta);
-          });
+          // Misma regla que Dashboard / Cronogramas: solo turnos del tenant (empresaId).
+          // Antes se incluían turnos de otros tenants solo por clientId/alias → plan cobertura inflado.
+          const allTurnos = turnosRaw.filter((t) =>
+            !scopeEmpresa || belongsToEmpresaView(t, empresaId, migracionCompleta),
+          );
 
           bucketsEarly.forEach((b) => {
             const fromExtract = sumBalancesByClient(balancesLive.filter((r) => r.periodKey === b.key));
@@ -1125,8 +1122,6 @@ export default function CRMPage() {
       if (runId !== metricsRunRef.current) return;
       bumpProgress(80, 'Calculando horas…');
 
-      const tenantAliasSet = new Set(collectClientIdAliases(clientRefs));
-
       const validEmp: Record<string, boolean> = {};
       const sharedMeta: Record<string, { legajo?: string; name?: string }> = {};
       sEmployees.forEach((d) => {
@@ -1137,13 +1132,9 @@ export default function CRMPage() {
       });
       sharedEmpMetaRef.current = sharedMeta;
 
-      const allTurnos = turnosRaw.filter((t) => {
-        if (!scopeEmpresa) return true;
-        const cid = String(t.clientId ?? '').trim();
-        if (cid && tenantAliasSet.has(cid)) return true;
-        if (clientRefs.some((c) => clientRowMatchesClient(t, c))) return true;
-        return belongsToEmpresaView(t, empresaId, migracionCompleta);
-      });
+      const allTurnos = turnosRaw.filter((t) =>
+        !scopeEmpresa || belongsToEmpresaView(t, empresaId, migracionCompleta),
+      );
 
       const turnosByClient = groupTurnosByClient(allTurnos, clientRefs, tenantClientIds);
 
@@ -3169,7 +3160,7 @@ export default function CRMPage() {
                     );
                   }
                   const sortedServices = [...clientServices].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
-                  const COVERAGE_LABELS: Record<string, string> = { '24hs': '24 hs', '12hs_diurno': '12 hs Diurno', '12hs_nocturno': '12 hs Nocturno', 'custom': 'Personalizado' };
+                  const COVERAGE_LABELS: Record<string, string> = { '24hs': '24 hs', '12hs_diurno': '12 hs Diurno', '12hs_nocturno': '12 hs Nocturno', 'custom': 'Personalizado', 'encargado': 'Encargado' };
 
                   const StatusBadge = ({ s }: { s: any }) => {
                     const status = getServiceStatus(s);

@@ -2583,16 +2583,18 @@ export default function ReportsPage() {
                             if (cn !== 0) return cn;
                             return (a.objectiveName || '').localeCompare(b.objectiveName || '', 'es');
                         });
-                    const totalActivos = enPeriodo.filter((s: any) => isSlaContractActive(s.status)).length;
-                    const totalInactivos = enPeriodo.filter((s: any) => !isSlaContractActive(s.status)).length;
-                    const totalConRot = enPeriodo.filter((s: any) => (s.serviceRotations?.length ?? 0) > 0).length;
-                    const totalConCond = enPeriodo.filter((s: any) => (s.serviceRules?.length ?? 0) > 0).length;
+                    const kpiScope = filtered;
+                    const totalActivos = kpiScope.filter((s: any) => isSlaContractActive(s.status)).length;
+                    const totalInactivos = kpiScope.filter((s: any) => !isSlaContractActive(s.status)).length;
+                    const totalConRot = kpiScope.filter((s: any) => (s.serviceRotations?.length ?? 0) > 0).length;
+                    const totalConCond = kpiScope.filter((s: any) => (s.serviceRules?.length ?? 0) > 0).length;
+                    const filterActive = !!q || svcStatusFilter !== 'all';
                     return (
                         <div className="space-y-4">
-                            {/* KPIs */}
+                            {/* KPIs — siguen búsqueda / estado (misma base que la grilla y el PDF) */}
                             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                                 {[
-                                    { label: 'Total servicios', value: enPeriodo.length, color: '#4f46e5' },
+                                    { label: 'Total servicios', value: kpiScope.length, color: '#4f46e5' },
                                     { label: 'Activos', value: totalActivos, color: '#059669' },
                                     { label: 'Inactivos', value: totalInactivos, color: '#64748b' },
                                     { label: 'Con rotaciones', value: totalConRot, color: '#d97706' },
@@ -2601,6 +2603,11 @@ export default function ReportsPage() {
                                     <ContentCard key={label} className="!p-4">
                                         <p className="text-[9px] font-black uppercase text-slate-400 tracking-wide mb-1">{label}</p>
                                         <p className="text-2xl font-black" style={{ color }}>{value}</p>
+                                        {filterActive && (
+                                            <p className="text-[9px] font-bold text-slate-400 mt-0.5">
+                                                del filtro · {enPeriodo.length} en período
+                                            </p>
+                                        )}
                                     </ContentCard>
                                 ))}
                             </div>
@@ -2632,7 +2639,7 @@ export default function ReportsPage() {
                                             exportServiciosReportPdf({
                                                 rows: filtered,
                                                 empresaName: (empresa as any)?.name || 'COSP',
-                                                periodLabel: `${dateRange.start} → ${dateRange.end}`,
+                                                periodLabel: `${dateRange.start} a ${dateRange.end}`,
                                                 filterLabel: filterParts.length ? filterParts.join(' · ') : 'sin filtros adicionales',
                                             });
                                             toast.success('PDF de servicios descargado');
