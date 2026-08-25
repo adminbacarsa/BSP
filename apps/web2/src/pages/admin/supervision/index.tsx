@@ -19,6 +19,7 @@ import {
 import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
 import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
+import { applySlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
 import {
   fmtTs, urgencyLevel, hoursSincePending, pendingHoursLabel, URGENCY_STYLES,
   filterAbsencesByObjectives, filterSolicitudesByObjectives,
@@ -549,9 +550,14 @@ export default function SupervisionPage() {
       setAprobarTarget(null);
       return;
     }
-    const vaAPlanificacion = sol.origen === 'PORTAL_CLIENTE';
+    const vaAPlanificacion = sol.origen === 'PORTAL_CLIENTE' || sol.alcance === 'ESTRUCTURAL';
 
     try {
+      let slaPatch: { slaApplied?: boolean; slaIdAplicado?: string } = {};
+      if (sol.tipo === 'REFUERZO_PUESTO' && sol.alcance === 'ESTRUCTURAL') {
+        const applied = await applySlaRefuerzoPax(sol);
+        slaPatch = { slaApplied: true, slaIdAplicado: applied.slaId };
+      }
       if (vaAPlanificacion) {
         toast.loading('Aprobando — enviando a Planificación…', { id: 'aprobar' });
         const turnoIds = await crearTurnosParaSolicitud(sol, { draft: true });
@@ -562,6 +568,7 @@ export default function SupervisionPage() {
           autorizadoAt:        Timestamp.now(),
           actionTarget:        'PLANIFICACION',
           turnoIds,
+          ...slaPatch,
           ...(nota ? { notaInterna: nota } as any : {}),
         });
         await addDoc(collection(db, 'novedades'), {
@@ -574,9 +581,11 @@ export default function SupervisionPage() {
           createdAt: Timestamp.now(),
         });
         toast.success(
-          turnoIds.length === 1
-            ? 'Aprobada — asigná guardia al RFZ en Planificación (fila VACANTE RFZ)'
-            : `Aprobada — ${turnoIds.length} vacantes RFZ en Planificación`,
+          sol.alcance === 'ESTRUCTURAL'
+            ? 'Aprobada — +pax aplicado en Servicios. Asigná en Planificación.'
+            : (turnoIds.length === 1
+              ? 'Aprobada — asigná guardia al RFZ en Planificación (fila VACANTE RFZ)'
+              : `Aprobada — ${turnoIds.length} vacantes RFZ en Planificación`),
           { id: 'aprobar' },
         );
       } else {
