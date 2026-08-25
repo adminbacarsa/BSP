@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { db } from '@/lib/firebase';
+import { db, getDocsOnce } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp, orderBy, limit } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -20,7 +20,7 @@ import {
     isRegularLiquidationWorkShift,
 } from '@/lib/planificacion/deploymentRoles';
 import { RET_STANDBY_REFERENCE_HOURS } from '@/lib/planificacion/constants';
-import { getCctPayrollPeriodByOffset } from '@/lib/cctPayrollPeriod';
+import { getCctPayrollPeriodByOffset, toLocalYmd } from '@/lib/cctPayrollPeriod';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
     coalescePlannedCellBillableHours,
@@ -31,6 +31,7 @@ import {
     fetchReportAjustesHoras,
     fetchReportAusencias,
     fetchReportPlanificacionEstados,
+    calendarMonthsInYmdRange,
 } from '@/lib/reportFirestoreQueries';
 
 // --- CONSTANTES Y HELPERS ---
@@ -1111,44 +1112,67 @@ async function fetchTurnosForReport(opts: {
     scopeEmpresa: boolean;
     fetchScope?: ReportFetchScope;
     aliasLookup: Record<string, ObjectiveMeta>;
+    onProgress?: (label: string) => void;
 }): Promise<any[]> {
+    const REPORT_TURNOS_TIMEOUT_MS = 180_000;
     const startTs = Timestamp.fromDate(opts.startDate);
     const endTs = Timestamp.fromDate(opts.endDate);
     const col = collection(db, 'turnos');
     const empId = String(opts.fetchScope?.employeeId ?? '').trim();
 
     if (empId) {
-        const snap = await getDocs(query(
+        opts.onProgress?.('Descargando turnos del legajo…');
+        const snap = await getDocsOnce(query(
             col,
             where('employeeId', '==', empId),
             where('startTime', '>=', startTs),
             where('startTime', '<=', endTs),
-        ));
+        ), { timeoutMs: REPORT_TURNOS_TIMEOUT_MS });
         return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     }
 
     const objectiveIds = collectObjectiveIdsForTurnosQuery(opts.fetchScope, opts.aliasLookup);
-    if (objectiveIds.length === 0) {
-        const q = opts.scopeEmpresa
-            ? query(col, where('empresaId', '==', opts.empresaId), where('startTime', '>=', startTs), where('startTime', '<=', endTs))
-            : query(col, where('startTime', '>=', startTs), where('startTime', '<=', endTs));
-        const snap = await getDocs(q);
-        return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (objectiveIds.length > 0) {
+        const byId = new Map<string, any>();
+        const chunkSize = 8;
+        for (let i = 0; i < objectiveIds.length; i += chunkSize) {
+            const chunk = objectiveIds.slice(i, i + chunkSize);
+            opts.onProgress?.(
+                `Descargando turnos por objetivo (${Math.min(i + chunk.length, objectiveIds.length)}/${objectiveIds.length})…`,
+            );
+            const snaps = await Promise.all(chunk.map((oid) => getDocsOnce(query(
+                col,
+                where('objectiveId', '==', oid),
+                where('startTime', '>=', startTs),
+                where('startTime', '<=', endTs),
+            ), { timeoutMs: REPORT_TURNOS_TIMEOUT_MS })));
+            snaps.forEach((snap) => {
+                snap.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() }));
+            });
+        }
+        return [...byId.values()];
     }
 
+    // Planta completa: partir por mes calendario para no colgar un único getDocs gigante.
+    const months = calendarMonthsInYmdRange(toLocalYmd(opts.startDate), toLocalYmd(opts.endDate));
     const byId = new Map<string, any>();
-    const chunkSize = 8;
-    for (let i = 0; i < objectiveIds.length; i += chunkSize) {
-        const chunk = objectiveIds.slice(i, i + chunkSize);
-        const snaps = await Promise.all(chunk.map((oid) => getDocs(query(
-            col,
-            where('objectiveId', '==', oid),
-            where('startTime', '>=', startTs),
-            where('startTime', '<=', endTs),
-        ))));
-        snaps.forEach((snap) => {
-            snap.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() }));
-        });
+    for (let mi = 0; mi < months.length; mi++) {
+        const { year, month } = months[mi];
+        const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
+        const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
+        const from = monthStart < opts.startDate ? opts.startDate : monthStart;
+        const to = monthEnd > opts.endDate ? opts.endDate : monthEnd;
+        if (from > to) continue;
+        opts.onProgress?.(
+            `Descargando turnos ${String(month).padStart(2, '0')}/${year} (${mi + 1}/${months.length})…`,
+        );
+        const fromTs = Timestamp.fromDate(from);
+        const toTs = Timestamp.fromDate(to);
+        const q = opts.scopeEmpresa
+            ? query(col, where('empresaId', '==', opts.empresaId), where('startTime', '>=', fromTs), where('startTime', '<=', toTs))
+            : query(col, where('startTime', '>=', fromTs), where('startTime', '<=', toTs));
+        const snap = await getDocsOnce(q, { timeoutMs: REPORT_TURNOS_TIMEOUT_MS });
+        snap.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() }));
     }
     return [...byId.values()];
 }
@@ -1212,19 +1236,20 @@ export const useReportes = (forcedClientId?: string | null) => {
         });
     };
 
+    // SSR/hidratación: mismo default en server y client; sessionStorage solo después del mount.
     const initialCctPeriod = getCctPayrollPeriodByOffset(0);
-    const savedRpt = typeof window !== 'undefined'
-        ? readSessionJson<{ start?: string; end?: string; publishFilter?: ReportPublishFilter; usePlannedHours?: boolean }>('cosp:rpt:view')
-        : null;
     const [dateRange, setDateRange] = useState({
-        start: savedRpt?.start || initialCctPeriod.start,
-        end: savedRpt?.end || initialCctPeriod.end,
+        start: initialCctPeriod.start,
+        end: initialCctPeriod.end,
     });
-    
+    const [publishFilter, setPublishFilter] = useState<ReportPublishFilter>('all');
+    const [usePlannedHours, setUsePlannedHours] = useState(false);
+    const [rptViewReady, setRptViewReady] = useState(false);
+
     const [employeeReport, setEmployeeReport] = useState<any[]>([]);
     const [objectiveReport, setObjectiveReport] = useState<any[]>([]);
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
-    
+
     const [empMap, setEmpMap] = useState<Record<string, string>>({});
     const [empMetaMap, setEmpMetaMap] = useState<Record<string, {
         name: string;
@@ -1233,21 +1258,37 @@ export const useReportes = (forcedClientId?: string | null) => {
         experienciaObjetivos?: Record<string, unknown>;
         planificacionDotacion?: Record<string, unknown>;
     }>>({});
-    const [publishFilter, setPublishFilter] = useState<ReportPublishFilter>(savedRpt?.publishFilter || 'all');
-    const [usePlannedHours, setUsePlannedHours] = useState(savedRpt?.usePlannedHours ?? false);
     const [objMap, setObjMap] = useState<Record<string, string>>({});
     const [objectiveAliases, setObjectiveAliases] = useState<Record<string, ObjectiveMeta>>({});
     const [clientMap, setClientMap] = useState<Record<string, string>>({});
     const [holidaysData, setHolidaysData] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
+        const saved = readSessionJson<{
+            start?: string;
+            end?: string;
+            publishFilter?: ReportPublishFilter;
+            usePlannedHours?: boolean;
+        }>('cosp:rpt:view');
+        if (saved) {
+            if (saved.start && saved.end) {
+                setDateRange({ start: saved.start, end: saved.end });
+            }
+            if (saved.publishFilter) setPublishFilter(saved.publishFilter);
+            if (typeof saved.usePlannedHours === 'boolean') setUsePlannedHours(saved.usePlannedHours);
+        }
+        setRptViewReady(true);
+    }, []);
+
+    useEffect(() => {
+        if (!rptViewReady) return;
         writeSessionJson('cosp:rpt:view', {
             start: dateRange.start,
             end: dateRange.end,
             publishFilter,
             usePlannedHours,
         });
-    }, [dateRange.start, dateRange.end, publishFilter, usePlannedHours]);
+    }, [rptViewReady, dateRange.start, dateRange.end, publishFilter, usePlannedHours]);
 
     useEffect(() => {
         if (!empresaId) return;
@@ -1417,37 +1458,44 @@ export const useReportes = (forcedClientId?: string | null) => {
             const rangeStartYmd = dateRange.start;
             const rangeEndYmd = dateRange.end;
 
-            reportProgress(28, 'Descargando turnos, ausencias y planificación');
-            const [planifDocs, fetchedTurnos, ausDocs, ajustesDocs] = await Promise.all([
-                fetchReportPlanificacionEstados(
-                    empresaId,
-                    scopeEmpresa,
-                    rangeStartYmd,
-                    rangeEndYmd,
-                    scopeObjId || undefined,
-                ),
-                fetchTurnosForReport({
-                    startDate,
-                    endDate,
-                    empresaId,
-                    scopeEmpresa,
-                    fetchScope,
-                    aliasLookup,
-                }),
-                fetchReportAusencias(
-                    empresaId,
-                    scopeEmpresa,
-                    rangeStartYmd,
-                    rangeEndYmd,
-                    scopeEmpId || undefined,
-                ),
-                fetchReportAjustesHoras(
-                    empresaId,
-                    rangeStartYmd,
-                    rangeEndYmd,
-                    scopeEmpId || undefined,
-                ),
-            ]);
+            reportProgress(28, 'Descargando planificación publicada…');
+            const planifDocs = await fetchReportPlanificacionEstados(
+                empresaId,
+                scopeEmpresa,
+                rangeStartYmd,
+                rangeEndYmd,
+                scopeObjId || undefined,
+            );
+
+            reportProgress(32, 'Descargando ausencias…');
+            const ausDocs = await fetchReportAusencias(
+                empresaId,
+                scopeEmpresa,
+                rangeStartYmd,
+                rangeEndYmd,
+                scopeEmpId || undefined,
+            );
+
+            reportProgress(35, 'Descargando ajustes de horas…');
+            const ajustesDocs = await fetchReportAjustesHoras(
+                empresaId,
+                rangeStartYmd,
+                rangeEndYmd,
+                scopeEmpId || undefined,
+            );
+
+            reportProgress(38, scopeEmpId
+                ? 'Descargando turnos del legajo…'
+                : 'Descargando turnos (planta completa, puede demorar)…');
+            const fetchedTurnos = await fetchTurnosForReport({
+                startDate,
+                endDate,
+                empresaId,
+                scopeEmpresa,
+                fetchScope,
+                aliasLookup,
+                onProgress: (label) => reportProgress(40, label),
+            });
 
             reportProgress(45, 'Procesando turnos y novedades');
             const publishStatusMap: Record<string, boolean> = {};
@@ -1837,7 +1885,10 @@ export const useReportes = (forcedClientId?: string | null) => {
 
         } catch (err) {
             console.error('Error generando reporte:', err);
-            toast.error('Error al generar el reporte');
+            const msg = err instanceof Error && err.message
+                ? err.message
+                : 'Error al generar el reporte';
+            toast.error(msg.length > 120 ? 'Timeout o error leyendo Firestore. Probá un legajo o un período más corto.' : msg);
         } finally {
             setLoading(false);
             setLoadingProgress(null);

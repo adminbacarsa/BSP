@@ -54,16 +54,18 @@ export function getCctPayrollPeriodByOffset(offsetMonths: number, ref: Date = ne
     return cctPayrollPeriodForClosingMonth(anchor.getFullYear(), anchor.getMonth() + 1);
 }
 
-export function formatCctPeriodLabel(period: CctPayrollPeriod, locale = 'es-AR'): string {
-    const d = new Date(period.closingYear, period.closingMonth - 1, 1);
-    const month = d.toLocaleDateString(locale, { month: 'short' });
+const MONTH_SHORT_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'] as const;
+
+/** Etiqueta estable (sin toLocale) para evitar hydration mismatch SSR vs browser. */
+export function formatCctPeriodLabel(period: CctPayrollPeriod, _locale = 'es-AR'): string {
+    const month = MONTH_SHORT_ES[period.closingMonth - 1] || '???';
     return `${month} ${String(period.closingYear).slice(-2)}`;
 }
 
-export function formatCctPeriodRangeDisplay(period: CctPayrollPeriod, locale = 'es-AR'): string {
+export function formatCctPeriodRangeDisplay(period: CctPayrollPeriod, _locale = 'es-AR'): string {
     const fmt = (ymd: string) => {
         const [yy, mm, dd] = ymd.split('-').map(Number);
-        return new Date(yy, mm - 1, dd).toLocaleDateString(locale);
+        return `${pad2(dd)}/${pad2(mm)}/${yy}`;
     };
     return `${fmt(period.start)} – ${fmt(period.end)}`;
 }

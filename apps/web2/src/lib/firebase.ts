@@ -75,8 +75,14 @@ export function onSnapshotFresh(ref: any, ...args: any[]): Unsubscribe {
  * - Emulador + memoryLocalCache: el 1.er snapshot fromCache vacío es un miss;
  *   el siguiente (o uno fromCache con docs) ya es el listen. Nunca esperar
  *   fromCache=false: en emulador casi no llega y la UI se queda en 8%.
+ * @param opts.timeoutMs — override (p. ej. reportes con rangos grandes).
  */
-export function getDocsOnce<T = any>(ref: Query<T> | CollectionReference<T>): Promise<QuerySnapshot<T>> {
+export function getDocsOnce<T = any>(
+  ref: Query<T> | CollectionReference<T>,
+  opts?: { timeoutMs?: number },
+): Promise<QuerySnapshot<T>> {
+  const timeoutMs = opts?.timeoutMs
+    ?? (_USE_EMULATOR_FOR_SNAPSHOT ? 12_000 : 60_000);
   return new Promise<QuerySnapshot<T>>((resolve, reject) => {
     let settled = false;
     let n = 0;
@@ -91,8 +97,8 @@ export function getDocsOnce<T = any>(ref: Query<T> | CollectionReference<T>): Pr
     };
     const timer = setTimeout(() => {
       if (last) done(last);
-      else done(undefined, new Error('Timeout leyendo Firestore (60s).'));
-    }, _USE_EMULATOR_FOR_SNAPSHOT ? 12_000 : 60_000);
+      else done(undefined, new Error(`Timeout leyendo Firestore (${Math.round(timeoutMs / 1000)}s).`));
+    }, timeoutMs);
     const unsub = _onSnapshot(
       ref,
       { includeMetadataChanges: true },

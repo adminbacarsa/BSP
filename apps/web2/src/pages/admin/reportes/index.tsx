@@ -30,6 +30,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { exportServiciosReportPdf } from '@/lib/reportes/serviciosReportPdf';
+import { exportLiquidacionReportPdf } from '@/lib/reportes/liquidacionReportPdf';
 import {
     formatCctPeriodLabel,
     formatCctPeriodRangeDisplay,
@@ -880,6 +881,50 @@ export default function ReportsPage() {
                             <option value="legajo">Orden: Legajo</option>
                         </select>
                         <button onClick={() => downloadCSV(rows, 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                try {
+                                    const sum = (key: string) =>
+                                        sourceRows.reduce((a, c) => a + (Number((c as any)[key]) || 0), 0);
+                                    const planCob = sum('horasCobertura');
+                                    const planFuera = sum('horasDespliegue');
+                                    const realCob = sum('horasRealesCobertura');
+                                    const realFuera = sum('horasRealesDespliegue');
+                                    const planTotalFallback = sum('horasTeoricas') || sum('total');
+                                    const realTotalFallback = sum('horasReales');
+                                    exportLiquidacionReportPdf({
+                                        rows: rows,
+                                        empresaName: String((empresa as any)?.nombre || (empresa as any)?.name || 'COSP'),
+                                        periodLabel: formatCctPeriodRangeDisplay(cctPeriodForSelectedRange),
+                                        publishFilterLabel:
+                                            publishFilter === 'published' ? 'solo publicados'
+                                            : publishFilter === 'unpublished' ? 'solo borrador'
+                                            : 'publicados + borrador',
+                                        usePlannedHours,
+                                        kpis: {
+                                            legajos: sourceRows.length,
+                                            planCobertura: planCob > 0 || planFuera > 0 ? planCob : planTotalFallback,
+                                            fueraCob: planFuera,
+                                            realesCob: realCob > 0 || realFuera > 0 ? realCob : realTotalFallback,
+                                            realesFuera: realFuera,
+                                            al50: sum('extra50'),
+                                            al100: sum('extra100'),
+                                            plusFeriado: sum('plusFeriado'),
+                                            turnos: sum('shifts') || sum('shiftsTotal'),
+                                        },
+                                    });
+                                    toast.success('PDF de liquidacion descargado');
+                                } catch (e) {
+                                    toast.error(e instanceof Error ? e.message : 'No se pudo generar el PDF');
+                                }
+                            }}
+                            title="PDF formal: resumen + detalle con subtotales"
+                            aria-label="Descargar PDF de liquidacion"
+                            className="px-2.5 py-2 bg-slate-900 text-white rounded hover:bg-slate-800 flex items-center gap-1 text-[10px] font-black uppercase"
+                        >
+                            <FileText size={14} aria-hidden="true"/> PDF
+                        </button>
                         <button type="button" onClick={downloadPayrollJson} title="Exportar JSON (integración payrollApi)" aria-label="Exportar JSON liquidación" className="px-2.5 py-2 bg-white border rounded hover:bg-indigo-50 text-indigo-600 flex items-center gap-1 text-[10px] font-black uppercase"><FileText size={14} aria-hidden="true"/> JSON</button>
                         <button onClick={() => window.print()} aria-label="Imprimir liquidación de horas" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Printer size={16} aria-hidden="true"/></button>
                     </div>
