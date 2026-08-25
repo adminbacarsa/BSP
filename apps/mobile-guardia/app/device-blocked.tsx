@@ -1,47 +1,56 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
+import { useResponsiveLayout } from '../src/hooks/useResponsiveLayout';
 
 export default function DeviceBlockedScreen() {
   const router = useRouter();
   const { signOut, refreshEmployee } = usePortalAuth();
+  const { formMaxWidth } = useResponsiveLayout();
 
   return (
     <>
       <Stack.Screen options={{ title: 'Dispositivo no autorizado' }} />
-      <View style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Dispositivo no vinculado</Text>
-          <Text style={styles.body}>
-            Esta cuenta está activa en otro dispositivo o aún no completaste la activación por mail.
-            Pedile al administrador un nuevo enlace o activá desde el correo que recibiste.
-          </Text>
-          <Pressable
-            style={styles.btnSecondary}
-            onPress={async () => {
-              await refreshEmployee();
-              router.replace('/');
-            }}
-          >
-            <Text style={styles.btnSecondaryText}>Reintentar verificación</Text>
-          </Pressable>
-          <Pressable
-            style={styles.btn}
-            onPress={async () => {
-              await signOut();
-              router.replace('/login');
-            }}
-          >
-            <Text style={styles.btnText}>Cerrar sesión</Text>
-          </Pressable>
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.container}>
+          <View style={[styles.card, { maxWidth: formMaxWidth, width: '100%', alignSelf: 'center' }]}>
+            <Text style={styles.title}>Dispositivo no vinculado</Text>
+            <Text style={styles.body}>
+              Esta cuenta ya está activa en otro celular. Cada legajo permite un dispositivo a la vez.
+            </Text>
+            <Text style={styles.body}>
+              Si cambiaste de teléfono, pedile a RRHH un nuevo mail de acceso y activá desde el botón
+              «Abrir en COSP Guardia».
+            </Text>
+            <Pressable
+              style={styles.btnSecondary}
+              onPress={async () => {
+                await refreshEmployee();
+                router.replace('/');
+              }}
+            >
+              <Text style={styles.btnSecondaryText}>Reintentar verificación</Text>
+            </Pressable>
+            <Pressable
+              style={styles.btn}
+              onPress={async () => {
+                await signOut();
+                router.replace('/login');
+              }}
+            >
+              <Text style={styles.btnText}>Cerrar sesión</Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, justifyContent: 'center', backgroundColor: '#f8fafc' },
+  safe: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, padding: 20, justifyContent: 'center' },
   card: {
     backgroundColor: '#fff',
     borderRadius: 24,

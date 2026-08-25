@@ -6,7 +6,8 @@ const projectId = '79b445af-b6a7-456b-b1be-87cf25a20bd5';
 const config: ExpoConfig = {
   name: 'COSP Guardia',
   slug: 'cosp-guardia',
-  version: '1.1.2',
+  owner: 'cosp-guardia',
+  version: '1.1.3',
   orientation: 'portrait',
   scheme: 'cosp-guardia',
   userInterfaceStyle: 'light',
@@ -34,13 +35,35 @@ const config: ExpoConfig = {
   },
   android: {
     package: 'com.grupobacar.cosp.guardia',
-    permissions: ['ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION', 'CAMERA'],
+    googleServicesFile: './google-services.json',
+    permissions: [
+      'ACCESS_COARSE_LOCATION',
+      'ACCESS_FINE_LOCATION',
+      'CAMERA',
+      'POST_NOTIFICATIONS',
+      'RECEIVE_BOOT_COMPLETED',
+      'VIBRATE',
+    ],
     softwareKeyboardLayoutMode: 'resize',
     ...(useEmulator ? { usesCleartextTraffic: true } : {}),
     adaptiveIcon: {
       foregroundImage: './assets/android-icon-foreground.png',
       backgroundColor: '#312e81',
     },
+    intentFilters: [
+      {
+        action: 'VIEW',
+        autoVerify: true,
+        data: [
+          {
+            scheme: 'https',
+            host: 'comtroldata.web.app',
+            pathPrefix: '/empleado/activar',
+          },
+        ],
+        category: ['BROWSABLE', 'DEFAULT'],
+      },
+    ],
   },
   androidNavigationBar: {
     backgroundColor: '#ffffff',

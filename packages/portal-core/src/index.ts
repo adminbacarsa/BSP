@@ -65,3 +65,10 @@ export {
 export type { AssignGuardToEventParams } from './eventos/eventoPortal';
 export { normalizePortalInboxItem, solicitudEventoStatusLabel } from './notifications/inboxNormalize';
 export type { PortalInboxNormalized } from './notifications/inboxNormalize';
+export {
+  isOperationalPortalShift,
+  isShiftVisibleToEmployee,
+  planificacionMonthLookupKey,
+  shiftPlanificacionLookupKey,
+} from './shifts/employeeShiftVisibility';
+export type { EmployeeShiftVisibilityInput } from './shifts/employeeShiftVisibility';

@@ -6,6 +6,7 @@ const admin = require("firebase-admin");
 const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys");
 const llegadaTardeUtils_1 = require("../ausencias/llegadaTardeUtils");
 const updateLiquidacionOnTurnoComplete_1 = require("../liquidacion/updateLiquidacionOnTurnoComplete");
+const shiftNotifDigest_1 = require("./shiftNotifDigest");
 function formatDate(ts) {
     if (!ts)
         return '';
@@ -72,6 +73,7 @@ async function sendEmployeeTurnoPush(db, employeeId, msg, type, turnoId) {
     await db.collection('user_notifications').add({
         uid: empUid || null, employeeId, title: msg.title, body: msg.body,
         type, target: 'employee', turnoId, read: false, readAt: null,
+        requiresAck: true, ackedAt: null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     const tokens = Array.from(tokenSet);
@@ -79,6 +81,15 @@ async function sendEmployeeTurnoPush(db, employeeId, msg, type, turnoId) {
         await admin.messaging().sendEachForMulticast({
             tokens,
             notification: { title: msg.title, body: msg.body },
+            data: {
+                type,
+                turnoId,
+                employeeId,
+                title: msg.title,
+                body: msg.body,
+                link: '/empleado/dashboard',
+            },
+            android: { priority: 'high' },
             webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
         }).catch(e => console.warn('[onTurnoWrite] push error:', e));
     }
@@ -108,6 +119,17 @@ async function markSolicitudAsignada(db, solicitudId, turnoId, employeeId) {
         console.warn('[onTurnoWrite] markSolicitudAsignada error:', e);
     }
 }
+function isEventoShift(turn) {
+    if (!turn)
+        return false;
+    const origin = String(turn.origin ?? '')
+        .trim()
+        .toUpperCase();
+    const code = String(turn.code ?? '')
+        .trim()
+        .toUpperCase();
+    return origin === 'EVENTO' || code === 'EV' || !!turn.eventoId;
+}
 exports.onTurnoWrite = functions
     .runWith({ timeoutSeconds: 30, memory: '128MB' })
     .firestore.document('turnos/{turnoId}')
@@ -121,19 +143,46 @@ exports.onTurnoWrite = functions
     catch (e) {
         console.warn('[onTurnoWrite] liquidacion incremental:', e?.message);
     }
-    if (after?.draft === true)
+    if (after?.draft === true && !isEventoShift(after))
         return;
     const turn = after || before;
-    const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
-    if (turn && planningOrigins.has(turn.origin) && turn.objectiveId) {
-        const startMs = turn.startTime?.toMillis?.() ?? (turn.startTime?.seconds ? turn.startTime.seconds * 1000 : 0);
-        if (startMs) {
-            const { year, month } = (0, planificacionEstadoKeys_1.ymCordobaParts)(new Date(startMs));
-            const empId = String(turn.empresaId ?? '').trim();
-            const docIds = (0, planificacionEstadoKeys_1.planificacionEstadoLookupDocIds)(empId, turn.objectiveId, year, month);
-            const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
-            if (!planDocs.some(s => s.exists))
+    if (turn?.objectiveId) {
+        const origin = String(turn.origin ?? '')
+            .trim()
+            .toUpperCase();
+        const code = String(turn.code ?? '')
+            .trim()
+            .toUpperCase();
+        const isOperational = origin === 'RETEN' ||
+            origin === 'OPERATIONS_COVERAGE' ||
+            origin === 'CLIENT_REQUEST' ||
+            origin === 'EVENTO' ||
+            turn.isReten === true ||
+            String(turn.resolvedBy || '').toUpperCase() === 'OPERACIONES' ||
+            code === 'EV' ||
+            !!turn.eventoId;
+        if (!isOperational) {
+            const startMs = turn.startTime?.toMillis?.() ??
+                (turn.startTime?.seconds ? turn.startTime.seconds * 1000 : 0);
+            if (startMs) {
+                const { year, month } = (0, planificacionEstadoKeys_1.ymCordobaParts)(new Date(startMs));
+                const empId = String(turn.empresaId ?? '').trim();
+                const docIds = (0, planificacionEstadoKeys_1.planificacionEstadoLookupDocIds)(empId, turn.objectiveId, year, month);
+                const planDocs = await Promise.all(docIds.map((id) => db.doc(`planificacion_estados/${id}`).get()));
+                const published = planDocs.some((s) => {
+                    if (!s.exists)
+                        return false;
+                    const pub = s.data()?.publishedAt;
+                    return pub != null && pub !== '';
+                });
+                if (!published) {
+                    console.log('[onTurnoWrite] Skip notify: cronograma no publicado', turn.objectiveId, `${month}/${year}`);
+                    return;
+                }
+            }
+            else {
                 return;
+            }
         }
     }
     if (before && after && before.isAbsent === true && after.isPresent === true && !after.isAbsent) {
@@ -269,40 +318,15 @@ exports.onTurnoWrite = functions
             const position = after.positionName || '';
             const code = String(after.code || 'RFZ').toUpperCase();
             const dateStr = formatDate(after.startTime);
-            const rfzMsg = {
-                title: code === 'TURA' ? '📅 Turno Agregado asignado' : '📅 Refuerzo de cliente asignado',
-                body: `${dateStr}${position ? ' · ' + position : ''} — ${objective}`,
-            };
-            const empDocR = await db.collection('empleados').doc(assignedEmployeeId).get();
-            const empUidR = empDocR.exists ? empDocR.data()?.uid : undefined;
-            const [byEmpIdR, byUidR] = await Promise.all([
-                db.collection('device_tokens').where('employeeId', '==', assignedEmployeeId).get(),
-                empUidR ? db.collection('device_tokens').where('uid', '==', empUidR).get() : Promise.resolve({ docs: [] }),
-            ]);
-            const tokenSetR = new Set();
-            [...byEmpIdR.docs, ...byUidR.docs].forEach(d => { const t = d.data()?.token; if (typeof t === 'string' && t.length > 10)
-                tokenSetR.add(t); });
-            const tokensR = Array.from(tokenSetR);
+            const sampleBody = `${dateStr}${position ? ' · ' + position : ''} — ${objective}${code ? ` · ${code}` : ''}`;
             const turnoIdR = change.after.id;
-            await db.collection('user_notifications').add({
-                uid: empUidR || null,
+            await (0, shiftNotifDigest_1.enqueueShiftNotifDigest)(db, {
                 employeeId: assignedEmployeeId,
-                title: rfzMsg.title,
-                body: rfzMsg.body,
-                type: 'TURNO_NUEVO',
-                target: 'employee',
+                empresaId: after.empresaId || null,
+                eventType: 'TURNO_NUEVO',
+                sampleBody,
                 turnoId: turnoIdR,
-                read: false,
-                readAt: null,
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            if (tokensR.length) {
-                await admin.messaging().sendEachForMulticast({
-                    tokens: tokensR,
-                    notification: { title: rfzMsg.title, body: rfzMsg.body },
-                    webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
-                }).catch(e => console.warn('[onTurnoWrite] RFZ/TURA push error:', e));
-            }
             await markSolicitudAsignada(db, after.solicitudRefuerzoId, turnoIdR, assignedEmployeeId);
             return;
         }
@@ -310,14 +334,6 @@ exports.onTurnoWrite = functions
     if (after && before && rfzTuraCodes.has(String(after.code || '').toUpperCase())
         && before.draft === true && after.draft === false
         && after.employeeId && after.employeeId !== 'VACANTE') {
-        const code = String(after.code || 'RFZ').toUpperCase();
-        const objective = after.objectiveName || after.clientName || 'el objetivo';
-        const position = after.positionName || '';
-        const dateStr = formatDate(after.startTime);
-        await sendEmployeeTurnoPush(db, after.employeeId, {
-            title: code === 'TURA' ? '📅 Turno Agregado asignado' : '📅 Refuerzo de cliente asignado',
-            body: `${dateStr}${position ? ' · ' + position : ''} — ${objective}`,
-        }, 'TURNO_NUEVO', change.after.id);
         await markSolicitudAsignada(db, after.solicitudRefuerzoId, change.after.id, after.employeeId);
         return;
     }
@@ -329,7 +345,7 @@ exports.onTurnoWrite = functions
         eventType = 'TURNO_ELIMINADO';
     }
     else if (!before) {
-        if (after.draft === true)
+        if (after.draft === true && !isEventoShift(after))
             return;
         const isFranco = after.code === 'F' || after.isFranco;
         eventType = isFranco ? 'FRANCO_ASIGNADO' : 'TURNO_NUEVO';
@@ -348,80 +364,13 @@ exports.onTurnoWrite = functions
     const msg = buildMessage(eventType, after, before, change.after.id || change.before.id);
     if (!msg)
         return;
-    const empDoc = await db.collection('empleados').doc(employeeId).get();
-    const empUid = empDoc.exists ? empDoc.data()?.uid : undefined;
-    const [byEmpId, byUid] = await Promise.all([
-        db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
-        empUid
-            ? db.collection('device_tokens').where('uid', '==', empUid).get()
-            : Promise.resolve({ docs: [] }),
-    ]);
-    const tokenSet = new Set();
-    [...byEmpId.docs, ...byUid.docs].forEach(d => {
-        const t = d.data()?.token;
-        if (typeof t === 'string' && t.length > 10)
-            tokenSet.add(t);
-    });
-    const tokens = Array.from(tokenSet);
     const turnoId = change.after.id || change.before.id;
-    let notifDocId = null;
-    try {
-        const notifRef = await db.collection('user_notifications').add({
-            uid: empUid || null,
-            employeeId,
-            title: msg.title,
-            body: msg.body,
-            type: eventType,
-            target: 'employee',
-            turnoId,
-            read: false,
-            readAt: null,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        notifDocId = notifRef.id;
-    }
-    catch (e) {
-        console.error('[onTurnoWrite] Error saving notification:', e?.message);
-    }
-    if (!tokens.length) {
-        console.warn('[onTurnoWrite] No tokens found for employee:', employeeId, 'uid:', empUid);
-        return;
-    }
-    console.log('[onTurnoWrite] Sending push to', tokens.length, 'token(s) for employee:', employeeId);
-    try {
-        const result = await admin.messaging().sendEachForMulticast({
-            data: {
-                turnoId,
-                employeeId,
-                type: eventType,
-                title: msg.title,
-                body: msg.body,
-                notificationId: notifDocId || '',
-                link: `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`,
-            },
-            webpush: {
-                headers: { Urgency: 'high' },
-                fcmOptions: { link: `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}` },
-            },
-            tokens,
-        });
-        console.log('[onTurnoWrite] FCM result: success=', result.successCount, 'fail=', result.failureCount);
-        const invalidTokens = [];
-        result.responses.forEach((r, i) => {
-            if (!r.success && (r.error?.code === 'messaging/registration-token-not-registered' || r.error?.code === 'messaging/invalid-registration-token')) {
-                invalidTokens.push(tokens[i]);
-            }
-        });
-        if (invalidTokens.length > 0) {
-            const cleanSnap = await db.collection('device_tokens').where('token', 'in', invalidTokens).get();
-            const batch = db.batch();
-            cleanSnap.docs.forEach(d => batch.delete(d.ref));
-            await batch.commit();
-            console.log('[onTurnoWrite] Cleaned', invalidTokens.length, 'invalid token(s)');
-        }
-    }
-    catch (e) {
-        console.error('[onTurnoWrite] FCM error:', e?.message);
-    }
+    await (0, shiftNotifDigest_1.enqueueShiftNotifDigest)(db, {
+        employeeId,
+        empresaId: after?.empresaId || before?.empresaId || null,
+        eventType,
+        sampleBody: msg.body,
+        turnoId,
+    });
 });
 //# sourceMappingURL=onTurnoWrite.js.map

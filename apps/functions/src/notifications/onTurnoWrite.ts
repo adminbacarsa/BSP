@@ -3,6 +3,7 @@ import * as admin from 'firebase-admin';
 import { ymCordobaParts, planificacionEstadoLookupDocIds } from '../assistant/planificacionEstadoKeys';
 import { checkLlegadaTardeReiterada } from '../ausencias/llegadaTardeUtils';
 import { updateLiquidacionOnTurnoComplete } from '../liquidacion/updateLiquidacionOnTurnoComplete';
+import { enqueueShiftNotifDigest, type DigestEventType } from './shiftNotifDigest';
 
 function formatDate(ts: any): string {
   if (!ts) return '';
@@ -73,6 +74,7 @@ async function sendEmployeeTurnoPush(
   await db.collection('user_notifications').add({
     uid: empUid || null, employeeId, title: msg.title, body: msg.body,
     type, target: 'employee', turnoId, read: false, readAt: null,
+    requiresAck: true, ackedAt: null,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   const tokens = Array.from(tokenSet);
@@ -80,6 +82,15 @@ async function sendEmployeeTurnoPush(
     await admin.messaging().sendEachForMulticast({
       tokens,
       notification: { title: msg.title, body: msg.body },
+      data: {
+        type,
+        turnoId,
+        employeeId,
+        title: msg.title,
+        body: msg.body,
+        link: '/empleado/dashboard',
+      },
+      android: { priority: 'high' as const },
       webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
     }).catch(e => console.warn('[onTurnoWrite] push error:', e));
   }
@@ -114,6 +125,17 @@ async function markSolicitudAsignada(
   }
 }
 
+function isEventoShift(turn: any): boolean {
+  if (!turn) return false;
+  const origin = String(turn.origin ?? '')
+    .trim()
+    .toUpperCase();
+  const code = String(turn.code ?? '')
+    .trim()
+    .toUpperCase();
+  return origin === 'EVENTO' || code === 'EV' || !!turn.eventoId;
+}
+
 export const onTurnoWrite = functions
   .runWith({ timeoutSeconds: 30, memory: '128MB' })
   .firestore.document('turnos/{turnoId}')
@@ -128,22 +150,58 @@ export const onTurnoWrite = functions
       console.warn('[onTurnoWrite] liquidacion incremental:', (e as Error)?.message);
     }
 
-    // No notificar turnos en borrador (se notificará cuando se publique)
-    if (after?.draft === true) return;
+    // Borrador de planificación: no notificar — excepto turnos EV (independientes del crono).
+    if (after?.draft === true && !isEventoShift(after)) return;
 
-    // Turnos de planificación (SLA_VIRTUAL, PLANIFICADOR, sin origin): no notificar si el
-    // cronograma del objetivo/mes no está publicado. RETEN y OPERATIONS_COVERAGE son
-    // asignaciones operativas explícitas y siempre se notifican.
+    // Planificación: solo notificar si el objetivo/mes tiene publishedAt.
+    // Tener doc en planificacion_estados NO alcanza (ahí también viven puestos sin publicar).
+    // EV / operativos: siempre (no dependen de publishedAt).
     const turn = after || before;
-    const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
-    if (turn && planningOrigins.has(turn.origin) && turn.objectiveId) {
-      const startMs: number = turn.startTime?.toMillis?.() ?? (turn.startTime?.seconds ? turn.startTime.seconds * 1000 : 0);
-      if (startMs) {
-        const { year, month } = ymCordobaParts(new Date(startMs));
-        const empId = String(turn.empresaId ?? '').trim();
-        const docIds = planificacionEstadoLookupDocIds(empId, turn.objectiveId, year, month);
-        const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
-        if (!planDocs.some(s => s.exists)) return; // cronograma no publicado → no notificar
+    if (turn?.objectiveId) {
+      const origin = String(turn.origin ?? '')
+        .trim()
+        .toUpperCase();
+      const code = String(turn.code ?? '')
+        .trim()
+        .toUpperCase();
+      const isOperational =
+        origin === 'RETEN' ||
+        origin === 'OPERATIONS_COVERAGE' ||
+        origin === 'CLIENT_REQUEST' ||
+        origin === 'EVENTO' ||
+        turn.isReten === true ||
+        String(turn.resolvedBy || '').toUpperCase() === 'OPERACIONES' ||
+        code === 'EV' ||
+        !!turn.eventoId;
+
+      if (!isOperational) {
+        const startMs: number =
+          turn.startTime?.toMillis?.() ??
+          (turn.startTime?.seconds ? turn.startTime.seconds * 1000 : 0);
+        if (startMs) {
+          const { year, month } = ymCordobaParts(new Date(startMs));
+          const empId = String(turn.empresaId ?? '').trim();
+          const docIds = planificacionEstadoLookupDocIds(empId, turn.objectiveId, year, month);
+          const planDocs = await Promise.all(
+            docIds.map((id) => db.doc(`planificacion_estados/${id}`).get()),
+          );
+          const published = planDocs.some((s) => {
+            if (!s.exists) return false;
+            const pub = s.data()?.publishedAt;
+            return pub != null && pub !== '';
+          });
+          if (!published) {
+            console.log(
+              '[onTurnoWrite] Skip notify: cronograma no publicado',
+              turn.objectiveId,
+              `${month}/${year}`,
+            );
+            return;
+          }
+        } else {
+          // Sin fecha no podemos validar mes → no spamear al portal
+          return;
+        }
       }
     }
 
@@ -296,97 +354,50 @@ export const onTurnoWrite = functions
         const position = after.positionName || '';
         const code = String(after.code || 'RFZ').toUpperCase();
         const dateStr = formatDate(after.startTime);
-        const rfzMsg = {
-          title: code === 'TURA' ? '📅 Turno Agregado asignado' : '📅 Refuerzo de cliente asignado',
-          body: `${dateStr}${position ? ' · ' + position : ''} — ${objective}`,
-        };
-        const empDocR = await db.collection('empleados').doc(assignedEmployeeId).get();
-        const empUidR: string | undefined = empDocR.exists ? empDocR.data()?.uid : undefined;
-        const [byEmpIdR, byUidR] = await Promise.all([
-          db.collection('device_tokens').where('employeeId', '==', assignedEmployeeId).get(),
-          empUidR ? db.collection('device_tokens').where('uid', '==', empUidR).get() : Promise.resolve({ docs: [] as any[] }),
-        ]);
-        const tokenSetR = new Set<string>();
-        [...byEmpIdR.docs, ...byUidR.docs].forEach(d => { const t = d.data()?.token; if (typeof t === 'string' && t.length > 10) tokenSetR.add(t); });
-        const tokensR = Array.from(tokenSetR);
+        const sampleBody = `${dateStr}${position ? ' · ' + position : ''} — ${objective}${code ? ` · ${code}` : ''}`;
         const turnoIdR = change.after.id;
-        await db.collection('user_notifications').add({
-          uid: empUidR || null,
+        await enqueueShiftNotifDigest(db, {
           employeeId: assignedEmployeeId,
-          title: rfzMsg.title,
-          body: rfzMsg.body,
-          type: 'TURNO_NUEVO',
-          target: 'employee',
+          empresaId: after.empresaId || null,
+          eventType: 'TURNO_NUEVO',
+          sampleBody,
           turnoId: turnoIdR,
-          read: false,
-          readAt: null,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        if (tokensR.length) {
-          await admin.messaging().sendEachForMulticast({
-            tokens: tokensR,
-            notification: { title: rfzMsg.title, body: rfzMsg.body },
-            webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
-          }).catch(e => console.warn('[onTurnoWrite] RFZ/TURA push error:', e));
-        }
-
-        // Actualizar solicitud_refuerzo a ASIGNADA si el turno tiene vínculo
         await markSolicitudAsignada(db, after.solicitudRefuerzoId, turnoIdR, assignedEmployeeId);
         return;
       }
     }
 
-    // ── RFZ/TURA: republicación (draft true→false) de un turno YA asignado → push al guardia ──
-    // (la asignación se hizo en borrador; al republicar recién se notifica al guardia)
+    // ── RFZ/TURA: republicación (draft true→false) ──────────────────────────
+    // Sin push acá: la publicación masiva la cubre onCronogramaPublished;
+    // cambios sueltos (VACANTE→empleado u otros campos) van al digest.
     if (after && before && rfzTuraCodes.has(String(after.code || '').toUpperCase())
         && before.draft === true && after.draft === false
         && after.employeeId && after.employeeId !== 'VACANTE') {
-      const code = String(after.code || 'RFZ').toUpperCase();
-      const objective = after.objectiveName || after.clientName || 'el objetivo';
-      const position = after.positionName || '';
-      const dateStr = formatDate(after.startTime);
-      await sendEmployeeTurnoPush(
-        db,
-        after.employeeId,
-        {
-          title: code === 'TURA' ? '📅 Turno Agregado asignado' : '📅 Refuerzo de cliente asignado',
-          body: `${dateStr}${position ? ' · ' + position : ''} — ${objective}`,
-        },
-        'TURNO_NUEVO',
-        change.after.id,
-      );
-      // El RFZ se asignó en borrador (no se cerró el ciclo de la solicitud en ese momento):
-      // al publicar recién marcamos la solicitud ASIGNADA y limpiamos la novedad pendiente.
       await markSolicitudAsignada(db, after.solicitudRefuerzoId, change.after.id, after.employeeId);
       return;
     }
 
     // Determinar tipo de evento
-    let eventType: string;
+    let eventType: DigestEventType;
     const employeeId: string = (after || before)?.employeeId;
     if (!employeeId) return;
 
     if (!after) {
-      // Eliminación
       eventType = 'TURNO_ELIMINADO';
     } else if (!before) {
-      // Creación directa (no draft) — puede ser un turno operativo (retén, cobertura)
-      // Si viene con draft:true, no hacer nada (se notificará vía onCronogramaPublished al publicar)
-      if (after.draft === true) return;
+      if (after.draft === true && !isEventoShift(after)) return;
       const isFranco = after.code === 'F' || after.isFranco;
       eventType = isFranco ? 'FRANCO_ASIGNADO' : 'TURNO_NUEVO';
     } else {
-      // Modificación — solo notificar si cambió algo relevante
       const relevantFields = ['startTime', 'endTime', 'code', 'objectiveName', 'clientName', 'positionName', 'isFranco'];
       const changed = relevantFields.some(f => JSON.stringify(before[f]) !== JSON.stringify(after[f]));
 
-      // Silenciar: publicación masiva (draft:true → draft:false sin otros cambios)
-      // La notificación consolidada la envía onCronogramaPublished
+      // Publicación masiva: solo onCronogramaPublished
       if (before.draft === true && after.draft === false && !changed) return;
 
       if (!changed) return;
 
-      // Si se convirtió en franco
       const nowFranco = after.code === 'F' || after.isFranco;
       const wasFranco = before.code === 'F' || before.isFranco;
       eventType = (nowFranco && !wasFranco) ? 'FRANCO_ASIGNADO' : 'TURNO_MODIFICADO';
@@ -395,88 +406,12 @@ export const onTurnoWrite = functions
     const msg = buildMessage(eventType, after, before, change.after.id || change.before.id);
     if (!msg) return;
 
-    // Obtener uid del empleado
-    const empDoc = await db.collection('empleados').doc(employeeId).get();
-    const empUid: string | undefined = empDoc.exists ? empDoc.data()?.uid : undefined;
-
-    // Consultar tokens por ambos campos en paralelo para máxima cobertura
-    const [byEmpId, byUid] = await Promise.all([
-      db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
-      empUid
-        ? db.collection('device_tokens').where('uid', '==', empUid).get()
-        : Promise.resolve({ docs: [] as any[] }),
-    ]);
-
-    const tokenSet = new Set<string>();
-    [...byEmpId.docs, ...byUid.docs].forEach(d => {
-      const t = d.data()?.token;
-      if (typeof t === 'string' && t.length > 10) tokenSet.add(t);
-    });
-    const tokens = Array.from(tokenSet);
-
     const turnoId = change.after.id || change.before.id;
-
-    // Guardar en user_notifications (siempre, con o sin tokens)
-    let notifDocId: string | null = null;
-    try {
-      const notifRef = await db.collection('user_notifications').add({
-        uid: empUid || null,
-        employeeId,
-        title: msg.title,
-        body: msg.body,
-        type: eventType,
-        target: 'employee',
-        turnoId,
-        read: false,
-        readAt: null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      notifDocId = notifRef.id;
-    } catch (e) {
-      console.error('[onTurnoWrite] Error saving notification:', (e as Error)?.message);
-    }
-
-    if (!tokens.length) {
-      console.warn('[onTurnoWrite] No tokens found for employee:', employeeId, 'uid:', empUid);
-      return;
-    }
-
-    console.log('[onTurnoWrite] Sending push to', tokens.length, 'token(s) for employee:', employeeId);
-
-    try {
-      // Data-only message: onBackgroundMessage in SW controls display (avoids browser default text)
-      const result = await admin.messaging().sendEachForMulticast({
-        data: {
-          turnoId,
-          employeeId,
-          type: eventType,
-          title: msg.title,
-          body: msg.body,
-          notificationId: notifDocId || '',
-          link: `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`,
-        },
-        webpush: {
-          headers: { Urgency: 'high' },
-          fcmOptions: { link: `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}` },
-        },
-        tokens,
-      });
-      console.log('[onTurnoWrite] FCM result: success=', result.successCount, 'fail=', result.failureCount);
-      // Limpiar tokens inválidos
-      const invalidTokens: string[] = [];
-      result.responses.forEach((r, i) => {
-        if (!r.success && (r.error?.code === 'messaging/registration-token-not-registered' || r.error?.code === 'messaging/invalid-registration-token')) {
-          invalidTokens.push(tokens[i]);
-        }
-      });
-      if (invalidTokens.length > 0) {
-        const cleanSnap = await db.collection('device_tokens').where('token', 'in', invalidTokens).get();
-        const batch = db.batch();
-        cleanSnap.docs.forEach(d => batch.delete(d.ref));
-        await batch.commit();
-        console.log('[onTurnoWrite] Cleaned', invalidTokens.length, 'invalid token(s)');
-      }
-    } catch (e) {
-      console.error('[onTurnoWrite] FCM error:', (e as Error)?.message);
-    }
+    await enqueueShiftNotifDigest(db, {
+      employeeId,
+      empresaId: after?.empresaId || before?.empresaId || null,
+      eventType,
+      sampleBody: msg.body,
+      turnoId,
+    });
   });

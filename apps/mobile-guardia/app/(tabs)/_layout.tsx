@@ -10,8 +10,8 @@ const TAB_CONTENT = 56;
 
 export default function TabsLayout() {
   const { palette, isDark } = useTheme();
-  const { user, portalFeatures } = usePortalAuth();
-  const { unreadCount } = usePortalInbox(user);
+  const { user, portalFeatures, previewEmpDocId } = usePortalAuth();
+  const { unreadCount } = usePortalInbox(user, previewEmpDocId);
   const insets = useSafeAreaInsets();
   /**
    * Barra de 3 botones / gestos Android. Mínimo 28px si el inset llega 0

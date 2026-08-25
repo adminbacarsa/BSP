@@ -6,7 +6,6 @@ import {
   getCheckInTiming,
   resolveCheckInUiStatus,
   resolveEvShiftDisplay,
-  isEvShift,
 } from '@cosp/portal-core';
 import { isEmulatorMode } from '../../src/lib/portal';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
@@ -14,7 +13,7 @@ import { useEmployeeShifts } from '../../src/hooks/useEmployeeShifts';
 import { useObjectivesMap } from '../../src/hooks/useObjectivesMap';
 import { useCheckIn } from '../../src/hooks/useCheckIn';
 import { useEmpresaBranding } from '../../src/hooks/useEmpresaBranding';
-import { useConvocatoriasPendientes } from '../../src/hooks/useConvocatoriasPendientes';
+import { useEventosPortal } from '../../src/hooks/useEventosPortal';
 import { useEventosMap } from '../../src/hooks/useEventosMap';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
 import { heroShift, pickTodayShiftAny } from '../../src/lib/shifts';
@@ -25,19 +24,19 @@ import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
-import { formatHeroTimeRange, HeroShiftPanel } from '../../src/components/ui/HeroShiftPanel';
+import {
+  formatHeroShiftHeadline,
+  formatHeroTimeRange,
+  HeroShiftPanel,
+} from '../../src/components/ui/HeroShiftPanel';
 import { CheckInStatusBanner } from '../../src/components/ui/CheckInStatusBanner';
 import { RequireAuth } from '../../src/hooks/useRequireAuth';
 import { radius, spacing } from '../../src/theme/tokens';
 import { PortalErrorPanel } from '../../src/components/PortalErrorPanel';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
+import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { useTheme } from '../../src/theme/ThemeContext';
-
-function heroHeadline(todayAny: ReturnType<typeof pickTodayShiftAny>, hasNext: boolean): string {
-  if (todayAny) return 'HOY';
-  if (hasNext) return 'PRÓXIMO';
-  return 'SIN TURNO';
-}
+import type { SolicitudEvento } from '@cosp/portal-types';
 
 export default function HoyScreen() {
   return (
@@ -51,6 +50,7 @@ function HoyScreenContent() {
   const router = useRouter();
   const navigation = useNavigation();
   const { palette } = useTheme();
+  const { isCompact, contentMaxWidth, horizontalPadding } = useResponsiveLayout();
   const { isOffline } = useNetworkStatus();
   const {
     user,
@@ -62,15 +62,33 @@ function HoyScreenContent() {
     employeeProfileLoading,
     employeeProfileReady,
     employeeProfileError,
+    isPreviewMode,
+    previewEmpDocId,
   } = usePortalAuth();
   const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { objectivesMap } = useObjectivesMap();
   const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival } =
     useCheckIn();
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
-  const { convocatoriasPendientes } = useConvocatoriasPendientes(employee?.empresaId, empDocId);
+  const displayName = useMemo(() => {
+    if (employee?.lastName || employee?.firstName) {
+      return `${employee.lastName || ''}${employee.lastName && employee.firstName ? ', ' : ''}${employee.firstName || ''}`.trim();
+    }
+    return user?.email?.split('@')[0] || 'Vigilador';
+  }, [employee, user]);
+  const { convocatoriasPendientes, busyId: convocatoriaBusyId, responderConvocatoria } = useEventosPortal(
+    employee?.empresaId,
+    empDocId,
+    displayName,
+    { isPreviewMode },
+  );
   const { eventosMap } = useEventosMap(employee?.empresaId);
-  const { unreadCount } = usePortalInbox(user);
+  const { unreadCount } = usePortalInbox(user, previewEmpDocId);
+
+  async function onResponderConvocatoria(sol: SolicitudEvento, acepta: boolean) {
+    const result = await responderConvocatoria(sol, acepta);
+    Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
+  }
 
   const profileMissing = employeeProfileReady && !employee && !empDocId && !!user;
   const profileStale = employeeProfileReady && !employee && !!empDocId && !!user;
@@ -97,13 +115,6 @@ function HoyScreenContent() {
       ),
     });
   }, [navigation, palette.headerTint, router, signOut]);
-
-  const displayName = useMemo(() => {
-    if (employee?.lastName || employee?.firstName) {
-      return `${employee.lastName || ''}${employee.lastName && employee.firstName ? ', ' : ''}${employee.firstName || ''}`.trim();
-    }
-    return user?.email?.split('@')[0] || 'Vigilador';
-  }, [employee, user]);
 
   const now = new Date();
   const todayAny = pickTodayShiftAny(shifts, now);
@@ -151,14 +162,13 @@ function HoyScreenContent() {
     Alert.alert('Llegada tarde', result.message);
   }
 
+  const isHeroToday = !!todayAny;
   const heroSub =
     todayAny?.isFranco || mainShift?.isFranco
       ? 'Día de descanso programado'
-      : mainShift && isEvShift(mainShift)
-        ? resolveEvShiftDisplay(mainShift, eventosMap)?.nombre || formatHeroTimeRange(mainShift)
-        : mainShift
-          ? formatHeroTimeRange(mainShift)
-          : 'No hay turnos en el mes actual';
+      : mainShift
+        ? formatHeroTimeRange(mainShift)
+        : 'No hay turnos en el mes actual';
 
   const mainShiftEv =
     mainShift && !mainShift.isFranco ? resolveEvShiftDisplay(mainShift, eventosMap) : null;
@@ -167,7 +177,18 @@ function HoyScreenContent() {
     <>
       <PreviewModeBanner />
       <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={[]}>
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scroll,
+            {
+              paddingHorizontal: horizontalPadding,
+              ...(contentMaxWidth
+                ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const, width: '100%' }
+                : {}),
+            },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.welcome}>
             <Text style={[styles.welcomeLabel, { color: palette.primary }]}>Portal del vigilador</Text>
             <Text style={[styles.welcomeName, { color: palette.onSurface }]}>{displayName}</Text>
@@ -219,7 +240,9 @@ function HoyScreenContent() {
           {portalFeatures.viewEvents && convocatoriasPendientes.length > 0 ? (
             <ConvocatoriasBanner
               convocatorias={convocatoriasPendientes}
-              onOpenEventos={() => router.push('/eventos')}
+              busyId={convocatoriaBusyId}
+              onAccept={(sol) => void onResponderConvocatoria(sol, true)}
+              onReject={(sol) => void onResponderConvocatoria(sol, false)}
             />
           ) : null}
 
@@ -246,7 +269,7 @@ function HoyScreenContent() {
             </CommandCard>
           ) : (
             <HeroShiftPanel
-              headline={heroHeadline(todayAny, !!mainShift && !todayAny)}
+              headline={formatHeroShiftHeadline(mainShift, { isToday: isHeroToday, now })}
               subline={heroSub}
               shift={mainShift}
               placement={placement}
@@ -285,7 +308,7 @@ function HoyScreenContent() {
             />
           )}
 
-          <View style={styles.quickRow}>
+          <View style={[styles.quickRow, isCompact && styles.quickRowStack]}>
             {portalFeatures.viewEvents ? (
               <CommandCard style={styles.quickHalf}>
                 <Text style={[styles.quickTitle, { color: palette.onSurface }]}>Eventos</Text>
@@ -317,7 +340,7 @@ function HoyScreenContent() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scroll: { padding: spacing.container, gap: spacing.lg, paddingBottom: 24 },
+  scroll: { paddingVertical: spacing.container, gap: spacing.lg, paddingBottom: 24 },
   welcome: { gap: 4 },
   welcomeLabel: {
     fontSize: 11,
@@ -341,6 +364,7 @@ const styles = StyleSheet.create({
   pendingLine: { fontSize: 12, fontWeight: '700', marginTop: 8 },
   heroActions: { gap: 10, marginTop: 16 },
   quickRow: { flexDirection: 'row', gap: 12 },
+  quickRowStack: { flexDirection: 'column' },
   quickHalf: { flex: 1, gap: 8 },
   quickTitle: { fontSize: 16, fontWeight: '800' },
   quickSub: { fontSize: 12, marginBottom: 4, minHeight: 32 },

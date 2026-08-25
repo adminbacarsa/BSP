@@ -1,20 +1,24 @@
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { getMobilePlatform, getOrCreateDeviceId } from '../lib/deviceId';
 import { getDeviceInfo } from '../lib/deviceInfo';
 import { getPortalCallables, getPortalFirebase } from '../lib/portal';
 import { appRoutes } from '../lib/appRoutes';
 import { PasswordField } from '../components/ui/PasswordField';
+import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 
 type Props = {
   token: string | null;
@@ -35,6 +39,25 @@ function mapActivateError(err: unknown): string {
   return e?.message || 'Error al activar el dispositivo.';
 }
 
+function ActivateShell({ children }: { children: ReactNode }) {
+  const { formMaxWidth } = useResponsiveLayout();
+  return (
+    <SafeAreaView style={styles.flex}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.inner, { maxWidth: formMaxWidth, alignSelf: 'center', width: '100%' }]}>
+            {children}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
 export function ActivarScreen({ token }: Props) {
   const router = useRouter();
   const [password, setPassword] = useState('');
@@ -44,25 +67,31 @@ export function ActivarScreen({ token }: Props) {
 
   if (!token) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorTitle}>Enlace inválido</Text>
-        <Text style={styles.errorBody}>El enlace de activación está incompleto o venció.</Text>
-        <Pressable style={styles.btn} onPress={() => router.replace('/login')}>
-          <Text style={styles.btnText}>Ir al login</Text>
-        </Pressable>
-      </View>
+      <ActivateShell>
+        <View style={styles.card}>
+          <Text style={styles.errorTitle}>Enlace inválido</Text>
+          <Text style={styles.errorBody}>El enlace de activación está incompleto o venció.</Text>
+          <Pressable style={styles.btn} onPress={() => router.replace('/login')}>
+            <Text style={styles.btnText}>Ir al login</Text>
+          </Pressable>
+        </View>
+      </ActivateShell>
     );
   }
 
   if (success) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.successTitle}>¡Cuenta activada!</Text>
-        <Text style={styles.successBody}>Ya podés usar el portal del vigilador en este dispositivo.</Text>
-        <Pressable style={styles.btn} onPress={() => router.replace(appRoutes.hoy)}>
-          <Text style={styles.btnText}>Continuar</Text>
-        </Pressable>
-      </View>
+      <ActivateShell>
+        <View style={styles.card}>
+          <Text style={styles.successTitle}>¡Cuenta activada!</Text>
+          <Text style={styles.successBody}>
+            Este celular quedó vinculado. Si iniciás sesión en otro dispositivo, vas a ver la pantalla de bloqueo.
+          </Text>
+          <Pressable style={styles.btn} onPress={() => router.replace(appRoutes.hoy)}>
+            <Text style={styles.btnText}>Continuar</Text>
+          </Pressable>
+        </View>
+      </ActivateShell>
     );
   }
 
@@ -95,42 +124,40 @@ export function ActivarScreen({ token }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.badge}>Activación</Text>
-          <Text style={styles.title}>Vincular dispositivo</Text>
-          <Text style={styles.subtitle}>Creá tu contraseña para acceder al portal del vigilador.</Text>
+    <ActivateShell>
+      <View style={styles.card}>
+        <Text style={styles.badge}>Activación</Text>
+        <Text style={styles.title}>Vincular dispositivo</Text>
+        <Text style={styles.subtitle}>
+          Creá tu contraseña. Este paso ata tu legajo a este celular (un dispositivo activo por cuenta).
+        </Text>
 
-          <Text style={styles.label}>Nueva contraseña</Text>
-          <PasswordField
-            variant="dark"
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Mínimo 6 caracteres"
-          />
+        <Text style={styles.label}>Nueva contraseña</Text>
+        <PasswordField
+          variant="dark"
+          value={password}
+          onChangeText={setPassword}
+          placeholder="Mínimo 6 caracteres"
+        />
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <Pressable style={[styles.btn, busy && styles.btnDisabled]} onPress={handleActivate} disabled={busy}>
-            {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Activar y entrar</Text>}
-          </Pressable>
+        <Pressable style={[styles.btn, busy && styles.btnDisabled]} onPress={handleActivate} disabled={busy}>
+          {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Activar y entrar</Text>}
+        </Pressable>
 
-          <Pressable onPress={() => router.replace('/login')}>
-            <Text style={styles.link}>Ya tengo cuenta — iniciar sesión</Text>
-          </Pressable>
-        </View>
+        <Pressable onPress={() => router.replace('/login')}>
+          <Text style={styles.link}>Ya tengo cuenta — iniciar sesión</Text>
+        </Pressable>
       </View>
-    </KeyboardAvoidingView>
+    </ActivateShell>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#0f172a' },
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+  inner: { gap: 12 },
   card: {
     backgroundColor: '#1e293b',
     borderRadius: 24,
@@ -157,16 +184,6 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 22, fontWeight: '800' },
   subtitle: { color: '#94a3b8', fontSize: 14, lineHeight: 20 },
   label: { color: '#cbd5e1', fontSize: 13, marginTop: 8 },
-  input: {
-    backgroundColor: '#0f172a',
-    borderWidth: 1,
-    borderColor: '#475569',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    color: '#fff',
-    fontSize: 16,
-  },
   error: { color: '#fbbf24', fontSize: 13 },
   btn: {
     backgroundColor: '#4f46e5',
@@ -178,16 +195,8 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.7 },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   link: { color: '#818cf8', textAlign: 'center', marginTop: 8, fontSize: 14 },
-  center: {
-    flex: 1,
-    backgroundColor: '#0f172a',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    gap: 12,
-  },
   errorTitle: { color: '#fff', fontSize: 20, fontWeight: '800' },
-  errorBody: { color: '#94a3b8', textAlign: 'center' },
+  errorBody: { color: '#94a3b8', textAlign: 'center', lineHeight: 20 },
   successTitle: { color: '#34d399', fontSize: 22, fontWeight: '800' },
-  successBody: { color: '#cbd5e1', textAlign: 'center' },
+  successBody: { color: '#cbd5e1', textAlign: 'center', lineHeight: 20 },
 });

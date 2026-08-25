@@ -36,6 +36,9 @@ export declare const createClientPortalAccess: functions.HttpsFunction & functio
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
+export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
+export { onSolicitudEventoCreated } from './notifications/onSolicitudEventoCreated';
+export { flushShiftNotifDigests } from './notifications/shiftNotifDigest';
 export { payrollApi } from './payroll-api/handler';
 export declare const createPayrollApiKey: functions.HttpsFunction & functions.Runnable<any>;
 export declare const revokePayrollApiKey: functions.HttpsFunction & functions.Runnable<any>;

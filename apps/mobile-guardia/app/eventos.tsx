@@ -95,6 +95,9 @@ function EventosScreenContent() {
           <Text style={[styles.intro, { color: palette.onSurfaceMuted }]}>
             Servicios especiales (código EV). Podés solicitar cupos o responder convocatorias del administrador. Al
             aceptar, tu turno del día pasa a evento y planificación recibe la vacante generada.
+            {isPreviewMode
+              ? ' En PREVIEW, Acepto/No puedo usan el legajo elegido (asEmployeeId). Solicitar cupo está bloqueado.'
+              : ''}
           </Text>
 
           {error ? (

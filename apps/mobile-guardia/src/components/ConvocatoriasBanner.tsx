@@ -7,14 +7,14 @@ import { useTheme } from '../theme/ThemeContext';
 
 type Props = {
   convocatorias: SolicitudEvento[];
-  onOpenEventos: () => void;
+  busyId?: string | null;
+  onAccept: (sol: SolicitudEvento) => void;
+  onReject: (sol: SolicitudEvento) => void;
 };
 
-export function ConvocatoriasBanner({ convocatorias, onOpenEventos }: Props) {
+export function ConvocatoriasBanner({ convocatorias, busyId, onAccept, onReject }: Props) {
   const { palette } = useTheme();
   if (convocatorias.length === 0) return null;
-
-  const first = convocatorias[0];
 
   return (
     <View
@@ -32,17 +32,41 @@ export function ConvocatoriasBanner({ convocatorias, onOpenEventos }: Props) {
           <Text style={styles.countText}>{convocatorias.length}</Text>
         </View>
       </View>
-      <Text style={[styles.title, { color: palette.onSurface }]} numberOfLines={1}>
-        {first.eventoNombre}
-      </Text>
-      <Text style={[styles.sub, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
-        {first.servicioNombre}
-        {first.servicioFecha
-          ? ` · ${formatDateAr(`${first.servicioFecha}T12:00:00`)}`
-          : ''}
-        {convocatorias.length > 1 ? ` · +${convocatorias.length - 1} más` : ''}
-      </Text>
-      <CommandButton label="Responder convocatoria" variant="primary" onPress={onOpenEventos} />
+
+      {convocatorias.map((sol) => {
+        const busy = busyId === sol.id;
+        return (
+          <View
+            key={sol.id}
+            style={[styles.item, { borderColor: palette.cardBorder, backgroundColor: palette.inputBg }]}
+          >
+            <Text style={[styles.title, { color: palette.onSurface }]} numberOfLines={2}>
+              {sol.eventoNombre}
+            </Text>
+            <Text style={[styles.sub, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
+              {sol.servicioNombre}
+              {sol.servicioFecha ? ` · ${formatDateAr(`${sol.servicioFecha}T12:00:00`)}` : ''}
+            </Text>
+            <View style={styles.rowBtns}>
+              <CommandButton
+                label="Acepto"
+                variant="success"
+                onPress={() => onAccept(sol)}
+                disabled={busy}
+                loading={busy}
+                style={styles.btnFlex}
+              />
+              <CommandButton
+                label="No puedo"
+                variant="secondary"
+                onPress={() => onReject(sol)}
+                disabled={busy}
+                style={styles.btnFlex}
+              />
+            </View>
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -52,7 +76,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     padding: spacing.md,
-    gap: 8,
+    gap: 10,
   },
   headerRow: {
     flexDirection: 'row',
@@ -78,12 +102,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
   },
+  item: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.sm,
+    gap: 6,
+  },
   title: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '900',
   },
   sub: {
     fontSize: 13,
-    lineHeight: 19,
+    lineHeight: 18,
+  },
+  rowBtns: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  btnFlex: {
+    flex: 1,
   },
 });

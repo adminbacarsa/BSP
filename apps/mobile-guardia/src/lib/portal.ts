@@ -4,6 +4,7 @@ import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   initializeAuth,
+  // @ts-expect-error Firebase tipa el entry web; Metro resuelve el bundle RN con este export.
   getReactNativePersistence,
   type Auth,
 } from 'firebase/auth';

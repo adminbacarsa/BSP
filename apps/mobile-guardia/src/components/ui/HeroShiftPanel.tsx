@@ -2,12 +2,13 @@ import type { ReactNode } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Shift } from '@cosp/portal-types';
-import { formatTimeAr } from '@cosp/portal-core';
+import { formatDateAr, formatTimeAr, toDate } from '@cosp/portal-core';
 import { radius, shadow, typography } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
 import { CommandBadge } from './CommandButton';
 import type { ShiftPlacement } from '../../lib/shiftPlacement';
 import { resolveShiftPlacement } from '../../lib/shiftPlacement';
+import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 
 type Props = {
   headline: string;
@@ -33,6 +34,7 @@ export function HeroShiftPanel({
   statusSlot,
 }: Props) {
   const { palette, isDark } = useTheme();
+  const { isCompact } = useResponsiveLayout();
   const placement =
     placementProp ||
     resolveShiftPlacement(shift, objective ? { [objective.name]: objective } : {});
@@ -62,7 +64,9 @@ export function HeroShiftPanel({
           <Text style={[styles.sectionLabel, { color: palette.success }]}>OPERATIVO</Text>
         </View>
       ) : null}
-      <Text style={[styles.headline, { color: palette.heroText }]}>{headline}</Text>
+      <Text style={[styles.headline, isCompact && styles.headlineCompact, { color: palette.heroText }]}>
+        {headline}
+      </Text>
       <Text style={[styles.subline, { color: palette.heroSubtext }]}>{subline}</Text>
 
       {shift && !shift.isFranco ? (
@@ -114,7 +118,7 @@ export function HeroShiftPanel({
           },
         ]}
       >
-        <View style={styles.inner}>{inner}</View>
+        <View style={[styles.inner, isCompact && styles.innerCompact]}>{inner}</View>
       </View>
     );
   }
@@ -123,13 +127,33 @@ export function HeroShiftPanel({
     <LinearGradient colors={palette.heroGradient} style={[styles.hero, shadow.hero]}>
       <View style={styles.orbTop} />
       <View style={styles.orbBottom} />
-      <View style={styles.inner}>{inner}</View>
+      <View style={[styles.inner, isCompact && styles.innerCompact]}>{inner}</View>
     </LinearGradient>
   );
 }
 
 export function formatHeroTimeRange(shift: Shift): string {
   return `${formatTimeAr(shift.startTime)} – ${formatTimeAr(shift.endTime)}`;
+}
+
+/** Fecha + rango horario (ej. 22/08/2026 · 08:00 – 16:00). */
+export function formatHeroDateTimeRange(shift: Shift): string {
+  return `${formatDateAr(shift.startTime)} · ${formatHeroTimeRange(shift)}`;
+}
+
+/**
+ * Título del hero: HOY, o fecha + hora de inicio del próximo turno.
+ */
+export function formatHeroShiftHeadline(
+  shift: Shift | undefined,
+  opts: { isToday: boolean; now?: Date },
+): string {
+  if (opts.isToday) return 'HOY';
+  if (!shift) return 'SIN TURNO';
+  const d = toDate(shift.startTime);
+  if (!d) return 'SIN FECHA';
+  const weekday = d.toLocaleDateString('es-AR', { weekday: 'short' });
+  return `${weekday} ${formatDateAr(shift.startTime)} · ${formatTimeAr(shift.startTime)}`;
 }
 
 const styles = StyleSheet.create({
@@ -162,6 +186,7 @@ const styles = StyleSheet.create({
     left: -24,
   },
   inner: { padding: 24, gap: 8, zIndex: 1 },
+  innerCompact: { padding: 18 },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -174,7 +199,7 @@ const styles = StyleSheet.create({
     ...typography.sectionLabel,
   },
   empresaPill: {
-    maxWidth: 140,
+    maxWidth: '46%',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: radius.pill,
@@ -183,10 +208,11 @@ const styles = StyleSheet.create({
   },
   empresaText: { fontSize: 10, fontWeight: '800' },
   headline: {
-    fontSize: 32,
+    fontSize: 26,
     fontWeight: '900',
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
   },
+  headlineCompact: { fontSize: 22 },
   subline: {
     fontSize: 18,
     fontWeight: '700',

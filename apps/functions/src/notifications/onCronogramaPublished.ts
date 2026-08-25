@@ -9,6 +9,11 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
+const MONTH_NAMES_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+] as const;
+
 function publishedAtMillis(value: unknown): number | null {
   if (value == null || value === '') return null;
   if (typeof (value as { toMillis?: () => number }).toMillis === 'function') {
@@ -23,6 +28,25 @@ function publishedAtMillis(value: unknown): number | null {
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+/** Límites del mes calendario en America/Argentina/Cordoba (UTC-3). */
+function cordobaMonthBounds(year: number, month: number): {
+  first: admin.firestore.Timestamp;
+  last: admin.firestore.Timestamp;
+} {
+  const mm = String(month).padStart(2, '0');
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const dd = String(lastDay).padStart(2, '0');
+  return {
+    first: admin.firestore.Timestamp.fromDate(new Date(`${year}-${mm}-01T00:00:00-03:00`)),
+    last: admin.firestore.Timestamp.fromDate(new Date(`${year}-${mm}-${dd}T23:59:59.999-03:00`)),
+  };
+}
+
+function monthLabelEs(year: number, month: number): string {
+  const name = MONTH_NAMES_ES[month - 1] || String(month);
+  return `${name} de ${year}`;
 }
 
 export const onCronogramaPublished = functions
@@ -50,7 +74,7 @@ export const onCronogramaPublished = functions
     const month = Number(data.month ?? data.mes);
     const empresaId = String(data.empresaId ?? '').trim();
 
-    if (!objectiveId || !year || !month) {
+    if (!objectiveId || !year || !month || month < 1 || month > 12) {
       console.warn('[onCronogramaPublished] Documento incompleto:', change.after.id, data);
       return;
     }
@@ -60,15 +84,14 @@ export const onCronogramaPublished = functions
     // Pequeña espera para que el batch commit del cliente (draft→false) se propague
     await new Promise(resolve => setTimeout(resolve, 4000));
 
-    const firstDay = new Date(year, month - 1, 1);
-    const lastDay = new Date(year, month, 0, 23, 59, 59);
+    const { first: firstDay, last: lastDay } = cordobaMonthBounds(year, month);
 
     // Buscar TODOS los turnos del objetivo/mes (draft o no — no filtramos draft
     // para no perder empleados cuyos turnos aún no se actualizaron)
     const turnosSnap = await db.collection('turnos')
       .where('objectiveId', '==', objectiveId)
-      .where('startTime', '>=', admin.firestore.Timestamp.fromDate(firstDay))
-      .where('startTime', '<=', admin.firestore.Timestamp.fromDate(lastDay))
+      .where('startTime', '>=', firstDay)
+      .where('startTime', '<=', lastDay)
       .get();
 
     if (turnosSnap.empty) {
@@ -102,8 +125,8 @@ export const onCronogramaPublished = functions
       return;
     }
 
-    const monthName = new Date(year, month - 1, 1)
-      .toLocaleString('es-AR', { month: 'long', year: 'numeric', timeZone: 'America/Argentina/Cordoba' });
+    // No usar Date + timeZone: en Functions (UTC) el día 1 00:00 UTC cae en el mes anterior en AR.
+    const monthName = monthLabelEs(year, month);
 
     console.log(`[onCronogramaPublished] Notificando ${empMap.size} empleado(s) — ${objectiveId} ${month}/${year}`);
 
@@ -145,6 +168,9 @@ export const onCronogramaPublished = functions
           month,
           read: false,
           readAt: null,
+          requiresAck: true,
+          ackedAt: null,
+          empresaId: empresaId || null,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
         notifDocId = ref.id;
@@ -160,6 +186,7 @@ export const onCronogramaPublished = functions
       try {
         const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
         const result = await admin.messaging().sendEachForMulticast({
+          notification: { title, body },
           data: {
             type: 'CRONOGRAMA_PUBLICADO',
             title,
@@ -170,6 +197,7 @@ export const onCronogramaPublished = functions
             notificationId: notifDocId || '',
             link,
           },
+          android: { priority: 'high' as const },
           webpush: {
             headers: { Urgency: 'normal' },
             fcmOptions: { link },

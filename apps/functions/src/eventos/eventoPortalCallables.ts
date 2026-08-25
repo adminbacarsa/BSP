@@ -64,6 +64,12 @@ async function assertPortalEmployee(
 
   const resolved = await resolveEmployeeIdForUid(db, authUid);
   if (!resolved) {
+    if (isSuperAdminClaims(context.auth.token as Record<string, unknown>)) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Estás en sesión SuperAdmin. Entrá en Preview de un legajo (la app envía asEmployeeId) o usá el login del vigilador.',
+      );
+    }
     throw new functions.https.HttpsError('permission-denied', 'Perfil de vigilador no encontrado.');
   }
   return { uid: authUid, empId: resolved.empId, empData: resolved.empData, actingAsPreview: false };

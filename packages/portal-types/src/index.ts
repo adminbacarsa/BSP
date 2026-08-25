@@ -10,6 +10,7 @@ export type FirestoreTimestampLike =
 
 export type Shift = {
   id: string;
+  employeeId?: string;
   startTime?: FirestoreTimestampLike;
   endTime?: FirestoreTimestampLike;
   objectiveId?: string;

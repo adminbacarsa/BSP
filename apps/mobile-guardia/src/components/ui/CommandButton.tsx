@@ -61,6 +61,9 @@ export function CommandButton({ label, variant = 'primary', loading, disabled, s
 
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!(disabled || loading), busy: !!loading }}
       style={({ pressed }) => [
         styles.base,
         v.button,
