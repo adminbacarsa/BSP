@@ -18,6 +18,8 @@ apps/web2/out_prod/
 # --- Credenciales (nunca commitear) ---
 service-account.json
 backups/
+apps/mobile-guardia/google-services.json
+apps/mobile-guardia/GoogleService-Info.plist
 
 # --- Archivos de Datos y Media (Causantes de >100MB) ---
 *.zip
