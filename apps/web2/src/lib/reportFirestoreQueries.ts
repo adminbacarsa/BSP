@@ -1,7 +1,6 @@
-import { db } from '@/lib/firebase';
+import { db, getDocsOnce } from '@/lib/firebase';
 import {
     collection,
-    getDocs,
     query,
     where,
     Timestamp,
@@ -12,6 +11,9 @@ import { toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
 
 /** Meses hacia atrás desde el inicio del rango para capturar ausencias que empezaron antes y siguen vigentes. */
 export const REPORT_ABSENCE_START_LOOKBACK_MONTHS = 2;
+
+/** Timeout generoso: liquidación planta completa puede bajar miles de turnos. */
+const REPORT_QUERY_TIMEOUT_MS = 180_000;
 
 export type YearMonth = { year: number; month: number };
 
@@ -77,31 +79,37 @@ export async function fetchReportPlanificacionEstados(
         });
     };
 
-    if (scopeEmpresa && empresaId) {
+    if (empresaId) {
         const snaps = await Promise.all(
             months.map(({ year, month }) =>
-                getDocs(
+                getDocsOnce(
                     query(
                         collection(db, 'planificacion_estados'),
                         where('empresaId', '==', empresaId),
                         where('year', '==', year),
                         where('month', '==', month),
                     ),
+                    { timeoutMs: REPORT_QUERY_TIMEOUT_MS },
                 ),
             ),
         );
         return filterDocs(snaps.flatMap((s) => s.docs));
     }
 
-    const snap = await getDocs(collection(db, 'planificacion_estados'));
-    const monthKeys = new Set(months.map((m) => `${m.year}-${m.month}`));
-    return filterDocs(
-        snap.docs.filter((d) => {
-            const parsed = parsePlanificacionEstadoDocId(d.id);
-            if (!parsed) return false;
-            return monthKeys.has(`${parsed.year}-${parsed.month}`);
-        }),
+    // Sin empresaId: una query por mes (year+month). Evita getDocs de toda la colección.
+    const snaps = await Promise.all(
+        months.map(({ year, month }) =>
+            getDocsOnce(
+                query(
+                    collection(db, 'planificacion_estados'),
+                    where('year', '==', year),
+                    where('month', '==', month),
+                ),
+                { timeoutMs: REPORT_QUERY_TIMEOUT_MS },
+            ),
+        ),
     );
+    return filterDocs(snaps.flatMap((s) => s.docs));
 }
 
 export async function fetchReportAusencias(
@@ -118,25 +126,35 @@ export async function fetchReportAusencias(
 
     let snap;
     if (empId) {
-        snap = await getDocs(
+        snap = await getDocsOnce(
             query(
                 collection(db, 'ausencias'),
                 where('employeeId', '==', empId),
                 where('startDate', '>=', startTs),
                 where('startDate', '<=', endTs),
             ),
+            { timeoutMs: REPORT_QUERY_TIMEOUT_MS },
         );
     } else if (scopeEmpresa && empresaId) {
-        snap = await getDocs(
+        snap = await getDocsOnce(
             query(
                 collection(db, 'ausencias'),
                 where('empresaId', '==', empresaId),
                 where('startDate', '>=', startTs),
                 where('startDate', '<=', endTs),
             ),
+            { timeoutMs: REPORT_QUERY_TIMEOUT_MS },
         );
     } else {
-        snap = await getDocs(collection(db, 'ausencias'));
+        // Fallback acotado por fechas (evita getDocs de toda la colección).
+        snap = await getDocsOnce(
+            query(
+                collection(db, 'ausencias'),
+                where('startDate', '>=', startTs),
+                where('startDate', '<=', endTs),
+            ),
+            { timeoutMs: REPORT_QUERY_TIMEOUT_MS },
+        );
     }
 
     return snap.docs.filter((d) => absenceOverlapsReportRange(d.data(), rangeStartYmd, rangeEndYmd));
@@ -153,13 +171,14 @@ export async function fetchReportAjustesHoras(
     const endTs = ymdToEndTimestamp(rangeEndYmd);
     const empId = String(employeeId ?? '').trim();
 
-    const snap = await getDocs(
+    const snap = await getDocsOnce(
         query(
             collection(db, 'ajustes_horas'),
             where('empresaId', '==', empresaId),
             where('fecha', '>=', startTs),
             where('fecha', '<=', endTs),
         ),
+        { timeoutMs: REPORT_QUERY_TIMEOUT_MS },
     );
 
     if (!empId) return snap.docs;
