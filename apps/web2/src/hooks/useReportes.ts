@@ -749,7 +749,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(sortedDocs, { usePlannedHours });
 
     let hoursTotalOperativas = 0; // teóricas cobertura (sin RET/REF/ESC)
-    let hoursDespliegue = 0;     // teóricas RET + REF + ESC (fuera de cobertura)
+    let horasDespliegue = 0;     // teóricas RET + REF + ESC (fuera de cobertura)
     let totalDiurnas = 0;
     let totalNocturnas = 0;
     let hoursFT = 0;           // teóricas FT (para horasTeoricas)
@@ -817,7 +817,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (isFT) {
                 hoursFT += duration;
             } else if (isDespliegue && hasPlannedTimes) {
-                hoursDespliegue += duration;
+                horasDespliegue += duration;
             } else if (hasPlannedTimes) {
                 hoursTotalOperativas += duration;
             }
@@ -894,7 +894,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     // horasSimples = total real capeado a 204 (para HORAS TOTALES display)
     const horasSimples = Math.min(Math.max(0, horasRealesTotal), baseLimit);
     const horasCobertura = hoursTotalOperativas + hoursFT;
-    const horasTeoricas = horasCobertura + hoursDespliegue;
+    const horasTeoricas = horasCobertura + horasDespliegue;
 
     return {
         totalReal: horasTeoricas,        // nombre legacy, mantener por compat
