@@ -3,6 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onCronogramaPublished = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const MONTH_NAMES_ES = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
 function publishedAtMillis(value) {
     if (value == null || value === '')
         return null;
@@ -19,6 +23,19 @@ function publishedAtMillis(value) {
         return Number.isFinite(n) ? n : null;
     }
     return null;
+}
+function cordobaMonthBounds(year, month) {
+    const mm = String(month).padStart(2, '0');
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const dd = String(lastDay).padStart(2, '0');
+    return {
+        first: admin.firestore.Timestamp.fromDate(new Date(`${year}-${mm}-01T00:00:00-03:00`)),
+        last: admin.firestore.Timestamp.fromDate(new Date(`${year}-${mm}-${dd}T23:59:59.999-03:00`)),
+    };
+}
+function monthLabelEs(year, month) {
+    const name = MONTH_NAMES_ES[month - 1] || String(month);
+    return `${name} de ${year}`;
 }
 exports.onCronogramaPublished = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
@@ -40,18 +57,17 @@ exports.onCronogramaPublished = functions
     const year = Number(data.year ?? data.año);
     const month = Number(data.month ?? data.mes);
     const empresaId = String(data.empresaId ?? '').trim();
-    if (!objectiveId || !year || !month) {
+    if (!objectiveId || !year || !month || month < 1 || month > 12) {
         console.warn('[onCronogramaPublished] Documento incompleto:', change.after.id, data);
         return;
     }
     const db = admin.firestore();
     await new Promise(resolve => setTimeout(resolve, 4000));
-    const firstDay = new Date(year, month - 1, 1);
-    const lastDay = new Date(year, month, 0, 23, 59, 59);
+    const { first: firstDay, last: lastDay } = cordobaMonthBounds(year, month);
     const turnosSnap = await db.collection('turnos')
         .where('objectiveId', '==', objectiveId)
-        .where('startTime', '>=', admin.firestore.Timestamp.fromDate(firstDay))
-        .where('startTime', '<=', admin.firestore.Timestamp.fromDate(lastDay))
+        .where('startTime', '>=', firstDay)
+        .where('startTime', '<=', lastDay)
         .get();
     if (turnosSnap.empty) {
         console.log('[onCronogramaPublished] Sin turnos para', objectiveId, month, year);
@@ -83,8 +99,7 @@ exports.onCronogramaPublished = functions
         console.log('[onCronogramaPublished] Sin empleados válidos para notificar');
         return;
     }
-    const monthName = new Date(year, month - 1, 1)
-        .toLocaleString('es-AR', { month: 'long', year: 'numeric', timeZone: 'America/Argentina/Cordoba' });
+    const monthName = monthLabelEs(year, month);
     console.log(`[onCronogramaPublished] Notificando ${empMap.size} empleado(s) — ${objectiveId} ${month}/${year}`);
     for (const [employeeId, info] of empMap.entries()) {
         const title = `📅 Cronograma de ${monthName} disponible`;
@@ -118,6 +133,9 @@ exports.onCronogramaPublished = functions
                 month,
                 read: false,
                 readAt: null,
+                requiresAck: true,
+                ackedAt: null,
+                empresaId: empresaId || null,
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             notifDocId = ref.id;
@@ -132,6 +150,7 @@ exports.onCronogramaPublished = functions
         try {
             const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
             const result = await admin.messaging().sendEachForMulticast({
+                notification: { title, body },
                 data: {
                     type: 'CRONOGRAMA_PUBLICADO',
                     title,
@@ -142,6 +161,7 @@ exports.onCronogramaPublished = functions
                     notificationId: notifDocId || '',
                     link,
                 },
+                android: { priority: 'high' },
                 webpush: {
                     headers: { Urgency: 'normal' },
                     fcmOptions: { link },

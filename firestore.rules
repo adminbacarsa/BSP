@@ -393,10 +393,36 @@ service cloud.firestore {
     }
 
     match /user_notifications/{notifId} {
-      allow read: if request.auth != null && (isAdmin() ? tenantAdminRead() : true);
-      allow update: if request.auth != null;
+      // Empleado: solo propias (uid o legajo con su uid). Admin: tenant.
+      allow read: if request.auth != null && (
+        isAdmin()
+          ? tenantAdminRead()
+          : (
+            resource.data.uid == request.auth.uid
+            || (
+              resource.data.employeeId is string
+              && exists(/databases/$(database)/documents/empleados/$(resource.data.employeeId))
+              && get(/databases/$(database)/documents/empleados/$(resource.data.employeeId)).data.uid == request.auth.uid
+            )
+          )
+      );
+      // Lectura/acuse/ocultar propia; no borrar físico
+      allow update: if request.auth != null && (
+        isAdmin()
+        || resource.data.uid == request.auth.uid
+        || (
+          resource.data.employeeId is string
+          && exists(/databases/$(database)/documents/empleados/$(resource.data.employeeId))
+          && get(/databases/$(database)/documents/empleados/$(resource.data.employeeId)).data.uid == request.auth.uid
+        )
+      );
       allow create: if isAdmin();
       allow delete: if isAdmin();
+    }
+
+    // Digests de push planificación: solo Admin SDK / Functions
+    match /shift_notif_digests/{digestId} {
+      allow read, write: if false;
     }
 
     match /swap_requests/{requestId} {

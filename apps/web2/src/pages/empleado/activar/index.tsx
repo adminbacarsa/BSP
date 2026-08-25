@@ -38,6 +38,9 @@ export default function ActivarDispositivoPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   const token = typeof router.query.t === 'string' ? router.query.t : null;
+  const appDeepLink = token ? `cosp-guardia://empleado/activar?t=${token}` : null;
+  const isAndroid =
+    typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 
   useEffect(() => {
     if (!router.isReady) return;
@@ -161,6 +164,15 @@ export default function ActivarDispositivoPage() {
           <h1 className="text-white font-black text-xl mb-1">Activar mi cuenta</h1>
           <p className="text-slate-400 text-sm">Creá tu contraseña para acceder al portal desde este celular.</p>
         </div>
+
+        {isAndroid && appDeepLink ? (
+          <a
+            href={appDeepLink}
+            className="mb-5 block w-full rounded-xl border border-indigo-500/40 bg-indigo-950/50 px-4 py-3 text-center text-sm font-bold text-indigo-200 hover:bg-indigo-900/40"
+          >
+            Abrir en app COSP Guardia
+          </a>
+        ) : null}
 
         <div className="space-y-4">
           <div>

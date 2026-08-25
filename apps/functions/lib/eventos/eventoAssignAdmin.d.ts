@@ -1,0 +1,21 @@
+import * as admin from 'firebase-admin';
+export type AssignGuardToEventParams = {
+    empresaId: string;
+    empleadoId: string;
+    empleadoNombre: string;
+    empleadoObjectiveId?: string;
+    empleadoObjectiveName?: string;
+    eventoId: string;
+    eventoNombre: string;
+    clienteId?: string;
+    clienteNombre?: string;
+    servicioId: string;
+    servicioNombre: string;
+    servicioFecha: string;
+    horaInicio: string;
+    horaFin: string;
+    horas: number;
+    solicitudId?: string;
+    respondidoPor?: string;
+};
+export declare function assignGuardToEventAdmin(db: admin.firestore.Firestore, params: AssignGuardToEventParams): Promise<void>;

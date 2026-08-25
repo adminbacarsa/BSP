@@ -10,10 +10,35 @@ import {
   updateDoc,
   writeBatch,
   serverTimestamp,
+  Timestamp,
   type Firestore,
+  type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import type { Evento, SolicitudEvento } from '@cosp/portal-types';
 import { isEventoActivo } from './eventoHelpers';
+
+const AR_OFFSET = '-03:00';
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function arDateTimeTs(fecha: string, hhmm: string): Timestamp {
+  const time = /^\d{1,2}:\d{2}$/.test(hhmm) ? hhmm : '08:00';
+  const [hRaw, mRaw] = time.split(':');
+  return Timestamp.fromDate(
+    new Date(`${fecha}T${pad2(Number(hRaw))}:${pad2(Number(mRaw))}:00.000${AR_OFFSET}`),
+  );
+}
+
+function arDayBounds(fecha: string) {
+  return {
+    startTs: Timestamp.fromDate(new Date(`${fecha}T00:00:00.000${AR_OFFSET}`)),
+    endTs: Timestamp.fromDate(new Date(`${fecha}T23:59:59.999${AR_OFFSET}`)),
+    startStr: `${fecha}T00:00:00`,
+    endStr: `${fecha}T23:59:59`,
+  };
+}
 
 export async function loadEventosByEmpresaRange(
   db: Firestore,
@@ -113,18 +138,21 @@ export async function assignGuardToEvent(db: Firestore, params: AssignGuardToEve
     respondidoPor,
   } = params;
 
-  const turnosSnap = await getDocs(
-    query(
-      collection(db, 'turnos'),
-      where('empresaId', '==', empresaId),
-      where('employeeId', '==', empleadoId),
-      where('startTime', '>=', `${servicioFecha}T00:00:00`),
-      where('startTime', '<=', `${servicioFecha}T23:59:59`),
-    ),
-  );
+  const { startTs, endTs, startStr, endStr } = arDayBounds(servicioFecha);
+  const base = query(collection(db, 'turnos'), where('employeeId', '==', empleadoId));
+  const [tsSnap, strSnap] = await Promise.all([
+    getDocs(query(base, where('startTime', '>=', startTs), where('startTime', '<=', endTs))),
+    getDocs(query(base, where('startTime', '>=', startStr), where('startTime', '<=', endStr))),
+  ]);
+
+  const byId = new Map<string, QueryDocumentSnapshot>();
+  for (const d of [...tsSnap.docs, ...strSnap.docs]) {
+    if (empresaId && d.data().empresaId && String(d.data().empresaId) !== empresaId) continue;
+    byId.set(d.id, d);
+  }
 
   const existingTurno =
-    turnosSnap.docs.find((d) => {
+    [...byId.values()].find((d) => {
       const c = String(d.data().code || '').toUpperCase();
       return c !== 'EV' && c !== 'F' && c !== 'FF' && c !== 'FP';
     }) ?? null;
@@ -142,11 +170,18 @@ export async function assignGuardToEvent(db: Firestore, params: AssignGuardToEve
       if (empSnap.exists()) {
         const empData = empSnap.data() as Record<string, unknown>;
         originalObjectiveId = String(empData.preferredObjectiveId || empData.objectiveId || '') || null;
-        originalObjectiveName = String(empData.preferredObjectiveName || empData.objectiveName || '') || null;
+        originalObjectiveName =
+          String(empData.preferredObjectiveName || empData.objectiveName || '') || null;
       }
     } catch {
       /* continuar */
     }
+  }
+
+  let startTime = arDateTimeTs(servicioFecha, horaInicio);
+  let endTime = arDateTimeTs(servicioFecha, horaFin);
+  if (endTime.toMillis() <= startTime.toMillis()) {
+    endTime = Timestamp.fromDate(new Date(endTime.toDate().getTime() + 24 * 60 * 60 * 1000));
   }
 
   const batch = writeBatch(db);
@@ -159,8 +194,8 @@ export async function assignGuardToEvent(db: Firestore, params: AssignGuardToEve
       eventoNombre,
       servicioId,
       servicioNombre,
-      startTime: `${servicioFecha}T${horaInicio}:00`,
-      endTime: `${servicioFecha}T${horaFin}:00`,
+      startTime,
+      endTime,
       hours: horas,
       isPresent: false,
       isAbsent: false,
@@ -184,8 +219,8 @@ export async function assignGuardToEvent(db: Firestore, params: AssignGuardToEve
       eventoNombre,
       servicioId,
       servicioNombre,
-      startTime: `${servicioFecha}T${horaInicio}:00`,
-      endTime: `${servicioFecha}T${horaFin}:00`,
+      startTime,
+      endTime,
       hours: horas,
       isPresent: false,
       isAbsent: false,

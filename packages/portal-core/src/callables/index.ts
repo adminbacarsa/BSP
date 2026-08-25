@@ -18,7 +18,7 @@ export function createPortalCallables(functions: Functions) {
       PORTAL_CALLABLES.notificarLlegadaTarde,
     ),
     deleteMyTokens: httpsCallable<void, unknown>(functions, PORTAL_CALLABLES.deleteMyTokens),
-    sendTestNotification: httpsCallable<{ title?: string; body?: string }, unknown>(
+    sendTestNotification: httpsCallable<{ title?: string; body?: string; type?: string }, unknown>(
       functions,
       PORTAL_CALLABLES.sendTestNotification,
     ),

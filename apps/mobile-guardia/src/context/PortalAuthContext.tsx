@@ -198,6 +198,15 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         } else {
           setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         }
+        // Preview SuperAdmin: atar el token FCM al legajo visto, si no el push
+        // de cronograma/turno va al empleado real y este teléfono no lo recibe.
+        const { registerPushNotifications } = await import('../lib/pushNotifications');
+        await registerPushNotifications({
+          user: currentUser,
+          db,
+          empDocId: id,
+          empresaId: (data.empresaId as string) ?? null,
+        }).catch(() => {});
       } catch (err) {
         setEmployee(null);
         setEmpDocId(null);
@@ -451,6 +460,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setPreviewEmpDocId(null);
     setEmpDocId(null);
     setEmployee(null);
+    setPortalFeatures(DEFAULT_PORTAL_FEATURES);
     setEmployeeProfileReady(false);
     setDeviceVerified(null);
     setEmployeeProfileError(null);

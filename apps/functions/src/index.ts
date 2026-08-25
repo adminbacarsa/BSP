@@ -1148,7 +1148,11 @@ export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
 // =========================================================
 import * as nodemailer from 'nodemailer';
 
-function buildPortalEmailHtml(activationLink: string, empresaNombre: string): string {
+function buildPortalEmailHtml(
+  activationLinkWeb: string,
+  activationLinkApp: string,
+  empresaNombre: string,
+): string {
   const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
   const nombreUpper = nombre.toUpperCase();
   return `<!DOCTYPE html>
@@ -1161,31 +1165,38 @@ function buildPortalEmailHtml(activationLink: string, empresaNombre: string): st
         <tr>
           <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
             <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">${nombreUpper}</p>
-            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Empleados Â· COSP</p>
+            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Empleados · COSP</p>
           </td>
         </tr>
         <tr>
           <td style="padding:40px 40px 32px;">
             <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">${nombre} te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">AbrÃ­ este email <strong>desde tu celular</strong> y tocÃ¡ el botÃ³n para crear tu contraseÃ±a y vincular tu dispositivo en un solo paso:</p>
-            <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular Android</strong>. Si tenés instalada la app <strong>COSP Guardia</strong>, usá el botón verde. Si no, el botón azul abre el portal web.</p>
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 16px;">
               <tr>
-                <td style="background:#0f766e;border-radius:8px;">
-                  <a href="${activationLink}" target="_blank" style="display:inline-block;padding:16px 40px;color:#fff;font-size:16px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ACTIVAR MI CUENTA</a>
+                <td style="background:#312e81;border-radius:8px;">
+                  <a href="${activationLinkApp}" style="display:inline-block;padding:16px 32px;color:#fff;font-size:16px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ABRIR EN COSP GUARDIA</a>
                 </td>
               </tr>
             </table>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Con este paso podrÃ¡s ver tus turnos, marcar presencia y gestionar novedades.</p>
+            <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;">
+              <tr>
+                <td style="background:#0f766e;border-radius:8px;">
+                  <a href="${activationLinkWeb}" target="_blank" style="display:inline-block;padding:14px 32px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ACTIVAR EN EL NAVEGADOR</a>
+                </td>
+              </tr>
+            </table>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Con este paso podrás ver tus turnos, marcar presencia y gestionar novedades.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Este enlace expira en 48 horas y es de un solo uso. Si no esperabas este email, podÃ©s ignorarlo.</p>
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botÃ³n no funciona, copiÃ¡ este enlace en tu navegador:<br>
-              <a href="${activationLink}" style="color:#3b82f6;word-break:break-all;">${activationLink}</a>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Este enlace expira en 48 horas y es de un solo uso. Si no esperabas este email, podés ignorarlo.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Enlace web (copiar si hace falta):<br>
+              <a href="${activationLinkWeb}" style="color:#3b82f6;word-break:break-all;">${activationLinkWeb}</a>
             </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo Â· ${nombre}</strong></p>
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · ${nombre}</strong></p>
           </td>
         </tr>
       </table>
@@ -1195,13 +1206,21 @@ function buildPortalEmailHtml(activationLink: string, empresaNombre: string): st
 </html>`;
 }
 
-function buildPortalEmailText(activationLink: string, empresaNombre: string): string {
+function buildPortalEmailText(
+  activationLinkWeb: string,
+  activationLinkApp: string,
+  empresaNombre: string,
+): string {
   const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
   return `${nombre} te ha otorgado acceso al Portal de Empleados de COSP.
 
-AbrÃ­ este email desde tu celular y tocÃ¡ el siguiente enlace para crear tu contraseÃ±a y vincular tu dispositivo en un solo paso:
+Abrí este email desde tu celular Android.
 
-${activationLink}
+App COSP Guardia (recomendado si ya la instalaste):
+${activationLinkApp}
+
+Portal web:
+${activationLinkWeb}
 
 Este enlace expira en 48 horas y es de un solo uso.
 
@@ -1323,15 +1342,16 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         used: false,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      const activationLink = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
+      const activationLinkWeb = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
+      const activationLinkApp = `cosp-guardia://empleado/activar?t=${activationToken}`;
 
-      // Enviar email — solo se marca como enviado si el envÃ­o fue exitoso
+      // Enviar email — solo se marca como enviado si el envío fue exitoso
       await transporter.sendMail({
         from: `"${empresaNombre}" <${gmailUser}>`,
         to: email,
         subject: `Acceso al Portal de Empleados - ${empresaNombre}`,
-        html: buildPortalEmailHtml(activationLink, empresaNombre),
-        text: buildPortalEmailText(activationLink, empresaNombre),
+        html: buildPortalEmailHtml(activationLinkWeb, activationLinkApp, empresaNombre),
+        text: buildPortalEmailText(activationLinkWeb, activationLinkApp, empresaNombre),
       });
 
       // Limpiar uid de cualquier otro documento que ya lo tenga (evita duplicados)
@@ -1726,6 +1746,8 @@ export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
+export { onSolicitudEventoCreated } from './notifications/onSolicitudEventoCreated';
+export { flushShiftNotifDigests } from './notifications/shiftNotifDigest';
 
 // =========================================================
 // Payroll API (HTTP) — para sistemas de liquidación externos
@@ -1827,16 +1849,51 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
   const db = admin.firestore();
   const uid = context.auth.uid;
-  const tokensSnap = await db.collection('device_tokens').where('uid', '==', uid).get();
-  const tokens = tokensSnap.docs
-    .map((d) => d.data()?.token)
-    .filter((t): t is string => typeof t === 'string' && t.length > 10);
-  if (!tokens.length) {
-    throw new functions.https.HttpsError(
-      'not-found',
-      'No hay tokens FCM para esta cuenta. Abrí la app en el teléfono, aceptá notificaciones y reintentá.',
-    );
+  const role = String(context.auth.token?.role || '').toUpperCase();
+  const isSuper = isSuperAdminBackupRole(role) || role === 'SUPERADMIN' || role === 'SUPER_ADMIN' || role === 'SP';
+  const asEmployeeId = typeof data?.employeeId === 'string' ? data.employeeId.trim() : '';
+
+  let tokens: string[] = [];
+  if (asEmployeeId) {
+    if (!isSuper) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'Solo SuperAdmin puede enviar push de prueba a otro legajo.',
+      );
+    }
+    const empDoc = await db.collection('empleados').doc(asEmployeeId).get();
+    const empUid = empDoc.exists ? (empDoc.data()?.uid as string | undefined) : undefined;
+    const [byEmp, byUid] = await Promise.all([
+      db.collection('device_tokens').where('employeeId', '==', asEmployeeId).get(),
+      empUid
+        ? db.collection('device_tokens').where('uid', '==', empUid).get()
+        : Promise.resolve({ docs: [] as admin.firestore.QueryDocumentSnapshot[] }),
+    ]);
+    const set = new Set<string>();
+    [...byEmp.docs, ...byUid.docs].forEach((d) => {
+      const t = d.data()?.token;
+      if (typeof t === 'string' && t.length > 10) set.add(t);
+    });
+    tokens = Array.from(set);
+    if (!tokens.length) {
+      throw new functions.https.HttpsError(
+        'not-found',
+        'No hay tokens FCM para ese legajo. El vigilador debe abrir la app, aceptar notificaciones y (si es preview) reentrar al preview.',
+      );
+    }
+  } else {
+    const tokensSnap = await db.collection('device_tokens').where('uid', '==', uid).get();
+    tokens = tokensSnap.docs
+      .map((d) => d.data()?.token)
+      .filter((t): t is string => typeof t === 'string' && t.length > 10);
+    if (!tokens.length) {
+      throw new functions.https.HttpsError(
+        'not-found',
+        'No hay tokens FCM para esta cuenta. Abrí la app en el teléfono, aceptá notificaciones y reintentá.',
+      );
+    }
   }
+
   const title: string = data?.title || 'CronoApp';
   const body: string = data?.body || 'Notificación de prueba';
   const notifType = String(data?.type || 'SYSTEM_TEST').trim() || 'SYSTEM_TEST';

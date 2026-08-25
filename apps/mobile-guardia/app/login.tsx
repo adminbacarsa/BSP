@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -23,6 +24,7 @@ import {
 } from '../src/lib/portal';
 import { appRoutes } from '../src/lib/appRoutes';
 import { useEmulatorReachability } from '../src/hooks/useEmulatorReachability';
+import { useResponsiveLayout } from '../src/hooks/useResponsiveLayout';
 import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
 
@@ -35,6 +37,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const hostMisconfigured = isEmulatorHostMisconfiguredForDevice();
   const emulatorReach = useEmulatorReachability();
+  const { isCompact, formMaxWidth } = useResponsiveLayout();
 
   async function handleSubmit() {
     setError('');
@@ -65,14 +68,25 @@ export default function LoginScreen() {
   const shell = (
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.container}>
-          <View style={styles.brandBlock}>
-            <Text style={[styles.brandBadge, isDark ? styles.brandBadgeDark : styles.brandBadgeCore]}>
-              COSP · Grupo Bacar
-            </Text>
-            <Text style={[styles.brandTitle, { color: isDark ? palette.heroText : palette.primary }]}>
-              Guardia
-            </Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.container, { maxWidth: formMaxWidth, alignSelf: 'center', width: '100%' }]}>
+            <View style={styles.brandBlock}>
+              <Text style={[styles.brandBadge, isDark ? styles.brandBadgeDark : styles.brandBadgeCore]}>
+                COSP · Grupo Bacar
+              </Text>
+              <Text
+                style={[
+                  styles.brandTitle,
+                  isCompact && styles.brandTitleCompact,
+                  { color: isDark ? palette.heroText : palette.primary },
+                ]}
+              >
+                Guardia
+              </Text>
             <Text style={[styles.brandSub, { color: palette.onSurfaceMuted }]}>
               Centro de comando del vigilador
             </Text>
@@ -135,7 +149,8 @@ export default function LoginScreen() {
               <CommandButton label="Entrar al portal" onPress={handleSubmit} />
             )}
           </CommandCard>
-        </View>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -157,7 +172,8 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   safe: { flex: 1 },
-  container: { flex: 1, padding: spacing.xl, justifyContent: 'center', gap: spacing.lg },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: spacing.xl },
+  container: { gap: spacing.lg },
   brandBlock: { gap: 8, marginBottom: 8 },
   brandBadge: {
     alignSelf: 'flex-start',
@@ -179,6 +195,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(78,222,163,0.12)',
   },
   brandTitle: { fontSize: 40, fontWeight: '900', letterSpacing: -1 },
+  brandTitleCompact: { fontSize: 32 },
   brandSub: { fontSize: 15, fontWeight: '600' },
   emulatorBanner: {
     padding: 12,

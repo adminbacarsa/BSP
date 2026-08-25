@@ -5,6 +5,7 @@ import {
 } from '../../lib/agendaCalendar';
 import { radius } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
+import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 
 type Props = {
   cells: MonthCell[];
@@ -14,6 +15,8 @@ type Props = {
 
 export function AgendaMonthGrid({ cells, selectedKey, onSelectDay }: Props) {
   const { palette } = useTheme();
+  const { isCompact } = useResponsiveLayout();
+  const codeSize = isCompact ? 8 : 10;
 
   return (
     <View style={[styles.wrap, { backgroundColor: palette.card, borderColor: palette.cardBorder }]}>
@@ -70,9 +73,7 @@ export function AgendaMonthGrid({ cells, selectedKey, onSelectDay }: Props) {
                       key={`${cell.key}-${code}`}
                       style={[
                         styles.code,
-                        {
-                          color: selected ? palette.onPrimary : accent !== 'transparent' ? accent : palette.onSurfaceMuted,
-                        },
+                        { fontSize: codeSize, color: selected ? palette.onPrimary : accent !== 'transparent' ? accent : palette.onSurfaceMuted },
                       ]}
                       numberOfLines={1}
                     >
@@ -117,10 +118,12 @@ const styles = StyleSheet.create({
   },
   cell: {
     width: `${100 / 7}%`,
-    minHeight: 54,
+    aspectRatio: 1,
+    maxHeight: 72,
     paddingVertical: 4,
     paddingHorizontal: 2,
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: 'transparent',

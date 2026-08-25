@@ -8,6 +8,7 @@ import { CommandCard } from '../../src/components/ui/CommandCard';
 import { RequireAuth } from '../../src/hooks/useRequireAuth';
 import { radius, spacing } from '../../src/theme/tokens';
 import { useTheme } from '../../src/theme/ThemeContext';
+import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { useConvocatoriasPendientes } from '../../src/hooks/useConvocatoriasPendientes';
 import { checkAndApplyAppUpdate, getAppVersionLabel } from '../../src/lib/appUpdate';
 
@@ -24,6 +25,7 @@ function MasScreenContent() {
   const insets = useSafeAreaInsets();
   const { portalFeatures, signOut, employee, empDocId } = usePortalAuth();
   const { palette, mode, setThemeMode } = useTheme();
+  const { contentMaxWidth, horizontalPadding } = useResponsiveLayout();
   const { convocatoriasPendientes } = useConvocatoriasPendientes(employee?.empresaId, empDocId);
   const canNovedad = portalFeatures.reportAbsence || portalFeatures.requestLicense;
   const scrollBottomPad = Math.max(insets.bottom, 12) + 16;
@@ -44,7 +46,17 @@ function MasScreenContent() {
     <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={[]}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollBottomPad }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingHorizontal: horizontalPadding,
+            paddingTop: spacing.container,
+            paddingBottom: scrollBottomPad,
+            ...(contentMaxWidth
+              ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const, width: '100%' }
+              : {}),
+          },
+        ]}
         showsVerticalScrollIndicator
         keyboardShouldPersistTaps="handled"
       >
@@ -106,7 +118,7 @@ function MasScreenContent() {
             <CommandButton
               label={
                 convocatoriasPendientes.length > 0
-                  ? `Responder (${convocatoriasPendientes.length})`
+                  ? `Eventos · ${convocatoriasPendientes.length} pendiente(s)`
                   : 'Eventos y convocatorias'
               }
               variant={convocatoriasPendientes.length > 0 ? 'primary' : 'secondary'}
@@ -147,7 +159,16 @@ function MasScreenContent() {
         </CommandCard>
 
         <CommandCard title="Sesión">
-          <CommandButton label="Cerrar sesión" variant="secondary" onPress={() => signOut()} />
+          <CommandButton
+            label="Cerrar sesión"
+            variant="secondary"
+            onPress={() => {
+              void (async () => {
+                await signOut();
+                router.replace('/login');
+              })();
+            }}
+          />
         </CommandCard>
       </ScrollView>
     </SafeAreaView>
@@ -176,7 +197,7 @@ function Flag({ label, on }: { label: string; on: boolean }) {
 const styles = StyleSheet.create({
   safe: { flex: 1 },
   scroll: { flex: 1 },
-  scrollContent: { padding: spacing.container, gap: spacing.md },
+  scrollContent: { gap: spacing.md },
   intro: { fontSize: 14, lineHeight: 21 },
   cardSub: { fontSize: 13, marginBottom: 4 },
   versionLine: { fontSize: 12, fontWeight: '800', marginBottom: 10 },

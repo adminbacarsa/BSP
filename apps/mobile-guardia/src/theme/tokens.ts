@@ -18,6 +18,7 @@ export const colors = {
   slate800: '#334155',
   slate600: '#475569',
   slate500: '#64748b',
+  slate700: '#334155',
   slate200: '#e2e8f0',
   slate100: '#f1f5f9',
   slate50: corePalette.background,

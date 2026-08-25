@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -18,6 +19,7 @@ import { radius, spacing } from '../../src/theme/tokens';
 import { useTheme } from '../../src/theme/ThemeContext';
 import { usePortalInbox, type PortalInboxItem } from '../../src/hooks/usePortalInbox';
 import {
+  alertNeedsAck,
   notificationActionLabel,
   notificationDomainLabel,
   routeFromNotificationData,
@@ -26,7 +28,7 @@ import { getPortalCallables } from '../../src/lib/portal';
 import { appRoutes } from '../../src/lib/appRoutes';
 import type { Href } from 'expo-router';
 
-const DOMAIN_FILTERS = ['Todas', 'Planificación', 'Operaciones', 'Eventos', 'RRHH', 'Permutas', 'Sistema'] as const;
+const DOMAIN_FILTERS = ['Todas', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
 
 function hrefFromRoute(route: string): Href {
@@ -51,10 +53,14 @@ export default function AlertasScreen() {
 
 function AlertasScreenContent() {
   const router = useRouter();
-  const { user } = usePortalAuth();
+  const { user, previewEmpDocId, isPreviewMode } = usePortalAuth();
   const { palette } = useTheme();
-  const { items, loading, unreadCount, markRead, markAllUnreadRead } = usePortalInbox(user);
+  const { items, loading, unreadCount, markRead, acknowledge, dismiss, markAllUnreadRead, dismissAll } =
+    usePortalInbox(user, previewEmpDocId);
   const [testBusy, setTestBusy] = useState(false);
+  const [markAllBusy, setMarkAllBusy] = useState(false);
+  const [dismissAllBusy, setDismissAllBusy] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [domainFilter, setDomainFilter] = useState<DomainFilter>('Todas');
 
   const filtered = useMemo(() => {
@@ -62,16 +68,31 @@ function AlertasScreenContent() {
     return items.filter((n) => notificationDomainLabel(n.type) === domainFilter);
   }, [items, domainFilter]);
 
+  const pendingAck = useMemo(() => items.filter((n) => alertNeedsAck(n)).length, [items]);
+
   const sendTestPush = useCallback(async () => {
     if (!user) return;
     setTestBusy(true);
     try {
       const callables = getPortalCallables();
-      await callables.sendTestNotification({
+      const result = await callables.sendTestNotification({
         title: 'Prueba COSP Guardia',
         body: 'Si ves esto, FCM y la app nativa están alineados.',
+        type: 'SYSTEM_TEST',
       });
-      Alert.alert('Enviada', 'Revisá la bandeja del sistema si la app está en segundo plano.');
+      const data = (result?.data ?? {}) as { successCount?: number; failureCount?: number };
+      const ok = Number(data.successCount || 0);
+      const fail = Number(data.failureCount || 0);
+      if (ok === 0) {
+        Alert.alert(
+          'Push no entregada',
+          fail > 0
+            ? `FCM rechazó ${fail} token(s). Cerrá sesión, volvé a entrar y reintentá.`
+            : 'No hay tokens FCM para esta cuenta. Aceptá notificaciones y reabrí la app.',
+        );
+        return;
+      }
+      Alert.alert('Push enviada', `OK: ${ok}${fail ? ` · fallidas: ${fail}` : ''}.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo enviar la prueba';
       Alert.alert('Error', msg);
@@ -79,6 +100,54 @@ function AlertasScreenContent() {
       setTestBusy(false);
     }
   }, [user]);
+
+  const onMarkAll = useCallback(async () => {
+    if (unreadCount === 0) return;
+    setMarkAllBusy(true);
+    try {
+      await markAllUnreadRead();
+      Alert.alert('Listo', 'Todas las alertas quedaron leídas y confirmadas.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'No se pudieron marcar todas.';
+      Alert.alert('Error', msg);
+    } finally {
+      setMarkAllBusy(false);
+    }
+  }, [markAllUnreadRead, unreadCount]);
+
+  const onDismissAll = useCallback(() => {
+    if (items.length === 0) return;
+    const pendingAckCount = items.filter((n) => alertNeedsAck(n)).length;
+    Alert.alert(
+      'Borrar todas',
+      pendingAckCount > 0
+        ? `Se van a quitar ${items.length} alerta(s). Las ${pendingAckCount} que pedían confirmación se marcarán como enteradas.`
+        : `Se van a quitar ${items.length} alerta(s) de tu bandeja.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Borrar todas',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDismissAllBusy(true);
+              try {
+                await dismissAll();
+                Alert.alert('Listo', 'Bandeja vaciada.');
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : 'No se pudieron borrar todas.';
+                Alert.alert('Error', msg);
+              } finally {
+                setDismissAllBusy(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [dismissAll, items]);
+
+  const headerBusy = markAllBusy || dismissAllBusy || testBusy;
 
   const openInboxItem = useCallback(
     (n: PortalInboxItem) => {
@@ -96,6 +165,53 @@ function AlertasScreenContent() {
     [markRead, router],
   );
 
+  const onAck = useCallback(
+    async (n: PortalInboxItem) => {
+      setBusyId(n.id);
+      try {
+        await acknowledge(n.id);
+      } catch {
+        Alert.alert('Error', 'No se pudo registrar el acuse. Reintentá.');
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [acknowledge],
+  );
+
+  const onDismiss = useCallback(
+    (n: PortalInboxItem) => {
+      const needsAck = alertNeedsAck(n);
+      Alert.alert(
+        'Quitar alerta',
+        needsAck
+          ? 'Este aviso pide confirmación. ¿Marcar como enterado y quitarlo?'
+          : 'Se oculta de tu bandeja (queda el acuse en el historial del sistema).',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: needsAck ? 'Enterado y quitar' : 'Quitar',
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                setBusyId(n.id);
+                try {
+                  if (needsAck) await acknowledge(n.id);
+                  await dismiss(n.id);
+                } catch {
+                  Alert.alert('Error', 'No se pudo quitar la alerta.');
+                } finally {
+                  setBusyId(null);
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [acknowledge, dismiss],
+  );
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={[]}>
       <FlatList
@@ -105,10 +221,22 @@ function AlertasScreenContent() {
         ListHeaderComponent={
           <View style={styles.headerBlock}>
             <Text style={[styles.intro, { color: palette.onSurfaceMuted }]}>
-              Push + historial in-app (planificación, operaciones, eventos, RRHH).
+              Avisos para vos: turnos, eventos y permutas.
               {unreadCount > 0 ? ` · ${unreadCount} sin leer` : ''}
+              {pendingAck > 0 ? ` · ${pendingAck} por confirmar` : ''}
             </Text>
-            <View style={styles.filters}>
+            {isPreviewMode ? (
+              <Text style={[styles.fcmHint, { color: palette.warning }]}>
+                Preview: alertas del legajo elegido. Salí y volvé a entrar al preview para atar el
+                push FCM a ese legajo.
+              </Text>
+            ) : null}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filtersRow}
+              style={styles.filtersScroll}
+            >
               {DOMAIN_FILTERS.map((label) => {
                 const active = domainFilter === label;
                 return (
@@ -134,24 +262,34 @@ function AlertasScreenContent() {
                   </Pressable>
                 );
               })}
-            </View>
-            {__DEV__ ? (
+            </ScrollView>
+            <View style={styles.headerActions}>
+              {unreadCount > 0 ? (
+                <CommandButton
+                  label={markAllBusy ? 'Marcando…' : 'Marcar todas leídas'}
+                  variant="secondary"
+                  onPress={() => void onMarkAll()}
+                  disabled={headerBusy}
+                  style={styles.headerBtnFlex}
+                />
+              ) : null}
+              {items.length > 0 ? (
+                <CommandButton
+                  label={dismissAllBusy ? 'Borrando…' : 'Borrar todas'}
+                  variant="ghost"
+                  onPress={onDismissAll}
+                  disabled={headerBusy}
+                  style={styles.headerBtnFlex}
+                />
+              ) : null}
               <CommandButton
-                label={testBusy ? 'Enviando…' : 'Prueba FCM (dev)'}
-                variant="secondary"
+                label={testBusy ? 'Enviando…' : 'Probar push'}
+                variant="ghost"
                 onPress={sendTestPush}
-                disabled={testBusy}
-                style={styles.headerBtn}
+                disabled={headerBusy}
+                style={styles.headerBtnFlex}
               />
-            ) : null}
-            {unreadCount > 0 ? (
-              <CommandButton
-                label="Marcar todas leídas"
-                variant="secondary"
-                onPress={() => markAllUnreadRead()}
-                style={styles.headerBtn}
-              />
-            ) : null}
+            </View>
           </View>
         }
         ListEmptyComponent={
@@ -161,55 +299,110 @@ function AlertasScreenContent() {
             <CommandCard style={styles.emptyCard}>
               <Text style={[styles.emptyText, { color: palette.onSurfaceMuted }]}>
                 {domainFilter === 'Todas'
-                  ? 'Sin alertas por ahora. Cuando Operaciones o Planificación te avisen, aparecen acá y también como notificación del teléfono.'
+                  ? 'Sin alertas. Cuando publiquen tu malla o te cambien un turno, aparecen acá.'
                   : `Sin alertas en ${domainFilter}.`}
               </Text>
             </CommandCard>
           )
         }
-        renderItem={({ item: n }) => (
-          <View
-            style={[
-              styles.inboxItem,
-              {
-                backgroundColor: n.read ? palette.inputBg : palette.card,
-                borderColor: n.read ? palette.cardBorder : palette.primary,
-              },
-            ]}
-          >
-            <View style={styles.inboxTop}>
-              <Text style={[styles.domain, { color: palette.primary }]}>
-                {notificationDomainLabel(n.type)}
+        renderItem={({ item: n }) => {
+          const needsAck = alertNeedsAck(n);
+          const busy = busyId === n.id;
+          const route = routeFromNotificationData({ type: n.type });
+          const settled = !needsAck && (n.read || !!n.ackedAt);
+
+          if (settled) {
+            return (
+              <View
+                style={[
+                  styles.inboxItemCompact,
+                  {
+                    backgroundColor: palette.inputBg,
+                    borderColor: palette.cardBorder,
+                  },
+                ]}
+              >
+                <View style={styles.compactTextCol}>
+                  <Text style={[styles.domain, { color: palette.onSurfaceMuted }]}>
+                    {notificationDomainLabel(n.type)}
+                    {n.ackedAt ? ' · Enterado' : ' · Leída'}
+                  </Text>
+                  <Text
+                    style={[styles.inboxTitleCompact, { color: palette.onSurface }]}
+                    numberOfLines={1}
+                  >
+                    {n.title || 'Alerta'}
+                  </Text>
+                </View>
+                <CommandButton
+                  label={busy ? '…' : 'Quitar'}
+                  variant="ghost"
+                  onPress={() => onDismiss(n)}
+                  disabled={busy}
+                  style={styles.quitarCompact}
+                />
+              </View>
+            );
+          }
+
+          return (
+            <View
+              style={[
+                styles.inboxItem,
+                {
+                  backgroundColor: palette.card,
+                  borderColor: needsAck ? palette.warning : palette.primary,
+                },
+              ]}
+            >
+              <View style={styles.inboxTop}>
+                <Text style={[styles.domain, { color: palette.primary }]}>
+                  {notificationDomainLabel(n.type)}
+                </Text>
+                {needsAck ? (
+                  <Text style={[styles.nueva, { color: palette.warning }]}>Confirmar</Text>
+                ) : (
+                  <Text style={[styles.nueva, { color: palette.error }]}>Nueva</Text>
+                )}
+              </View>
+              <Text style={[styles.inboxTitle, { color: palette.onSurface }]}>
+                {n.title || 'Alerta'}
               </Text>
-              {!n.read ? (
-                <Text style={[styles.nueva, { color: palette.error }]}>Nueva</Text>
+              {n.body ? (
+                <Text style={[styles.inboxBody, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
+                  {n.body}
+                </Text>
               ) : null}
+              <View style={styles.rowBtns}>
+                {needsAck ? (
+                  <CommandButton
+                    label={busy ? '…' : 'Me enteré'}
+                    variant="success"
+                    onPress={() => void onAck(n)}
+                    disabled={busy}
+                    style={styles.btnFlex}
+                  />
+                ) : null}
+                {route ? (
+                  <CommandButton
+                    label={notificationActionLabel(n.type)}
+                    variant="secondary"
+                    onPress={() => openInboxItem(n)}
+                    disabled={busy}
+                    style={styles.btnFlex}
+                  />
+                ) : null}
+                <CommandButton
+                  label="Quitar"
+                  variant="ghost"
+                  onPress={() => onDismiss(n)}
+                  disabled={busy}
+                  style={styles.btnFlex}
+                />
+              </View>
             </View>
-            <Text style={[styles.inboxTitle, { color: palette.onSurface }]}>
-              {n.title || 'Alerta'}
-            </Text>
-            {n.body ? (
-              <Text style={[styles.inboxBody, { color: palette.onSurfaceMuted }]} numberOfLines={3}>
-                {n.body}
-              </Text>
-            ) : null}
-            {routeFromNotificationData({ type: n.type }) ? (
-              <CommandButton
-                label={notificationActionLabel(n.type)}
-                variant="primary"
-                onPress={() => openInboxItem(n)}
-                style={styles.actionBtn}
-              />
-            ) : !n.read ? (
-              <CommandButton
-                label="Marcar leída"
-                variant="secondary"
-                onPress={() => markRead(n.id)}
-                style={styles.actionBtn}
-              />
-            ) : null}
-          </View>
-        )}
+          );
+        }}
       />
     </SafeAreaView>
   );
@@ -220,15 +413,26 @@ const styles = StyleSheet.create({
   list: { padding: spacing.container, paddingBottom: 32, gap: 10 },
   headerBlock: { gap: 8, marginBottom: 8 },
   intro: { fontSize: 14, lineHeight: 21 },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  filtersScroll: { flexGrow: 0, marginHorizontal: -2 },
+  filtersRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 2,
+    paddingRight: 8,
+  },
   filterChip: {
     borderRadius: radius.pill,
     borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 6,
+    flexShrink: 0,
   },
   filterText: { fontSize: 11, fontWeight: '800' },
-  headerBtn: { marginTop: 0 },
+  headerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  headerBtnFlex: { flexGrow: 1, minWidth: '40%' },
+  fcmHint: { fontSize: 12, lineHeight: 17 },
   loader: { marginVertical: 32 },
   emptyCard: { marginTop: 12 },
   emptyText: { fontSize: 14, lineHeight: 21 },
@@ -238,6 +442,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 10,
   },
+  inboxItemCompact: {
+    borderRadius: radius.lg,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  compactTextCol: { flex: 1, minWidth: 0 },
+  quitarCompact: { flexGrow: 0, flexShrink: 0, minWidth: 88, paddingHorizontal: 10 },
   inboxTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -252,6 +468,8 @@ const styles = StyleSheet.create({
   },
   nueva: { fontSize: 11, fontWeight: '800' },
   inboxTitle: { fontWeight: '800', fontSize: 15 },
+  inboxTitleCompact: { fontWeight: '700', fontSize: 13, marginTop: 2 },
   inboxBody: { fontSize: 13, marginTop: 4, lineHeight: 18 },
-  actionBtn: { marginTop: 10 },
+  rowBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  btnFlex: { flexGrow: 1, flexBasis: '45%', minWidth: 120 },
 });

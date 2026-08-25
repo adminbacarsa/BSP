@@ -16,8 +16,9 @@ export function PreviewModeBanner() {
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label} numberOfLines={1}>
+      <Text style={styles.label} numberOfLines={2}>
         PREVIEW · {label}
+        {'\n'}Convocatorias: Acepto/No puedo actúan como este legajo.
       </Text>
       <Pressable
         style={styles.btn}

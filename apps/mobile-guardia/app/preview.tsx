@@ -12,7 +12,7 @@ import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { appRoutes } from '../src/lib/appRoutes';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
-import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { LoadingScreen } from '../src/components/LoadingScreen';
 import { CommandButton } from '../src/components/ui/CommandButton';
@@ -36,6 +36,8 @@ export default function PreviewPickerScreen() {
   const { user, initializing, isSuperAdmin, enterPreview, signOut } = usePortalAuth();
   const [employees, setEmployees] = useState<PreviewEmployee[]>([]);
   const [loadingList, setLoadingList] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
+  const [listReloadKey, setListReloadKey] = useState(0);
   const [search, setSearch] = useState('');
   const [empresaFilter, setEmpresaFilter] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -45,8 +47,9 @@ export default function PreviewPickerScreen() {
     if (!isSuperAdmin) return;
     let cancelled = false;
     setLoadingList(true);
+    setListError(null);
     const { db } = getPortalFirebase();
-    void getDocs(query(collection(db, 'empleados'), orderBy('lastName'), limit(500)))
+    void getDocs(query(collection(db, 'empleados'), orderBy('lastName')))
       .then((snap) => {
         if (cancelled) return;
         setEmployees(
@@ -64,8 +67,10 @@ export default function PreviewPickerScreen() {
           }),
         );
       })
-      .catch(() => {
-        if (!cancelled) setEmployees([]);
+      .catch((err) => {
+        if (cancelled) return;
+        setEmployees([]);
+        setListError(err instanceof Error ? err.message : 'No se pudo cargar el listado de empleados');
       })
       .finally(() => {
         if (!cancelled) setLoadingList(false);
@@ -73,7 +78,7 @@ export default function PreviewPickerScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, listReloadKey]);
 
   const empresas = useMemo(
     () => Array.from(new Set(employees.map((e) => e.empresa).filter(Boolean))).sort() as string[],
@@ -180,6 +185,15 @@ export default function PreviewPickerScreen() {
 
         {loadingList ? (
           <ActivityIndicator color={palette.primary} style={styles.loader} />
+        ) : listError ? (
+          <View style={styles.errorBox}>
+            <Text style={[styles.empty, { color: palette.error }]}>{listError}</Text>
+            <CommandButton
+              label="Reintentar"
+              variant="secondary"
+              onPress={() => setListReloadKey((k) => k + 1)}
+            />
+          </View>
         ) : (
           <FlatList
             style={styles.listFlex}
@@ -191,7 +205,9 @@ export default function PreviewPickerScreen() {
             windowSize={10}
             ListEmptyComponent={
               <Text style={[styles.empty, { color: palette.onSurfaceMuted }]}>
-                {employees.length === 0 ? 'Cargando empleados…' : `Sin resultados para "${search}"`}
+                {employees.length === 0
+                  ? 'No hay empleados para mostrar.'
+                  : `Sin resultados para "${search}".`}
               </Text>
             }
             renderItem={({ item }) => {
@@ -284,6 +300,12 @@ const styles = StyleSheet.create({
   },
   searchInput: { paddingVertical: 12, fontSize: 15, fontWeight: '600' },
   loader: { marginTop: 32 },
+  errorBox: {
+    paddingHorizontal: spacing.container,
+    paddingVertical: 24,
+    gap: 12,
+  },
+  listFlex: { flex: 1 },
   list: { paddingHorizontal: spacing.container, paddingBottom: 12, gap: 8 },
   empty: { textAlign: 'center', paddingVertical: 24 },
   row: {
@@ -326,5 +348,11 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   qrUrl: { fontSize: 10, fontWeight: '600', textAlign: 'center' },
-  footer: { paddingHorizontal: spacing.container, paddingBottom: 12 },
+  footer: {
+    paddingHorizontal: spacing.container,
+    paddingTop: 8,
+    paddingBottom: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e2e8f0',
+  },
 });

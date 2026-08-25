@@ -16,18 +16,27 @@ import {
 import type { User } from 'firebase/auth';
 import { normalizePortalInboxItem, type PortalInboxNormalized } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
+import { isEmployeeFacingAlert, alertNeedsAck } from '../lib/notificationNavigation';
 
 export type PortalInboxItem = PortalInboxNormalized;
 
 function mergeInboxBuckets(buckets: Record<string, PortalInboxItem[]>): PortalInboxItem[] {
   const merged = Object.values(buckets).flat();
   const unique = Array.from(new Map(merged.map((n) => [n.id, n])).values());
-  unique.sort((a, b) => {
+  const visible = unique.filter((n) =>
+    isEmployeeFacingAlert({
+      type: n.type,
+      target: n.target,
+      dismissed: n.dismissed,
+      status: n.status,
+    }),
+  );
+  visible.sort((a, b) => {
     const ad = inboxTimestampMs(a.createdAt);
     const bd = inboxTimestampMs(b.createdAt);
     return bd - ad;
   });
-  return unique.slice(0, 20);
+  return visible.slice(0, 40);
 }
 
 function inboxTimestampMs(value: unknown): number {
@@ -43,7 +52,11 @@ function inboxTimestampMs(value: unknown): number {
   return 0;
 }
 
-export function usePortalInbox(user: User | null) {
+/**
+ * @param previewEmpDocId En preview SuperAdmin solo escuchamos ese legajo
+ * (no el uid del admin, que trae alertas de Operaciones).
+ */
+export function usePortalInbox(user: User | null, previewEmpDocId?: string | null) {
   const { db } = getPortalFirebase();
   const [items, setItems] = useState<PortalInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +75,7 @@ export function usePortalInbox(user: User | null) {
     bucketsRef.current = {};
     fallbackRef.current = new Set();
     const unsubs: Array<() => void> = [];
+    const previewId = previewEmpDocId?.trim() || null;
 
     const rebuild = () => {
       setItems(mergeInboxBuckets(bucketsRef.current));
@@ -94,15 +108,37 @@ export function usePortalInbox(user: User | null) {
       unsubs.push(unsub);
     };
 
+    const registerEmp = (empId: string) => {
+      register(
+        `emp:${empId}`,
+        query(
+          collection(db, 'user_notifications'),
+          where('employeeId', '==', empId),
+          orderBy('createdAt', 'desc'),
+          limit(40),
+        ),
+        () =>
+          query(collection(db, 'user_notifications'), where('employeeId', '==', empId), limit(40)),
+      );
+    };
+
+    // Preview: solo legajo (evita vacantes/ops del SuperAdmin).
+    if (previewId) {
+      registerEmp(previewId);
+      return () => {
+        unsubs.forEach((u) => u());
+      };
+    }
+
     register(
       `uid:${user.uid}`,
       query(
         collection(db, 'user_notifications'),
         where('uid', '==', user.uid),
         orderBy('createdAt', 'desc'),
-        limit(20),
+        limit(40),
       ),
-      () => query(collection(db, 'user_notifications'), where('uid', '==', user.uid), limit(20)),
+      () => query(collection(db, 'user_notifications'), where('uid', '==', user.uid), limit(40)),
     );
 
     (async () => {
@@ -119,23 +155,7 @@ export function usePortalInbox(user: User | null) {
           );
           byEmail.docs.forEach((d) => ids.add(d.id));
         }
-        ids.forEach((empId) => {
-          register(
-            `emp:${empId}`,
-            query(
-              collection(db, 'user_notifications'),
-              where('employeeId', '==', empId),
-              orderBy('createdAt', 'desc'),
-              limit(20),
-            ),
-            () =>
-              query(
-                collection(db, 'user_notifications'),
-                where('employeeId', '==', empId),
-                limit(20),
-              ),
-          );
-        });
+        ids.forEach((empId) => registerEmp(empId));
       } catch (e) {
         console.warn('[usePortalInbox] empleados', e);
       }
@@ -144,9 +164,12 @@ export function usePortalInbox(user: User | null) {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [user?.uid, db]);
+  }, [user?.uid, previewEmpDocId, db]);
 
-  const unreadCount = useMemo(() => items.filter((n) => !n.read).length, [items]);
+  const unreadCount = useMemo(
+    () => items.filter((n) => !n.read || alertNeedsAck(n)).length,
+    [items],
+  );
 
   const markRead = async (id: string) => {
     try {
@@ -156,13 +179,97 @@ export function usePortalInbox(user: User | null) {
       });
     } catch (e) {
       console.warn('[usePortalInbox] markRead', e);
+      throw e;
+    }
+  };
+
+  const acknowledge = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'user_notifications', id), {
+        read: true,
+        readAt: serverTimestamp(),
+        ackedAt: serverTimestamp(),
+        ackedByUid: user?.uid || null,
+      });
+    } catch (e) {
+      console.warn('[usePortalInbox] acknowledge', e);
+      throw e;
+    }
+  };
+
+  /** Soft-delete: el vigilador no puede deleteDoc (reglas); se oculta con dismissed. */
+  const dismiss = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'user_notifications', id), {
+        dismissed: true,
+        status: 'INACTIVE',
+        read: true,
+        readAt: serverTimestamp(),
+        dismissedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('[usePortalInbox] dismiss', e);
+      throw e;
     }
   };
 
   const markAllUnreadRead = async () => {
-    const unread = items.filter((n) => !n.read);
-    await Promise.all(unread.map((n) => markRead(n.id)));
+    const pending = items.filter((n) => !n.read || alertNeedsAck(n));
+    if (pending.length === 0) return;
+
+    const errors: string[] = [];
+    // Secuencial: evita saturar reglas/get() y deja trazas claras
+    for (const n of pending) {
+      try {
+        if (alertNeedsAck(n)) {
+          await acknowledge(n.id);
+        } else {
+          await markRead(n.id);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        errors.push(n.id);
+        console.warn('[usePortalInbox] markAllUnreadRead', n.id, msg);
+      }
+    }
+    if (errors.length > 0) {
+      throw new Error(
+        `No se pudieron actualizar ${errors.length} de ${pending.length} alertas.`,
+      );
+    }
   };
 
-  return { items, loading, unreadCount, markRead, markAllUnreadRead };
+  /** Soft-delete de toda la bandeja visible (mismas reglas que dismiss unitario). */
+  const dismissAll = async () => {
+    const pending = [...items];
+    if (pending.length === 0) return;
+
+    const errors: string[] = [];
+    for (const n of pending) {
+      try {
+        if (alertNeedsAck(n)) {
+          await acknowledge(n.id);
+        }
+        await dismiss(n.id);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        errors.push(n.id);
+        console.warn('[usePortalInbox] dismissAll', n.id, msg);
+      }
+    }
+    if (errors.length > 0) {
+      throw new Error(`No se pudieron quitar ${errors.length} de ${pending.length} alertas.`);
+    }
+  };
+
+  return {
+    items,
+    loading,
+    unreadCount,
+    markRead,
+    acknowledge,
+    dismiss,
+    markAllUnreadRead,
+    dismissAll,
+  };
 }
