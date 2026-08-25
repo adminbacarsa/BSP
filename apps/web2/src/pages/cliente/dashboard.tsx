@@ -1272,6 +1272,7 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
   const [endTime, setEndTime] = useState('');
   const [motivo, setMotivo] = useState('');
   const [cantidadPax, setCantidadPax] = useState(1);
+  const [alcance, setAlcance] = useState<'PUNTUAL' | 'ESTRUCTURAL'>('PUNTUAL');
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [solicitudes, setSolicitudes] = useState<SolicitudRefuerzo[]>([]);
@@ -1453,7 +1454,7 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
 
   const resetForm = () => {
     setFecha(''); setFechasExtra([]); setStartTime(''); setEndTime(''); setMotivo('');
-    setCantidadPax(1); setGuardiaSelPorFecha({}); setGuardiasByFecha({}); setSelPosId(''); setSelShiftCode('');
+    setCantidadPax(1); setAlcance('PUNTUAL'); setGuardiaSelPorFecha({}); setGuardiasByFecha({}); setSelPosId(''); setSelShiftCode('');
     setShowForm(false);
   };
 
@@ -1467,7 +1468,7 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
         clientName:          clienteUser.clientName,
         objectiveId:         objetivo.id,
         objectiveName:       objetivo.name,
-        tipo, startTime, endTime, motivo,
+        tipo, alcance: tipo === 'REFUERZO_PUESTO' ? alcance : 'PUNTUAL', startTime, endTime, motivo,
         origen:              'PORTAL_CLIENTE' as const,
         estado:              'PENDIENTE' as const,
         solicitadoPorUid:    clienteUser.uid,
@@ -1484,7 +1485,7 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
           ? guardiasByFecha[f]?.find(g => g.shiftId === guardiaSelPorFecha[f])
           : undefined;
         const extras = tipo === 'REFUERZO_PUESTO'
-          ? { cantidadPax, positionId: selPosId || undefined, positionName: selPosition?.name }
+          ? { cantidadPax, positionId: selPosId || undefined, positionName: selPosition?.name, shiftCode: selShiftCode || undefined }
           : {
               parentShiftId: guardiaSelected?.shiftId,
               parentEmpleadoId: guardiaSelected?.empleadoId,
@@ -1537,8 +1538,31 @@ function RefuerzosTab({ objetivo, clienteUser }: { objetivo: ObjetivoInfo; clien
             ))}
           </div>
           <p className="text-[11px] text-slate-500 -mt-1">
-            {tipo === 'REFUERZO_PUESTO' ? 'Personal extra para el puesto en una fecha puntual.' : 'Ampliar el horario de un guardia ya asignado al objetivo.'}
+            {tipo === 'REFUERZO_PUESTO' ? 'Personal extra en un puesto y turno. Podés pedirlo solo ese día o sumarlo al servicio.' : 'Ampliar el horario de un guardia ya asignado al objetivo.'}
           </p>
+
+          {tipo === 'REFUERZO_PUESTO' && (
+            <div className="flex gap-2">
+              {([
+                { id: 'PUNTUAL' as const, label: 'Solo esa fecha' },
+                { id: 'ESTRUCTURAL' as const, label: 'Sumar al servicio' },
+              ]).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setAlcance(opt.id)}
+                  className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${alcance === opt.id ? 'bg-amber-600 text-white border-amber-600' : 'border-slate-200 text-slate-600 hover:border-amber-300'}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {tipo === 'REFUERZO_PUESTO' && alcance === 'ESTRUCTURAL' && (
+            <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+              Si se autoriza, se agrega +{cantidadPax} pax en ese puesto/turno del contrato (Servicios) y Planificación debe cubrirlo.
+            </p>
+          )}
 
           {/* REFUERZO: puesto + turno del SLA */}
           {tipo === 'REFUERZO_PUESTO' && slaPositions.length > 0 && (

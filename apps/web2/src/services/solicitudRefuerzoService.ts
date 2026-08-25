@@ -5,6 +5,7 @@ import {
 } from 'firebase/firestore';
 
 export type SolicitudTipo   = 'REFUERZO_PUESTO' | 'AGREGADO_TURNO';
+export type SolicitudAlcance = 'PUNTUAL' | 'ESTRUCTURAL';
 export type SolicitudEstado = 'PENDIENTE' | 'APROBADA' | 'RECHAZADA' | 'ASIGNADA' | 'COMPLETADA' | 'CANCELADA';
 export type SolicitudOrigen = 'PORTAL_CLIENTE' | 'MANUAL' | 'SUPERVISOR_MANUAL';
 
@@ -17,6 +18,10 @@ export interface SolicitudRefuerzo {
   objectiveName: string;
 
   tipo: SolicitudTipo;
+  /** PUNTUAL = solo esa fecha (RFZ). ESTRUCTURAL = +pax en el SLA del servicio. */
+  alcance?: SolicitudAlcance;
+  slaApplied?: boolean;
+  slaIdAplicado?: string;
   fecha: string;      // YYYY-MM-DD
   startTime: string;  // HH:mm
   endTime: string;    // HH:mm
@@ -24,6 +29,7 @@ export interface SolicitudRefuerzo {
   // Solo REFUERZO_PUESTO
   positionId?: string;
   positionName?: string;
+  shiftCode?: string;
   cantidadPax?: number;
 
   // Solo AGREGADO_TURNO

@@ -317,6 +317,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const [pendientesCount, setPendientesCount] = useState(0);
   const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
   const [rfzPlanifIds, setRfzPlanifIds] = useState<string[]>([]);
+  const [serviciosTaskCount, setServiciosTaskCount] = useState(0);
   useEffect(() => {
     const path = router.pathname;
     const key = `cosp:scroll:${path}`;
@@ -346,6 +347,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   }, [router.pathname, compactSidebar]);
   const canViewSupervision = canReadModule('SUPERVISION');
   const canViewPlanning = canReadModule('PLANNING');
+  const canViewServices = canReadModule('SERVICES') || canReadModule('CLIENTS');
 
   useEffect(() => {
     if (!empresaId || !canViewSupervision || !user?.uid) return;
@@ -393,6 +395,18 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     }, () => {});
     return unsub;
   }, [empresaId, canViewPlanning]);
+
+  useEffect(() => {
+    if (!empresaId || !canViewServices) return;
+    return solicitudRefuerzoService.subscribeByEmpresa(empresaId, items => {
+      const n = items.filter(s =>
+        s.tipo === 'REFUERZO_PUESTO'
+        && s.alcance === 'ESTRUCTURAL'
+        && (s.estado === 'PENDIENTE' || (s.estado === 'APROBADA' && !s.slaApplied)),
+      ).length;
+      setServiciosTaskCount(n);
+    });
+  }, [empresaId, canViewServices]);
 
   const sidebarOpen = !compactSidebar && (isPinned || isHovered);
 
@@ -580,10 +594,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               )}
               {(canReadModule('SERVICES') || canReadModule('CLIENTS')) && (
                 <Link href="/admin/servicios" prefetch={false} title="Servicios"
-                  className={getLinkHoverClass('/admin/servicios')}
+                  className={`${getLinkHoverClass('/admin/servicios')} relative`}
                   style={getLinkStyle('/admin/servicios')}>
                   <ShieldCheck size={18} className="shrink-0" />
-                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Servicios</span>}
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Servicios</span>}
+                  {serviciosTaskCount > 0 && (
+                    <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-amber-500 text-white text-[9px] font-black rounded-full flex items-center justify-center`}>
+                      {serviciosTaskCount > 99 ? '99+' : serviciosTaskCount}
+                    </span>
+                  )}
                 </Link>
               )}
             </>
