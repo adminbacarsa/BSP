@@ -446,7 +446,7 @@ export default function PlanningCronogramasOverviewModal({
               </p>
               {totalPlannedHours > 0 && (
                 <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-lg tabular-nums">
-                  Σ visible: {Math.round(totalPlannedHours).toLocaleString('es-AR')} hs plan
+                  Σ visible: {Math.round(totalPlannedHours).toLocaleString('es-AR')} hs plan cob.
                 </span>
               )}
               {portfolioPlannedHours > 0 && filtered.length !== rows.length && (

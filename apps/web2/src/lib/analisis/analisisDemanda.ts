@@ -30,6 +30,7 @@ function isExtensionShift(t: any): boolean {
 }
 
 export function coveragePlannedBillableHours(plan: number, ext = 0, adel = 0): number {
+  // Plan cobertura = malla + extensión + adelanto. RET/REF/ESC y ops van aparte (fuera de cobertura).
   return Math.round((plan + ext + adel) * 10) / 10;
 }
 

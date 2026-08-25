@@ -2396,7 +2396,7 @@ export default function ReportsPage() {
                                 {
                                     label: 'Hs. Teóricas',
                                     value: employeeReport.reduce((a, c) => a + (c.total || 0), 0).toFixed(1),
-                                    sub: 'planificadas',
+                                    sub: 'liquidación (incl. RET/REF/ESC)',
                                     icon: '🕐',
                                     color: 'from-sky-500 to-sky-600',
                                 },
@@ -2426,7 +2426,7 @@ export default function ReportsPage() {
                             {
                                 label: 'Hs. Teóricas',
                                 value: employeeReport.reduce((a,c)=>a+(c.total||0),0).toFixed(1),
-                                sub: 'horas planificadas',
+                                sub: 'liquidación (incl. RET/REF/ESC)',
                                 icon: '🕐',
                                 color: 'from-sky-500 to-sky-600',
                             },
