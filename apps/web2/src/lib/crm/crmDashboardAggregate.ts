@@ -118,6 +118,7 @@ export function aggregateCrmHoursByClient(
   }
 
   const demanda = buildDemandaForCrmAggregate(clientRefs, slaDocsByClient, allTurnos, start, end);
+  // Atribución por cliente; el total de plan debe coincidir con demanda.totals (misma fórmula Dashboard).
   for (const row of demanda.rows) {
     const cid = clientIdForDemandaClientName(row.client, clientRefs);
     if (!cid || !out[cid]) continue;
