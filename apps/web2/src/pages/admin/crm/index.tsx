@@ -156,7 +156,7 @@ import {
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 /** Incrementar cuando cambia la fórmula de KPIs (plan = cobertura viva, no extracto stale). */
-const CRM_DASHBOARD_METRICS_VERSION = 8;
+const CRM_DASHBOARD_METRICS_VERSION = 9;
 
 function crmBurnVisual(burnRate: number) {
   const burn = Math.round(burnRate || 0);
@@ -903,9 +903,12 @@ export default function CRMPage() {
           });
           // Misma regla que Dashboard / Cronogramas: solo turnos del tenant (empresaId).
           // Antes se incluían turnos de otros tenants solo por clientId/alias → plan cobertura inflado.
-          const allTurnos = turnosRaw.filter((t) =>
-            !scopeEmpresa || belongsToEmpresaView(t, empresaId, migracionCompleta),
-          );
+          const allTurnos = turnosRaw.filter((t) => {
+            if (scopeEmpresa && !belongsToEmpresaView(t, empresaId, migracionCompleta)) return false;
+            const st = String(t.status || '');
+            if (st === 'Canceled' || st === 'CANCELED') return false;
+            return true;
+          });
 
           bucketsEarly.forEach((b) => {
             const fromExtract = sumBalancesByClient(balancesLive.filter((r) => r.periodKey === b.key));
@@ -1132,9 +1135,12 @@ export default function CRMPage() {
       });
       sharedEmpMetaRef.current = sharedMeta;
 
-      const allTurnos = turnosRaw.filter((t) =>
-        !scopeEmpresa || belongsToEmpresaView(t, empresaId, migracionCompleta),
-      );
+      const allTurnos = turnosRaw.filter((t) => {
+        if (scopeEmpresa && !belongsToEmpresaView(t, empresaId, migracionCompleta)) return false;
+        const st = String(t.status || '');
+        if (st === 'Canceled' || st === 'CANCELED') return false;
+        return true;
+      });
 
       const turnosByClient = groupTurnosByClient(allTurnos, clientRefs, tenantClientIds);
 

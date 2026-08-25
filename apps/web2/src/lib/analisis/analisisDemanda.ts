@@ -96,6 +96,16 @@ export function buildDemandaByObjective(opts: {
   turnos.forEach((t: any) => {
     const plannedStart = t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null;
     const scheduleDateKey = plannedStart ? getDateKeyInTimezone(plannedStart) : '';
+    // periodStart/periodEnd acotan la malla (CRM trae ±2 días de padding para fichadas; no deben inflar plan).
+    if (scheduleDateKey) {
+      const periodStartKey = getDateKeyInTimezone(periodStart);
+      const periodEndKey = getDateKeyInTimezone(periodEnd);
+      if (scheduleDateKey < periodStartKey || scheduleDateKey > periodEndKey) return;
+    } else if (plannedStart) {
+      if (plannedStart < periodStart || plannedStart > periodEnd) return;
+    } else {
+      return;
+    }
     if (
       plannedStart &&
       isTurnoOnSlaExcludedSlot(t, slaExclusionCtx, {
