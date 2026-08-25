@@ -1,6 +1,7 @@
 /**
  * PDF membretado del reporte Servicios (contratos SLA).
- * Agrupa por cliente, detalla objetivos con subtotales y respeta filtros activos.
+ * Agrupa por cliente, detalla objetivos con subtotales y desglose de puestos/turnos.
+ * Helvetica (jsPDF) no soporta Unicode → se sanitizan flechas y guiones tipográficos.
  */
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -38,25 +39,65 @@ type ClientGroup = {
   puestos: number;
 };
 
+const COVERAGE_LABELS: Record<string, string> = {
+  '24hs': '24 hs',
+  '12hs_diurno': '12 hs Diurno',
+  '12hs_nocturno': '12 hs Nocturno',
+  custom: 'Personalizado',
+  encargado: 'Encargado',
+};
+
+/** Helvetica no tiene → – — · etc.; evita basura tipo `!'` en el PDF. */
+function pdfSafe(text: string): string {
+  return String(text || '')
+    .replace(/\u2192/g, '->')
+    .replace(/\u2190/g, '<-')
+    .replace(/[\u2013\u2014\u2212]/g, '-')
+    .replace(/[\u00B7\u2022]/g, '-')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, '?');
+}
+
 function sanitizeFilename(name: string): string {
   return name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 60);
 }
 
 function fmtYmd(value: unknown): string {
   const ymd = toYyyyMmDd(value);
-  if (!ymd || ymd.length < 10) return '—';
+  if (!ymd || ymd.length < 10) return '-';
   const [y, m, d] = ymd.split('-');
+  if (!y || !m || !d) return '-';
   return `${d}/${m}/${y}`;
+}
+
+/** Convierte `YYYY-MM-DD` o `YYYY-MM-DD -> YYYY-MM-DD` a DD/MM/YYYY. */
+export function formatServiciosPdfPeriodLabel(raw: string): string {
+  const s = String(raw || '').trim();
+  if (!s) return 'Periodo';
+  const safe = pdfSafe(s);
+  const m = safe.match(/(\d{4}-\d{2}-\d{2})\s*(?:->|a|-|\/)\s*(\d{4}-\d{2}-\d{2})/i);
+  if (m) {
+    return `${fmtYmd(m[1])} a ${fmtYmd(m[2])}`;
+  }
+  const single = safe.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (single) return fmtYmd(single[1]);
+  return safe;
 }
 
 function coverageLabel(s: ServiciosReportPdfRow): string {
   const types = [
     ...new Set(
-      (s.positions || []).map((p: any) => String(p?.coverageType || '24hs')),
+      (s.positions || []).map((p: any) => String(p?.coverageType || s.coverageType || '24hs')),
     ),
   ];
-  if (types.length === 0) return '—';
-  if (types.length === 1) return String(types[0]);
+  if (types.length === 0) {
+    const ct = String(s.coverageType || '').trim();
+    return ct ? (COVERAGE_LABELS[ct] || ct) : '-';
+  }
+  if (types.length === 1) {
+    const t = types[0];
+    return COVERAGE_LABELS[t] || t;
+  }
   return 'Mixto';
 }
 
@@ -66,7 +107,30 @@ function rowHours(s: ServiciosReportPdfRow): number {
 }
 
 function rowPuestos(s: ServiciosReportPdfRow): number {
+  if (!Array.isArray(s.positions)) return 0;
+  return s.positions.reduce((acc: number, p: any) => acc + (Number(p?.quantity) > 0 ? Number(p.quantity) : 1), 0);
+}
+
+function rowPuestoSlots(s: ServiciosReportPdfRow): number {
   return Array.isArray(s.positions) ? s.positions.length : 0;
+}
+
+function activeDaysLabel(days: unknown): string {
+  if (!Array.isArray(days) || days.length === 0) return 'Todos';
+  const map: Record<string, string> = {
+    D: 'Dom', L: 'Lun', M: 'Mar', X: 'Mie', J: 'Jue', V: 'Vie', S: 'Sab',
+  };
+  return days.map((d) => map[String(d).toUpperCase()] || String(d)).join(',');
+}
+
+function shiftLine(sh: any): string {
+  const code = String(sh?.code || '?').toUpperCase();
+  const start = String(sh?.startTime || '').slice(0, 5);
+  const end = String(sh?.endTime || '').slice(0, 5);
+  const hs = Number(sh?.hours);
+  const hsPart = Number.isFinite(hs) && hs > 0 ? ` ${hs}h` : '';
+  if (start && end) return `${code} ${start}-${end}${hsPart}`;
+  return `${code}${hsPart}`;
 }
 
 function groupByClient(rows: ServiciosReportPdfRow[]): ClientGroup[] {
@@ -104,14 +168,15 @@ function drawLetterhead(
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
-  doc.text(String(empresa || 'COSP').toUpperCase(), 14, 12);
+  doc.text(pdfSafe(String(empresa || 'COSP').toUpperCase()), 14, 12);
   doc.setFontSize(11);
-  doc.text(title.toUpperCase(), 14, 20);
+  doc.text(pdfSafe(title.toUpperCase()), 14, 20);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.text(periodLabel, pageW - 14, 12, { align: 'right' });
   doc.setFontSize(8);
-  doc.text('Reporte de contratos SLA', pageW - 14, 20, { align: 'right' });
+  const periodLines = doc.splitTextToSize(pdfSafe(periodLabel), 78);
+  doc.text(periodLines, pageW - 14, 11, { align: 'right' });
+  doc.setFontSize(8);
+  doc.text('Reporte de contratos SLA', pageW - 14, 22, { align: 'right' });
   doc.setTextColor(0, 0, 0);
 }
 
@@ -124,10 +189,17 @@ function drawFooter(doc: jsPDF, empresa: string, issued: string, pageW: number, 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(100, 116, 139);
-    doc.text(`${empresa} · ${issued} · Confidencial`, 14, pageH - 6);
-    doc.text(`Página ${i} / ${total}`, pageW - 14, pageH - 6, { align: 'right' });
+    doc.text(pdfSafe(`${empresa} - ${issued} - Confidencial`), 14, pageH - 6);
+    doc.text(`Pagina ${i} / ${total}`, pageW - 14, pageH - 6, { align: 'right' });
   }
   doc.setTextColor(0, 0, 0);
+}
+
+function ensureSpace(doc: jsPDF, y: number, need: number, pageH: number, drawHead: () => void): number {
+  if (y + need <= pageH - 18) return y;
+  doc.addPage();
+  drawHead();
+  return 36;
 }
 
 /** Genera y descarga PDF membretado del reporte Servicios filtrado. */
@@ -146,8 +218,8 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
     hour: '2-digit',
     minute: '2-digit',
   });
-  const periodLabel = opts.periodLabel || 'Período';
-  const filterLabel = String(opts.filterLabel || '').trim();
+  const periodLabel = formatServiciosPdfPeriodLabel(opts.periodLabel || 'Periodo');
+  const filterLabel = pdfSafe(String(opts.filterLabel || '').trim());
 
   const groups = groupByClient(rows);
   const grandHours = groups.reduce((a, g) => a + g.hours, 0);
@@ -165,10 +237,12 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(51, 65, 85);
-  doc.text(`Emisión: ${issued}`, 14, y);
+  doc.text(pdfSafe(`Emision: ${issued}`), 14, y);
   y += 5;
   doc.text(
-    `Totales: ${rows.length} servicio(s) · ${groups.length} cliente(s) · ${grandActivos} activos · ${grandInactivos} inactivos · ${grandPuestos} puestos · ${Math.round(grandHours).toLocaleString('es-AR')} hs/mes`,
+    pdfSafe(
+      `Totales: ${rows.length} servicio(s) - ${groups.length} cliente(s) - ${grandActivos} activos - ${grandInactivos} inactivos - ${grandPuestos} pax - ${Math.round(grandHours).toLocaleString('es-AR')} hs/mes`,
+    ),
     14,
     y,
   );
@@ -176,19 +250,18 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
   if (filterLabel) {
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
-    doc.text(`Filtros: ${filterLabel}`, 14, y);
+    doc.text(pdfSafe(`Filtros: ${filterLabel}`), 14, y);
     y += 6;
   } else {
     y += 2;
   }
   doc.setTextColor(0, 0, 0);
 
-  // Resumen por cliente
   autoTable(doc, {
     startY: y,
-    head: [['Cliente', 'Objetivos', 'Activos', 'Inactivos', 'Puestos', 'Hs/mes']],
+    head: [['Cliente', 'Objetivos', 'Activos', 'Inactivos', 'Pax', 'Hs/mes']],
     body: groups.map((g) => [
-      g.clientName,
+      pdfSafe(g.clientName),
       String(g.rows.length),
       String(g.activos),
       String(g.inactivos),
@@ -203,7 +276,7 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
       String(grandPuestos),
       Math.round(grandHours).toLocaleString('es-AR'),
     ]],
-    styles: { fontSize: 8, cellPadding: 1.8 },
+    styles: { fontSize: 8, cellPadding: 1.8, font: 'helvetica' },
     headStyles: { fillColor: [15, 23, 42], textColor: 255, fontStyle: 'bold' },
     footStyles: { fillColor: [241, 245, 249], fontStyle: 'bold', textColor: [15, 23, 42] },
     columnStyles: {
@@ -218,10 +291,10 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
     showFoot: 'lastPage',
   });
 
-  // Detalle por cliente
   for (const g of groups) {
     doc.addPage();
-    drawLetterhead(doc, empresa, g.clientName, periodLabel, pageW);
+    const headClient = () => drawLetterhead(doc, empresa, g.clientName, periodLabel, pageW);
+    headClient();
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
@@ -231,7 +304,9 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
     doc.text(
-      `${g.rows.length} objetivo(s) · ${g.activos} activos · ${Math.round(g.hours).toLocaleString('es-AR')} hs/mes`,
+      pdfSafe(
+        `${g.rows.length} objetivo(s) - ${g.activos} activos - ${Math.round(g.hours).toLocaleString('es-AR')} hs/mes`,
+      ),
       14,
       41,
     );
@@ -239,24 +314,24 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
 
     autoTable(doc, {
       startY: 45,
-      head: [['Estado', 'Objetivo', 'Desde', 'Hasta', 'Puestos', 'Cobertura', 'Hs/mes', 'Rot.', 'Cond.']],
+      head: [['Estado', 'Objetivo', 'Desde', 'Hasta', 'Pax', 'Cobertura', 'Hs/mes', 'Rot.', 'Cond.']],
       body: g.rows.map((s) => {
         const active = isSlaContractActive(s.status);
         return [
           active ? 'Activo' : 'Inactivo',
-          String(s.objectiveName || '—'),
+          pdfSafe(String(s.objectiveName || '-')),
           fmtYmd(s.startDate),
           fmtYmd(s.endDate),
           String(rowPuestos(s)),
-          coverageLabel(s),
-          rowHours(s) > 0 ? Math.round(rowHours(s)).toLocaleString('es-AR') : '—',
+          pdfSafe(coverageLabel(s)),
+          rowHours(s) > 0 ? Math.round(rowHours(s)).toLocaleString('es-AR') : '-',
           String(s.serviceRotations?.length || 0),
           String(s.serviceRules?.length || 0),
         ];
       }),
       foot: [[
         '',
-        `Subtotal ${g.clientName}`,
+        pdfSafe(`Subtotal ${g.clientName}`),
         '',
         '',
         String(g.puestos),
@@ -265,7 +340,7 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
         '',
         '',
       ]],
-      styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+      styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak', font: 'helvetica' },
       headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold', fontSize: 7 },
       footStyles: { fillColor: [238, 242, 255], fontStyle: 'bold', textColor: [49, 46, 129], fontSize: 7.5 },
       columnStyles: {
@@ -289,6 +364,76 @@ export function exportServiciosReportPdf(opts: ServiciosReportPdfOpts): void {
         if (v === 'Inactivo') data.cell.styles.textColor = [100, 116, 139];
       },
     });
+
+    // ── Desglose por servicio: puestos y turnos ──
+    let dy = ((doc as any).lastAutoTable?.finalY as number) || 50;
+    dy += 8;
+    dy = ensureSpace(doc, dy, 12, pageH, headClient);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(15, 23, 42);
+    doc.text('Desglose por servicio - puestos y turnos', 14, dy);
+    dy += 6;
+    doc.setTextColor(0, 0, 0);
+
+    for (const s of g.rows) {
+      const positions = Array.isArray(s.positions) ? (s.positions as any[]) : [];
+      dy = ensureSpace(doc, dy, 18, pageH, headClient);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(30, 41, 59);
+      const objTitle = pdfSafe(
+        `${s.objectiveName || 'Objetivo'}  |  ${fmtYmd(s.startDate)} a ${fmtYmd(s.endDate)}  |  ${rowPuestoSlots(s)} puesto(s) / ${rowPuestos(s)} pax`,
+      );
+      const titleLines = doc.splitTextToSize(objTitle, pageW - 28);
+      doc.text(titleLines, 14, dy);
+      dy += titleLines.length * 4 + 2;
+
+      if (positions.length === 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text('Sin puestos cargados en el contrato.', 14, dy);
+        dy += 6;
+        doc.setTextColor(0, 0, 0);
+        continue;
+      }
+
+      const body = positions.map((p: any) => {
+        const shifts = Array.isArray(p?.allowedShiftTypes) ? p.allowedShiftTypes : [];
+        const turnosTxt = shifts.length
+          ? shifts.map(shiftLine).join(' | ')
+          : '-';
+        const cov = String(p?.coverageType || s.coverageType || '24hs');
+        return [
+          pdfSafe(String(p?.name || p?.code || 'Puesto')),
+          String(Number(p?.quantity) > 0 ? Number(p.quantity) : 1),
+          pdfSafe(COVERAGE_LABELS[cov] || cov),
+          pdfSafe(activeDaysLabel(p?.activeDays)),
+          pdfSafe(turnosTxt),
+        ];
+      });
+
+      autoTable(doc, {
+        startY: dy,
+        head: [['Puesto', 'PAX', 'Cobertura', 'Dias', 'Turnos (codigo / horario)']],
+        body,
+        styles: { fontSize: 7, cellPadding: 1.3, overflow: 'linebreak', font: 'helvetica' },
+        headStyles: { fillColor: [99, 102, 241], textColor: 255, fontStyle: 'bold', fontSize: 6.5 },
+        columnStyles: {
+          0: { cellWidth: 38 },
+          1: { halign: 'center', cellWidth: 12 },
+          2: { cellWidth: 28 },
+          3: { cellWidth: 28 },
+          4: { cellWidth: 'auto' as any },
+        },
+        theme: 'grid',
+        margin: { left: 14, right: 14 },
+      });
+      dy = (((doc as any).lastAutoTable?.finalY as number) || dy) + 6;
+    }
   }
 
   drawFooter(doc, empresa, issued, pageW, pageH);
