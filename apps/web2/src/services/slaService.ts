@@ -26,7 +26,7 @@ export interface ServicePosition {
   id: string;
   name: string;
   code?: string;
-  coverageType: '24hs' | '12hs_diurno' | '12hs_nocturno' | 'custom';
+  coverageType: '24hs' | '12hs_diurno' | '12hs_nocturno' | 'custom' | 'encargado';
   quantity: number;
   allowedShiftTypes: ShiftVariant[];
   activeDays: string[];
@@ -151,6 +151,9 @@ export interface ServiceSLA {
   serviceRules?: ServiceRule[];
   /** Rotaciones periódicas por puesto/banda entre empleados. */
   serviceRotations?: ServiceRotation[];
+  /** Persona asignada al puesto Encargado de este servicio (no es flag de legajo). */
+  encargadoEmployeeId?: string;
+  encargadoEmployeeName?: string;
 }
 
 /**

@@ -6,12 +6,12 @@ import { useToast } from '@/context/ToastContext';
 import { db, getDocsOnce } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
-import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, writeBatch, doc, Timestamp, limit } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, getDoc, writeBatch, doc, Timestamp, limit, updateDoc } from 'firebase/firestore';
 import {
   Shield, Calendar, Users, Plus, Trash2, Edit2, Copy, Zap,
   Search, Save, X, MapPin, Briefcase, Table, Settings,
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
-  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck
+  Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck, User
 } from 'lucide-react';
 import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSchemeModal';
 import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
@@ -35,6 +35,22 @@ import {
   parseYmdToLocalDate,
   WEEK_DAY_CODES,
 } from '@/lib/servicios/slaHoursCalculator';
+import {
+  applyEncargadoEmployeeChoice,
+  buildEncargadoDefaultShift,
+  ENCARGADO_ALL_DAYS,
+  ENCARGADO_COVERAGE_TYPE,
+  ENCARGADO_SHIFT_CODE,
+  ENCARGADO_WEEKDAYS,
+  findEncargadoPosition,
+  formatEncargadoDaysLabel,
+  isDedicatedEncargadoAssignment,
+  isEncargadoPosition,
+  nextPlanificacionDotacionForEncargado,
+  sameEncargadoDaySet,
+  stripEncargadoAssignment,
+} from '@/lib/servicios/encargadoPosition';
+import { matchesEmployeeSearch } from '@/lib/planificacion/employeeSearch';
 
 import { toYyyyMmDd, slaCoversCalendarMonth } from '@/lib/firestoreDates';
 import {
@@ -48,6 +64,18 @@ import {
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
+}
+
+function formatPlantillaEmpName(emp: {
+  id: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+}): string {
+  const last = String(emp.lastName || '').trim();
+  const first = String(emp.firstName || '').trim();
+  const composed = `${last} ${first}`.trim() || `${first} ${last}`.trim();
+  return String(emp.name || '').trim() || composed || emp.id;
 }
 
 // --- 1. MODELO DE DATOS ---
@@ -157,6 +185,8 @@ export default function ServiciosSLAPage() {
   const [rotacionesOpen, setRotacionesOpen] = useState(true);
   const [editingRotation, setEditingRotation] = useState<ServiceRotation | null>(null);
   const [editingRotationIsNew, setEditingRotationIsNew] = useState(false);
+  const [plantillaEmps, setPlantillaEmps] = useState<any[]>([]);
+  const [encargadoSearch, setEncargadoSearch] = useState('');
 
   // --- EFECTOS ---
   
@@ -201,7 +231,27 @@ export default function ServiciosSLAPage() {
         setCoverageEmps(rows);
       })
       .catch(() => setCoverageEmps([]));
-  }, [form.objectiveId, view]);
+  }, [form.objectiveId, view, empresaId]);
+
+  const hasEncargadoPos = useMemo(() => !!findEncargadoPosition(form.positions), [form.positions]);
+
+  useEffect(() => {
+    if (view !== 'form' || !empresaId || !hasEncargadoPos) {
+      setPlantillaEmps([]);
+      return;
+    }
+    const qEmpleados = empresaCollectionQuery('empleados', empresaId, scopeEmpresa);
+    getDocs(qEmpleados)
+      .then((snap) => {
+        const rows = snap.docs
+          .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+          .map((d) => ({ id: d.id, ...(d.data() as any) }))
+          .filter((e: any) => String(e.status || '').toLowerCase() !== 'inactivo')
+          .sort((a: any, b: any) => formatPlantillaEmpName(a).localeCompare(formatPlantillaEmpName(b), 'es'));
+        setPlantillaEmps(rows);
+      })
+      .catch(() => setPlantillaEmps([]));
+  }, [view, empresaId, scopeEmpresa, migracionCompleta, hasEncargadoPos]);
 
   // Carga única de servicios_sla + clientes en paralelo (sin listener persistente).
   // Las mutaciones (create/edit/delete) actualizan el estado local directamente.
@@ -473,8 +523,25 @@ export default function ServiciosSLAPage() {
       }
       else if (type === '12hs_diurno') variants = [SHIFT_VARIANTS_DB['M'], SHIFT_VARIANTS_DB['D12']];
       else if (type === '12hs_nocturno') variants = [SHIFT_VARIANTS_DB['N'], SHIFT_VARIANTS_DB['N12']];
+      else if (type === ENCARGADO_COVERAGE_TYPE) variants = [buildEncargadoDefaultShift()];
       
-      setPositionForm({ ...currentFormState, allowedShiftTypes: type === 'custom' ? [] : variants, coverageType: type as any });
+      const switchingToEncargado = type === ENCARGADO_COVERAGE_TYPE;
+      const keepCustomDays = switchingToEncargado
+        && currentFormState.activeDays?.length
+        && !sameEncargadoDaySet(currentFormState.activeDays, ENCARGADO_ALL_DAYS);
+      setPositionForm({
+        ...currentFormState,
+        name: switchingToEncargado && (!currentFormState.name || currentFormState.name === 'Puesto 1')
+          ? 'Encargado'
+          : currentFormState.name,
+        code: switchingToEncargado ? ENCARGADO_SHIFT_CODE : currentFormState.code,
+        quantity: switchingToEncargado ? 1 : currentFormState.quantity,
+        activeDays: switchingToEncargado
+          ? (keepCustomDays ? currentFormState.activeDays : [...ENCARGADO_WEEKDAYS])
+          : currentFormState.activeDays,
+        allowedShiftTypes: type === 'custom' ? [] : variants,
+        coverageType: type as ServicePosition['coverageType'],
+      });
   };
 
   const handleCoverageTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -750,7 +817,23 @@ export default function ServiciosSLAPage() {
   };
 
   const removePosition = (id: string) => {
+      const removed = form.positions.find((p) => p.id === id);
       const updatedPositions = form.positions.filter(p => p.id !== id);
+      if (removed && isEncargadoPosition(removed)) {
+        const prevId = String(form.encargadoEmployeeId || '').trim();
+        const assignments = prevId
+          ? stripEncargadoAssignment(form.positionAssignments, prevId, removed.name)
+          : form.positionAssignments;
+        setForm({
+          ...form,
+          positions: updatedPositions,
+          encargadoEmployeeId: '',
+          encargadoEmployeeName: '',
+          positionAssignments: assignments,
+        });
+        setEncargadoSearch('');
+        return;
+      }
       setForm({ ...form, positions: updatedPositions });
   };
 
@@ -778,6 +861,48 @@ export default function ServiciosSLAPage() {
   const removeCoverage = (empId: string) => {
     setForm({ ...form, positionAssignments: (form.positionAssignments || []).filter(a => a.employeeId !== empId) });
     if (coverageEditEmpId === empId) cancelEditCoverage();
+  };
+
+  const selectEncargadoEmployee = (emp: { id: string; name?: string; firstName?: string; lastName?: string } | null) => {
+    const next = emp
+      ? { employeeId: emp.id, employeeName: formatPlantillaEmpName(emp) }
+      : null;
+    const patched = applyEncargadoEmployeeChoice(form, next);
+    setForm({
+      ...form,
+      encargadoEmployeeId: patched.encargadoEmployeeId,
+      encargadoEmployeeName: patched.encargadoEmployeeName,
+      positionAssignments: patched.positionAssignments,
+    });
+    setEncargadoSearch('');
+  };
+
+  const syncEncargadoLegajoDotacion = async (opts: {
+    objectiveId: string;
+    positionName: string;
+    prevId?: string;
+    nextId?: string;
+    dedicated: boolean;
+  }) => {
+    const objId = String(opts.objectiveId || '').trim();
+    if (!objId) return;
+    const ids = [opts.prevId, opts.nextId].map((v) => String(v || '').trim()).filter(Boolean);
+    const unique = Array.from(new Set(ids));
+    for (const empId of unique) {
+      const snap = await getDoc(doc(db, 'empleados', empId));
+      if (!snap.exists()) continue;
+      const current = ((snap.data() as any).planificacionDotacion || {}) as Record<string, { positionName: string; shiftCode?: string }>;
+      const mode: 'set' | 'clear' = empId === opts.nextId ? 'set' : 'clear';
+      const nextDotacion = nextPlanificacionDotacionForEncargado({
+        current,
+        objectiveId: objId,
+        positionName: opts.positionName,
+        mode,
+        dedicated: mode === 'set' ? opts.dedicated : true,
+      });
+      if (JSON.stringify(current) === JSON.stringify(nextDotacion)) continue;
+      await updateDoc(doc(db, 'empleados', empId), { planificacionDotacion: nextDotacion });
+    }
   };
   const toggleCoveragePosition = (positionName: string) => {
     const exists = coverageEditSlots.find(s => s.positionName === positionName);
@@ -1045,8 +1170,17 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     // ─────────────────────────────────────────────────────────────────────────
 
     // JSON round-trip elimina campos undefined que Firestore no acepta
-    const dataToSave = JSON.parse(JSON.stringify({ ...form, totalMonthlyHours: totalContractHours })) as any;
+    const encPosToSave = findEncargadoPosition(form.positions);
+    const dataToSave = JSON.parse(JSON.stringify({
+      ...form,
+      totalMonthlyHours: totalContractHours,
+      encargadoEmployeeId: encPosToSave ? (form.encargadoEmployeeId || '') : '',
+      encargadoEmployeeName: encPosToSave ? (form.encargadoEmployeeName || '') : '',
+    })) as any;
     if (scopeEmpresa && empresaId) dataToSave.empresaId = empresaId;
+    const prevEncargadoId = isEditing && form.id
+      ? String(services.find((s) => s.id === form.id)?.encargadoEmployeeId || '').trim()
+      : '';
 
     try {
       if (isEditing && form.id) {
@@ -1069,6 +1203,23 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           empresaId,
           sla: { ...dataToSave, id: isEditing && form.id ? form.id : dataToSave.id } as any,
         }).catch((err) => console.warn('[servicios] hours_balances', err));
+      }
+      const nextEncargadoId = String(dataToSave.encargadoEmployeeId || '').trim();
+      if (dataToSave.objectiveId && (prevEncargadoId || nextEncargadoId || encPosToSave)) {
+        void syncEncargadoLegajoDotacion({
+          objectiveId: dataToSave.objectiveId,
+          positionName: encPosToSave?.name || 'Encargado',
+          prevId: prevEncargadoId,
+          nextId: encPosToSave ? nextEncargadoId : '',
+          dedicated: isDedicatedEncargadoAssignment(
+            dataToSave.positionAssignments,
+            nextEncargadoId,
+            encPosToSave?.name,
+          ),
+        }).catch((err) => {
+          console.warn('[servicios] encargado dotacion', err);
+          addToast('Servicio guardado, pero no se pudo actualizar el puesto Encargado en el legajo', 'error');
+        });
       }
     } catch (e: unknown) {
         console.error(e);
@@ -1328,6 +1479,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
         positions += (srv.positions || []).length;
         // Guardias = suma de ceil(hs_mensuales_por_puesto / 200) — guardias en rotación reales
         (srv.positions || []).forEach(p => {
+          if (isEncargadoPosition(p)) return;
           calculateMonthlyBreakdown([p], srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
             if (mb.monthKey === sk) {
               const pax = p.quantity || 1;
@@ -2181,6 +2333,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             <span key={v.code} className="text-[8px] font-bold bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-1.5 py-0.5 rounded">{v.code} · {v.hours}h</span>
                           ))}
                         </div>
+                        {isEncargadoPosition(pos) ? (
+                          <p className="text-[9px] font-bold text-slate-500 mt-1.5 truncate">
+                            {formatEncargadoDaysLabel(pos.activeDays)}
+                            {srv.encargadoEmployeeName ? ` · ${srv.encargadoEmployeeName}` : ''}
+                          </p>
+                        ) : null}
                       </div>
                     ))}
                   </div>
@@ -2192,10 +2350,13 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                     const avgH = bd.length > 0 ? bd.reduce((a, m) => a + m.totalHours, 0) / bd.length : 0;
                     return { pos, avgH: Math.round(avgH) };
                   });
-                  const totalHrsAll = viabilityBase.reduce((a, v) => a + v.avgH, 0);
-                  const totalGuards = Math.ceil(totalHrsAll / 192);
+                  const coverageHrs = viabilityBase
+                    .filter((v) => !isEncargadoPosition(v.pos))
+                    .reduce((a, v) => a + v.avgH, 0);
+                  const totalGuards = Math.ceil(coverageHrs / 192);
                   const viability = viabilityBase.map(({ pos, avgH }) => {
-                    const propGuards = totalHrsAll > 0 ? (avgH / totalHrsAll) * totalGuards : 0;
+                    if (isEncargadoPosition(pos)) return { pos, avgH, propGuards: 0, hxg: 0 };
+                    const propGuards = coverageHrs > 0 ? (avgH / coverageHrs) * totalGuards : 0;
                     const hxg = propGuards > 0 ? avgH / propGuards : 0;
                     return { pos, avgH, propGuards, hxg };
                   });
@@ -2849,6 +3010,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     {(positionContractHoursMap[pos.id] ?? 0).toLocaleString('es-AR')} hs/mes
                                   </span>
                                 ) : null}
+                                {isEncargadoPosition(pos) ? (
+                                  <span className="text-[10px] font-black text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-600">
+                                    {formatEncargadoDaysLabel(pos.activeDays)}
+                                    {form.encargadoEmployeeName ? ` · ${form.encargadoEmployeeName}` : ''}
+                                  </span>
+                                ) : null}
                               </div>
                            </div>
                            <div className="flex gap-1 flex-wrap justify-end max-w-xs items-center">
@@ -2875,6 +3042,95 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      ))}
                   </div>
                </div>
+            </div>
+
+            {/* ── Encargado de servicio ── */}
+            <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2">
+                  <User size={16} className="text-indigo-500"/> Encargado de servicio
+                </h3>
+              </div>
+              {!hasEncargadoPos ? (
+                <p className="text-[10px] text-slate-400">
+                  Primero agregá el puesto <span className="font-bold text-slate-500">ENCARGADO DE SERVICIO (sin cobertura)</span> en la estructura operativa. Después elegís quién lo ocupa en este contrato.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-[10px] text-slate-500">
+                    Esta persona ficha y factura horas, pero <span className="font-bold text-slate-600 dark:text-slate-300">no cubre vacantes de otros puestos</span>. La asignación es del servicio, no del legajo.
+                  </p>
+                  {form.encargadoEmployeeId ? (
+                    <div className="flex items-center gap-3 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 px-4 py-3 shadow-sm">
+                      <div className="h-9 w-9 rounded-xl bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300 flex items-center justify-center">
+                        <User size={16}/>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-black text-slate-800 dark:text-white truncate">{form.encargadoEmployeeName || form.encargadoEmployeeId}</p>
+                        <p className="text-[10px] text-slate-400">Asignado a {findEncargadoPosition(form.positions)?.name || 'Encargado'}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => selectEncargadoEmployee(null)}
+                        className="px-3 py-1.5 rounded-xl text-[10px] font-black text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-3 py-2">
+                      Todavía no hay Encargado en este servicio.
+                    </p>
+                  )}
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    <input
+                      type="search"
+                      value={encargadoSearch}
+                      onChange={(e) => setEncargadoSearch(e.target.value)}
+                      placeholder="Buscar por apellido, nombre, legajo o DNI…"
+                      className="w-full pl-9 pr-3 py-2.5 bg-white dark:bg-slate-800 border dark:border-slate-600 rounded-xl text-xs font-bold dark:text-white"
+                    />
+                  </div>
+                  <div className="max-h-56 overflow-y-auto space-y-1 custom-scrollbar">
+                    {plantillaEmps.length === 0 ? (
+                      <p className="text-[10px] text-slate-400 px-1">Cargando plantilla…</p>
+                    ) : !encargadoSearch.trim() ? (
+                      <p className="text-[10px] text-slate-400 px-1">Escribí apellido, nombre, legajo o DNI para elegir de toda la plantilla.</p>
+                    ) : (
+                      (() => {
+                        const matches = plantillaEmps.filter((emp) => matchesEmployeeSearch(emp, encargadoSearch));
+                        if (matches.length === 0) {
+                          return <p className="text-[10px] text-slate-400 px-1">Sin coincidencias en la plantilla activa.</p>;
+                        }
+                        return matches.slice(0, 20).map((emp: any) => {
+                          const empName = formatPlantillaEmpName(emp);
+                          const selected = form.encargadoEmployeeId === emp.id;
+                          const sameObjective = emp.preferredObjectiveId === form.objectiveId;
+                          return (
+                            <button
+                              key={emp.id}
+                              type="button"
+                              onClick={() => selectEncargadoEmployee(emp)}
+                              className={`w-full text-left px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${
+                                selected
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'
+                              }`}
+                            >
+                              <span className="block truncate">{empName}</span>
+                              <span className={`text-[9px] font-bold ${selected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                                {emp.fileNumber ? `Legajo ${emp.fileNumber}` : 'Sin legajo'}
+                                {sameObjective ? ' · Este objetivo' : ''}
+                              </span>
+                            </button>
+                          );
+                        });
+                      })()
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* ── Cobertura de dotación ── */}
@@ -2936,7 +3192,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                         {isEditingEmp && (
                           <div className="border-t dark:border-slate-700 px-4 py-3 space-y-3 bg-slate-50 dark:bg-slate-900/30">
                             <p className="text-[10px] font-black uppercase text-slate-400">Puestos permitidos para {empName}:</p>
-                            {form.positions.map((pos: ServicePosition) => {
+                            {form.positions.filter((pos: ServicePosition) => !isEncargadoPosition(pos)).map((pos: ServicePosition) => {
                               const slot = coverageEditSlots.find(s => s.positionName === pos.name);
                               const active = !!slot;
                               return (
@@ -3964,8 +4220,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                     <div className="grid grid-cols-4 gap-3">
                         <div className="col-span-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nombre del puesto</label><input className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold dark:text-white" value={positionForm.name} onChange={e => setPositionForm({...positionForm, name: e.target.value})}/></div>
                         <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Sigla <span className="text-indigo-400">(planif.)</span></label><input maxLength={4} className="w-full p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700 rounded-xl font-black text-center text-indigo-700 dark:text-indigo-300 uppercase" placeholder="P1" value={positionForm.code || ''} onChange={e => setPositionForm({...positionForm, code: e.target.value.toUpperCase().slice(0,4)})}/></div>
+                        {positionForm.coverageType !== 'encargado' && (
                         <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Pax</label><input type="number" min="1" className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-center dark:text-white" value={positionForm.quantity} onChange={e => setPositionForm({...positionForm, quantity: parseInt(e.target.value) || 1})}/></div>
+                        )}
                     </div>
+                    {positionForm.coverageType !== 'encargado' && (
                     <div>
                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1 block">Días operativos</label>
                         <div className="flex gap-1">
@@ -3994,6 +4253,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             })()}
                         </p>
                     </div>
+                    )}
                     <div>
                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Tipo de Cobertura</label>
                         <select className="w-full p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl font-bold text-indigo-700 dark:text-indigo-300" value={positionForm.coverageType} onChange={handleCoverageTypeChange}>
@@ -4001,8 +4261,102 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             <option value="12hs_diurno">12 HORAS DIURNO</option>
                             <option value="12hs_nocturno">12 HORAS NOCTURNO</option>
                             <option value="custom">PERSONALIZADO / TURNOS ESPECÍFICOS</option>
+                            <option value="encargado">ENCARGADO DE SERVICIO (sin cobertura)</option>
                         </select>
                     </div>
+                    {positionForm.coverageType === 'encargado' && (
+                        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-4 space-y-3">
+                            <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 leading-snug">
+                                Criterio de trabajo del Encargado. Esas horas <span className="underline">suman al servicio</span> (SLA/CRM) como horas anticipadas. Si ese día no trabaja o tiene franco, no se cubre el puesto y no se suman horas de vacante.
+                            </p>
+                            <div>
+                                <label className="text-[9px] font-black uppercase text-slate-500 block mb-1.5">Días que trabaja</label>
+                                <div className="flex flex-wrap gap-1.5 mb-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPositionForm((prev) => ({ ...prev, activeDays: [...ENCARGADO_WEEKDAYS] }))}
+                                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black border transition-colors ${sameEncargadoDaySet(positionForm.activeDays, ENCARGADO_WEEKDAYS) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-500 border-amber-200 dark:border-amber-800'}`}
+                                    >L–V</button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPositionForm((prev) => ({ ...prev, activeDays: [...ENCARGADO_ALL_DAYS] }))}
+                                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black border transition-colors ${sameEncargadoDaySet(positionForm.activeDays, ENCARGADO_ALL_DAYS) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-500 border-amber-200 dark:border-amber-800'}`}
+                                    >L–D</button>
+                                </div>
+                                <div className="flex gap-1">
+                                    {ENCARGADO_ALL_DAYS.map((day) => {
+                                        const active = (positionForm.activeDays || [...ENCARGADO_WEEKDAYS]).includes(day);
+                                        return (
+                                            <button
+                                                key={day}
+                                                type="button"
+                                                onClick={() => {
+                                                    const cur = positionForm.activeDays?.length ? positionForm.activeDays : [...ENCARGADO_WEEKDAYS];
+                                                    const next = active ? cur.filter((d) => d !== day) : [...cur, day];
+                                                    const ordered = ENCARGADO_ALL_DAYS.filter((d) => next.includes(d));
+                                                    setPositionForm({ ...positionForm, activeDays: ordered.length ? ordered : [...ENCARGADO_WEEKDAYS] });
+                                                }}
+                                                className={`w-9 h-9 rounded-lg text-[11px] font-black transition-colors border ${active ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-400 border-amber-200 dark:border-amber-800'}`}
+                                            >{day}</button>
+                                        );
+                                    })}
+                                </div>
+                                <p className="text-[9px] text-slate-500 font-bold mt-1">
+                                    {sameEncargadoDaySet(positionForm.activeDays, ENCARGADO_WEEKDAYS)
+                                      ? 'Lunes a viernes. Sábado y domingo no suman horas al servicio.'
+                                      : sameEncargadoDaySet(positionForm.activeDays, ENCARGADO_ALL_DAYS)
+                                        ? 'Todos los días del calendario (incluye S/D).'
+                                        : `${formatEncargadoDaysLabel(positionForm.activeDays)} — solo esos días suman horas anticipadas.`}
+                                </p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-[9px] font-black uppercase text-slate-500 block mb-1">Desde</label>
+                                    <input
+                                        type="time"
+                                        className="w-full p-2.5 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-xl font-bold text-sm"
+                                        value={positionForm.allowedShiftTypes.find((s) => s.code === ENCARGADO_SHIFT_CODE)?.startTime?.slice(0, 5) || '10:00'}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            if (!v) return;
+                                            setPositionForm((prev) => {
+                                                const cur = prev.allowedShiftTypes[0];
+                                                const end = cur?.endTime?.slice(0, 5) || '18:00';
+                                                return { ...prev, allowedShiftTypes: [buildEncargadoDefaultShift({ startTime: v, endTime: end })] };
+                                            });
+                                        }}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-[9px] font-black uppercase text-slate-500 block mb-1">Hasta</label>
+                                    <input
+                                        type="time"
+                                        className="w-full p-2.5 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-xl font-bold text-sm"
+                                        value={positionForm.allowedShiftTypes.find((s) => s.code === ENCARGADO_SHIFT_CODE)?.endTime?.slice(0, 5) || '18:00'}
+                                        onChange={(e) => {
+                                            const v = e.target.value;
+                                            if (!v) return;
+                                            setPositionForm((prev) => {
+                                                const cur = prev.allowedShiftTypes[0];
+                                                const start = cur?.startTime?.slice(0, 5) || '10:00';
+                                                return { ...prev, allowedShiftTypes: [buildEncargadoDefaultShift({ startTime: start, endTime: v })] };
+                                            });
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                            {form.startDate && form.endDate ? (() => {
+                                const hs = calculatePositionContractTotalHours(positionForm, form.startDate, form.endDate, form.excludedDates);
+                                const enc = positionForm.allowedShiftTypes[0];
+                                const dayHs = enc ? (enc.hours || 8) : 8;
+                                return (
+                                    <p className="text-[10px] font-black text-amber-900 dark:text-amber-200 bg-white/70 dark:bg-slate-900/40 rounded-xl px-3 py-2 border border-amber-200 dark:border-amber-800">
+                                        {dayHs} hs/día · {formatEncargadoDaysLabel(positionForm.activeDays)} → {hs.toLocaleString('es-AR')} hs anticipadas en el contrato
+                                    </p>
+                                );
+                            })() : null}
+                        </div>
+                    )}
                     <div>
                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Género requerido en el puesto</label>
                         <select className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold dark:text-white" value={positionForm.preferenciaGenero || 'INDISTINTO'} onChange={e => setPositionForm({ ...positionForm, preferenciaGenero: e.target.value as ServicePosition['preferenciaGenero'] })}>
@@ -4260,7 +4614,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                         </div>
                     </div>
                     {/* Estimación de guardias en rotación */}
-                    {positionForm.allowedShiftTypes.length > 0 && (() => {
+                    {positionForm.coverageType !== 'encargado' && positionForm.allowedShiftTypes.length > 0 && (() => {
                       const bd = calculateMonthlyBreakdown([positionForm], form.startDate, form.endDate);
                       const avgH = bd.length > 0 ? bd.reduce((a, m) => a + m.totalHours, 0) / bd.length : 0;
                       const _pax = positionForm.quantity || 1;
