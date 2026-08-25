@@ -29,6 +29,7 @@ import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, 
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { exportServiciosReportPdf } from '@/lib/reportes/serviciosReportPdf';
 import {
     formatCctPeriodLabel,
     formatCctPeriodRangeDisplay,
@@ -146,7 +147,7 @@ const DICTIONARY: Record<string, string> = {
 
 export default function ReportsPage() {
     const { assignedClientId } = useAuth();
-    const { empresaId } = useEmpresa();
+    const { empresaId, empresa } = useEmpresa();
     const {
         loading, loadingProgress, dateRange, setDateRange, publishFilter, setPublishFilter,
         usePlannedHours, setUsePlannedHours,
@@ -1926,10 +1927,29 @@ export default function ReportsPage() {
         );
     };
 
+    const reportProgressTitle = useMemo(() => {
+        switch (activeTab) {
+            case 'EMPLOYEE':
+                return 'Generando liquidación';
+            case 'SHIFTS':
+                return 'Generando detalle de turnos';
+            case 'OBJECTIVE':
+                return 'Generando reporte por objetivo';
+            case 'PLANIFICADO':
+                return 'Generando planificado vs real';
+            case 'SERVICIOS':
+                return 'Generando reporte de servicios';
+            case 'AUDIT':
+                return 'Cargando auditoría';
+            default:
+                return 'Generando reporte';
+        }
+    }, [activeTab]);
+
     return (
         <DashboardLayout>
             <Head><title>Reportes | COSP V1.0</title></Head>
-            {loading && (
+            {(loading || (activeTab === 'SERVICIOS' && svcReportLoading)) && (
                 <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm no-print">
                     <div className="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg px-6 py-5">
                         <div className="flex items-center gap-3 mb-4">
@@ -1938,20 +1958,26 @@ export default function ReportsPage() {
                             </div>
                             <div className="min-w-0">
                                 <p className="text-sm font-black uppercase tracking-wide text-slate-800 dark:text-white">
-                                    Generando liquidación
+                                    {reportProgressTitle}
                                 </p>
                                 <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400 truncate">
-                                    {loadingProgress?.label || 'Procesando…'}
+                                    {loading
+                                        ? (loadingProgress?.label || 'Procesando…')
+                                        : 'Cargando contratos de servicio…'}
                                 </p>
                             </div>
                             <span className="ml-auto text-2xl font-black tabular-nums text-indigo-600 dark:text-indigo-400">
-                                {loadingProgress?.pct ?? 0}%
+                                {loading ? `${loadingProgress?.pct ?? 0}%` : '…'}
                             </span>
                         </div>
                         <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                             <div
                                 className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-indigo-600 transition-[width] duration-300 ease-out"
-                                style={{ width: `${loadingProgress?.pct ?? 0}%` }}
+                                style={{
+                                    width: loading
+                                        ? `${loadingProgress?.pct ?? 0}%`
+                                        : '40%',
+                                }}
                             />
                         </div>
                         <p className="mt-3 text-[10px] font-bold text-slate-400 text-center">
@@ -2382,83 +2408,135 @@ export default function ReportsPage() {
                 </ContentCard>
 
                 {/* ── KPI Resumen Ejecutivo ── */}
-                {(employeeReport.length > 0 || objectiveReport.length > 0) && (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
-                        {(activeTab === 'EMPLOYEE'
+                {(employeeReport.length > 0 || objectiveReport.length > 0) && (() => {
+                    const sumEmp = (key: string) =>
+                        employeeReport.reduce((a, c) => a + (Number((c as any)[key]) || 0), 0);
+                    const planCob = sumEmp('horasCobertura');
+                    const planFuera = sumEmp('horasDespliegue');
+                    const realCob = sumEmp('horasRealesCobertura');
+                    const realFuera = sumEmp('horasRealesDespliegue');
+                    // Fallback si el reporte se generó antes del split
+                    const planTotalFallback = sumEmp('horasTeoricas') || sumEmp('total');
+                    const realTotalFallback = sumEmp('horasReales');
+                    const planCobShow = planCob > 0 || planFuera > 0 ? planCob : planTotalFallback;
+                    const realCobShow = realCob > 0 || realFuera > 0 ? realCob : realTotalFallback;
+
+                    const kpis =
+                        activeTab === 'EMPLOYEE'
                             ? [
-                                {
-                                    label: 'Legajos',
-                                    value: employeeReport.length,
-                                    sub: liqQueryEmployeeId ? 'consulta individual' : 'en el período',
-                                    icon: '👤',
-                                    color: 'from-indigo-500 to-indigo-600',
-                                },
-                                {
-                                    label: 'Hs. Teóricas',
-                                    value: employeeReport.reduce((a, c) => a + (c.total || 0), 0).toFixed(1),
-                                    sub: 'liquidación (incl. RET/REF/ESC)',
-                                    icon: '🕐',
-                                    color: 'from-sky-500 to-sky-600',
-                                },
-                                {
-                                    label: 'Hs. Reales',
-                                    value: employeeReport.reduce((a, c) => a + (c.horasReales ?? 0), 0).toFixed(1),
-                                    sub: 'liquidación',
-                                    icon: '✅',
-                                    color: 'from-emerald-500 to-emerald-600',
-                                },
-                                {
-                                    label: 'Al 50%',
-                                    value: employeeReport.reduce((a, c) => a + (c.extra50 || 0), 0).toFixed(1),
-                                    sub: 'excedente CCT',
-                                    icon: '⚡',
-                                    color: 'from-orange-500 to-orange-600',
-                                },
-                            ]
+                                  {
+                                      label: 'Legajos',
+                                      value: employeeReport.length,
+                                      sub: liqQueryEmployeeId ? 'consulta individual' : 'en el período',
+                                      icon: '👤',
+                                      color: 'from-indigo-500 to-indigo-600',
+                                  },
+                                  {
+                                      label: 'Plan cobertura',
+                                      value: planCobShow.toFixed(1),
+                                      sub: 'hs teóricas (sin RET/REF/ESC)',
+                                      icon: '🕐',
+                                      color: 'from-sky-500 to-sky-600',
+                                  },
+                                  {
+                                      label: 'Fuera cob.',
+                                      value: planFuera.toFixed(1),
+                                      sub: 'RET + REF + ESC teóricas',
+                                      icon: '📦',
+                                      color: 'from-amber-500 to-amber-600',
+                                  },
+                                  {
+                                      label: 'Reales cob.',
+                                      value: realCobShow.toFixed(1),
+                                      sub: 'trabajadas cobertura',
+                                      icon: '✅',
+                                      color: 'from-emerald-500 to-emerald-600',
+                                  },
+                                  {
+                                      label: 'Reales fuera',
+                                      value: realFuera.toFixed(1),
+                                      sub: 'RET + REF + ESC reales',
+                                      icon: '📤',
+                                      color: 'from-teal-500 to-teal-600',
+                                  },
+                                  {
+                                      label: 'Al 50%',
+                                      value: sumEmp('extra50').toFixed(1),
+                                      sub: 'excedente CCT',
+                                      icon: '⚡',
+                                      color: 'from-orange-500 to-orange-600',
+                                  },
+                              ]
                             : [
-                            {
-                                label: 'Empleados',
-                                value: employeeReport.length,
-                                sub: `${employeeReport.reduce((a,c)=>a+(c.shiftsTotal ?? c.shifts ?? 0),0)} turnos`,
-                                icon: '👤',
-                                color: 'from-indigo-500 to-indigo-600',
-                            },
-                            {
-                                label: 'Hs. Teóricas',
-                                value: employeeReport.reduce((a,c)=>a+(c.total||0),0).toFixed(1),
-                                sub: 'liquidación (incl. RET/REF/ESC)',
-                                icon: '🕐',
-                                color: 'from-sky-500 to-sky-600',
-                            },
-                            {
-                                label: 'Hs. Reales',
-                                value: employeeReport.reduce((a,c)=>a+(c.horasReales ?? 0),0).toFixed(1),
-                                sub: 'horas trabajadas',
-                                icon: '✅',
-                                color: 'from-emerald-500 to-emerald-600',
-                            },
-                            {
-                                label: 'Objetivos',
-                                value: objectiveReport.length,
-                                sub: 'en el período',
-                                icon: '🏢',
-                                color: 'from-violet-500 to-violet-600',
-                            },
-                        ]).map(kpi => (
-                            <div key={kpi.label} className="relative overflow-hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 shadow-sm">
-                                <div className={`absolute inset-0 bg-gradient-to-br ${kpi.color} opacity-5 dark:opacity-10`}/>
-                                <div className="relative flex items-start gap-3">
-                                    <div className="text-2xl leading-none mt-0.5">{kpi.icon}</div>
-                                    <div>
-                                        <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">{kpi.label}</p>
-                                        <p className="text-2xl font-black text-slate-800 dark:text-white leading-tight">{kpi.value}</p>
-                                        <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{kpi.sub}</p>
+                                  {
+                                      label: 'Empleados',
+                                      value: employeeReport.length,
+                                      sub: `${employeeReport.reduce((a, c) => a + (c.shiftsTotal ?? c.shifts ?? 0), 0)} turnos`,
+                                      icon: '👤',
+                                      color: 'from-indigo-500 to-indigo-600',
+                                  },
+                                  {
+                                      label: 'Plan cobertura',
+                                      value: planCobShow.toFixed(1),
+                                      sub: 'hs teóricas (sin RET/REF/ESC)',
+                                      icon: '🕐',
+                                      color: 'from-sky-500 to-sky-600',
+                                  },
+                                  {
+                                      label: 'Fuera cob.',
+                                      value: planFuera.toFixed(1),
+                                      sub: 'RET + REF + ESC teóricas',
+                                      icon: '📦',
+                                      color: 'from-amber-500 to-amber-600',
+                                  },
+                                  {
+                                      label: 'Reales cob.',
+                                      value: realCobShow.toFixed(1),
+                                      sub: 'horas trabajadas cobertura',
+                                      icon: '✅',
+                                      color: 'from-emerald-500 to-emerald-600',
+                                  },
+                                  {
+                                      label: 'Reales fuera',
+                                      value: realFuera.toFixed(1),
+                                      sub: 'RET + REF + ESC reales',
+                                      icon: '📤',
+                                      color: 'from-teal-500 to-teal-600',
+                                  },
+                                  {
+                                      label: 'Objetivos',
+                                      value: objectiveReport.length,
+                                      sub: 'en el período',
+                                      icon: '🏢',
+                                      color: 'from-violet-500 to-violet-600',
+                                  },
+                              ];
+
+                    return (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-2">
+                            {kpis.map((kpi) => (
+                                <div
+                                    key={kpi.label}
+                                    className="relative overflow-hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-4 shadow-sm"
+                                >
+                                    <div className={`absolute inset-0 bg-gradient-to-br ${kpi.color} opacity-5 dark:opacity-10`} />
+                                    <div className="relative flex items-start gap-3">
+                                        <div className="text-2xl leading-none mt-0.5">{kpi.icon}</div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                                                {kpi.label}
+                                            </p>
+                                            <p className="text-2xl font-black text-slate-800 dark:text-white leading-tight">
+                                                {kpi.value}
+                                            </p>
+                                            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{kpi.sub}</p>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                            ))}
+                        </div>
+                    );
+                })()}
 
                 {activeTab === 'EMPLOYEE' && renderEmployeeTable()}
                 {activeTab === 'SHIFTS' && renderShiftsDetailTable()}
@@ -2542,6 +2620,31 @@ export default function ReportsPage() {
                                     ))}
                                 </div>
                                 <span className="text-[10px] font-black text-slate-400 uppercase">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''}</span>
+                                <button
+                                    type="button"
+                                    disabled={filtered.length === 0 || svcReportLoading}
+                                    onClick={() => {
+                                        try {
+                                            const filterParts: string[] = [];
+                                            if (svcStatusFilter === 'active') filterParts.push('solo activos');
+                                            if (svcStatusFilter === 'inactive') filterParts.push('solo inactivos');
+                                            if (svcSearch.trim()) filterParts.push(`búsqueda "${svcSearch.trim()}"`);
+                                            exportServiciosReportPdf({
+                                                rows: filtered,
+                                                empresaName: (empresa as any)?.name || 'COSP',
+                                                periodLabel: `${dateRange.start} → ${dateRange.end}`,
+                                                filterLabel: filterParts.length ? filterParts.join(' · ') : 'sin filtros adicionales',
+                                            });
+                                            toast.success('PDF de servicios descargado');
+                                        } catch (e) {
+                                            toast.error(e instanceof Error ? e.message : 'No se pudo generar el PDF');
+                                        }
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wide hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                                    title="Descargar PDF membretado (totales por cliente)"
+                                >
+                                    <Download size={13}/> PDF
+                                </button>
                             </ContentCard>
                             {/* Tabla */}
                             <ContentCard padding={false} className="overflow-hidden">
