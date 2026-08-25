@@ -209,9 +209,6 @@ export default function CrmDashboardSummary({
           <KpiCompact label="Plan ÷ SLA" value={planVsSla} unit="%" tone="text-slate-700 dark:text-slate-200" />
           <KpiCompact label="Real. ÷ plan" value={execVsPlan} unit="%" tone="text-slate-700 dark:text-slate-200" />
         </div>
-        <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500">
-          Plan cobertura = malla que cubre SLA (ext/adel incluidos). RET / REF / ESC no suman acá: son costo fuera de cobertura (liquidación).
-        </p>
 
         <div className="grid grid-cols-3 gap-1.5 text-center">
           <MiniStat label="Δ plan − SLA" value={`${deltaPlanSla >= 0 ? '+' : ''}${deltaPlanSla.toLocaleString('es-AR')} hs`} />

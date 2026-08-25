@@ -748,13 +748,16 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     );
     const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(sortedDocs, { usePlannedHours });
 
-    let hoursTotalOperativas = 0; // teÃ³ricas
+    let hoursTotalOperativas = 0; // teóricas cobertura (sin RET/REF/ESC)
+    let hoursDespliegue = 0;     // teóricas RET + REF + ESC (fuera de cobertura)
     let totalDiurnas = 0;
     let totalNocturnas = 0;
-    let hoursFT = 0;           // teÃ³ricas FT (para horasTeoricas)
+    let hoursFT = 0;           // teóricas FT (para horasTeoricas)
     let horasFTReal = 0;       // reales FT trabajadas (para extra100 y extra50)
     let hoursFeriado = 0;
     let horasRealesTotal = 0;   // reales (realStartTime/realEndTime)
+    let horasRealesCobertura = 0;
+    let horasRealesDespliegue = 0;
     let turnosConDatosReales = 0;
 
     sortedDocs.forEach(d => {
@@ -767,7 +770,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const isFT = isFrancoTrabajadoShift(d);
             if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'EV'].includes(rawCode) && !isFT) return;
             if (rawCode === 'F' && !isFT) return;
-            // Doc F sin fichada: liquida en el turno de cobertura si ese dÃ­a tiene fichada
+            // Doc F sin fichada: liquida en el turno de cobertura si ese día tiene fichada
             if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d) && francoDocSkipIds.has(d.id)) return;
 
             // Fallback a tiempos reales si no hay planificado (ej: turno RET sin endTime)
@@ -779,6 +782,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const end   = d.endTime?.toDate   ? d.endTime.toDate()   : rEndFB;
             if (!start || !end) return;
             const isRet = rawCode === 'RET' || d.isReten === true;
+            const isDespliegue = isRet || isDeploymentOrPoolShift(d);
             let duration: number;
 
             if (isRet) {
@@ -806,25 +810,30 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 duration = resolveFtLiquidationHours(d, duration > 0 && duration < 23.5 ? duration : 8);
             }
 
-            // Fix 4: feriado solo aplica a turnos no-FT (no doble acumulaciÃ³n)
+            // Fix 4: feriado solo aplica a turnos no-FT (no doble acumulación)
             if (isFeriado && !isFT) hoursFeriado += duration;
             // Solo sumar a teóricas si el turno tiene tiempos planificados reales
             const hasPlannedTimes = !!(d.startTime?.toDate) && !!(d.endTime?.toDate);
-            if (isFT) { hoursFT += duration; }
-            else if (hasPlannedTimes) { hoursTotalOperativas += duration; }
+            if (isFT) {
+                hoursFT += duration;
+            } else if (isDespliegue && hasPlannedTimes) {
+                hoursDespliegue += duration;
+            } else if (hasPlannedTimes) {
+                hoursTotalOperativas += duration;
+            }
 
-            // Horas reales: solo turnos ya finalizados con fichada real (sin fallback a teÃ³rico)
+            // Horas reales: solo turnos ya finalizados con fichada real (sin fallback a teórico)
             const isAbsent = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
             if (isAbsent || (!usePlannedHours && end > new Date())) return;
 
-            // Regla de liquidaciÃ³n:
-            // - Inicio: siempre hora planificada (salvo adelanto explÃ­cito)
-            // - Fin: hora planificada, salvo relevo anticipado (da horas completas) o retenciÃ³n formal
+            // Regla de liquidación:
+            // - Inicio: siempre hora planificada (salvo adelanto explícito)
+            // - Fin: hora planificada, salvo relevo anticipado (da horas completas) o retención formal
             const isEarlyStartShift = d.isEarlyStart === true;
             const isRetentionShift  = d.isRetention === true || (d.retentionMinutes ?? 0) > 0;
 
             const clampS = (real: Date, plan: Date): Date =>
-                isEarlyStartShift ? real : plan;  // adelanto â†’ hora real; normal â†’ hora planificada
+                isEarlyStartShift ? real : plan;  // adelanto → hora real; normal → hora planificada
 
             const clampE = (real: Date, plan: Date): Date => {
                 if (!plan || isNaN(plan.getTime())) return real; // sin planificado -> usar real
@@ -861,6 +870,10 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             // Fix 1: acumular horas FT reales (solo trabajadas)
             if (isFT && worked > 0) horasFTReal += worked;
             horasRealesTotal += worked;
+            if (worked > 0) {
+                if (isDespliegue && !isFT) horasRealesDespliegue += worked;
+                else horasRealesCobertura += worked;
+            }
             // Acumular diurnas/nocturnas basado en horas reales trabajadas
             if (worked > 0) {
                 const effS = rStart || start;
@@ -880,18 +893,23 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     const excess = Math.max(0, regularReal - baseLimit);
     // horasSimples = total real capeado a 204 (para HORAS TOTALES display)
     const horasSimples = Math.min(Math.max(0, horasRealesTotal), baseLimit);
-    const horasTeoricas = hoursTotalOperativas + hoursFT;
+    const horasCobertura = hoursTotalOperativas + hoursFT;
+    const horasTeoricas = horasCobertura + hoursDespliegue;
 
     return {
         totalReal: horasTeoricas,        // nombre legacy, mantener por compat
         horasTeoricas,
+        horasCobertura,
+        horasDespliegue,
         horasReales: horasRealesTotal,
+        horasRealesCobertura,
+        horasRealesDespliegue,
         turnosConDatosReales,
         horasSimples,
         totalDiurnas,
         totalNocturnas,
         extra50: excess,
-        extra100: horasFTReal, // Fix 1: usar horas FT reales, no teÃ³ricas
+        extra100: horasFTReal, // Fix 1: usar horas FT reales, no teóricas
         plusFeriado: hoursFeriado,
         horasExtra: Math.max(0, horasRealesTotal - horasTeoricas),
     };
@@ -1648,7 +1666,11 @@ export const useReportes = (forcedClientId?: string | null) => {
                     novedadesRRHH,
                     total: stats.horasTeoricas,
                     horasTeoricas: stats.horasTeoricas,
+                    horasCobertura: stats.horasCobertura,
+                    horasDespliegue: stats.horasDespliegue,
                     horasReales: stats.horasReales,
+                    horasRealesCobertura: stats.horasRealesCobertura,
+                    horasRealesDespliegue: stats.horasRealesDespliegue,
                     horasExtra: stats.horasExtra,
                     turnosConDatosReales: stats.turnosConDatosReales,
                     diurnas: stats.totalDiurnas,
@@ -1662,7 +1684,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 });
             }
 
-            // Ajustes de horas manuales â€” sumar/restar del total teÃ³rico del empleado
+            // Ajustes de horas manuales — sumar/restar del total teórico (van a cobertura)
             const ajustesByEmp: Record<string, number> = {};
             ajustesDocs.forEach(d => {
                 const data = d.data();
@@ -1674,7 +1696,12 @@ export const useReportes = (forcedClientId?: string | null) => {
             const finalEmpRows = empRows.map(row => {
                 const adj = ajustesByEmp[row.id] || 0;
                 if (adj === 0) return row;
-                return { ...row, total: row.total + adj, horasTeoricas: row.horasTeoricas + adj };
+                return {
+                    ...row,
+                    total: row.total + adj,
+                    horasTeoricas: row.horasTeoricas + adj,
+                    horasCobertura: (row.horasCobertura ?? 0) + adj,
+                };
             });
 
             setEmployeeReport(finalEmpRows.sort((a,b) => b.total - a.total));
@@ -1791,7 +1818,11 @@ export const useReportes = (forcedClientId?: string | null) => {
                     vacantHours,
                     total: stats.horasTeoricas,
                     horasTeoricas: stats.horasTeoricas,
+                    horasCobertura: stats.horasCobertura,
+                    horasDespliegue: stats.horasDespliegue,
                     horasReales: stats.horasReales,
+                    horasRealesCobertura: stats.horasRealesCobertura,
+                    horasRealesDespliegue: stats.horasRealesDespliegue,
                     diurnas: stats.totalDiurnas,
                     nocturnas: stats.totalNocturnas,
                     extra50: stats.extra50,
