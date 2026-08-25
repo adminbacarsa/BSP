@@ -294,6 +294,11 @@ export function buildPlanningPositionStructure(
     for (const raw of positionsIterable) {
       const pos = raw as Record<string, unknown> | null;
       if (!pos) continue;
+      const posStatus = String(pos.status || 'ACTIVE').toUpperCase();
+      if (posStatus === 'INACTIVE' || posStatus === 'INACTIVO') {
+        const from = String(pos.inactiveFrom || '').slice(0, 10);
+        if (!from) continue;
+      }
       const shiftList = pos.allowedShiftTypes ?? pos.shifts;
       const hasShifts = Array.isArray(shiftList) && shiftList.length > 0;
       if (!hasShifts && !slaActive) continue;
@@ -310,7 +315,21 @@ export function buildPlanningPositionStructure(
       // Días excluidos: SLA-nivel aplica a todos; posición-nivel solo a este puesto
       const slaExcluded: string[] = Array.isArray((srv as any).excludedDates) ? (srv as any).excludedDates : [];
       const posExcluded: string[] = Array.isArray(pos.excludedDates) ? (pos.excludedDates as string[]) : [];
-      const mergedExcluded = [...new Set([...slaExcluded, ...posExcluded])];
+      const inactiveFrom = String(pos.inactiveFrom || '').slice(0, 10);
+      const posInactive = String(pos.status || 'ACTIVE').toUpperCase() === 'INACTIVE'
+        || String(pos.status || '').toUpperCase() === 'INACTIVO';
+      const bajaDates: string[] = [];
+      if (posInactive && inactiveFrom) {
+        const endYmd = toYyyyMmDd((srv as any).endDate) || inactiveFrom;
+        let cursor = inactiveFrom;
+        while (cursor && endYmd && cursor <= endYmd && bajaDates.length < 800) {
+          bajaDates.push(cursor);
+          const [yy, mm, dd] = cursor.split('-').map(Number);
+          const next = new Date(yy, (mm || 1) - 1, (dd || 1) + 1);
+          cursor = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+        }
+      }
+      const mergedExcluded = [...new Set([...slaExcluded, ...posExcluded, ...bajaDates])];
       const rawShiftEx = pos.excludedShiftDates;
       const excludedShiftDates =
         rawShiftEx && typeof rawShiftEx === 'object' && !Array.isArray(rawShiftEx)

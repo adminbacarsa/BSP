@@ -9,7 +9,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, getDoc, addDoc } from 'firebase/firestore';
 import {
   Shield, CheckCircle, XCircle, Users, AlertCircle,
-  RefreshCw, Plus, X, MessageSquare, User, Search,
+  RefreshCw, Plus, X, MessageSquare, User, Search, Ban,
 } from 'lucide-react';
 import {
   solicitudRefuerzoService,
@@ -19,7 +19,7 @@ import {
 import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
 import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
-import { applySlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
+import { applySlaRefuerzoPax, revertSlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
 import {
   fmtTs, urgencyLevel, hoursSincePending, pendingHoursLabel, URGENCY_STYLES,
   filterAbsencesByObjectives, filterSolicitudesByObjectives,
@@ -112,6 +112,9 @@ function AprobarModal({ solicitud, onClose, onConfirm }: {
           <p><strong>Objetivo:</strong> {solicitud.objectiveName}</p>
           <p><strong>Fecha:</strong> {solicitud.fecha} · {solicitud.startTime}–{solicitud.endTime}</p>
           <p><strong>Tipo:</strong> {solicitud.tipo === 'REFUERZO_PUESTO' ? `Refuerzo +${solicitud.cantidadPax || 1} pax` : `Agregado al turno de ${solicitud.parentEmpleadoName || '—'}`}</p>
+          {solicitud.alcance === 'ESTRUCTURAL' && (
+            <p className="text-amber-800 font-bold">Alcance estructural: se suma pax al SLA. No se crea vacante RFZ de ese día.</p>
+          )}
           <p><strong>Motivo cliente:</strong> {solicitud.motivo}</p>
         </div>
         <textarea
@@ -282,6 +285,7 @@ export default function SupervisionPage() {
   const [mSolicitante, setMSolicitante] = useState('');
   const [mCanal, setMCanal] = useState<'TELEFONO' | 'WHATSAPP' | 'EMAIL' | 'PRESENCIAL'>('TELEFONO');
   const [mPax, setMPax]     = useState(1);
+  const [mAlcance, setMAlcance] = useState<'PUNTUAL' | 'ESTRUCTURAL'>('PUNTUAL');
   const [mPosicionNombre, setMPosicionNombre] = useState('');
   const [mGuardiaAAmpliar, setMGuardiaAAmpliar] = useState('');
   const [mGuardiaEmpleadoId, setMGuardiaEmpleadoId]   = useState('');
@@ -550,15 +554,52 @@ export default function SupervisionPage() {
       setAprobarTarget(null);
       return;
     }
-    const vaAPlanificacion = sol.origen === 'PORTAL_CLIENTE' || sol.alcance === 'ESTRUCTURAL';
+    const esEstructural = sol.tipo === 'REFUERZO_PUESTO' && sol.alcance === 'ESTRUCTURAL';
+    const vaAPlanificacion = sol.origen === 'PORTAL_CLIENTE' || esEstructural;
+    const actor = { uid: user.uid, name: user.displayName || user.email || '' };
 
     try {
-      let slaPatch: { slaApplied?: boolean; slaIdAplicado?: string } = {};
-      if (sol.tipo === 'REFUERZO_PUESTO' && sol.alcance === 'ESTRUCTURAL') {
-        const applied = await applySlaRefuerzoPax(sol);
-        slaPatch = { slaApplied: true, slaIdAplicado: applied.slaId };
+      let slaPatch: {
+        slaApplied?: boolean;
+        slaIdAplicado?: string;
+        slaAppliedPax?: number;
+        slaAppliedShiftCode?: string;
+        slaAppliedPositionId?: string;
+      } = {};
+      if (esEstructural) {
+        const applied = await applySlaRefuerzoPax(sol, actor);
+        slaPatch = {
+          slaApplied: true,
+          slaIdAplicado: applied.slaId,
+          slaAppliedPax: applied.addedPax,
+          slaAppliedShiftCode: applied.shiftCode,
+          slaAppliedPositionId: applied.positionId,
+        };
       }
-      if (vaAPlanificacion) {
+      if (esEstructural) {
+        toast.loading('Aprobando — sumando pax al SLA…', { id: 'aprobar' });
+        await solicitudRefuerzoService.update(sol.id, {
+          estado:              'APROBADA',
+          autorizadoPorUid:    user.uid,
+          autorizadoPorNombre: user.displayName || user.email || '',
+          autorizadoAt:        Timestamp.now(),
+          actionTarget:        'PLANIFICACION',
+          turnoIds:            [],
+          ...slaPatch,
+          ...(nota ? { notaInterna: nota } as any : {}),
+        });
+        await addDoc(collection(db, 'novedades'), {
+          ...buildRefuerzoNovedadPayload({ ...sol, alcance: 'ESTRUCTURAL' }, {
+            reportedBy: 'SUPERVISION',
+            actionTarget: 'PLANIFICACION',
+            turnoIds: [],
+            type: 'REFUERZO_ESTRUCTURAL',
+          }),
+          autorizadoPorNombre: user.displayName || user.email || '',
+          createdAt: Timestamp.now(),
+        });
+        toast.success('Aprobada — +pax en el SLA. Planificación cubre la demanda extra (sin RFZ de ese día).', { id: 'aprobar' });
+      } else if (vaAPlanificacion) {
         toast.loading('Aprobando — enviando a Planificación…', { id: 'aprobar' });
         const turnoIds = await crearTurnosParaSolicitud(sol, { draft: true });
         await solicitudRefuerzoService.update(sol.id, {
@@ -581,11 +622,9 @@ export default function SupervisionPage() {
           createdAt: Timestamp.now(),
         });
         toast.success(
-          sol.alcance === 'ESTRUCTURAL'
-            ? 'Aprobada — +pax aplicado en Servicios. Asigná en Planificación.'
-            : (turnoIds.length === 1
-              ? 'Aprobada — asigná guardia al RFZ en Planificación (fila VACANTE RFZ)'
-              : `Aprobada — ${turnoIds.length} vacantes RFZ en Planificación`),
+          turnoIds.length === 1
+            ? 'Aprobada — asigná guardia al RFZ en Planificación (fila VACANTE RFZ)'
+            : `Aprobada — ${turnoIds.length} vacantes RFZ en Planificación`,
           { id: 'aprobar' },
         );
       } else {
@@ -626,7 +665,7 @@ export default function SupervisionPage() {
   const resetManualForm = () => {
     setMTipo('REFUERZO_PUESTO'); setMClienteId(''); setMObjetivoId('');
     setMFecha(''); setMStart(''); setMEnd(''); setMMotivo('');
-    setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1);
+    setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1); setMAlcance('PUNTUAL');
     setMPosicionNombre(''); setMGuardiaAAmpliar('');
     setMGuardiaEmpleadoId(''); setMGuardiaShiftId('');
     setSlaPositions([]); setMSelPosId(''); setMSelShiftCode('');
@@ -646,7 +685,79 @@ export default function SupervisionPage() {
       const endISO   = `${fechaFin}T${mEnd}:00`;
 
       const isAgregado = mTipo === 'AGREGADO_TURNO';
+      const alcance = isAgregado ? 'PUNTUAL' as const : mAlcance;
+      const esEstructural = !isAgregado && alcance === 'ESTRUCTURAL';
       const horasPactadas = calcRefuerzoPactadaHours(mStart, mEnd);
+      const actor = { uid: user.uid, name: user.displayName || user.email || '' };
+      const selectedPos = slaPositions.find(p => p.id === mSelPosId);
+      const positionName = mPosicionNombre.trim() || selectedPos?.name || '';
+      const positionId = mSelPosId || undefined;
+      const shiftCode = mSelShiftCode || undefined;
+
+      const solicitudBase = {
+        empresaId,
+        clientId:            mClienteId,
+        clientName:          selectedObjective?.clientName || mClienteId,
+        objectiveId:         mObjetivoId,
+        objectiveName:       selectedObjective?.name || mObjetivoId,
+        tipo:                mTipo,
+        alcance,
+        fecha:               mFecha,
+        startTime:           mStart,
+        endTime:             mEnd,
+        motivo:              mMotivo.trim(),
+        origen:              'SUPERVISOR_MANUAL' as const,
+        estado:              'APROBADA' as const,
+        solicitadoPorUid:    user!.uid,
+        solicitadoPorNombre: mSolicitante.trim() || 'Sin especificar',
+        canalSolicitud:      mCanal,
+        solicitadoAt:        Timestamp.now(),
+        autorizadoPorUid:    user!.uid,
+        autorizadoPorNombre: user!.displayName || user!.email || '',
+        autorizadoAt:        Timestamp.now(),
+        ...(!isAgregado ? { cantidadPax: mPax, positionName: positionName || undefined, positionId, shiftCode } : {}),
+        ...(isAgregado  ? {
+          parentEmpleadoName: mGuardiaAAmpliar.trim() || undefined,
+          parentEmpleadoId:   mGuardiaEmpleadoId || undefined,
+          parentShiftId:      mGuardiaShiftId    || undefined,
+        } : {}),
+      };
+
+      if (esEstructural) {
+        const solicitudId = await solicitudRefuerzoService.create({ ...solicitudBase, turnoIds: [], actionTarget: 'PLANIFICACION' });
+        const manualSol: SolicitudRefuerzo = {
+          ...solicitudBase,
+          id: solicitudId,
+          cantidadPax: mPax,
+          positionName: positionName || undefined,
+          positionId,
+          shiftCode,
+        };
+        const applied = await applySlaRefuerzoPax(manualSol, actor);
+        await solicitudRefuerzoService.update(solicitudId, {
+          slaApplied: true,
+          slaIdAplicado: applied.slaId,
+          slaAppliedPax: applied.addedPax,
+          slaAppliedShiftCode: applied.shiftCode,
+          slaAppliedPositionId: applied.positionId,
+        });
+        await addDoc(collection(db, 'novedades'), {
+          ...buildRefuerzoNovedadPayload({ ...manualSol, alcance: 'ESTRUCTURAL' }, {
+            reportedBy: 'SUPERVISION',
+            actionTarget: 'PLANIFICACION',
+            turnoIds: [],
+            type: 'REFUERZO_ESTRUCTURAL',
+          }),
+          canalSolicitud: mCanal,
+          createdBy:      user.displayName || user.email || '',
+          createdAt:      Timestamp.now(),
+          origin:         'SUPERVISOR_MANUAL',
+        });
+        toast.success(`+${mPax} pax aplicado al SLA. Planificación cubre la demanda extra (sin vacante RFZ).`);
+        resetManualForm();
+        return;
+      }
+
       const base = {
         empresaId,
         objectiveId:   mObjetivoId,
@@ -664,67 +775,30 @@ export default function SupervisionPage() {
         autorizadoPorNombre: user!.displayName || user!.email || null,
         autorizadoAt:        Timestamp.now(),
       };
-      // Crear los turnos vacantes directamente (urgente, ya pasó el corte de planificación)
       const n = isAgregado ? 1 : mPax;
       const turnoIds: string[] = [];
       for (let i = 0; i < n; i++) {
         const turnoExtra: Record<string, unknown> = { ...base, employeeId: 'VACANTE' };
-        if (!isAgregado && mPosicionNombre.trim()) turnoExtra.positionName = mPosicionNombre.trim();
+        if (!isAgregado && positionName) turnoExtra.positionName = positionName;
+        if (!isAgregado && positionId) turnoExtra.positionId = positionId;
         if (isAgregado && mGuardiaAAmpliar.trim())  turnoExtra.parentEmpleadoName = mGuardiaAAmpliar.trim();
         if (isAgregado && mGuardiaEmpleadoId)       turnoExtra.parentEmpleadoId   = mGuardiaEmpleadoId;
         if (isAgregado && mGuardiaShiftId)          turnoExtra.parentShiftId      = mGuardiaShiftId;
         const r = await addDoc(collection(db, 'turnos'), turnoExtra);
         turnoIds.push(r.id);
       }
-      // Guardar la solicitud como ya aprobada
       const solicitudId = await solicitudRefuerzoService.create({
-        empresaId,
-        clientId:            mClienteId,
-        clientName:          selectedObjective?.clientName || mClienteId,
-        objectiveId:         mObjetivoId,
-        objectiveName:       selectedObjective?.name || mObjetivoId,
-        tipo:                mTipo,
-        fecha:               mFecha,
-        startTime:           mStart,
-        endTime:             mEnd,
-        motivo:              mMotivo.trim(),
-        origen:              'SUPERVISOR_MANUAL' as const,
-        estado:              'APROBADA' as const,
-        solicitadoPorUid:    user!.uid,
-        solicitadoPorNombre: mSolicitante.trim() || 'Sin especificar',
-        canalSolicitud:      mCanal,
-        solicitadoAt:        Timestamp.now(),
-        autorizadoPorUid:    user!.uid,
-        autorizadoPorNombre: user!.displayName || user!.email || '',
-        autorizadoAt:        Timestamp.now(),
+        ...solicitudBase,
         turnoIds,
-        ...(!isAgregado ? { cantidadPax: mPax, positionName: mPosicionNombre.trim() || undefined } : {}),
-        ...(isAgregado  ? {
-          parentEmpleadoName: mGuardiaAAmpliar.trim() || undefined,
-          parentEmpleadoId:   mGuardiaEmpleadoId || undefined,
-          parentShiftId:      mGuardiaShiftId    || undefined,
-        } : {}),
+        actionTarget: 'OPERACIONES',
       });
-      // Novedad para OPERACIONES (vacante urgente, no alcanzó el plazo de planificación)
       const manualSol: SolicitudRefuerzo = {
+        ...solicitudBase,
         id:                  solicitudId,
-        empresaId,
-        clientId:            mClienteId,
-        clientName:          selectedObjective?.clientName || mClienteId,
-        objectiveId:         mObjetivoId,
-        objectiveName:       selectedObjective?.name || mObjetivoId,
-        tipo:                mTipo,
-        fecha:               mFecha,
-        startTime:           mStart,
-        endTime:             mEnd,
-        motivo:              mMotivo.trim(),
-        origen:              'SUPERVISOR_MANUAL',
-        estado:              'APROBADA',
-        solicitadoPorUid:    user!.uid,
-        solicitadoPorNombre: mSolicitante.trim() || 'Sin especificar',
-        solicitadoAt:        Timestamp.now(),
         cantidadPax:         isAgregado ? 1 : mPax,
-        positionName:        !isAgregado && mPosicionNombre.trim() ? mPosicionNombre.trim() : undefined,
+        positionName:        !isAgregado && positionName ? positionName : undefined,
+        positionId,
+        shiftCode,
         parentEmpleadoName:  isAgregado && mGuardiaAAmpliar.trim() ? mGuardiaAAmpliar.trim() : undefined,
         parentEmpleadoId:    isAgregado ? mGuardiaEmpleadoId || undefined : undefined,
         parentShiftId:       isAgregado ? mGuardiaShiftId || undefined : undefined,
@@ -764,6 +838,31 @@ export default function SupervisionPage() {
     await p;
     setRechazarTarget(null);
   }, [rechazarTarget, user]);
+
+  const handleCancelarEstructural = useCallback(async (sol: SolicitudRefuerzo) => {
+    if (!sol.id || !user) return;
+    if (sol.alcance !== 'ESTRUCTURAL' || (sol.estado !== 'APROBADA' && sol.estado !== 'ASIGNADA')) return;
+    const reason = window.prompt('Motivo de cancelación del refuerzo estructural:')?.trim();
+    if (!reason) return;
+    const actor = { uid: user.uid, name: user.displayName || user.email || '' };
+    try {
+      toast.loading('Cancelando y revirtiendo +pax…', { id: 'cancel-est' });
+      if (sol.slaApplied) {
+        await revertSlaRefuerzoPax(sol, actor);
+      }
+      await solicitudRefuerzoService.update(sol.id, {
+        estado: 'CANCELADA',
+        slaApplied: false,
+        cancelledAt: Timestamp.now(),
+        cancelledByUid: user.uid,
+        cancelledByNombre: actor.name,
+        cancelReason: reason,
+      });
+      toast.success(sol.slaApplied ? 'Cancelada — se revirtió el +pax del SLA' : 'Solicitud cancelada', { id: 'cancel-est' });
+    } catch (e: any) {
+      toast.error(`Error: ${e?.message || 'No se pudo cancelar'}`, { id: 'cancel-est' });
+    }
+  }, [user]);
 
   const userName = user?.displayName || user?.email || 'Supervisor';
   const bandejaBadge = pendientes.length + ausencias.filter(a => a.type !== 'NO_PRESENTACION' && a.status === 'Pendiente').length;
@@ -930,6 +1029,11 @@ export default function SupervisionPage() {
                             <div className="flex items-center gap-2 flex-wrap mb-1">
                               {tipoBadge(s.tipo)}
                               {estadoBadge(s.estado)}
+                              {s.alcance === 'ESTRUCTURAL' && (
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">
+                                  Estructural{s.slaApplied ? ' · SLA' : ''}
+                                </span>
+                              )}
                               <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${urgStyle.cls}`}>{urgStyle.label}</span>
                               {pendH && <span className="text-[9px] font-bold text-amber-600">{pendH}</span>}
                               <span className="text-[9px] text-slate-400 font-mono">{fmtTs(s.solicitadoAt)}</span>
@@ -989,7 +1093,18 @@ export default function SupervisionPage() {
                             </div>
                           )}
                           {s.estado === 'APROBADA' && (
-                            <span className="text-[10px] text-teal-600 font-bold shrink-0">✓ {s.autorizadoPorNombre}</span>
+                            <div className="flex flex-col items-end gap-2 shrink-0">
+                              <span className="text-[10px] text-teal-600 font-bold">✓ {s.autorizadoPorNombre}</span>
+                              {s.alcance === 'ESTRUCTURAL' && s.slaApplied && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelarEstructural(s)}
+                                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
+                                >
+                                  <Ban size={12}/> Revertir +pax
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1128,7 +1243,10 @@ export default function SupervisionPage() {
               <button onClick={resetManualForm} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
             </div>
             <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
-              <AlertCircle size={12}/> Carga directa como vacante operativa — Operaciones recibe la notificación
+              <AlertCircle size={12}/>
+              {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
+                ? 'Suma pax al contrato (Servicios). Planificación cubre la demanda extra — no se crea vacante RFZ de ese día.'
+                : 'Puntual: vacante operativa — Operaciones recibe la notificación.'}
             </p>
 
             {/* Tipo */}
@@ -1150,6 +1268,24 @@ export default function SupervisionPage() {
             />
 
             {/* RFZ — Puesto del SLA + turnos disponibles */}
+            {mTipo === 'REFUERZO_PUESTO' && (
+              <div className="flex gap-2">
+                {([
+                  { id: 'PUNTUAL' as const, label: 'Solo esa fecha' },
+                  { id: 'ESTRUCTURAL' as const, label: 'Sumar al servicio' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setMAlcance(opt.id)}
+                    className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${mAlcance === opt.id ? 'bg-amber-600 text-white border-amber-600' : 'border-slate-200 text-slate-600 hover:border-amber-300'}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {mTipo === 'REFUERZO_PUESTO' && mObjetivoId && (
               <>
                 <div className="grid grid-cols-3 gap-2">
@@ -1299,7 +1435,7 @@ export default function SupervisionPage() {
                 onClick={handleCrearManual}
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
                 {manualSaving ? <RefreshCw size={14} className="animate-spin"/> : <Plus size={14}/>}
-                Crear vacante operativa
+                {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' ? 'Sumar al SLA' : 'Crear vacante operativa'}
               </button>
             </div>
           </div>

@@ -79,6 +79,9 @@ export function buildRefuerzoPlanningInstruction(sol: SolicitudRefuerzo): string
   }
   const pax = sol.cantidadPax ?? 1;
   const puesto = sol.positionName ? ` · ${sol.positionName}` : '';
+  if (sol.alcance === 'ESTRUCTURAL') {
+    return `Refuerzo estructural: +${pax} pax${puesto} desde ${fecha} ${horario}. Cubrir la demanda extra del SLA en la malla (no hay fila RFZ).`;
+  }
   return `En Planificación, abrí la fila VACANTE RFZ${puesto} (${fecha} ${horario}) y asigná ${pax} guardia${pax !== 1 ? 's' : ''}.`;
 }
 
@@ -94,7 +97,7 @@ export function buildRefuerzoOperacionesInstruction(sol: SolicitudRefuerzo): str
 }
 
 export function resolveRefuerzoActionTarget(sol: SolicitudRefuerzo): RefuerzoActionTarget {
-  // Portal (≥8h antes del día) → planificación. Carga manual supervisor → operaciones.
+  if (sol.alcance === 'ESTRUCTURAL') return 'PLANIFICACION';
   return sol.origen === 'PORTAL_CLIENTE' ? 'PLANIFICACION' : 'OPERACIONES';
 }
 

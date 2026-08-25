@@ -71,7 +71,7 @@ export function isArgentineHoliday(dateStr: string): boolean {
   return (AR_FERIADOS_VARIABLES[year] ?? []).includes(norm);
 }
 
-import type { ServicePosition, ShiftVariant } from '@/services/slaService';
+import { isPositionActiveOnDate, type ServicePosition, type ShiftVariant } from '@/services/slaService';
 
 export const WEEK_DAY_CODES = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
@@ -258,6 +258,7 @@ export function calculateMonthlyBreakdown(
 
     if (!slaExcluded.has(dateStr)) {
       positions.forEach((pos) => {
+        if (!isPositionActiveOnDate(pos, dateStr)) return;
         if (pos.excludedDates?.includes(dateStr)) return;
         const skipCodes = pos.excludedShiftDates?.[dateStr] || [];
         const paxCuts = pos.excludedShiftPaxDates?.[dateStr] || {};

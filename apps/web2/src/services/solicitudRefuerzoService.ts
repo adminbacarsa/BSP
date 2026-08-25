@@ -22,6 +22,13 @@ export interface SolicitudRefuerzo {
   alcance?: SolicitudAlcance;
   slaApplied?: boolean;
   slaIdAplicado?: string;
+  slaAppliedPax?: number;
+  slaAppliedShiftCode?: string;
+  slaAppliedPositionId?: string;
+  cancelledAt?: Timestamp | string;
+  cancelledByUid?: string;
+  cancelledByNombre?: string;
+  cancelReason?: string;
   fecha: string;      // YYYY-MM-DD
   startTime: string;  // HH:mm
   endTime: string;    // HH:mm
