@@ -1499,6 +1499,18 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
   const [kpiMonth, setKpiMonth] = useState(new Date().getMonth());
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
+
+  /** Mes visible en listado (kpi) ∩ vigencia del contrato — para resumen de días excluidos. */
+  const excludedDisplayRange = useMemo(() => {
+    if (!form.startDate?.trim() || !form.endDate?.trim()) return null;
+    const { start, end } = monthBoundsYmd(kpiYear, kpiMonth);
+    const from = start > form.startDate ? start : form.startDate;
+    const to = end < form.endDate ? end : form.endDate;
+    if (from > to) return null;
+    const label = new Date(kpiYear, kpiMonth, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+    return { from, to, label };
+  }, [form.startDate, form.endDate, kpiYear, kpiMonth]);
+
   const [srvSearch, setSrvSearch] = useState('');
   const [srvCatalogFilter, setSrvCatalogFilter] = usePersistedState<ServiciosCatalogFilter>('cosp:srv:catalog', 'all');
   const [srvClientFilter, setSrvClientFilter] = usePersistedState<string>('cosp:srv:client', 'all');
@@ -2823,20 +2835,52 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                          }
                      };
 
-                     const partialDayCount = form.positions.reduce((acc, p) => {
-                         const m = p.excludedShiftDates || {};
-                         const px = p.excludedShiftPaxDates || {};
-                         const shiftDays = Object.values(m).reduce((n, codes) => n + (codes?.length ? 1 : 0), 0);
-                         const paxDays = Object.values(px).reduce((n, row) => n + (row && Object.keys(row).length ? 1 : 0), 0);
-                         return acc + shiftDays + paxDays;
-                     }, 0);
-                     const totalExcluded = slaGlobal.size + form.positions.reduce(
-                         (acc, p) => acc + (p.excludedDates?.length || 0), 0
-                     ) + partialDayCount;
-
                      const months: Array<{ year: number; month: number; label: string; days: Array<{ date: Date; ds: string }> }> = [];
                      const start = parseYmdToLocalDate(form.startDate);
                      const end = parseYmdToLocalDate(form.endDate);
+                     const displayStart = excludedDisplayRange ? parseYmdToLocalDate(excludedDisplayRange.from) : start;
+                     const displayEnd = excludedDisplayRange ? parseYmdToLocalDate(excludedDisplayRange.to) : end;
+
+                     const isDateInDisplayRange = (ds: string) => {
+                         if (!ds || !displayStart || !displayEnd) return false;
+                         const d = parseYmdToLocalDate(ds);
+                         if (!d) return false;
+                         return d >= displayStart && d <= displayEnd;
+                     };
+
+                     const filterDateSet = (input: Iterable<string>) => {
+                         const out = new Set<string>();
+                         for (const ds of input) if (isDateInDisplayRange(ds)) out.add(ds);
+                         return out;
+                     };
+
+                     const filterShiftMap = (map: Record<string, string[]> | undefined) => {
+                         const out: Record<string, string[]> = {};
+                         for (const [ds, codes] of Object.entries(map || {})) {
+                             if (isDateInDisplayRange(ds) && codes?.length) out[ds] = codes;
+                         }
+                         return out;
+                     };
+
+                     const filterPaxMap = (map: Record<string, Record<string, number>> | undefined) => {
+                         const out: Record<string, Record<string, number>> = {};
+                         for (const [ds, row] of Object.entries(map || {})) {
+                             if (isDateInDisplayRange(ds) && row && Object.keys(row).length) out[ds] = row;
+                         }
+                         return out;
+                     };
+
+                     const partialDayCount = form.positions.reduce((acc, p) => {
+                         const m = p.excludedShiftDates || {};
+                         const px = p.excludedShiftPaxDates || {};
+                         const shiftDays = Object.entries(m).reduce((n, [ds, codes]) => n + (isDateInDisplayRange(ds) && codes?.length ? 1 : 0), 0);
+                         const paxDays = Object.entries(px).reduce((n, [ds, row]) => n + (isDateInDisplayRange(ds) && row && Object.keys(row).length ? 1 : 0), 0);
+                         return acc + shiftDays + paxDays;
+                     }, 0);
+                     const slaGlobalInRange = filterDateSet(slaGlobal);
+                     const totalExcluded = slaGlobalInRange.size + form.positions.reduce(
+                         (acc, p) => acc + filterDateSet(p.excludedDates || []).size, 0
+                     ) + partialDayCount;
                      if (start && end) {
                          let cur = new Date(start.getFullYear(), start.getMonth(), 1);
                          const endMo = new Date(end.getFullYear(), end.getMonth(), 1);
@@ -2868,8 +2912,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      };
 
                      const makeShiftSummary = (p: ServicePosition) => {
-                         const m = p.excludedShiftDates || {};
-                         const px = p.excludedShiftPaxDates || {};
+                         const m = filterShiftMap(p.excludedShiftDates);
+                         const px = filterPaxMap(p.excludedShiftPaxDates);
                          const days = new Set([...Object.keys(m), ...Object.keys(px)]);
                          const parts = Array.from(days).sort().map(ds => {
                              const [, mo, d] = ds.split('-');
@@ -2902,16 +2946,24 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                              </button>
                              {totalExcluded > 0 && !showExcludedDatesPicker && (
                                  <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/20 border-t border-rose-100 dark:border-rose-900 space-y-0.5">
-                                     {slaGlobal.size > 0 && <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">Todos los puestos: {makeSummary(slaGlobal)}</p>}
-                                     {form.positions.map(p => (p.excludedDates?.length ?? 0) > 0 && (
-                                         <p key={`${p.id}-full`} className="text-[9px] font-bold text-rose-500 dark:text-rose-400">{p.name || p.id} (completo): {makeSummary(new Set(p.excludedDates))}</p>
-                                     ))}
-                                     {form.positions.map(p => Object.keys(p.excludedShiftDates || {}).length > 0 && (
-                                         <p key={`${p.id}-partial`} className="text-[9px] font-bold text-amber-600 dark:text-amber-400">{p.name || p.id} (turnos): {makeShiftSummary(p)}</p>
-                                     ))}
-                                     {form.positions.map(p => Object.keys(p.excludedShiftPaxDates || {}).length > 0 && !Object.keys(p.excludedShiftDates || {}).length && (
-                                         <p key={`${p.id}-pax`} className="text-[9px] font-bold text-amber-600 dark:text-amber-400">{p.name || p.id} (pax): {makeShiftSummary(p)}</p>
-                                     ))}
+                                     {excludedDisplayRange && (
+                                         <p className="text-[8px] font-black uppercase tracking-wide text-rose-400 mb-1">
+                                             {excludedDisplayRange.label}
+                                         </p>
+                                     )}
+                                     {slaGlobalInRange.size > 0 && <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">Todos los puestos: {makeSummary(slaGlobalInRange)}</p>}
+                                     {form.positions.map(p => {
+                                         const inRange = filterDateSet(p.excludedDates || []);
+                                         return inRange.size > 0 ? (
+                                             <p key={`${p.id}-full`} className="text-[9px] font-bold text-rose-500 dark:text-rose-400">{p.name || p.id} (completo): {makeSummary(inRange)}</p>
+                                         ) : null;
+                                     })}
+                                     {form.positions.map(p => {
+                                         const shiftSummary = makeShiftSummary(p);
+                                         return shiftSummary ? (
+                                             <p key={`${p.id}-partial`} className="text-[9px] font-bold text-amber-600 dark:text-amber-400">{p.name || p.id} (turnos): {shiftSummary}</p>
+                                         ) : null;
+                                     })}
                                  </div>
                              )}
                              {showExcludedDatesPicker && (
@@ -3047,12 +3099,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                                      </div>
                                                  );
                                              })}
-                                             {(activeFullDates.size > 0 || Object.keys(scopeShiftMap).length > 0 || Object.keys(scopePaxMap).length > 0) && (
+                                             {(filterDateSet(activeFullDates).size > 0 || Object.keys(filterShiftMap(scopeShiftMap)).length > 0 || Object.keys(filterPaxMap(scopePaxMap)).length > 0) && (
                                                  <div className="flex items-center justify-between pt-2 border-t dark:border-slate-700 gap-2">
                                                      <p className="text-[9px] font-bold text-rose-600 dark:text-rose-400">
-                                                         {activeFullDates.size > 0 && makeSummary(activeFullDates)}
-                                                         {activeFullDates.size > 0 && (Object.keys(scopeShiftMap).length > 0 || Object.keys(scopePaxMap).length > 0) && ' · '}
-                                                         {scopePos && (Object.keys(scopeShiftMap).length > 0 || Object.keys(scopePaxMap).length > 0) && makeShiftSummary(scopePos)}
+                                                         {filterDateSet(activeFullDates).size > 0 && makeSummary(filterDateSet(activeFullDates))}
+                                                         {filterDateSet(activeFullDates).size > 0 && (Object.keys(filterShiftMap(scopeShiftMap)).length > 0 || Object.keys(filterPaxMap(scopePaxMap)).length > 0) && ' · '}
+                                                         {scopePos && makeShiftSummary(scopePos)}
                                                      </p>
                                                      <button type="button" onClick={clearScope} className="text-[9px] font-black text-rose-400 hover:text-rose-600 uppercase shrink-0">Limpiar</button>
                                                  </div>
