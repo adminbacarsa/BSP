@@ -665,6 +665,24 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    // Mapeo centros de costo (Excel marcaciones) → objetivos CRM por empresa.
+    // Doc id = empresaId; el campo empresaId debe coincidir.
+    match /ccosto_objective_mapping/{empId} {
+      allow read: if isSuperAdmin() || systemUserHasAllEmpresas() || (
+        isAdmin() && userEmpresaId() != '' && empId == userEmpresaId()
+      ) || (
+        isAdmin() && resource != null && tenantMatches(resource.data)
+      );
+      allow create, update: if isSuperAdmin() || systemUserHasAllEmpresas() || (
+        isAdmin() && userEmpresaId() != '' && empId == userEmpresaId()
+        && request.resource.data.empresaId == empId
+      ) || (
+        isAdmin() && request.resource.data.empresaId == empId
+        && tenantMatches(request.resource.data)
+      );
+      allow delete: if isSuperAdmin() || tenantAdminDelete();
+    }
+
     // API Keys de integraciones — solo lectura de metadata (no del hash).
     // Escritura exclusivamente vía Admin SDK (callables createPayrollApiKey / revokePayrollApiKey).
     match /integraciones_api/{keyId} {
