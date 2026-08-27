@@ -1,5 +1,5 @@
 import type { SolicitudRefuerzo } from '@/services/solicitudRefuerzoService';
-import { calcRefuerzoPactadaHours, refuerzoTipoCode } from './refuerzoDisplay';
+import { calcRefuerzoPactadaHours, isSolicitudRefuerzoExtraVendible, refuerzoTipoCode } from './refuerzoDisplay';
 import type { ProformaDayCell, ProformaObjectiveGrid } from '@/lib/crm/proformaTypes';
 
 const BILLABLE_ESTADOS = new Set(['APROBADA', 'ASIGNADA', 'COMPLETADA']);
@@ -47,6 +47,7 @@ export function applyRefuerzoHorasVendidasToBreakdown(
   let added = 0;
   for (const sol of solicitudes) {
     if (!BILLABLE_ESTADOS.has(sol.estado)) continue;
+    if (!isSolicitudRefuerzoExtraVendible(sol)) continue;
     if (!solicitudRefuerzoInRange(sol, rangeStart, rangeEnd)) continue;
 
     const hrs = calcRefuerzoHorasVendidas(sol);
@@ -83,6 +84,7 @@ export function solicitudIdsBilledInRange(
   const ids = new Set<string>();
   for (const sol of solicitudes) {
     if (!sol.id || !BILLABLE_ESTADOS.has(sol.estado)) continue;
+    if (!isSolicitudRefuerzoExtraVendible(sol)) continue;
     if (!solicitudRefuerzoInRange(sol, rangeStart, rangeEnd)) continue;
     ids.add(sol.id);
   }
@@ -149,6 +151,7 @@ export function applyRefuerzoHorasVendidasToGrids(
 
   for (const sol of solicitudes) {
     if (!BILLABLE_ESTADOS.has(sol.estado)) continue;
+    if (!isSolicitudRefuerzoExtraVendible(sol)) continue;
     if (!solicitudRefuerzoInRange(sol, startYmd, endYmd)) continue;
 
     const fecha = String(sol.fecha || '').slice(0, 10);
@@ -195,4 +198,18 @@ export function applyRefuerzoHorasVendidasToGrids(
   }
 
   return out.sort((a, b) => a.objectiveName.localeCompare(b.objectiveName, 'es'));
+}
+
+export function countEstructuralesEnRango(
+  solicitudes: SolicitudRefuerzo[],
+  range: { start: Date; end: Date },
+): number {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const rangeStart = `${range.start.getFullYear()}-${pad(range.start.getMonth() + 1)}-${pad(range.start.getDate())}`;
+  const rangeEnd = `${range.end.getFullYear()}-${pad(range.end.getMonth() + 1)}-${pad(range.end.getDate())}`;
+  return solicitudes.filter((sol) =>
+    BILLABLE_ESTADOS.has(sol.estado)
+    && !isSolicitudRefuerzoExtraVendible(sol)
+    && solicitudRefuerzoInRange(sol, rangeStart, rangeEnd),
+  ).length;
 }

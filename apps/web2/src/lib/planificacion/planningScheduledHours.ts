@@ -128,14 +128,39 @@ export function isPlanificadorPlannedHoursShift(t: any): boolean {
   return true;
 }
 
+function instantFromShiftClock(val: unknown): Date | null {
+  if (!val) return null;
+  if (typeof (val as { toDate?: () => Date }).toDate === 'function') {
+    const d = (val as { toDate: () => Date }).toDate();
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const sec = (val as { seconds?: number; _seconds?: number }).seconds
+    ?? (val as { _seconds?: number })._seconds;
+  if (typeof sec === 'number' && sec > 0) return new Date(sec * 1000);
+  if (typeof val === 'string') {
+    const raw = val.trim();
+    if (/^\d{1,2}:\d{2}$/.test(raw)) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
 function durationHoursFromShiftTimestamps(shift: any): number {
-  if (shift.startTime?.seconds && shift.endTime?.seconds) {
-    return Math.max(0, Math.min((shift.endTime.seconds - shift.startTime.seconds) / 3600, 24));
+  const startAt = instantFromShiftClock(shift.startTime);
+  const endAt = instantFromShiftClock(shift.endTime);
+  if (startAt && endAt) {
+    let dur = (endAt.getTime() - startAt.getTime()) / 3600000;
+    if (dur <= 0) dur += 24;
+    if (dur > 0 && dur <= 24) return Math.round(dur * 100) / 100;
   }
   if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
     const parseH = (t: string) => {
-      const m = t.match(/^(\d{1,2}):(\d{2})$/);
-      return m ? +m[1] + +m[2] / 60 : null;
+      const raw = t.trim();
+      const hm = raw.match(/^(\d{1,2}):(\d{2})$/);
+      if (hm) return +hm[1] + +hm[2] / 60;
+      const iso = raw.match(/T(\d{2}):(\d{2})/);
+      return iso ? +iso[1] + +iso[2] / 60 : null;
     };
     const s = parseH(shift.startTime);
     const e = parseH(shift.endTime);
@@ -175,10 +200,13 @@ export function calcPlanningBillableShiftHours(
 
   const storedForBase = Number(shift.hours);
   const tsDur = durationHoursFromShiftTimestamps(shift);
+  const isClienteRefuerzo = code === 'RFZ' || code === 'TURA';
   const intrinsic =
-    storedForBase >= 0.5 ? Math.min(storedForBase, 24)
-      : tsDur >= 0.5 ? tsDur
-        : 0;
+    isClienteRefuerzo && tsDur >= 0.25
+      ? tsDur
+      : storedForBase >= 0.5 ? Math.min(storedForBase, 24)
+        : tsDur >= 0.5 ? tsDur
+          : 0;
 
   let codeBase = 0;
   if (intrinsic >= 0.5) {

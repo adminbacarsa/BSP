@@ -4,8 +4,12 @@ export type RefuerzoActionTarget = 'PLANIFICACION' | 'OPERACIONES';
 
 export function calcRefuerzoPactadaHours(startTime: string, endTime: string): number {
   const parse = (t: string) => {
-    const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})$/);
-    return m ? +m[1] + +m[2] / 60 : null;
+    const raw = String(t || '').trim();
+    const hm = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (hm) return +hm[1] + +hm[2] / 60;
+    const iso = raw.match(/T(\d{2}):(\d{2})/);
+    if (iso) return +iso[1] + +iso[2] / 60;
+    return null;
   };
   const s = parse(startTime);
   const e = parse(endTime);
@@ -13,6 +17,52 @@ export function calcRefuerzoPactadaHours(startTime: string, endTime: string): nu
   let dur = e - s;
   if (dur <= 0) dur += 24;
   return Math.max(0, Math.min(dur, 24));
+}
+
+/** Puntual vende extra. Estructural ya está en el SLA: no se cobra de nuevo. */
+export function isSolicitudRefuerzoExtraVendible(sol: Pick<SolicitudRefuerzo, 'alcance' | 'slaApplied'>): boolean {
+  if (sol.alcance === 'ESTRUCTURAL' || sol.slaApplied) return false;
+  return true;
+}
+
+function instantFromClock(val: unknown): Date | null {
+  if (!val) return null;
+  if (typeof (val as { toDate?: () => Date }).toDate === 'function') {
+    const d = (val as { toDate: () => Date }).toDate();
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const sec = (val as { seconds?: number; _seconds?: number }).seconds
+    ?? (val as { _seconds?: number })._seconds;
+  if (typeof sec === 'number' && sec > 0) return new Date(sec * 1000);
+  if (typeof val === 'string') {
+    const raw = val.trim();
+    if (/^\d{1,2}:\d{2}$/.test(raw)) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/** Duración real del turno RFZ/TURA (ISO o Timestamp). No usa 8 h por defecto. */
+export function hoursFromShiftClock(shift: {
+  startTime?: unknown;
+  endTime?: unknown;
+  hours?: unknown;
+}): number {
+  const a = instantFromClock(shift.startTime);
+  const b = instantFromClock(shift.endTime);
+  if (a && b) {
+    let dur = (b.getTime() - a.getTime()) / 3600000;
+    if (dur <= 0) dur += 24;
+    if (dur > 0 && dur <= 24) return Math.round(dur * 100) / 100;
+  }
+  if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+    const hs = calcRefuerzoPactadaHours(shift.startTime, shift.endTime);
+    if (hs > 0 && hs < 24) return hs;
+  }
+  const stored = Number(shift.hours);
+  if (Number.isFinite(stored) && stored >= 0.25 && stored <= 24) return stored;
+  return 0;
 }
 
 export function formatRefuerzoTimeRange(startTime?: string, endTime?: string): string {

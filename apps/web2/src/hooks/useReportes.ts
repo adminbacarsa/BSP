@@ -68,6 +68,24 @@ const SHIFT_HOURS_LOOKUP: Record<string, number> = {
 
 const PAID_DAY_DEFAULT_HOURS = 8;
 
+function parseShiftInstant(val: unknown): Date | null {
+    if (!val) return null;
+    if (typeof (val as { toDate?: () => Date }).toDate === 'function') {
+        const d = (val as { toDate: () => Date }).toDate();
+        return isNaN(d.getTime()) ? null : d;
+    }
+    const sec = (val as { seconds?: number; _seconds?: number }).seconds
+        ?? (val as { _seconds?: number })._seconds;
+    if (typeof sec === 'number' && sec > 0) return new Date(sec * 1000);
+    if (typeof val === 'string') {
+        const raw = val.trim();
+        if (/^\d{1,2}:\d{2}$/.test(raw)) return null;
+        const d = new Date(raw);
+        return isNaN(d.getTime()) ? null : d;
+    }
+    return null;
+}
+
 const isOperationalOriginShift = (shift: any): boolean => {
     const o = String(shift?.origin || '').toUpperCase();
     if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL' || o === 'CLIENT_REQUEST') return true;
@@ -643,8 +661,8 @@ export function resolveShiftDurationHours(
     shift: {
         code?: string;
         hours?: number;
-        startTime?: { seconds?: number; _seconds?: number };
-        endTime?: { seconds?: number; _seconds?: number };
+        startTime?: { seconds?: number; _seconds?: number; toDate?: () => Date } | string;
+        endTime?: { seconds?: number; _seconds?: number; toDate?: () => Date } | string;
         isAbsent?: boolean;
         status?: string;
         isReten?: boolean;
@@ -689,11 +707,11 @@ export function resolveShiftDurationHours(
         return fromLookup && fromLookup > 0 ? fromLookup : PAID_DAY_DEFAULT_HOURS;
     }
 
-    const startSec = shift.startTime?.seconds ?? shift.startTime?._seconds ?? 0;
-    const endSec = shift.endTime?.seconds ?? shift.endTime?._seconds ?? 0;
-    if (!startSec || !endSec) return lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
+    const startAt = parseShiftInstant(shift.startTime);
+    const endAt = parseShiftInstant(shift.endTime);
+    if (!startAt || !endAt) return lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
 
-    let duration = Math.max(0, (endSec - startSec) / 3600);
+    let duration = Math.max(0, (endAt.getTime() - startAt.getTime()) / 3600000);
     if (duration === 0 || duration >= 23.5 || duration > 24 || isNaN(duration)) {
         duration = lookup[rawCode] || PAID_DAY_DEFAULT_HOURS;
     }
@@ -743,9 +761,9 @@ const getNightDuration = (start: Date, end: Date) => {
 // Calculadora CCT 507/07
 const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>, opts?: { usePlannedHours?: boolean }) => {
     const usePlannedHours = opts?.usePlannedHours ?? false;
-    const validShifts = shifts.filter(s => s.startTime && s.endTime && s.startTime.seconds && s.endTime.seconds);
+    const validShifts = shifts.filter(s => parseShiftInstant(s.startTime) && parseShiftInstant(s.endTime));
     const sortedDocs = collapseShiftsByEmployeeDayForLiquidation(
-        [...validShifts].sort((a, b) => a.startTime.seconds - b.startTime.seconds),
+        [...validShifts].sort((a, b) => (parseShiftInstant(a.startTime)?.getTime() || 0) - (parseShiftInstant(b.startTime)?.getTime() || 0)),
     );
     const francoDocSkipIds = buildFrancoDocLiquidationSkipIds(sortedDocs, { usePlannedHours });
 
@@ -779,8 +797,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                            : d.checkInTime?.seconds  ? new Date(d.checkInTime.seconds  * 1000) : null;
             const rEndFB   = d.realEndTime?.seconds   ? new Date(d.realEndTime.seconds   * 1000)
                            : d.checkOutTime?.seconds  ? new Date(d.checkOutTime.seconds  * 1000) : null;
-            const start = d.startTime?.toDate ? d.startTime.toDate() : rStartFB;
-            const end   = d.endTime?.toDate   ? d.endTime.toDate()   : rEndFB;
+            const start = parseShiftInstant(d.startTime) || rStartFB;
+            const end   = parseShiftInstant(d.endTime) || rEndFB;
             if (!start || !end) return;
             const isRet = rawCode === 'RET' || d.isReten === true;
             const isDespliegue = isRet || isDeploymentOrPoolShift(d);
@@ -814,7 +832,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             // Fix 4: feriado solo aplica a turnos no-FT (no doble acumulación)
             if (isFeriado && !isFT) hoursFeriado += duration;
             // Solo sumar a teóricas si el turno tiene tiempos planificados reales
-            const hasPlannedTimes = !!(d.startTime?.toDate) && !!(d.endTime?.toDate);
+            const hasPlannedTimes = !!(parseShiftInstant(d.startTime) && parseShiftInstant(d.endTime));
             if (isFT) {
                 hoursFT += duration;
             } else if (isDespliegue && hasPlannedTimes) {

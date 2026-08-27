@@ -61,6 +61,10 @@ import {
   type ServiciosCatalogFilter,
   type ServiciosCatalogRow,
 } from '@/lib/servicios/serviciosObjectiveCatalog';
+import { solicitudRefuerzoService, type SolicitudRefuerzo } from '@/services/solicitudRefuerzoService';
+import { isSolicitudRefuerzoExtraVendible } from '@/lib/refuerzo/refuerzoDisplay';
+import { calcRefuerzoHorasVendidas } from '@/lib/refuerzo/refuerzoProforma';
+import { buildServiceModificaciones, turnoExtraHours } from '@/lib/servicios/slaModificaciones';
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
@@ -306,7 +310,7 @@ export default function ServiciosSLAPage() {
 
   // Turnos RFZ/TURA — carga única al abrir el listado, acotada a ±1 mes.
   useEffect(() => {
-    if (!empresaId || view === 'form') return;
+    if (!empresaId) return;
     const now = new Date();
     const rangeStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const rangeEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59);
@@ -325,7 +329,12 @@ export default function ServiciosSLAPage() {
         .filter(t => ['RFZ', 'TURA'].includes(String(t.code || '').toUpperCase()));
       setRfzTuraExtras(rows);
     }).catch(e => console.error('[servicios] RFZ/TURA extras error:', e));
-  }, [empresaId, scopeEmpresa, migracionCompleta, view]);
+  }, [empresaId, scopeEmpresa, migracionCompleta]);
+
+  useEffect(() => {
+    if (!empresaId) return;
+    return solicitudRefuerzoService.subscribeByEmpresa(empresaId, setSolicitudesRefuerzo);
+  }, [empresaId]);
 
 
   // Auditoría en 'audit_logs'
@@ -1522,6 +1531,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   const toggleClient = (id: string) =>
     setExpandedClients(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [rfzTuraExtras, setRfzTuraExtras] = useState<any[]>([]);
+  const [solicitudesRefuerzo, setSolicitudesRefuerzo] = useState<SolicitudRefuerzo[]>([]);
   const [shiftModal, setShiftModal] = useState<{
     open: boolean;
     service: (ServiceSLA & { id: string }) | null;
@@ -2251,8 +2261,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             || group.services.some(s => s.objectiveId === t.objectiveId)
                             || (!!group.objectiveName && t.objectiveName === group.objectiveName);
                         });
-                        if (groupExtras.length === 0) return null;
-                        const extraHrs = groupExtras.reduce((a, t) => a + (t.hours || 8), 0);
+                        const monthSols = solicitudesRefuerzo.filter((sol) => {
+                          const f = String(sol.fecha || '').slice(0, 10);
+                          if (!f.startsWith(`${kpiYear}-${String(kpiMonth + 1).padStart(2, '0')}`)) return false;
+                          return sol.objectiveId === group.key
+                            || group.services.some(s => s.objectiveId === sol.objectiveId || (s.id && s.id === sol.slaIdAplicado))
+                            || (!!group.objectiveName && sol.objectiveName === group.objectiveName);
+                        });
+                        const estructurales = monthSols.filter((s) => !isSolicitudRefuerzoExtraVendible(s));
+                        const puntuales = monthSols.filter((s) => isSolicitudRefuerzoExtraVendible(s) && ['APROBADA', 'ASIGNADA', 'COMPLETADA'].includes(s.estado));
+                        if (groupExtras.length === 0 && estructurales.length === 0 && puntuales.length === 0) return null;
+                        const extraHrs = puntuales.length > 0
+                          ? puntuales.reduce((a, s) => a + calcRefuerzoHorasVendidas(s), 0)
+                          : groupExtras.reduce((a, t) => a + turnoExtraHours(t), 0);
                         const baseHrs = group.services.reduce((a, s) => a + getServiceHoursForKpiMonth(s), 0);
                         return (
                           <div className="mt-3 border-t border-dashed border-red-200 dark:border-red-900/40 pt-3">
@@ -2261,11 +2282,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                 <AlertCircle size={10}/> Refuerzos del mes · {kpiCurrent.label}
                               </span>
                               <span className="text-[9px] font-black bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-200">
-                                {groupExtras.length} turno{groupExtras.length !== 1 ? 's' : ''} · +{extraHrs} h
+                                {puntuales.length || groupExtras.length} extra{((puntuales.length || groupExtras.length) !== 1) ? 's' : ''} · +{Math.round(extraHrs * 10) / 10} h
                               </span>
                             </div>
                             <div className="space-y-1 mb-2">
-                              {groupExtras.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).map(t => (
+                              {puntuales.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).map(s => (
+                                <div key={s.id} className="flex items-center gap-2 text-[10px]">
+                                  <span className={`shrink-0 font-black px-1 py-0.5 rounded ${s.tipo === 'AGREGADO_TURNO' ? 'bg-red-600 text-white' : 'bg-red-500 text-white'}`}>{s.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ'}</span>
+                                  <span className="font-bold text-slate-600 dark:text-slate-300 w-16 shrink-0">{s.fecha}</span>
+                                  <span className="text-slate-500 dark:text-slate-400 flex-1 truncate">{s.positionName || s.parentEmpleadoName || 'Sin asignar'}</span>
+                                  <span className="shrink-0 font-black text-red-500">{calcRefuerzoHorasVendidas(s)}h</span>
+                                </div>
+                              ))}
+                              {puntuales.length === 0 && groupExtras.sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).map(t => (
                                 <div key={t.id} className="flex items-center gap-2 text-[10px]">
                                   <span className={`shrink-0 font-black px-1 py-0.5 rounded ${t.code === 'TURA' ? 'bg-red-600 text-white' : 'bg-red-500 text-white'}`}>{t.code}</span>
                                   <span className="font-bold text-slate-600 dark:text-slate-300 w-16 shrink-0">{t.fecha}</span>
@@ -2273,15 +2302,22 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <span className={`shrink-0 font-bold ${t.employeeId && t.employeeId !== 'VACANTE' ? 'text-emerald-600' : 'text-amber-600'}`}>
                                     {t.employeeId && t.employeeId !== 'VACANTE' ? 'Asignado' : 'Vacante'}
                                   </span>
-                                  <span className="shrink-0 font-black text-red-500">{t.hours || 8}h</span>
+                                  <span className="shrink-0 font-black text-red-500">{turnoExtraHours(t) || 0}h</span>
+                                </div>
+                              ))}
+                              {estructurales.map(s => (
+                                <div key={s.id} className="flex items-center gap-2 text-[10px]">
+                                  <span className="shrink-0 font-black px-1 py-0.5 rounded bg-amber-500 text-white">SLA</span>
+                                  <span className="font-bold text-slate-600 dark:text-slate-300 w-16 shrink-0">{s.fecha}</span>
+                                  <span className="text-amber-700 dark:text-amber-400 flex-1 truncate">+{s.cantidadPax || 1} pax estructural · ya en el contrato</span>
                                 </div>
                               ))}
                             </div>
-                            {baseHrs > 0 && (
+                            {baseHrs > 0 && extraHrs > 0 && (
                               <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-900/50 rounded-lg px-3 py-1.5">
-                                <span className="text-[9px] font-black uppercase text-slate-500">SLA del mes c/ refuerzos</span>
+                                <span className="text-[9px] font-black uppercase text-slate-500">SLA del mes c/ extras puntuales</span>
                                 <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 tabular-nums">
-                                  {baseHrs} + {extraHrs} = {baseHrs + extraHrs} h
+                                  {baseHrs} + {Math.round(extraHrs * 10) / 10} = {Math.round((baseHrs + extraHrs) * 10) / 10} h
                                 </span>
                               </div>
                             )}
@@ -2440,6 +2476,39 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   <span className="font-bold font-mono">{srv.endDate}</span>
                   <span className="ml-auto text-base font-black text-indigo-600 dark:text-indigo-400">{total} hs totales</span>
                 </div>
+                {(() => {
+                  const mods = buildServiceModificaciones(srv, solicitudesRefuerzo, rfzTuraExtras);
+                  if (mods.length === 0) return null;
+                  return (
+                    <div>
+                      <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Modificaciones</p>
+                      <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                        {mods.slice(0, 20).map((row) => {
+                          const d = String(row.at || '').slice(0, 10);
+                          const fecha = d.length === 10 ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : d;
+                          return (
+                            <div key={row.key} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${
+                                  row.kind === 'ESTRUCTURAL' ? 'bg-amber-100 text-amber-800'
+                                    : row.kind === 'TURA' ? 'bg-red-100 text-red-700'
+                                      : row.kind === 'RFZ' ? 'bg-rose-100 text-rose-700'
+                                        : 'bg-slate-100 text-slate-600'
+                                }`}>{row.kind}</span>
+                                <p className="text-[10px] font-black text-slate-700 dark:text-slate-200 flex-1 truncate">{row.title}</p>
+                                {row.hours != null && row.hours > 0 && (
+                                  <span className="text-[10px] font-black text-indigo-600">{row.hours}h</span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-500 truncate">{row.detail}</p>
+                              <p className="text-[9px] text-slate-400">{fecha}{row.actor ? ` · ${row.actor}` : ''}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div>
                   <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Dotación Operativa</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
@@ -3314,7 +3383,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               )}
             </div>
 
-            {(form.changeLog?.length || form.cancelReason) ? (
+            {(form.changeLog?.length || form.cancelReason || (isEditing && buildServiceModificaciones(form, solicitudesRefuerzo, rfzTuraExtras).length > 0)) ? (
               <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
                 <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2 mb-3">
                   <FileText size={16} className="text-indigo-500"/> Trazabilidad
@@ -3327,14 +3396,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   </p>
                 )}
                 <div className="space-y-2 max-h-56 overflow-y-auto">
-                  {[...(form.changeLog || [])].slice().reverse().map((entry, idx) => {
-                    const d = String(entry.at || '').slice(0, 10);
+                  {buildServiceModificaciones(form, solicitudesRefuerzo, rfzTuraExtras).map((row) => {
+                    const d = String(row.at || '').slice(0, 10);
                     const fecha = d.length === 10 ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : d;
                     return (
-                      <div key={`${entry.at}-${idx}`} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 px-3 py-2">
-                        <p className="text-[10px] font-black uppercase text-indigo-500">{entry.action.replace(/_/g, ' ')}</p>
-                        <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{entry.detail}</p>
-                        <p className="text-[9px] text-slate-400">{fecha}{entry.byName ? ` · ${entry.byName}` : ''}</p>
+                      <div key={row.key} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 px-3 py-2">
+                        <p className="text-[10px] font-black uppercase text-indigo-500">{row.title}</p>
+                        <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{row.detail}{row.hours ? ` · ${row.hours}h` : ''}</p>
+                        <p className="text-[9px] text-slate-400">{fecha}{row.actor ? ` · ${row.actor}` : ''}</p>
                       </div>
                     );
                   })}
