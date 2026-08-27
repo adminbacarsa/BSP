@@ -150,6 +150,7 @@ import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '
 import {
   applyRefuerzoHorasVendidasToGrids,
   applyRefuerzoHorasVendidasToBreakdown,
+  countEstructuralesEnRango,
   solicitudIdsBilledInRange,
 } from '@/lib/refuerzo/refuerzoProforma';
 
@@ -371,6 +372,7 @@ export default function CRMPage() {
     executed: 0,
     sinCobertura: 0,
     loading: false,
+    estructurales: 0,
   });
   const [proformaBreakdown, setProformaBreakdown] = useState<any[]>([]);
   const [proformaBundle, setProformaBundle] = useState<ProformaExportBundle | null>(null);
@@ -2201,6 +2203,7 @@ export default function CRMPage() {
           : Math.round(executed.total),
         sinCobertura: modeIsSinCobertura ? gridTotal : Math.round(sinCobertura.total),
         loading: false,
+        estructurales: countEstructuralesEnRango(solicitudesRefuerzo, { start, end }),
       });
     } catch (e) {
       console.error(e);

@@ -24,7 +24,7 @@ export type ProformaPanelProps = {
   proformaDetailMode: ProformaDetailMode;
   proformaBase: 'requested' | 'planned' | 'executed';
   proformaHourlyValue: string;
-  proformaTotals: { planned: number; executed: number; sinCobertura: number; loading: boolean };
+  proformaTotals: { planned: number; executed: number; sinCobertura: number; loading: boolean; estructurales?: number };
   proformaBreakdown: any[];
   proformaBundle: ProformaExportBundle | null;
   baseHours: number;
@@ -244,6 +244,9 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                   <>Ejecutado (fichaje): {proformaTotals.executed} hs · requiere realStart/realEnd del guardia</>
                 ) : (
                   <>Plan: {proformaTotals.planned} hs · Ejec: {proformaTotals.executed} hs · Sin cob: {proformaTotals.sinCobertura} hs</>
+                )}
+                {(proformaTotals.estructurales ?? 0) > 0 && (
+                  <> · {proformaTotals.estructurales} refuerzo{proformaTotals.estructurales === 1 ? '' : 's'} estructural{proformaTotals.estructurales === 1 ? '' : 'es'} ya incluido{proformaTotals.estructurales === 1 ? '' : 's'} en el SLA</>
                 )}
               </span>
             </div>
