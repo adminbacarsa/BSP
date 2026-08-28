@@ -543,20 +543,29 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     }
   }
 
-  // â"€â"€ Gmail SMTP â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-  const gmailUser = process.env.GMAIL_USER || '';
-  const gmailPass = process.env.GMAIL_PASS || '';
+  // — Gmail SMTP —
+  const gmailUser = (process.env.GMAIL_USER || '').trim();
+  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
   if (!gmailUser || !gmailPass) {
     results.gmail = { ok: false, detail: 'GMAIL_USER / GMAIL_PASS no configurados' };
   } else {
     const tm = Date.now();
     try {
       const nodemailerMod = await import('nodemailer');
-      const transporter = nodemailerMod.createTransport({ service: 'gmail', auth: { user: gmailUser, pass: gmailPass } });
+      const transporter = nodemailerMod.createTransport({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: { user: gmailUser, pass: gmailPass },
+      });
       await transporter.verify();
-      results.gmail = { ok: true, latencyMs: Date.now() - tm, detail: gmailUser };
+      results.gmail = { ok: true, latencyMs: Date.now() - tm, detail: `${gmailUser} · passLen=${gmailPass.length}` };
     } catch (e: any) {
-      results.gmail = { ok: false, latencyMs: Date.now() - tm, detail: e.message?.slice(0, 120) };
+      results.gmail = {
+        ok: false,
+        latencyMs: Date.now() - tm,
+        detail: `${gmailUser} · passLen=${gmailPass.length} · ${(e.message || '').slice(0, 100)}`,
+      };
     }
   }
 
@@ -1171,11 +1180,11 @@ function buildPortalEmailHtml(
         <tr>
           <td style="padding:40px 40px 32px;">
             <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">${nombre} te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular Android</strong>. Si tenés instalada la app <strong>COSP Guardia</strong>, usá el botón verde. Si no, el botón azul abre el portal web.</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular Android</strong>. Si tenés la app <strong>COSP Guardia</strong>, usá el botón índigo (abre la web y te ofrece pasar a la app). Si no, el botón verde activa en el navegador.</p>
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 16px;">
               <tr>
                 <td style="background:#312e81;border-radius:8px;">
-                  <a href="${activationLinkApp}" style="display:inline-block;padding:16px 32px;color:#fff;font-size:16px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ABRIR EN COSP GUARDIA</a>
+                  <a href="${activationLinkApp}" target="_blank" style="display:inline-block;padding:16px 32px;color:#fff;font-size:16px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ABRIR EN COSP GUARDIA</a>
                 </td>
               </tr>
             </table>
@@ -1219,7 +1228,7 @@ Abrí este email desde tu celular Android.
 App COSP Guardia (recomendado si ya la instalaste):
 ${activationLinkApp}
 
-Portal web:
+Portal web (solo navegador):
 ${activationLinkWeb}
 
 Este enlace expira en 48 horas y es de un solo uso.
@@ -1259,8 +1268,8 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
   }
 
   // Credenciales SMTP — definir en apps/functions/.env (GMAIL_USER y GMAIL_PASS)
-  const gmailUser = process.env.GMAIL_USER || '';
-  const gmailPass = process.env.GMAIL_PASS || '';
+  const gmailUser = (process.env.GMAIL_USER || '').trim();
+  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
 
   if (!gmailUser || !gmailPass) {
     throw new functions.https.HttpsError(
@@ -1270,7 +1279,9 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
   }
 
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: { user: gmailUser, pass: gmailPass },
   });
 
@@ -1343,7 +1354,9 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       const activationLinkWeb = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
-      const activationLinkApp = `cosp-guardia://empleado/activar?t=${activationToken}`;
+      // Gmail bloquea esquemas custom (cosp-guardia://). Usamos HTTPS + open=app;
+      // la página web intenta abrir la app y deja activar en navegador.
+      const activationLinkApp = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}&open=app`;
 
       // Enviar email — solo se marca como enviado si el envío fue exitoso
       await transporter.sendMail({
@@ -1612,8 +1625,8 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
     throw new functions.https.HttpsError('invalid-argument', 'Se requieren clientId, clientName, nombre y email.');
   }
 
-  const gmailUser = process.env.GMAIL_USER || '';
-  const gmailPass = process.env.GMAIL_PASS || '';
+  const gmailUser = (process.env.GMAIL_USER || '').trim();
+  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
 
   if (!gmailUser || !gmailPass) {
     throw new functions.https.HttpsError(
@@ -1623,7 +1636,9 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
   }
 
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: { user: gmailUser, pass: gmailPass },
   });
 
