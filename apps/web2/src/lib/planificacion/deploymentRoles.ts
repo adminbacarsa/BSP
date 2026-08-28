@@ -192,19 +192,39 @@ export function shiftCountsForEmployeeCronoHours(shift: {
     return !nonWork.has(code);
 }
 
+export type DeploymentShiftOverride = {
+    hours?: number;
+    startTime?: string;
+    endTime?: string;
+    name?: string;
+};
+
+/**
+ * Construye config REF/ESC. `band` es el código de banda del puesto (T, T EX, ME…).
+ * Si hay `shiftOverride` (turno real del SLA), usa sus horas/horario en lugar de la tabla fija M/T/N.
+ */
 export function buildDeploymentShiftConfig(
     intent: 'SURPLUS' | 'TRAINING',
     band: string,
     positionName: string,
+    shiftOverride?: DeploymentShiftOverride | null,
 ): Record<string, unknown> {
     const b = String(band || 'M').toUpperCase();
     const code = intent === 'TRAINING' ? 'ESC' : 'REF';
-    const hours = DEPLOYMENT_BAND_HOURS[b] ?? 8;
+    const hoursRaw = Number(shiftOverride?.hours);
+    const hours = Number.isFinite(hoursRaw) && hoursRaw > 0
+        ? hoursRaw
+        : (DEPLOYMENT_BAND_HOURS[b] ?? 8);
+    const startTime = String(shiftOverride?.startTime || '').trim()
+        || DEPLOYMENT_BAND_START[b]
+        || '07:00';
+    const endTime = String(shiftOverride?.endTime || '').trim() || undefined;
     return {
         code,
         name: intent === 'TRAINING' ? 'Escuela' : 'Refuerzo',
         hours,
-        startTime: DEPLOYMENT_BAND_START[b] || '07:00',
+        startTime,
+        ...(endTime ? { endTime } : {}),
         deploymentBand: b,
         deploymentRole: intent === 'TRAINING' ? 'TRAINING' : 'SURPLUS',
         surplusIntent: intent === 'TRAINING' ? 'FORMACION' : 'HORAS',

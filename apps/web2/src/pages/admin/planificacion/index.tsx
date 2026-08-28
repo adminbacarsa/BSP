@@ -1145,6 +1145,13 @@ export default function PlanificacionPage() {
     const objectiveSortAppliedRef = useRef<string | null>(null);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
+    /** Picker REF/ESC desde selección masiva (bandas = turnos reales del puesto). */
+    const [bulkDeployPicker, setBulkDeployPicker] = useState<{
+        intent: 'SURPLUS' | 'TRAINING';
+        onlyEmpId?: string;
+        positionName: string;
+        bands: { code: string; name?: string; hours?: number; startTime?: string; endTime?: string }[];
+    } | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
     const [notifPanelTop, setNotifPanelTop] = useState(0);
@@ -3218,6 +3225,8 @@ export default function PlanificacionPage() {
         if (bulkMonoPerEmpMode) {
             bulkMonoShifts.forEach((s: any) => addCode(s.code));
         }
+        addCode('REF');
+        addCode('ESC');
         addCode('RET');
         addCode('F');
         const ORDER = ['M', 'T', 'N', 'D12', 'N12', 'RO', 'EN', 'ESC', 'REF', 'RET', 'F'];
@@ -6730,9 +6739,12 @@ export default function PlanificacionPage() {
                 const upper = String(code || '').toUpperCase();
                 if (upper === 'RET') return 'Retén';
                 if (['F', 'FF', 'FP', 'FT'].includes(upper)) return 'General';
-                const owners = ownersForCode(upper);
                 const empPos = empDefaultPos[`${emp.id}___${covObjId}`] || null;
                 const filterPos = bulkEmpPositionFilter[emp.id] || bulkBarPosition || null;
+                if (upper === 'REF' || upper === 'ESC') {
+                    return hintPos || filterPos || empPos || fallbackPosLocal;
+                }
+                const owners = ownersForCode(upper);
                 if (owners.length === 0) {
                     return empPos || filterPos || hintPos || fallbackPosLocal;
                 }
@@ -6919,16 +6931,37 @@ export default function PlanificacionPage() {
                     cellIsFT = markAsFT;
                 }
                 newChanges[key] = {
-                    code: def?.code || shiftConfig.code,
-                    name: def?.name || shiftConfig.name,
-                    hours,
-                    startTime: def?.startTime || shiftConfig.startTime,
-                    endTime: def?.endTime || shiftConfig.endTime,
+                    code: (codeUpper === 'REF' || codeUpper === 'ESC')
+                        ? codeUpper
+                        : (def?.code || shiftConfig.code),
+                    name: (codeUpper === 'REF' || codeUpper === 'ESC')
+                        ? (shiftConfig.name || (codeUpper === 'ESC' ? 'Escuela' : 'Refuerzo'))
+                        : (def?.name || shiftConfig.name),
+                    hours: (codeUpper === 'REF' || codeUpper === 'ESC')
+                        ? (Number(shiftConfig.hours) > 0 ? Number(shiftConfig.hours) : hours)
+                        : hours,
+                    startTime: (codeUpper === 'REF' || codeUpper === 'ESC')
+                        ? (shiftConfig.startTime || def?.startTime || '07:00')
+                        : (def?.startTime || shiftConfig.startTime),
+                    endTime: (codeUpper === 'REF' || codeUpper === 'ESC')
+                        ? (shiftConfig.endTime || def?.endTime)
+                        : (def?.endTime || shiftConfig.endTime),
                     isTemp: true,
                     oldObjectiveId: effectiveExisting?.objectiveId,
                     isFrancoTrabajado: cellIsFT,
                     positionName: assignPos,
                     objectiveId: covObjId || undefined,
+                    ...(codeUpper === 'REF' || codeUpper === 'ESC'
+                        ? {
+                            deploymentBand: shiftConfig.deploymentBand || codeUpper,
+                            deploymentRole: shiftConfig.deploymentRole || (codeUpper === 'ESC' ? 'TRAINING' : 'SURPLUS'),
+                            surplusIntent: shiftConfig.surplusIntent || (codeUpper === 'ESC' ? 'FORMACION' : 'HORAS'),
+                            countsForCoverage: false,
+                            isRefuerzo: true,
+                            isEscuela: codeUpper === 'ESC',
+                            isReten: false,
+                        }
+                        : {}),
                 };
                 count++;
             }
@@ -7336,11 +7369,133 @@ export default function PlanificacionPage() {
         setDeployBandPicker(intent);
     };
 
-    const confirmDeploymentBand = (band: string) => {
+    /** Bandas disponibles para ESC/REF = turnos laborales reales del puesto (no M/T/N fijos). */
+    const getDeploymentBandsForPosition = useCallback((
+        positionName: string,
+        structure?: any[],
+        dateStr?: string | null,
+    ) => {
+        const struct = structure || effectivePosStructure || positionStructure || [];
+        const pos = struct.find((p: any) => p.positionName === positionName);
+        if (!pos) return [] as { code: string; name?: string; hours?: number; startTime?: string; endTime?: string }[];
+        const cycles = autoSelectedCyclesRef.current?.length ? autoSelectedCyclesRef.current : autoCycles;
+        const dayLetter = dateStr ? getDayLetter(dateStr) : '';
+        const raw = dateStr
+            ? filterShiftsForPlanningDay(pos.shifts || [], pos, dayLetter, dateStr, cycles)
+            : (pos.shifts || []);
+        const NON = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC', 'RFZ', 'TURA']);
+        const seen = new Set<string>();
+        const out: { code: string; name?: string; hours?: number; startTime?: string; endTime?: string }[] = [];
+        for (const s of raw) {
+            const code = String(s.code || '').trim().toUpperCase();
+            if (!code || NON.has(code) || seen.has(code)) continue;
+            seen.add(code);
+            out.push({
+                code,
+                name: s.name,
+                hours: Number(s.hours) || undefined,
+                startTime: s.startTime,
+                endTime: s.endTime,
+            });
+        }
+        return out;
+    }, [effectivePosStructure, positionStructure, autoCycles]);
+
+    const deployBandOptions = useMemo(() => {
+        if (!deployBandPicker || !activePosition || activePosition === 'General' || activePosition === 'Retén') {
+            return [] as { code: string; name?: string; hours?: number; startTime?: string; endTime?: string }[];
+        }
+        return getDeploymentBandsForPosition(activePosition, effectivePosStructure, selectedCell?.dateStr);
+    }, [deployBandPicker, activePosition, effectivePosStructure, selectedCell?.dateStr, getDeploymentBandsForPosition]);
+
+    const confirmDeploymentBand = (band: string, shiftOverride?: { hours?: number; startTime?: string; endTime?: string; name?: string } | null) => {
         if (!deployBandPicker || !selectedCell) return;
-        const config = buildDeploymentShiftConfig(deployBandPicker, band, activePosition || 'General');
+        const config = buildDeploymentShiftConfig(
+            deployBandPicker,
+            band,
+            activePosition || 'General',
+            shiftOverride,
+        );
         setDeployBandPicker(null);
         handleAssignShift(config, activePosition || 'General');
+    };
+
+    const openBulkDeployPicker = (
+        intent: 'SURPLUS' | 'TRAINING',
+        opts?: { onlyEmpId?: string; positionName?: string },
+    ) => {
+        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
+        if (!selection.start || !selection.end) return;
+        const minC = Math.min(selection.start.c, selection.end?.c ?? selection.start.c);
+        const dateStr = daysInMonth[minC] ? getDateKey(daysInMonth[minC]) : null;
+        if (dateStr && isPlanningDateLocked(dateStr) && intent === 'SURPLUS') {
+            toast.warning('Periodo cerrado — solo podés asignar ESC (no REF) en masa.');
+            return;
+        }
+
+        let positionName = String(opts?.positionName || '').trim();
+        let structure = bulkEffectiveStructure || positionStructure || [];
+
+        if (opts?.onlyEmpId) {
+            const emp = displayedEmployees.find((e: any) => e.id === opts.onlyEmpId);
+            if (emp) {
+                const covObjId = (selectedGrupo && grupoUnifiedMode)
+                    ? (resolveNativeObjectiveInGrupo(emp)
+                        || bulkEmpObjectiveOverrides[emp.id]
+                        || bulkTargetObjectiveId
+                        || selectedGrupo.objectiveIds[0]
+                        || selectedObjective)
+                    : selectedObjective;
+                if (selectedGrupo && grupoUnifiedMode && covObjId && grupoSlaMap[covObjId]?.length) {
+                    structure = grupoSlaMap[covObjId];
+                }
+                if (!positionName) {
+                    positionName = bulkEmpPositionFilter[opts.onlyEmpId]
+                        || (covObjId ? (empDefaultPos[`${opts.onlyEmpId}___${covObjId}`] || '') : '')
+                        || resolveBulkPanelEmpPosition(emp, covObjId || undefined)
+                        || bulkBarPosition
+                        || '';
+                }
+            }
+        }
+
+        if (!positionName) {
+            positionName = bulkBarPosition
+                || (structure.length === 1 ? structure[0]?.positionName : '')
+                || (activePosition && activePosition !== 'General' && activePosition !== 'Retén' ? activePosition : '')
+                || '';
+        }
+
+        if (!positionName || positionName === 'General' || positionName === 'Retén') {
+            toast.error('Elegí un puesto (paleta) antes de asignar REF o ESC en masa');
+            return;
+        }
+
+        const bands = getDeploymentBandsForPosition(positionName, structure, dateStr);
+        if (!bands.length) {
+            toast.error(`El puesto "${positionName}" no tiene turnos SLA para escuela/refuerzo en esta selección`);
+            return;
+        }
+
+        setBulkDeployPicker({
+            intent,
+            onlyEmpId: opts?.onlyEmpId,
+            positionName,
+            bands,
+        });
+    };
+
+    const confirmBulkDeployBand = (band: string, shiftOverride?: { hours?: number; startTime?: string; endTime?: string; name?: string } | null) => {
+        if (!bulkDeployPicker) return;
+        const config = buildDeploymentShiftConfig(
+            bulkDeployPicker.intent,
+            band,
+            bulkDeployPicker.positionName,
+            shiftOverride,
+        );
+        const onlyEmpId = bulkDeployPicker.onlyEmpId;
+        setBulkDeployPicker(null);
+        applyBulkChange(config, onlyEmpId ? { onlyEmpId } : undefined);
     };
 
     const handleAssignShift = async (shiftConfig: any, positionName: string) => {
@@ -11439,6 +11594,16 @@ export default function PlanificacionPage() {
                                                     <button key="all_F" type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' })} disabled={isServiceLocked} className="w-7 h-6 rounded bg-green-500 text-white font-black text-[9px]">F</button>
                                                 );
                                             }
+                                            if (code === 'REF') {
+                                                return (
+                                                    <button key="all_REF" type="button" onClick={() => openBulkDeployPicker('SURPLUS')} disabled={isServiceLocked} title="Refuerzo — elegí banda del puesto" className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('REF')}`}>REF</button>
+                                                );
+                                            }
+                                            if (code === 'ESC') {
+                                                return (
+                                                    <button key="all_ESC" type="button" onClick={() => openBulkDeployPicker('TRAINING')} disabled={isServiceLocked} title="Escuela — elegí banda real del puesto" className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('ESC')}`}>ESC</button>
+                                                );
+                                            }
                                             const pool = bulkHeaderShiftPool;
                                             const s = pool.find((x: any) => String(x.code || '').toUpperCase() === code);
                                             if (!s) return <span key={`all_sp_${code}`} className="w-7 h-6 shrink-0" aria-hidden />;
@@ -11503,6 +11668,16 @@ export default function PlanificacionPage() {
                                                                 if (code === 'F') {
                                                                     return (
                                                                         <button key={`${emp.id}_F`} type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className="w-7 h-6 rounded bg-green-600 text-white text-[9px] font-black">F</button>
+                                                                    );
+                                                                }
+                                                                if (code === 'REF') {
+                                                                    return (
+                                                                        <button key={`${emp.id}_REF`} type="button" onClick={() => openBulkDeployPicker('SURPLUS', { onlyEmpId: emp.id, positionName: empPos || undefined })} disabled={isServiceLocked || !empPos} title={!empPos ? 'Sin puesto asignado' : `${emp.name} · REF en ${empPos}`} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('REF')} ${!empPos ? 'opacity-30 cursor-not-allowed' : ''}`}>REF</button>
+                                                                    );
+                                                                }
+                                                                if (code === 'ESC') {
+                                                                    return (
+                                                                        <button key={`${emp.id}_ESC`} type="button" onClick={() => openBulkDeployPicker('TRAINING', { onlyEmpId: emp.id, positionName: empPos || undefined })} disabled={isServiceLocked || !empPos} title={!empPos ? 'Sin puesto asignado' : `${emp.name} · ESC en ${empPos}`} className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle('ESC')} ${!empPos ? 'opacity-30 cursor-not-allowed' : ''}`}>ESC</button>
                                                                     );
                                                                 }
                                                                 const s = empShiftByCode.get(code);
@@ -11585,6 +11760,22 @@ export default function PlanificacionPage() {
                                                             if (code === 'F') {
                                                                 return (
                                                                     <button key={`${emp.id}_F`} type="button" onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' }, { onlyEmpId: emp.id })} disabled={isServiceLocked} className="w-7 h-6 rounded bg-green-600 text-white text-[9px] font-black">F</button>
+                                                                );
+                                                            }
+                                                            if (code === 'REF' || code === 'ESC') {
+                                                                const intent = code === 'ESC' ? 'TRAINING' as const : 'SURPLUS' as const;
+                                                                const posForDeploy = effectivePosName || filterPos || bulkBarPosition || (isSinglePosSla ? panelStructure[0]?.positionName : '') || '';
+                                                                return (
+                                                                    <button
+                                                                        key={`${emp.id}_${code}`}
+                                                                        type="button"
+                                                                        onClick={() => openBulkDeployPicker(intent, { onlyEmpId: emp.id, positionName: posForDeploy || undefined })}
+                                                                        disabled={isServiceLocked || !posForDeploy}
+                                                                        title={!posForDeploy ? 'Elegí puesto primero' : `${emp.name} · ${code} en ${posForDeploy}`}
+                                                                        className={`w-7 h-6 rounded font-black text-[9px] ${getDefaultStyle(code)} ${!posForDeploy ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                                                    >
+                                                                        {code}
+                                                                    </button>
                                                                 );
                                                             }
                                                             const s = empShiftByCode.get(code);
@@ -11711,6 +11902,22 @@ export default function PlanificacionPage() {
                                     className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle('RET') || 'bg-amber-100 text-amber-800 border border-amber-300'}`}
                                 >
                                     RET
+                                </button>
+                                <button
+                                    onClick={() => openBulkDeployPicker('SURPLUS')}
+                                    disabled={isServiceLocked}
+                                    title="Refuerzo — elegí la banda real del puesto"
+                                    className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle('REF') || 'bg-violet-100 text-violet-800 border border-violet-300'}`}
+                                >
+                                    REF
+                                </button>
+                                <button
+                                    onClick={() => openBulkDeployPicker('TRAINING')}
+                                    disabled={isServiceLocked}
+                                    title="Escuela — elegí el turno real del puesto (no M/T/N genéricos)"
+                                    className={`w-8 h-8 rounded-lg font-black text-xs ${getDefaultStyle('ESC') || 'bg-sky-100 text-sky-800 border border-sky-300'}`}
+                                >
+                                    ESC
                                 </button>
                                 <button onClick={() => applyBulkChange({ code: 'F', name: 'Franco', hours: 0, startTime: '00:00' })} disabled={isServiceLocked} className="w-8 h-8 rounded-lg bg-green-500 text-white font-black text-xs border border-green-600">F</button>
                                 <div className="h-6 w-px bg-slate-600 mx-1"></div>
@@ -13322,9 +13529,9 @@ export default function PlanificacionPage() {
                 )}
                 {deployBandPicker && createPortal(
                     <div className="fixed inset-0 z-[9100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setDeployBandPicker(null)}>
-                        <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-2xl w-full max-w-xs border dark:border-slate-700" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-2xl w-full max-w-sm border dark:border-slate-700" onClick={e => e.stopPropagation()}>
                             <h3 className="font-black text-sm uppercase mb-1 text-slate-800 dark:text-white">
-                                {deployBandPicker === 'TRAINING' ? 'Escuela — elegir banda' : 'Refuerzo — elegir banda'}
+                                {deployBandPicker === 'TRAINING' ? 'Escuela — elegir turno del puesto' : 'Refuerzo — elegir turno del puesto'}
                             </h3>
                             <p className="text-[10px] text-slate-500 mb-4 flex items-center gap-2 flex-wrap">
                                 Puesto: <span className="font-bold text-indigo-600">{activePosition}</span>
@@ -13332,12 +13539,66 @@ export default function PlanificacionPage() {
                                     positionStructure.find((p: any) => p.positionName === activePosition)?.preferenciaGenero,
                                 )}
                             </p>
-                            <div className="grid grid-cols-3 gap-2">
-                                {['M', 'T', 'N', 'D12', 'N12'].map(b => (
-                                    <button key={b} onClick={() => confirmDeploymentBand(b)} className={`p-3 rounded-lg border font-black text-sm ${SHIFT_STYLES[b] || 'bg-slate-100'}`}>{b}</button>
-                                ))}
-                            </div>
+                            {deployBandOptions.length === 0 ? (
+                                <p className="text-[11px] text-rose-600 font-bold mb-3">
+                                    Este puesto no tiene turnos SLA activos para el día. Revisá el servicio / días excluidos.
+                                </p>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-2">
+                                    {deployBandOptions.map((b) => {
+                                        const hrs = Number(b.hours) > 0 ? Number(b.hours) : undefined;
+                                        const timeRange = b.startTime
+                                            ? `${b.startTime}${b.endTime ? `–${b.endTime}` : ''}`
+                                            : null;
+                                        return (
+                                            <button
+                                                key={b.code}
+                                                onClick={() => confirmDeploymentBand(b.code, b)}
+                                                className={`p-3 rounded-lg border font-black text-sm flex flex-col items-center gap-0.5 ${SHIFT_STYLES[b.code] || 'bg-slate-100 text-slate-800 border-slate-200'}`}
+                                            >
+                                                <span>{b.code}</span>
+                                                {hrs != null && <span className="text-[9px] opacity-70 font-bold">{hrs}hs</span>}
+                                                {timeRange && <span className="text-[8px] opacity-60 font-mono">{timeRange}</span>}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
                             <button onClick={() => setDeployBandPicker(null)} className="w-full mt-4 py-2 text-xs font-bold text-slate-400 hover:text-slate-600">Cancelar</button>
+                        </div>
+                    </div>,
+                    document.body,
+                )}
+                {bulkDeployPicker && createPortal(
+                    <div className="fixed inset-0 z-[9100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" onClick={() => setBulkDeployPicker(null)}>
+                        <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-2xl w-full max-w-sm border dark:border-slate-700" onClick={e => e.stopPropagation()}>
+                            <h3 className="font-black text-sm uppercase mb-1 text-slate-800 dark:text-white">
+                                {bulkDeployPicker.intent === 'TRAINING' ? 'Escuela masiva — turno del puesto' : 'Refuerzo masivo — turno del puesto'}
+                            </h3>
+                            <p className="text-[10px] text-slate-500 mb-4">
+                                Puesto: <span className="font-bold text-indigo-600">{bulkDeployPicker.positionName}</span>
+                                {bulkDeployPicker.onlyEmpId ? ' · un colaborador' : ' · selección completa'}
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                                {bulkDeployPicker.bands.map((b) => {
+                                    const hrs = Number(b.hours) > 0 ? Number(b.hours) : undefined;
+                                    const timeRange = b.startTime
+                                        ? `${b.startTime}${b.endTime ? `–${b.endTime}` : ''}`
+                                        : null;
+                                    return (
+                                        <button
+                                            key={b.code}
+                                            onClick={() => confirmBulkDeployBand(b.code, b)}
+                                            className={`p-3 rounded-lg border font-black text-sm flex flex-col items-center gap-0.5 ${SHIFT_STYLES[b.code] || 'bg-slate-100 text-slate-800 border-slate-200'}`}
+                                        >
+                                            <span>{b.code}</span>
+                                            {hrs != null && <span className="text-[9px] opacity-70 font-bold">{hrs}hs</span>}
+                                            {timeRange && <span className="text-[8px] opacity-60 font-mono">{timeRange}</span>}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <button onClick={() => setBulkDeployPicker(null)} className="w-full mt-4 py-2 text-xs font-bold text-slate-400 hover:text-slate-600">Cancelar</button>
                         </div>
                     </div>,
                     document.body,

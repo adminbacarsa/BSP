@@ -45,6 +45,7 @@ import {
   type NovedadType,
 } from '@/lib/rrhh/novedadTypes';
 import { novedadTypeService } from '@/services/novedadTypeService';
+import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
 
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -942,23 +943,9 @@ export default function EmployeesPage() {
               if (isFT) { hoursOnFranco += duration; }
               else { hoursTotalOperativas += duration; totalNocturnas += night; totalDiurnas += day; }
 
-              // Horas reales con clamp (ingreso anticipado → hora plan; ±5min egreso → hora plan)
-              const isAbsentShift = d.isAbsent === true || st.includes('absent') || st.includes('ausent');
-              if (!isAbsentShift && end <= new Date()) {
-                  const rStartRaw = d.realStartTime?.seconds ? new Date(d.realStartTime.seconds * 1000)
-                                  : d.checkInTime?.seconds  ? new Date(d.checkInTime.seconds * 1000)
-                                  : null;
-                  const rEndRaw   = d.realEndTime?.seconds   ? new Date(d.realEndTime.seconds * 1000)
-                                  : d.checkOutTime?.seconds  ? new Date(d.checkOutTime.seconds * 1000)
-                                  : null;
-                  const rStart = rStartRaw ? ((rStartRaw.getTime() - start.getTime()) / 60000 <= 5 ? start : rStartRaw) : null;
-                  const rEnd   = rEndRaw   ? (Math.abs((rEndRaw.getTime() - end.getTime()) / 60000) <= 5 ? end : rEndRaw) : null;
-                  if (rStart && rEnd) {
-                      const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
-                      totalRealizado += (rDur >= 0 && rDur <= 36) ? rDur : duration;
-                  } else {
-                      totalRealizado += duration;
-                  }
+              // Horas reales = solo fichadas (misma regla que Dashboard/CRM/Análisis). Sin fichada = 0, no se copia el plan.
+              if (isShiftFichado(d)) {
+                  totalRealizado += fichadaHoursForShift(d);
               }
 
               let objName = "Sin Asignar";
