@@ -110,7 +110,7 @@ cronoapp/
 | `roles` | Permisos por módulo. Estructura: `{ permissions: { MODULE_KEY: ['read','create',...] } }` |
 | `payroll_settings` | Modo de horas publicado al endpoint de liquidación (`hoursMode: planned \| real`). Doc id = `empresaId`. |
 
-**Uso de la información (Bacar S.A.):** política general de uso y compartición entre áreas (Excel, mail, WhatsApp, COSP) en `docs/politica-datos-bacar/`. Anexos por área: pendientes. No sustituye `firestore.rules`.
+**Uso del dato (Bacar S.A.):** política general en `docs/politica-datos-bacar/` — gobernanza por área (el dato es de la empresa), alta con propósito, Google Workspace / intranet como lugar de creación y distribución; no planillas locales sin declarar. Anexos por área: pendientes.
 
 ### Campos importantes en `turnos`
 

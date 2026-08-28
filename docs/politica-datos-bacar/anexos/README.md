@@ -2,17 +2,17 @@
 
 La política general está en [`01-politica-uso-compartido-informacion.md`](../01-politica-uso-compartido-informacion.md).
 
-Cada anexo baja esas reglas al día a día del sector: qué Excel o sistema usa, quién es dueño, qué puede compartir con otras áreas y qué no sale.
+Cada anexo baja el marco al sector: qué información **gobierna** (no es dueña), qué planillas oficiales hay en Google Workspace / intranet / COSP, y qué puede circular.
 
-No se redactan hasta que se tome el área. Orden sugerido (se puede cambiar):
+No se redactan hasta que se tome el área:
 
-| Orden | Anexo | Pregunta que tiene que responder |
-|-------|--------|----------------------------------|
-| 1 | RRHH | Legajo, novedades, qué sale a Operaciones / liquidación |
-| 2 | Operaciones | Guardia del día, listados, WhatsApp de cobertura |
-| 3 | Administración / liquidación | Horas, haberes, qué piden a RRHH y a Operaciones |
-| 4 | Planificación | Malla, extractos, quién ve el Excel vs COSP |
-| 5 | Comercial / clientes | Contratos, contactos, qué se le informa al cliente |
-| 6 | Sistemas | Accesos, COSP, copias, lab vs producción |
+| Orden | Anexo | Tiene que responder |
+|-------|--------|---------------------|
+| 1 | RRHH | Qué gobierna; qué puede pedir Operaciones / liquidación; qué no sale |
+| 2 | Operaciones | Guardia del día; listados oficiales vs chat; qué nace en el piso |
+| 3 | Administración / liquidación | Horas y haberes; de dónde se toma el número |
+| 4 | Planificación | Malla; extractos; COSP vs Sheet |
+| 5 | Comercial / clientes | Contratos y contactos; qué se informa al cliente |
+| 6 | Sistemas | Workspace, intranet, COSP, altas de reportes nuevos |
 
-Cuando se arme uno, el archivo va acá con nombre `anexo-{area}.md`.
+Archivo: `anexo-{area}.md`.
