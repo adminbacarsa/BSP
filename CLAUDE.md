@@ -110,7 +110,7 @@ cronoapp/
 | `roles` | Permisos por módulo. Estructura: `{ permissions: { MODULE_KEY: ['read','create',...] } }` |
 | `payroll_settings` | Modo de horas publicado al endpoint de liquidación (`hoursMode: planned \| real`). Doc id = `empresaId`. |
 
-**Gobierno de datos (Bacar S.A.):** política corporativa Ley 25.326 en `docs/politica-datos-bacar/` (marco, inventario, sistemas, derechos/incidentes, cláusulas). Borrador interno; no sustituye `firestore.rules`. Datos sensibles (certificados E/ART, PG) no deben enviarse a Gemini. Baja de personas: `status: INACTIVE`, no `deleteDoc`.
+**Uso de la información (Bacar S.A.):** política general de uso y compartición entre áreas (Excel, mail, WhatsApp, COSP) en `docs/politica-datos-bacar/`. Anexos por área: pendientes. No sustituye `firestore.rules`.
 
 ### Campos importantes en `turnos`
 
