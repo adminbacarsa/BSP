@@ -30,15 +30,27 @@ function getOrCreateDeviceId(): string {
   return id;
 }
 
+/** Intent Android: abre la app si está instalada; si no, no rompe la página. */
+function buildAndroidIntentUrl(token: string): string {
+  const schemePath = `empleado/activar?t=${encodeURIComponent(token)}`;
+  return `intent://${schemePath}#Intent;scheme=cosp-guardia;package=com.grupobacar.cosp.guardia;end`;
+}
+
 export default function ActivarDispositivoPage() {
   const router = useRouter();
   const [state, setState] = useState<State>('loading');
   const [errorMsg, setErrorMsg] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [triedOpenApp, setTriedOpenApp] = useState(false);
 
   const token = typeof router.query.t === 'string' ? router.query.t : null;
+  const openApp =
+    router.query.open === 'app' ||
+    router.query.open === '1' ||
+    router.query.open === 'true';
   const appDeepLink = token ? `cosp-guardia://empleado/activar?t=${token}` : null;
+  const androidIntentUrl = token ? buildAndroidIntentUrl(token) : null;
   const isAndroid =
     typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
 
@@ -51,6 +63,27 @@ export default function ActivarDispositivoPage() {
     }
     setState('form');
   }, [router.isReady, token]);
+
+  // Desde el mail (open=app): intentar abrir la app al cargar (Gmail no permite cosp-guardia:// directo).
+  useEffect(() => {
+    if (!router.isReady || !token || !openApp || !isAndroid || triedOpenApp) return;
+    setTriedOpenApp(true);
+    const custom = `cosp-guardia://empleado/activar?t=${encodeURIComponent(token)}`;
+    const intent = buildAndroidIntentUrl(token);
+    try {
+      window.location.href = custom;
+    } catch {
+      /* ignore */
+    }
+    const t = window.setTimeout(() => {
+      try {
+        window.location.href = intent;
+      } catch {
+        /* ignore */
+      }
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [router.isReady, token, openApp, isAndroid, triedOpenApp]);
 
   async function handleActivate() {
     if (!password || password.length < 6) {
@@ -165,13 +198,20 @@ export default function ActivarDispositivoPage() {
           <p className="text-slate-400 text-sm">Creá tu contraseña para acceder al portal desde este celular.</p>
         </div>
 
-        {isAndroid && appDeepLink ? (
-          <a
-            href={appDeepLink}
-            className="mb-5 block w-full rounded-xl border border-indigo-500/40 bg-indigo-950/50 px-4 py-3 text-center text-sm font-bold text-indigo-200 hover:bg-indigo-900/40"
-          >
-            Abrir en app COSP Guardia
-          </a>
+        {isAndroid && (appDeepLink || androidIntentUrl) ? (
+          <div className="mb-5 space-y-2">
+            {openApp ? (
+              <p className="text-center text-xs text-indigo-300/90">
+                Si tenés COSP Guardia instalada, debería abrirse sola. Si no, tocá el botón.
+              </p>
+            ) : null}
+            <a
+              href={androidIntentUrl || appDeepLink!}
+              className="block w-full rounded-xl border border-indigo-500/40 bg-indigo-950/50 px-4 py-3 text-center text-sm font-bold text-indigo-200 hover:bg-indigo-900/40"
+            >
+              Abrir en app COSP Guardia
+            </a>
+          </div>
         ) : null}
 
         <div className="space-y-4">
