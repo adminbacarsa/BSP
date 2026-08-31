@@ -9,7 +9,7 @@ import {
   Loader2,
   Printer,
 } from 'lucide-react';
-import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
+import type { ProformaExportBundle, ProformaLayoutMode } from '@/lib/crm/proformaTypes';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { formatHoursColonTotal, shortDayHeader } from '@/lib/crm/proformaGrid';
 import type { ProformaDetailMode } from '@/lib/crm/proformaMode';
@@ -22,6 +22,7 @@ export type ProformaPanelProps = {
   proformaStartDate: string;
   proformaEndDate: string;
   proformaDetailMode: ProformaDetailMode;
+  proformaLayoutMode: ProformaLayoutMode;
   proformaBase: 'requested' | 'planned' | 'executed';
   proformaHourlyValue: string;
   proformaTotals: { planned: number; executed: number; sinCobertura: number; loading: boolean; estructurales?: number };
@@ -36,6 +37,7 @@ export type ProformaPanelProps = {
   onStartDateChange: (v: string) => void;
   onEndDateChange: (v: string) => void;
   onDetailModeChange: (v: ProformaDetailMode) => void;
+  onLayoutModeChange: (v: ProformaLayoutMode) => void;
   onBaseChange: (v: 'requested' | 'planned' | 'executed') => void;
   onHourlyValueChange: (v: string) => void;
   onRecalculate: () => void;
@@ -55,6 +57,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
     proformaStartDate,
     proformaEndDate,
     proformaDetailMode,
+    proformaLayoutMode,
     proformaBase,
     proformaHourlyValue,
     proformaTotals,
@@ -69,6 +72,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
     onStartDateChange,
     onEndDateChange,
     onDetailModeChange,
+    onLayoutModeChange,
     onBaseChange,
     onHourlyValueChange,
     onRecalculate,
@@ -83,18 +87,24 @@ export default function ProformaPanel(props: ProformaPanelProps) {
 
   const [openSummary, setOpenSummary] = useState(true);
   const [openGridsSection, setOpenGridsSection] = useState(false);
+  const [openPositionGridsSection, setOpenPositionGridsSection] = useState(true);
   const [openBreakdown, setOpenBreakdown] = useState(false);
   const [openEventos, setOpenEventos] = useState(false);
   const [openGrids, setOpenGrids] = useState<Record<string, boolean>>({});
+  const [openPositionGrids, setOpenPositionGrids] = useState<Record<string, boolean>>({});
   const [openObjectives, setOpenObjectives] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setOpenGrids({});
+    setOpenPositionGrids({});
     setOpenObjectives({});
   }, [proformaBundle?.periodLabel, client?.id]);
 
   const objectiveCount = proformaBundle?.objectives.length ?? 0;
+  const positionGridCount = proformaBundle?.positionGrids?.length ?? 0;
   const gridOpenCount = Object.values(openGrids).filter(Boolean).length;
+  const showEmployeeGrids = proformaLayoutMode === 'employees' || proformaLayoutMode === 'both';
+  const showPositionGrids = proformaLayoutMode === 'positions' || proformaLayoutMode === 'both';
 
   // Mapa objectiveName → stats para el detalle por puesto
   const objectiveStats = React.useMemo(() => {
@@ -180,7 +190,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
         {/* Parámetros */}
         <div className="p-6 bg-slate-50 border-b border-slate-200">
           <p className="text-[10px] font-black uppercase text-slate-400 mb-3">Parámetros del período</p>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
             <div>
               <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Año</label>
               <select className="w-full p-2.5 rounded-lg border bg-white text-xs font-bold" value={proformaYear} onChange={(e) => onYearChange(Number(e.target.value))}>
@@ -206,12 +216,20 @@ export default function ProformaPanel(props: ProformaPanelProps) {
               <input type="date" className="w-full p-2.5 rounded-lg border bg-white text-xs font-bold" value={proformaEndDate} onChange={(e) => onEndDateChange(e.target.value)} />
             </div>
             <div>
-              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Detalle</label>
+              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Detalle horas</label>
               <select className="w-full p-2.5 rounded-lg border bg-white text-xs font-bold" value={proformaDetailMode} onChange={(e) => onDetailModeChange(e.target.value as ProformaDetailMode)}>
                 <option value="auto">Auto</option>
                 <option value="planned">Planificado</option>
                 <option value="executed">Ejecutado (fichaje)</option>
                 <option value="sin_cobertura">Sin cobertura (ops)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Vista / PDF</label>
+              <select className="w-full p-2.5 rounded-lg border bg-white text-xs font-bold" value={proformaLayoutMode} onChange={(e) => onLayoutModeChange(e.target.value as ProformaLayoutMode)}>
+                <option value="both">Empleados + Puestos</option>
+                <option value="employees">Solo empleados</option>
+                <option value="positions">Solo puestos</option>
               </select>
             </div>
             <div>
@@ -261,7 +279,13 @@ export default function ProformaPanel(props: ProformaPanelProps) {
             onClick={onExportPdf}
             className="bg-rose-600 hover:bg-rose-700 disabled:opacity-40 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase flex items-center gap-2"
           >
-            <FileText size={14} /> PDF (resumen + por objetivo)
+            <FileText size={14} /> PDF (
+            {proformaLayoutMode === 'positions'
+              ? 'resumen + puestos'
+              : proformaLayoutMode === 'employees'
+                ? 'resumen + empleados'
+                : 'resumen + empleados + puestos'}
+            )
           </button>
           <button
             type="button"
@@ -370,7 +394,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
       )}
 
       {/* Grilla por objetivo (vista previa PDF) */}
-      {proformaBundle && proformaBundle.objectives.length > 0 && (
+      {showEmployeeGrids && proformaBundle && proformaBundle.objectives.length > 0 && (
         <div className="border rounded-xl overflow-hidden bg-white shadow-sm">
           <div className="px-6 py-3 bg-slate-100 border-b flex flex-wrap items-center justify-between gap-2">
             <button
@@ -380,7 +404,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
             >
               {openGridsSection ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
               <div>
-                <p className="text-[10px] font-black uppercase text-slate-500">Detalle horario por objetivo</p>
+                <p className="text-[10px] font-black uppercase text-slate-500">Detalle horario por empleado</p>
                 <p className="text-xs font-bold text-slate-400 mt-0.5">
                   {objectiveCount} grilla(s) · {gridOpenCount} expandida(s)
                 </p>
@@ -499,7 +523,133 @@ export default function ProformaPanel(props: ProformaPanelProps) {
         </div>
       )}
 
+      {/* Registro mensual por puesto (tipo Excel cliente) */}
+      {showPositionGrids && proformaBundle && (proformaBundle.positionGrids?.length ?? 0) > 0 && (
+        <div className="border rounded-xl overflow-hidden bg-white shadow-sm">
+          <div className="px-6 py-3 bg-indigo-50 border-b border-indigo-100 flex flex-wrap items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => setOpenPositionGridsSection((v) => !v)}
+              className="flex items-center gap-2 text-left hover:opacity-80"
+            >
+              {openPositionGridsSection ? <ChevronUp size={18} className="text-indigo-400" /> : <ChevronDown size={18} className="text-indigo-400" />}
+              <div>
+                <p className="text-[10px] font-black uppercase text-indigo-600">Registro mensual por puesto</p>
+                <p className="text-xs font-bold text-indigo-400/80 mt-0.5">
+                  {positionGridCount} objetivo(s) · horas diarias agregadas por puesto · vista PDF
+                </p>
+              </div>
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const next: Record<string, boolean> = {};
+                  proformaBundle.positionGrids?.forEach((g) => { next[g.objectiveId] = true; });
+                  setOpenPositionGrids(next);
+                  setOpenPositionGridsSection(true);
+                }}
+                className="text-[10px] font-black uppercase text-indigo-600 hover:text-indigo-800 px-2 py-1"
+              >
+                Expandir todo
+              </button>
+              <button type="button" onClick={() => setOpenPositionGrids({})} className="text-[10px] font-black uppercase text-slate-400 hover:text-slate-600 px-2 py-1">
+                Comprimir todo
+              </button>
+            </div>
+          </div>
+
+          {openPositionGridsSection && (
+            <div className="divide-y">
+              {proformaBundle.positionGrids!.map((grid) => {
+                const isOpen = !!openPositionGrids[grid.objectiveId];
+                return (
+                  <div key={`pos_${grid.objectiveId}`}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenPositionGrids((prev) => ({ ...prev, [grid.objectiveId]: !prev[grid.objectiveId] }))}
+                      className="w-full px-6 py-3 flex flex-wrap items-center justify-between gap-2 text-left hover:bg-slate-50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {isOpen ? <ChevronUp size={16} className="text-slate-400 shrink-0" /> : <ChevronDown size={16} className="text-slate-400 shrink-0" />}
+                        <p className="text-sm font-black text-slate-800 uppercase truncate">{grid.objectiveName}</p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0 text-[10px] font-bold">
+                        <span className="text-slate-500">{periodLabel}</span>
+                        <span className="font-mono text-slate-700">{formatHoursColonTotal(grid.grandTotal.total)} hs</span>
+                        <span className="text-slate-400">{grid.positions.length} puesto(s)</span>
+                      </div>
+                    </button>
+                    {isOpen && (
+                      <div className="overflow-x-auto border-t w-full">
+                        <table
+                          className="w-full table-fixed text-[10px] border-collapse"
+                          style={{ minWidth: 160 + 72 + grid.dateColumns.length * 34 }}
+                        >
+                          <colgroup>
+                            <col style={{ width: 160 }} />
+                            {grid.dateColumns.map((d) => (
+                              <col key={d} />
+                            ))}
+                            <col style={{ width: 72 }} />
+                          </colgroup>
+                          <thead>
+                            <tr className="bg-slate-50 border-b">
+                              <th className="sticky left-0 z-10 bg-slate-50 border-r px-2 py-1.5 text-left font-black text-slate-600">Puesto / Horas</th>
+                              {grid.dateColumns.map((d) => (
+                                <th key={d} className="px-0.5 py-1 text-center font-black text-slate-500 border-r whitespace-nowrap">
+                                  <div className="leading-tight">{grid.dayLabels[d]?.toLowerCase()?.slice(0, 3)}</div>
+                                  <div>{shortDayHeader(d).split('/')[0]}</div>
+                                </th>
+                              ))}
+                              <th className="px-2 py-1.5 text-center font-black text-slate-600">Resumen</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {grid.positions.map((p) => (
+                              <tr key={p.positionName} className="border-b hover:bg-slate-50/80">
+                                <td className="sticky left-0 z-10 bg-white border-r px-2 py-1.5 font-bold text-slate-800">{p.positionName}</td>
+                                {grid.dateColumns.map((d) => {
+                                  const h = p.days[d]?.hours || 0;
+                                  return (
+                                    <td key={d} className="px-0.5 py-1 text-center border-r font-mono whitespace-nowrap text-slate-700">
+                                      {h > 0 ? Math.round(h * 10) / 10 : ''}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-2 py-1.5 text-center font-mono font-black text-slate-800 whitespace-nowrap">
+                                  {Math.round(p.totalHours * 10) / 10}
+                                </td>
+                              </tr>
+                            ))}
+                            <tr className="bg-slate-100 font-black">
+                              <td className="sticky left-0 z-10 bg-slate-100 border-r px-2 py-1.5 text-slate-600">Totales</td>
+                              {grid.dateColumns.map((d) => {
+                                const h = grid.dailyTotals[d]?.total || 0;
+                                return (
+                                  <td key={d} className="px-0.5 py-1 text-center border-r font-mono whitespace-nowrap">
+                                    {h > 0 ? Math.round(h * 10) / 10 : ''}
+                                  </td>
+                                );
+                              })}
+                              <td className="px-2 py-1.5 text-center font-mono text-indigo-700 whitespace-nowrap">
+                                {Math.round(grid.grandTotal.total * 10) / 10}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Detalle por objetivo y puesto */}
+
       <div className="border rounded-xl bg-white shadow-sm overflow-hidden">
         <button
           type="button"

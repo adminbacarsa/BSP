@@ -1,4 +1,11 @@
-import type { ProformaDayCell, ProformaEmployeeRow, ProformaObjectiveGrid, ProformaExportBundle, ProformaSummaryRow } from './proformaTypes';
+import type {
+  ProformaDayCell,
+  ProformaEmployeeRow,
+  ProformaObjectiveGrid,
+  ProformaPositionObjectiveGrid,
+  ProformaPositionRow,
+  ProformaSummaryRow,
+} from './proformaTypes';
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   type ObjectiveMeta,
@@ -378,6 +385,195 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     };
   })
   .sort((a, b) => a.objectiveName.localeCompare(b.objectiveName, 'es'));
+}
+
+/**
+ * Misma base de turnos que la grilla por empleado, agregada por puesto/día.
+ * Varios legajos en el mismo puesto suman horas en la celda del día.
+ */
+export function buildProformaPositionGrids(opts: BuildProformaGridsOpts): ProformaPositionObjectiveGrid[] {
+  const dateColumns = listDatesInRange(opts.start, opts.end);
+  const dayLabels: Record<string, string> = {};
+  dateColumns.forEach((d) => { dayLabels[d] = dayLabelFromYmd(d); });
+
+  const byObjective: Record<string, {
+    objectiveId: string;
+    objectiveName: string;
+    positions: Record<string, ProformaPositionRow>;
+  }> = {};
+
+  const useExecuted = proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto);
+  const sinCoberturaMode = resolveProformaDetailMode(opts.mode, opts.useExecutedForAuto) === 'sin_cobertura';
+  const aliases = opts.objectiveAliases || {};
+  const hint = opts.slaCodeHoursHint;
+  const hintByObjective = opts.slaCodeHoursHintByObjective;
+
+  const cellGroups = new Map<string, ProformaTurnoInput[]>();
+
+  for (const t of opts.turnos) {
+    if (!turnoEligibleForProformaGrid(t, opts.mode, opts.useExecutedForAuto)) continue;
+    const plannedStart = toDateSafe(t.startTime);
+    if (!plannedStart) continue;
+    if (!turnoScheduleDateInRange(t as Record<string, unknown>, opts.start, opts.end)) continue;
+
+    const dateKey = resolveTurnoScheduleDateKey(t as Record<string, unknown>) || getDateKeyInTimezone(plannedStart);
+    if (
+      opts.slaExclusion
+      && isTurnoOnSlaExcludedSlot(t, opts.slaExclusion, {
+        scheduleDateKey: dateKey,
+        positionName: String(t.positionName ?? ''),
+      })
+    ) {
+      continue;
+    }
+    const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId || opts.clientId };
+    const objId = resolveCanonicalObjectiveId(rowCtx, aliases) || String(t.objectiveId || 'sin-id');
+    const empId = String(t.employeeId || 'unknown');
+    const posKey = String(t.positionName || '').trim() || 'Sin puesto';
+    if (!sinCoberturaMode) {
+      const meta = resolveEmployeeMeta(opts.empMeta, empId, t.employeeName);
+      if (isProformaVacancyEmployee({ employeeId: empId, name: meta.name || '' })) continue;
+    }
+    const gKey = `${objId}_${posKey}_${empId}_${dateKey}`;
+    const list = cellGroups.get(gKey) || [];
+    list.push(t);
+    cellGroups.set(gKey, list);
+  }
+
+  for (const [, groupTurnos] of cellGroups) {
+    const rowCtxPreview = {
+      objectiveId: groupTurnos[0]?.objectiveId,
+      objectiveName: groupTurnos[0]?.objectiveName,
+      clientId: groupTurnos[0]?.clientId || opts.clientId,
+    };
+    const objIdForHint = resolveCanonicalObjectiveId(rowCtxPreview, aliases)
+      || String(groupTurnos[0]?.objectiveId || '');
+    const cellHint = (objIdForHint && hintByObjective?.[objIdForHint]) || hint;
+
+    const t = coalescePlannedTurnosForCell(groupTurnos, cellHint) as ProformaTurnoInput;
+    if (!t) continue;
+
+    const code = String(t.code || t.type || '').trim().toUpperCase();
+    const plannedStart = toDateSafe(t.startTime);
+    const plannedEnd = toDateSafe(t.endTime);
+    const realStart = toDateSafe(t.realStartTime);
+    const realEnd = toDateSafe(t.realEndTime);
+
+    const start = useExecuted ? realStart : plannedStart;
+    if (!start) continue;
+
+    let hrs = coalescePlannedCellBillableHours(groupTurnos, cellHint);
+    if (useExecuted && realStart && realEnd) {
+      const realH = getDurationHours(realStart, realEnd);
+      if (realH >= 0.25 && realH <= 24) hrs = realH;
+    }
+    if (!Number.isFinite(hrs) || hrs < 0) hrs = 0;
+
+    const plannedEndResolved = useExecuted ? (realEnd || plannedEnd) : plannedEnd;
+    const end = resolveShiftEndForProforma(t, start, plannedEndResolved, hrs);
+    if (!end) continue;
+
+    const dateKey = resolveTurnoScheduleDateKey(t as Record<string, unknown>) || getDateKeyInTimezone(start);
+    const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: t.clientId || opts.clientId };
+    const objId = resolveCanonicalObjectiveId(rowCtx, aliases) || String(t.objectiveId || 'sin-id');
+    const objName = formatProformaObjectiveLabel(objId, resolveObjectiveDisplayName(rowCtx, aliases));
+    const posKey = String(t.positionName || '').trim() || 'Sin puesto';
+
+    byObjective[objId] ||= {
+      objectiveId: objId,
+      objectiveName: objName,
+      positions: {},
+    };
+    if (!objName.startsWith('Objetivo sin nombre')) byObjective[objId].objectiveName = objName;
+
+    byObjective[objId].positions[posKey] ||= {
+      positionName: posKey,
+      days: Object.fromEntries(dateColumns.map((d) => [d, emptyCell(d)])),
+      totalHours: 0,
+      totalDay: 0,
+      totalNight: 0,
+    };
+
+    const cell = cellFromShift(dateKey, code, start, end, hrs);
+    if (cell.hours <= 0 && cell.display !== 'Frco') continue;
+
+    const row = byObjective[objId].positions[posKey];
+    const prev = row.days[dateKey] || emptyCell(dateKey);
+    const nextHours = prev.hours + cell.hours;
+    const nextDay = prev.dayHours + cell.dayHours;
+    const nextNight = prev.nightHours + cell.nightHours;
+    row.days[dateKey] = {
+      date: dateKey,
+      display: nextHours > 0 ? formatHoursHm(nextHours) : (cell.display || prev.display),
+      hours: nextHours,
+      dayHours: nextDay,
+      nightHours: nextNight,
+    };
+  }
+
+  for (const sla of opts.slaInRange || []) {
+    if (!slaOverlapsRange(sla, opts.start, opts.end)) continue;
+    const rowCtx = { ...sla, clientId: opts.clientId };
+    const objId = resolveCanonicalObjectiveId(rowCtx, aliases);
+    if (!objId || byObjective[objId]) continue;
+    byObjective[objId] = {
+      objectiveId: objId,
+      objectiveName: formatProformaObjectiveLabel(objId, resolveObjectiveDisplayName(rowCtx, aliases)),
+      positions: {},
+    };
+  }
+
+  return Object.values(byObjective)
+    .filter((obj) => {
+      const hasRows = Object.keys(obj.positions).length > 0;
+      if (hasRows) return true;
+      return !obj.objectiveName.startsWith('Objetivo sin nombre') && !obj.objectiveName.includes('…');
+    })
+    .map((obj) => {
+      const positions = Object.values(obj.positions)
+        .map((p) => {
+          let totalHours = 0;
+          let totalDay = 0;
+          let totalNight = 0;
+          dateColumns.forEach((d) => {
+            totalHours += p.days[d]?.hours || 0;
+            totalDay += p.days[d]?.dayHours || 0;
+            totalNight += p.days[d]?.nightHours || 0;
+          });
+          return { ...p, totalHours, totalDay, totalNight };
+        })
+        .filter((p) => p.totalHours > 0)
+        .sort((a, b) => a.positionName.localeCompare(b.positionName, 'es'));
+
+      const dailyTotals: ProformaPositionObjectiveGrid['dailyTotals'] = {};
+      dateColumns.forEach((d) => {
+        dailyTotals[d] = { total: 0, day: 0, night: 0 };
+        positions.forEach((p) => {
+          dailyTotals[d].total += p.days[d]?.hours || 0;
+          dailyTotals[d].day += p.days[d]?.dayHours || 0;
+          dailyTotals[d].night += p.days[d]?.nightHours || 0;
+        });
+      });
+
+      const grandTotal = { total: 0, day: 0, night: 0 };
+      positions.forEach((p) => {
+        grandTotal.total += p.totalHours;
+        grandTotal.day += p.totalDay;
+        grandTotal.night += p.totalNight;
+      });
+
+      return {
+        objectiveId: obj.objectiveId,
+        objectiveName: obj.objectiveName,
+        dateColumns,
+        dayLabels,
+        positions,
+        dailyTotals,
+        grandTotal,
+      };
+    })
+    .filter((g) => g.positions.length > 0)
+    .sort((a, b) => a.objectiveName.localeCompare(b.objectiveName, 'es'));
 }
 
 export function buildProformaSummary(
