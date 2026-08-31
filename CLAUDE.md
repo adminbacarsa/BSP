@@ -105,7 +105,7 @@ cronoapp/
 | `tipos_novedad` | Catálogo parametrizable de tipos RRHH por empresa (label, código grilla, `defaultDays`, flags). Soft delete `status: INACTIVE`. Seed incluye MAVIC (mutual SUVICO) |
 | `novedades` | Alertas operativas. `shiftId` vincula con turno |
 | `planificacion_estados` | Publicación de planificación. Key: `${objectiveId}_${year}_${month}` |
-| `servicios_sla` | Contratos/SLA con estructura de puestos y turnos permitidos |
+| `servicios_sla` | Contratos/SLA con estructura de puestos y turnos permitidos. Puesto `coverageType: eventos` = extras (Eventos): no cubre ni vende SLA; las TURA imputadas van a prefactura agrupadas por día. |
 | `hours_balances` | Extracto mensual por objetivo: SLA (debe), plan (turno cubierto, sin novedades), reales, FT/ext (costo), resultante cobertura (plan+ext/adel+ops), saldos. Doc id = `{empresaId}_{objectiveId}_{yyyy-mm}` |
 | `roles` | Permisos por módulo. Estructura: `{ permissions: { MODULE_KEY: ['read','create',...] } }` |
 | `payroll_settings` | Modo de horas publicado al endpoint de liquidación (`hoursMode: planned \| real`). Doc id = `empresaId`. |

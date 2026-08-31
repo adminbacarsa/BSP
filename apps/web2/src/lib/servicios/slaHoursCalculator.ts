@@ -138,6 +138,7 @@ export function computePositionDayComposition(
 ) {
   let dayTotal = 0;
   let dayNight = 0;
+  if (String(pos.coverageType || '').toLowerCase() === 'eventos') return { dayTotal: 0, dayNight: 0 };
   const activeDays = pos.activeDays?.length ? pos.activeDays : [...WEEK_DAY_CODES];
   if (!activeDays.includes(dayCode)) return { dayTotal: 0, dayNight: 0 };
 

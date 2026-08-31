@@ -50,6 +50,7 @@ import {
   sameEncargadoDaySet,
   stripEncargadoAssignment,
 } from '@/lib/servicios/encargadoPosition';
+import { EVENTOS_COVERAGE_TYPE, EVENTOS_SHIFT_CODE, isEventosPosition } from '@/lib/servicios/eventosPosition';
 import { matchesEmployeeSearch } from '@/lib/planificacion/employeeSearch';
 
 import { toYyyyMmDd, slaCoversCalendarMonth } from '@/lib/firestoreDates';
@@ -389,6 +390,7 @@ export default function ServiciosSLAPage() {
   };
 
   const formatPositionPaxLabel = (pos: ServicePosition): string => {
+    if (isEventosPosition(pos)) return 'EXTRAS';
     const shiftQtys = pos.allowedShiftTypes
       .map((s) => s.quantity)
       .filter((q): q is number => q != null);
@@ -399,6 +401,7 @@ export default function ServiciosSLAPage() {
   };
 
   const formatPositionDailyCoverageLabel = (pos: ServicePosition) => {
+    if (isEventosPosition(pos)) return '0 hs/día · extras TURA';
     const totals = WEEK_DAY_CODES.map((d) => computePositionDayComposition(pos, d).dayTotal);
     const min = Math.min(...totals);
     const max = Math.max(...totals);
@@ -533,8 +536,10 @@ export default function ServiciosSLAPage() {
       else if (type === '12hs_diurno') variants = [SHIFT_VARIANTS_DB['M'], SHIFT_VARIANTS_DB['D12']];
       else if (type === '12hs_nocturno') variants = [SHIFT_VARIANTS_DB['N'], SHIFT_VARIANTS_DB['N12']];
       else if (type === ENCARGADO_COVERAGE_TYPE) variants = [buildEncargadoDefaultShift()];
+      else if (type === EVENTOS_COVERAGE_TYPE) variants = [];
       
       const switchingToEncargado = type === ENCARGADO_COVERAGE_TYPE;
+      const switchingToEventos = type === EVENTOS_COVERAGE_TYPE;
       const keepCustomDays = switchingToEncargado
         && currentFormState.activeDays?.length
         && !sameEncargadoDaySet(currentFormState.activeDays, ENCARGADO_ALL_DAYS);
@@ -542,13 +547,15 @@ export default function ServiciosSLAPage() {
         ...currentFormState,
         name: switchingToEncargado && (!currentFormState.name || currentFormState.name === 'Puesto 1')
           ? 'Encargado'
-          : currentFormState.name,
-        code: switchingToEncargado ? ENCARGADO_SHIFT_CODE : currentFormState.code,
-        quantity: switchingToEncargado ? 1 : currentFormState.quantity,
+          : switchingToEventos && (!currentFormState.name || currentFormState.name === 'Puesto 1')
+            ? 'Eventos'
+            : currentFormState.name,
+        code: switchingToEncargado ? ENCARGADO_SHIFT_CODE : switchingToEventos ? EVENTOS_SHIFT_CODE : currentFormState.code,
+        quantity: switchingToEncargado || switchingToEventos ? 1 : currentFormState.quantity,
         activeDays: switchingToEncargado
           ? (keepCustomDays ? currentFormState.activeDays : [...ENCARGADO_WEEKDAYS])
           : currentFormState.activeDays,
-        allowedShiftTypes: type === 'custom' ? [] : variants,
+        allowedShiftTypes: type === 'custom' || switchingToEventos ? [] : variants,
         coverageType: type as ServicePosition['coverageType'],
       });
   };
@@ -1602,7 +1609,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
         positions += (srv.positions || []).length;
         // Guardias = suma de ceil(hs_mensuales_por_puesto / 200) — guardias en rotación reales
         (srv.positions || []).forEach(p => {
-          if (isEncargadoPosition(p)) return;
+          if (isEncargadoPosition(p) || isEventosPosition(p)) return;
           calculateMonthlyBreakdown([p], srv.startDate, srv.endDate, srv.excludedDates).forEach((mb) => {
             if (mb.monthKey === sk) {
               const pax = p.quantity || 1;
@@ -2530,6 +2537,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             {formatEncargadoDaysLabel(pos.activeDays)}
                             {srv.encargadoEmployeeName ? ` · ${srv.encargadoEmployeeName}` : ''}
                           </p>
+                        ) : isEventosPosition(pos) ? (
+                          <p className="text-[9px] font-bold text-rose-600 mt-1.5">Sin cobertura · TURA/RFZ imputados a prefactura</p>
                         ) : null}
                       </div>
                     ))}
@@ -2543,11 +2552,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                     return { pos, avgH: Math.round(avgH) };
                   });
                   const coverageHrs = viabilityBase
-                    .filter((v) => !isEncargadoPosition(v.pos))
+                    .filter((v) => !isEncargadoPosition(v.pos) && !isEventosPosition(v.pos))
                     .reduce((a, v) => a + v.avgH, 0);
                   const totalGuards = Math.ceil(coverageHrs / 192);
                   const viability = viabilityBase.map(({ pos, avgH }) => {
-                    if (isEncargadoPosition(pos)) return { pos, avgH, propGuards: 0, hxg: 0 };
+                    if (isEncargadoPosition(pos) || isEventosPosition(pos)) return { pos, avgH, propGuards: 0, hxg: 0 };
                     const propGuards = coverageHrs > 0 ? (avgH / coverageHrs) * totalGuards : 0;
                     const hxg = propGuards > 0 ? avgH / propGuards : 0;
                     return { pos, avgH, propGuards, hxg };
@@ -3260,6 +3269,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     {formatEncargadoDaysLabel(pos.activeDays)}
                                     {form.encargadoEmployeeName ? ` · ${form.encargadoEmployeeName}` : ''}
                                   </span>
+                                ) : isEventosPosition(pos) ? (
+                                  <span className="text-[10px] font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                                    Extras · no cubre
+                                  </span>
                                 ) : null}
                               </div>
                            </div>
@@ -3470,7 +3483,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                         {isEditingEmp && (
                           <div className="border-t dark:border-slate-700 px-4 py-3 space-y-3 bg-slate-50 dark:bg-slate-900/30">
                             <p className="text-[10px] font-black uppercase text-slate-400">Puestos permitidos para {empName}:</p>
-                            {form.positions.filter((pos: ServicePosition) => !isEncargadoPosition(pos)).map((pos: ServicePosition) => {
+                            {form.positions.filter((pos: ServicePosition) => !isEncargadoPosition(pos) && !isEventosPosition(pos)).map((pos: ServicePosition) => {
                               const slot = coverageEditSlots.find(s => s.positionName === pos.name);
                               const active = !!slot;
                               return (
@@ -4510,11 +4523,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                     <div className="grid grid-cols-4 gap-3">
                         <div className="col-span-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Nombre del puesto</label><input className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold dark:text-white" value={positionForm.name} onChange={e => setPositionForm({...positionForm, name: e.target.value})}/></div>
                         <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Sigla <span className="text-indigo-400">(planif.)</span></label><input maxLength={4} className="w-full p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700 rounded-xl font-black text-center text-indigo-700 dark:text-indigo-300 uppercase" placeholder="P1" value={positionForm.code || ''} onChange={e => setPositionForm({...positionForm, code: e.target.value.toUpperCase().slice(0,4)})}/></div>
-                        {positionForm.coverageType !== 'encargado' && (
+                        {positionForm.coverageType !== 'encargado' && positionForm.coverageType !== 'eventos' && (
                         <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Pax</label><input type="number" min="1" className="w-full p-3 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-center dark:text-white" value={positionForm.quantity} onChange={e => setPositionForm({...positionForm, quantity: parseInt(e.target.value) || 1})}/></div>
                         )}
                     </div>
-                    {positionForm.coverageType !== 'encargado' && (
+                    {positionForm.coverageType !== 'encargado' && positionForm.coverageType !== 'eventos' && (
                     <div>
                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1 block">Días operativos</label>
                         <div className="flex gap-1">
@@ -4552,8 +4565,16 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             <option value="12hs_nocturno">12 HORAS NOCTURNO</option>
                             <option value="custom">PERSONALIZADO / TURNOS ESPECÍFICOS</option>
                             <option value="encargado">ENCARGADO DE SERVICIO (sin cobertura)</option>
+                            <option value="eventos">EVENTOS / EXTRAS (sin cobertura, prefactura)</option>
                         </select>
                     </div>
+                    {positionForm.coverageType === 'eventos' && (
+                        <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl p-4">
+                            <p className="text-[10px] font-bold text-rose-800 dark:text-rose-300 leading-snug">
+                                No suma cobertura ni horas de contrato. En Supervisión imputás TURA (extensiones) a este puesto; la prefactura agrupa esas horas el día del evento (ej. 4 h + 8 h = 12 h en Eventos).
+                            </p>
+                        </div>
+                    )}
                     {positionForm.coverageType === 'encargado' && (
                         <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-4 space-y-3">
                             <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 leading-snug">
@@ -4904,7 +4925,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                         </div>
                     </div>
                     {/* Estimación de guardias en rotación */}
-                    {positionForm.coverageType !== 'encargado' && positionForm.allowedShiftTypes.length > 0 && (() => {
+                    {positionForm.coverageType !== 'encargado' && positionForm.coverageType !== 'eventos' && positionForm.allowedShiftTypes.length > 0 && (() => {
                       const bd = calculateMonthlyBreakdown([positionForm], form.startDate, form.endDate);
                       const avgH = bd.length > 0 ? bd.reduce((a, m) => a + m.totalHours, 0) / bd.length : 0;
                       const _pax = positionForm.quantity || 1;
