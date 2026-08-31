@@ -1,13 +1,21 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import type { ProformaExportBundle, ProformaObjectiveGrid, ProformaEvento } from './proformaTypes';
+import type { ProformaExportBundle, ProformaObjectiveGrid, ProformaEvento, ProformaPositionObjectiveGrid, ProformaLayoutMode } from './proformaTypes';
 import { formatHoursColonTotal, pdfDayLetter, pdfDayNumber, shortDayHeader } from './proformaGrid';
 
 const PDF_PAGE_W = 297;
 const PDF_MARGIN_X = 8;
 const PDF_HEADER_Y = 19;
 const PDF_CONTENT_TOP = 28;
+
+function resolveLayoutMode(bundle: ProformaExportBundle): ProformaLayoutMode {
+  if (bundle.layoutMode === 'employees' || bundle.layoutMode === 'positions' || bundle.layoutMode === 'both') {
+    return bundle.layoutMode;
+  }
+  if (bundle.positionGrids && bundle.positionGrids.some((g) => g.positions.length > 0)) return 'both';
+  return 'employees';
+}
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -124,6 +132,99 @@ function objectiveTableBody(grid: ProformaObjectiveGrid): (string | number)[][] 
   return [...objectiveEmployeeBody(grid), ...objectiveFootRows(grid)];
 }
 
+
+function positionTableHeadPdf(grid: ProformaPositionObjectiveGrid) {
+  return [
+    'Puesto / Horas',
+    ...grid.dateColumns.map((d) => pdfDayNumber(d)),
+    'Resumen',
+  ];
+}
+
+function positionSubHeadPdf(grid: ProformaPositionObjectiveGrid): string[] {
+  return [
+    '',
+    ...grid.dateColumns.map((d) => pdfDayLetter(d)),
+    '',
+  ];
+}
+
+function positionRowBody(grid: ProformaPositionObjectiveGrid): (string | number)[][] {
+  return grid.positions.map((p) => [
+    p.positionName,
+    ...grid.dateColumns.map((d) => {
+      const h = p.days[d]?.hours || 0;
+      return h > 0 ? String(Math.round(h * 10) / 10) : '';
+    }),
+    String(Math.round(p.totalHours * 10) / 10),
+  ]);
+}
+
+function positionFootRows(grid: ProformaPositionObjectiveGrid): (string | number)[][] {
+  return [
+    [
+      'Totales',
+      ...grid.dateColumns.map((d) => {
+        const h = grid.dailyTotals[d]?.total || 0;
+        return h > 0 ? String(Math.round(h * 10) / 10) : '';
+      }),
+      String(Math.round(grid.grandTotal.total * 10) / 10),
+    ],
+  ];
+}
+
+function positionPdfColumnStyles(grid: ProformaPositionObjectiveGrid) {
+  const pageW = PDF_PAGE_W - PDF_MARGIN_X * 2;
+  const nameW = Math.min(58, Math.max(36, pageW * 0.18));
+  const totalW = 14;
+  const dayCount = grid.dateColumns.length || 1;
+  const dayW = Math.max(4, (pageW - nameW - totalW) / dayCount);
+  const styles: Record<number, { cellWidth: number; halign?: string; overflow?: string }> = {
+    0: { cellWidth: nameW, halign: 'left', overflow: 'ellipsize' },
+  };
+  grid.dateColumns.forEach((_, i) => {
+    styles[1 + i] = { cellWidth: dayW, halign: 'center', overflow: 'hidden' };
+  });
+  styles[1 + dayCount] = { cellWidth: totalW, halign: 'center', overflow: 'hidden' };
+  return styles;
+}
+
+function appendPositionGridPages(doc: jsPDF, bundle: ProformaExportBundle, empresa: string, issued: string) {
+  const grids = (bundle.positionGrids || []).filter((g) => g.positions.length > 0);
+  grids.forEach((grid) => {
+    doc.addPage();
+    drawPdfHeaderBar(
+      doc,
+      empresa,
+      `REGISTRO MENSUAL DE HORAS: ${grid.objectiveName}`,
+      bundle.periodLabel,
+    );
+
+    autoTable(doc, {
+      startY: PDF_CONTENT_TOP,
+      head: [positionTableHeadPdf(grid), positionSubHeadPdf(grid)],
+      body: positionRowBody(grid),
+      foot: positionFootRows(grid),
+      styles: { fontSize: 6, cellPadding: 0.8, halign: 'center', overflow: 'hidden', minCellHeight: 5 },
+      headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold', fontSize: 6, cellPadding: 0.6 },
+      footStyles: { fillColor: [241, 245, 249], fontStyle: 'bold', fontSize: 6, textColor: [30, 41, 59], cellPadding: 0.5 },
+      columnStyles: positionPdfColumnStyles(grid),
+      theme: 'grid',
+      margin: { left: PDF_MARGIN_X, right: PDF_MARGIN_X },
+      showFoot: 'lastPage',
+    });
+
+    const y2 = (doc as any).lastAutoTable?.finalY || 180;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text(
+      `${empresa}  ·  Fecha de emisión: ${issued.split(',')[0]}  ·  Hora: ${issued.split(',')[1]?.trim() || ''}`,
+      PDF_MARGIN_X + 6,
+      y2 + 6,
+    );
+  });
+}
+
 function objectivePdfColumnStyles(grid: ProformaObjectiveGrid) {
   const pageW = PDF_PAGE_W - PDF_MARGIN_X * 2;
   const legajoW = 10;
@@ -195,30 +296,38 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
   doc.setFontSize(8);
   doc.text(`Fecha de emisión: ${issued.split(',')[0]}  ·  Hora: ${issued.split(',')[1]?.trim() || ''}`, PDF_MARGIN_X + 6, finalY + 8);
 
-  bundle.objectives.filter((grid) => grid.employees.length > 0).forEach((grid) => {
-    doc.addPage();
-    drawPdfHeaderBar(doc, empresa, grid.objectiveName, bundle.periodLabel);
+  const layout = resolveLayoutMode(bundle);
 
-    autoTable(doc, {
-      startY: PDF_CONTENT_TOP,
-      head: [objectiveTableHeadPdf(grid), objectiveSubHeadPdf(grid)],
-      body: objectiveEmployeeBody(grid),
-      foot: objectiveFootRows(grid),
-      styles: { fontSize: 6, cellPadding: 0.8, halign: 'center', overflow: 'hidden', minCellHeight: 5 },
-      headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold', fontSize: 6, cellPadding: 0.6 },
-      footStyles: { fillColor: [241, 245, 249], fontStyle: 'bold', fontSize: 4.8, textColor: [30, 41, 59], cellPadding: 0.4 },
-      columnStyles: objectivePdfColumnStyles(grid),
-      theme: 'grid',
-      margin: { left: PDF_MARGIN_X, right: PDF_MARGIN_X },
-      showFoot: 'lastPage',
-      didParseCell: objectivePdfDidParseCell(grid),
+  if (layout === 'employees' || layout === 'both') {
+    bundle.objectives.filter((grid) => grid.employees.length > 0).forEach((grid) => {
+      doc.addPage();
+      drawPdfHeaderBar(doc, empresa, grid.objectiveName, bundle.periodLabel);
+
+      autoTable(doc, {
+        startY: PDF_CONTENT_TOP,
+        head: [objectiveTableHeadPdf(grid), objectiveSubHeadPdf(grid)],
+        body: objectiveEmployeeBody(grid),
+        foot: objectiveFootRows(grid),
+        styles: { fontSize: 6, cellPadding: 0.8, halign: 'center', overflow: 'hidden', minCellHeight: 5 },
+        headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold', fontSize: 6, cellPadding: 0.6 },
+        footStyles: { fillColor: [241, 245, 249], fontStyle: 'bold', fontSize: 4.8, textColor: [30, 41, 59], cellPadding: 0.4 },
+        columnStyles: objectivePdfColumnStyles(grid),
+        theme: 'grid',
+        margin: { left: PDF_MARGIN_X, right: PDF_MARGIN_X },
+        showFoot: 'lastPage',
+        didParseCell: objectivePdfDidParseCell(grid),
+      });
+
+      const y2 = (doc as any).lastAutoTable?.finalY || 180;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(`Fecha de emisión: ${issued.split(',')[0]}  ·  Hora: ${issued.split(',')[1]?.trim() || ''}`, PDF_MARGIN_X + 6, y2 + 6);
     });
+  }
 
-    const y2 = (doc as any).lastAutoTable?.finalY || 180;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.text(`Fecha de emisión: ${issued.split(',')[0]}  ·  Hora: ${issued.split(',')[1]?.trim() || ''}`, PDF_MARGIN_X + 6, y2 + 6);
-  });
+  if (layout === 'positions' || layout === 'both') {
+    appendPositionGridPages(doc, bundle, empresa, issued);
+  }
 
   if (bundle.eventos && bundle.eventos.length > 0) {
     const evTotalHoras = bundle.eventos.reduce((a, e) => a + e.totalHoras, 0);
@@ -292,13 +401,41 @@ export function exportProformaCsv(bundle: ProformaExportBundle) {
   lines.push(['Totales', g.sla != null ? formatHoursColonTotal(g.sla) : '—', formatHoursColonTotal(g.total), formatHoursColonTotal(g.day), formatHoursColonTotal(g.night)].map(esc).join(','));
   lines.push('');
 
-  bundle.objectives.forEach((grid) => {
-    lines.push(`OBJETIVO: ${grid.objectiveName}`);
-    lines.push(objectiveTableHead(grid).map(esc).join(','));
-    lines.push(objectiveSubHead(grid).map(esc).join(','));
-    objectiveTableBody(grid).forEach((row) => lines.push(row.map(esc).join(',')));
-    lines.push('');
-  });
+  const layout = resolveLayoutMode(bundle);
+
+  if (layout === 'employees' || layout === 'both') {
+    bundle.objectives.forEach((grid) => {
+      lines.push(`OBJETIVO (empleados): ${grid.objectiveName}`);
+      lines.push(objectiveTableHead(grid).map(esc).join(','));
+      lines.push(objectiveSubHead(grid).map(esc).join(','));
+      objectiveTableBody(grid).forEach((row) => lines.push(row.map(esc).join(',')));
+      lines.push('');
+    });
+  }
+
+  if (layout === 'positions' || layout === 'both') {
+    (bundle.positionGrids || []).forEach((grid) => {
+      lines.push(`OBJETIVO (puestos): ${grid.objectiveName}`);
+      lines.push(['Puesto / Horas', ...grid.dateColumns.map((d) => shortDayHeader(d)), 'Resumen'].map(esc).join(','));
+      lines.push(['', ...grid.dateColumns.map((d) => grid.dayLabels[d] || ''), ''].map(esc).join(','));
+      grid.positions.forEach((p) => {
+        lines.push([
+          p.positionName,
+          ...grid.dateColumns.map((d) => (p.days[d]?.hours > 0 ? String(Math.round(p.days[d].hours * 10) / 10) : '')),
+          String(Math.round(p.totalHours * 10) / 10),
+        ].map(esc).join(','));
+      });
+      lines.push([
+        'Totales',
+        ...grid.dateColumns.map((d) => {
+          const h = grid.dailyTotals[d]?.total || 0;
+          return h > 0 ? String(Math.round(h * 10) / 10) : '';
+        }),
+        String(Math.round(grid.grandTotal.total * 10) / 10),
+      ].map(esc).join(','));
+      lines.push('');
+    });
+  }
 
   if (bundle.eventos && bundle.eventos.length > 0) {
     lines.push('EVENTOS');
@@ -349,17 +486,47 @@ export function exportProformaExcel(bundle: ProformaExportBundle) {
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), 'Resumen');
 
-  bundle.objectives.forEach((grid, idx) => {
-    const sheetName = grid.objectiveName.slice(0, 28).replace(/[\\/*?:[\]]/g, '') || `Obj_${idx + 1}`;
-    const rows: (string | number)[][] = [
-      [bundle.empresaName || 'COSP', grid.objectiveName, bundle.periodLabel],
-      [],
-      objectiveTableHead(grid),
-      objectiveSubHead(grid),
-      ...objectiveTableBody(grid),
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sheetName);
-  });
+  const layout = resolveLayoutMode(bundle);
+
+  if (layout === 'employees' || layout === 'both') {
+    bundle.objectives.forEach((grid, idx) => {
+      const sheetName = grid.objectiveName.slice(0, 28).replace(/[\\/*?:[\]]/g, '') || `Obj_${idx + 1}`;
+      const rows: (string | number)[][] = [
+        [bundle.empresaName || 'COSP', grid.objectiveName, bundle.periodLabel],
+        [],
+        objectiveTableHead(grid),
+        objectiveSubHead(grid),
+        ...objectiveTableBody(grid),
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sheetName);
+    });
+  }
+
+  if (layout === 'positions' || layout === 'both') {
+    (bundle.positionGrids || []).forEach((grid, idx) => {
+      const sheetName = (`P_${grid.objectiveName}`).slice(0, 28).replace(/[\\/*?:[\]]/g, '') || `Puestos_${idx + 1}`;
+      const rows: (string | number)[][] = [
+        [bundle.empresaName || 'COSP', `REGISTRO MENSUAL DE HORAS: ${grid.objectiveName}`, bundle.periodLabel],
+        [],
+        ['Puesto / Horas', ...grid.dateColumns.map((d) => shortDayHeader(d)), 'Resumen'],
+        ['', ...grid.dateColumns.map((d) => grid.dayLabels[d] || ''), ''],
+        ...grid.positions.map((p) => [
+          p.positionName,
+          ...grid.dateColumns.map((d) => (p.days[d]?.hours > 0 ? Math.round(p.days[d].hours * 10) / 10 : '')),
+          Math.round(p.totalHours * 10) / 10,
+        ]),
+        [
+          'Totales',
+          ...grid.dateColumns.map((d) => {
+            const h = grid.dailyTotals[d]?.total || 0;
+            return h > 0 ? Math.round(h * 10) / 10 : '';
+          }),
+          Math.round(grid.grandTotal.total * 10) / 10,
+        ],
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sheetName);
+    });
+  }
 
   if (bundle.eventos && bundle.eventos.length > 0) {
     const evRows: (string | number)[][] = [

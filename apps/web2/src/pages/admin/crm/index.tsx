@@ -110,7 +110,8 @@ import {
 } from '@/lib/crm/clientDataMatch';
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
-import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary } from '@/lib/crm/proformaGrid';
+import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, buildProformaPositionGrids } from '@/lib/crm/proformaGrid';
+import type { ProformaLayoutMode } from '@/lib/crm/proformaTypes';
 import { turnoEligibleForProformaGrid, type ProformaDetailMode } from '@/lib/crm/proformaMode';
 import { isSinCoberturaShift } from '@/lib/crm/proformaVacancy';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
@@ -365,6 +366,7 @@ export default function CRMPage() {
   const [proformaStartDate, setProformaStartDate] = useState('');
   const [proformaEndDate, setProformaEndDate] = useState('');
   const [proformaDetailMode, setProformaDetailMode] = useState<ProformaDetailMode>('auto');
+  const [proformaLayoutMode, setProformaLayoutMode] = useState<ProformaLayoutMode>('both');
   const [proformaBase, setProformaBase] = useState<ProformaBase>('requested');
   const [proformaHourlyValue, setProformaHourlyValue] = useState('');
   const [proformaTotals, setProformaTotals] = useState({
@@ -2110,6 +2112,20 @@ export default function CRMPage() {
         slaCodeHoursHintByObjective,
       });
       const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
+      const positionGrids = buildProformaPositionGrids({
+        turnos,
+        empMeta,
+        clientId: selectedClient.id,
+        objectiveAliases,
+        slaInRange,
+        slaExclusion,
+        start,
+        end,
+        mode: proformaDetailMode,
+        useExecutedForAuto,
+        slaCodeHoursHint,
+        slaCodeHoursHintByObjective,
+      });
       const vigenteSlas = pickVigenteSlasForPeriod(servicesForProforma, start, end, selectedClient.id);
       const slaHoursByObjectiveId: Record<string, number> = {};
       for (const srv of vigenteSlas) {
@@ -2175,6 +2191,8 @@ export default function CRMPage() {
         empresaName: (empresa as any)?.name || 'COSP',
         summary,
         objectives: grids,
+        positionGrids,
+        layoutMode: proformaLayoutMode,
         eventos: eventosProforma.length > 0 ? eventosProforma : undefined,
         sourceDebug: {
           clientId: selectedClient.id,
@@ -2227,6 +2245,10 @@ export default function CRMPage() {
     calculateProformaTurnos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proformaActive, selectedClient?.id, clientServices, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
+
+  useEffect(() => {
+    setProformaBundle((prev) => (prev ? { ...prev, layoutMode: proformaLayoutMode } : prev));
+  }, [proformaLayoutMode]);
 
   const handleExportProformaPdf = () => {
     if (!proformaBundle) return;
@@ -3858,6 +3880,7 @@ export default function CRMPage() {
                     proformaStartDate={proformaStartDate}
                     proformaEndDate={proformaEndDate}
                     proformaDetailMode={proformaDetailMode}
+                    proformaLayoutMode={proformaLayoutMode}
                     proformaBase={proformaBase}
                     proformaHourlyValue={proformaHourlyValue}
                     proformaTotals={proformaTotals}
@@ -3872,6 +3895,7 @@ export default function CRMPage() {
                     onStartDateChange={setProformaStartDate}
                     onEndDateChange={setProformaEndDate}
                     onDetailModeChange={setProformaDetailMode}
+                    onLayoutModeChange={setProformaLayoutMode}
                     onBaseChange={setProformaBase}
                     onHourlyValueChange={setProformaHourlyValue}
                     onRecalculate={calculateProformaTurnos}

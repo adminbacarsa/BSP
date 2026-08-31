@@ -26,6 +26,28 @@ export type ProformaObjectiveGrid = {
   grandTotal: { total: number; day: number; night: number };
 };
 
+/** Fila de registro mensual por puesto (agrega horas de todos los legajos del puesto). */
+export type ProformaPositionRow = {
+  positionName: string;
+  days: Record<string, ProformaDayCell>;
+  totalHours: number;
+  totalDay: number;
+  totalNight: number;
+};
+
+export type ProformaPositionObjectiveGrid = {
+  objectiveId: string;
+  objectiveName: string;
+  dateColumns: string[];
+  dayLabels: Record<string, string>;
+  positions: ProformaPositionRow[];
+  dailyTotals: Record<string, { total: number; day: number; night: number }>;
+  grandTotal: { total: number; day: number; night: number };
+};
+
+/** Qué páginas/secciones incluir en vista y PDF/CSV/Excel. */
+export type ProformaLayoutMode = 'both' | 'employees' | 'positions';
+
 export type ProformaSummaryRow = {
   objectiveName: string;
   totalHours: number;
@@ -72,6 +94,10 @@ export type ProformaExportBundle = {
   empresaName: string;
   summary: ProformaSummaryRow[];
   objectives: ProformaObjectiveGrid[];
+  /** Grillas diarias agregadas por puesto (registro mensual tipo Excel cliente). */
+  positionGrids?: ProformaPositionObjectiveGrid[];
+  /** Controla vista UI y export PDF/CSV/Excel. */
+  layoutMode?: ProformaLayoutMode;
   eventos?: ProformaEvento[];
   /** Trazabilidad de lectura Firestore (solo UI pre-factura). */
   sourceDebug?: {
