@@ -20,6 +20,7 @@ import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
 import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
 import { applySlaRefuerzoPax, revertSlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
+import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import {
   fmtTs, urgencyLevel, hoursSincePending, pendingHoursLabel, URGENCY_STYLES,
   filterAbsencesByObjectives, filterSolicitudesByObjectives,
@@ -249,6 +250,8 @@ function ParentShiftInfo({ parentShiftId }: { parentShiftId?: string }) {
 interface SlaPosition {
   id: string;
   name: string;
+  coverageType?: string;
+  code?: string;
   shifts: { code: string; name: string; startTime: string; endTime: string }[];
 }
 
@@ -315,7 +318,13 @@ export default function SupervisionPage() {
             code: s.code, name: s.name || s.code,
             startTime: s.startTime || '', endTime: s.endTime || '',
           })).filter((s: any) => s.startTime);
-          if (shifts.length) posMap.set(key, { id: p.id || p.name, name: p.name, shifts });
+          posMap.set(key, {
+            id: p.id || p.name,
+            name: p.name,
+            coverageType: p.coverageType,
+            code: p.code,
+            shifts,
+          });
         });
         setSlaPositions(Array.from(posMap.values()));
       });
@@ -527,7 +536,8 @@ export default function SupervisionPage() {
         employeeId:    sol.parentEmpleadoId  ?? null,
         employeeName:  sol.parentEmpleadoName ?? null,
         parentShiftId: sol.parentShiftId      ?? null,
-        positionName:  parentPositionName,
+        positionId:    sol.positionId ?? null,
+        positionName:  sol.positionName || parentPositionName,
       });
       ids.push(ref.id);
     } else {
@@ -720,6 +730,8 @@ export default function SupervisionPage() {
           parentEmpleadoName: mGuardiaAAmpliar.trim() || undefined,
           parentEmpleadoId:   mGuardiaEmpleadoId || undefined,
           parentShiftId:      mGuardiaShiftId    || undefined,
+          positionName:       positionName || undefined,
+          positionId,
         } : {}),
       };
 
@@ -779,8 +791,8 @@ export default function SupervisionPage() {
       const turnoIds: string[] = [];
       for (let i = 0; i < n; i++) {
         const turnoExtra: Record<string, unknown> = { ...base, employeeId: 'VACANTE' };
-        if (!isAgregado && positionName) turnoExtra.positionName = positionName;
-        if (!isAgregado && positionId) turnoExtra.positionId = positionId;
+        if (positionName) turnoExtra.positionName = positionName;
+        if (positionId) turnoExtra.positionId = positionId;
         if (isAgregado && mGuardiaAAmpliar.trim())  turnoExtra.parentEmpleadoName = mGuardiaAAmpliar.trim();
         if (isAgregado && mGuardiaEmpleadoId)       turnoExtra.parentEmpleadoId   = mGuardiaEmpleadoId;
         if (isAgregado && mGuardiaShiftId)          turnoExtra.parentShiftId      = mGuardiaShiftId;
@@ -796,7 +808,7 @@ export default function SupervisionPage() {
         ...solicitudBase,
         id:                  solicitudId,
         cantidadPax:         isAgregado ? 1 : mPax,
-        positionName:        !isAgregado && positionName ? positionName : undefined,
+        positionName:        positionName || undefined,
         positionId,
         shiftCode,
         parentEmpleadoName:  isAgregado && mGuardiaAAmpliar.trim() ? mGuardiaAAmpliar.trim() : undefined,
@@ -1057,6 +1069,9 @@ export default function SupervisionPage() {
                                   <User size={10}/>{s.parentEmpleadoName}
                                 </span>
                               )}
+                              {s.tipo === 'AGREGADO_TURNO' && s.positionName && (
+                                <span className="text-xs text-rose-600 font-bold">→ {s.positionName}</span>
+                              )}
                               {s.tipo === 'AGREGADO_TURNO' && (s as any).parentShiftId && (
                                 <ParentShiftInfo parentShiftId={(s as any).parentShiftId}/>
                               )}
@@ -1252,7 +1267,12 @@ export default function SupervisionPage() {
             {/* Tipo */}
             <div className="flex gap-2">
               {(['REFUERZO_PUESTO', 'AGREGADO_TURNO'] as const).map(t => (
-                <button key={t} type="button" onClick={() => setMTipo(t)}
+                <button key={t} type="button" onClick={() => {
+                  setMTipo(t);
+                  setMSelPosId('');
+                  setMSelShiftCode('');
+                  setMPosicionNombre('');
+                }}
                   className={`flex-1 py-2 rounded-xl text-xs font-black uppercase border transition-colors ${mTipo === t ? 'bg-red-600 text-white border-red-600' : 'border-slate-200 text-slate-500 hover:border-red-300'}`}>
                   {t === 'REFUERZO_PUESTO' ? 'RFZ Refuerzo' : 'TURA Agregado'}
                 </button>
@@ -1291,14 +1311,14 @@ export default function SupervisionPage() {
                 <div className="grid grid-cols-3 gap-2">
                   <div className="col-span-2">
                     <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Puesto</label>
-                    {slaPositions.length > 0 ? (
+                    {slaPositions.filter((p) => !isEventosPosition(p) && p.shifts.length > 0).length > 0 ? (
                       <select value={mSelPosId} onChange={e => {
                         const id = e.target.value;
                         setMSelPosId(id); setMSelShiftCode(''); setMStart(''); setMEnd('');
                         setMPosicionNombre(slaPositions.find(p => p.id === id)?.name || '');
                       }} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400">
                         <option value="">— Seleccioná un puesto —</option>
-                        {slaPositions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        {slaPositions.filter((p) => !isEventosPosition(p) && p.shifts.length > 0).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     ) : (
                       <input type="text" placeholder="Ej: Portería norte, Acceso vehicular…" value={mPosicionNombre} onChange={e => setMPosicionNombre(e.target.value)}
@@ -1396,6 +1416,32 @@ export default function SupervisionPage() {
                 {mGuardiaAAmpliar && (
                   <p className="text-[10px] text-violet-600 font-bold mt-1">✓ {mGuardiaAAmpliar}</p>
                 )}
+                {(() => {
+                  const eventos = slaPositions.filter((p) => isEventosPosition(p) || /^eventos?$/i.test(String(p.name || '').trim()));
+                  return (
+                    <div className="mt-3">
+                      <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Imputar a puesto (prefactura)</label>
+                      {eventos.length > 0 ? (
+                        <select
+                          value={mSelPosId}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            setMSelPosId(id);
+                            setMPosicionNombre(eventos.find((p) => p.id === id)?.name || '');
+                          }}
+                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"
+                        >
+                          <option value="">— Sin imputar (TURA suelta) —</option>
+                          {eventos.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 font-bold">
+                          Creá un puesto Eventos en Servicios (tipo Eventos/extras) para agrupar estas horas en prefactura.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

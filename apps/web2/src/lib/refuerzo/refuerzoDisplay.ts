@@ -88,7 +88,10 @@ export function buildRefuerzoDisplayTitle(sol: SolicitudRefuerzo): string {
   const code = refuerzoTipoCode(sol);
   if (code === 'TURA') {
     const guardia = sol.parentEmpleadoName || 'guardia';
-    return `TURA · ${guardia} · ${sol.objectiveName || 'objetivo'}`;
+    const dest = sol.positionName?.trim();
+    return dest
+      ? `TURA · ${guardia} → ${dest} · ${sol.objectiveName || 'objetivo'}`
+      : `TURA · ${guardia} · ${sol.objectiveName || 'objetivo'}`;
   }
   const puesto = sol.positionName || 'Puesto';
   const pax = sol.cantidadPax ?? 1;

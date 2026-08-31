@@ -26,7 +26,7 @@ export interface ServicePosition {
   id: string;
   name: string;
   code?: string;
-  coverageType: '24hs' | '12hs_diurno' | '12hs_nocturno' | 'custom' | 'encargado';
+  coverageType: '24hs' | '12hs_diurno' | '12hs_nocturno' | 'custom' | 'encargado' | 'eventos';
   quantity: number;
   allowedShiftTypes: ShiftVariant[];
   activeDays: string[];

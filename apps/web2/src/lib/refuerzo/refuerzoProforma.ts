@@ -54,9 +54,10 @@ export function applyRefuerzoHorasVendidasToBreakdown(
     if (hrs <= 0) continue;
 
     const objName = sol.objectiveName || 'Objetivo';
+    const billedPos = String(sol.positionName || '').trim();
     const posName = sol.tipo === 'AGREGADO_TURNO'
-      ? `TURA · ${sol.parentEmpleadoName || 'Agregado'}`
-      : `RFZ · ${sol.positionName || 'Refuerzo cliente'}`;
+      ? (billedPos || `TURA · ${sol.parentEmpleadoName || 'Agregado'}`)
+      : `RFZ · ${billedPos || 'Refuerzo cliente'}`;
     const fecha = String(sol.fecha).slice(0, 10);
 
     const oKey = normalize(objName);
@@ -175,22 +176,35 @@ export function applyRefuerzoHorasVendidasToGrids(
     }
 
     const code = refuerzoTipoCode(sol);
-    const rowId = sol.id ? `refuerzo-${sol.id}` : `refuerzo-${code}-${fecha}-${grid.employees.length}`;
-    const rowName = code === 'TURA'
-      ? `TURA cliente · ${sol.parentEmpleadoName || 'Agregado'}`
-      : `RFZ cliente · ${sol.positionName || 'Refuerzo'}`;
-    const days = Object.fromEntries(dateColumns.map((d) => [d, emptyCell(d)]));
-    days[fecha] = { date: fecha, display: formatHoursHm(hrs), hours: hrs, dayHours: hrs, nightHours: 0 };
+    const billedPos = String(sol.positionName || '').trim();
+    const aggregateTura = code === 'TURA' && !!billedPos;
+    const rowId = aggregateTura
+      ? `puesto-${sol.positionId || billedPos}`
+      : (sol.id ? `refuerzo-${sol.id}` : `refuerzo-${code}-${fecha}-${grid.employees.length}`);
+    const rowName = aggregateTura
+      ? billedPos
+      : (code === 'TURA'
+        ? `TURA cliente · ${sol.parentEmpleadoName || 'Agregado'}`
+        : `RFZ cliente · ${billedPos || 'Refuerzo'}`);
 
-    grid.employees.push({
-      employeeId: rowId,
-      legajo: 'RFZ',
-      name: rowName,
-      days,
-      totalHours: hrs,
-      totalDay: hrs,
-      totalNight: 0,
-    });
+    let row = grid.employees.find((e) => e.employeeId === rowId);
+    if (!row) {
+      row = {
+        employeeId: rowId,
+        legajo: aggregateTura ? 'EVT' : 'RFZ',
+        name: rowName,
+        days: Object.fromEntries(dateColumns.map((d) => [d, emptyCell(d)])),
+        totalHours: 0,
+        totalDay: 0,
+        totalNight: 0,
+      };
+      grid.employees.push(row);
+    }
+    const prev = row.days[fecha]?.hours || 0;
+    const nextHrs = prev + hrs;
+    row.days[fecha] = { date: fecha, display: formatHoursHm(nextHrs), hours: nextHrs, dayHours: nextHrs, nightHours: 0 };
+    row.totalHours += hrs;
+    row.totalDay += hrs;
     grid.dailyTotals[fecha].total += hrs;
     grid.dailyTotals[fecha].day += hrs;
     grid.grandTotal.total += hrs;

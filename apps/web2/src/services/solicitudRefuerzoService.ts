@@ -33,7 +33,7 @@ export interface SolicitudRefuerzo {
   startTime: string;  // HH:mm
   endTime: string;    // HH:mm
 
-  // Solo REFUERZO_PUESTO
+  // REFUERZO_PUESTO, o TURA imputada a un puesto Eventos (prefactura)
   positionId?: string;
   positionName?: string;
   shiftCode?: string;
