@@ -816,13 +816,16 @@ export default function ServiciosSLAPage() {
 
   const handleSavePosition = () => {
       if (!positionForm.name) return addToast('Nombre requerido', 'error');
-      if (positionForm.allowedShiftTypes.length === 0) return addToast('Seleccione al menos un turno', 'error');
+      const isEventos = positionForm.coverageType === EVENTOS_COVERAGE_TYPE;
+      if (!isEventos && positionForm.allowedShiftTypes.length === 0) return addToast('Seleccione al menos un turno', 'error');
 
       const newId = positionForm.id || `pos_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
       const newPosition: ServicePosition = {
         ...positionForm,
         id: newId,
-        allowedShiftTypes: positionForm.allowedShiftTypes.map(s => ({ ...s })),
+        allowedShiftTypes: isEventos ? [] : positionForm.allowedShiftTypes.map(s => ({ ...s })),
+        quantity: isEventos ? 1 : positionForm.quantity,
+        code: isEventos ? (positionForm.code || EVENTOS_SHIFT_CODE) : positionForm.code,
       };
       let updatedPositions = [...form.positions];
       if (positionForm.id) updatedPositions = updatedPositions.map(p => p.id === positionForm.id ? newPosition : p);
@@ -4839,6 +4842,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                         </div>
                     )}
 
+                    {positionForm.coverageType !== EVENTOS_COVERAGE_TYPE && (
                     <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border dark:border-slate-700">
                         <label className="text-[10px] font-black uppercase text-slate-400 mb-3 block">Turnos Habilitados</label>
                         <div className="flex flex-col gap-2">
@@ -4924,6 +4928,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             )}) : <span className="text-xs text-slate-400 italic">Ningún turno seleccionado.</span>}
                         </div>
                     </div>
+                    )}
                     {/* Estimación de guardias en rotación */}
                     {positionForm.coverageType !== 'encargado' && positionForm.coverageType !== 'eventos' && positionForm.allowedShiftTypes.length > 0 && (() => {
                       const bd = calculateMonthlyBreakdown([positionForm], form.startDate, form.endDate);
