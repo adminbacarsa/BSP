@@ -290,9 +290,8 @@ export default function SupervisionPage() {
   const [mPax, setMPax]     = useState(1);
   const [mAlcance, setMAlcance] = useState<'PUNTUAL' | 'ESTRUCTURAL'>('PUNTUAL');
   const [mPosicionNombre, setMPosicionNombre] = useState('');
-  const [mGuardiaAAmpliar, setMGuardiaAAmpliar] = useState('');
-  const [mGuardiaEmpleadoId, setMGuardiaEmpleadoId]   = useState('');
-  const [mGuardiaShiftId, setMGuardiaShiftId]         = useState('');
+  const [mGuardiasTura, setMGuardiasTura] = useState<Array<{ shiftId: string; empleadoId: string; nombre: string }>>([]);
+  const [mGuardiaManualNombre, setMGuardiaManualNombre] = useState('');
   const [slaPositions, setSlaPositions] = useState<SlaPosition[]>([]);
   const [mSelPosId, setMSelPosId]       = useState('');
   const [mSelShiftCode, setMSelShiftCode] = useState('');
@@ -332,7 +331,7 @@ export default function SupervisionPage() {
 
   // Cargar guardias con turno en el objetivo/fecha seleccionados (para TURA)
   useEffect(() => {
-    setGuardias(undefined); setMGuardiaAAmpliar(''); setMGuardiaEmpleadoId(''); setMGuardiaShiftId('');
+    setGuardias(undefined); setMGuardiasTura([]); setMGuardiaManualNombre('');
     if (mTipo !== 'AGREGADO_TURNO' || !mObjetivoId || !mFecha) return;
     setGuardias([]);
     const fmtHora = (val: any): string => {
@@ -676,8 +675,7 @@ export default function SupervisionPage() {
     setMTipo('REFUERZO_PUESTO'); setMClienteId(''); setMObjetivoId('');
     setMFecha(''); setMStart(''); setMEnd(''); setMMotivo('');
     setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1); setMAlcance('PUNTUAL');
-    setMPosicionNombre(''); setMGuardiaAAmpliar('');
-    setMGuardiaEmpleadoId(''); setMGuardiaShiftId('');
+    setMPosicionNombre(''); setMGuardiasTura([]); setMGuardiaManualNombre('');
     setSlaPositions([]); setMSelPosId(''); setMSelShiftCode('');
     setGuardias(undefined);
     setShowManualForm(false);
@@ -704,7 +702,20 @@ export default function SupervisionPage() {
       const positionId = mSelPosId || undefined;
       const shiftCode = mSelShiftCode || undefined;
 
-      const solicitudBase = {
+      const turaTargets: Array<{ shiftId: string; empleadoId: string; nombre: string }> = isAgregado
+        ? (Array.isArray(guardias) && guardias.length > 0
+          ? mGuardiasTura
+          : (mGuardiaManualNombre.trim()
+            ? [{ shiftId: '', empleadoId: '', nombre: mGuardiaManualNombre.trim() }]
+            : []))
+        : [];
+
+      if (isAgregado && turaTargets.length === 0) {
+        toast.error('Seleccioná al menos un guardia a ampliar');
+        return;
+      }
+
+      const buildSolicitudBase = (guard?: { shiftId: string; empleadoId: string; nombre: string }) => ({
         empresaId,
         clientId:            mClienteId,
         clientName:          selectedObjective?.clientName || mClienteId,
@@ -726,14 +737,16 @@ export default function SupervisionPage() {
         autorizadoPorNombre: user!.displayName || user!.email || '',
         autorizadoAt:        Timestamp.now(),
         ...(!isAgregado ? { cantidadPax: mPax, positionName: positionName || undefined, positionId, shiftCode } : {}),
-        ...(isAgregado  ? {
-          parentEmpleadoName: mGuardiaAAmpliar.trim() || undefined,
-          parentEmpleadoId:   mGuardiaEmpleadoId || undefined,
-          parentShiftId:      mGuardiaShiftId    || undefined,
+        ...(isAgregado && guard ? {
+          parentEmpleadoName: guard.nombre || undefined,
+          parentEmpleadoId:   guard.empleadoId || undefined,
+          parentShiftId:      guard.shiftId || undefined,
           positionName:       positionName || undefined,
           positionId,
         } : {}),
-      };
+      });
+
+      const solicitudBase = buildSolicitudBase(isAgregado ? turaTargets[0] : undefined);
 
       if (esEstructural) {
         const solicitudId = await solicitudRefuerzoService.create({ ...solicitudBase, turnoIds: [], actionTarget: 'PLANIFICACION' });
@@ -787,15 +800,62 @@ export default function SupervisionPage() {
         autorizadoPorNombre: user!.displayName || user!.email || null,
         autorizadoAt:        Timestamp.now(),
       };
-      const n = isAgregado ? 1 : mPax;
+
+      if (isAgregado) {
+        let created = 0;
+        for (const guard of turaTargets) {
+          const turnoExtra: Record<string, unknown> = {
+            ...base,
+            employeeId: 'VACANTE',
+          };
+          if (positionName) turnoExtra.positionName = positionName;
+          if (positionId) turnoExtra.positionId = positionId;
+          if (guard.nombre) turnoExtra.parentEmpleadoName = guard.nombre;
+          if (guard.empleadoId) turnoExtra.parentEmpleadoId = guard.empleadoId;
+          if (guard.shiftId) turnoExtra.parentShiftId = guard.shiftId;
+          const r = await addDoc(collection(db, 'turnos'), turnoExtra);
+          const turnoIds = [r.id];
+          const solBase = buildSolicitudBase(guard);
+          const solicitudId = await solicitudRefuerzoService.create({
+            ...solBase,
+            turnoIds,
+            actionTarget: 'OPERACIONES',
+          });
+          const manualSol: SolicitudRefuerzo = {
+            ...solBase,
+            id: solicitudId,
+            cantidadPax: 1,
+            positionName: positionName || undefined,
+            positionId,
+            shiftCode,
+            parentEmpleadoName: guard.nombre || undefined,
+            parentEmpleadoId: guard.empleadoId || undefined,
+            parentShiftId: guard.shiftId || undefined,
+          };
+          await addDoc(collection(db, 'novedades'), {
+            ...buildRefuerzoNovedadPayload(manualSol, {
+              reportedBy: 'SUPERVISION',
+              actionTarget: 'OPERACIONES',
+              turnoIds,
+            }),
+            canalSolicitud: mCanal,
+            createdBy: user.displayName || user.email || '',
+            createdAt: Timestamp.now(),
+            origin: 'SUPERVISOR_MANUAL',
+          });
+          created += 1;
+        }
+        toast.success(`${created} TURA${created > 1 ? 's' : ''} creada${created > 1 ? 's' : ''} como vacante operativa`);
+        resetManualForm();
+        return;
+      }
+
+      const n = mPax;
       const turnoIds: string[] = [];
       for (let i = 0; i < n; i++) {
         const turnoExtra: Record<string, unknown> = { ...base, employeeId: 'VACANTE' };
         if (positionName) turnoExtra.positionName = positionName;
         if (positionId) turnoExtra.positionId = positionId;
-        if (isAgregado && mGuardiaAAmpliar.trim())  turnoExtra.parentEmpleadoName = mGuardiaAAmpliar.trim();
-        if (isAgregado && mGuardiaEmpleadoId)       turnoExtra.parentEmpleadoId   = mGuardiaEmpleadoId;
-        if (isAgregado && mGuardiaShiftId)          turnoExtra.parentShiftId      = mGuardiaShiftId;
         const r = await addDoc(collection(db, 'turnos'), turnoExtra);
         turnoIds.push(r.id);
       }
@@ -807,13 +867,10 @@ export default function SupervisionPage() {
       const manualSol: SolicitudRefuerzo = {
         ...solicitudBase,
         id:                  solicitudId,
-        cantidadPax:         isAgregado ? 1 : mPax,
+        cantidadPax:         mPax,
         positionName:        positionName || undefined,
         positionId,
         shiftCode,
-        parentEmpleadoName:  isAgregado && mGuardiaAAmpliar.trim() ? mGuardiaAAmpliar.trim() : undefined,
-        parentEmpleadoId:    isAgregado ? mGuardiaEmpleadoId || undefined : undefined,
-        parentShiftId:       isAgregado ? mGuardiaShiftId || undefined : undefined,
       };
       await addDoc(collection(db, 'novedades'), {
         ...buildRefuerzoNovedadPayload(manualSol, {
@@ -1371,11 +1428,12 @@ export default function SupervisionPage() {
               </div>
             </div>
 
-            {/* TURA — Guardia a ampliar (carga de turnos del día) */}
+            {/* TURA — Guardias a ampliar (multi-select) */}
             {mTipo === 'AGREGADO_TURNO' && mObjetivoId && (
               <div>
                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
-                  Guardia a ampliar
+                  Guardias a ampliar
+                  <span className="text-slate-400 font-normal normal-case ml-1">(podés elegir varios)</span>
                   {!mFecha && <span className="text-slate-300 font-normal ml-1">(seleccioná fecha primero)</span>}
                 </label>
                 {guardias === undefined && mFecha && (
@@ -1389,12 +1447,20 @@ export default function SupervisionPage() {
                 {Array.isArray(guardias) && guardias.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {guardias.map(g => {
-                      const activo = mGuardiaShiftId === g.shiftId;
+                      const activo = mGuardiasTura.some((x) => x.shiftId === g.shiftId);
                       return (
                         <button key={g.shiftId} type="button"
-                          onClick={() => { setMGuardiaShiftId(g.shiftId); setMGuardiaEmpleadoId(g.empleadoId); setMGuardiaAAmpliar(g.nombre); }}
+                          onClick={() => {
+                            setMGuardiasTura((prev) => {
+                              const exists = prev.some((x) => x.shiftId === g.shiftId);
+                              if (exists) return prev.filter((x) => x.shiftId !== g.shiftId);
+                              return [...prev, { shiftId: g.shiftId, empleadoId: g.empleadoId, nombre: g.nombre }];
+                            });
+                          }}
                           className={`px-3 py-2 rounded-xl text-xs font-bold border transition-colors flex items-start gap-2 text-left ${activo ? 'bg-violet-600 text-white border-violet-600' : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-violet-300'}`}>
-                          <User size={12} className="mt-0.5 shrink-0"/>
+                          {activo
+                            ? <CheckCircle size={12} className="mt-0.5 shrink-0"/>
+                            : <User size={12} className="mt-0.5 shrink-0"/>}
                           <span className="min-w-0 flex-1">
                             <span className="block truncate">{g.nombre}</span>
                             <span className={`block mt-0.5 text-[10px] font-bold ${activo ? 'text-violet-100' : 'text-slate-500'}`}>
@@ -1408,35 +1474,54 @@ export default function SupervisionPage() {
                     })}
                   </div>
                 )}
+                {Array.isArray(guardias) && guardias.length > 0 && mGuardiasTura.length > 0 && (
+                  <p className="text-[10px] text-violet-600 font-bold mt-2">
+                    ✓ {mGuardiasTura.length} guardia{mGuardiasTura.length !== 1 ? 's' : ''} seleccionado{mGuardiasTura.length !== 1 ? 's' : ''}
+                  </p>
+                )}
                 {(!Array.isArray(guardias) || guardias.length === 0) && (
-                  <input type="text" placeholder="Nombre del guardia cuyo turno se extiende" value={mGuardiaAAmpliar}
-                    onChange={e => setMGuardiaAAmpliar(e.target.value)}
+                  <input type="text" placeholder="Nombre del guardia cuyo turno se extiende" value={mGuardiaManualNombre}
+                    onChange={e => setMGuardiaManualNombre(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400 mt-1"/>
                 )}
-                {mGuardiaAAmpliar && (
-                  <p className="text-[10px] text-violet-600 font-bold mt-1">✓ {mGuardiaAAmpliar}</p>
+                {mGuardiaManualNombre && (!Array.isArray(guardias) || guardias.length === 0) && (
+                  <p className="text-[10px] text-violet-600 font-bold mt-1">✓ {mGuardiaManualNombre}</p>
                 )}
                 {(() => {
-                  const eventos = slaPositions.filter((p) => isEventosPosition(p) || /^eventos?$/i.test(String(p.name || '').trim()));
+                  const imputacionPositions = [...slaPositions].sort((a, b) => {
+                    const ae = isEventosPosition(a) ? 0 : 1;
+                    const be = isEventosPosition(b) ? 0 : 1;
+                    if (ae !== be) return ae - be;
+                    return String(a.name || '').localeCompare(String(b.name || ''), 'es');
+                  });
                   return (
                     <div className="mt-3">
                       <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Imputar a puesto (prefactura)</label>
-                      {eventos.length > 0 ? (
-                        <select
-                          value={mSelPosId}
-                          onChange={(e) => {
-                            const id = e.target.value;
-                            setMSelPosId(id);
-                            setMPosicionNombre(eventos.find((p) => p.id === id)?.name || '');
-                          }}
-                          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"
-                        >
-                          <option value="">— Sin imputar (TURA suelta) —</option>
-                          {eventos.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                      {imputacionPositions.length > 0 ? (
+                        <>
+                          <select
+                            value={mSelPosId}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setMSelPosId(id);
+                              setMPosicionNombre(imputacionPositions.find((p) => p.id === id)?.name || '');
+                            }}
+                            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"
+                          >
+                            <option value="">— Sin imputar (TURA suelta) —</option>
+                            {imputacionPositions.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}{isEventosPosition(p) ? ' · extras' : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[9px] text-slate-400 font-bold mt-1">
+                            Eventos agrupa extras del día; otro puesto imputa la extensión a ese rubro en prefactura.
+                          </p>
+                        </>
                       ) : (
                         <p className="text-[10px] text-slate-400 font-bold">
-                          Creá un puesto Eventos en Servicios (tipo Eventos/extras) para agrupar estas horas en prefactura.
+                          Sin puestos en el SLA activo — la TURA queda suelta en prefactura.
                         </p>
                       )}
                     </div>
@@ -1477,11 +1562,22 @@ export default function SupervisionPage() {
                 Cancelar
               </button>
               <button type="button"
-                disabled={manualSaving || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()}
+                disabled={
+                  manualSaving || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()
+                  || (mTipo === 'AGREGADO_TURNO' && (
+                    Array.isArray(guardias) && guardias.length > 0
+                      ? mGuardiasTura.length === 0
+                      : !mGuardiaManualNombre.trim()
+                  ))
+                }
                 onClick={handleCrearManual}
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
                 {manualSaving ? <RefreshCw size={14} className="animate-spin"/> : <Plus size={14}/>}
-                {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' ? 'Sumar al SLA' : 'Crear vacante operativa'}
+                {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
+                  ? 'Sumar al SLA'
+                  : mTipo === 'AGREGADO_TURNO' && mGuardiasTura.length > 1
+                    ? `Crear ${mGuardiasTura.length} TURAs`
+                    : 'Crear vacante operativa'}
               </button>
             </div>
           </div>

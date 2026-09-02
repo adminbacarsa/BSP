@@ -150,6 +150,7 @@ import { slaFootprintFromServices, summarizeCrmCommercial, type CrmSlaFootprint 
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   applyRefuerzoHorasVendidasToGrids,
+  applyRefuerzoHorasVendidasToPositionGrids,
   applyRefuerzoHorasVendidasToBreakdown,
   countEstructuralesEnRango,
   solicitudIdsBilledInRange,
@@ -2112,7 +2113,8 @@ export default function CRMPage() {
         slaCodeHoursHintByObjective,
       });
       const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
-      const positionGrids = buildProformaPositionGrids({
+      const positionGrids = applyRefuerzoHorasVendidasToPositionGrids(
+        buildProformaPositionGrids({
         turnos,
         empMeta,
         clientId: selectedClient.id,
@@ -2125,7 +2127,10 @@ export default function CRMPage() {
         useExecutedForAuto,
         slaCodeHoursHint,
         slaCodeHoursHintByObjective,
-      });
+      }),
+        solicitudesRefuerzo,
+        { start, end },
+      );
       const vigenteSlas = pickVigenteSlasForPeriod(servicesForProforma, start, end, selectedClient.id);
       const slaHoursByObjectiveId: Record<string, number> = {};
       for (const srv of vigenteSlas) {
