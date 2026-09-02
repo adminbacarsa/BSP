@@ -40,18 +40,21 @@ function ensureWorktree() {
 
   if (!fs.existsSync(DEPLOY_DIR)) {
     console.log(`\n▶ Creando worktree de deploy en ${DEPLOY_DIR} ...`);
-    git(`worktree add --detach "${DEPLOY_DIR}" ${BRANCH}`);
+    git(`fetch origin ${BRANCH}`, LAB_ROOT);
+    git(`worktree add --detach "${DEPLOY_DIR}" origin/${BRANCH}`);
     return;
   }
 
   if (!hasDeploy) {
     console.log(`\n▶ Registrando worktree en ${DEPLOY_DIR} ...`);
-    git(`worktree add --detach "${DEPLOY_DIR}" ${BRANCH}`);
+    git(`fetch origin ${BRANCH}`, LAB_ROOT);
+    git(`worktree add --detach "${DEPLOY_DIR}" origin/${BRANCH}`);
     return;
   }
 
   console.log(`\n▶ Actualizando worktree ${DEPLOY_DIR} ...`);
-  git(`reset --hard ${BRANCH}`, DEPLOY_DIR);
+  git(`fetch origin ${BRANCH}`, LAB_ROOT);
+  git(`reset --hard origin/${BRANCH}`, DEPLOY_DIR);
 }
 
 function syncEnvLocal() {
