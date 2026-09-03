@@ -162,7 +162,7 @@ import {
 import ObjectiveServiceAnalysisCard from '@/components/planificacion/ObjectiveServiceAnalysisCard';
 import { resolveCronogramPlanningRules } from '@/lib/planificacion/cronogramPlanningRules';
 import { dominantDotacionFromPlanningCells } from '@/lib/planificacion/seedDotacionFromPrevMonth';
-import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
+import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery, buildPlanningMonthTuraQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
 import { matchesEmployeeSearch } from '@/lib/planificacion/employeeSearch';
 import {
     adjacentPlanningMonths,
@@ -4834,7 +4834,7 @@ export default function PlanificacionPage() {
             setShiftsMap(ingested.shiftsMap);
             setCellTurnosMap(ingested.cellTurnosMap);
             setAllShiftIds(ingested.allShiftIds);
-            setTuraMap(ingested.turaMap);
+            setTuraMap((prev) => ({ ...prev, ...ingested.turaMap }));
             setSecondBlockMap(ingested.secondBlockMap);
             setRfzVacantes(ingested.rfzVacantes);
             setRfzTodos(ingested.rfzTodos);
@@ -4848,6 +4848,7 @@ export default function PlanificacionPage() {
             setShiftsMapLoaded(false);
             setRfzVacantes([]);
             setRfzTodos([]);
+            setTuraMap({});
         }
 
         const mergeRfzLists = (prev: any[], extra: any[]) => {
@@ -4897,6 +4898,7 @@ export default function PlanificacionPage() {
         });
 
         let unsubRfz = () => {};
+        let unsubTura = () => {};
         try {
             const rfzQ = buildPlanningMonthRfzQuery({
                 empresaId,
@@ -4921,9 +4923,33 @@ export default function PlanificacionPage() {
             /* índice RFZ opcional en emulador */
         }
 
+        try {
+            const turaQ = buildPlanningMonthTuraQuery({
+                empresaId,
+                scopeEmpresa,
+                year: viewYear,
+                month: viewMonth,
+            });
+            unsubTura = onSnapshot(turaQ, (snap) => {
+                const ingested = ingestPlanningTurnosSnapshot(
+                    snap.docs,
+                    empresaId,
+                    migracionCompleta,
+                    getDateKey,
+                    { turaOnly: true },
+                );
+                setTuraMap((prev) => ({ ...prev, ...ingested.turaMap }));
+            }, () => {
+                /* índice TURA+fecha opcional en emulador */
+            });
+        } catch {
+            /* índice TURA opcional */
+        }
+
         return () => {
             unsubS();
             unsubRfz();
+            unsubTura();
             if (prefetchTimer) window.clearTimeout(prefetchTimer);
         };
     }, [empresaId, migracionCompleta, scopeEmpresa, currentDate.getFullYear(), currentDate.getMonth()]);
