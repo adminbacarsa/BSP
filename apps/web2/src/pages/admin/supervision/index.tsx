@@ -25,6 +25,7 @@ import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import {
   fmtTs, urgencyLevel, hoursSincePending, pendingHoursLabel, URGENCY_STYLES,
   filterAbsencesByObjectives, filterSolicitudesByObjectives,
+  listYmdDatesInclusive, formatYmdAr,
   type SupervisionMainTab,
 } from '@/lib/supervision/supervisionUtils';
 import { useSupervisorScope } from '@/hooks/useSupervisorScope';
@@ -282,7 +283,9 @@ export default function SupervisionPage() {
   const [mTipo, setMTipo]   = useState<'REFUERZO_PUESTO' | 'AGREGADO_TURNO'>('REFUERZO_PUESTO');
   const [mClienteId, setMClienteId] = useState('');
   const [mObjetivoId, setMObjetivoId] = useState('');
-  const [mFecha, setMFecha] = useState('');
+  const [mFechaDesde, setMFechaDesde] = useState('');
+  const [mFechaHasta, setMFechaHasta] = useState('');
+  const [mFechaModo, setMFechaModo] = useState<'DIA' | 'RANGO'>('DIA');
   const [mStart, setMStart] = useState('');
   const [mEnd, setMEnd]     = useState('');
   const [mMotivo, setMMotivo]     = useState('');
@@ -330,10 +333,15 @@ export default function SupervisionPage() {
       });
   }, [mObjetivoId]);
 
+  const mFechasRfzPreview = useMemo(() => {
+    if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'PUNTUAL' || mFechaModo !== 'RANGO' || !mFechaDesde) return [];
+    return listYmdDatesInclusive(mFechaDesde, mFechaHasta);
+  }, [mTipo, mAlcance, mFechaModo, mFechaDesde, mFechaHasta]);
+
   // Cargar guardias con turno en el objetivo/fecha seleccionados (para TURA)
   useEffect(() => {
     setGuardias(undefined); setMGuardiasTura([]); setMGuardiaManualNombre('');
-    if (mTipo !== 'AGREGADO_TURNO' || !mObjetivoId || !mFecha) return;
+    if (mTipo !== 'AGREGADO_TURNO' || !mObjetivoId || !mFechaDesde) return;
     setGuardias([]);
     const fmtHora = (val: any): string => {
       if (!val) return '';
@@ -352,7 +360,7 @@ export default function SupervisionPage() {
         const del_dia = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter((t: any) => {
           let tFecha: string = typeof t.fecha === 'string' ? t.fecha : '';
           if (!tFecha && t.startTime?.seconds) tFecha = new Date(t.startTime.seconds * 1000).toISOString().slice(0, 10);
-          return tFecha === mFecha && !t.isAbsent && !t.isFranco
+          return tFecha === mFechaDesde && !t.isAbsent && !t.isFranco
             && t.employeeId && t.employeeId !== 'VACANTE'
             && !seen.has(t.employeeId) && !!seen.add(t.employeeId);
         });
@@ -383,7 +391,7 @@ export default function SupervisionPage() {
           };
         })).then(lista => setGuardias(lista));
       });
-  }, [mTipo, mObjetivoId, mFecha]);
+  }, [mTipo, mObjetivoId, mFechaDesde]);
 
   // Limpiar estado al cambiar empresa para evitar flash de datos anteriores
   useEffect(() => {
@@ -447,7 +455,9 @@ export default function SupervisionPage() {
     setMainTab('BANDEJA');
     setTab('PENDIENTE');
     setMTipo('REFUERZO_PUESTO');
-    setMFecha(fechaDia || todayStr);
+    setMFechaDesde(fechaDia || todayStr);
+    setMFechaHasta('');
+    setMFechaModo('DIA');
     setMMotivo(`Cobertura por ausencia de ${a.employeeName}${a.reason ? ` — ${a.reason}` : ''}`);
     setShowManualForm(true);
   }, [todayStr]);
@@ -517,8 +527,8 @@ export default function SupervisionPage() {
       isAbsent:            false,
       isCompleted:         false,
       // TURA = extensión de un guardia ya publicado → se auto-publica (notifica al instante).
-      // RFZ = vacante a asignar en Planificación → queda en borrador hasta republicar.
-      draft:               isAgregado ? false : (opts?.draft ?? false),
+      // RFZ = vacante a planificar → borrador hasta publicar (mismo circuito que portal).
+      draft:               isAgregado ? false : (opts?.draft ?? true),
       autorizadoPorUid:    user?.uid ?? null,
       autorizadoPorNombre: user?.displayName || user?.email || null,
       autorizadoAt:        Timestamp.now(),
@@ -560,6 +570,7 @@ export default function SupervisionPage() {
           employeeId:   'VACANTE',
           positionId:   sol.positionId   ?? null,
           positionName: sol.positionName ?? null,
+          shiftCode:    sol.shiftCode     ?? null,
         });
         ids.push(ref.id);
       }
@@ -576,7 +587,8 @@ export default function SupervisionPage() {
       return;
     }
     const esEstructural = sol.tipo === 'REFUERZO_PUESTO' && sol.alcance === 'ESTRUCTURAL';
-    const vaAPlanificacion = sol.origen === 'PORTAL_CLIENTE' || esEstructural;
+    const esRfzPuntual = sol.tipo === 'REFUERZO_PUESTO' && !esEstructural;
+    const vaAPlanificacion = esEstructural || esRfzPuntual || sol.origen === 'PORTAL_CLIENTE';
     const actor = { uid: user.uid, name: user.displayName || user.email || '' };
 
     try {
@@ -685,7 +697,7 @@ export default function SupervisionPage() {
 
   const resetManualForm = () => {
     setMTipo('REFUERZO_PUESTO'); setMClienteId(''); setMObjetivoId('');
-    setMFecha(''); setMStart(''); setMEnd(''); setMMotivo('');
+    setMFechaDesde(''); setMFechaHasta(''); setMFechaModo('DIA'); setMStart(''); setMEnd(''); setMMotivo('');
     setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1); setMAlcance('PUNTUAL');
     setMPosicionNombre(''); setMGuardiasTura([]); setMGuardiaManualNombre('');
     setSlaPositions([]); setMSelPosId(''); setMSelShiftCode('');
@@ -694,20 +706,28 @@ export default function SupervisionPage() {
   };
 
   const handleCrearManual = async () => {
-    if (!user || !empresaId || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()) return;
+    if (!user || !empresaId || !mClienteId || !mObjetivoId || !mFechaDesde || !mStart || !mEnd || !mMotivo.trim()) return;
     setManualSaving(true);
     try {
       const selectedObjective = scopedObjectives.find(obj => obj.id === mObjetivoId);
-      const isOvernight = mEnd < mStart;
-      const nextDay = (d: string) => { const dt = new Date(d + 'T00:00:00'); dt.setDate(dt.getDate() + 1); return dt.toISOString().split('T')[0]; };
-      const fechaFin = isOvernight ? nextDay(mFecha) : mFecha;
-      const startISO = `${mFecha}T${mStart}:00`;
-      const endISO   = `${fechaFin}T${mEnd}:00`;
-
       const isAgregado = mTipo === 'AGREGADO_TURNO';
       const alcance = isAgregado ? 'PUNTUAL' as const : mAlcance;
       const esEstructural = !isAgregado && alcance === 'ESTRUCTURAL';
-      const horasPactadas = calcRefuerzoPactadaHours(mStart, mEnd);
+      const rfzUsaRango = !isAgregado && !esEstructural && mFechaModo === 'RANGO';
+      const fechasRfz = rfzUsaRango
+        ? listYmdDatesInclusive(mFechaDesde, mFechaHasta)
+        : [mFechaDesde];
+
+      if (rfzUsaRango) {
+        if (!mFechaHasta || mFechaHasta < mFechaDesde) {
+          toast.error('Indicá fecha hasta válida (≥ desde)');
+          return;
+        }
+        if (fechasRfz.length > 31) {
+          toast.error('Máximo 31 días por pedido RFZ');
+          return;
+        }
+      }
       const actor = { uid: user.uid, name: user.displayName || user.email || '' };
       const selectedPos = slaPositions.find(p => p.id === mSelPosId);
       const positionName = mPosicionNombre.trim() || selectedPos?.name || '';
@@ -727,7 +747,16 @@ export default function SupervisionPage() {
         return;
       }
 
-      const buildSolicitudBase = (guard?: { shiftId: string; empleadoId: string; nombre: string }) => ({
+      if (!isAgregado && !esEstructural) {
+        const slaPosCobertura = slaPositions.filter((p) => !isEventosPosition(p) && p.shifts.length > 0);
+        if (slaPosCobertura.length > 0 && !mSelPosId && !positionName) {
+          toast.error('Seleccioná el puesto del SLA o ingresá el nombre del puesto');
+          setManualSaving(false);
+          return;
+        }
+      }
+
+      const buildSolicitudBase = (fecha: string, guard?: { shiftId: string; empleadoId: string; nombre: string }) => ({
         empresaId,
         clientId:            mClienteId,
         clientName:          selectedObjective?.clientName || mClienteId,
@@ -735,7 +764,7 @@ export default function SupervisionPage() {
         objectiveName:       selectedObjective?.name || mObjetivoId,
         tipo:                mTipo,
         alcance,
-        fecha:               mFecha,
+        fecha,
         startTime:           mStart,
         endTime:             mEnd,
         motivo:              mMotivo.trim(),
@@ -758,7 +787,7 @@ export default function SupervisionPage() {
         } : {}),
       });
 
-      const solicitudBase = buildSolicitudBase(isAgregado ? turaTargets[0] : undefined);
+      const solicitudBase = buildSolicitudBase(mFechaDesde, isAgregado ? turaTargets[0] : undefined);
 
       if (esEstructural) {
         const solicitudId = await solicitudRefuerzoService.create({ ...solicitudBase, turnoIds: [], actionTarget: 'PLANIFICACION' });
@@ -795,50 +824,13 @@ export default function SupervisionPage() {
         return;
       }
 
-      const base = {
-        empresaId,
-        objectiveId:   mObjetivoId,
-        objectiveName: selectedObjective?.name || mObjetivoId,
-        clientId:      mClienteId,
-        clientName:    selectedObjective?.clientName || mClienteId,
-        fecha:         mFecha,
-        startTime:     startISO,
-        endTime:       endISO,
-        hours:         horasPactadas,
-        origin:        'CLIENT_REQUEST',
-        code:          isAgregado ? 'TURA' : 'RFZ',
-        isPresent: false, isAbsent: false, isCompleted: false, draft: false,
-        autorizadoPorUid:    user!.uid,
-        autorizadoPorNombre: user!.displayName || user!.email || null,
-        autorizadoAt:        Timestamp.now(),
-      };
-
       if (isAgregado) {
         let created = 0;
         for (const guard of turaTargets) {
-          const parentStub = guard.shiftId
-            ? { startTime: guard.shiftStart, endTime: guard.shiftEnd, fecha: mFecha }
-            : null;
-          const turaContiguous = parentStub
-            ? isTuraContiguousToParent(parentStub, { startTime: startISO, endTime: endISO, fecha: mFecha })
-            : false;
-          const turnoExtra: Record<string, unknown> = {
-            ...base,
-            employeeId: guard.empleadoId || 'VACANTE',
-            employeeName: guard.nombre || null,
-            turaContiguous,
-          };
-          if (positionName) turnoExtra.positionName = positionName;
-          if (positionId) turnoExtra.positionId = positionId;
-          if (guard.nombre) turnoExtra.parentEmpleadoName = guard.nombre;
-          if (guard.empleadoId) turnoExtra.parentEmpleadoId = guard.empleadoId;
-          if (guard.shiftId) turnoExtra.parentShiftId = guard.shiftId;
-          const r = await addDoc(collection(db, 'turnos'), turnoExtra);
-          const turnoIds = [r.id];
-          const solBase = buildSolicitudBase(guard);
+          const solBase = buildSolicitudBase(mFechaDesde, guard);
           const solicitudId = await solicitudRefuerzoService.create({
             ...solBase,
-            turnoIds,
+            turnoIds: [],
             actionTarget: 'OPERACIONES',
           });
           const manualSol: SolicitudRefuerzo = {
@@ -851,7 +843,13 @@ export default function SupervisionPage() {
             parentEmpleadoName: guard.nombre || undefined,
             parentEmpleadoId: guard.empleadoId || undefined,
             parentShiftId: guard.shiftId || undefined,
+            actionTarget: 'OPERACIONES',
           };
+          const turnoIds = await crearTurnosParaSolicitud(manualSol, { draft: false });
+          await solicitudRefuerzoService.update(solicitudId, {
+            turnoIds,
+            estado: guard.empleadoId ? 'ASIGNADA' : 'APROBADA',
+          });
           await addDoc(collection(db, 'novedades'), {
             ...buildRefuerzoNovedadPayload(manualSol, {
               reportedBy: 'SUPERVISION',
@@ -870,40 +868,43 @@ export default function SupervisionPage() {
         return;
       }
 
-      const n = mPax;
-      const turnoIds: string[] = [];
-      for (let i = 0; i < n; i++) {
-        const turnoExtra: Record<string, unknown> = { ...base, employeeId: 'VACANTE' };
-        if (positionName) turnoExtra.positionName = positionName;
-        if (positionId) turnoExtra.positionId = positionId;
-        const r = await addDoc(collection(db, 'turnos'), turnoExtra);
-        turnoIds.push(r.id);
+      const rfzActionTarget = 'PLANIFICACION' as const;
+      let totalTurnos = 0;
+      for (const fecha of fechasRfz) {
+        const solBase = buildSolicitudBase(fecha);
+        const solicitudId = await solicitudRefuerzoService.create({
+          ...solBase,
+          turnoIds: [],
+          actionTarget: rfzActionTarget,
+        });
+        const manualSol: SolicitudRefuerzo = {
+          ...solBase,
+          id: solicitudId,
+          cantidadPax: mPax,
+          positionName: positionName || undefined,
+          positionId,
+          shiftCode,
+          actionTarget: rfzActionTarget,
+        };
+        const turnoIds = await crearTurnosParaSolicitud(manualSol, { draft: true });
+        totalTurnos += turnoIds.length;
+        await solicitudRefuerzoService.update(solicitudId, { turnoIds, actionTarget: rfzActionTarget });
+        await addDoc(collection(db, 'novedades'), {
+          ...buildRefuerzoNovedadPayload(manualSol, {
+            reportedBy: 'SUPERVISION',
+            actionTarget: rfzActionTarget,
+            turnoIds,
+          }),
+          canalSolicitud: mCanal,
+          createdBy: user.displayName || user.email || '',
+          createdAt: Timestamp.now(),
+          origin: 'SUPERVISOR_MANUAL',
+        });
       }
-      const solicitudId = await solicitudRefuerzoService.create({
-        ...solicitudBase,
-        turnoIds,
-        actionTarget: 'OPERACIONES',
-      });
-      const manualSol: SolicitudRefuerzo = {
-        ...solicitudBase,
-        id:                  solicitudId,
-        cantidadPax:         mPax,
-        positionName:        positionName || undefined,
-        positionId,
-        shiftCode,
-      };
-      await addDoc(collection(db, 'novedades'), {
-        ...buildRefuerzoNovedadPayload(manualSol, {
-          reportedBy: 'SUPERVISION',
-          actionTarget: 'OPERACIONES',
-          turnoIds,
-        }),
-        canalSolicitud: mCanal,
-        createdBy:      user.displayName || user.email || '',
-        createdAt:      Timestamp.now(),
-        origin:         'SUPERVISOR_MANUAL',
-      });
-      toast.success(`${n} turno${n > 1 ? 's' : ''} ${base.code} creado${n > 1 ? 's' : ''} como vacante operativa`);
+      const diasLabel = fechasRfz.length > 1 ? `${fechasRfz.length} días · ` : '';
+      toast.success(
+        `${diasLabel}${totalTurnos} vacante${totalTurnos !== 1 ? 's' : ''} RFZ en Planificación — asigná guardia y publicá`,
+      );
       resetManualForm();
     } catch (e: any) {
       toast.error(`Error: ${e?.message || 'No se pudo crear'}`);
@@ -985,7 +986,7 @@ export default function SupervisionPage() {
                 onClick={() => setShowManualForm(true)}
                 className="shrink-0 flex items-center gap-1.5 px-3 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform"
               >
-                <Plus size={14}/> Urgente
+                <Plus size={14}/> Crear RFZ
               </button>
             )}
           </div>
@@ -1338,7 +1339,9 @@ export default function SupervisionPage() {
               <AlertCircle size={12}/>
               {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
                 ? 'Suma pax al contrato (Servicios). Planificación cubre la demanda extra — no se crea vacante RFZ de ese día.'
-                : 'Puntual: vacante operativa — Operaciones recibe la notificación.'}
+                : mTipo === 'AGREGADO_TURNO'
+                  ? 'TURA: extensión del turno del guardia — plan/ops según contigüidad.'
+                  : 'RFZ: vacante a planificar → fila VACANTE RFZ → publicar → ops → prefactura.'}
             </p>
 
             {/* Tipo */}
@@ -1364,7 +1367,7 @@ export default function SupervisionPage() {
               onObjectiveChange={setMObjetivoId}
             />
 
-            {/* RFZ — Puesto del SLA + turnos disponibles */}
+            {/* RFZ — alcance y destino */}
             {mTipo === 'REFUERZO_PUESTO' && (
               <div className="flex gap-2">
                 {([
@@ -1374,8 +1377,29 @@ export default function SupervisionPage() {
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => setMAlcance(opt.id)}
+                    onClick={() => { setMAlcance(opt.id); if (opt.id === 'ESTRUCTURAL') { setMFechaModo('DIA'); setMFechaHasta(''); } }}
                     className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${mAlcance === opt.id ? 'bg-amber-600 text-white border-amber-600' : 'border-slate-200 text-slate-600 hover:border-amber-300'}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && (
+              <div className="flex gap-2">
+                {([
+                  { id: 'DIA' as const, label: 'Un día' },
+                  { id: 'RANGO' as const, label: 'Desde / hasta' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setMFechaModo(opt.id);
+                      if (opt.id === 'DIA') setMFechaHasta('');
+                    }}
+                    className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${mFechaModo === opt.id ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-200 text-slate-600 hover:border-slate-400'}`}
                   >
                     {opt.label}
                   </button>
@@ -1430,23 +1454,59 @@ export default function SupervisionPage() {
             )}
 
             {/* Fecha y horarios */}
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
-                <input type="date" value={mFecha} onChange={e => setMFecha(e.target.value)}
-                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+            {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && mFechaModo === 'RANGO' ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Desde</label>
+                    <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Hasta</label>
+                    <input type="date" value={mFechaHasta} min={mFechaDesde || undefined} onChange={e => setMFechaHasta(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
+                    <input type="time" value={mStart} onChange={e => setMStart(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
+                    <input type="time" value={mEnd} onChange={e => setMEnd(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                </div>
+                {mFechasRfzPreview.length > 0 && (
+                  <p className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">
+                    {mFechasRfzPreview.length} día{mFechasRfzPreview.length !== 1 ? 's' : ''} · {formatYmdAr(mFechasRfzPreview[0])}
+                    {mFechasRfzPreview.length > 1 ? ` → ${formatYmdAr(mFechasRfzPreview[mFechasRfzPreview.length - 1])}` : ''}
+                    {' · '}{mPax} pax/día → {mFechasRfzPreview.length * mPax} vacante{mFechasRfzPreview.length * mPax !== 1 ? 's' : ''} RFZ
+                  </p>
+                )}
               </div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
-                <input type="time" value={mStart} onChange={e => setMStart(e.target.value)}
-                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                    {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' ? 'Vigencia desde' : 'Fecha'}
+                  </label>
+                  <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
+                  <input type="time" value={mStart} onChange={e => setMStart(e.target.value)}
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
+                  <input type="time" value={mEnd} onChange={e => setMEnd(e.target.value)}
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                </div>
               </div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
-                <input type="time" value={mEnd} onChange={e => setMEnd(e.target.value)}
-                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
-              </div>
-            </div>
+            )}
 
             {/* TURA — Guardias a ampliar (multi-select) */}
             {mTipo === 'AGREGADO_TURNO' && mObjetivoId && (
@@ -1454,14 +1514,14 @@ export default function SupervisionPage() {
                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
                   Guardias a ampliar
                   <span className="text-slate-400 font-normal normal-case ml-1">(podés elegir varios)</span>
-                  {!mFecha && <span className="text-slate-300 font-normal ml-1">(seleccioná fecha primero)</span>}
+                  {!mFechaDesde && <span className="text-slate-300 font-normal ml-1">(seleccioná fecha primero)</span>}
                 </label>
-                {guardias === undefined && mFecha && (
+                {guardias === undefined && mFechaDesde && (
                   <div className="flex items-center gap-2 py-2 text-xs text-slate-400">
                     <RefreshCw size={12} className="animate-spin"/> Buscando guardias…
                   </div>
                 )}
-                {Array.isArray(guardias) && guardias.length === 0 && mFecha && (
+                {Array.isArray(guardias) && guardias.length === 0 && mFechaDesde && (
                   <p className="text-xs text-slate-400 py-1">Sin guardias con turno ese día — ingresá el nombre manualmente</p>
                 )}
                 {Array.isArray(guardias) && guardias.length > 0 && (
@@ -1583,7 +1643,8 @@ export default function SupervisionPage() {
               </button>
               <button type="button"
                 disabled={
-                  manualSaving || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()
+                  manualSaving || !mClienteId || !mObjetivoId || !mFechaDesde || !mStart || !mEnd || !mMotivo.trim()
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && mFechaModo === 'RANGO' && !mFechaHasta)
                   || (mTipo === 'AGREGADO_TURNO' && (
                     Array.isArray(guardias) && guardias.length > 0
                       ? mGuardiasTura.length === 0
@@ -1595,9 +1656,15 @@ export default function SupervisionPage() {
                 {manualSaving ? <RefreshCw size={14} className="animate-spin"/> : <Plus size={14}/>}
                 {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
                   ? 'Sumar al SLA'
-                  : mTipo === 'AGREGADO_TURNO' && mGuardiasTura.length > 1
-                    ? `Crear ${mGuardiasTura.length} TURAs`
-                    : 'Crear vacante operativa'}
+                  : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL'
+                    ? mFechaModo === 'RANGO' && mFechasRfzPreview.length > 1
+                      ? `Crear ${mFechasRfzPreview.length * mPax} RFZ (${mFechasRfzPreview.length} días)`
+                      : `Crear ${mPax > 1 ? `${mPax} RFZ` : 'RFZ'} en Planificación`
+                    : mTipo === 'AGREGADO_TURNO' && mGuardiasTura.length > 1
+                      ? `Crear ${mGuardiasTura.length} TURAs`
+                      : mTipo === 'AGREGADO_TURNO'
+                        ? 'Crear TURA'
+                        : 'Crear RFZ'}
               </button>
             </div>
           </div>

@@ -150,8 +150,13 @@ export function buildRefuerzoOperacionesInstruction(sol: SolicitudRefuerzo): str
 }
 
 export function resolveRefuerzoActionTarget(sol: SolicitudRefuerzo): RefuerzoActionTarget {
+  if (sol.actionTarget === 'PLANIFICACION' || sol.actionTarget === 'OPERACIONES') {
+    return sol.actionTarget;
+  }
   if (sol.alcance === 'ESTRUCTURAL') return 'PLANIFICACION';
-  return sol.origen === 'PORTAL_CLIENTE' ? 'PLANIFICACION' : 'OPERACIONES';
+  if (sol.tipo === 'REFUERZO_PUESTO') return 'PLANIFICACION';
+  if (sol.origen === 'PORTAL_CLIENTE') return 'PLANIFICACION';
+  return 'OPERACIONES';
 }
 
 /** TURA con guardia base ya asignado: extensión de plan, no vacante operativa. */

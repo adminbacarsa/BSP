@@ -2378,7 +2378,22 @@ export default function OperacionesPage() {
                     toast.info('Buscá al guardia en PLAN — el TURA está anexado a su turno.');
                 }
 
-            } else if (novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') {
+            } else if (
+                novedad.type === 'REFUERZO_CLIENTE_PENDIENTE'
+                || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'RFZ')
+                || (novedad.type === 'VACANTE_OPERATIVA' && novedad.actionTarget === 'PLANIFICACION')
+            ) {
+                const fecha = String(novedad.fecha || '').slice(0, 10);
+                const [y, mo] = fecha.split('-').map(Number);
+                const qs = new URLSearchParams();
+                if (novedad.objectiveId) qs.set('objectiveId', String(novedad.objectiveId));
+                if (novedad.clientId) qs.set('clientId', String(novedad.clientId));
+                if (Number.isFinite(y) && y > 2000) qs.set('year', String(y));
+                if (Number.isFinite(mo) && mo >= 1 && mo <= 12) qs.set('month', String(mo));
+                void router.push(`/admin/planificacion/${qs.toString() ? `?${qs.toString()}` : ''}`);
+                toast.info('Planificación — fila VACANTE RFZ: asigná guardia y publicá el cronograma.');
+
+            } else if (novedad.type === 'VACANTE_OPERATIVA') {
                 const turnoIds: string[] = Array.isArray(novedad.turnoIds) ? novedad.turnoIds : [];
                 const vacShift = turnoIds.length
                     ? logic.processedData.find((s: any) => turnoIds.includes(s.id))
@@ -2389,10 +2404,10 @@ export default function OperacionesPage() {
                 if (vacShift) {
                     setCoverageData({ isOpen: true, shift: vacShift });
                     logic.setViewTab('VACANTES');
-                    toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'RFZ'}`);
+                    toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'TURA'}`);
                 } else {
                     logic.setViewTab('VACANTES');
-                    toast.info(novedad.description || 'Buscá la vacante RFZ/TURA en la pestaña VACANTES');
+                    toast.info(novedad.description || 'Buscá la vacante TURA en la pestaña VACANTES');
                 }
 
             } else if (novedad.type === 'ADELANTO_TURNO' || novedad.type === 'CONVOCATORIA_RETEN' || novedad.type === 'RETENCION' || novedad.type === 'FRANCO_TRABAJADO') {

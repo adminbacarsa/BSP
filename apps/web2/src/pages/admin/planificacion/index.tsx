@@ -295,6 +295,7 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
+import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import {
     shiftCoverageExtensionExtraHours,
     calcPlanningBillableShiftHours,
@@ -17488,6 +17489,22 @@ export default function PlanificacionPage() {
                                                         employeeName: emp.name,
                                                         ...(cat.franco ? { isFrancoTrabajado: true, coveredFromFranco: true } : {}),
                                                     });
+                                                    const solId = String(rfzAsignando.solicitudRefuerzoId || '').trim();
+                                                    if (solId) {
+                                                        try {
+                                                            const solSnap = await getDoc(doc(db, 'solicitudes_refuerzo', solId));
+                                                            if (solSnap.exists()) {
+                                                                const solData = solSnap.data();
+                                                                const prevIds = Array.isArray(solData.empleadoIds) ? solData.empleadoIds : [];
+                                                                const prevNames = Array.isArray(solData.empleadoNames) ? solData.empleadoNames : [];
+                                                                await solicitudRefuerzoService.update(solId, {
+                                                                    estado: 'ASIGNADA',
+                                                                    empleadoIds: prevIds.includes(emp.id) ? prevIds : [...prevIds, emp.id],
+                                                                    empleadoNames: prevIds.includes(emp.id) ? prevNames : [...prevNames, emp.name],
+                                                                });
+                                                            }
+                                                        } catch { /* turno asignado; sync solicitud best-effort */ }
+                                                    }
                                                     activateRfzCorrectionFlow();
                                                     setRfzAsignando(null);
                                                     const lookupKey = planificacionPublishLookupKey(
