@@ -1302,19 +1302,19 @@ export default function TacticalMapView() {
     const objectivesForMap = useMemo(() => {
         const base = logic.filteredObjectives || [];
         const allObjs = logic.objectives || [];
-        const centerLat = -31.4201, centerLng = -64.1888;
-        const ensureCoords = (arr: any[]) => arr.map((o: any) => {
-            const hasCoords = o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng));
-            return hasCoords ? o : { ...o, lat: centerLat, lng: centerLng };
-        });
+        /** Solo objetivos con geo real — no inventar Córdoba (apilaba todos los pines). */
+        const onlyWithCoords = (arr: any[]) =>
+            (arr || []).filter((o: any) => o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng)));
         if (logic.viewTab === 'TODOS') {
             const result = base.length ? base : allObjs;
-            return ensureCoords(result.length ? result : objectivesWithCoords);
+            const withCoords = onlyWithCoords(result);
+            return withCoords.length ? withCoords : objectivesWithCoords;
         }
         const ids = new Set((logic.listData || []).map((s: any) => s.objectiveId).filter(Boolean));
         const fromTab = base.filter((o: any) => ids.has(o.id));
         const combined = fromTab.length ? fromTab : base;
-        return ensureCoords(combined.length ? combined : objectivesWithCoords);
+        const withCoords = onlyWithCoords(combined);
+        return withCoords.length ? withCoords : objectivesWithCoords;
     }, [logic.filteredObjectives, logic.listData, logic.viewTab, logic.objectives, objectivesWithCoords]);
 
     return (

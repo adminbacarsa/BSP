@@ -1,6 +1,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { isGoogleMapsEnabled } from '@/lib/googleMapsConfig';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { getGoogleMapsApiKey, isGoogleMapsEnabled } from '@/lib/googleMapsConfig';
 import type { OperacionesMapProps } from '@/components/operaciones/OperacionesMapGoogle';
 
 const OperacionesMapGoogle = dynamic(() => import('@/components/operaciones/OperacionesMapGoogle'), {
@@ -22,7 +23,13 @@ const OperacionesMapLeaflet = dynamic(() => import('@/components/operaciones/Ope
 });
 
 const OperacionesMap = (props: OperacionesMapProps) => {
-  if (isGoogleMapsEnabled()) return <OperacionesMapGoogle {...props} />;
+  const { empresa } = useEmpresa();
+  const runtimeKey = empresa?.googleMapsApiKey;
+  const apiKey = getGoogleMapsApiKey(runtimeKey);
+
+  if (isGoogleMapsEnabled(runtimeKey)) {
+    return <OperacionesMapGoogle {...props} apiKey={apiKey} />;
+  }
   return <OperacionesMapLeaflet {...props} />;
 };
 

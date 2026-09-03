@@ -7,9 +7,10 @@ import {
   OPERACIONES_MAP_OPTIONS,
   toLatLng,
 } from '@/lib/googleMapsConfig';
-import { buildOperacionesMarkerIcon } from '@/lib/operaciones/mapMarkerIcons';
+import { toGoogleMapsIcon } from '@/lib/operaciones/mapMarkerIcons';
 import { useOperacionesMapMarkers } from '@/hooks/useOperacionesMapMarkers';
 import { OperacionesMapPopup } from '@/components/operaciones/OperacionesMapPopup';
+import { OperacionesMapChrome } from '@/components/operaciones/OperacionesMapChrome';
 
 export type OperacionesMapProps = {
   center?: [number, number] | { lat: number; lng: number };
@@ -22,6 +23,8 @@ export type OperacionesMapProps = {
   onOpenInterrupt: (shift: any) => void;
   onOpenManualRetention?: (shift: any) => void;
   onReportPlanning?: (shift: any) => void;
+  /** Key runtime (empresa). Si falta, usa NEXT_PUBLIC_GOOGLE_MAPS_API_KEY. */
+  apiKey?: string;
 };
 
 const OperacionesMapGoogle = ({
@@ -33,25 +36,28 @@ const OperacionesMapGoogle = ({
   onOpenHandover,
   onOpenInterrupt,
   onOpenManualRetention,
+  apiKey,
 }: OperacionesMapProps) => {
   const mapCenter = toLatLng(center);
   const markers = useOperacionesMapMarkers(allObjectives, filteredShifts);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
+  const resolvedKey = getGoogleMapsApiKey(apiKey);
 
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'cosp-google-maps',
-    googleMapsApiKey: getGoogleMapsApiKey(),
+    googleMapsApiKey: resolvedKey,
     libraries: GOOGLE_MAPS_LIBRARIES,
   });
 
   const markerIcons = useMemo(() => {
-    const cache: Record<string, ReturnType<typeof buildOperacionesMarkerIcon>> = {};
+    if (!isLoaded) return {} as Record<string, google.maps.Icon>;
+    const cache: Record<string, google.maps.Icon> = {};
     markers.forEach((m) => {
-      if (!cache[m.iconPreset]) cache[m.iconPreset] = buildOperacionesMarkerIcon(m.iconPreset);
+      if (!cache[m.iconPreset]) cache[m.iconPreset] = toGoogleMapsIcon(m.iconPreset);
     });
     return cache;
-  }, [markers]);
+  }, [markers, isLoaded]);
 
   const fitMapToMarkers = useCallback(() => {
     const map = mapRef.current;
@@ -69,8 +75,11 @@ const OperacionesMapGoogle = ({
 
   if (loadError) {
     return (
-      <div className="h-full w-full flex items-center justify-center bg-slate-900 text-rose-300 text-sm font-medium p-6 text-center">
-        No se pudo cargar Google Maps. Verificá la API key y que Maps JavaScript API esté habilitada.
+      <div className="h-full w-full flex flex-col items-center justify-center bg-slate-900 text-rose-300 text-sm font-medium p-6 text-center gap-2">
+        <p>No se pudo cargar Google Maps.</p>
+        <p className="text-xs text-slate-400 font-normal max-w-md">
+          Verificá la key en Configuración → Empresas (o NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) y que Maps JavaScript API esté habilitada en Google Cloud.
+        </p>
       </div>
     );
   }
@@ -84,45 +93,49 @@ const OperacionesMapGoogle = ({
   }
 
   return (
-    <GoogleMap
-      mapContainerStyle={{ width: '100%', height: '100%' }}
-      center={mapCenter || DEFAULT_MAP_CENTER}
-      zoom={13}
-      options={OPERACIONES_MAP_OPTIONS as google.maps.MapOptions}
-      onLoad={(map) => {
-        mapRef.current = map;
-        fitMapToMarkers();
-      }}
-      onUnmount={() => {
-        mapRef.current = null;
-      }}
-    >
-      {markers.map((marker) => (
-        <Marker
-          key={marker.id}
-          position={{ lat: marker.lat, lng: marker.lng }}
-          icon={markerIcons[marker.iconPreset] as google.maps.Icon}
-          zIndex={marker.layerOrder === 0 ? 1 : 500}
-          onClick={() => setSelectedMarkerId(marker.id)}
-        />
-      ))}
-
-      {selectedMarker && (
-        <InfoWindow
-          position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }}
-          onCloseClick={() => setSelectedMarkerId(null)}
-        >
-          <OperacionesMapPopup
-            marker={selectedMarker}
-            onOpenCoverage={onOpenCoverage}
-            onOpenAttendance={onOpenAttendance}
-            onOpenHandover={onOpenHandover}
-            onOpenInterrupt={onOpenInterrupt}
-            onOpenManualRetention={onOpenManualRetention}
+    <div className="relative h-full w-full">
+      <GoogleMap
+        mapContainerStyle={{ width: '100%', height: '100%' }}
+        center={mapCenter || DEFAULT_MAP_CENTER}
+        zoom={13}
+        options={OPERACIONES_MAP_OPTIONS as google.maps.MapOptions}
+        onLoad={(map) => {
+          mapRef.current = map;
+          fitMapToMarkers();
+        }}
+        onUnmount={() => {
+          mapRef.current = null;
+        }}
+      >
+        {markers.map((marker) => (
+          <Marker
+            key={marker.id}
+            position={{ lat: marker.lat, lng: marker.lng }}
+            icon={markerIcons[marker.iconPreset]}
+            title={`${marker.name} · ${marker.statusText}`}
+            zIndex={marker.layerOrder === 0 ? 1 : marker.isEvent ? 600 : 500}
+            onClick={() => setSelectedMarkerId(marker.id)}
           />
-        </InfoWindow>
-      )}
-    </GoogleMap>
+        ))}
+
+        {selectedMarker && (
+          <InfoWindow
+            position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }}
+            onCloseClick={() => setSelectedMarkerId(null)}
+          >
+            <OperacionesMapPopup
+              marker={selectedMarker}
+              onOpenCoverage={onOpenCoverage}
+              onOpenAttendance={onOpenAttendance}
+              onOpenHandover={onOpenHandover}
+              onOpenInterrupt={onOpenInterrupt}
+              onOpenManualRetention={onOpenManualRetention}
+            />
+          </InfoWindow>
+        )}
+      </GoogleMap>
+      <OperacionesMapChrome provider="google" markerCount={markers.length} onFit={fitMapToMarkers} />
+    </div>
   );
 };
 

@@ -1,5 +1,5 @@
 ﻿import React, { useState, useRef } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio, MapPin } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
@@ -175,6 +175,13 @@ export default function EmpresasTab() {
 
   const [guardandoCc, setGuardandoCc] = useState(false);
   const ccActivo = empresa?.centroControlEnabled !== false;
+  const [mapsKeyDraft, setMapsKeyDraft] = useState('');
+  const [guardandoMaps, setGuardandoMaps] = useState(false);
+  const [showMapsKey, setShowMapsKey] = useState(false);
+
+  React.useEffect(() => {
+    setMapsKeyDraft(String((empresa as any)?.googleMapsApiKey || ''));
+  }, [empresa?.id, (empresa as any)?.googleMapsApiKey]);
 
   const handleToggleCentroControl = async () => {
     if (!empresa) return;
@@ -566,6 +573,70 @@ export default function EmpresasTab() {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {empresa && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center shrink-0">
+              <MapPin size={18} className="text-indigo-600" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Google Maps</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                Key de Maps JavaScript API para el mapa táctico de Operaciones. Sin key se usa OpenStreetMap.
+                En Google Cloud: habilitar <strong>Maps JavaScript API</strong> y restringir por HTTP referrer
+                (`localhost:3001/*`, `comtroldata.web.app/*`).
+              </p>
+              <p className={`text-[10px] font-black uppercase tracking-wider mt-2 ${mapsKeyDraft.trim() ? 'text-emerald-600' : 'text-amber-700'}`}>
+                {mapsKeyDraft.trim() ? 'Key configurada para esta empresa' : 'Sin key — mapa en modo OpenStreetMap'}
+              </p>
+            </div>
+          </div>
+          {isSuperAdmin && (
+            <div className="space-y-3">
+              <div className="relative">
+                <input
+                  type={showMapsKey ? 'text' : 'password'}
+                  value={mapsKeyDraft}
+                  onChange={e => setMapsKeyDraft(e.target.value)}
+                  autoComplete="off"
+                  className="w-full px-3 py-2 pr-10 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="AIza…"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowMapsKey(v => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600"
+                  aria-label={showMapsKey ? 'Ocultar key' : 'Mostrar key'}
+                >
+                  {showMapsKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={guardandoMaps}
+                  onClick={async () => {
+                    if (!empresa) return;
+                    setGuardandoMaps(true);
+                    try {
+                      await guardarEmpresa(empresa.id, { googleMapsApiKey: mapsKeyDraft.trim() } as any);
+                      toast.success(mapsKeyDraft.trim() ? 'Key de Google Maps guardada' : 'Key de Google Maps quitada');
+                    } catch (err) {
+                      toast.error(empresaWriteErrorMessage(err, isSuperAdmin));
+                    } finally {
+                      setGuardandoMaps(false);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+                >
+                  {guardandoMaps ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Guardar Maps
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
