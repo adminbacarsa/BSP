@@ -25,7 +25,6 @@ import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQu
 import { db, getDocsOnce, functions } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
-import { assignGuardToEvent } from '@/services/eventoAssignService';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 
@@ -186,7 +185,10 @@ import {
     type AutoPlanningBrainResult,
 } from '@/lib/planificacion/autoPlanningBrain';
 import { applySlaContractDotacion, buildPositionAssignmentsByEmp, buildSlaRotationByDate } from '@/lib/planificacion/slaContractPlanning';
-import { mergeEncargadoIntoAssignments } from '@/lib/servicios/encargadoPosition';
+import { mergeEncargadoIntoAssignments, isEncargadoPosition } from '@/lib/servicios/encargadoPosition';
+import { isEventosPosition } from '@/lib/servicios/eventosPosition';
+import { positionIncludeInSlaTotals } from '@/lib/servicios/auxiliaryPositionPolicy';
+import { calculatePositionMonthHours } from '@/lib/servicios/slaHoursCalculator';
 import { applyRotationsForMonth } from '@/lib/planificacion/slaRotationMonthPlanner';
 import {
     countPositionClosedUnitsFromShifts,
@@ -2406,6 +2408,42 @@ export default function PlanificacionPage() {
             }),
         });
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+
+    const planningAuxiliarySummary = useMemo(() => {
+        if (!Array.isArray(activePlanningSlaRow?.positions) || activePlanningSlaRow.positions.length === 0) return null;
+        const positions = Array.isArray(activePlanningSlaRow.positions) ? activePlanningSlaRow.positions : [];
+        const y = currentDate.getFullYear();
+        const m = currentDate.getMonth();
+        const start = toYyyyMmDd(activePlanningSlaRow.startDate) || '';
+        const end = toYyyyMmDd(activePlanningSlaRow.endDate) || '';
+        const ex = activePlanningSlaRow.excludedDates as string[] | undefined;
+        let encContract = 0;
+        let encInSla = 0;
+        const hasEnc = positions.some((p: any) => isEncargadoPosition(p));
+        const hasEvt = positions.some((p: any) => isEventosPosition(p));
+        for (const pos of positions) {
+            if (!isEncargadoPosition(pos)) continue;
+            const h = calculatePositionMonthHours(pos, start, end, ex, y, m);
+            encContract += h;
+            if (positionIncludeInSlaTotals(pos)) encInSla += h;
+        }
+        const encPlanned = Math.round((planningMonthHoursBreakdown.byCodeGross['ENC'] || 0) * 10) / 10;
+        const evtFromGrid = Math.round(((planningMonthHoursBreakdown.byCodeGross['EVT'] || 0) + (planningMonthHoursBreakdown.byCodeGross['EV'] || 0)) * 10) / 10;
+        const monthPrefixEvt = `${y}-${String(m + 1).padStart(2, '0')}`;
+        const turaEventosHrs = Object.values(turaMap)
+            .filter((t: any) => t.objectiveId === selectedObjective && String(t.fecha || '').startsWith(monthPrefixEvt))
+            .filter((t: any) => isEventosPosition({ name: t.positionName, coverageType: 'eventos' }))
+            .reduce((a: number, t: any) => a + (Number(t.hours) || 0), 0);
+        const evtPlanned = Math.round((evtFromGrid + turaEventosHrs) * 10) / 10;
+        return {
+            hasEnc,
+            hasEvt,
+            encContract: Math.round(encContract * 10) / 10,
+            encInSla: Math.round(encInSla * 10) / 10,
+            encPlanned,
+            evtPlanned,
+        };
+    }, [activePlanningSlaRow, currentDate, planningMonthHoursBreakdown, turaMap, selectedObjective]);
 
     /** Facturable por sede (grupo unificado): suma turnos con objectiveId de cada objetivo — debe cerrar con grupoTotalVendidas. */
     const grupoObjectiveBillableHours = useMemo(() => {
@@ -5852,6 +5890,102 @@ export default function PlanificacionPage() {
                 }
             };
 
+            const eventoSolicitudCache = new Map<string, Array<{ id: string; tipo?: string; status?: string }>>();
+
+            const readEventoSolicitudes = async (
+                eventoId: string,
+                servicioId: string,
+                empleadoId: string,
+            ) => {
+                const cacheKey = `${eventoId}__${servicioId}__${empleadoId}`;
+                if (eventoSolicitudCache.has(cacheKey)) return eventoSolicitudCache.get(cacheKey)!;
+                const snap = await getDocs(query(
+                    collection(db, 'solicitudes_evento'),
+                    where('empresaId', '==', empresaId),
+                    where('eventoId', '==', eventoId),
+                    where('servicioId', '==', servicioId),
+                    where('empleadoId', '==', empleadoId),
+                ));
+                const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+                eventoSolicitudCache.set(cacheKey, rows);
+                return rows;
+            };
+
+            const rollbackEventoSolicitud = async (
+                eventoId: string,
+                servicioId: string,
+                empleadoId: string,
+            ) => {
+                if (!eventoId || !servicioId || !empleadoId) return;
+                const rows = await readEventoSolicitudes(eventoId, servicioId, empleadoId);
+                if (rows.length === 0) return;
+                for (const row of rows) {
+                    if (row.tipo === 'admin_asigna') {
+                        batch.delete(doc(db, 'solicitudes_evento', row.id));
+                    } else {
+                        batch.update(doc(db, 'solicitudes_evento', row.id), {
+                            status: 'convocado',
+                            respondidoAt: serverTimestamp(),
+                            respondidoPor: auth.currentUser?.uid || '',
+                        });
+                    }
+                    bumpBatchOp();
+                    await flushBatchWhenFull();
+                }
+                eventoSolicitudCache.delete(`${eventoId}__${servicioId}__${empleadoId}`);
+            };
+
+            const approveEventoSolicitud = async (
+                change: any,
+                empId: string,
+                empName: string,
+                dateStr: string,
+            ) => {
+                const eventoId = String(change?.eventoId || '');
+                const servicioId = String(change?.servicioId || '');
+                if (!eventoId || !servicioId) return;
+                const rows = await readEventoSolicitudes(eventoId, servicioId, empId);
+                if (rows.length > 0) {
+                    const first = rows[0];
+                    batch.update(doc(db, 'solicitudes_evento', first.id), {
+                        status: 'aprobada',
+                        tipo: first.tipo || 'admin_asigna',
+                        eventoNombre: change.eventoNombre || null,
+                        servicioNombre: change.servicioNombre || null,
+                        servicioFecha: dateStr,
+                        respondidoAt: serverTimestamp(),
+                        respondidoPor: auth.currentUser?.uid || '',
+                    });
+                    bumpBatchOp();
+                    await flushBatchWhenFull();
+                    return;
+                }
+                const newRef = doc(collection(db, 'solicitudes_evento'));
+                batch.set(newRef, stampEmpresaId({
+                    empresaId,
+                    eventoId,
+                    eventoNombre: change.eventoNombre || '',
+                    servicioId,
+                    servicioNombre: change.servicioNombre || '',
+                    servicioFecha: dateStr,
+                    empleadoId: empId,
+                    empleadoNombre: empName,
+                    status: 'aprobada',
+                    tipo: 'admin_asigna',
+                    convocadoPor: auth.currentUser?.uid || '',
+                    respondidoPor: auth.currentUser?.uid || '',
+                    respondidoAt: serverTimestamp(),
+                    creadoAt: serverTimestamp(),
+                }, empresaId));
+                bumpBatchOp();
+                await flushBatchWhenFull();
+                eventoSolicitudCache.set(`${eventoId}__${servicioId}__${empId}`, [{
+                    id: newRef.id,
+                    tipo: 'admin_asigna',
+                    status: 'aprobada',
+                }]);
+            };
+
             const registerPlanificacionCorreccion = async (
                 empId: string,
                 empName: string,
@@ -5907,6 +6041,12 @@ export default function PlanificacionPage() {
                     const empId = parts[0];
                     const dateStr = parts[1]; // YYYY-MM-DD
                     const existing = jobShiftsMap[key];
+                    const existingCodeUpper = String(existing?.code || existing?.type || '').toUpperCase();
+                    const nextCodeUpper = String(change?.code || change?.type || '').toUpperCase();
+                    const existingEventoId = String(existing?.eventoId || '');
+                    const existingServicioId = String(existing?.servicioId || '');
+                    const nextEventoId = String(change?.eventoId || '');
+                    const nextServicioId = String(change?.servicioId || '');
                     const empObj = employeesById[empId];
                     const empName = empObj ? empObj.name : 'Desconocido';
                     let actionType = 'ASIGNACION_MASIVA';
@@ -5929,6 +6069,9 @@ export default function PlanificacionPage() {
                     if (change.isDeleted) {
                         actionType = 'ELIMINACION_MASIVA';
                         actionDetail = `Borró turno de ${empName} el ${dateStr}`;
+                        if (existingCodeUpper === 'EV' && existingEventoId && existingServicioId) {
+                            await rollbackEventoSolicitud(existingEventoId, existingServicioId, empId);
+                        }
                         deleteAllExisting();
                         await registerPlanificacionCorreccion(
                             empId,
@@ -5939,6 +6082,18 @@ export default function PlanificacionPage() {
                             '(eliminado)',
                         );
                     } else {
+                        if (
+                            existingCodeUpper === 'EV'
+                            && existingEventoId
+                            && existingServicioId
+                            && (
+                                nextCodeUpper !== 'EV'
+                                || existingEventoId !== nextEventoId
+                                || existingServicioId !== nextServicioId
+                            )
+                        ) {
+                            await rollbackEventoSolicitud(existingEventoId, existingServicioId, empId);
+                        }
                         deleteAllExisting();
                         await flushBatchWhenFull();
 
@@ -5983,6 +6138,7 @@ export default function PlanificacionPage() {
 
                         const turnoPayload: Record<string, unknown> = {
                             employeeId: empId,
+                            employeeName: empName,
                             clientId: selectedClient,
                             objectiveId: change.objectiveId || resolveObjectiveForEmp(empId),
                             code: change.isFrancoCompensatorio ? 'FF' : change.code,
@@ -6077,6 +6233,9 @@ export default function PlanificacionPage() {
                         batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
                         bumpBatchOp();
                         await flushBatchWhenFull();
+                        if (nextCodeUpper === 'EV' && nextEventoId && nextServicioId) {
+                            await approveEventoSolicitud(change, empId, empName, dateStr);
+                        }
 
                         if (correctionMode) {
                             const codigoNuevo = change.isFrancoCompensatorio ? 'FF' : change.code;
@@ -12184,8 +12343,20 @@ export default function PlanificacionPage() {
                         )}
                         {effectiveSlaVendidas > 0 && statsHoursView === 'total' && (
                             <div className={`${metricBox} min-w-[2.5rem] ${slaMismatch ? 'border-teal-200/90' : ''}`}>
-                                <p className={metricLabel}>Vendidas</p>
+                                <p className={metricLabel}>SLA vend.</p>
                                 <p className={`${metricValue} text-teal-800 dark:text-teal-300`}>{effectiveSlaVendidas}</p>
+                            </div>
+                        )}
+                        {planningAuxiliarySummary?.hasEnc && (
+                            <div className={`${metricBox} min-w-[2.75rem]`} title={`Encargado: ${planningAuxiliarySummary.encPlanned}h planificadas · techo ${planningAuxiliarySummary.encContract}h${planningAuxiliarySummary.encInSla > 0 ? ` (${planningAuxiliarySummary.encInSla}h en SLA vendido)` : ' (fuera de SLA vendido)'}`}>
+                                <p className={`${metricLabel} text-amber-700`}>ENC</p>
+                                <p className={`${metricValue} text-amber-800`}>{planningAuxiliarySummary.encPlanned}<span className="text-[8px] text-slate-500">/{planningAuxiliarySummary.encContract}</span></p>
+                            </div>
+                        )}
+                        {(planningAuxiliarySummary?.hasEvt || (planningAuxiliarySummary?.evtPlanned ?? 0) > 0) && (
+                            <div className={`${metricBox} min-w-[2.5rem]`} title="Eventos / extras TURA — prefactura, fuera de SLA cobertura">
+                                <p className={`${metricLabel} text-violet-700`}>EVT</p>
+                                <p className={`${metricValue} text-violet-800`}>{planningAuxiliarySummary?.evtPlanned ?? 0}</p>
                             </div>
                         )}
                         {hoursMode === 'mes' && selectedObjective && (
@@ -12372,6 +12543,7 @@ export default function PlanificacionPage() {
                                                 CRONOGRAMA_PUBLICADO: 'bg-violet-100 text-violet-700',
                                                 CONVOCATORIA_EVENTO: 'bg-yellow-100 text-yellow-800',
                                                 EVENTO_CONFIRMADO: 'bg-emerald-100 text-emerald-800',
+                                                EVENTO_DESAFECTADO: 'bg-rose-100 text-rose-800',
                                             };
                                             const typeLabel: Record<string, string> = {
                                                 TURNO_NUEVO: 'Nuevo turno',
@@ -12381,8 +12553,9 @@ export default function PlanificacionPage() {
                                                 CRONOGRAMA_PUBLICADO: 'Cronograma',
                                                 CONVOCATORIA_EVENTO: 'Convocatoria',
                                                 EVENTO_CONFIRMADO: 'Evento OK',
+                                                EVENTO_DESAFECTADO: 'Desafectado',
                                             };
-                                            const pendingAck = !!(n.requiresAck || ['CRONOGRAMA_PUBLICADO','TURNO_NUEVO','TURNO_MODIFICADO','TURNO_ELIMINADO','FRANCO_ASIGNADO','CONVOCATORIA_EVENTO','EVENTO_CONFIRMADO'].includes(n.type)) && !n.ackedAt;
+                                            const pendingAck = !!(n.requiresAck || ['CRONOGRAMA_PUBLICADO','TURNO_NUEVO','TURNO_MODIFICADO','TURNO_ELIMINADO','FRANCO_ASIGNADO','CONVOCATORIA_EVENTO','EVENTO_CONFIRMADO','EVENTO_DESAFECTADO'].includes(n.type)) && !n.ackedAt;
                                             return (
                                                 <div key={n.id} className={`p-3 border rounded-2xl shadow-sm transition-colors ${
                                                     pendingAck ? 'bg-amber-50 border-amber-200' : n.ackedAt ? 'bg-emerald-50/40 border-emerald-100' : n.read ? 'bg-white' : 'bg-indigo-50 border-indigo-200'
@@ -13335,6 +13508,22 @@ export default function PlanificacionPage() {
                                                             const srvsDia = serviciosParaFecha(eventos, selectedCell.dateStr, true);
                                                             if (srvsDia.length === 0) return null;
                                                             const isPickerOpen = eventoPickerKey === cellKey;
+                                                            const countAssignedForService = (servicioId: string) => {
+                                                                return displayedEmployees.reduce((acc: number, emp: any) => {
+                                                                    const shift = resolveCellShiftAtObjective(
+                                                                        emp.id,
+                                                                        selectedCell.dateStr,
+                                                                        selectedObjective,
+                                                                        pendingChanges,
+                                                                        shiftsMap,
+                                                                    );
+                                                                    if (!shift || shift.isDeleted) return acc;
+                                                                    const code = String(shift.code || shift.type || '').toUpperCase();
+                                                                    if (code !== 'EV') return acc;
+                                                                    if (String(shift.servicioId || '') !== String(servicioId)) return acc;
+                                                                    return acc + 1;
+                                                                }, 0);
+                                                            };
                                                             const assignServicio = async ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {
                                                                 if (isServiceLocked) return;
                                                                 const guardHours = servicio.tipoTurno === '3x8' ? 8
@@ -13342,48 +13531,55 @@ export default function PlanificacionPage() {
                                                                     : calcHorasEvento(servicio.horaInicio, servicio.horaFin);
                                                                 const emp = (displayedEmployees as any[]).find((e: any) => e.id === selectedCell.empId);
                                                                 const empNombre = emp?.name || selectedCell.empId;
-                                                                try {
-                                                                    const uid = getAuth().currentUser?.uid || '';
-                                                                    const solicitudRef = await addDoc(collection(db, 'solicitudes_evento'), {
-                                                                        empresaId,
-                                                                        eventoId: evento.id,
-                                                                        eventoNombre: evento.nombre,
-                                                                        servicioId: servicio.id,
-                                                                        servicioNombre: servicio.nombre,
-                                                                        servicioFecha: servicio.fecha,
-                                                                        empleadoId: selectedCell.empId,
-                                                                        empleadoNombre: empNombre,
-                                                                        status: 'aprobada',
-                                                                        tipo: 'admin_asigna',
-                                                                        convocadoPor: uid,
-                                                                        respondidoPor: uid,
-                                                                        respondidoAt: serverTimestamp(),
-                                                                        creadoAt: serverTimestamp(),
-                                                                    });
-                                                                    await assignGuardToEvent({
-                                                                        empresaId,
-                                                                        empleadoId: selectedCell.empId,
-                                                                        empleadoNombre: empNombre,
-                                                                        empleadoObjectiveId: emp?.preferredObjectiveId || emp?.objectiveId,
-                                                                        empleadoObjectiveName: emp?.preferredObjectiveName || emp?.objectiveName,
-                                                                        eventoId: evento.id!,
-                                                                        eventoNombre: evento.nombre,
-                                                                        clienteId: evento.clienteId,
-                                                                        clienteNombre: evento.clienteNombre,
-                                                                        servicioId: servicio.id,
-                                                                        servicioNombre: servicio.nombre,
-                                                                        servicioFecha: servicio.fecha,
-                                                                        horaInicio: servicio.horaInicio,
-                                                                        horaFin: servicio.horaFin,
-                                                                        horas: guardHours,
-                                                                        solicitudId: solicitudRef.id,
-                                                                        respondidoPor: uid,
-                                                                    });
-                                                                } catch (e) {
-                                                                    console.error('Error asignando guardia a evento:', e);
+                                                                const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
+                                                                const current = pendingChanges[key]?.isDeleted
+                                                                    ? null
+                                                                    : (pendingChanges[key] || selectedCell.currentShift);
+                                                                const currentCode = String(current?.code || current?.type || '').toUpperCase();
+                                                                const alreadySameService = currentCode === 'EV'
+                                                                    && String(current?.servicioId || '') === String(servicio.id)
+                                                                    && String(current?.eventoId || '') === String(evento.id || '');
+                                                                if (alreadySameService) {
+                                                                    toast.info('Ese guardia ya está asignado a este servicio en borrador');
+                                                                    setEventoPickerKey(null);
+                                                                    return;
                                                                 }
+                                                                const assigned = countAssignedForService(servicio.id);
+                                                                const replacingThisService = currentCode === 'EV'
+                                                                    && String(current?.servicioId || '') === String(servicio.id);
+                                                                const effectiveAssigned = replacingThisService ? Math.max(0, assigned - 1) : assigned;
+                                                                if (servicio.cupo > 0 && effectiveAssigned >= servicio.cupo) {
+                                                                    toast.error(`Cupo completo para ${servicio.nombre} (${effectiveAssigned}/${servicio.cupo})`);
+                                                                    return;
+                                                                }
+                                                                const coveredPosition = activePosition || current?.positionName || 'General';
+                                                                applyToPending({
+                                                                    code: 'EV',
+                                                                    name: 'Evento',
+                                                                    hours: guardHours,
+                                                                    startTime: servicio.horaInicio || '08:00',
+                                                                    endTime: servicio.horaFin || '16:00',
+                                                                    positionName: coveredPosition,
+                                                                    eventoId: evento.id,
+                                                                    eventoNombre: evento.nombre,
+                                                                    servicioId: servicio.id,
+                                                                    servicioNombre: servicio.nombre,
+                                                                    comments: `Evento: ${evento.nombre} · ${servicio.nombre}`,
+                                                                    isFrancoTrabajado: false,
+                                                                    isFrancoCompensatorio: false,
+                                                                    isExtended: false,
+                                                                    isEarlyStart: false,
+                                                                });
                                                                 setEventoPickerKey(null);
                                                             };
+                                                            const buttonLabel = (() => {
+                                                                if (srvsDia.length !== 1) return `${srvsDia.length} servicios`;
+                                                                const one = srvsDia[0];
+                                                                const assigned = countAssignedForService(one.servicio.id);
+                                                                const left = one.servicio.cupo > 0 ? Math.max(0, one.servicio.cupo - assigned) : null;
+                                                                const base = `${one.evento.nombre} · ${one.servicio.nombre}`;
+                                                                return left == null ? base : `${base} (${assigned}/${one.servicio.cupo})`;
+                                                            })();
                                                             return (
                                                                 <div className="col-span-3">
                                                                     <button
@@ -13401,12 +13597,14 @@ export default function PlanificacionPage() {
                                                                     >
                                                                         <span>EV</span>
                                                                         <span className="text-[9px] font-bold truncate max-w-[120px]">
-                                                                            {srvsDia.length === 1 ? srvsDia[0].servicio.nombre : `${srvsDia.length} servicios`}
+                                                                            {buttonLabel}
                                                                         </span>
                                                                     </button>
                                                                     {isPickerOpen && srvsDia.length > 1 && (
                                                                         <div className="mt-1 flex flex-col gap-1 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg p-2 max-h-48 overflow-y-auto">
                                                                             {srvsDia.map(({ evento, servicio }) => {
+                                                                                const assigned = countAssignedForService(servicio.id);
+                                                                                const cupoLleno = servicio.cupo > 0 && assigned >= servicio.cupo;
                                                                                 const horarioBadge = servicio.tipoTurno === '3x8'
                                                                                     ? '3×8h'
                                                                                     : servicio.tipoTurno === '2x12'
@@ -13415,8 +13613,11 @@ export default function PlanificacionPage() {
                                                                                 return (
                                                                                     <button
                                                                                         key={servicio.id}
+                                                                                        disabled={cupoLleno}
                                                                                         onClick={() => { void assignServicio({ evento, servicio }); }}
-                                                                                        className="text-left px-2 py-2 rounded text-xs font-bold text-yellow-900 hover:bg-yellow-200 border-b border-yellow-100 last:border-0"
+                                                                                        className={`text-left px-2 py-2 rounded text-xs font-bold border-b border-yellow-100 last:border-0 ${
+                                                                                            cupoLleno ? 'text-slate-400 bg-slate-100 cursor-not-allowed' : 'text-yellow-900 hover:bg-yellow-200'
+                                                                                        }`}
                                                                                     >
                                                                                         <div className="flex items-center justify-between gap-2">
                                                                                             <span className="font-black truncate">{servicio.nombre}</span>
@@ -13424,7 +13625,8 @@ export default function PlanificacionPage() {
                                                                                         </div>
                                                                                         <div className="flex items-center gap-1.5 mt-0.5 font-normal text-[10px] opacity-70">
                                                                                             <span className="px-1 py-0.5 bg-yellow-300 rounded text-[9px] font-bold">{horarioBadge}</span>
-                                                                                            {servicio.cupo > 0 && <span>{servicio.cupo} pax</span>}
+                                                                                            {servicio.cupo > 0 && <span>{assigned}/{servicio.cupo} pax</span>}
+                                                                                            {cupoLleno && <span className="text-rose-500 font-bold">Cupo completo</span>}
                                                                                         </div>
                                                                                     </button>
                                                                                 );
@@ -14999,6 +15201,29 @@ export default function PlanificacionPage() {
                                     const codes = Object.entries(b.byCodeGross).sort((a, c) => c[1] - a[1]);
                                     return (
                                         <>
+                                            {planningAuxiliarySummary && (planningAuxiliarySummary.hasEnc || planningAuxiliarySummary.hasEvt) && (
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                                    {planningAuxiliarySummary.hasEnc && (
+                                                        <div className="rounded-xl border border-amber-200 p-3 bg-amber-50/50">
+                                                            <p className="text-[9px] font-black uppercase text-amber-700">Encargado (ENC)</p>
+                                                            <p className="text-lg font-black text-amber-900">{planningAuxiliarySummary.encPlanned}h <span className="text-sm font-bold text-slate-500">plan</span></p>
+                                                            <p className="text-[10px] text-slate-600">Techo mes: {planningAuxiliarySummary.encContract}h · {planningAuxiliarySummary.encInSla > 0 ? `${planningAuxiliarySummary.encInSla}h en SLA vendido` : 'fuera de SLA vendido'}</p>
+                                                        </div>
+                                                    )}
+                                                    {(planningAuxiliarySummary.hasEvt || planningAuxiliarySummary.evtPlanned > 0) && (
+                                                        <div className="rounded-xl border border-violet-200 p-3 bg-violet-50/50">
+                                                            <p className="text-[9px] font-black uppercase text-violet-700">Eventos (EVT)</p>
+                                                            <p className="text-lg font-black text-violet-900">{planningAuxiliarySummary.evtPlanned}h</p>
+                                                            <p className="text-[10px] text-slate-600">Prefactura / extras — no cierra SLA cobertura</p>
+                                                        </div>
+                                                    )}
+                                                    <div className="rounded-xl border border-slate-200 p-3 bg-slate-50/80">
+                                                        <p className="text-[9px] font-black uppercase text-slate-500">SLA cobertura</p>
+                                                        <p className="text-lg font-black text-teal-800">{vend || '—'}h vend.</p>
+                                                        <p className="text-[10px] text-slate-600">Base plan {b.baseSla}h · facturable {b.gross}h</p>
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                                 <div className="rounded-xl border border-slate-200 p-3 bg-white dark:bg-slate-800">
                                                     <p className="text-[9px] font-black uppercase text-slate-400">Col. legajo (CRM)</p>

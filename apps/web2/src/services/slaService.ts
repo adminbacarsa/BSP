@@ -44,6 +44,14 @@ export interface ServicePosition {
    */
   excludedShiftPaxDates?: Record<string, Record<string, number>>;
   preferenciaGenero?: 'M' | 'F' | 'INDISTINTO';
+  /** Encargado/Eventos: si false no suma horas vendidas SLA ni cierre cobertura. Eventos siempre false. */
+  includeInSlaTotals?: boolean;
+  /** Encargado: horario fijo (L–V) vs rotación compartida (patrón 6×2, 5×1…). */
+  encargadoScheduleMode?: 'fixed' | 'rotating';
+  /** Patrón rotativo obligatorio si includeInSlaTotals y mode=rotating. */
+  workPattern?: '6x2' | '5x1' | '4x12' | '6x1';
+  /** Horas por jornada para patrón rotativo (default: turno ENC o 8). */
+  workPatternHoursPerDay?: number;
   /** Soft-delete del puesto: deja de exigir cobertura / horas desde `inactiveFrom`. */
   status?: 'ACTIVE' | 'INACTIVE';
   inactiveFrom?: string;

@@ -51,6 +51,12 @@ import {
   stripEncargadoAssignment,
 } from '@/lib/servicios/encargadoPosition';
 import { EVENTOS_COVERAGE_TYPE, EVENTOS_SHIFT_CODE, isEventosPosition } from '@/lib/servicios/eventosPosition';
+import {
+  WORK_PATTERN_OPTIONS,
+  encargadoRotatingPatternMonthHours,
+  resolveEncargadoHoursPerDay,
+  workShiftsInMonthForPattern,
+} from '@/lib/servicios/auxiliaryPositionPolicy';
 import { matchesEmployeeSearch } from '@/lib/planificacion/employeeSearch';
 
 import { toYyyyMmDd, slaCoversCalendarMonth } from '@/lib/firestoreDates';
@@ -557,6 +563,13 @@ export default function ServiciosSLAPage() {
           : currentFormState.activeDays,
         allowedShiftTypes: type === 'custom' || switchingToEventos ? [] : variants,
         coverageType: type as ServicePosition['coverageType'],
+        ...(switchingToEncargado ? {
+          includeInSlaTotals: currentFormState.includeInSlaTotals ?? true,
+          encargadoScheduleMode: currentFormState.encargadoScheduleMode ?? 'fixed',
+          workPattern: currentFormState.workPattern ?? '6x2',
+          workPatternHoursPerDay: currentFormState.workPatternHoursPerDay ?? 8,
+        } : {}),
+        ...(switchingToEventos ? { includeInSlaTotals: false } : {}),
       });
   };
 
@@ -817,15 +830,20 @@ export default function ServiciosSLAPage() {
   const handleSavePosition = () => {
       if (!positionForm.name) return addToast('Nombre requerido', 'error');
       const isEventos = positionForm.coverageType === EVENTOS_COVERAGE_TYPE;
+      const isEncargado = positionForm.coverageType === ENCARGADO_COVERAGE_TYPE;
       if (!isEventos && positionForm.allowedShiftTypes.length === 0) return addToast('Seleccione al menos un turno', 'error');
+      if (isEncargado && positionForm.includeInSlaTotals !== false && positionForm.encargadoScheduleMode === 'rotating' && !positionForm.workPattern) {
+        return addToast('Seleccioná patrón de trabajo (6×2, 5×1…) para encargado rotativo en SLA', 'error');
+      }
 
       const newId = positionForm.id || `pos_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
       const newPosition: ServicePosition = {
         ...positionForm,
         id: newId,
         allowedShiftTypes: isEventos ? [] : positionForm.allowedShiftTypes.map(s => ({ ...s })),
-        quantity: isEventos ? 1 : positionForm.quantity,
-        code: isEventos ? (positionForm.code || EVENTOS_SHIFT_CODE) : positionForm.code,
+        quantity: isEventos || isEncargado ? 1 : positionForm.quantity,
+        code: isEventos ? (positionForm.code || EVENTOS_SHIFT_CODE) : isEncargado ? ENCARGADO_SHIFT_CODE : positionForm.code,
+        includeInSlaTotals: isEventos ? false : positionForm.includeInSlaTotals,
       };
       let updatedPositions = [...form.positions];
       if (positionForm.id) updatedPositions = updatedPositions.map(p => p.id === positionForm.id ? newPosition : p);
@@ -4572,17 +4590,94 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                         </select>
                     </div>
                     {positionForm.coverageType === 'eventos' && (
-                        <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl p-4">
+                        <div className="bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl p-4 space-y-2">
                             <p className="text-[10px] font-bold text-rose-800 dark:text-rose-300 leading-snug">
-                                No suma cobertura ni horas de contrato. En Supervisión imputás TURA (extensiones) a este puesto; la prefactura agrupa esas horas el día del evento (ej. 4 h + 8 h = 12 h en Eventos).
+                                No suma cobertura ni horas vendidas SLA. En Supervisión imputás TURA (extensiones) a este puesto; la prefactura agrupa esas horas el día del evento.
                             </p>
+                            <p className="text-[9px] font-bold text-rose-700/90">Siempre fuera del SLA — solo plan/real + prefactura Eventos.</p>
                         </div>
                     )}
                     {positionForm.coverageType === 'encargado' && (
                         <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-4 space-y-3">
-                            <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300 leading-snug">
-                                Criterio de trabajo del Encargado. Esas horas <span className="underline">suman al servicio</span> (SLA/CRM) como horas anticipadas. Si ese día no trabaja o tiene franco, no se cubre el puesto y no se suman horas de vacante.
-                            </p>
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-[10px] font-black uppercase text-amber-900 dark:text-amber-200">Incluir en horas SLA / cierre</p>
+                                    <p className="text-[9px] text-amber-800/80 dark:text-amber-300/80 leading-snug mt-0.5">
+                                        OFF = planificás ENC aparte (SLA + ENC). ON = suma al vendido del mes.
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={positionForm.includeInSlaTotals !== false}
+                                    onClick={() => setPositionForm((prev) => ({ ...prev, includeInSlaTotals: prev.includeInSlaTotals === false }))}
+                                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${positionForm.includeInSlaTotals !== false ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}
+                                >
+                                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${positionForm.includeInSlaTotals !== false ? 'translate-x-5' : ''}`} />
+                                </button>
+                            </div>
+                            <div>
+                                <label className="text-[9px] font-black uppercase text-slate-500 block mb-1.5">Modalidad</label>
+                                <div className="flex flex-wrap gap-1.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPositionForm((prev) => ({ ...prev, encargadoScheduleMode: 'fixed', includeInSlaTotals: prev.includeInSlaTotals ?? true }))}
+                                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black border transition-colors ${(positionForm.encargadoScheduleMode || 'fixed') === 'fixed' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-500 border-amber-200'}`}
+                                    >Horario fijo (L–V u otros)</button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPositionForm((prev) => ({ ...prev, encargadoScheduleMode: 'rotating', includeInSlaTotals: prev.includeInSlaTotals ?? false }))}
+                                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black border transition-colors ${positionForm.encargadoScheduleMode === 'rotating' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-slate-900 text-slate-500 border-amber-200'}`}
+                                    >Rotación compartida</button>
+                                </div>
+                                <p className="text-[9px] text-slate-500 font-bold mt-1 leading-snug">
+                                    {(positionForm.encargadoScheduleMode || 'fixed') === 'fixed'
+                                      ? 'Días y franja explícitos (ej. L–V 08–17). Ideal cuando el crono refleja el horario real.'
+                                      : 'La grilla semanal puede variar; el compromiso mensual se calcula por patrón (6×2, 5×1…).'}
+                                </p>
+                            </div>
+                            {positionForm.encargadoScheduleMode === 'rotating' && (
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="text-[9px] font-black uppercase text-slate-500 block mb-1">Patrón de trabajo</label>
+                                        <select
+                                            className="w-full p-2.5 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-xl font-bold text-sm"
+                                            value={positionForm.workPattern || '6x2'}
+                                            onChange={(e) => setPositionForm({ ...positionForm, workPattern: e.target.value as ServicePosition['workPattern'] })}
+                                        >
+                                            {WORK_PATTERN_OPTIONS.map((p) => (
+                                                <option key={p.id} value={p.id}>{p.label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-[9px] font-black uppercase text-slate-500 block mb-1">Hs. por jornada</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={24}
+                                            step={0.5}
+                                            className="w-full p-2.5 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-xl font-bold text-sm"
+                                            value={positionForm.workPatternHoursPerDay ?? resolveEncargadoHoursPerDay(positionForm)}
+                                            onChange={(e) => setPositionForm({ ...positionForm, workPatternHoursPerDay: Number(e.target.value) || 8 })}
+                                        />
+                                    </div>
+                                    {form.startDate && form.endDate && (() => {
+                                        const y = new Date(form.startDate + 'T12:00:00').getFullYear();
+                                        const m = new Date(form.startDate + 'T12:00:00').getMonth();
+                                        const contractH = encargadoRotatingPatternMonthHours(positionForm, form.startDate, form.endDate, y, m);
+                                        const shifts = workShiftsInMonthForPattern(positionForm.workPattern || '6x2', y, m);
+                                        return (
+                                            <p className="col-span-2 text-[10px] font-black text-amber-900 dark:text-amber-200 bg-white/70 dark:bg-slate-900/40 rounded-xl px-3 py-2 border border-amber-200">
+                                                Patrón {positionForm.workPattern || '6x2'} · ~{shifts} jornadas/mes × {resolveEncargadoHoursPerDay(positionForm)}h ≈ {contractH.toLocaleString('es-AR')}h/mes
+                                                {positionForm.includeInSlaTotals !== false ? ' (incluidas en SLA)' : ' (solo plan/real, fuera de SLA)'}
+                                            </p>
+                                        );
+                                    })()}
+                                </div>
+                            )}
+                            {(positionForm.encargadoScheduleMode || 'fixed') === 'fixed' && (
+                            <>
                             <div>
                                 <label className="text-[9px] font-black uppercase text-slate-500 block mb-1.5">Días que trabaja</label>
                                 <div className="flex flex-wrap gap-1.5 mb-2">
@@ -4665,10 +4760,13 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                 const dayHs = enc ? (enc.hours || 8) : 8;
                                 return (
                                     <p className="text-[10px] font-black text-amber-900 dark:text-amber-200 bg-white/70 dark:bg-slate-900/40 rounded-xl px-3 py-2 border border-amber-200 dark:border-amber-800">
-                                        {dayHs} hs/día · {formatEncargadoDaysLabel(positionForm.activeDays)} → {hs.toLocaleString('es-AR')} hs anticipadas en el contrato
+                                        {dayHs} hs/día · {formatEncargadoDaysLabel(positionForm.activeDays)} → {hs.toLocaleString('es-AR')} hs en contrato
+                                        {positionForm.includeInSlaTotals !== false ? ' (incluidas en SLA)' : ' (solo plan/real, fuera de SLA)'}
                                     </p>
                                 );
                             })() : null}
+                            </>
+                            )}
                         </div>
                     )}
                     <div>
