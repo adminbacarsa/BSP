@@ -483,6 +483,19 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS.push({
         },
         required: [],
     },
+}, {
+    name: 'ejecutar_auto_presencia_cierre',
+    description: 'Marca automáticamente presencia en los turnos que ya iniciaron sin fichar, y cierra los turnos que ya terminaron y siguen activos. Si hay un relevo pendiente (guardia que viene a reemplazar pero aún no llegó), el turno saliente queda en retención en vez de cerrarse. Ideal para «activá el modo demo», «dar presentes automáticos», «cerrar turnos que terminaron», «activá auto presencia». Con simulacion=true solo muestra qué haría sin modificar nada.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            simulacion: {
+                type: generative_ai_1.SchemaType.BOOLEAN,
+                description: 'Si true (default), solo muestra qué haría sin modificar datos (dry run). Si false, ejecuta los cambios reales.',
+            },
+        },
+        required: [],
+    },
 });
 exports.ASSISTANT_TOOL_ROUNDS_MAX = 4;
 const WRITE_TOOL_MODULE_REQUIREMENTS = {
@@ -493,6 +506,7 @@ const WRITE_TOOL_MODULE_REQUIREMENTS = {
     proponer_registrar_ausencia: 'OPERATIONS',
     proponer_cerrar_turno: 'OPERATIONS',
     proponer_planificar_objetivo_mes: 'PLANNING',
+    ejecutar_auto_presencia_cierre: 'OPERATIONS',
 };
 function getFilteredDeclarations(readableModuleKeys) {
     const moduleSet = new Set(readableModuleKeys);

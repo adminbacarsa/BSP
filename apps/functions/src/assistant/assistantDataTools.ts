@@ -3837,6 +3837,10 @@ async function dispatchAssistantToolCallInner(
       fecha_hasta: args.fecha_hasta != null ? String(args.fecha_hasta) : undefined,
       limite: args.limite != null ? Number(args.limite) : undefined,
     });
+  } else if (name === 'ejecutar_auto_presencia_cierre') {
+    raw = await ejecutarAutoPresenciaCierre(ctx, {
+      simulacion: args.simulacion !== false,
+    });
   } else {
     raw = { error: 'herramienta_desconocida', name };
   }
@@ -4424,5 +4428,111 @@ async function ejecutarProponerCrearTurnoRefuerzo(
         horaFin,
       },
     },
+  };
+}
+
+async function ejecutarAutoPresenciaCierre(
+  ctx: AssistantToolContext,
+  args: { simulacion?: boolean },
+): Promise<Record<string, unknown>> {
+  const dryRun = args.simulacion !== false;
+  const db = admin.firestore();
+  const now = new Date();
+  const nowTs = Timestamp.fromDate(now);
+
+  const windowStart = Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+  const windowEnd   = Timestamp.fromDate(new Date(now.getTime() +  2 * 3600000));
+
+  const snap = await db.collection('turnos')
+    .where('empresaId', '==', ctx.empresaId)
+    .where('startTime', '>=', windowStart)
+    .where('startTime', '<=', windowEnd)
+    .where('draft', '==', false)
+    .where('isFranco', '==', false)
+    .limit(500)
+    .get();
+
+  // Índice para chequear relevos pendientes
+  const byObjective = new Map<string, Array<{ startMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean }>>();
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    const oid = String(t.objectiveId || '');
+    if (!oid) continue;
+    if (!byObjective.has(oid)) byObjective.set(oid, []);
+    byObjective.get(oid)!.push({
+      startMs: (t.startTime?.seconds ?? 0) * 1000,
+      isPresent: !!t.isPresent,
+      isCompleted: !!t.isCompleted,
+      isAbsent: !!t.isAbsent,
+    });
+  }
+
+  function hayRelevoPendiente(objectiveId: string, shiftEndMs: number): boolean {
+    return (byObjective.get(objectiveId) ?? []).some(
+      r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000,
+    );
+  }
+
+  const presenciaMarcada: string[] = [];
+  const turnosCerrados: string[] = [];
+  const turnosEnRetencion: string[] = [];
+  const batch = db.batch();
+  let ops = 0;
+
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (t.isAbsent || t.isVirtual) continue;
+    const startMs = (t.startTime?.seconds ?? 0) * 1000;
+    const endMs   = (t.endTime?.seconds   ?? 0) * 1000;
+    const oid = String(t.objectiveId || '');
+    const label = `${t.empleadoNombre ?? t.employeeId} (${t.code}) en ${t.objetivoNombre ?? oid}`;
+
+    if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
+      presenciaMarcada.push(label);
+      if (!dryRun) {
+        batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+        ops++;
+      }
+    }
+
+    if (endMs && endMs <= now.getTime() && t.isPresent && !t.isCompleted) {
+      if (oid && hayRelevoPendiente(oid, endMs)) {
+        turnosEnRetencion.push(label);
+      } else {
+        turnosCerrados.push(label);
+        if (!dryRun) {
+          batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
+          ops++;
+          db.collection('novedades')
+            .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+            .then(ns => {
+              if (ns.empty) return;
+              const b2 = db.batch();
+              ns.docs.filter(d => ['RETENCION_LARGA','RECARGO_12H','RETENCION_DETECTADA'].includes(d.data().type))
+                .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
+              return b2.commit();
+            }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  if (!dryRun && ops > 0) await batch.commit();
+
+  const modo = dryRun ? 'SIMULACIÓN' : 'EJECUTADO';
+  const resumen = dryRun
+    ? `[${modo}] Se marcarían ${presenciaMarcada.length} presencia(s) y cerrarían ${turnosCerrados.length} turno(s). ${turnosEnRetencion.length > 0 ? `${turnosEnRetencion.length} turno(s) en retención (relevo pendiente).` : ''}`
+    : `[${modo}] ${presenciaMarcada.length} presencia(s) marcadas · ${turnosCerrados.length} turno(s) cerrados${turnosEnRetencion.length > 0 ? ` · ${turnosEnRetencion.length} en retención` : ''}.`;
+
+  return {
+    modo,
+    turnos_evaluados: snap.size,
+    presencias_marcadas: presenciaMarcada.length,
+    turnos_cerrados: turnosCerrados.length,
+    turnos_en_retencion: turnosEnRetencion.length,
+    detalle_presencias: presenciaMarcada,
+    detalle_cierres: turnosCerrados,
+    detalle_retencion: turnosEnRetencion,
+    resumen,
   };
 }
