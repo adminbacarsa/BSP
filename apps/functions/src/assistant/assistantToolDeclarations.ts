@@ -531,6 +531,21 @@ ASSISTANT_FUNCTION_DECLARATIONS.push(
     },
   } as any,
   {
+    name: 'estado_modo_demo',
+    description: 'Consulta si el Modo Demo (operador automático) está activo o no para la empresa actual. Usá para «está activo el modo demo», «cómo está el modo demo», «modo demo on/off».',
+    parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
+  } as any,
+  {
+    name: 'activar_modo_demo',
+    description: 'Activa el Modo Demo continuo para la empresa: el sistema dará presentes, cerrará turnos y hará relevos automáticamente cada 5 minutos sin intervención manual. Usá para «activá el modo demo», «quiero que de presentes solo», «modo automático encendido».',
+    parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
+  } as any,
+  {
+    name: 'desactivar_modo_demo',
+    description: 'Desactiva el Modo Demo continuo. Los turnos dejan de cerrarse y darse presente automáticamente. Usá para «desactivá el modo demo», «apagá el automático», «modo demo off».',
+    parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
+  } as any,
+  {
     name: 'ejecutar_auto_presencia_cierre',
     description:
       'Actúa como operador automático: marca presencia a los guardias que ya iniciaron turno sin fichar, cierra los turnos que terminaron, y completa los relevos (cuando llega el reemplazo, cierra al saliente automáticamente en el mismo ciclo). Usar con simulacion=false para «activar modo demo», «activá modo demo», «actuar como operador», «dar presentes y cerrar turnos», «hacer los relevos automáticos». Con simulacion=true (o para «simulá», «qué haría») muestra un preview sin modificar nada.',
@@ -558,6 +573,9 @@ const WRITE_TOOL_MODULE_REQUIREMENTS: Record<string, string> = {
   proponer_cerrar_turno: 'OPERATIONS',
   proponer_planificar_objetivo_mes: 'PLANNING',
   ejecutar_auto_presencia_cierre: 'OPERATIONS',
+  activar_modo_demo: 'OPERATIONS',
+  desactivar_modo_demo: 'OPERATIONS',
+  estado_modo_demo: 'OPERATIONS',
 };
 
 export function getFilteredDeclarations(readableModuleKeys: string[]): typeof ASSISTANT_FUNCTION_DECLARATIONS {

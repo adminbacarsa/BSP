@@ -192,6 +192,22 @@ export default function EmpresasTab() {
       setGuardandoPiloto(false);
     }
   };
+
+  const [guardandoModoDemo, setGuardandoModoDemo] = useState(false);
+  const modoDemoActivo = empresa?.modoDemoEnabled === true;
+
+  const handleToggleModoDemo = async () => {
+    if (!empresa) return;
+    setGuardandoModoDemo(true);
+    try {
+      await guardarEmpresa(empresa.id, { modoDemoEnabled: !modoDemoActivo } as any);
+      toast.success(modoDemoActivo ? 'Modo Demo desactivado' : 'Modo Demo activado — el sistema dará presentes y cerrará turnos automáticamente cada 5 min');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setGuardandoModoDemo(false);
+    }
+  };
   const [autoPresenciaLoading, setAutoPresenciaLoading] = useState(false);
   const [autoPresenciaResult, setAutoPresenciaResult] = useState<{
     dryRun: boolean; turnosEvaluados: number; presenciaMarcada: number; turnosCerrados: number;
@@ -646,6 +662,39 @@ export default function EmpresasTab() {
                 {guardandoPiloto && <Loader2 size={12} className="absolute inset-0 m-auto animate-spin text-white" />}
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {empresa && isSuperAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${modoDemoActivo ? 'bg-emerald-500/15' : 'bg-slate-200'}`}>
+                <Timer size={18} className={modoDemoActivo ? 'text-emerald-600' : 'text-slate-400'} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Modo Demo</h3>
+                  {modoDemoActivo && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-wide animate-pulse">Activo</span>}
+                </div>
+                <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                  Cuando está activo, el sistema actúa como operador: da presentes al inicio del turno, cierra al finalizar y completa relevos automáticamente. Se ejecuta cada 5 minutos.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleModoDemo}
+              disabled={guardandoModoDemo}
+              role="switch"
+              aria-checked={modoDemoActivo}
+              aria-label="Activar o desactivar Modo Demo"
+              className={`relative h-8 w-14 rounded-full shrink-0 transition-colors disabled:opacity-60 ${modoDemoActivo ? 'bg-emerald-500' : 'bg-slate-300'}`}
+            >
+              <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${modoDemoActivo ? 'translate-x-6' : 'translate-x-0'}`} />
+              {guardandoModoDemo && <Loader2 size={12} className="absolute inset-0 m-auto animate-spin text-white" />}
+            </button>
           </div>
         </div>
       )}

@@ -3841,6 +3841,12 @@ async function dispatchAssistantToolCallInner(
     raw = await ejecutarAutoPresenciaCierre(ctx, {
       simulacion: args.simulacion !== false,
     });
+  } else if (name === 'estado_modo_demo') {
+    raw = await ejecutarEstadoModoDemo(ctx);
+  } else if (name === 'activar_modo_demo') {
+    raw = await ejecutarToggleModoDemo(ctx, true);
+  } else if (name === 'desactivar_modo_demo') {
+    raw = await ejecutarToggleModoDemo(ctx, false);
   } else {
     raw = { error: 'herramienta_desconocida', name };
   }
@@ -4632,5 +4638,36 @@ async function ejecutarAutoPresenciaCierre(
     instruccion: dryRun
       ? 'Para ejecutar los cambios reales, respondé "ejecutá" o "activá modo demo".'
       : undefined,
+  };
+}
+
+async function ejecutarEstadoModoDemo(
+  ctx: AssistantToolContext,
+): Promise<Record<string, unknown>> {
+  const db = admin.firestore();
+  const empSnap = await db.collection('empresas').doc(ctx.empresaId).get();
+  const activo = empSnap.exists ? empSnap.data()?.modoDemoEnabled === true : false;
+  return {
+    modoDemoEnabled: activo,
+    estado: activo ? 'ACTIVO' : 'INACTIVO',
+    mensaje: activo
+      ? 'El Modo Demo está **activo**: el sistema da presentes, cierra turnos y hace relevos automáticamente cada 5 minutos.'
+      : 'El Modo Demo está **inactivo**. Decí «activá el modo demo» para encenderlo.',
+  };
+}
+
+async function ejecutarToggleModoDemo(
+  ctx: AssistantToolContext,
+  activar: boolean,
+): Promise<Record<string, unknown>> {
+  if (!ctx.empresaId) return { error: 'sin_empresa', mensaje: 'No hay empresa en sesión.' };
+  const db = admin.firestore();
+  await db.collection('empresas').doc(ctx.empresaId).update({ modoDemoEnabled: activar });
+  return {
+    modoDemoEnabled: activar,
+    estado: activar ? 'ACTIVO' : 'INACTIVO',
+    mensaje: activar
+      ? '✓ Modo Demo **activado**. El sistema dará presentes, cerrará turnos y hará relevos automáticamente cada 5 minutos.'
+      : '✓ Modo Demo **desactivado**. Los turnos ya no se procesarán automáticamente.',
   };
 }

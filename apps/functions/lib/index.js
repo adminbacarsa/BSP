@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = void 0;
+exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -640,6 +640,114 @@ async function executeAgentActionHandler(data, context) {
     throw new functions.https.HttpsError('internal', 'Acción no implementada.');
 }
 exports.executeAgentAction = functions.https.onCall(executeAgentActionHandler);
+async function runModoDemoForEmpresa(db, empresaId) {
+    const now = new Date();
+    const nowTs = admin.firestore.Timestamp.fromDate(now);
+    const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+    const windowEnd = admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 2 * 3600000));
+    const snap = await db.collection('turnos')
+        .where('empresaId', '==', empresaId)
+        .where('startTime', '>=', windowStart)
+        .where('startTime', '<=', windowEnd)
+        .where('draft', '==', false)
+        .where('isFranco', '==', false)
+        .limit(500)
+        .get();
+    const byObj = new Map();
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        const oid = String(t.objectiveId || '');
+        if (!oid)
+            continue;
+        if (!byObj.has(oid))
+            byObj.set(oid, []);
+        byObj.get(oid).push({
+            shiftId: doc.id,
+            startMs: (t.startTime?.seconds ?? 0) * 1000,
+            endMs: (t.endTime?.seconds ?? 0) * 1000,
+            isPresent: !!t.isPresent,
+            isCompleted: !!t.isCompleted,
+            isAbsent: !!t.isAbsent,
+        });
+    }
+    const hayRelevaYPresente = (oid, endMs) => (byObj.get(oid) ?? []).some(r => r.isPresent && !r.isCompleted && Math.abs(r.startMs - endMs) <= 90 * 60 * 1000);
+    const hayRelevoPendiente = (oid, endMs) => (byObj.get(oid) ?? []).some(r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - endMs) <= 90 * 60 * 1000);
+    const batch = db.batch();
+    let presencias = 0, cierres = 0, retencion = 0;
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted)
+            continue;
+        const startMs = (t.startTime?.seconds ?? 0) * 1000;
+        if (startMs > now.getTime())
+            continue;
+        const oid = String(t.objectiveId || '');
+        batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true, modoDemoAt: nowTs });
+        presencias++;
+        const idx = byObj.get(oid);
+        const entry = idx?.find(r => r.shiftId === doc.id);
+        if (entry)
+            entry.isPresent = true;
+    }
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted)
+            continue;
+        const endMs = (t.endTime?.seconds ?? 0) * 1000;
+        if (!endMs || endMs > now.getTime())
+            continue;
+        const oid = String(t.objectiveId || '');
+        if (oid && hayRelevaYPresente(oid, endMs)) {
+            batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
+            cierres++;
+        }
+        else if (oid && hayRelevoPendiente(oid, endMs)) {
+            retencion++;
+        }
+        else {
+            batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
+            cierres++;
+        }
+    }
+    if (presencias + cierres > 0) {
+        await batch.commit();
+        snap.docs.forEach(doc => {
+            const t = doc.data();
+            if (t.isPresent && !t.isCompleted)
+                return;
+            db.collection('novedades').where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(5).get()
+                .then(ns => {
+                if (ns.empty)
+                    return;
+                const b2 = db.batch();
+                ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
+                    .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'MODO_DEMO' }));
+                return b2.commit();
+            }).catch(() => { });
+        });
+    }
+    return { presencias, cierres, retencion };
+}
+exports.modoDemoCron = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .pubsub.schedule('every 5 minutes')
+    .onRun(async () => {
+    const db = admin.firestore();
+    const empSnap = await db.collection('empresas').where('modoDemoEnabled', '==', true).get();
+    if (empSnap.empty)
+        return;
+    for (const empDoc of empSnap.docs) {
+        try {
+            const res = await runModoDemoForEmpresa(db, empDoc.id);
+            if (res.presencias + res.cierres > 0) {
+                console.log(`[modoDemoCron] ${empDoc.id}: presencias=${res.presencias} cierres=${res.cierres} retencion=${res.retencion}`);
+            }
+        }
+        catch (e) {
+            console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, e?.message);
+        }
+    }
+});
 const SUPER_ADMIN_ROLES_AP = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 exports.autoPresenciaYCierre = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB' })

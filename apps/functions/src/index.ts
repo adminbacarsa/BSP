@@ -798,6 +798,127 @@ async function executeAgentActionHandler(
 export const executeAgentAction = functions.https.onCall(executeAgentActionHandler);
 
 // =========================================================
+// MODO DEMO CONTINUO — cron cada 5 min para empresas con
+// modoDemoEnabled: true. Actúa como operador automático:
+// da presentes, cierra turnos y completa relevos.
+// =========================================================
+async function runModoDemoForEmpresa(
+  db: admin.firestore.Firestore,
+  empresaId: string,
+): Promise<{ presencias: number; cierres: number; retencion: number }> {
+  const now = new Date();
+  const nowTs = admin.firestore.Timestamp.fromDate(now);
+  const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+  const windowEnd   = admin.firestore.Timestamp.fromDate(new Date(now.getTime() +  2 * 3600000));
+
+  const snap = await db.collection('turnos')
+    .where('empresaId', '==', empresaId)
+    .where('startTime', '>=', windowStart)
+    .where('startTime', '<=', windowEnd)
+    .where('draft', '==', false)
+    .where('isFranco', '==', false)
+    .limit(500)
+    .get();
+
+  interface TIdx { shiftId: string; startMs: number; endMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean; }
+  const byObj = new Map<string, TIdx[]>();
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    const oid = String(t.objectiveId || '');
+    if (!oid) continue;
+    if (!byObj.has(oid)) byObj.set(oid, []);
+    byObj.get(oid)!.push({
+      shiftId: doc.id,
+      startMs: (t.startTime?.seconds ?? 0) * 1000,
+      endMs:   (t.endTime?.seconds   ?? 0) * 1000,
+      isPresent: !!t.isPresent,
+      isCompleted: !!t.isCompleted,
+      isAbsent: !!t.isAbsent,
+    });
+  }
+
+  const hayRelevaYPresente = (oid: string, endMs: number) =>
+    (byObj.get(oid) ?? []).some(r => r.isPresent && !r.isCompleted && Math.abs(r.startMs - endMs) <= 90 * 60 * 1000);
+  const hayRelevoPendiente = (oid: string, endMs: number) =>
+    (byObj.get(oid) ?? []).some(r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - endMs) <= 90 * 60 * 1000);
+
+  const batch = db.batch();
+  let presencias = 0, cierres = 0, retencion = 0;
+
+  // Pase 1: marcar presentes a entrantes + actualizar índice virtual
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted) continue;
+    const startMs = (t.startTime?.seconds ?? 0) * 1000;
+    if (startMs > now.getTime()) continue;
+    const oid = String(t.objectiveId || '');
+    batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true, modoDemoAt: nowTs });
+    presencias++;
+    const idx = byObj.get(oid);
+    const entry = idx?.find(r => r.shiftId === doc.id);
+    if (entry) entry.isPresent = true;
+  }
+
+  // Pase 2: cerrar salientes (con índice actualizado)
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted) continue;
+    const endMs = (t.endTime?.seconds ?? 0) * 1000;
+    if (!endMs || endMs > now.getTime()) continue;
+    const oid = String(t.objectiveId || '');
+
+    if (oid && hayRelevaYPresente(oid, endMs)) {
+      // Relevo listo → cerrar saliente (relevo completado)
+      batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
+      cierres++;
+    } else if (oid && hayRelevoPendiente(oid, endMs)) {
+      retencion++;
+    } else {
+      batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
+      cierres++;
+    }
+  }
+
+  if (presencias + cierres > 0) {
+    await batch.commit();
+    // Descartar novedades RETENCION fire-and-forget (no bloquea el cron)
+    snap.docs.forEach(doc => {
+      const t = doc.data() as any;
+      if (t.isPresent && !t.isCompleted) return; // solo los que cerramos
+      db.collection('novedades').where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(5).get()
+        .then(ns => {
+          if (ns.empty) return;
+          const b2 = db.batch();
+          ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
+            .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'MODO_DEMO' }));
+          return b2.commit();
+        }).catch(() => {});
+    });
+  }
+
+  return { presencias, cierres, retencion };
+}
+
+export const modoDemoCron = functions
+  .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
+  .pubsub.schedule('every 5 minutes')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const empSnap = await db.collection('empresas').where('modoDemoEnabled', '==', true).get();
+    if (empSnap.empty) return;
+    for (const empDoc of empSnap.docs) {
+      try {
+        const res = await runModoDemoForEmpresa(db, empDoc.id);
+        if (res.presencias + res.cierres > 0) {
+          console.log(`[modoDemoCron] ${empDoc.id}: presencias=${res.presencias} cierres=${res.cierres} retencion=${res.retencion}`);
+        }
+      } catch (e) {
+        console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);
+      }
+    }
+  });
+
+// =========================================================
 // AUTO PRESENCIA Y CIERRE — callable SuperAdmin (modo prueba)
 // Marca presencia en turnos planificados que ya iniciaron
 // y cierra los que ya terminaron y siguen presentes.
