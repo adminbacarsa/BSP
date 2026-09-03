@@ -126,9 +126,9 @@ const OperacionesMapGoogle = ({
             icon={markerIcons[marker.iconPreset]}
             label={{
               text: truncateObjectiveLabel(marker.name) || ' ',
-              color: '#0f172a',
-              fontSize: '10px',
-              fontWeight: '800',
+              color: '#f8fafc',
+              fontSize: '11px',
+              fontWeight: '700',
               className: 'cosp-obj-label',
             }}
             title={`${marker.name} · ${marker.statusText}`}
