@@ -16,9 +16,9 @@ export type OperacionesMapMarker = {
 };
 
 function isEventShift(shift: any): boolean {
-  const code = String(shift?.code || shift?.shiftCode || '').trim().toUpperCase();
+  const code = String(shift?.code || '').trim().toUpperCase();
   const origin = String(shift?.origin || '').trim().toUpperCase();
-  return code === 'EV' || origin === 'EVENTO' || !!String(shift?.eventoId || '').trim();
+  return code === 'EV' || origin === 'EVENTO';
 }
 
 /** Separa pines apilados en el mismo lat/lng (p. ej. varios objetivos sin geo real). */

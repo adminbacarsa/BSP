@@ -82,6 +82,7 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, recentlyRelievedIds, onRelieved }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
+    const [saving, setSaving] = React.useState(false);
     if (!isOpen || !incomingShift) return null;
     const now = new Date();
     const start = toDate(incomingShift.shiftDateObj);
@@ -114,7 +115,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
 
     // Candidatos a relevar:
     // 1. Guardias en retención (siempre — llevan tiempo extra esperando)
-    // 2. Guardias a â‰¤15 min de terminar su turno (están por salir)
+    // 2. Guardias a ≤15 min de terminar su turno (están por salir)
     // Filtro de duración: solo guardias con turno compatible (±90 min) al del entrante
     // Ordenados por FIFO: quien lleva más minutos trabajados se va primero
     const incomingDurMin = (() => {
@@ -149,7 +150,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     const positionCapacity = Math.max(1, Number(pos?.quantity) || 1);
     const mustRelevar = activeGuards.length >= positionCapacity;
 
-    // â"€â"€ INTERCAMBIO DE TURNOS â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    // ── INTERCAMBIO DE TURNOS ──────────────────────────────────────────────
     // Cuando Guard A llega tarde (>60 min) y su turno fue cubierto por Guard B,
     // Guard A puede tomar el próximo turno de Guard B como compensación.
     const handleIntercambio = async () => {
@@ -201,14 +202,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: incomingShift.employeeId,
                 type: 'INTERCAMBIO',
-                title: 'ðŸ"„ Intercambio de turno',
+                title: 'Intercambio de turno',
                 body: `Cubrís el turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)} - ${formatTimeSimple(guardBNextShift.endDateObj)}).`,
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: coveringEmpId,
                 type: 'INTERCAMBIO',
-                title: 'ðŸ"„ Intercambio de turno',
+                title: 'Intercambio de turno',
                 body: `${incomingShift.employeeName} tomó tu turno de ${guardBNextShift.objectiveName}. Tu turno de la mañana queda registrado.`,
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
@@ -228,8 +229,8 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     };
 
     const handleConfirm = async (prevShiftId: string | null) => {
+        if (saving) return;
         // Un guardia tardío SIEMPRE puede dar presente — el relevo es secundario.
-        // Si el puesto está lleno y no seleccionó relevo, dar presente igual con aviso.
         if (mustRelevar && !prevShiftId && status !== 'LATE') {
             toast.error(`Puesto completo (${positionCapacity} pax). Seleccioná a quién relevar.`);
             return;
@@ -237,152 +238,152 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
         if (mustRelevar && !prevShiftId && status === 'LATE') {
             toast.warning(`${incomingShift.employeeName} ingresó. Hay guardias en retención — relevalos manualmente.`);
         }
+        if (!incomingShift?.id) {
+            toast.error('Turno sin ID — no se puede registrar el ingreso.');
+            return;
+        }
+
+        // Check de empresa en memoria (sin getDoc al servidor — era el cuello de botella).
+        const shiftEmp = String(incomingShift.empresaId || '').trim();
+        if (migracionCompleta && empresaId && shiftEmp && shiftEmp !== empresaId) {
+            toast.error(`Operación bloqueada: el turno pertenece a «${shiftEmp}», no a «${empresaId}».`);
+            return;
+        }
+        if (prevShiftId) {
+            const prev = logic.processedData.find((s: any) => s.id === prevShiftId);
+            const prevEmp = String(prev?.empresaId || '').trim();
+            if (migracionCompleta && empresaId && prevEmp && prevEmp !== empresaId) {
+                toast.error(`Operación bloqueada: el turno saliente pertenece a otra empresa.`);
+                return;
+            }
+        }
+
+        setSaving(true);
+        const tenantId = String(incomingShift.empresaId || empresaId || '').trim();
+        const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
+
+        const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
+            ? incomingShift.shiftDateObj
+            : toDate(incomingShift.shiftDateObj);
+        const isEarlyStartShift = !!incomingShift.isEarlyStart;
+        const incomingRealStart = isEarlyStartShift
+            ? (incomingShift.adjustedStartTime
+                ? (incomingShift.adjustedStartTime.toDate
+                    ? Timestamp.fromDate(incomingShift.adjustedStartTime.toDate())
+                    : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
+                : serverTimestamp())
+            : Timestamp.fromDate(incomingScheduledStart);
+
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'turnos', incomingShift.id), stampEmpresaId({
+            isPresent: true,
+            status: 'PRESENT',
+            realStartTime: incomingRealStart,
+            lateArrivalAt: status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
+            isLate: status === 'LATE' || wasAutoAbsent,
+            isAbsent: false,
+            absenceType: null,
+            absenceDetectedAt: null,
+            absenceReversedAt: serverTimestamp(),
+            absenceReversedBy: 'OPERACIONES',
+        }, tenantId));
+
+        if (incomingShift.linkedTuraId && incomingShift.turaContiguous) {
+            batch.update(doc(db, 'turnos', incomingShift.linkedTuraId), stampEmpresaId({
+                coveredByParentPresence: true,
+                isPresent: true,
+                status: 'PRESENT',
+                parentPresenceShiftId: incomingShift.id,
+            }, tenantId));
+        }
+
+        if (prevShiftId) {
+            const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
+            const prevEnd = prevShift ? toDate(prevShift.endDateObj) : null;
+            const nowDate = new Date();
+            const isEarlyRelevo = !!(prevEnd && prevEnd > nowDate);
+            batch.update(doc(db, 'turnos', prevShiftId), stampEmpresaId({
+                realEndTime: isEarlyRelevo ? Timestamp.fromDate(prevEnd!) : serverTimestamp(),
+                isCompleted: true,
+                status: 'COMPLETED',
+                isPresent: false,
+                relievedEarly: isEarlyRelevo,
+            }, tenantId));
+        }
+
+        // Cerrar YA: el operador no espera el ACK del servidor / emulador.
+        if (prevShiftId) onRelieved?.(prevShiftId);
+        else onClose();
+        toast.success(status === 'LATE' ? 'Ingreso tarde registrado.' : 'Ingreso registrado.');
+
         try {
-            await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
-            if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
-
-            // â"€â"€ Leer ausencia AA ANTES de abrir el batch (no se puede hacer getDocs dentro de un batch) â"€â"€
-            const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
-            let aaDoc: any = null;
-            let aaHorario = '';
-            if (wasAutoAbsent) {
-                const absSnap = await getDocs(query(
-                    collection(db, 'ausencias'),
-                    where('shiftId', '==', incomingShift.id),
-                    limit(5)
-                ));
-                aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA') ?? null;
-                if (aaDoc) {
-                    const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-                    const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : null;
-                    const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : null;
-                    aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
-                }
-            }
-
-            // â"€â"€ Construir y commitear el batch (sin lecturas async intercaladas) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-            const batch = writeBatch(db);
-            // Regla de liquidación: realStartTime = hora planificada (no la real de llegada)
-            // El guardia siempre cobra desde su hora planificada, llegue antes o después.
-            // Excepción: adelanto por cobertura (isEarlyStart) → usa adjustedStartTime del operador.
-            const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
-                ? incomingShift.shiftDateObj
-                : toDate(incomingShift.shiftDateObj);
-            const isEarlyStartShift = !!incomingShift.isEarlyStart;
-            // Adelanto: usa adjustedStartTime (= inicio de la vacante a cubrir, no la hora de llegada)
-            // Así el guardia cobra desde las 7 AM aunque haya llegado a las 8 AM
-            const incomingRealStart = isEarlyStartShift
-                ? (incomingShift.adjustedStartTime
-                    ? (incomingShift.adjustedStartTime.toDate
-                        ? Timestamp.fromDate(incomingShift.adjustedStartTime.toDate())
-                        : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
-                    : serverTimestamp())
-                : Timestamp.fromDate(incomingScheduledStart); // normal: hora planificada
-            batch.update(doc(db, 'turnos', incomingShift.id), {
-                isPresent:           true,
-                status:              'PRESENT',
-                realStartTime:       incomingRealStart,
-                lateArrivalAt:       status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
-                isLate:              status === 'LATE' || wasAutoAbsent,
-                // Limpiar flags de ausencia — el guardia llegó tarde pero llegó
-                isAbsent:            false,
-                absenceType:         null,
-                absenceDetectedAt:   null,
-                absenceReversedAt:   serverTimestamp(),
-                absenceReversedBy:   'OPERACIONES',
-            });
-            if (incomingShift.linkedTuraId && incomingShift.turaContiguous) {
-                batch.update(doc(db, 'turnos', incomingShift.linkedTuraId), {
-                    coveredByParentPresence: true,
-                    isPresent: true,
-                    status: 'PRESENT',
-                    parentPresenceShiftId: incomingShift.id,
-                });
-            }
-            // Si fue marcado AA, marcar la ausencia como "Llegada Tarde" (ya leímos aaDoc arriba)
-            if (wasAutoAbsent && aaDoc) {
-                batch.update(aaDoc.ref, {
-                    type: 'Llegada Tarde',
-                    absenceType: 'LT',
-                    status: 'Confirmada',
-                    reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
-                    arrivedAt: serverTimestamp(),
-                });
-            }
-            if (prevShiftId) {
-                // Horas completas: si el relevo es anticipado, el saliente cobra hasta su hora programada de fin
-                const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
-                const prevEnd = prevShift ? toDate(prevShift.endDateObj) : null;
-                const nowDate = new Date();
-                const isEarlyRelevo = prevEnd && prevEnd > nowDate;
-                const outgoingRealEnd = isEarlyRelevo
-                    ? Timestamp.fromDate(prevEnd!)   // hora programada → horas completas
-                    : serverTimestamp();              // ya pasó el horario → hora real
-                batch.update(doc(db, 'turnos', prevShiftId), {
-                    realEndTime: outgoingRealEnd,
-                    isCompleted: true,
-                    status: 'COMPLETED',
-                    isPresent: false,
-                    relievedEarly: isEarlyRelevo,    // flag para trazabilidad
-                });
-            }
             await batch.commit();
 
-            // Cerrar el modal inmediatamente — el write ya está en IndexedDB local.
-            if (prevShiftId) onRelieved?.(prevShiftId);
-            toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
-            onClose();
+            // Post-trabajo en background (no bloquea UI)
+            void (async () => {
+                try {
+                    if (wasAutoAbsent) {
+                        const absSnap = await getDocs(query(
+                            collection(db, 'ausencias'),
+                            where('shiftId', '==', incomingShift.id),
+                            limit(5)
+                        ));
+                        const aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA');
+                        if (aaDoc) {
+                            const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                            const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : toDate(incomingShift.shiftDateObj);
+                            const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : toDate(incomingShift.endDateObj);
+                            const aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+                            await updateDoc(aaDoc.ref, {
+                                type: 'Llegada Tarde',
+                                absenceType: 'LT',
+                                status: 'Confirmada',
+                                reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
+                                arrivedAt: serverTimestamp(),
+                            });
+                        }
+                    }
 
-            // Background: verificar sync con servidor (no bloquea UI)
-            Promise.race([
-                waitForPendingWrites(db),
-                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
-            ]).catch(err => {
-                if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado.');
+                    const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                    const _prev = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
+                    const _detail = _prev
+                        ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
+                        : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
+                    await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                        action: status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
+                        module: 'OPERACIONES',
+                        actorName: _actor,
+                        timestamp: serverTimestamp(),
+                        employeeId: incomingShift.employeeId,
+                        employeeName: incomingShift.employeeName,
+                        objectiveId: incomingShift.objectiveId,
+                        objectiveName: incomingShift.objectiveName,
+                        shiftId: incomingShift.id,
+                        details: _detail,
+                    }, tenantId));
+
+                    if (prevShiftId) {
+                        const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
+                        if (prevShift?.employeeId) {
+                            await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                                userId: prevShift.employeeId,
+                                type: 'RELEVO',
+                                title: 'Turno finalizado — relevado',
+                                body: `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizó.`,
+                                read: false,
+                                createdAt: serverTimestamp(),
+                            }, tenantId));
+                        }
+                    }
+                } catch {
+                    /* post-trabajo no crítico */
                 }
-            }).catch(() => {});
-
-
-            // â"€â"€ Audit log: presente / llegada tarde / relevo â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-            {
-                const _tenantId = String(incomingShift.empresaId || empresaId || '').trim();
-                const _actor    = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                const _prev     = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
-                const _detail   = _prev
-                    ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
-                    : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action:        status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
-                    module:        'OPERACIONES',
-                    actorName:     _actor,
-                    timestamp:     serverTimestamp(),
-                    employeeId:    incomingShift.employeeId,
-                    employeeName:  incomingShift.employeeName,
-                    objectiveId:   incomingShift.objectiveId,
-                    objectiveName: incomingShift.objectiveName,
-                    shiftId:       incomingShift.id,
-                    details:       _detail,
-                }, _tenantId)).catch(() => {});
-            }
-
-            // Notificar al guardia saliente si fue relevado
-            if (prevShiftId) {
-                const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
-                if (prevShift?.employeeId) {
-                    const shiftEmpresaId = String(incomingShift.empresaId || empresaId || '').trim();
-                    await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
-                        userId:   prevShift.employeeId,
-                        type:     'RELEVO',
-                        title:    'âœ… Turno finalizado — relevado',
-                        body:     `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizó.`,
-                        read:     false,
-                        createdAt: serverTimestamp(),
-                    }, shiftEmpresaId)).catch(() => {});
-                }
-            }
-
-        } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
+            })();
+        } catch (e: any) {
+            toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
+        } finally {
+            setSaving(false);
+        }
     };
 
     return (
@@ -1600,6 +1601,37 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
     );
 };
 
+/** Solo turnos realmente de evento (EV). No alcanza con eventoId suelto en un M/T/N. */
+const isEventShift = (shift: any): boolean => {
+    const code = String(shift?.code || '').trim().toUpperCase();
+    const origin = String(shift?.origin || '').trim().toUpperCase();
+    return code === 'EV' || origin === 'EVENTO';
+};
+
+const getEventGroupKey = (shift: any): string => {
+    const eventoId = String(shift?.eventoId || '').trim();
+    const servicioId = String(shift?.servicioId || '').trim();
+    if (eventoId || servicioId) return `EV_${eventoId || 'sin_evento'}_${servicioId || 'sin_servicio'}`;
+    const eventoNombre = String(shift?.eventoNombre || '').trim();
+    const servicioNombre = String(shift?.servicioNombre || '').trim();
+    return `EVNAME_${eventoNombre || 'evento'}_${servicioNombre || 'servicio'}`;
+};
+
+const getEventGroupLabel = (shift: any): string => {
+    const evento = String(shift?.eventoNombre || '').trim() || 'Evento sin nombre';
+    const servicio = String(shift?.servicioNombre || '').trim();
+    if (servicio) return `Evento: ${evento} · ${servicio}`;
+    return `Evento: ${evento}`;
+};
+
+/** En EV mostrar el servicio del evento, no el puesto SLA que quedó pegado al convertir. */
+const shiftPostLabel = (shift: any): string => {
+    if (isEventShift(shift)) {
+        return String(shift?.servicioNombre || shift?.eventoNombre || shift?.positionName || 'Evento').trim();
+    }
+    return String(shift?.positionName || '—').trim();
+};
+
 const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, onOpenManualRetention, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
 
@@ -1675,7 +1707,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     {badge}
                 </div>
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
-                    <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shift.positionName}</span></span>
+                    <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
                     <span className={`shrink-0 font-bold ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
                 </div>
@@ -1730,7 +1762,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <MapPin size={10} className="text-indigo-400 shrink-0"/>
                     <span className="truncate font-medium">{shift.objectiveName}</span>
                     <span className="text-slate-300">·</span>
-                    <span className="text-indigo-600 font-bold truncate">{shift.positionName}</span>
+                    <span className="text-indigo-600 font-bold truncate">{shiftPostLabel(shift)}</span>
                     {shift.turaContiguous && shift.turaImputationPos && (
                         <span className="text-violet-600 font-bold shrink-0">+TURA {shift.turaImputationPos}</span>
                     )}
@@ -1805,30 +1837,6 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
             </div>
         </div>
     );
-};
-
-const isEventShift = (shift: any): boolean => {
-    const code = String(shift?.code || shift?.type || '').toUpperCase();
-    const origin = String(shift?.origin || '').toUpperCase();
-    return code === 'EV' || origin === 'EVENTO' || !!String(shift?.eventoId || '').trim();
-};
-
-const getEventGroupKey = (shift: any): string => {
-    const eventoId = String(shift?.eventoId || '').trim();
-    const servicioId = String(shift?.servicioId || '').trim();
-    if (eventoId || servicioId) return `EV_${eventoId || 'sin_evento'}_${servicioId || 'sin_servicio'}`;
-    const eventoNombre = String(shift?.eventoNombre || '').trim();
-    const servicioNombre = String(shift?.servicioNombre || '').trim();
-    return `EVNAME_${eventoNombre || 'evento'}_${servicioNombre || 'servicio'}`;
-};
-
-const getEventGroupLabel = (shift: any): string => {
-    const evento = String(shift?.eventoNombre || '').trim() || 'Evento sin nombre';
-    const servicio = String(shift?.servicioNombre || '').trim();
-    const puesto = String(shift?.positionName || '').trim();
-    if (servicio) return `Evento: ${evento} · ${servicio}`;
-    if (puesto) return `Evento: ${evento} · ${puesto}`;
-    return `Evento: ${evento}`;
 };
 
 const splitShiftsByEvent = (items: any[]) => {

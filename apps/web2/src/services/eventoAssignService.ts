@@ -93,13 +93,18 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
     const originalCode = existingTurno
         ? String(existingTurno.data().code || '').toUpperCase()
         : null;
-    const existingTurnoData = (existingTurno?.data() || {}) as Record<string, unknown>;
+    const existingTurnoData = (existingTurno?.data() || {}) as Record<string, any>;
     const isPassiveRetention = originalCode === 'RET'
         || String(existingTurnoData.origin || '').toUpperCase() === 'RETEN'
         || existingTurnoData.isReten === true;
 
-    let originalObjectiveId: string | null = existingTurno?.data().objectiveId || empleadoObjectiveId || null;
-    let originalObjectiveName: string | null = existingTurno?.data().objectiveName || empleadoObjectiveName || null;
+    let originalObjectiveId: string | null = existingTurnoData.objectiveId || empleadoObjectiveId || null;
+    let originalObjectiveName: string | null = existingTurnoData.objectiveName || empleadoObjectiveName || null;
+    const originalPositionName = String(existingTurnoData.positionName || '').trim() || null;
+    const originalStartTime = existingTurnoData.startTime ?? null;
+    const originalEndTime = existingTurnoData.endTime ?? null;
+    const originalClientId = existingTurnoData.clientId || clienteId || null;
+    const originalClientName = existingTurnoData.clientName || clienteNombre || null;
 
     if (!originalObjectiveId) {
         try {
@@ -121,6 +126,7 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
     const batch = writeBatch(db);
 
     if (existingTurno) {
+        // El doc pasa a ser el turno del EVENTO — no conservar el nombre del puesto SLA.
         batch.update(existingTurno.ref, {
             code: 'EV',
             origin: 'EVENTO',
@@ -128,6 +134,8 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
             eventoNombre,
             servicioId,
             servicioNombre,
+            positionName: servicioNombre || 'Evento',
+            originalPositionName: originalPositionName,
             startTime,
             endTime,
             hours: horas,
@@ -151,6 +159,7 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
             eventoNombre,
             servicioId,
             servicioNombre,
+            positionName: servicioNombre || 'Evento',
             startTime,
             endTime,
             hours: horas,
@@ -176,6 +185,31 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
     if (shouldCreateVacancyByEvent) {
         const [y, m, d2] = servicioFecha.split('-');
         const fechaLabel = `${d2}/${m}/${y}`;
+        // Vacante REAL en el puesto original — Operaciones la ve bajo el objetivo, no dentro del evento.
+        const vacRef = doc(collection(db, 'turnos'));
+        batch.set(vacRef, stampEmpresaId({
+            employeeId: 'VACANTE',
+            employeeName: 'VACANTE',
+            isUnassigned: true,
+            code: originalCode || null,
+            objectiveId: originalObjectiveId,
+            objectiveName: originalObjectiveName,
+            positionName: originalPositionName,
+            clientId: originalClientId,
+            clientName: originalClientName,
+            startTime: originalStartTime || startTime,
+            endTime: originalEndTime || endTime,
+            status: 'UNCOVERED',
+            origin: 'VACANTE_POR_EVENTO',
+            vacancyOrigin: 'EVENTO',
+            causedByEventoId: eventoId,
+            causedByEventoNombre: eventoNombre,
+            causedByEmployeeId: empleadoId,
+            causedByEmployeeName: empleadoNombre,
+            createdAt: serverTimestamp(),
+            draft: false,
+        } as Record<string, unknown>, empresaId));
+
         const notifPayload = stampEmpresaId({
             type:         'VACANTE_POR_EVENTO',
             status:       'pending',
@@ -184,9 +218,12 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
             actionTarget: 'PLANIFICACION',
             title:        `Vacante por evento · ${empleadoNombre}`,
             description:  `${empleadoNombre} sale al evento "${eventoNombre}" el ${fechaLabel}. `
-                + `Queda vacante turno ${originalCode || '—'} en ${originalObjectiveName || originalObjectiveId}.`,
+                + `Queda vacante turno ${originalCode || '—'} en ${originalObjectiveName || originalObjectiveId}`
+                + (originalPositionName ? ` · ${originalPositionName}` : '') + '.',
             objectiveId:   originalObjectiveId,
             objectiveName: originalObjectiveName,
+            positionName:  originalPositionName,
+            shiftId:       vacRef.id,
             fecha:         servicioFecha,
             codigoTurnoOriginal: originalCode,
             employeeId:    empleadoId,

@@ -1504,7 +1504,7 @@ export default function TacticalMapView() {
                 </div>
             )}
             
-            {/* ── PANEL FLOTANTE DE ALERTAS — arriba del logo Google; leyenda del mapa queda en bottom-28 ── */}
+            {/* ── PANEL FLOTANTE DE ALERTAS — abajo izquierda; leyenda del mapa está arriba izquierda ── */}
             <div className="absolute bottom-14 left-4 z-[1000]">
             {(() => {
                 // Ghost badge fix: mismo filtro que stats.prioridad
