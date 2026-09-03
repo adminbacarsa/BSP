@@ -208,25 +208,86 @@ export async function ejecutarCerrarTurno(
   empresaId: string,
   payload: AgentActionPayload,
 ): Promise<{ ok: boolean; message: string }> {
-  const { shiftId, empleadoNombre, objetivoNombre, fecha } = payload as {
+  const { shiftId, empleadoId, empleadoNombre, objetivoId, objetivoNombre, fecha } = payload as {
     shiftId: string;
+    empleadoId?: string;
     empleadoNombre?: string;
+    objetivoId?: string;
     objetivoNombre?: string;
     fecha?: string;
   };
   if (!shiftId) throw new Error('Payload incompleto: falta shiftId.');
   const db = admin.firestore();
+  const now = Timestamp.now();
+
   await db.collection('turnos').doc(shiftId).update({
+    status: 'COMPLETED',
     isCompleted: true,
-    completedAt: Timestamp.now(),
+    isPresent: false,
+    realEndTime: now,
     modifiedByAgent: true,
-    modifiedByAgentAt: Timestamp.now(),
+    modifiedByAgentAt: now,
     modifiedByAgentEmpresaId: empresaId,
   });
-  const nombre = empleadoNombre ?? 'Turno';
-  const sitio = objetivoNombre ? ` en **${objetivoNombre}**` : '';
+
+  // Audit log (fire and forget)
+  const nombre = empleadoNombre ?? 'Guardia';
+  const sitio = objetivoNombre ?? '';
+  db.collection('audit_logs').add({
+    action: 'CHECKOUT',
+    module: 'ASISTENTE_IA',
+    actorName: 'Asistente COSP',
+    timestamp: now,
+    empleadoId: empleadoId ?? '',
+    employeeId: empleadoId ?? '',
+    empleadoNombre: nombre,
+    employeeName: nombre,
+    objetivoId: objetivoId ?? '',
+    objectiveId: objetivoId ?? '',
+    objetivoNombre: sitio,
+    objectiveName: sitio,
+    shiftId,
+    empresaId,
+    details: `${nombre} finalizó turno${sitio ? ` en ${sitio}` : ''} (vía Asistente IA).`,
+  }).catch(() => {});
+
+  // Auto-descartar novedades de retención/recargo del turno
+  const AUTO_DISMISS = ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'];
+  db.collection('novedades')
+    .where('shiftId', '==', shiftId)
+    .where('status', '==', 'pending')
+    .limit(20)
+    .get()
+    .then((snap) => {
+      if (snap.empty) return;
+      const toUpdate = snap.docs.filter((d) => AUTO_DISMISS.includes(d.data().type));
+      if (!toUpdate.length) return;
+      const batch = db.batch();
+      toUpdate.forEach((d) => batch.update(d.ref, { status: 'ATENDIDA', atendidaAt: now, atendidaPor: 'AUTO_CHECKOUT_AGENT' }));
+      return batch.commit();
+    })
+    .catch(() => {});
+
+  // Notificar al guardia (FCM via onEmployeeNotificationCreated trigger)
+  if (empleadoId) {
+    db.collection('empleados').doc(empleadoId).get().then((empSnap) => {
+      const uid = empSnap.exists ? (empSnap.data()?.uid as string | undefined) : undefined;
+      return db.collection('user_notifications').add({
+        type: 'TURNO_FINALIZADO',
+        title: 'Tu turno fue cerrado',
+        body: `Tu turno${sitio ? ` en ${sitio}` : ''}${fecha ? ` del ${fecha}` : ''} fue registrado como finalizado.`,
+        employeeId: empleadoId,
+        ...(uid ? { uid } : {}),
+        shiftId,
+        empresaId,
+        createdAt: now,
+        read: false,
+      });
+    }).catch(() => {});
+  }
+
   const dia = fecha ? ` del ${fecha}` : '';
-  return { ok: true, message: `✓ Turno cerrado: **${nombre}**${dia}${sitio} registrado como completado.` };
+  return { ok: true, message: `✓ Turno cerrado: **${nombre}**${dia}${sitio ? ` en **${sitio}**` : ''} — estado COMPLETED, presencia finalizada. El guardia fue notificado.` };
 }
 
 export async function ejecutarPlanificarObjetivoMes(

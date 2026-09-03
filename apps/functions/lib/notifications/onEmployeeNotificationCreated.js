@@ -7,6 +7,7 @@ const INBOX_NEEDS_FCM = new Set([
     'CONVOCATORIA_EVENTO',
     'EVENTO_CONFIRMADO',
     'SWAP_REQUEST',
+    'TURNO_FINALIZADO',
 ]);
 async function collectTokens(db, uid, employeeId) {
     const tokenSet = new Set();
