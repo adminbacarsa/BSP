@@ -346,19 +346,18 @@ export default function SupervisionPage() {
     if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'ESTRUCTURAL' || !mSelPosId) return null;
     const pos = slaPositions.find((p) => p.id === mSelPosId);
     if (!pos) return null;
-    const shift = mSelShiftCode
-      ? pos.shifts.find((s) => s.code === mSelShiftCode)
-      : pos.shifts[0];
-    const current = shift?.quantity ?? pos.quantity ?? 1;
     const delta = Math.max(1, Math.floor(Number(mPax) || 1));
-    return {
-      posName: pos.name,
-      shiftCode: shift?.code || mSelShiftCode || '',
-      current,
-      next: current + delta,
-      delta,
-    };
-  }, [mTipo, mAlcance, mSelPosId, mSelShiftCode, mPax, slaPositions]);
+    const posBase = pos.quantity ?? 1;
+    const bands = pos.shifts.map((s) => {
+      const current = s.quantity ?? posBase;
+      return { code: s.code, startTime: s.startTime, endTime: s.endTime, current, next: current + delta };
+    });
+    const currents = bands.map((b) => b.current);
+    const uniformCurrent = currents.length ? Math.min(...currents) : posBase;
+    const uniformNext = uniformCurrent + delta;
+    const allSame = bands.length > 0 && bands.every((b) => b.current === bands[0].current);
+    return { posName: pos.name, delta, bands, allSame, uniformCurrent, uniformNext };
+  }, [mTipo, mAlcance, mSelPosId, mPax, slaPositions]);
 
   // Cargar guardias con turno en el objetivo/fecha seleccionados (para TURA)
   useEffect(() => {
@@ -728,13 +727,27 @@ export default function SupervisionPage() {
   };
 
   const handleCrearManual = async () => {
-    if (!user || !empresaId || !mClienteId || !mObjetivoId || !mFechaDesde || !mStart || !mEnd || !mMotivo.trim()) return;
+    if (!user || !empresaId || !mClienteId || !mObjetivoId || !mFechaDesde || !mMotivo.trim()) return;
     setManualSaving(true);
     try {
       const selectedObjective = scopedObjectives.find(obj => obj.id === mObjetivoId);
       const isAgregado = mTipo === 'AGREGADO_TURNO';
       const alcance = isAgregado ? 'PUNTUAL' as const : mAlcance;
       const esEstructural = !isAgregado && alcance === 'ESTRUCTURAL';
+      const selPosForTimes = esEstructural ? slaPositions.find((p) => p.id === mSelPosId) : undefined;
+      const firstBand = selPosForTimes?.shifts[0];
+      const effectiveStart = mStart || firstBand?.startTime || '08:00';
+      const effectiveEnd = mEnd || firstBand?.endTime || '16:00';
+      if (!isAgregado && !esEstructural && (!mStart || !mEnd)) {
+        toast.error('Indicá horario de inicio y fin');
+        setManualSaving(false);
+        return;
+      }
+      if (isAgregado && (!mStart || !mEnd)) {
+        toast.error('Indicá horario de inicio y fin');
+        setManualSaving(false);
+        return;
+      }
       const rfzUsaRango = !isAgregado && !esEstructural && mFechaModo === 'RANGO';
       const fechasRfz = rfzUsaRango
         ? listYmdDatesInclusive(mFechaDesde, mFechaHasta)
@@ -785,12 +798,6 @@ export default function SupervisionPage() {
           setManualSaving(false);
           return;
         }
-        const selPos = slaPositions.find((p) => p.id === mSelPosId);
-        if (selPos && selPos.shifts.length > 0 && !mSelShiftCode) {
-          toast.error('Seleccioná el turno/banda del puesto');
-          setManualSaving(false);
-          return;
-        }
       }
 
       const buildSolicitudBase = (fecha: string, guard?: { shiftId: string; empleadoId: string; nombre: string }) => ({
@@ -802,8 +809,8 @@ export default function SupervisionPage() {
         tipo:                mTipo,
         alcance,
         fecha,
-        startTime:           mStart,
-        endTime:             mEnd,
+        startTime:           isAgregado || !esEstructural ? mStart : effectiveStart,
+        endTime:             isAgregado || !esEstructural ? mEnd : effectiveEnd,
         motivo:              mMotivo.trim(),
         origen:              'SUPERVISOR_MANUAL' as const,
         estado:              'APROBADA' as const,
@@ -814,7 +821,12 @@ export default function SupervisionPage() {
         autorizadoPorUid:    user!.uid,
         autorizadoPorNombre: user!.displayName || user!.email || '',
         autorizadoAt:        Timestamp.now(),
-        ...(!isAgregado ? { cantidadPax: mPax, positionName: positionName || undefined, positionId, shiftCode } : {}),
+        ...(!isAgregado ? {
+          cantidadPax: mPax,
+          positionName: positionName || undefined,
+          positionId,
+          ...(esEstructural ? {} : { shiftCode }),
+        } : {}),
         ...(isAgregado && guard ? {
           parentEmpleadoName: guard.nombre || undefined,
           parentEmpleadoId:   guard.empleadoId || undefined,
@@ -1382,7 +1394,7 @@ export default function SupervisionPage() {
               <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
                 <AlertCircle size={12}/>
                 {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
-                  ? '+ Pax al puesto: modifica el SLA (ej. Puesto 1 de 2 → 3 pax). Planificación cubre la demanda. Queda en trazabilidad del servicio.'
+                  ? '+ Pax al puesto: suma rotación en todas las bandas (M/T/N…). Planificación cubre la demanda. Queda en trazabilidad del servicio.'
                   : mTipo === 'AGREGADO_TURNO'
                     ? 'TURA: extensión del turno del guardia — plan/ops según contigüidad.'
                     : 'RFZ puntual: vacante extra en fecha → fila VACANTE RFZ → publicar → ops → prefactura.'}
@@ -1422,7 +1434,7 @@ export default function SupervisionPage() {
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => { setMAlcance(opt.id); if (opt.id === 'ESTRUCTURAL') { setMFechaModo('DIA'); setMFechaHasta(''); } }}
+                    onClick={() => { setMAlcance(opt.id); if (opt.id === 'ESTRUCTURAL') { setMFechaModo('DIA'); setMFechaHasta(''); setMSelShiftCode(''); setMStart(''); setMEnd(''); } }}
                     className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${mAlcance === opt.id ? 'bg-amber-600 text-white border-amber-600' : 'border-slate-200 text-slate-600 hover:border-amber-300'}`}
                   >
                     {opt.label}
@@ -1482,14 +1494,38 @@ export default function SupervisionPage() {
                 {mPaxEstructuralPreview && (
                   <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                     {mPaxEstructuralPreview.posName}
-                    {mPaxEstructuralPreview.shiftCode ? ` · ${mPaxEstructuralPreview.shiftCode}` : ''}
-                    {' · '}{mPaxEstructuralPreview.current} pax → <span className="text-amber-900">{mPaxEstructuralPreview.next} pax</span>
-                    {' '}(+{mPaxEstructuralPreview.delta} en el contrato)
+                    {mPaxEstructuralPreview.allSame
+                      ? ` · todas las bandas: ${mPaxEstructuralPreview.uniformCurrent} → ${mPaxEstructuralPreview.uniformNext} pax`
+                      : ` · +${mPaxEstructuralPreview.delta} pax por banda`}
+                    {' '}(+{mPaxEstructuralPreview.delta} rotación en el contrato)
                   </p>
                 )}
                 {mSelPosId && (() => {
-                  const shifts = slaPositions.find(p => p.id === mSelPosId)?.shifts || [];
+                  const pos = slaPositions.find(p => p.id === mSelPosId);
+                  const shifts = pos?.shifts || [];
                   if (!shifts.length) return null;
+                  const delta = mAlcance === 'ESTRUCTURAL' ? Math.max(1, Math.floor(Number(mPax) || 1)) : 0;
+                  const posBase = pos?.quantity ?? 1;
+                  if (mAlcance === 'ESTRUCTURAL') {
+                    return (
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Bandas del puesto (todas suben)</label>
+                        <div className="flex gap-2 flex-wrap">
+                          {shifts.map(s => {
+                            const cur = s.quantity ?? posBase;
+                            const next = cur + delta;
+                            return (
+                              <span key={s.code} className="px-3 py-1.5 rounded-xl text-xs font-black border bg-slate-50 border-slate-200 text-slate-700">
+                                <span>{s.code}</span>
+                                <span className="font-normal opacity-75"> {s.startTime}–{s.endTime}</span>
+                                <span className="ml-1 font-bold text-amber-700"> · {cur} → {next} pax</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
                     <div>
                       <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Turno del puesto</label>
@@ -1547,12 +1583,16 @@ export default function SupervisionPage() {
                   </p>
                 )}
               </div>
+            ) : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' ? (
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vigencia desde</label>
+                <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
+                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+              </div>
             ) : (
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
-                    {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' ? 'Vigencia desde' : 'Fecha'}
-                  </label>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
                   <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
                     className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
                 </div>
@@ -1704,10 +1744,11 @@ export default function SupervisionPage() {
               </button>
               <button type="button"
                 disabled={
-                  manualSaving || !mClienteId || !mObjetivoId || !mFechaDesde || !mStart || !mEnd || !mMotivo.trim()
+                  manualSaving || !mClienteId || !mObjetivoId || !mFechaDesde || !mMotivo.trim()
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance !== 'ESTRUCTURAL' && (!mStart || !mEnd))
+                  || (mTipo === 'AGREGADO_TURNO' && (!mStart || !mEnd))
                   || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && mFechaModo === 'RANGO' && !mFechaHasta)
                   || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && slaPositions.some((p) => !isEventosPosition(p) && p.shifts.length > 0) && !mSelPosId)
-                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && !!mSelPosId && (slaPositions.find((p) => p.id === mSelPosId)?.shifts.length || 0) > 0 && !mSelShiftCode)
                   || (mTipo === 'AGREGADO_TURNO' && (
                     Array.isArray(guardias) && guardias.length > 0
                       ? mGuardiasTura.length === 0

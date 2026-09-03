@@ -76,8 +76,21 @@ async function resolveSlaRef(sol: SolicitudRefuerzo) {
 }
 
 function applyPaxDelta(pos: ServicePosition, sol: SolicitudRefuerzo, delta: number): { next: ServicePosition; shiftCode: string } {
-    const shift = matchShift(pos, sol);
+    const explicitBand = String(sol.shiftCode || sol.slaAppliedShiftCode || '').trim().toUpperCase();
     const nextPos: ServicePosition = { ...pos, allowedShiftTypes: [...(pos.allowedShiftTypes || [])] };
+    const posBase = Number(nextPos.quantity || 1);
+
+    /** Sin banda explícita = rotación del puesto completo (+pax en todas las bandas). */
+    if (!explicitBand) {
+        nextPos.quantity = Math.max(0, posBase + delta);
+        nextPos.allowedShiftTypes = nextPos.allowedShiftTypes.map((s) => {
+            const base = s.quantity != null ? Number(s.quantity) : posBase;
+            return { ...s, quantity: Math.max(0, base + delta) };
+        });
+        return { next: nextPos, shiftCode: '' };
+    }
+
+    const shift = matchShift(pos, sol);
 
     if (shift) {
         const shIdx = nextPos.allowedShiftTypes.findIndex((s) => s === shift || (
@@ -86,15 +99,15 @@ function applyPaxDelta(pos: ServicePosition, sol: SolicitudRefuerzo, delta: numb
         ));
         if (shIdx >= 0) {
             const cur = nextPos.allowedShiftTypes[shIdx];
-            const base = cur.quantity != null ? Number(cur.quantity) : Number(nextPos.quantity || 1);
+            const base = cur.quantity != null ? Number(cur.quantity) : posBase;
             nextPos.allowedShiftTypes[shIdx] = { ...cur, quantity: Math.max(0, base + delta) };
         } else {
-            nextPos.quantity = Math.max(0, Number(nextPos.quantity || 1) + delta);
+            nextPos.quantity = Math.max(0, posBase + delta);
         }
     } else {
-        nextPos.quantity = Math.max(0, Number(nextPos.quantity || 1) + delta);
+        nextPos.quantity = Math.max(0, posBase + delta);
     }
-    return { next: nextPos, shiftCode: String(shift?.code || sol.shiftCode || sol.slaAppliedShiftCode || '') };
+    return { next: nextPos, shiftCode: explicitBand };
 }
 
 /** Suma pax al puesto/turno del SLA vigente del objetivo (refuerzo estructural). */
@@ -115,7 +128,9 @@ export async function applySlaRefuerzoPax(
 
     const logEntry: Omit<SlaChangeLogEntry, 'at'> = {
         action: 'REFUERZO_ESTRUCTURAL',
-        detail: `+${addedPax} pax en ${nextPos.name}${shiftCode ? ` · ${shiftCode}` : ''} desde ${sol.fecha || '—'}`,
+        detail: shiftCode
+            ? `+${addedPax} pax en ${nextPos.name} · ${shiftCode} desde ${sol.fecha || '—'}`
+            : `+${addedPax} rotación en ${nextPos.name} (todas las bandas) desde ${sol.fecha || '—'}`,
         byUid: actor?.uid,
         byName: actor?.name,
         solicitudId: sol.id,
