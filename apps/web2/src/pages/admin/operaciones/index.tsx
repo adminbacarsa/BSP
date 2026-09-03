@@ -26,6 +26,7 @@ import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
+import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
@@ -36,6 +37,10 @@ const toDate = (d: any) => { if (!d) return new Date(); if (d instanceof Date) r
 const formatTimeSimple = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
 const formatDateShort = (dateObj: any) => { try { return toDate(dateObj).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Cordoba' }).toUpperCase(); } catch (e) { return '--/--'; } };
 const formatTimeRange = (start: any, end: any) => { try { return `${toDate(start).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})} - ${toDate(end).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})}`; } catch { return '--:--'; } };
+const displayShiftTimeRange = (shift: any) => {
+    if (shift?.turaContiguous && shift?.turaExtensionRange) return shift.turaExtensionRange;
+    return formatTimeRange(shift.shiftDateObj, shift.endDateObj);
+};
 const fmt24h = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
 const isSameDay = (d1: any, d2: any) => { if (!d1 || !d2) return false; return toDate(d1).toLocaleDateString('en-CA') === toDate(d2).toLocaleDateString('en-CA'); };
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => { if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity; const R = 6371; const dLat = (lat2 - lat1) * (Math.PI / 180); const dLon = (lon2 - lon1) * (Math.PI / 180); const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return R * c; };
@@ -1332,6 +1337,7 @@ const TYPE_META: Record<string, { label: string; bg: string; text: string; borde
     RRHH_NOVEDAD:                 { label: 'RRHH',            bg: 'bg-purple-600', text: 'text-white',     border: 'border-purple-500' },
     REFUERZO_CLIENTE_PENDIENTE:   { label: 'REFUERZO CLIENTE', bg: 'bg-violet-600', text: 'text-white',   border: 'border-violet-500' },
     VACANTE_OPERATIVA:            { label: 'VACANTE RFZ/TURA', bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-500' },
+    TURA_EXTENSION:               { label: 'TURA EXT', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
 };
 const DEFAULT_META = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
 
@@ -1430,7 +1436,7 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                     )}
 
                     {/* Refuerzo / vacante cliente */}
-                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') && (
+                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA' || novedad.type === 'TURA_EXTENSION') && (
                         <div className="space-y-1.5 text-xs text-white/80">
                             {novedad.tipoSolicitud && (
                                 <p><span className="text-white/50">Tipo:</span> <span className="font-bold text-white">{novedad.tipoSolicitud}</span></p>
@@ -1631,7 +1637,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     // Badge de estado
     let badge = null;
     if (shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
-    else if (refuerzoLabel && shift.isUnassigned) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${shift.isTuraCutSegment ? 'bg-violet-700' : 'bg-fuchsia-600'}`}>{shift.isTuraCutSegment ? 'TURA 2º tramo' : `VACANTE ${refuerzoLabel}`}</span>;
+    else if (shift.isTuraCutSegment) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-700 text-white shrink-0">TURA 2º tramo</span>;
+    else if (refuerzoLabel && shift.isUnassigned) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 bg-fuchsia-600`}>{`VACANTE ${refuerzoLabel}`}</span>;
     else if (refuerzoLabel) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${refuerzoLabel === 'TURA' ? 'bg-violet-600' : 'bg-red-600'}`}>{refuerzoLabel}</span>;
     else if (shift.turaContiguous) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0" title={shift.turaExtensionRange ? `Bloque ${shift.turaExtensionRange}` : 'TURA seguido'}>TURA seguido</span>;
     else if (shift.isUnassigned && shift.isPartialPlannedCoverage) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0">PARCIAL PLAN</span>;
@@ -1667,7 +1674,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
                     <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shift.positionName}</span></span>
                     <span className={`shrink-0 font-bold ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
-                    <span className="shrink-0 font-mono">{formatTimeRange(shift.shiftDateObj, shift.endDateObj)}</span>
+                    <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
                 </div>
             </div>
             <div className="flex gap-1 shrink-0">
@@ -1721,9 +1728,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <span className="truncate font-medium">{shift.objectiveName}</span>
                     <span className="text-slate-300">·</span>
                     <span className="text-indigo-600 font-bold truncate">{shift.positionName}</span>
+                    {shift.turaContiguous && shift.turaImputationPos && (
+                        <span className="text-violet-600 font-bold shrink-0">+TURA {shift.turaImputationPos}</span>
+                    )}
                     <span className="ml-auto font-mono text-slate-600 shrink-0 flex items-center gap-1">
                         <span className={`font-bold not-font-mono text-[9px] ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
-                        {formatTimeRange(shift.shiftDateObj, shift.endDateObj)}
+                        {displayShiftTimeRange(shift)}
                     </span>
                 </div>
                 {/* Franja retención */}
@@ -2017,6 +2027,12 @@ export default function OperacionesPage() {
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
             if (n.enGestion) return false; // otro operador (mapa) la está gestionando
 
+            // TURA-extensión ya mergeada en el turno del guardia: no alertar como vacante
+            if ((n.type === 'VACANTE_OPERATIVA' || n.type === 'TURA_EXTENSION') && n.tipoSolicitud === 'TURA' && n.parentEmpleadoId) {
+                const target = resolveTuraExtensionOperacionesTarget(n, logic.processedData);
+                if (target?.turaContiguous) return false;
+            }
+
             // Protocolo de cobertura: no mostrar si el turno ya terminó o venció el tiempo de gracia
             if (n.type === 'VACANTE_PROTOCOLO_COBERTURA') {
                 // Buscar el turno en processedData por shiftId o virtualVacancyId
@@ -2275,6 +2291,19 @@ export default function OperacionesPage() {
                 } else {
                     logic.setViewTab('VACANTES');
                     toast.info('Usá el botón CUBRIR en la vacante correspondiente');
+                }
+
+            } else if (novedad.type === 'TURA_EXTENSION' || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'TURA' && novedad.parentEmpleadoId)) {
+                const target = resolveTuraExtensionOperacionesTarget(novedad, logic.processedData);
+                if (target) {
+                    logic.setViewTab('PLAN');
+                    setHandoverData({ isOpen: true, shift: target });
+                    toast.info(target.turaContiguous
+                        ? `Turno extendido: ${target.employeeName} · ${displayShiftTimeRange(target)}`
+                        : `2º tramo TURA: ${target.employeeName} · ${displayShiftTimeRange(target)}`);
+                } else {
+                    logic.setViewTab('PLAN');
+                    toast.info('Buscá al guardia en PLAN — el TURA está anexado a su turno.');
                 }
 
             } else if (novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') {
@@ -3371,6 +3400,7 @@ export default function OperacionesPage() {
     );
 
     return (
+        <>
         <DashboardLayout>
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <style>{POPUP_STYLES}</style>
@@ -4223,6 +4253,8 @@ export default function OperacionesPage() {
                                     LLEGADA_TARDE:               { label: 'TARDE',   bg: 'bg-amber-400 text-white animate-pulse',    border: 'border-l-amber-400',  actionBg: 'bg-amber-500 hover:bg-amber-600' },
                                     TURNO_COMPLETADO_AUTO:       { label: 'FIN',     bg: 'bg-slate-100 text-slate-600',              border: 'border-l-slate-400',  actionBg: 'bg-slate-600 hover:bg-slate-700' },
                                     INGRESO_AUTOREGISTRO:        { label: 'INGRESO', bg: 'bg-teal-100 text-teal-700',                border: 'border-l-teal-500',   actionBg: 'bg-teal-600 hover:bg-teal-700' },
+                                    VACANTE_OPERATIVA:           { label: 'VAC RFZ', bg: 'bg-fuchsia-100 text-fuchsia-800',         border: 'border-l-fuchsia-500', actionBg: 'bg-fuchsia-700 hover:bg-fuchsia-800' },
+                                    TURA_EXTENSION:              { label: 'TURA',    bg: 'bg-violet-100 text-violet-800',           border: 'border-l-violet-500', actionBg: 'bg-violet-700 hover:bg-violet-800' },
                                 };
                                 const getMeta = (t: string) => NOV_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300', actionBg: 'bg-slate-700 hover:bg-slate-800' };
                                 // Agrupar por tipo
@@ -4430,5 +4462,13 @@ export default function OperacionesPage() {
                 );
             })()}
         </DashboardLayout>
+        {detailNovedad && (
+            <NovedadDetailPopup
+                novedad={detailNovedad}
+                onClose={() => setDetailNovedad(null)}
+                onAtender={handleAtenderNovedad}
+            />
+        )}
+        </>
     );
 }

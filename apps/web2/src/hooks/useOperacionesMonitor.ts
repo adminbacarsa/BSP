@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
-import { combinedContiguousRangeLabel, isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
+import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -364,14 +364,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const parentTuraExt = new Map<string, { turaId: string; endDateObj: Date; tura: any }>();
         mergedRawShifts.forEach((row) => {
             const code = String(row.code || row.type || '').toUpperCase();
-            if (code !== 'TURA' || !row.parentShiftId) return;
-            const parent = mergedRawShifts.find((s) => s.id === row.parentShiftId);
-            if (!parent) return;
+            if (code !== 'TURA') return;
+            const parent = findParentShiftForTura(row, mergedRawShifts);
+            if (!parent?.id) return;
+            const parentKey = String(parent.id);
             const contiguous = row.turaContiguous === true
                 || (row.turaContiguous !== false && isTuraContiguousToParent(parent, row));
             if (contiguous && row.endDateObj instanceof Date) {
                 suppressedTuraIds.add(row.id);
-                parentTuraExt.set(row.parentShiftId, { turaId: row.id, endDateObj: row.endDateObj, tura: row });
+                parentTuraExt.set(parentKey, { turaId: row.id, endDateObj: row.endDateObj, tura: row });
             }
         });
 
@@ -408,9 +409,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             let finalEmpName = shift.employeeName;
             
             let isValidEmployee = false;
-            if (shift.employeeId && shift.employeeId !== 'VACANTE') {
-                const foundName = empMap.get(shift.employeeId);
+            const parentEmpleadoId = String(shift.parentEmpleadoId || '').trim();
+            const effectiveEmployeeId = (shift.employeeId && shift.employeeId !== 'VACANTE')
+                ? shift.employeeId
+                : (parentEmpleadoId || null);
+
+            if (effectiveEmployeeId && effectiveEmployeeId !== 'VACANTE') {
+                const foundName = empMap.get(effectiveEmployeeId);
                 if (foundName) finalEmpName = foundName;
+                else if (shift.parentEmpleadoName && parentEmpleadoId) finalEmpName = shift.parentEmpleadoName;
                 isValidEmployee = true; 
             } else { finalEmpName = 'VACANTE'; }
 
@@ -443,7 +450,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const shiftCode = String(shift.code || shift.type || '').toUpperCase();
             // RFZ publicado sin guardia = refuerzo por ausencia pendiente de asignar en Planificación
             const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
-            const isTuraVacante = shiftCode === 'TURA' && isUnassigned;
+            const isTuraVacante = shiftCode === 'TURA' && isUnassigned && !parentEmpleadoId;
             if (isRfzVacante) finalEmpName = 'VACANTE: RFZ';
             if (isTuraVacante) {
                 finalEmpName = shift.parentEmpleadoName
@@ -548,13 +555,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 (isPlannedSplitSegment && !isAbsent && !isPotentialAbsence)
             );
 
-            const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
+            const phone = empPhoneMap.get(effectiveEmployeeId || shift.employeeId) || shift.phone || shift.celular || '';
 
-            const isTuraCutSegment = shiftCode === 'TURA' && !!shift.parentShiftId && !suppressedTuraIds.has(shift.id);
+            const isTuraCutSegment = shiftCode === 'TURA' && !suppressedTuraIds.has(shift.id)
+                && (!!shift.parentShiftId || !!parentEmpleadoId);
 
             return {
                 ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: rawPos,
                 phone,
+                employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,

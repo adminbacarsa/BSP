@@ -10,6 +10,7 @@ import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
     try {
@@ -736,6 +737,7 @@ const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; b
     RRHH_NOVEDAD:                 { label: 'RRHH',           bg: 'bg-purple-600', text: 'text-white', border: 'border-purple-500' },
     REFUERZO_CLIENTE_PENDIENTE:   { label: 'REFUERZO CLIENTE', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
     VACANTE_OPERATIVA:            { label: 'VACANTE RFZ/TURA', bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-500' },
+    TURA_EXTENSION:               { label: 'TURA EXT', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
 };
 const DEFAULT_META_MAP = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
 const AUTO_CLOSE_MAP = 3000;
@@ -829,7 +831,7 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                             <span className="text-white/70 text-xs">{novedad.clientName}</span>
                         </div>
                     )}
-                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') && (
+                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA' || novedad.type === 'TURA_EXTENSION') && (
                         <div className="space-y-1.5 text-xs text-white/80">
                             {novedad.tipoSolicitud && (
                                 <p><span className="text-white/50">Tipo:</span> <span className="font-bold text-white">{novedad.tipoSolicitud}</span></p>
@@ -1027,12 +1029,17 @@ export default function TacticalMapView() {
         };
     }, []);
     const pendingNovedades = useMemo(() =>
-        empNovedades.filter(n =>
-            n.status !== 'ATENDIDA' && n.status !== 'atendida' &&
-            n.type !== 'VACANTE_A_PLANIFICACION' &&
-            !n.enGestion   // excluir las que otro operador está gestionando
-        ),
-    [empNovedades]);
+        empNovedades.filter(n => {
+            if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
+            if (n.type === 'VACANTE_A_PLANIFICACION') return false;
+            if (n.enGestion) return false;
+            if ((n.type === 'VACANTE_OPERATIVA' || n.type === 'TURA_EXTENSION') && n.tipoSolicitud === 'TURA' && n.parentEmpleadoId) {
+                const target = resolveTuraExtensionOperacionesTarget(n, logic.processedData);
+                if (target?.turaContiguous) return false;
+            }
+            return true;
+        }),
+    [empNovedades, logic.processedData]);
     // Nombre del operador actual (para marcar enGestion)
     const operatorName = useMemo(() => getAuth().currentUser?.email?.split('@')[0] || 'Operador', []);
     useEffect(() => {
@@ -1152,6 +1159,18 @@ export default function TacticalMapView() {
                         setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
                     } else { setCoverageData({ isOpen: true, shift: vacShift }); }
                 } else { toast.info('Vacante no encontrada. Verificá en mapa.'); }
+            } else if (novedad.type === 'TURA_EXTENSION' || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'TURA' && novedad.parentEmpleadoId)) {
+                const target = resolveTuraExtensionOperacionesTarget(novedad, logic.processedData);
+                if (target) {
+                    logic.setViewTab('PLAN');
+                    setHandoverData({ isOpen: true, shift: target });
+                    toast.info(target.turaContiguous
+                        ? `Turno extendido: ${target.employeeName}${target.turaExtensionRange ? ` · ${target.turaExtensionRange}` : ''}`
+                        : `2º tramo TURA: ${target.employeeName}`);
+                } else {
+                    logic.setViewTab('PLAN');
+                    toast.info('Buscá al guardia en PLAN — el TURA está anexado a su turno.');
+                }
             } else if (novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') {
                 const turnoIds: string[] = Array.isArray(novedad.turnoIds) ? novedad.turnoIds : [];
                 const vacShift = turnoIds.length
@@ -1422,6 +1441,7 @@ export default function TacticalMapView() {
                     RETENCION_DETECTADA:         { label: 'REC',     bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
                     REFUERZO_CLIENTE_PENDIENTE:  { label: 'RFZ CLI', bg: 'bg-violet-100 text-violet-800',       border: 'border-l-violet-500' },
                     VACANTE_OPERATIVA:           { label: 'VAC RFZ', bg: 'bg-fuchsia-100 text-fuchsia-800',     border: 'border-l-fuchsia-500' },
+                    TURA_EXTENSION:              { label: 'TURA', bg: 'bg-violet-100 text-violet-800',       border: 'border-l-violet-500' },
                 };
                 const getNovMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
 

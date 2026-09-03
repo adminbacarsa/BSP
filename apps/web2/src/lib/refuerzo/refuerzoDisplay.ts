@@ -154,6 +154,12 @@ export function resolveRefuerzoActionTarget(sol: SolicitudRefuerzo): RefuerzoAct
   return sol.origen === 'PORTAL_CLIENTE' ? 'PLANIFICACION' : 'OPERACIONES';
 }
 
+/** TURA con guardia base ya asignado: extensión de plan, no vacante operativa. */
+export function isTuraExtensionWithAssignedGuard(sol: Pick<SolicitudRefuerzo, 'tipo' | 'parentEmpleadoId' | 'parentShiftId'>): boolean {
+  if (sol.tipo !== 'AGREGADO_TURNO') return false;
+  return !!(String(sol.parentEmpleadoId || '').trim() || String(sol.parentShiftId || '').trim());
+}
+
 export function buildRefuerzoNovedadPayload(
   sol: SolicitudRefuerzo,
   opts: {
@@ -168,15 +174,24 @@ export function buildRefuerzoNovedadPayload(
   const isPlanificacion = actionTarget === 'PLANIFICACION';
   const horasPactadas = calcRefuerzoPactadaHours(sol.startTime, sol.endTime);
   const pax = sol.cantidadPax ?? 1;
+  const turaExtension = isTuraExtensionWithAssignedGuard(sol) && !isPlanificacion;
+
+  const defaultType = isPlanificacion
+    ? 'REFUERZO_CLIENTE_PENDIENTE'
+    : turaExtension
+      ? 'TURA_EXTENSION'
+      : 'VACANTE_OPERATIVA';
 
   return {
-    type: opts.type ?? (isPlanificacion ? 'REFUERZO_CLIENTE_PENDIENTE' : 'VACANTE_OPERATIVA'),
+    type: opts.type ?? defaultType,
     title: buildRefuerzoDisplayTitle(sol),
     description: isPlanificacion
       ? buildRefuerzoPlanningInstruction(sol)
-      : buildRefuerzoOperacionesInstruction(sol),
+      : turaExtension
+        ? `Extensión TURA${sol.parentEmpleadoName ? ` de ${sol.parentEmpleadoName}` : ''}: ${sol.startTime || ''}–${sol.endTime || ''}. Horario anexado al turno en plan — no requiere protocolo de cobertura.`
+        : buildRefuerzoOperacionesInstruction(sol),
+    priority: turaExtension ? 'normal' : 'high',
     status: 'pending',
-    priority: 'high',
     actionTarget,
     solicitudRefuerzoId: sol.id,
     tipoSolicitud: code,

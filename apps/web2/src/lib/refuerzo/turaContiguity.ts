@@ -123,3 +123,101 @@ export function combinedContiguousRangeLabel(
 export function turaBillableHours(tura: ShiftClockLike | null | undefined): number {
   return hoursFromShiftClock(tura || {});
 }
+
+export type ShiftRowLike = ShiftClockLike & {
+  id?: string;
+  parentShiftId?: string;
+  parentEmpleadoId?: string;
+  employeeId?: string;
+  objectiveId?: string;
+  code?: string;
+  type?: string;
+  solicitudRefuerzoId?: string;
+  isTuraCutSegment?: boolean;
+  turaContiguous?: boolean;
+};
+
+/** Busca el turno base de un TURA por id directo o por parentEmpleadoId + proximidad horaria. */
+export function findParentShiftForTura(
+  tura: ShiftRowLike | null | undefined,
+  allShifts: ShiftRowLike[],
+): ShiftRowLike | null {
+  if (!tura) return null;
+  const parentId = String(tura.parentShiftId || '').trim();
+  if (parentId) {
+    const direct = allShifts.find((s) => s.id === parentId);
+    if (direct) return direct;
+  }
+  const peid = String(tura.parentEmpleadoId || '').trim();
+  if (!peid) return null;
+  const turaStart = resolveShiftStartInstant(tura);
+  if (!turaStart) return null;
+
+  let best: ShiftRowLike | null = null;
+  let bestGap = Infinity;
+  for (const s of allShifts) {
+    if (s.id === tura.id) continue;
+    const code = String(s.code || s.type || '').toUpperCase();
+    if (code === 'TURA' || code === 'RFZ') continue;
+    if (String(s.employeeId || '') !== peid) continue;
+    if (tura.objectiveId && s.objectiveId && s.objectiveId !== tura.objectiveId) continue;
+    const parentEnd = resolveShiftEndInstant(s);
+    if (!parentEnd) continue;
+    const gap = (turaStart.getTime() - parentEnd.getTime()) / 60000;
+    if (gap < -60 || gap > 24 * 60) continue;
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = s;
+    }
+  }
+  return best;
+}
+
+/** Turno operativo a enfocar al atender una novedad TURA-extensión (padre mergeado o 2º tramo cortado). */
+export function resolveTuraExtensionOperacionesTarget(
+  novedad: {
+    parentShiftId?: string | null;
+    parentEmpleadoId?: string | null;
+    objectiveId?: string | null;
+    solicitudRefuerzoId?: string | null;
+    turnoIds?: string[] | null;
+    tipoSolicitud?: string | null;
+  },
+  processedData: ShiftRowLike[],
+): ShiftRowLike | null {
+  const isTura = String(novedad.tipoSolicitud || '').toUpperCase() === 'TURA'
+    || String(novedad.type || '').toUpperCase() === 'TURA_EXTENSION';
+  if (!isTura && !novedad.parentEmpleadoId) return null;
+
+  const parentId = String(novedad.parentShiftId || '').trim();
+  if (parentId) {
+    const parent = processedData.find((s) => s.id === parentId);
+    if (parent) return parent;
+  }
+
+  const peid = String(novedad.parentEmpleadoId || '').trim();
+  if (peid && novedad.objectiveId) {
+    const mergedParent = processedData.find(
+      (s) => s.employeeId === peid
+        && s.objectiveId === novedad.objectiveId
+        && s.turaContiguous,
+    );
+    if (mergedParent) return mergedParent;
+
+    const turnoIds = Array.isArray(novedad.turnoIds) ? novedad.turnoIds : [];
+    const cut = processedData.find(
+      (s) => s.isTuraCutSegment
+        && (String(s.parentEmpleadoId || s.employeeId || '') === peid)
+        && s.objectiveId === novedad.objectiveId
+        && (turnoIds.includes(String(s.id || ''))
+          || (novedad.solicitudRefuerzoId && s.solicitudRefuerzoId === novedad.solicitudRefuerzoId)),
+    );
+    if (cut) return cut;
+  }
+
+  const turnoIds = Array.isArray(novedad.turnoIds) ? novedad.turnoIds : [];
+  if (turnoIds.length) {
+    return processedData.find((s) => turnoIds.includes(String(s.id || ''))) ?? null;
+  }
+  return null;
+}

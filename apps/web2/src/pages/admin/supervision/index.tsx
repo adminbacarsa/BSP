@@ -824,7 +824,8 @@ export default function SupervisionPage() {
             : false;
           const turnoExtra: Record<string, unknown> = {
             ...base,
-            employeeId: 'VACANTE',
+            employeeId: guard.empleadoId || 'VACANTE',
+            employeeName: guard.nombre || null,
             turaContiguous,
           };
           if (positionName) turnoExtra.positionName = positionName;
@@ -864,7 +865,7 @@ export default function SupervisionPage() {
           });
           created += 1;
         }
-        toast.success(`${created} TURA${created > 1 ? 's' : ''} creada${created > 1 ? 's' : ''} como vacante operativa`);
+        toast.success(`${created} TURA${created > 1 ? 's' : ''} creada${created > 1 ? 's' : ''} — extensión en plan${created > 1 ? '' : ' del guardia'}`);
         resetManualForm();
         return;
       }
