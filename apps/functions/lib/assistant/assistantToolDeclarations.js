@@ -485,13 +485,13 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS.push({
     },
 }, {
     name: 'ejecutar_auto_presencia_cierre',
-    description: 'Marca automáticamente presencia en los turnos que ya iniciaron sin fichar, y cierra los turnos que ya terminaron y siguen activos. Si hay un relevo pendiente (guardia que viene a reemplazar pero aún no llegó), el turno saliente queda en retención en vez de cerrarse. Ideal para «activá el modo demo», «dar presentes automáticos», «cerrar turnos que terminaron», «activá auto presencia». Con simulacion=true solo muestra qué haría sin modificar nada.',
+    description: 'Actúa como operador automático: marca presencia a los guardias que ya iniciaron turno sin fichar, cierra los turnos que terminaron, y completa los relevos (cuando llega el reemplazo, cierra al saliente automáticamente en el mismo ciclo). Usar con simulacion=false para «activar modo demo», «activá modo demo», «actuar como operador», «dar presentes y cerrar turnos», «hacer los relevos automáticos». Con simulacion=true (o para «simulá», «qué haría») muestra un preview sin modificar nada.',
     parameters: {
         type: generative_ai_1.SchemaType.OBJECT,
         properties: {
             simulacion: {
                 type: generative_ai_1.SchemaType.BOOLEAN,
-                description: 'Si true (default), solo muestra qué haría sin modificar datos (dry run). Si false, ejecuta los cambios reales.',
+                description: 'false = ejecuta cambios reales (modo demo activo). true = solo preview sin modificar. Default: false cuando el usuario dice "activá modo demo" o equivalente; true cuando dice "simulá" o "qué haría".',
             },
         },
         required: [],

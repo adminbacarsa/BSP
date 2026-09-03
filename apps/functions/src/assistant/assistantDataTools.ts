@@ -4501,21 +4501,32 @@ async function ejecutarAutoPresenciaCierre(
     return `${emp} — ${t.code} ${desde}–${hasta} en ${obj}`;
   }
 
-  // Índice para chequear relevos pendientes
-  const byObjective = new Map<string, Array<{ startMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean }>>();
+  // Índice mutable: registra el estado virtual tras el pase 1 (entrantes marcados como presentes)
+  // Esto permite que en el pase 2, al cerrar salientes, el relevo ya "conste" como presente
+  interface TurnoIdx { shiftId: string; startMs: number; endMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean; }
+  const byObjective = new Map<string, TurnoIdx[]>();
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     const oid = String(t.objectiveId || '');
     if (!oid) continue;
     if (!byObjective.has(oid)) byObjective.set(oid, []);
     byObjective.get(oid)!.push({
+      shiftId: doc.id,
       startMs: (t.startTime?.seconds ?? 0) * 1000,
+      endMs:   (t.endTime?.seconds   ?? 0) * 1000,
       isPresent: !!t.isPresent,
       isCompleted: !!t.isCompleted,
       isAbsent: !!t.isAbsent,
     });
   }
 
+  // ¿Hay relevo que ya está (o acaba de ser marcado) presente para cubrir el fin del turno saliente?
+  function hayRelevaYPresente(objectiveId: string, shiftEndMs: number): boolean {
+    return (byObjective.get(objectiveId) ?? []).some(
+      r => r.isPresent && !r.isCompleted && Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000,
+    );
+  }
+  // ¿Hay relevo esperado pero aún no llegó?
   function hayRelevoPendiente(objectiveId: string, shiftEndMs: number): boolean {
     return (byObjective.get(objectiveId) ?? []).some(
       r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000,
@@ -4528,42 +4539,75 @@ async function ejecutarAutoPresenciaCierre(
   const batch = db.batch();
   let ops = 0;
 
+  // PASE 1: marcar presentes a los entrantes → actualizar índice virtual
   for (const doc of snap.docs) {
     const t = doc.data() as any;
-    if (t.isAbsent || t.isVirtual) continue;
+    if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted || t.isAbsent) continue;
     const startSec = t.startTime?.seconds ?? 0;
     const endSec   = t.endTime?.seconds   ?? 0;
     const startMs  = startSec * 1000;
-    const endMs    = endSec   * 1000;
     const oid = String(t.objectiveId || '');
+    if (startMs > now.getTime()) continue;
+
+    presenciaMarcada.push(turnoLabel(t, startSec, endSec, oid));
+    // Actualizar índice virtual para que el pase 2 lo vea como presente
+    const idx = byObjective.get(oid);
+    if (idx) {
+      const entry = idx.find(r => r.shiftId === doc.id);
+      if (entry) entry.isPresent = true;
+    }
+    if (!dryRun) {
+      batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+      ops++;
+    }
+  }
+
+  // PASE 2: cerrar salientes (con índice ya actualizado por pase 1)
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted) continue;
+    const startSec = t.startTime?.seconds ?? 0;
+    const endSec   = t.endTime?.seconds   ?? 0;
+    const endMs    = endSec * 1000;
+    const oid = String(t.objectiveId || '');
+    if (!endMs || endMs > now.getTime()) continue;
+
     const label = turnoLabel(t, startSec, endSec, oid);
 
-    if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
-      presenciaMarcada.push(label);
+    if (oid && hayRelevaYPresente(oid, endMs)) {
+      // Relevo ya fichó (en este ciclo o antes) → cerrar el saliente
+      turnosCerrados.push(`${label} [relevo completado]`);
       if (!dryRun) {
-        batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+        batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
         ops++;
+        db.collection('novedades')
+          .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+          .then(ns => {
+            if (ns.empty) return;
+            const b2 = db.batch();
+            ns.docs.filter(d => ['RETENCION_LARGA','RECARGO_12H','RETENCION_DETECTADA'].includes(d.data().type))
+              .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
+            return b2.commit();
+          }).catch(() => {});
       }
-    }
-
-    if (endMs && endMs <= now.getTime() && t.isPresent && !t.isCompleted) {
-      if (oid && hayRelevoPendiente(oid, endMs)) {
-        turnosEnRetencion.push(label);
-      } else {
-        turnosCerrados.push(label);
-        if (!dryRun) {
-          batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
-          ops++;
-          db.collection('novedades')
-            .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
-            .then(ns => {
-              if (ns.empty) return;
-              const b2 = db.batch();
-              ns.docs.filter(d => ['RETENCION_LARGA','RECARGO_12H','RETENCION_DETECTADA'].includes(d.data().type))
-                .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
-              return b2.commit();
-            }).catch(() => {});
-        }
+    } else if (oid && hayRelevoPendiente(oid, endMs)) {
+      // Relevo esperado pero no llegó → retención
+      turnosEnRetencion.push(label);
+    } else {
+      // Sin relevo → cerrar normalmente
+      turnosCerrados.push(label);
+      if (!dryRun) {
+        batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
+        ops++;
+        db.collection('novedades')
+          .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+          .then(ns => {
+            if (ns.empty) return;
+            const b2 = db.batch();
+            ns.docs.filter(d => ['RETENCION_LARGA','RECARGO_12H','RETENCION_DETECTADA'].includes(d.data().type))
+              .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
+            return b2.commit();
+          }).catch(() => {});
       }
     }
   }

@@ -3870,11 +3870,16 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
         if (!byObjective.has(oid))
             byObjective.set(oid, []);
         byObjective.get(oid).push({
+            shiftId: doc.id,
             startMs: (t.startTime?.seconds ?? 0) * 1000,
+            endMs: (t.endTime?.seconds ?? 0) * 1000,
             isPresent: !!t.isPresent,
             isCompleted: !!t.isCompleted,
             isAbsent: !!t.isAbsent,
         });
+    }
+    function hayRelevaYPresente(objectiveId, shiftEndMs) {
+        return (byObjective.get(objectiveId) ?? []).some(r => r.isPresent && !r.isCompleted && Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000);
     }
     function hayRelevoPendiente(objectiveId, shiftEndMs) {
         return (byObjective.get(objectiveId) ?? []).some(r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000);
@@ -3886,41 +3891,72 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
     let ops = 0;
     for (const doc of snap.docs) {
         const t = doc.data();
-        if (t.isAbsent || t.isVirtual)
+        if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted || t.isAbsent)
             continue;
         const startSec = t.startTime?.seconds ?? 0;
         const endSec = t.endTime?.seconds ?? 0;
         const startMs = startSec * 1000;
+        const oid = String(t.objectiveId || '');
+        if (startMs > now.getTime())
+            continue;
+        presenciaMarcada.push(turnoLabel(t, startSec, endSec, oid));
+        const idx = byObjective.get(oid);
+        if (idx) {
+            const entry = idx.find(r => r.shiftId === doc.id);
+            if (entry)
+                entry.isPresent = true;
+        }
+        if (!dryRun) {
+            batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+            ops++;
+        }
+    }
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted)
+            continue;
+        const startSec = t.startTime?.seconds ?? 0;
+        const endSec = t.endTime?.seconds ?? 0;
         const endMs = endSec * 1000;
         const oid = String(t.objectiveId || '');
+        if (!endMs || endMs > now.getTime())
+            continue;
         const label = turnoLabel(t, startSec, endSec, oid);
-        if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
-            presenciaMarcada.push(label);
+        if (oid && hayRelevaYPresente(oid, endMs)) {
+            turnosCerrados.push(`${label} [relevo completado]`);
             if (!dryRun) {
-                batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+                batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
                 ops++;
+                db.collection('novedades')
+                    .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+                    .then(ns => {
+                    if (ns.empty)
+                        return;
+                    const b2 = db.batch();
+                    ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
+                        .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
+                    return b2.commit();
+                }).catch(() => { });
             }
         }
-        if (endMs && endMs <= now.getTime() && t.isPresent && !t.isCompleted) {
-            if (oid && hayRelevoPendiente(oid, endMs)) {
-                turnosEnRetencion.push(label);
-            }
-            else {
-                turnosCerrados.push(label);
-                if (!dryRun) {
-                    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
-                    ops++;
-                    db.collection('novedades')
-                        .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
-                        .then(ns => {
-                        if (ns.empty)
-                            return;
-                        const b2 = db.batch();
-                        ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
-                            .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
-                        return b2.commit();
-                    }).catch(() => { });
-                }
+        else if (oid && hayRelevoPendiente(oid, endMs)) {
+            turnosEnRetencion.push(label);
+        }
+        else {
+            turnosCerrados.push(label);
+            if (!dryRun) {
+                batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
+                ops++;
+                db.collection('novedades')
+                    .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+                    .then(ns => {
+                    if (ns.empty)
+                        return;
+                    const b2 = db.batch();
+                    ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
+                        .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
+                    return b2.commit();
+                }).catch(() => { });
             }
         }
     }
