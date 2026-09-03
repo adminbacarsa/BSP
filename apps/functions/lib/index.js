@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = void 0;
+exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -640,6 +640,115 @@ async function executeAgentActionHandler(data, context) {
     throw new functions.https.HttpsError('internal', 'Acción no implementada.');
 }
 exports.executeAgentAction = functions.https.onCall(executeAgentActionHandler);
+const SUPER_ADMIN_ROLES_AP = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
+exports.autoPresenciaYCierre = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .https.onCall(async (data, context) => {
+    if (!context.auth?.uid)
+        throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión.');
+    const role = String(context.auth.token?.role ?? '');
+    if (!SUPER_ADMIN_ROLES_AP.includes(role)) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo SuperAdmin puede ejecutar este comando.');
+    }
+    const empresaId = data?.empresaId || String(context.auth.token?.empresaId ?? '');
+    if (!empresaId)
+        throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+    const dryRun = data?.dryRun !== false;
+    const db = admin.firestore();
+    const now = new Date();
+    const nowTs = admin.firestore.Timestamp.fromDate(now);
+    const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+    const windowEnd = admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 2 * 3600000));
+    const snap = await db.collection('turnos')
+        .where('empresaId', '==', empresaId)
+        .where('startTime', '>=', windowStart)
+        .where('startTime', '<=', windowEnd)
+        .where('draft', '==', false)
+        .where('isFranco', '==', false)
+        .limit(500)
+        .get();
+    const byObjective = new Map();
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        const oid = String(t.objectiveId || '');
+        if (!oid)
+            continue;
+        if (!byObjective.has(oid))
+            byObjective.set(oid, []);
+        byObjective.get(oid).push({
+            startMs: (t.startTime?.seconds ?? 0) * 1000,
+            endMs: (t.endTime?.seconds ?? 0) * 1000,
+            isPresent: !!t.isPresent,
+            isCompleted: !!t.isCompleted,
+            isAbsent: !!t.isAbsent,
+        });
+    }
+    function hayRelevoPendiente(objectiveId, shiftEndMs) {
+        const turnos = byObjective.get(objectiveId) ?? [];
+        return turnos.some(r => !r.isPresent && !r.isAbsent && !r.isCompleted &&
+            Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000);
+    }
+    const presenciaMarcada = [];
+    const turnosCerrados = [];
+    const turnosEnRetencion = [];
+    const batch = db.batch();
+    let ops = 0;
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (t.isAbsent || t.isVirtual)
+            continue;
+        const startMs = (t.startTime?.seconds ?? 0) * 1000;
+        const endMs = (t.endTime?.seconds ?? 0) * 1000;
+        const objectiveId = String(t.objectiveId || '');
+        const label = `${t.empleadoNombre ?? t.employeeId} (${t.code}) en ${t.objetivoNombre ?? objectiveId}`;
+        if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
+            presenciaMarcada.push(label);
+            if (!dryRun) {
+                batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+                ops++;
+            }
+        }
+        if (endMs && endMs <= now.getTime() && t.isPresent && !t.isCompleted) {
+            if (objectiveId && hayRelevoPendiente(objectiveId, endMs)) {
+                turnosEnRetencion.push(label);
+            }
+            else {
+                turnosCerrados.push(label);
+                if (!dryRun) {
+                    batch.update(doc.ref, {
+                        status: 'COMPLETED', isCompleted: true, isPresent: false,
+                        realEndTime: nowTs, autoCierre: true,
+                    });
+                    ops++;
+                    db.collection('novedades')
+                        .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+                        .then(ns => {
+                        if (ns.empty)
+                            return;
+                        const b2 = db.batch();
+                        ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
+                            .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_CIERRE_ADMIN' }));
+                        return b2.commit();
+                    }).catch(() => { });
+                }
+            }
+        }
+    }
+    if (!dryRun && ops > 0)
+        await batch.commit();
+    return {
+        dryRun,
+        empresaId,
+        turnosEvaluados: snap.size,
+        presenciaMarcada: presenciaMarcada.length,
+        turnosCerrados: turnosCerrados.length,
+        turnosEnRetencion: turnosEnRetencion.length,
+        detalle: { presenciaMarcada, turnosCerrados, turnosEnRetencion },
+        mensaje: dryRun
+            ? `[DRY RUN] Se marcarían ${presenciaMarcada.length} presencias, cerrarían ${turnosCerrados.length} turnos (${turnosEnRetencion.length} en retención por relevo pendiente).`
+            : `✓ ${presenciaMarcada.length} presencias marcadas · ${turnosCerrados.length} turnos cerrados · ${turnosEnRetencion.length} en retención (relevo esperado).`,
+    };
+});
 const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 async function optimizePlanningGeminiHandler(data, context) {
     if (!context.auth?.uid) {

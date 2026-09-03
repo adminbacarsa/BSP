@@ -1,5 +1,5 @@
 ﻿import React, { useState, useRef } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio, MapPin, Zap } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio, MapPin, Zap, Timer } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
@@ -192,6 +192,30 @@ export default function EmpresasTab() {
       setGuardandoPiloto(false);
     }
   };
+  const [autoPresenciaLoading, setAutoPresenciaLoading] = useState(false);
+  const [autoPresenciaResult, setAutoPresenciaResult] = useState<{
+    dryRun: boolean; turnosEvaluados: number; presenciaMarcada: number; turnosCerrados: number;
+    turnosEnRetencion?: number;
+    detalle?: { presenciaMarcada: string[]; turnosCerrados: string[]; turnosEnRetencion?: string[] }; mensaje: string;
+  } | null>(null);
+
+  const handleAutoPresencia = async (dryRun: boolean) => {
+    if (!empresa) return;
+    setAutoPresenciaLoading(true);
+    try {
+      const fn = httpsCallable<{ empresaId: string; dryRun: boolean }, typeof autoPresenciaResult>(
+        functions, 'autoPresenciaYCierre',
+      );
+      const { data } = await fn({ empresaId: empresa.id, dryRun });
+      setAutoPresenciaResult(data);
+      toast.success(dryRun ? 'Simulación completada' : 'Presencias y cierres aplicados');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al ejecutar');
+    } finally {
+      setAutoPresenciaLoading(false);
+    }
+  };
+
   const [mapsKeyDraft, setMapsKeyDraft] = useState('');
   const [guardandoMaps, setGuardandoMaps] = useState(false);
   const [showMapsKey, setShowMapsKey] = useState(false);
@@ -623,6 +647,73 @@ export default function EmpresasTab() {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {empresa && isSuperAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+              <Timer size={18} className="text-amber-600" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Auto Presencia y Cierre</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                Marca presencia en turnos que ya iniciaron sin fichar, y cierra los que terminaron y siguen activos.
+                Usá <strong>Simular</strong> primero para ver qué afectaría sin modificar nada.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={() => { setAutoPresenciaResult(null); handleAutoPresencia(true); }}
+              disabled={autoPresenciaLoading}
+              className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-50 flex items-center gap-2 transition-colors"
+            >
+              {autoPresenciaLoading ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+              Simular (dry run)
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAutoPresenciaResult(null); handleAutoPresencia(false); }}
+              disabled={autoPresenciaLoading}
+              className="px-4 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 flex items-center gap-2 transition-colors"
+            >
+              {autoPresenciaLoading ? <Loader2 size={13} className="animate-spin" /> : <Timer size={13} />}
+              Ejecutar ahora
+            </button>
+          </div>
+          {autoPresenciaResult && (
+            <div className={`mt-4 rounded-xl p-4 text-xs space-y-2 ${autoPresenciaResult.dryRun ? 'bg-slate-50 border border-slate-200' : 'bg-emerald-50 border border-emerald-200'}`}>
+              <p className="font-bold text-slate-700">{autoPresenciaResult.mensaje}</p>
+              <p className="text-slate-500">Turnos evaluados: {autoPresenciaResult.turnosEvaluados} · Presencias: {autoPresenciaResult.presenciaMarcada} · Cierres: {autoPresenciaResult.turnosCerrados}</p>
+              {autoPresenciaResult.detalle?.presenciaMarcada?.length > 0 && (
+                <div>
+                  <p className="font-semibold text-slate-600 mb-1">Presencias marcadas:</p>
+                  <ul className="list-disc list-inside text-slate-500 space-y-0.5">
+                    {autoPresenciaResult.detalle.presenciaMarcada.map((l, i) => <li key={i}>{l}</li>)}
+                  </ul>
+                </div>
+              )}
+              {autoPresenciaResult.detalle?.turnosCerrados?.length > 0 && (
+                <div>
+                  <p className="font-semibold text-slate-600 mb-1">Turnos cerrados:</p>
+                  <ul className="list-disc list-inside text-slate-500 space-y-0.5">
+                    {autoPresenciaResult.detalle.turnosCerrados.map((l, i) => <li key={i}>{l}</li>)}
+                  </ul>
+                </div>
+              )}
+              {autoPresenciaResult.detalle?.turnosEnRetencion?.length > 0 && (
+                <div>
+                  <p className="font-semibold text-amber-700 mb-1">En retención (relevo pendiente):</p>
+                  <ul className="list-disc list-inside text-amber-600 space-y-0.5">
+                    {autoPresenciaResult.detalle.turnosEnRetencion.map((l, i) => <li key={i}>{l}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

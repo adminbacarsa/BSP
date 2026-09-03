@@ -797,6 +797,136 @@ async function executeAgentActionHandler(
 
 export const executeAgentAction = functions.https.onCall(executeAgentActionHandler);
 
+// =========================================================
+// AUTO PRESENCIA Y CIERRE — callable SuperAdmin (modo prueba)
+// Marca presencia en turnos planificados que ya iniciaron
+// y cierra los que ya terminaron y siguen presentes.
+// =========================================================
+const SUPER_ADMIN_ROLES_AP = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
+
+export const autoPresenciaYCierre = functions
+  .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
+  .https.onCall(async (data: { empresaId?: string; dryRun?: boolean }, context) => {
+    if (!context.auth?.uid) throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión.');
+    const role = String((context.auth.token as any)?.role ?? '');
+    if (!SUPER_ADMIN_ROLES_AP.includes(role)) {
+      throw new functions.https.HttpsError('permission-denied', 'Solo SuperAdmin puede ejecutar este comando.');
+    }
+
+    const empresaId = data?.empresaId || String((context.auth.token as any)?.empresaId ?? '');
+    if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+    const dryRun = data?.dryRun !== false;
+
+    const db = admin.firestore();
+    const now = new Date();
+    const nowTs = admin.firestore.Timestamp.fromDate(now);
+
+    const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+    const windowEnd   = admin.firestore.Timestamp.fromDate(new Date(now.getTime() +  2 * 3600000));
+
+    const snap = await db.collection('turnos')
+      .where('empresaId', '==', empresaId)
+      .where('startTime', '>=', windowStart)
+      .where('startTime', '<=', windowEnd)
+      .where('draft', '==', false)
+      .where('isFranco', '==', false)
+      .limit(500)
+      .get();
+
+    // Índice: set de objetivoId con turno activo entrante (relevo aun no fichado)
+    // Relevo = turno que empieza cerca del endTime del saliente y NO tiene presencia aún
+    // Construimos mapa objectiveId → turnos de la ventana para el chequeo de relevo
+    const byObjective = new Map<string, Array<{ startMs: number; endMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean }>>();
+    for (const doc of snap.docs) {
+      const t = doc.data() as any;
+      const oid = String(t.objectiveId || '');
+      if (!oid) continue;
+      if (!byObjective.has(oid)) byObjective.set(oid, []);
+      byObjective.get(oid)!.push({
+        startMs: (t.startTime?.seconds ?? 0) * 1000,
+        endMs:   (t.endTime?.seconds   ?? 0) * 1000,
+        isPresent: !!t.isPresent,
+        isCompleted: !!t.isCompleted,
+        isAbsent: !!t.isAbsent,
+      });
+    }
+
+    // ¿Tiene relevo pendiente? = hay un turno en el mismo objetivo cuyo startTime está
+    // dentro de ±90 min del endTime del turno saliente Y ese relevo aún no fichó ni es ausente.
+    function hayRelevoPendiente(objectiveId: string, shiftEndMs: number): boolean {
+      const turnos = byObjective.get(objectiveId) ?? [];
+      return turnos.some(r =>
+        !r.isPresent && !r.isAbsent && !r.isCompleted &&
+        Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000,
+      );
+    }
+
+    const presenciaMarcada: string[] = [];
+    const turnosCerrados: string[] = [];
+    const turnosEnRetencion: string[] = [];
+    const batch = db.batch();
+    let ops = 0;
+
+    for (const doc of snap.docs) {
+      const t = doc.data() as any;
+      if (t.isAbsent || t.isVirtual) continue;
+      const startMs = (t.startTime?.seconds ?? 0) * 1000;
+      const endMs   = (t.endTime?.seconds   ?? 0) * 1000;
+      const objectiveId = String(t.objectiveId || '');
+      const label = `${t.empleadoNombre ?? t.employeeId} (${t.code}) en ${t.objetivoNombre ?? objectiveId}`;
+
+      // Marcar presencia: turno ya inició, no tiene presencia ni ausencia
+      if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
+        presenciaMarcada.push(label);
+        if (!dryRun) {
+          batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+          ops++;
+        }
+      }
+
+      // Cerrar: turno terminó, sigue presente — pero solo si no hay relevo esperando
+      if (endMs && endMs <= now.getTime() && t.isPresent && !t.isCompleted) {
+        if (objectiveId && hayRelevoPendiente(objectiveId, endMs)) {
+          // Relevo no llegó → retención, no cerramos
+          turnosEnRetencion.push(label);
+        } else {
+          turnosCerrados.push(label);
+          if (!dryRun) {
+            batch.update(doc.ref, {
+              status: 'COMPLETED', isCompleted: true, isPresent: false,
+              realEndTime: nowTs, autoCierre: true,
+            });
+            ops++;
+            db.collection('novedades')
+              .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+              .then(ns => {
+                if (ns.empty) return;
+                const b2 = db.batch();
+                ns.docs.filter(d => ['RETENCION_LARGA','RECARGO_12H','RETENCION_DETECTADA'].includes(d.data().type))
+                  .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_CIERRE_ADMIN' }));
+                return b2.commit();
+              }).catch(() => {});
+          }
+        }
+      }
+    }
+
+    if (!dryRun && ops > 0) await batch.commit();
+
+    return {
+      dryRun,
+      empresaId,
+      turnosEvaluados: snap.size,
+      presenciaMarcada: presenciaMarcada.length,
+      turnosCerrados: turnosCerrados.length,
+      turnosEnRetencion: turnosEnRetencion.length,
+      detalle: { presenciaMarcada, turnosCerrados, turnosEnRetencion },
+      mensaje: dryRun
+        ? `[DRY RUN] Se marcarían ${presenciaMarcada.length} presencias, cerrarían ${turnosCerrados.length} turnos (${turnosEnRetencion.length} en retención por relevo pendiente).`
+        : `✓ ${presenciaMarcada.length} presencias marcadas · ${turnosCerrados.length} turnos cerrados · ${turnosEnRetencion.length} en retención (relevo esperado).`,
+    };
+  });
+
 const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 
 async function optimizePlanningGeminiHandler(
