@@ -178,6 +178,18 @@ function serverTodayCordobaYsMmDd(): string {
   return y && m && d ? `${y}-${m}-${d}` : new Date().toISOString().slice(0, 10);
 }
 
+function serverNowCordobaHhMm(): string {
+  const parts = new Intl.DateTimeFormat('es-AR', {
+    timeZone: 'America/Argentina/Cordoba',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const h = parts.find((p) => p.type === 'hour')?.value ?? '';
+  const mn = parts.find((p) => p.type === 'minute')?.value ?? '';
+  return h && mn ? `${h}:${mn}` : '';
+}
+
 function normalizeClientTodayYsMmDd(raw: unknown): string {
   const s = String(raw ?? '').trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
@@ -252,6 +264,7 @@ function buildSystemPrompt(
     `- Perfil efectivo: ${profile.summaryLabel} (${profile.persona})`,
     `- Ruta navegador (orientativa): "${pathname}"`,
     `- fechaReferenciaCliente (hoy): "${referenceYsMmDd}"`,
+    `- horaActualServidor AR: "${serverNowCordobaHhMm()}" — usá esto para distinguir turnos pasados, en curso y próximos. «Próximos» = startTime > ahora. «En curso» = ya inició y no terminó. «Pasados» = endTime < ahora.`,
     ...(moduleKey ? [`- moduleKey cliente (orientativo): "${moduleKey}"`] : []),
     '',
     personaModuleBlurb(profile.persona, profile.readableModuleKeys, moduleKey || undefined),
