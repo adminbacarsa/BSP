@@ -46,6 +46,10 @@ import {
   ejecutarExtenderJornada,
   ejecutarCubrirAusencia,
   ejecutarCrearTurnoRefuerzo,
+  ejecutarConfirmarPresencia,
+  ejecutarRegistrarAusencia,
+  ejecutarCerrarTurno,
+  ejecutarPlanificarObjetivoMes,
   type AgentActionPayload,
 } from './assistant/assistantWriteActions';
 import {
@@ -754,7 +758,7 @@ export const chatPlatformAssistant =
 // AGENTE: ejecutar acción propuesta (con confirmación humana)
 // =========================================================
 const AGENT_WRITE_ALLOWED_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'Operador', 'operador'];
-const AGENT_WRITE_ACTIONS = ['extender_jornada', 'cubrir_ausencia', 'crear_turno_refuerzo'] as const;
+const AGENT_WRITE_ACTIONS = ['extender_jornada', 'cubrir_ausencia', 'crear_turno_refuerzo', 'confirmar_presencia', 'registrar_ausencia', 'cerrar_turno', 'planificar_objetivo_mes'] as const;
 type AgentWriteAction = (typeof AGENT_WRITE_ACTIONS)[number];
 
 async function executeAgentActionHandler(
@@ -780,6 +784,10 @@ async function executeAgentActionHandler(
     if (action === 'extender_jornada') return await ejecutarExtenderJornada(empresaId, payload);
     if (action === 'cubrir_ausencia') return await ejecutarCubrirAusencia(empresaId, payload);
     if (action === 'crear_turno_refuerzo') return await ejecutarCrearTurnoRefuerzo(empresaId, payload);
+    if (action === 'confirmar_presencia') return await ejecutarConfirmarPresencia(empresaId, payload);
+    if (action === 'registrar_ausencia') return await ejecutarRegistrarAusencia(empresaId, payload);
+    if (action === 'cerrar_turno') return await ejecutarCerrarTurno(empresaId, payload);
+    if (action === 'planificar_objetivo_mes') return await ejecutarPlanificarObjetivoMes(empresaId, payload);
   } catch (e: any) {
     console.error('[executeAgentAction] error', e?.message);
     throw new functions.https.HttpsError('internal', e?.message ?? 'Error al ejecutar la acción.');

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ASSISTANT_TOOL_ROUNDS_MAX = exports.ASSISTANT_FUNCTION_DECLARATIONS = void 0;
+exports.getFilteredDeclarations = getFilteredDeclarations;
 const generative_ai_1 = require("@google/generative-ai");
 exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     {
@@ -359,5 +360,122 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
         },
     },
 ];
+exports.ASSISTANT_FUNCTION_DECLARATIONS.push({
+    name: 'proponer_extender_jornada',
+    description: 'Propone extender la jornada de un empleado de 8h a 12h (M→D12, T→D12, N→N12) en un objetivo y fecha. Usá cuando pidan «extendé a García», «pasá a García a 12 horas», «necesito extender el turno de X». Buscá primero al empleado con buscar_empleados_por_nombre si no tenés su id. Requiere permiso OPERATIONS.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            id_firestore_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del empleado (de buscar_empleados_por_nombre).' },
+            texto_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+            fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD del turno a extender. Default: hoy cliente.' },
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre del objetivo/sede (opcional, para desambiguar si tiene varios turnos ese día).' },
+        },
+        required: [],
+    },
+}, {
+    name: 'proponer_cubrir_ausencia',
+    description: 'Busca candidatos disponibles para cubrir un puesto vacante o una ausencia en un objetivo y día, siguiendo la prioridad CCT (sin turno → RET → ESC → FT). Usá cuando pidan «alguien para cubrir», «hay alguien disponible para el turno M en X», «cubrí la vacante». Si no especifican banda, usá la del turno ausente.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre del objetivo donde hay vacante.' },
+            id_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+            banda: { type: generative_ai_1.SchemaType.STRING, description: 'M | T | N — turno a cubrir.' },
+            id_empleado_ausente: { type: generative_ai_1.SchemaType.STRING, description: 'Opcional: ID del empleado ausente para tomar su turno exacto.' },
+        },
+        required: [],
+    },
+}, {
+    name: 'proponer_crear_turno_refuerzo',
+    description: 'Propone crear un turno de refuerzo (origen OPERATIONS_COVERAGE) para un empleado específico en un objetivo y fecha. Usá para «agregá un refuerzo», «mandá a García al objetivo X mañana», «necesito un refuerzo en Banco XYZ». Requiere nombre de empleado, objetivo, fecha y banda.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            id_firestore_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del empleado.' },
+            texto_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre si no tenés el id.' },
+            fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD del turno a crear.' },
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre del objetivo donde irá el refuerzo.' },
+            id_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+            banda: { type: generative_ai_1.SchemaType.STRING, description: 'M | T | N | D12 | N12 — código CCT del turno.' },
+        },
+        required: [],
+    },
+}, {
+    name: 'proponer_confirmar_presencia',
+    description: 'Propone marcar presente a un empleado en su turno del día indicado. Usá cuando digan «marcá presente a García», «confirmar presencia de X», «llegó García». Buscá al empleado con buscar_empleados_por_nombre si no tenés id. Requiere permiso OPERATIONS:update.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            id_firestore_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del empleado.' },
+            texto_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+            fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD del turno. Default: hoy cliente.' },
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre del objetivo para desambiguar si hay más de un turno ese día.' },
+            id_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        },
+        required: [],
+    },
+}, {
+    name: 'proponer_registrar_ausencia',
+    description: 'Propone registrar que un empleado estuvo ausente en su turno: marca isAbsent=true y crea doc en ausencias. Usá para «García no vino», «registrá la ausencia de X», «faltó Romero hoy». Siempre buscá primero el turno del empleado. Requiere permiso OPERATIONS:update.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            id_firestore_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del empleado.' },
+            texto_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+            fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre del objetivo para desambiguar.' },
+            id_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+            motivo: { type: generative_ai_1.SchemaType.STRING, description: 'Motivo opcional: AA (injustificada), E (enfermedad), A (autorizada). Default: AA.' },
+        },
+        required: [],
+    },
+}, {
+    name: 'proponer_cerrar_turno',
+    description: 'Propone cerrar (checkout / completar) el turno de un empleado: isCompleted=true. Usá para «cerré el turno de García», «García ya se fue», «checkout de X». Requiere permiso OPERATIONS:update.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            id_firestore_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del empleado.' },
+            texto_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+            fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre del objetivo para desambiguar.' },
+            id_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        },
+        required: [],
+    },
+}, {
+    name: 'proponer_planificar_objetivo_mes',
+    description: 'Genera automáticamente el cronograma mensual de un objetivo aplicando CCT 422/05 (ciclo 6+2). Usá para «planificá Obrador para octubre», «generá la planificación de Casino en septiembre», «automatizá el crono de X». Los turnos se crean como borrador (draft:true) para revisión antes de publicar. Requiere permiso PLANNING:create.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre del objetivo/sede a planificar (ej. «Obrador Malagueño», «Casino»).' },
+            id_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés de buscar_objetivos_por_nombre).' },
+            mes: { type: generative_ai_1.SchemaType.NUMBER, description: 'Número de mes 1-12 (ej. octubre = 10). Default: mes en curso.' },
+            anio: { type: generative_ai_1.SchemaType.NUMBER, description: 'Año (ej. 2026). Default: año en curso.' },
+        },
+        required: [],
+    },
+});
 exports.ASSISTANT_TOOL_ROUNDS_MAX = 4;
+const WRITE_TOOL_MODULE_REQUIREMENTS = {
+    proponer_extender_jornada: 'OPERATIONS',
+    proponer_cubrir_ausencia: 'OPERATIONS',
+    proponer_crear_turno_refuerzo: 'OPERATIONS',
+    proponer_confirmar_presencia: 'OPERATIONS',
+    proponer_registrar_ausencia: 'OPERATIONS',
+    proponer_cerrar_turno: 'OPERATIONS',
+    proponer_planificar_objetivo_mes: 'PLANNING',
+};
+function getFilteredDeclarations(readableModuleKeys) {
+    const moduleSet = new Set(readableModuleKeys);
+    return exports.ASSISTANT_FUNCTION_DECLARATIONS.filter((decl) => {
+        const req = WRITE_TOOL_MODULE_REQUIREMENTS[decl.name];
+        if (!req)
+            return true;
+        return moduleSet.has(req);
+    });
+}
 //# sourceMappingURL=assistantToolDeclarations.js.map

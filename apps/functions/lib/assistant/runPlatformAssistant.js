@@ -366,7 +366,7 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         generationConfig: { maxOutputTokens: 8192, temperature: 0.35 },
         ...(toolsEnabled
             ? {
-                tools: [{ functionDeclarations: assistantToolDeclarations_1.ASSISTANT_FUNCTION_DECLARATIONS }],
+                tools: [{ functionDeclarations: (0, assistantToolDeclarations_1.getFilteredDeclarations)(toolCtx.readableModuleKeys) }],
                 toolConfig: { functionCallingConfig: { mode: generative_ai_1.FunctionCallingMode.AUTO } },
             }
             : {}),
@@ -381,6 +381,7 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         throw new functions.https.HttpsError('failed-precondition', mapGeminiErrorToHint(e));
     }
     let rounds = 0;
+    let capturedActionProposal = null;
     while (toolsEnabled && rounds < assistantToolDeclarations_1.ASSISTANT_TOOL_ROUNDS_MAX) {
         rounds++;
         let calls = [];
@@ -395,10 +396,14 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         const responseParts = await Promise.all(calls.map(async (fc) => {
             const args = (fc.args ?? {});
             const out = await (0, assistantDataTools_1.dispatchAssistantToolCall)(toolCtx, fc.name, args);
+            if (!capturedActionProposal && out.accion_propuesta && typeof out.accion_propuesta === 'object') {
+                capturedActionProposal = out.accion_propuesta;
+            }
+            const { accion_propuesta: _ap, ...outForGemini } = out;
             return {
                 functionResponse: {
                     name: fc.name,
-                    response: out,
+                    response: outForGemini,
                 },
             };
         }));
@@ -450,6 +455,10 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
     if (!reply) {
         throw new functions.https.HttpsError('failed-precondition', 'El modelo no devolvió texto. Probá de nuevo en un momento o formulá más corto.');
     }
-    return { reply: reply.slice(0, 8000) };
+    const finalReply = reply.slice(0, 8000);
+    if (capturedActionProposal) {
+        return { reply: `${finalReply}<!--COSP_ACTION:${JSON.stringify(capturedActionProposal)}-->` };
+    }
+    return { reply: finalReply };
 }
 //# sourceMappingURL=runPlatformAssistant.js.map

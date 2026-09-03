@@ -15,6 +15,7 @@ export declare const manageAgreements: functions.HttpsFunction & functions.Runna
 export declare const platformHealthCheck: functions.HttpsFunction & functions.Runnable<any>;
 export declare const checkSystemHealth: functions.HttpsFunction & functions.Runnable<any>;
 export declare const chatPlatformAssistant: functions.HttpsFunction & functions.Runnable<any>;
+export declare const executeAgentAction: functions.HttpsFunction & functions.Runnable<any>;
 export declare const optimizePlanningGemini: functions.HttpsFunction & functions.Runnable<any>;
 export { vplanRun } from './vplan';
 export declare const runAutoSchedule: functions.HttpsFunction & functions.Runnable<any>;

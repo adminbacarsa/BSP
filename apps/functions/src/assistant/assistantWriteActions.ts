@@ -141,3 +141,165 @@ export async function ejecutarCrearTurnoRefuerzo(
   const sitioDisplay = objetivoNombre ?? objetivoId;
   return { ok: true, message: `✓ Refuerzo creado: **${nombreDisplay}** turno **${banda}** el ${fecha} en **${sitioDisplay}**.` };
 }
+
+export async function ejecutarConfirmarPresencia(
+  empresaId: string,
+  payload: AgentActionPayload,
+): Promise<{ ok: boolean; message: string }> {
+  const { shiftId, empleadoNombre, objetivoNombre, fecha } = payload as {
+    shiftId: string;
+    empleadoNombre?: string;
+    objetivoNombre?: string;
+    fecha?: string;
+  };
+  if (!shiftId) throw new Error('Payload incompleto: falta shiftId.');
+  const db = admin.firestore();
+  await db.collection('turnos').doc(shiftId).update({
+    isPresent: true,
+    presentAt: Timestamp.now(),
+    modifiedByAgent: true,
+    modifiedByAgentAt: Timestamp.now(),
+    modifiedByAgentEmpresaId: empresaId,
+  });
+  const nombre = empleadoNombre ?? 'Empleado';
+  const sitio = objetivoNombre ? ` en **${objetivoNombre}**` : '';
+  const dia = fecha ? ` el ${fecha}` : '';
+  return { ok: true, message: `✓ Presencia confirmada: **${nombre}**${dia}${sitio} marcado como presente.` };
+}
+
+export async function ejecutarRegistrarAusencia(
+  empresaId: string,
+  payload: AgentActionPayload,
+): Promise<{ ok: boolean; message: string }> {
+  const { shiftId, empleadoId, objetivoId, fecha, empleadoNombre, objetivoNombre, motivo } = payload as {
+    shiftId: string;
+    empleadoId: string;
+    objetivoId?: string;
+    fecha: string;
+    empleadoNombre?: string;
+    objetivoNombre?: string;
+    motivo?: string;
+  };
+  if (!shiftId || !empleadoId || !fecha) throw new Error('Payload incompleto para registrar_ausencia.');
+  const db = admin.firestore();
+  await db.collection('turnos').doc(shiftId).update({
+    isAbsent: true,
+    modifiedByAgent: true,
+    modifiedByAgentAt: Timestamp.now(),
+    modifiedByAgentEmpresaId: empresaId,
+  });
+  await db.collection('ausencias').add({
+    employeeId: empleadoId,
+    objectiveId: objetivoId ?? '',
+    shiftId,
+    empresaId,
+    date: fecha,
+    motivo: motivo ?? 'AA',
+    origin: 'AGENT',
+    createdByAgent: true,
+    createdByAgentAt: Timestamp.now(),
+  });
+  const nombre = empleadoNombre ?? 'Empleado';
+  const sitio = objetivoNombre ? ` en **${objetivoNombre}**` : '';
+  return { ok: true, message: `✓ Ausencia registrada: **${nombre}** marcado como ausente${sitio} el ${fecha}.` };
+}
+
+export async function ejecutarCerrarTurno(
+  empresaId: string,
+  payload: AgentActionPayload,
+): Promise<{ ok: boolean; message: string }> {
+  const { shiftId, empleadoNombre, objetivoNombre, fecha } = payload as {
+    shiftId: string;
+    empleadoNombre?: string;
+    objetivoNombre?: string;
+    fecha?: string;
+  };
+  if (!shiftId) throw new Error('Payload incompleto: falta shiftId.');
+  const db = admin.firestore();
+  await db.collection('turnos').doc(shiftId).update({
+    isCompleted: true,
+    completedAt: Timestamp.now(),
+    modifiedByAgent: true,
+    modifiedByAgentAt: Timestamp.now(),
+    modifiedByAgentEmpresaId: empresaId,
+  });
+  const nombre = empleadoNombre ?? 'Turno';
+  const sitio = objetivoNombre ? ` en **${objetivoNombre}**` : '';
+  const dia = fecha ? ` del ${fecha}` : '';
+  return { ok: true, message: `✓ Turno cerrado: **${nombre}**${dia}${sitio} registrado como completado.` };
+}
+
+export async function ejecutarPlanificarObjetivoMes(
+  empresaId: string,
+  payload: AgentActionPayload,
+): Promise<{ ok: boolean; message: string }> {
+  const { objetivoId, clientId, year, month, objetivoNombre } = payload as {
+    objetivoId: string;
+    clientId?: string;
+    year: number;
+    month: number;
+    objetivoNombre?: string;
+  };
+  if (!objetivoId || !year || !month) throw new Error('Payload incompleto para planificar_objetivo_mes.');
+
+  const { runAutoScheduleCore } = await import('../scheduling/runAutoSchedule');
+  const result = await runAutoScheduleCore({ objectiveId: objetivoId, year, month, empresaId });
+  if (!result.ok && result.error) throw new Error(result.error);
+
+  const db = admin.firestore();
+  const agentAt = Timestamp.now();
+  const BATCH_SIZE = 400;
+
+  function arHhmm(dateStr: string, timeStr: string): Date {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const [h, min] = timeStr.split(':').map(Number);
+    return new Date(Date.UTC(y, m - 1, d, h + 3, min, 0, 0));
+  }
+
+  let written = 0;
+  let currentBatch = db.batch();
+  let batchOps = 0;
+  const commits: Promise<FirebaseFirestore.WriteResult[]>[] = [];
+
+  for (const a of result.assignments) {
+    if (batchOps >= BATCH_SIZE) {
+      commits.push(currentBatch.commit());
+      currentBatch = db.batch();
+      batchOps = 0;
+    }
+    const startUtc = arHhmm(a.dateStr, a.startTime);
+    let endUtc = a.endTime ? arHhmm(a.dateStr, a.endTime) : new Date(startUtc.getTime() + a.hours * 3600000);
+    if (endUtc <= startUtc) endUtc = new Date(endUtc.getTime() + 86400000);
+
+    currentBatch.set(db.collection('turnos').doc(), {
+      employeeId: a.empId,
+      objectiveId: objetivoId,
+      clientId: clientId ?? '',
+      empresaId,
+      code: a.code,
+      startTime: Timestamp.fromDate(startUtc),
+      endTime: Timestamp.fromDate(endUtc),
+      isFranco: a.isFranco ?? false,
+      isPresent: false,
+      isAbsent: false,
+      isCompleted: false,
+      draft: true,
+      createdByAgent: true,
+      createdByAgentAt: agentAt,
+    });
+    batchOps++;
+    written++;
+  }
+  if (batchOps > 0) commits.push(currentBatch.commit());
+  await Promise.all(commits);
+
+  const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const mesNombre = MESES[(month - 1)] ?? String(month);
+  const sitio = objetivoNombre ?? objetivoId;
+  const pct = Math.round((result.coverage?.coverageRatio ?? 0) * 100);
+
+  return {
+    ok: true,
+    message: `✓ Planificación generada en borrador para **${sitio}** — ${mesNombre} ${year}.\n- **${written}** turnos creados · Cobertura: **${pct}%** SLA\n- **${result.meta.employeeCount}** empleados · **${result.meta.positionCount}** puestos\n\nRevisá en **Planificación** y publicá cuando estés listo.`,
+  };
+}

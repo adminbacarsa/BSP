@@ -14,7 +14,7 @@ import {
   resolveSelfEmployeeFirestoreId,
   type AssistantToolContext,
 } from './assistantDataTools';
-import { ASSISTANT_FUNCTION_DECLARATIONS, ASSISTANT_TOOL_ROUNDS_MAX } from './assistantToolDeclarations';
+import { ASSISTANT_TOOL_ROUNDS_MAX, getFilteredDeclarations } from './assistantToolDeclarations';
 import {
   shouldPrefetchMetricsSnapshot,
   shouldPrefetchOperationsMetricsInSnapshot,
@@ -489,7 +489,7 @@ async function runGeminiAssistantChat(
     generationConfig: { maxOutputTokens: 8192, temperature: 0.35 },
     ...(toolsEnabled
       ? {
-          tools: [{ functionDeclarations: ASSISTANT_FUNCTION_DECLARATIONS as any }],
+          tools: [{ functionDeclarations: getFilteredDeclarations(toolCtx.readableModuleKeys) as any }],
           toolConfig: { functionCallingConfig: { mode: FunctionCallingMode.AUTO } },
         }
       : {}),

@@ -3793,6 +3793,38 @@ async function dispatchAssistantToolCallInner(
       id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
       banda: args.banda != null ? String(args.banda) : undefined,
     });
+  } else if (name === 'proponer_confirmar_presencia') {
+    raw = await ejecutarProponerConfirmarPresencia(ctx, {
+      id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+      texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+      fecha: args.fecha != null ? String(args.fecha) : undefined,
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+    });
+  } else if (name === 'proponer_registrar_ausencia') {
+    raw = await ejecutarProponerRegistrarAusencia(ctx, {
+      id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+      texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+      fecha: args.fecha != null ? String(args.fecha) : undefined,
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+      motivo: args.motivo != null ? String(args.motivo) : undefined,
+    });
+  } else if (name === 'proponer_cerrar_turno') {
+    raw = await ejecutarProponerCerrarTurno(ctx, {
+      id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+      texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+      fecha: args.fecha != null ? String(args.fecha) : undefined,
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+    });
+  } else if (name === 'proponer_planificar_objetivo_mes') {
+    raw = await ejecutarProponerPlanificarObjetivoMes(ctx, {
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+      mes: args.mes != null ? Number(args.mes) : undefined,
+      anio: args.anio != null ? Number(args.anio) : undefined,
+    });
   } else {
     raw = { error: 'herramienta_desconocida', name };
   }
@@ -4016,6 +4048,206 @@ async function ejecutarProponerCubrirAusencia(
         fecha,
         origenCandidato: mejor.origen,
       },
+    },
+  };
+}
+
+async function resolverTurnoPorEmpleadoFecha(
+  empleadoId: string,
+  fecha: string,
+  objetivoId?: string,
+): Promise<{ shiftId: string; code: string; objetivoId: string; objetivoNombre?: string; empresaId: string } | null> {
+  const db = admin.firestore();
+  const startTs = Timestamp.fromDate(startOfDayAr(fecha));
+  const endTs = Timestamp.fromDate(endOfDayAr(fecha));
+  const snap = await db
+    .collection('turnos')
+    .where('employeeId', '==', empleadoId)
+    .where('startTime', '>=', startTs)
+    .where('startTime', '<', endTs)
+    .limit(10)
+    .get();
+  if (snap.empty) return null;
+  let docs = snap.docs;
+  if (objetivoId) docs = docs.filter((d) => d.data().objectiveId === objetivoId);
+  const active = docs.filter((d) => {
+    const data = d.data();
+    return !data.isFranco && !data.draft && data.code !== 'F' && data.code !== 'FF' && data.code !== 'FP';
+  });
+  const chosen = active[0] ?? docs[0];
+  if (!chosen) return null;
+  const data = chosen.data();
+  return {
+    shiftId: chosen.id,
+    code: String(data.code ?? ''),
+    objetivoId: String(data.objectiveId ?? ''),
+    objetivoNombre: data.objetivoNombre ? String(data.objetivoNombre) : undefined,
+    empresaId: String(data.empresaId ?? ''),
+  };
+}
+
+async function ejecutarProponerConfirmarPresencia(
+  ctx: AssistantToolContext,
+  args: {
+    id_firestore_empleado?: string;
+    texto_empleado?: string;
+    fecha?: string;
+    texto_objetivo?: string;
+    id_objetivo?: string;
+  },
+): Promise<Record<string, unknown>> {
+  const fecha = args.fecha || ctx.referenceDateYsMmDd;
+  let empleadoId = args.id_firestore_empleado;
+  let empleadoNombre = '';
+  if (!empleadoId && args.texto_empleado) {
+    const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+    if (!found) return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+    empleadoId = found.id;
+    empleadoNombre = found.nombre;
+  }
+  if (!empleadoId) return { error: 'falta_empleado' };
+
+  let objetivoId = args.id_objetivo;
+  let objetivoNombre = '';
+  if (!objetivoId && args.texto_objetivo) {
+    const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+    if (found) { objetivoId = found.id; objetivoNombre = found.nombre; }
+  }
+
+  const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+  if (!turno) return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+  if (!objetivoNombre && turno.objetivoNombre) objetivoNombre = turno.objetivoNombre;
+
+  const label = `Confirmar presencia de ${empleadoNombre} (turno ${turno.code})${objetivoNombre ? ' en ' + objetivoNombre : ''} el ${fecha}`;
+  return {
+    accion_propuesta: {
+      type: 'confirmar_presencia',
+      label,
+      payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha },
+    },
+  };
+}
+
+async function ejecutarProponerRegistrarAusencia(
+  ctx: AssistantToolContext,
+  args: {
+    id_firestore_empleado?: string;
+    texto_empleado?: string;
+    fecha?: string;
+    texto_objetivo?: string;
+    id_objetivo?: string;
+    motivo?: string;
+  },
+): Promise<Record<string, unknown>> {
+  const fecha = args.fecha || ctx.referenceDateYsMmDd;
+  let empleadoId = args.id_firestore_empleado;
+  let empleadoNombre = '';
+  if (!empleadoId && args.texto_empleado) {
+    const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+    if (!found) return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+    empleadoId = found.id;
+    empleadoNombre = found.nombre;
+  }
+  if (!empleadoId) return { error: 'falta_empleado' };
+
+  let objetivoId = args.id_objetivo;
+  let objetivoNombre = '';
+  if (!objetivoId && args.texto_objetivo) {
+    const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+    if (found) { objetivoId = found.id; objetivoNombre = found.nombre; }
+  }
+
+  const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+  if (!turno) return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+  if (!objetivoNombre && turno.objetivoNombre) objetivoNombre = turno.objetivoNombre;
+
+  const motivo = args.motivo ?? 'AA';
+  const label = `Registrar ausencia de ${empleadoNombre} (${motivo}) el ${fecha}${objetivoNombre ? ' en ' + objetivoNombre : ''}`;
+  return {
+    accion_propuesta: {
+      type: 'registrar_ausencia',
+      label,
+      payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha, motivo },
+    },
+  };
+}
+
+async function ejecutarProponerCerrarTurno(
+  ctx: AssistantToolContext,
+  args: {
+    id_firestore_empleado?: string;
+    texto_empleado?: string;
+    fecha?: string;
+    texto_objetivo?: string;
+    id_objetivo?: string;
+  },
+): Promise<Record<string, unknown>> {
+  const fecha = args.fecha || ctx.referenceDateYsMmDd;
+  let empleadoId = args.id_firestore_empleado;
+  let empleadoNombre = '';
+  if (!empleadoId && args.texto_empleado) {
+    const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+    if (!found) return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+    empleadoId = found.id;
+    empleadoNombre = found.nombre;
+  }
+  if (!empleadoId) return { error: 'falta_empleado' };
+
+  let objetivoId = args.id_objetivo;
+  let objetivoNombre = '';
+  if (!objetivoId && args.texto_objetivo) {
+    const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+    if (found) { objetivoId = found.id; objetivoNombre = found.nombre; }
+  }
+
+  const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+  if (!turno) return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+  if (!objetivoNombre && turno.objetivoNombre) objetivoNombre = turno.objetivoNombre;
+
+  const label = `Cerrar turno ${turno.code} de ${empleadoNombre} el ${fecha}${objetivoNombre ? ' en ' + objetivoNombre : ''}`;
+  return {
+    accion_propuesta: {
+      type: 'cerrar_turno',
+      label,
+      payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha },
+    },
+  };
+}
+
+async function ejecutarProponerPlanificarObjetivoMes(
+  ctx: AssistantToolContext,
+  args: {
+    texto_objetivo?: string;
+    id_objetivo?: string;
+    mes?: number;
+    anio?: number;
+  },
+): Promise<Record<string, unknown>> {
+  let objetivoId = args.id_objetivo;
+  let objetivoNombre = '';
+  let clientId = '';
+  if (!objetivoId && args.texto_objetivo) {
+    const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+    if (!found) return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+    objetivoId = found.id;
+    objetivoNombre = found.nombre;
+    clientId = found.clientId;
+  }
+  if (!objetivoId) return { error: 'falta_objetivo' };
+
+  const refDate = new Date(ctx.referenceDateYsMmDd ?? new Date().toISOString().slice(0, 10));
+  const year = args.anio ?? refDate.getFullYear();
+  const month = args.mes ?? (refDate.getMonth() + 1);
+
+  const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const mesNombre = MESES[(month - 1)] ?? String(month);
+
+  const label = `Generar planificación CCT 6+2 para ${objetivoNombre || objetivoId} — ${mesNombre} ${year} (borradores para revisar)`;
+  return {
+    accion_propuesta: {
+      type: 'planificar_objetivo_mes',
+      label,
+      payload: { objetivoId, clientId, objetivoNombre, year, month },
     },
   };
 }

@@ -3224,9 +3224,473 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
             limite: args.limite != null ? Number(args.limite) : undefined,
         });
     }
+    else if (name === 'proponer_extender_jornada') {
+        raw = await ejecutarProponerExtenderJornada(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+        });
+    }
+    else if (name === 'proponer_cubrir_ausencia') {
+        raw = await ejecutarProponerCubrirAusencia(ctx, {
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            banda: args.banda != null ? String(args.banda) : undefined,
+            id_empleado_ausente: args.id_empleado_ausente != null ? String(args.id_empleado_ausente) : undefined,
+        });
+    }
+    else if (name === 'proponer_crear_turno_refuerzo') {
+        raw = await ejecutarProponerCrearTurnoRefuerzo(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            banda: args.banda != null ? String(args.banda) : undefined,
+        });
+    }
+    else if (name === 'proponer_confirmar_presencia') {
+        raw = await ejecutarProponerConfirmarPresencia(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+        });
+    }
+    else if (name === 'proponer_registrar_ausencia') {
+        raw = await ejecutarProponerRegistrarAusencia(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            motivo: args.motivo != null ? String(args.motivo) : undefined,
+        });
+    }
+    else if (name === 'proponer_cerrar_turno') {
+        raw = await ejecutarProponerCerrarTurno(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+        });
+    }
+    else if (name === 'proponer_planificar_objetivo_mes') {
+        raw = await ejecutarProponerPlanificarObjetivoMes(ctx, {
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            mes: args.mes != null ? Number(args.mes) : undefined,
+            anio: args.anio != null ? Number(args.anio) : undefined,
+        });
+    }
     else {
         raw = { error: 'herramienta_desconocida', name };
     }
     return raw;
+}
+function bandaToNewCode(code) {
+    if (code === 'N')
+        return 'N12';
+    return 'D12';
+}
+function bandaToHoraInicio(banda) {
+    if (banda === 'T')
+        return '14:00';
+    if (banda === 'N')
+        return '22:00';
+    if (banda === 'D12')
+        return '06:00';
+    if (banda === 'N12')
+        return '18:00';
+    return '06:00';
+}
+function bandaToHoraFin(banda) {
+    if (banda === 'T')
+        return '22:00';
+    if (banda === 'N')
+        return '06:00';
+    if (banda === 'D12')
+        return '18:00';
+    if (banda === 'N12')
+        return '06:00';
+    return '14:00';
+}
+function startOfDayAr(dateYmd) {
+    const [y, m, d] = dateYmd.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
+}
+function endOfDayAr(dateYmd) {
+    const [y, m, d] = dateYmd.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d + 1, 3, 0, 0, 0));
+}
+async function resolverEmpleadoPorTexto(ctx, texto) {
+    const db = admin.firestore();
+    const n = norm(texto);
+    const docs = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 60);
+    const matches = docs.filter((d) => {
+        const data = d.data();
+        const full = norm(`${data.firstName ?? ''} ${data.lastName ?? ''} ${data.name ?? ''}`);
+        return full.includes(n) || n.split(' ').every((tok) => tok.length < 2 || full.includes(tok));
+    });
+    if (matches.length === 0)
+        return null;
+    const data = matches[0].data();
+    const nombre = [data.lastName, data.firstName].filter(Boolean).join(', ') || data.name || matches[0].id;
+    return { id: matches[0].id, nombre: String(nombre) };
+}
+async function resolverObjetivoPorTexto(ctx, texto) {
+    const db = admin.firestore();
+    const clientDocs = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 60);
+    for (const clientDoc of clientDocs) {
+        const data = clientDoc.data();
+        const objetivos = Array.isArray(data.objetivos) ? data.objetivos : [];
+        for (const obj of objetivos) {
+            if (objectiveHaystackMatchesNeedle(texto, obj.name ?? '', data.name ?? '')) {
+                return { id: String(obj.id ?? obj._id ?? ''), nombre: String(obj.name ?? ''), clientId: clientDoc.id };
+            }
+        }
+    }
+    return null;
+}
+async function ejecutarProponerExtenderJornada(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = empleadoId ?? '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    const db = admin.firestore();
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(fecha));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(fecha));
+    const q = db
+        .collection('turnos')
+        .where('employeeId', '==', empleadoId)
+        .where('startTime', '>=', startTs)
+        .where('startTime', '<', endTs)
+        .limit(10);
+    const snap = await q.get();
+    let turnos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (ctx.scopeEmpresa)
+        turnos = turnos.filter((t) => t.empresaId === ctx.empresaId);
+    if (args.texto_objetivo) {
+        turnos = turnos.filter((t) => objectiveHaystackMatchesNeedle(args.texto_objetivo, t.objetivoNombre ?? '', ''));
+    }
+    const extensibles = turnos.filter((t) => ['M', 'T', 'N'].includes(t.code) && !t.isFranco && !t.draft);
+    if (extensibles.length === 0) {
+        return { error: 'sin_turno_extensible', empleado: empleadoNombre, fecha, turnos_encontrados: turnos.length };
+    }
+    const turno = extensibles[0];
+    const nuevoCodigo = bandaToNewCode(turno.code);
+    const label = `Extender turno ${turno.code} → ${nuevoCodigo} de ${empleadoNombre} el ${fecha}${turno.objetivoNombre ? ' en ' + turno.objetivoNombre : ''}`;
+    return {
+        turno_encontrado: { id: turno.id, code: turno.code, empleado: empleadoNombre, objetivo: turno.objetivoNombre ?? '' },
+        nuevo_codigo: nuevoCodigo,
+        accion_propuesta: {
+            type: 'extender_jornada',
+            label,
+            payload: {
+                shiftId: turno.id,
+                nuevoCodigo,
+                empleadoNombre,
+                codigoActual: turno.code,
+                objetivoNombre: turno.objetivoNombre ?? '',
+                fecha,
+            },
+        },
+    };
+}
+async function ejecutarProponerCubrirAusencia(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    const db = admin.firestore();
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    let clientId = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (!found)
+            return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+        objetivoId = found.id;
+        objetivoNombre = found.nombre;
+        clientId = found.clientId;
+    }
+    if (!objetivoId)
+        return { error: 'falta_objetivo' };
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(fecha));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(fecha));
+    const turnosSnap = await db
+        .collection('turnos')
+        .where('objectiveId', '==', objetivoId)
+        .where('startTime', '>=', startTs)
+        .where('startTime', '<', endTs)
+        .limit(60)
+        .get();
+    const turnosDia = turnosSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }));
+    const empleadosConTurno = new Set(turnosDia.map((t) => t.employeeId).filter(Boolean));
+    const banda = args.banda ?? (args.id_empleado_ausente
+        ? turnosDia.find((t) => t.employeeId === args.id_empleado_ausente)?.code ?? 'M'
+        : 'M');
+    const retDisponibles = turnosDia.filter((t) => t.code === 'RET' && !t.isFranco && t.employeeId !== args.id_empleado_ausente);
+    const sinTurnoDocs = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 60);
+    const sinTurnoCandidatos = sinTurnoDocs
+        .filter((d) => !empleadosConTurno.has(d.id))
+        .slice(0, 5)
+        .map((d) => {
+        const data = d.data();
+        return { id: d.id, nombre: [data.lastName, data.firstName].filter(Boolean).join(', ') || data.name || d.id };
+    });
+    const candidatos = [
+        ...sinTurnoCandidatos.map((c) => ({ ...c, origen: 'SIN_TURNO' })),
+        ...retDisponibles.slice(0, 3).map((t) => ({ id: t.employeeId, nombre: t.empleadoNombre ?? t.employeeId, origen: 'RET' })),
+    ];
+    if (candidatos.length === 0) {
+        return { error: 'sin_candidatos', objetivo: objetivoNombre, fecha, banda };
+    }
+    const mejor = candidatos[0];
+    const label = `Cubrir turno ${banda} en ${objetivoNombre || objetivoId} el ${fecha} con ${mejor.nombre} (${mejor.origen})`;
+    return {
+        candidatos,
+        accion_propuesta: {
+            type: 'cubrir_ausencia',
+            label,
+            payload: {
+                empleadoId: mejor.id,
+                empleadoNombre: mejor.nombre,
+                objetivoId,
+                clientId,
+                objetivoNombre,
+                banda,
+                fecha,
+                origenCandidato: mejor.origen,
+            },
+        },
+    };
+}
+async function resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId) {
+    const db = admin.firestore();
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(fecha));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(fecha));
+    const snap = await db
+        .collection('turnos')
+        .where('employeeId', '==', empleadoId)
+        .where('startTime', '>=', startTs)
+        .where('startTime', '<', endTs)
+        .limit(10)
+        .get();
+    if (snap.empty)
+        return null;
+    let docs = snap.docs;
+    if (objetivoId)
+        docs = docs.filter((d) => d.data().objectiveId === objetivoId);
+    const active = docs.filter((d) => {
+        const data = d.data();
+        return !data.isFranco && !data.draft && data.code !== 'F' && data.code !== 'FF' && data.code !== 'FP';
+    });
+    const chosen = active[0] ?? docs[0];
+    if (!chosen)
+        return null;
+    const data = chosen.data();
+    return {
+        shiftId: chosen.id,
+        code: String(data.code ?? ''),
+        objetivoId: String(data.objectiveId ?? ''),
+        objetivoNombre: data.objetivoNombre ? String(data.objetivoNombre) : undefined,
+        empresaId: String(data.empresaId ?? ''),
+    };
+}
+async function ejecutarProponerConfirmarPresencia(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (found) {
+            objetivoId = found.id;
+            objetivoNombre = found.nombre;
+        }
+    }
+    const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+    if (!turno)
+        return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+    if (!objetivoNombre && turno.objetivoNombre)
+        objetivoNombre = turno.objetivoNombre;
+    const label = `Confirmar presencia de ${empleadoNombre} (turno ${turno.code})${objetivoNombre ? ' en ' + objetivoNombre : ''} el ${fecha}`;
+    return {
+        accion_propuesta: {
+            type: 'confirmar_presencia',
+            label,
+            payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha },
+        },
+    };
+}
+async function ejecutarProponerRegistrarAusencia(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (found) {
+            objetivoId = found.id;
+            objetivoNombre = found.nombre;
+        }
+    }
+    const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+    if (!turno)
+        return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+    if (!objetivoNombre && turno.objetivoNombre)
+        objetivoNombre = turno.objetivoNombre;
+    const motivo = args.motivo ?? 'AA';
+    const label = `Registrar ausencia de ${empleadoNombre} (${motivo}) el ${fecha}${objetivoNombre ? ' en ' + objetivoNombre : ''}`;
+    return {
+        accion_propuesta: {
+            type: 'registrar_ausencia',
+            label,
+            payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha, motivo },
+        },
+    };
+}
+async function ejecutarProponerCerrarTurno(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (found) {
+            objetivoId = found.id;
+            objetivoNombre = found.nombre;
+        }
+    }
+    const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+    if (!turno)
+        return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+    if (!objetivoNombre && turno.objetivoNombre)
+        objetivoNombre = turno.objetivoNombre;
+    const label = `Cerrar turno ${turno.code} de ${empleadoNombre} el ${fecha}${objetivoNombre ? ' en ' + objetivoNombre : ''}`;
+    return {
+        accion_propuesta: {
+            type: 'cerrar_turno',
+            label,
+            payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha },
+        },
+    };
+}
+async function ejecutarProponerPlanificarObjetivoMes(ctx, args) {
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    let clientId = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (!found)
+            return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+        objetivoId = found.id;
+        objetivoNombre = found.nombre;
+        clientId = found.clientId;
+    }
+    if (!objetivoId)
+        return { error: 'falta_objetivo' };
+    const refDate = new Date(ctx.referenceDateYsMmDd ?? new Date().toISOString().slice(0, 10));
+    const year = args.anio ?? refDate.getFullYear();
+    const month = args.mes ?? (refDate.getMonth() + 1);
+    const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const mesNombre = MESES[(month - 1)] ?? String(month);
+    const label = `Generar planificación CCT 6+2 para ${objetivoNombre || objetivoId} — ${mesNombre} ${year} (borradores para revisar)`;
+    return {
+        accion_propuesta: {
+            type: 'planificar_objetivo_mes',
+            label,
+            payload: { objetivoId, clientId, objetivoNombre, year, month },
+        },
+    };
+}
+async function ejecutarProponerCrearTurnoRefuerzo(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    const banda = args.banda ?? 'M';
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    let clientId = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (!found)
+            return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+        objetivoId = found.id;
+        objetivoNombre = found.nombre;
+        clientId = found.clientId;
+    }
+    if (!objetivoId)
+        return { error: 'falta_objetivo' };
+    const horaInicio = bandaToHoraInicio(banda);
+    const horaFin = bandaToHoraFin(banda);
+    const label = `Crear refuerzo ${banda} (${horaInicio}–${horaFin}) para ${empleadoNombre} el ${fecha} en ${objetivoNombre || objetivoId}`;
+    return {
+        accion_propuesta: {
+            type: 'crear_turno_refuerzo',
+            label,
+            payload: {
+                empleadoId,
+                empleadoNombre,
+                objetivoId,
+                clientId,
+                objetivoNombre,
+                banda,
+                fecha,
+                horaInicio,
+                horaFin,
+            },
+        },
+    };
 }
 //# sourceMappingURL=assistantDataTools.js.map

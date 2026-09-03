@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = void 0;
+exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -28,6 +28,7 @@ const centroControlGuard_1 = require("./ops/centroControlGuard");
 const pattern_service_1 = require("./scheduling/pattern.service");
 const labor_agreement_service_1 = require("./data-management/labor-agreement.service");
 const runPlatformAssistant_1 = require("./assistant/runPlatformAssistant");
+const assistantWriteActions_1 = require("./assistant/assistantWriteActions");
 const assistantInteractionLog_1 = require("./assistant/assistantInteractionLog");
 const planningGeminiServer_1 = require("./assistant/planningGeminiServer");
 const runAutoSchedule_1 = require("./scheduling/runAutoSchedule");
@@ -417,8 +418,8 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
             results.gemini = { ok: false, latencyMs: Date.now() - tg, detail: e.message?.slice(0, 120) };
         }
     }
-    const gmailUser = process.env.GMAIL_USER || '';
-    const gmailPass = process.env.GMAIL_PASS || '';
+    const gmailUser = (process.env.GMAIL_USER || '').trim();
+    const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
     if (!gmailUser || !gmailPass) {
         results.gmail = { ok: false, detail: 'GMAIL_USER / GMAIL_PASS no configurados' };
     }
@@ -426,12 +427,21 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
         const tm = Date.now();
         try {
             const nodemailerMod = await Promise.resolve().then(() => require('nodemailer'));
-            const transporter = nodemailerMod.createTransport({ service: 'gmail', auth: { user: gmailUser, pass: gmailPass } });
+            const transporter = nodemailerMod.createTransport({
+                host: 'smtp.gmail.com',
+                port: 465,
+                secure: true,
+                auth: { user: gmailUser, pass: gmailPass },
+            });
             await transporter.verify();
-            results.gmail = { ok: true, latencyMs: Date.now() - tm, detail: gmailUser };
+            results.gmail = { ok: true, latencyMs: Date.now() - tm, detail: `${gmailUser} · passLen=${gmailPass.length}` };
         }
         catch (e) {
-            results.gmail = { ok: false, latencyMs: Date.now() - tm, detail: e.message?.slice(0, 120) };
+            results.gmail = {
+                ok: false,
+                latencyMs: Date.now() - tm,
+                detail: `${gmailUser} · passLen=${gmailPass.length} · ${(e.message || '').slice(0, 100)}`,
+            };
         }
     }
     const driveFolderId = process.env.DRIVE_BACKUP_FOLDER_ID || '';
@@ -590,6 +600,46 @@ exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
     : functions
         .runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 180, memory: '512MB' })
         .https.onCall(chatPlatformAssistantHandler);
+const AGENT_WRITE_ALLOWED_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'Operador', 'operador'];
+const AGENT_WRITE_ACTIONS = ['extender_jornada', 'cubrir_ausencia', 'crear_turno_refuerzo', 'confirmar_presencia', 'registrar_ausencia', 'cerrar_turno', 'planificar_objetivo_mes'];
+async function executeAgentActionHandler(data, context) {
+    if (!context.auth?.uid)
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    const role = String(context.auth.token.role ?? '');
+    const isSuperAdmin = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes(role);
+    if (!isSuperAdmin && !AGENT_WRITE_ALLOWED_ROLES.includes(role)) {
+        throw new functions.https.HttpsError('permission-denied', 'No tenés permiso para ejecutar acciones del agente.');
+    }
+    const { action, payload, empresaId } = data;
+    if (!AGENT_WRITE_ACTIONS.includes(action)) {
+        throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+    }
+    if (!empresaId)
+        throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+    console.info('[executeAgentAction]', { uid: context.auth.uid, role, action, empresaId });
+    try {
+        if (action === 'extender_jornada')
+            return await (0, assistantWriteActions_1.ejecutarExtenderJornada)(empresaId, payload);
+        if (action === 'cubrir_ausencia')
+            return await (0, assistantWriteActions_1.ejecutarCubrirAusencia)(empresaId, payload);
+        if (action === 'crear_turno_refuerzo')
+            return await (0, assistantWriteActions_1.ejecutarCrearTurnoRefuerzo)(empresaId, payload);
+        if (action === 'confirmar_presencia')
+            return await (0, assistantWriteActions_1.ejecutarConfirmarPresencia)(empresaId, payload);
+        if (action === 'registrar_ausencia')
+            return await (0, assistantWriteActions_1.ejecutarRegistrarAusencia)(empresaId, payload);
+        if (action === 'cerrar_turno')
+            return await (0, assistantWriteActions_1.ejecutarCerrarTurno)(empresaId, payload);
+        if (action === 'planificar_objetivo_mes')
+            return await (0, assistantWriteActions_1.ejecutarPlanificarObjetivoMes)(empresaId, payload);
+    }
+    catch (e) {
+        console.error('[executeAgentAction] error', e?.message);
+        throw new functions.https.HttpsError('internal', e?.message ?? 'Error al ejecutar la acción.');
+    }
+    throw new functions.https.HttpsError('internal', 'Acción no implementada.');
+}
+exports.executeAgentAction = functions.https.onCall(executeAgentActionHandler);
 const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 async function optimizePlanningGeminiHandler(data, context) {
     if (!context.auth?.uid) {
@@ -941,11 +991,11 @@ function buildPortalEmailHtml(activationLinkWeb, activationLinkApp, empresaNombr
         <tr>
           <td style="padding:40px 40px 32px;">
             <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">${nombre} te ha otorgado acceso al <strong>Portal de Empleados de COSP</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular Android</strong>. Si tenés instalada la app <strong>COSP Guardia</strong>, usá el botón verde. Si no, el botón azul abre el portal web.</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Abrí este email <strong>desde tu celular Android</strong>. Si tenés la app <strong>COSP Guardia</strong>, usá el botón índigo (abre la web y te ofrece pasar a la app). Si no, el botón verde activa en el navegador.</p>
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 16px;">
               <tr>
                 <td style="background:#312e81;border-radius:8px;">
-                  <a href="${activationLinkApp}" style="display:inline-block;padding:16px 32px;color:#fff;font-size:16px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ABRIR EN COSP GUARDIA</a>
+                  <a href="${activationLinkApp}" target="_blank" style="display:inline-block;padding:16px 32px;color:#fff;font-size:16px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">ABRIR EN COSP GUARDIA</a>
                 </td>
               </tr>
             </table>
@@ -984,7 +1034,7 @@ Abrí este email desde tu celular Android.
 App COSP Guardia (recomendado si ya la instalaste):
 ${activationLinkApp}
 
-Portal web:
+Portal web (solo navegador):
 ${activationLinkWeb}
 
 Este enlace expira en 48 horas y es de un solo uso.
@@ -1016,13 +1066,15 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
     if (!employeeIds?.length) {
         throw new functions.https.HttpsError('invalid-argument', 'Se requiere al menos un empleado.');
     }
-    const gmailUser = process.env.GMAIL_USER || '';
-    const gmailPass = process.env.GMAIL_PASS || '';
+    const gmailUser = (process.env.GMAIL_USER || '').trim();
+    const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
     if (!gmailUser || !gmailPass) {
         throw new functions.https.HttpsError('failed-precondition', 'Servicio de email no configurado. Definir GMAIL_USER y GMAIL_PASS en apps/functions/.env y redesplegar.');
     }
     const transporter = nodemailer.createTransport({
-        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
         auth: { user: gmailUser, pass: gmailPass },
     });
     const db = admin.firestore();
@@ -1089,7 +1141,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             const activationLinkWeb = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
-            const activationLinkApp = `cosp-guardia://empleado/activar?t=${activationToken}`;
+            const activationLinkApp = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}&open=app`;
             await transporter.sendMail({
                 from: `"${empresaNombre}" <${gmailUser}>`,
                 to: email,
@@ -1290,13 +1342,15 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
     if (!clientId || !clientName || !nombre || !email) {
         throw new functions.https.HttpsError('invalid-argument', 'Se requieren clientId, clientName, nombre y email.');
     }
-    const gmailUser = process.env.GMAIL_USER || '';
-    const gmailPass = process.env.GMAIL_PASS || '';
+    const gmailUser = (process.env.GMAIL_USER || '').trim();
+    const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
     if (!gmailUser || !gmailPass) {
         throw new functions.https.HttpsError('failed-precondition', 'Servicio de email no configurado. Definir GMAIL_USER y GMAIL_PASS en apps/functions/.env y redesplegar.');
     }
     const transporter = nodemailer.createTransport({
-        service: 'gmail',
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
         auth: { user: gmailUser, pass: gmailPass },
     });
     const db = admin.firestore();

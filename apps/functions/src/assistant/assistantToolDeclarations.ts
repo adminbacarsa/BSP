@@ -433,6 +433,89 @@ ASSISTANT_FUNCTION_DECLARATIONS.push(
       required: [],
     },
   } as any,
+  {
+    name: 'proponer_confirmar_presencia',
+    description:
+      'Propone marcar presente a un empleado en su turno del día indicado. Usá cuando digan «marcá presente a García», «confirmar presencia de X», «llegó García». Buscá al empleado con buscar_empleados_por_nombre si no tenés id. Requiere permiso OPERATIONS:update.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado.' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD del turno. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo para desambiguar si hay más de un turno ese día.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_registrar_ausencia',
+    description:
+      'Propone registrar que un empleado estuvo ausente en su turno: marca isAbsent=true y crea doc en ausencias. Usá para «García no vino», «registrá la ausencia de X», «faltó Romero hoy». Siempre buscá primero el turno del empleado. Requiere permiso OPERATIONS:update.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado.' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo para desambiguar.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        motivo: { type: SchemaType.STRING, description: 'Motivo opcional: AA (injustificada), E (enfermedad), A (autorizada). Default: AA.' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_cerrar_turno',
+    description:
+      'Propone cerrar (checkout / completar) el turno de un empleado: isCompleted=true. Usá para «cerré el turno de García», «García ya se fue», «checkout de X». Requiere permiso OPERATIONS:update.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado.' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo para desambiguar.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_planificar_objetivo_mes',
+    description:
+      'Genera automáticamente el cronograma mensual de un objetivo aplicando CCT 422/05 (ciclo 6+2). Usá para «planificá Obrador para octubre», «generá la planificación de Casino en septiembre», «automatizá el crono de X». Los turnos se crean como borrador (draft:true) para revisión antes de publicar. Requiere permiso PLANNING:create.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo/sede a planificar (ej. «Obrador Malagueño», «Casino»).' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés de buscar_objetivos_por_nombre).' },
+        mes: { type: SchemaType.NUMBER, description: 'Número de mes 1-12 (ej. octubre = 10). Default: mes en curso.' },
+        anio: { type: SchemaType.NUMBER, description: 'Año (ej. 2026). Default: año en curso.' },
+      },
+      required: [],
+    },
+  } as any,
 );
 
 export const ASSISTANT_TOOL_ROUNDS_MAX = 4;
+
+const WRITE_TOOL_MODULE_REQUIREMENTS: Record<string, string> = {
+  proponer_extender_jornada: 'OPERATIONS',
+  proponer_cubrir_ausencia: 'OPERATIONS',
+  proponer_crear_turno_refuerzo: 'OPERATIONS',
+  proponer_confirmar_presencia: 'OPERATIONS',
+  proponer_registrar_ausencia: 'OPERATIONS',
+  proponer_cerrar_turno: 'OPERATIONS',
+  proponer_planificar_objetivo_mes: 'PLANNING',
+};
+
+export function getFilteredDeclarations(readableModuleKeys: string[]): typeof ASSISTANT_FUNCTION_DECLARATIONS {
+  const moduleSet = new Set(readableModuleKeys);
+  return ASSISTANT_FUNCTION_DECLARATIONS.filter((decl) => {
+    const req = WRITE_TOOL_MODULE_REQUIREMENTS[(decl as any).name];
+    if (!req) return true;
+    return moduleSet.has(req);
+  }) as typeof ASSISTANT_FUNCTION_DECLARATIONS;
+}
