@@ -481,27 +481,14 @@ export function AssistantFloatingBubble(): React.ReactNode {
             <div className="flex min-w-0 items-center gap-2.5">
               <CospShieldIcon size={36} className="" style={{ color: brandColor } as React.CSSProperties} />
               <div className="min-w-0">
-                <p className="text-[11px] font-black uppercase tracking-wide dark:text-indigo-100" style={{ color: brandColor }}>
-                  Asistente COSP
+                <p className="text-[13px] font-black uppercase tracking-wide leading-tight dark:text-indigo-100" style={{ color: brandColor }}>
+                  VIGI
                 </p>
-                <p className="truncate text-[10px] font-medium text-slate-600 dark:text-slate-400" title={fullPath}>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 leading-tight">
+                  Asistente Virtual COSP
+                </p>
+                <p className="truncate text-[10px] font-medium text-slate-600 dark:text-slate-400 mt-0.5" title={fullPath}>
                   {moduleTitleEs(inferModuleKeyFromPath(fullPath || pathname))}
-                </p>
-                <p
-                  className="truncate text-[9px] font-bold text-slate-500 dark:text-slate-500"
-                  title={deployCtx.versionLabel}
-                >
-                  <span
-                    className={
-                      deployCtx.environment === 'emulator'
-                        ? 'text-amber-700 dark:text-amber-400'
-                        : 'text-emerald-700 dark:text-emerald-400'
-                    }
-                  >
-                    {deployCtx.environment === 'emulator' ? 'Lab' : 'Prod'}
-                  </span>
-                  {' · '}
-                  {deployCtx.buildHash}
                 </p>
               </div>
             </div>
