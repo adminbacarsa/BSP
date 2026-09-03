@@ -845,12 +845,14 @@ async function runModoDemoForEmpresa(
   const batch = db.batch();
   let presencias = 0, cierres = 0, retencion = 0;
 
-  // Pase 1: marcar presentes a entrantes + actualizar índice virtual
+  // Pase 1: marcar presentes a entrantes (con 10 min de adelanto para que el relevo
+  // esté presente antes de que el cron cierre al saliente en el mismo ciclo)
+  const LOOKAHEAD_MS = 10 * 60 * 1000;
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime()) continue;
+    if (startMs > now.getTime() + LOOKAHEAD_MS) continue; // dentro de 10 min → dar presente ya
     const oid = String(t.objectiveId || '');
     batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true, modoDemoAt: nowTs });
     presencias++;
@@ -859,24 +861,14 @@ async function runModoDemoForEmpresa(
     if (entry) entry.isPresent = true;
   }
 
-  // Pase 2: cerrar salientes (con índice actualizado)
+  // Pase 2: cerrar salientes — en modo demo NO hay retención, siempre se cierra
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted) continue;
     const endMs = (t.endTime?.seconds ?? 0) * 1000;
     if (!endMs || endMs > now.getTime()) continue;
-    const oid = String(t.objectiveId || '');
-
-    if (oid && hayRelevaYPresente(oid, endMs)) {
-      // Relevo listo → cerrar saliente (relevo completado)
-      batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
-      cierres++;
-    } else if (oid && hayRelevoPendiente(oid, endMs)) {
-      retencion++;
-    } else {
-      batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
-      cierres++;
-    }
+    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
+    cierres++;
   }
 
   if (presencias + cierres > 0) {

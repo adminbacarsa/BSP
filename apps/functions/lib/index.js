@@ -674,12 +674,13 @@ async function runModoDemoForEmpresa(db, empresaId) {
     const hayRelevoPendiente = (oid, endMs) => (byObj.get(oid) ?? []).some(r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - endMs) <= 90 * 60 * 1000);
     const batch = db.batch();
     let presencias = 0, cierres = 0, retencion = 0;
+    const LOOKAHEAD_MS = 10 * 60 * 1000;
     for (const doc of snap.docs) {
         const t = doc.data();
         if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted)
             continue;
         const startMs = (t.startTime?.seconds ?? 0) * 1000;
-        if (startMs > now.getTime())
+        if (startMs > now.getTime() + LOOKAHEAD_MS)
             continue;
         const oid = String(t.objectiveId || '');
         batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true, modoDemoAt: nowTs });
@@ -696,18 +697,8 @@ async function runModoDemoForEmpresa(db, empresaId) {
         const endMs = (t.endTime?.seconds ?? 0) * 1000;
         if (!endMs || endMs > now.getTime())
             continue;
-        const oid = String(t.objectiveId || '');
-        if (oid && hayRelevaYPresente(oid, endMs)) {
-            batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
-            cierres++;
-        }
-        else if (oid && hayRelevoPendiente(oid, endMs)) {
-            retencion++;
-        }
-        else {
-            batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
-            cierres++;
-        }
+        batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
+        cierres++;
     }
     if (presencias + cierres > 0) {
         await batch.commit();
