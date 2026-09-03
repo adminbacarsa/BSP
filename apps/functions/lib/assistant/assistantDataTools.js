@@ -3815,6 +3815,52 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
         .where('isFranco', '==', false)
         .limit(500)
         .get();
+    const empIdsToResolve = new Set();
+    const objIdsToResolve = new Set();
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (!t.empleadoNombre && t.employeeId)
+            empIdsToResolve.add(String(t.employeeId));
+        if (!t.objetivoNombre && t.objectiveId)
+            objIdsToResolve.add(String(t.objectiveId));
+    }
+    const empNames = new Map();
+    if (empIdsToResolve.size > 0) {
+        const empIds = [...empIdsToResolve].slice(0, 30);
+        const empDocs = await Promise.all(empIds.map(id => db.collection('empleados').doc(id).get()));
+        for (const d of empDocs) {
+            if (!d.exists)
+                continue;
+            const data = d.data();
+            const name = [data.lastName, data.firstName].filter(Boolean).join(', ')
+                || data.name || data.fullName || d.id;
+            empNames.set(d.id, name);
+        }
+    }
+    const objNames = new Map();
+    if (objIdsToResolve.size > 0) {
+        const clientsSnap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).get();
+        for (const cdoc of clientsSnap.docs) {
+            const objetivos = cdoc.data().objetivos ?? [];
+            for (const obj of objetivos) {
+                if (obj.id && objIdsToResolve.has(obj.id)) {
+                    objNames.set(obj.id, obj.name || obj.nombre || obj.id);
+                }
+            }
+        }
+    }
+    function formatHhMm(seconds) {
+        const arMs = seconds * 1000 - 3 * 3600000;
+        const d = new Date(arMs);
+        return `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}`;
+    }
+    function turnoLabel(t, startSec, endSec, oid) {
+        const emp = t.empleadoNombre || empNames.get(t.employeeId) || t.employeeId || '?';
+        const obj = t.objetivoNombre || objNames.get(oid) || oid || '?';
+        const desde = startSec ? formatHhMm(startSec) : '?';
+        const hasta = endSec ? formatHhMm(endSec) : '?';
+        return `${emp} — ${t.code} ${desde}–${hasta} en ${obj}`;
+    }
     const byObjective = new Map();
     for (const doc of snap.docs) {
         const t = doc.data();
@@ -3842,10 +3888,12 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
         const t = doc.data();
         if (t.isAbsent || t.isVirtual)
             continue;
-        const startMs = (t.startTime?.seconds ?? 0) * 1000;
-        const endMs = (t.endTime?.seconds ?? 0) * 1000;
+        const startSec = t.startTime?.seconds ?? 0;
+        const endSec = t.endTime?.seconds ?? 0;
+        const startMs = startSec * 1000;
+        const endMs = endSec * 1000;
         const oid = String(t.objectiveId || '');
-        const label = `${t.empleadoNombre ?? t.employeeId} (${t.code}) en ${t.objetivoNombre ?? oid}`;
+        const label = turnoLabel(t, startSec, endSec, oid);
         if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
             presenciaMarcada.push(label);
             if (!dryRun) {
@@ -3880,18 +3928,21 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
         await batch.commit();
     const modo = dryRun ? 'SIMULACIÓN' : 'EJECUTADO';
     const resumen = dryRun
-        ? `[${modo}] Se marcarían ${presenciaMarcada.length} presencia(s) y cerrarían ${turnosCerrados.length} turno(s). ${turnosEnRetencion.length > 0 ? `${turnosEnRetencion.length} turno(s) en retención (relevo pendiente).` : ''}`
+        ? `[${modo}] Se marcarían ${presenciaMarcada.length} presencia(s) y cerrarían ${turnosCerrados.length} turno(s).${turnosEnRetencion.length > 0 ? ` ${turnosEnRetencion.length} turno(s) en retención por relevo pendiente.` : ''}`
         : `[${modo}] ${presenciaMarcada.length} presencia(s) marcadas · ${turnosCerrados.length} turno(s) cerrados${turnosEnRetencion.length > 0 ? ` · ${turnosEnRetencion.length} en retención` : ''}.`;
     return {
         modo,
         turnos_evaluados: snap.size,
-        presencias_marcadas: presenciaMarcada.length,
-        turnos_cerrados: turnosCerrados.length,
+        presencias_a_marcar: presenciaMarcada.length,
+        turnos_a_cerrar: turnosCerrados.length,
         turnos_en_retencion: turnosEnRetencion.length,
         detalle_presencias: presenciaMarcada,
         detalle_cierres: turnosCerrados,
         detalle_retencion: turnosEnRetencion,
         resumen,
+        instruccion: dryRun
+            ? 'Para ejecutar los cambios reales, respondé "ejecutá" o "activá modo demo".'
+            : undefined,
     };
 }
 //# sourceMappingURL=assistantDataTools.js.map
