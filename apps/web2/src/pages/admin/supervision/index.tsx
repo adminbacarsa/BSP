@@ -254,7 +254,8 @@ interface SlaPosition {
   name: string;
   coverageType?: string;
   code?: string;
-  shifts: { code: string; name: string; startTime: string; endTime: string }[];
+  quantity?: number;
+  shifts: { code: string; name: string; startTime: string; endTime: string; quantity?: number }[];
 }
 
 // ─── Página principal ────────────────────────────────────────────────────────
@@ -317,15 +318,18 @@ export default function SupervisionPage() {
         best.forEach((p: any) => {
           const key = p.id || p.name;
           if (!key || posMap.has(key)) return;
+          const posQty = p.quantity != null ? Number(p.quantity) : 1;
           const shifts = (p.allowedShiftTypes || []).map((s: any) => ({
             code: s.code, name: s.name || s.code,
             startTime: s.startTime || '', endTime: s.endTime || '',
+            quantity: s.quantity != null ? Number(s.quantity) : posQty,
           })).filter((s: any) => s.startTime);
           posMap.set(key, {
             id: p.id || p.name,
             name: p.name,
             coverageType: p.coverageType,
             code: p.code,
+            quantity: posQty,
             shifts,
           });
         });
@@ -337,6 +341,24 @@ export default function SupervisionPage() {
     if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'PUNTUAL' || mFechaModo !== 'RANGO' || !mFechaDesde) return [];
     return listYmdDatesInclusive(mFechaDesde, mFechaHasta);
   }, [mTipo, mAlcance, mFechaModo, mFechaDesde, mFechaHasta]);
+
+  const mPaxEstructuralPreview = useMemo(() => {
+    if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'ESTRUCTURAL' || !mSelPosId) return null;
+    const pos = slaPositions.find((p) => p.id === mSelPosId);
+    if (!pos) return null;
+    const shift = mSelShiftCode
+      ? pos.shifts.find((s) => s.code === mSelShiftCode)
+      : pos.shifts[0];
+    const current = shift?.quantity ?? pos.quantity ?? 1;
+    const delta = Math.max(1, Math.floor(Number(mPax) || 1));
+    return {
+      posName: pos.name,
+      shiftCode: shift?.code || mSelShiftCode || '',
+      current,
+      next: current + delta,
+      delta,
+    };
+  }, [mTipo, mAlcance, mSelPosId, mSelShiftCode, mPax, slaPositions]);
 
   // Cargar guardias con turno en el objetivo/fecha seleccionados (para TURA)
   useEffect(() => {
@@ -751,6 +773,21 @@ export default function SupervisionPage() {
         const slaPosCobertura = slaPositions.filter((p) => !isEventosPosition(p) && p.shifts.length > 0);
         if (slaPosCobertura.length > 0 && !mSelPosId && !positionName) {
           toast.error('Seleccioná el puesto del SLA o ingresá el nombre del puesto');
+          setManualSaving(false);
+          return;
+        }
+      }
+
+      if (esEstructural) {
+        const slaPosCobertura = slaPositions.filter((p) => !isEventosPosition(p) && p.shifts.length > 0);
+        if (slaPosCobertura.length > 0 && !mSelPosId) {
+          toast.error('Seleccioná el puesto del SLA para sumar pax');
+          setManualSaving(false);
+          return;
+        }
+        const selPos = slaPositions.find((p) => p.id === mSelPosId);
+        if (selPos && selPos.shifts.length > 0 && !mSelShiftCode) {
+          toast.error('Seleccioná el turno/banda del puesto');
           setManualSaving(false);
           return;
         }
@@ -1326,38 +1363,46 @@ export default function SupervisionPage() {
 
       {/* ── Modal carga manual supervisor ── */}
       {showManualForm && (
-        <div className="fixed inset-0 z-[80] flex flex-col justify-end bg-slate-900/60 backdrop-blur-md" onClick={() => !manualSaving && resetManualForm()}>
-          <div className="bg-white dark:bg-slate-800 rounded-t-3xl w-full max-w-lg mx-auto lg:rounded-2xl lg:my-auto lg:max-h-[90vh] p-6 shadow-2xl border border-slate-100 dark:border-slate-700 space-y-4 max-h-[92dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
-                <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-lg text-[10px]">Manual</span>
-                Cargar RFZ / TURA
-              </h3>
-              <button onClick={resetManualForm} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+        <div
+          className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-md p-0 sm:p-4"
+          onClick={() => !manualSaving && resetManualForm()}
+        >
+          <div
+            className="bg-white dark:bg-slate-800 w-full max-w-lg flex flex-col max-h-[min(92dvh,820px)] rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 px-5 sm:px-6 pt-5 sm:pt-6 pb-3 space-y-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="flex items-center justify-between">
+                <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-lg text-[10px]">Manual</span>
+                  Cargar RFZ / TURA
+                </h3>
+                <button onClick={resetManualForm} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+              </div>
+              <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
+                <AlertCircle size={12}/>
+                {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
+                  ? '+ Pax al puesto: modifica el SLA (ej. Puesto 1 de 2 → 3 pax). Planificación cubre la demanda. Queda en trazabilidad del servicio.'
+                  : mTipo === 'AGREGADO_TURNO'
+                    ? 'TURA: extensión del turno del guardia — plan/ops según contigüidad.'
+                    : 'RFZ puntual: vacante extra en fecha → fila VACANTE RFZ → publicar → ops → prefactura.'}
+              </p>
+              <div className="flex gap-2">
+                {(['REFUERZO_PUESTO', 'AGREGADO_TURNO'] as const).map(t => (
+                  <button key={t} type="button" onClick={() => {
+                    setMTipo(t);
+                    setMSelPosId('');
+                    setMSelShiftCode('');
+                    setMPosicionNombre('');
+                  }}
+                    className={`flex-1 py-2 rounded-xl text-xs font-black uppercase border transition-colors ${mTipo === t ? 'bg-red-600 text-white border-red-600' : 'border-slate-200 text-slate-500 hover:border-red-300'}`}>
+                    {t === 'REFUERZO_PUESTO' ? 'RFZ Refuerzo' : 'TURA Agregado'}
+                  </button>
+                ))}
+              </div>
             </div>
-            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
-              <AlertCircle size={12}/>
-              {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
-                ? 'Suma pax al contrato (Servicios). Planificación cubre la demanda extra — no se crea vacante RFZ de ese día.'
-                : mTipo === 'AGREGADO_TURNO'
-                  ? 'TURA: extensión del turno del guardia — plan/ops según contigüidad.'
-                  : 'RFZ: vacante a planificar → fila VACANTE RFZ → publicar → ops → prefactura.'}
-            </p>
 
-            {/* Tipo */}
-            <div className="flex gap-2">
-              {(['REFUERZO_PUESTO', 'AGREGADO_TURNO'] as const).map(t => (
-                <button key={t} type="button" onClick={() => {
-                  setMTipo(t);
-                  setMSelPosId('');
-                  setMSelShiftCode('');
-                  setMPosicionNombre('');
-                }}
-                  className={`flex-1 py-2 rounded-xl text-xs font-black uppercase border transition-colors ${mTipo === t ? 'bg-red-600 text-white border-red-600' : 'border-slate-200 text-slate-500 hover:border-red-300'}`}>
-                  {t === 'REFUERZO_PUESTO' ? 'RFZ Refuerzo' : 'TURA Agregado'}
-                </button>
-              ))}
-            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-4 space-y-4">
 
             <SupervisionClienteObjetivoPicker
               objectives={scopedObjectives}
@@ -1371,8 +1416,8 @@ export default function SupervisionPage() {
             {mTipo === 'REFUERZO_PUESTO' && (
               <div className="flex gap-2">
                 {([
-                  { id: 'PUNTUAL' as const, label: 'Solo esa fecha' },
-                  { id: 'ESTRUCTURAL' as const, label: 'Sumar al servicio' },
+                  { id: 'PUNTUAL' as const, label: 'RFZ puntual (fecha)' },
+                  { id: 'ESTRUCTURAL' as const, label: '+ Pax al puesto' },
                 ]).map((opt) => (
                   <button
                     key={opt.id}
@@ -1427,11 +1472,21 @@ export default function SupervisionPage() {
                     )}
                   </div>
                   <div>
-                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cantidad</label>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                      {mAlcance === 'ESTRUCTURAL' ? 'Pax a sumar' : 'Cantidad'}
+                    </label>
                     <input type="number" min={1} max={20} value={mPax} onChange={e => setMPax(Number(e.target.value))}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
                   </div>
                 </div>
+                {mPaxEstructuralPreview && (
+                  <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    {mPaxEstructuralPreview.posName}
+                    {mPaxEstructuralPreview.shiftCode ? ` · ${mPaxEstructuralPreview.shiftCode}` : ''}
+                    {' · '}{mPaxEstructuralPreview.current} pax → <span className="text-amber-900">{mPaxEstructuralPreview.next} pax</span>
+                    {' '}(+{mPaxEstructuralPreview.delta} en el contrato)
+                  </p>
+                )}
                 {mSelPosId && (() => {
                   const shifts = slaPositions.find(p => p.id === mSelPosId)?.shifts || [];
                   if (!shifts.length) return null;
@@ -1443,7 +1498,13 @@ export default function SupervisionPage() {
                           <button key={s.code} type="button"
                             onClick={() => { setMSelShiftCode(s.code); setMStart(s.startTime); setMEnd(s.endTime); }}
                             className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-colors ${mSelShiftCode === s.code ? 'bg-red-600 text-white border-red-600' : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-red-300'}`}>
-                            <span>{s.code}</span> <span className="font-normal opacity-75">{s.startTime}–{s.endTime}</span>
+                            <span>{s.code}</span>
+                            <span className="font-normal opacity-75"> {s.startTime}–{s.endTime}</span>
+                            {s.quantity != null && (
+                              <span className={`ml-1 font-bold ${mSelShiftCode === s.code ? 'text-red-100' : 'text-emerald-600'}`}>
+                                · {s.quantity} pax
+                              </span>
+                            )}
                           </button>
                         ))}
                       </div>
@@ -1629,14 +1690,14 @@ export default function SupervisionPage() {
               </div>
             </div>
 
-            {/* Motivo */}
             <div>
               <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Motivo</label>
               <textarea rows={2} placeholder="Descripción del pedido..." value={mMotivo} onChange={e => setMMotivo(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold resize-none focus:outline-none focus:border-red-400"/>
             </div>
+            </div>
 
-            <div className="flex gap-2">
+            <div className="shrink-0 px-5 sm:px-6 pb-5 sm:pb-6 pt-3 border-t border-slate-100 dark:border-slate-700 flex gap-2 bg-white dark:bg-slate-800 rounded-b-3xl sm:rounded-b-2xl">
               <button type="button" onClick={resetManualForm} disabled={manualSaving}
                 className="flex-1 py-2.5 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">
                 Cancelar
@@ -1645,6 +1706,8 @@ export default function SupervisionPage() {
                 disabled={
                   manualSaving || !mClienteId || !mObjetivoId || !mFechaDesde || !mStart || !mEnd || !mMotivo.trim()
                   || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && mFechaModo === 'RANGO' && !mFechaHasta)
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && slaPositions.some((p) => !isEventosPosition(p) && p.shifts.length > 0) && !mSelPosId)
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && !!mSelPosId && (slaPositions.find((p) => p.id === mSelPosId)?.shifts.length || 0) > 0 && !mSelShiftCode)
                   || (mTipo === 'AGREGADO_TURNO' && (
                     Array.isArray(guardias) && guardias.length > 0
                       ? mGuardiasTura.length === 0
@@ -1655,7 +1718,7 @@ export default function SupervisionPage() {
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
                 {manualSaving ? <RefreshCw size={14} className="animate-spin"/> : <Plus size={14}/>}
                 {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
-                  ? 'Sumar al SLA'
+                  ? `Sumar ${mPax} pax al puesto`
                   : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL'
                     ? mFechaModo === 'RANGO' && mFechasRfzPreview.length > 1
                       ? `Crear ${mFechasRfzPreview.length * mPax} RFZ (${mFechasRfzPreview.length} días)`

@@ -64,7 +64,10 @@ export type SlaChangeAction =
   | 'REVERT_REFUERZO'
   | 'CANCEL_SERVICE'
   | 'BAJA_PUESTO'
-  | 'REACTIVAR_PUESTO';
+  | 'REACTIVAR_PUESTO'
+  | 'ALTA_PUESTO'
+  | 'EDIT_PUESTO'
+  | 'ELIMINAR_PUESTO';
 
 export interface SlaChangeLogEntry {
   at: string;

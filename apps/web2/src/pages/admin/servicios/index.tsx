@@ -846,16 +846,60 @@ export default function ServiciosSLAPage() {
         includeInSlaTotals: isEventos ? false : positionForm.includeInSlaTotals,
       };
       let updatedPositions = [...form.positions];
-      if (positionForm.id) updatedPositions = updatedPositions.map(p => p.id === positionForm.id ? newPosition : p);
-      else updatedPositions.push(newPosition);
+      const actor = actorLabel();
+      let changeLog = form.changeLog;
+      if (positionForm.id) {
+        updatedPositions = updatedPositions.map(p => p.id === positionForm.id ? newPosition : p);
+        const prev = form.positions.find((p) => p.id === positionForm.id);
+        if (prev) {
+          const detailParts: string[] = [];
+          if (prev.name !== newPosition.name) detailParts.push(`nombre: ${prev.name} → ${newPosition.name}`);
+          const prevPax = formatPositionPaxLabel(prev);
+          const newPax = formatPositionPaxLabel(newPosition);
+          if (prevPax !== newPax) detailParts.push(`pax: ${prevPax} → ${newPax}`);
+          const prevCodes = prev.allowedShiftTypes.map((s) => s.code).sort().join(',');
+          const newCodes = newPosition.allowedShiftTypes.map((s) => s.code).sort().join(',');
+          if (prevCodes !== newCodes) detailParts.push(`bandas: ${prevCodes || '—'} → ${newCodes || '—'}`);
+          if (detailParts.length > 0) {
+            changeLog = appendSlaChangeLog(changeLog, {
+              action: 'EDIT_PUESTO',
+              detail: detailParts.join(' · '),
+              positionId: newId,
+              positionName: newPosition.name,
+              byUid: actor.uid,
+              byName: actor.name,
+            });
+          }
+        }
+      } else {
+        updatedPositions.push(newPosition);
+        changeLog = appendSlaChangeLog(changeLog, {
+          action: 'ALTA_PUESTO',
+          detail: `Alta de ${newPosition.name} · ${formatPositionPaxLabel(newPosition)}`,
+          positionId: newId,
+          positionName: newPosition.name,
+          byUid: actor.uid,
+          byName: actor.name,
+        });
+      }
 
-      setForm({ ...form, positions: updatedPositions });
+      setForm({ ...form, positions: updatedPositions, changeLog });
       setShowPositionModal(false);
   };
 
   const removePosition = (id: string) => {
       const removed = form.positions.find((p) => p.id === id);
+      if (!removed) return;
       const updatedPositions = form.positions.filter(p => p.id !== id);
+      const actor = actorLabel();
+      const changeLog = appendSlaChangeLog(form.changeLog, {
+        action: 'ELIMINAR_PUESTO',
+        detail: `Eliminó ${removed.name} · ${formatPositionPaxLabel(removed)}`,
+        positionId: removed.id,
+        positionName: removed.name,
+        byUid: actor.uid,
+        byName: actor.name,
+      });
       if (removed && isEncargadoPosition(removed)) {
         const prevId = String(form.encargadoEmployeeId || '').trim();
         const assignments = prevId
@@ -864,6 +908,7 @@ export default function ServiciosSLAPage() {
         setForm({
           ...form,
           positions: updatedPositions,
+          changeLog,
           encargadoEmployeeId: '',
           encargadoEmployeeName: '',
           positionAssignments: assignments,
@@ -871,7 +916,7 @@ export default function ServiciosSLAPage() {
         setEncargadoSearch('');
         return;
       }
-      setForm({ ...form, positions: updatedPositions });
+      setForm({ ...form, positions: updatedPositions, changeLog });
   };
 
   const actorLabel = () => {
