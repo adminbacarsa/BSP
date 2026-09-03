@@ -506,6 +506,7 @@ async function runGeminiAssistantChat(
   }
 
   let rounds = 0;
+  let capturedActionProposal: Record<string, unknown> | null = null;
 
   while (toolsEnabled && rounds < ASSISTANT_TOOL_ROUNDS_MAX) {
     rounds++;
@@ -521,10 +522,14 @@ async function runGeminiAssistantChat(
       calls.map(async (fc) => {
         const args = (fc.args ?? {}) as Record<string, unknown>;
         const out = await dispatchAssistantToolCall(toolCtx, fc.name, args);
+        if (!capturedActionProposal && out.accion_propuesta && typeof out.accion_propuesta === 'object') {
+          capturedActionProposal = out.accion_propuesta as Record<string, unknown>;
+        }
+        const { accion_propuesta: _ap, ...outForGemini } = out;
         return {
           functionResponse: {
             name: fc.name,
-            response: out,
+            response: outForGemini,
           },
         };
       }),
@@ -597,5 +602,9 @@ async function runGeminiAssistantChat(
       'El modelo no devolvió texto. Probá de nuevo en un momento o formulá más corto.',
     );
   }
-  return { reply: reply.slice(0, 8000) };
+  const finalReply = reply.slice(0, 8000);
+  if (capturedActionProposal) {
+    return { reply: `${finalReply}<!--COSP_ACTION:${JSON.stringify(capturedActionProposal)}-->` };
+  }
+  return { reply: finalReply };
 }

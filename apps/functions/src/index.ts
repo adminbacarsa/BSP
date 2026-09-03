@@ -43,6 +43,12 @@ import { LaborAgreementService } from './data-management/labor-agreement.service
 import { EmployeeRole } from './common/interfaces/employee.interface';
 import { runPlatformAssistant, type AssistantChatPayload } from './assistant/runPlatformAssistant';
 import {
+  ejecutarExtenderJornada,
+  ejecutarCubrirAusencia,
+  ejecutarCrearTurnoRefuerzo,
+  type AgentActionPayload,
+} from './assistant/assistantWriteActions';
+import {
   classifyAssistantOutcome,
   extractLastUserQuestion,
   writeAssistantInteractionLog,
@@ -743,6 +749,45 @@ export const chatPlatformAssistant =
     : functions
         .runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 180, memory: '512MB' })
         .https.onCall(chatPlatformAssistantHandler);
+
+// =========================================================
+// AGENTE: ejecutar acción propuesta (con confirmación humana)
+// =========================================================
+const AGENT_WRITE_ALLOWED_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'Operador', 'operador'];
+const AGENT_WRITE_ACTIONS = ['extender_jornada', 'cubrir_ausencia', 'crear_turno_refuerzo'] as const;
+type AgentWriteAction = (typeof AGENT_WRITE_ACTIONS)[number];
+
+async function executeAgentActionHandler(
+  data: { action: string; payload: AgentActionPayload; empresaId: string },
+  context: functions.https.CallableContext,
+): Promise<{ ok: boolean; message: string }> {
+  if (!context.auth?.uid) throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  const role = String(context.auth.token.role ?? '');
+  const isSuperAdmin = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes(role);
+  if (!isSuperAdmin && !AGENT_WRITE_ALLOWED_ROLES.includes(role)) {
+    throw new functions.https.HttpsError('permission-denied', 'No tenés permiso para ejecutar acciones del agente.');
+  }
+
+  const { action, payload, empresaId } = data;
+  if (!AGENT_WRITE_ACTIONS.includes(action as AgentWriteAction)) {
+    throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+  }
+  if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+
+  console.info('[executeAgentAction]', { uid: context.auth.uid, role, action, empresaId });
+
+  try {
+    if (action === 'extender_jornada') return await ejecutarExtenderJornada(empresaId, payload);
+    if (action === 'cubrir_ausencia') return await ejecutarCubrirAusencia(empresaId, payload);
+    if (action === 'crear_turno_refuerzo') return await ejecutarCrearTurnoRefuerzo(empresaId, payload);
+  } catch (e: any) {
+    console.error('[executeAgentAction] error', e?.message);
+    throw new functions.https.HttpsError('internal', e?.message ?? 'Error al ejecutar la acción.');
+  }
+  throw new functions.https.HttpsError('internal', 'Acción no implementada.');
+}
+
+export const executeAgentAction = functions.https.onCall(executeAgentActionHandler);
 
 const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 

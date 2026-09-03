@@ -382,4 +382,57 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
   },
 ];
 
+// ── Tools de propuesta de acción (write con confirmación humana) ──────────────
+
+ASSISTANT_FUNCTION_DECLARATIONS.push(
+  {
+    name: 'proponer_extender_jornada',
+    description:
+      'Propone extender la jornada de un empleado de 8h a 12h (M→D12, T→D12, N→N12) en un objetivo y fecha. Usá cuando pidan «extendé a García», «pasá a García a 12 horas», «necesito extender el turno de X». Buscá primero al empleado con buscar_empleados_por_nombre si no tenés su id. Requiere permiso OPERATIONS.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado (de buscar_empleados_por_nombre).' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD del turno a extender. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo/sede (opcional, para desambiguar si tiene varios turnos ese día).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_cubrir_ausencia',
+    description:
+      'Busca candidatos disponibles para cubrir un puesto vacante o una ausencia en un objetivo y día, siguiendo la prioridad CCT (sin turno → RET → ESC → FT). Usá cuando pidan «alguien para cubrir», «hay alguien disponible para el turno M en X», «cubrí la vacante». Si no especifican banda, usá la del turno ausente.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo donde hay vacante.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        banda: { type: SchemaType.STRING, description: 'M | T | N — turno a cubrir.' },
+        id_empleado_ausente: { type: SchemaType.STRING, description: 'Opcional: ID del empleado ausente para tomar su turno exacto.' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_crear_turno_refuerzo',
+    description:
+      'Propone crear un turno de refuerzo (origen OPERATIONS_COVERAGE) para un empleado específico en un objetivo y fecha. Usá para «agregá un refuerzo», «mandá a García al objetivo X mañana», «necesito un refuerzo en Banco XYZ». Requiere nombre de empleado, objetivo, fecha y banda.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado.' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD del turno a crear.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo donde irá el refuerzo.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        banda: { type: SchemaType.STRING, description: 'M | T | N | D12 | N12 — código CCT del turno.' },
+      },
+      required: [],
+    },
+  } as any,
+);
+
 export const ASSISTANT_TOOL_ROUNDS_MAX = 4;
