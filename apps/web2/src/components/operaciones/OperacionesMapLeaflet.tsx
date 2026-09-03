@@ -59,11 +59,8 @@ const OperacionesMapLeaflet = ({
   return (
     <div className="relative h-full w-full operaciones-map-leaflet">
       <style>{`
-        .operaciones-map-leaflet .leaflet-tile-pane {
-          filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9);
-        }
         .operaciones-map-leaflet .leaflet-container {
-          background: #0f172a;
+          background: #e8eef5;
         }
       `}</style>
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] px-3 py-1.5 rounded-xl bg-slate-900/90 text-slate-200 text-[10px] font-semibold shadow-lg border border-slate-700/50 max-w-lg text-center pointer-events-auto">

@@ -16,19 +16,28 @@ export function isGoogleMapsEnabled(runtimeKey?: string | null): boolean {
   return getGoogleMapsApiKey(runtimeKey).length > 0;
 }
 
-/** Estilo mapa operativo (Centro de Comando). */
+/**
+ * Estilo mapa operativo — claro/legible (no night mode).
+ * Terreno suave slate, calles blancas, agua azul, pines de estado destacan.
+ */
 export const OPERACIONES_MAP_STYLES: Array<Record<string, unknown>> = [
-  { elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0f172a' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#334155' }] },
+  { elementType: 'geometry', stylers: [{ color: '#e8eef5' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#475569' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#94a3b8' }] },
+  { featureType: 'administrative.land_parcel', stylers: [{ visibility: 'off' }] },
   { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#334155' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1e293b' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#475569' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#d4e8d4' }, { visibility: 'on' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#cbd5e1' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#fde68a' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#f59e0b' }] },
+  { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
   { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#93c5fd' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#1e40af' }] },
 ];
 
 export const OPERACIONES_MAP_OPTIONS = {

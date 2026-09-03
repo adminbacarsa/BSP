@@ -7,8 +7,8 @@ import type { OperacionesMapProps } from '@/components/operaciones/OperacionesMa
 const OperacionesMapGoogle = dynamic(() => import('@/components/operaciones/OperacionesMapGoogle'), {
   ssr: false,
   loading: () => (
-    <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-400 font-mono text-xs">
-      CARGANDO MAPA TÁCTICO...
+    <div className="h-full w-full flex items-center justify-center bg-slate-100 text-slate-500 font-mono text-xs">
+      CARGANDO GOOGLE MAPS...
     </div>
   ),
 });
@@ -16,16 +16,25 @@ const OperacionesMapGoogle = dynamic(() => import('@/components/operaciones/Oper
 const OperacionesMapLeaflet = dynamic(() => import('@/components/operaciones/OperacionesMapLeaflet'), {
   ssr: false,
   loading: () => (
-    <div className="h-full w-full flex items-center justify-center bg-slate-900 text-slate-400 font-mono text-xs">
-      CARGANDO MAPA TÁCTICO...
+    <div className="h-full w-full flex items-center justify-center bg-slate-100 text-slate-500 font-mono text-xs">
+      CARGANDO MAPA...
     </div>
   ),
 });
 
 const OperacionesMap = (props: OperacionesMapProps) => {
-  const { empresa } = useEmpresa();
+  const { empresa, loadingEmpresa } = useEmpresa();
   const runtimeKey = empresa?.googleMapsApiKey;
   const apiKey = getGoogleMapsApiKey(runtimeKey);
+
+  // Esperar empresa: evita montar OSM y después saltar a Google (dos “versiones”).
+  if (loadingEmpresa || empresa === null) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-slate-100 text-slate-500 font-mono text-xs">
+        CARGANDO MAPA...
+      </div>
+    );
+  }
 
   if (isGoogleMapsEnabled(runtimeKey)) {
     return <OperacionesMapGoogle {...props} apiKey={apiKey} />;

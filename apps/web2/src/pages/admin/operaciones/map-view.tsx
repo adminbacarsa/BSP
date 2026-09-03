@@ -10,7 +10,7 @@ import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orde
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa, assertDocBelongsToEmpresa } from '@/lib/multiempresa';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
@@ -48,13 +48,17 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 
 // --- MODALES (INTEGRADOS) ---
 const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelievedIds, onRelieved }: any) => {
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
+    const [saving, setSaving] = React.useState(false);
     if (!isOpen || !incomingShift) return null;
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME'; if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
+    const wasAbsent = incomingShift.isAbsent === true || incomingShift.absenceType === 'AA';
     const activeGuards = logic.processedData.filter((s:any) => {
         if (s.objectiveId !== incomingShift.objectiveId) return false;
-        if (s.positionName !== incomingShift.positionName) return false;
-        if (!(s.isPresent || s.status === 'COMPLETED') || s.isCompleted) return false;
+        if (String(s.positionName || '').trim().toLowerCase() !== String(incomingShift.positionName || '').trim().toLowerCase()) return false;
+        if (!s.isPresent || s.isCompleted) return false;
         if (s.id === incomingShift.id) return false;
         if (recentlyRelievedIds?.has?.(s.id)) return false;
         // Guardias retenidos: solo los cuyo turno terminó ≤45 min antes del turno entrante
@@ -66,20 +70,97 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
         return minutesUntilEnd <= 15;
     });
     const handleConfirm = async (prevShiftId: string | null) => {
+        if (saving) return;
+        if (!incomingShift?.id) {
+            toast.error('Turno sin ID — no se puede registrar el ingreso.');
+            return;
+        }
+        setSaving(true);
         try {
-            const batch = writeBatch(db);
-            batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: serverTimestamp(), isLate: status === 'LATE' });
-            if (prevShiftId) {
-                batch.update(doc(db, 'turnos', prevShiftId), { realEndTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' });
-            }
-            await batch.commit();
+            await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
+            if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
 
-            // Cerrar inmediatamente — write ya en IndexedDB local
+            const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
+            let aaDoc: any = null;
+            let aaHorario = '';
+            if (wasAutoAbsent) {
+                const absSnap = await getDocs(query(
+                    collection(db, 'ausencias'),
+                    where('shiftId', '==', incomingShift.id),
+                    limit(5)
+                ));
+                aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA') ?? null;
+                if (aaDoc) {
+                    const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                    const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : toDate(incomingShift.shiftDateObj);
+                    const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : toDate(incomingShift.endDateObj);
+                    aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+                }
+            }
+
+            const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
+                ? incomingShift.shiftDateObj
+                : toDate(incomingShift.shiftDateObj);
+            const isEarlyStartShift = !!incomingShift.isEarlyStart;
+            const incomingRealStart = isEarlyStartShift
+                ? (incomingShift.adjustedStartTime
+                    ? (incomingShift.adjustedStartTime.toDate
+                        ? Timestamp.fromDate(incomingShift.adjustedStartTime.toDate())
+                        : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
+                    : serverTimestamp())
+                : Timestamp.fromDate(incomingScheduledStart);
+
+            await updateDocForEmpresa('turnos', incomingShift.id, {
+                isPresent: true,
+                status: 'PRESENT',
+                realStartTime: incomingRealStart,
+                lateArrivalAt: status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
+                isLate: status === 'LATE' || wasAutoAbsent,
+                isAbsent: false,
+                absenceType: null,
+                absenceDetectedAt: null,
+                absenceReversedAt: serverTimestamp(),
+                absenceReversedBy: 'OPERACIONES',
+            }, empresaId, migracionCompleta);
+
+            if (incomingShift.linkedTuraId && incomingShift.turaContiguous) {
+                await updateDocForEmpresa('turnos', incomingShift.linkedTuraId, {
+                    coveredByParentPresence: true,
+                    isPresent: true,
+                    status: 'PRESENT',
+                    parentPresenceShiftId: incomingShift.id,
+                }, empresaId, migracionCompleta).catch(() => {});
+            }
+
+            if (wasAutoAbsent && aaDoc) {
+                await updateDoc(aaDoc.ref, {
+                    type: 'Llegada Tarde',
+                    absenceType: 'LT',
+                    status: 'Confirmada',
+                    reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
+                    arrivedAt: serverTimestamp(),
+                }).catch(() => {});
+            }
+
+            if (prevShiftId) {
+                const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
+                const prevEnd = prevShift ? toDate(prevShift.endDateObj) : null;
+                const nowDate = new Date();
+                const isEarlyRelevo = !!(prevEnd && prevEnd > nowDate);
+                const outgoingRealEnd = isEarlyRelevo ? Timestamp.fromDate(prevEnd!) : serverTimestamp();
+                await updateDocForEmpresa('turnos', prevShiftId, {
+                    realEndTime: outgoingRealEnd,
+                    isCompleted: true,
+                    status: 'COMPLETED',
+                    isPresent: false,
+                    relievedEarly: isEarlyRelevo,
+                }, empresaId, migracionCompleta);
+            }
+
             if (prevShiftId && onRelieved) onRelieved(prevShiftId);
             else onClose();
-            toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
+            toast.success(status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).');
 
-            // Background: sync check (no bloquea UI)
             Promise.race([
                 waitForPendingWrites(db),
                 new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
@@ -88,7 +169,12 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                     toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado.');
                 }
             }).catch(() => {});
-        } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
+        } catch (e: any) {
+            console.error('[HandoverModal map]', e);
+            toast.error('Error al registrar ingreso: ' + (e?.message || e?.code || String(e)));
+        } finally {
+            setSaving(false);
+        }
     };
     return (
         <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
@@ -105,7 +191,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                             </p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18}/></button>
+                    <button type="button" onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18}/></button>
                 </div>
                 <div className="px-4 pt-3 pb-2 flex flex-wrap gap-1.5">
                     <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">
@@ -123,7 +209,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                         <div className="space-y-2 mb-3">
                             <p className="text-[10px] font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p>
                             {activeGuards.map((s:any) => (
-                                <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group">
+                                <button key={s.id} type="button" disabled={saving} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group disabled:opacity-60">
                                     <div className="text-left">
                                         <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span>
                                         <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span>
@@ -134,13 +220,25 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                         </div>
                     )}
                     {activeGuards.length === 0 && (
-                        <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-3">
-                            <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p>
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center mb-3 space-y-1">
+                            <p className="text-xs font-bold text-slate-600">No hay guardia saliente en el puesto</p>
+                            <p className="text-[11px] text-slate-500 leading-snug">
+                                Podés registrar el ingreso igual: el puesto queda con este guardia, sin relevo.
+                            </p>
                         </div>
                     )}
-                    <button onClick={() => handleConfirm(null)}
-                        className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                        {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : (status === 'LATE' ? 'CONFIRMAR LLEGADA TARDE' : 'CONFIRMAR INGRESO')}
+                    <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => { void handleConfirm(null); }}
+                        className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm disabled:opacity-60 flex items-center justify-center gap-2 ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                    >
+                        {saving ? <Loader2 size={16} className="animate-spin" /> : null}
+                        {saving
+                            ? 'GUARDANDO…'
+                            : (activeGuards.length > 0
+                                ? 'INGRESAR SIN RELEVAR'
+                                : (status === 'LATE' ? 'INGRESAR SIN RELEVAR (TARDE)' : 'INGRESAR SIN RELEVAR'))}
                     </button>
                 </div>
             </div>
@@ -1298,33 +1396,14 @@ export default function TacticalMapView() {
         { id: 'FRANCOS', label: 'FRAN', count: logic.stats.francos, color: 'text-blue-600' }
     ];
 
-    const objectivesWithCoords = useMemo(() => (logic.objectives || []).filter((o: any) => o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng))), [logic.objectives]);
-    const objectivesForMap = useMemo(() => {
-        const base = logic.filteredObjectives || [];
-        const allObjs = logic.objectives || [];
-        /** Solo objetivos con geo real — no inventar Córdoba (apilaba todos los pines). */
-        const onlyWithCoords = (arr: any[]) =>
-            (arr || []).filter((o: any) => o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng)));
-        if (logic.viewTab === 'TODOS') {
-            const result = base.length ? base : allObjs;
-            const withCoords = onlyWithCoords(result);
-            return withCoords.length ? withCoords : objectivesWithCoords;
-        }
-        const ids = new Set((logic.listData || []).map((s: any) => s.objectiveId).filter(Boolean));
-        const fromTab = base.filter((o: any) => ids.has(o.id));
-        const combined = fromTab.length ? fromTab : base;
-        const withCoords = onlyWithCoords(combined);
-        return withCoords.length ? withCoords : objectivesWithCoords;
-    }, [logic.filteredObjectives, logic.listData, logic.viewTab, logic.objectives, objectivesWithCoords]);
-
     return (
         <div className="h-screen w-screen overflow-hidden bg-slate-900 relative">
-            <Head><title>COSP TACTICAL V1.0 · 31b309b</title></Head>
+            <Head><title>COSP TACTICAL V1.0</title></Head>
             <style>{POPUP_STYLES}</style>
             
             <div className="absolute top-4 left-4 right-4 z-[1000] flex gap-2 justify-between pointer-events-none">
                 <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-2 flex items-center gap-3 border border-slate-200 pointer-events-auto">
-                    <div className="flex items-center gap-2 px-3 border-r border-slate-200 pr-4"><Radio className="text-rose-600 animate-pulse" size={20} /><div><h1 className="font-black text-slate-800 text-sm leading-none">COSP TACTICAL</h1><span className="text-[10px] text-slate-500 font-bold">V1.0 · <span className="font-mono">31b309b</span></span></div></div>
+                    <div className="flex items-center gap-2 px-3 border-r border-slate-200 pr-4"><Radio className="text-rose-600 animate-pulse" size={20} /><div><h1 className="font-black text-slate-800 text-sm leading-none">COSP TACTICAL</h1><span className="text-[10px] text-slate-500 font-bold">V1.0</span></div></div>
                     <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200"><Filter size={14} className="text-slate-400 ml-1"/><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none w-40 cursor-pointer"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                     <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-64"><Search size={14} className="text-slate-400 ml-1"/><input className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar guardia, objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
                 </div>
@@ -1373,9 +1452,8 @@ export default function TacticalMapView() {
             </div>
 
             <OperacionesMap
-                key={`tactical-${logic.viewTab}-${(objectivesForMap || []).map((o:any)=>o.id).sort().join(',').slice(0,120)}`}
                 center={[-31.4201, -64.1888]}
-                allObjectives={objectivesForMap}
+                allObjectives={logic.filteredObjectives}
                 filteredShifts={logic.listData}
                 onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
                 onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} 
@@ -1385,6 +1463,13 @@ export default function TacticalMapView() {
                 onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true, shift:s})}
                 onReportPlanning={handleReportPlanning} 
             />
+            {!logic.isStable && (
+                <div className="absolute inset-0 z-[400] flex items-center justify-center bg-slate-900/40 pointer-events-none">
+                    <div className="rounded-2xl bg-slate-900/90 border border-slate-600 px-4 py-3 text-xs font-black text-slate-200 uppercase tracking-wide">
+                        Sincronizando operaciones…
+                    </div>
+                </div>
+            )}
 
             {showHelp && (
                 <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
@@ -1419,8 +1504,8 @@ export default function TacticalMapView() {
                 </div>
             )}
             
-            {/* ── PANEL FLOTANTE DE ALERTAS — con fix ghost badge + triage urgente/PROT ── */}
-            <div className="absolute bottom-8 left-8 z-[1000]">
+            {/* ── PANEL FLOTANTE DE ALERTAS — arriba del logo Google; leyenda del mapa queda en bottom-28 ── */}
+            <div className="absolute bottom-14 left-4 z-[1000]">
             {(() => {
                 // Ghost badge fix: mismo filtro que stats.prioridad
                 const _now = new Date();
@@ -1439,7 +1524,8 @@ export default function TacticalMapView() {
                 const otherNovedades = pendingNovedades.filter(n =>
                     !urgentNovedades.includes(n) && !protNovedades.includes(n)
                 );
-                const totalAlerts = priorityShiftsPanel.length + lateShiftsPanel.length + urgentNovedades.length + otherNovedades.length + protNovedades.length;
+                // Mismo criterio que Operaciones: novedades + turnos en prioridad
+                const totalAlerts = priorityShiftsPanel.length + lateShiftsPanel.length + pendingNovedades.length;
 
                 const NOV_TYPE_META: Record<string, { label: string; bg: string; border: string }> = {
                     AUSENCIA_CORTO_PLAZO:        { label: 'URGENTE', bg: 'bg-red-600 text-white animate-pulse', border: 'border-l-red-600' },

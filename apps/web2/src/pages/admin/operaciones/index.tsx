@@ -483,16 +483,19 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                                 })}
                             </div>
                         ) : (
-                            <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-3">
-                                <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p>
+                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center mb-3 space-y-1">
+                                <p className="text-xs font-bold text-slate-600">No hay guardia saliente en el puesto</p>
+                                <p className="text-[11px] text-slate-500 leading-snug">
+                                    Podés registrar el ingreso igual: el puesto queda con este guardia, sin relevo.
+                                </p>
                             </div>
                         )}
-                        {!mustRelevar && (
+                        {(!mustRelevar || activeGuards.length === 0) && (
                             <button onClick={() => handleConfirm(null)}
                                 className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                                 {activeGuards.length > 0
                                     ? 'INGRESAR SIN RELEVAR'
-                                    : (status === 'LATE' ? 'CONFIRMAR LLEGADA TARDE' : 'CONFIRMAR INGRESO')}
+                                    : (status === 'LATE' ? 'INGRESAR SIN RELEVAR (TARDE)' : 'INGRESAR SIN RELEVAR')}
                             </button>
                         )}
                     </>
@@ -4334,8 +4337,7 @@ export default function OperacionesPage() {
                     </div>
                 </div>
 
-                {/* â"€â"€ PANEL FLOTANTE DE ALERTAS — solo visible cuando el mapa NO está en ventana externa â"€â"€ */}
-                {!isExternalMap && (
+                {/* PANEL FLOTANTE DE ALERTAS — siempre visible (también con mapa undocked) */}
                 <React.Fragment>
                 {/* Backdrop mobile cuando panel abierto */}
                 {notifPanelOpen && <div className="fixed inset-0 bg-black/40 z-[999] lg:hidden" onClick={() => setNotifPanelOpen(false)}/>}
@@ -4533,7 +4535,6 @@ export default function OperacionesPage() {
                 })()}
                 </div>
                 </React.Fragment>
-                )}
 
             </div>
 

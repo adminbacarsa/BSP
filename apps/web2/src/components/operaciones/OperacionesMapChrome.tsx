@@ -23,7 +23,8 @@ export function OperacionesMapChrome({
 }) {
   return (
     <>
-      <div className="absolute bottom-4 left-4 z-[450] pointer-events-auto">
+      {/* Izquierda, encima de Alertas y del logo Google (~56px) */}
+      <div className="absolute bottom-28 left-4 z-[450] pointer-events-auto max-w-[220px]">
         <div className="rounded-2xl bg-slate-900/90 border border-slate-700/80 shadow-lg px-3 py-2 space-y-1.5">
           <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-slate-300">
             <MapPin size={11} className={provider === 'google' ? 'text-indigo-400' : 'text-amber-400'} />
@@ -40,11 +41,12 @@ export function OperacionesMapChrome({
           </div>
         </div>
       </div>
+      {/* Derecha: encima de zoom / attribution de Google */}
       {onFit && (
         <button
           type="button"
           onClick={onFit}
-          className="absolute bottom-4 right-4 z-[450] pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-700 text-slate-200 text-[10px] font-black uppercase hover:bg-slate-800 shadow-lg"
+          className="absolute bottom-24 right-14 z-[450] pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-700 text-slate-200 text-[10px] font-black uppercase hover:bg-slate-800 shadow-lg"
         >
           <Crosshair size={12} /> Ajustar
         </button>
