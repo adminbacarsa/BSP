@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     X, Calendar, Users, MapPin, Search, Send,
     CheckCircle, Clock,
@@ -8,6 +8,7 @@ import { collection, addDoc, deleteDoc, getDocs, getDoc, query, where, serverTim
 import { getAuth } from 'firebase/auth';
 import { db } from '@/lib/firebase';
 import { empresaCollectionQuery } from '@/lib/multiempresa';
+import { assignGuardToEvent } from '@/services/eventoAssignService';
 import { type Evento, type ServicioEvento } from '@/services/eventoService';
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
 import { useToast } from '@/context/ToastContext';
@@ -26,6 +27,14 @@ function fmtFecha(ymd: string): string {
     if (!ymd) return '—';
     const [y, m, d] = ymd.split('-');
     return `${d}/${m}/${y.slice(2)}`;
+}
+
+function calcHorasServicio(horaInicio: string, horaFin: string): number {
+    const [sh, sm] = String(horaInicio || '08:00').split(':').map(Number);
+    const [eh, em] = String(horaFin || '16:00').split(':').map(Number);
+    let mins = (eh * 60 + em) - (sh * 60 + sm);
+    if (mins <= 0) mins += 24 * 60;
+    return Math.max(1, Math.round(mins / 60));
 }
 
 // Códigos que se consideran "disponibles" (sin turno productivo)
@@ -64,6 +73,10 @@ interface EmpRow {
     name: string;
     fileNumber?: string;
     aptitudes?: EmpleadoAptitud[];
+    preferredObjectiveId?: string;
+    preferredObjectiveName?: string;
+    objectiveId?: string;
+    objectiveName?: string;
 }
 
 interface Props {
@@ -90,8 +103,13 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const [filterAvail, setFilterAvail] = useState<'todos' | 'libre' | 'RET' | 'franco' | 'conTurno'>('todos');
     const [evTurnos, setEvTurnos] = useState<any[]>([]);
     const [loadingCrono, setLoadingCrono] = useState(false);
+    const [selectedCronoTurnos, setSelectedCronoTurnos] = useState<Set<string>>(new Set());
 
     const selectedSrv = evento.servicios?.find(s => s.id === selectedSrvId) || null;
+
+    useEffect(() => {
+        setSelectedCronoTurnos(new Set());
+    }, [selectedSrvId, tab, evento.id]);
 
     // Cargar empleados activos una vez
     useEffect(() => {
@@ -107,7 +125,17 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     const name = dat.name
                         || `${dat.firstName || dat.nombre || ''} ${dat.lastName || dat.apellido || ''}`.trim()
                         || d.id;
-                    return { id: d.id, uid: dat.uid || '', name, fileNumber: dat.fileNumber || dat.legajo || '', aptitudes: dat.aptitudes || [] };
+                    return {
+                        id: d.id,
+                        uid: dat.uid || '',
+                        name,
+                        fileNumber: dat.fileNumber || dat.legajo || '',
+                        aptitudes: dat.aptitudes || [],
+                        preferredObjectiveId: dat.preferredObjectiveId || '',
+                        preferredObjectiveName: dat.preferredObjectiveName || '',
+                        objectiveId: dat.objectiveId || '',
+                        objectiveName: dat.objectiveName || '',
+                    };
                 })
                 .sort((a, b) => a.name.localeCompare(b.name, 'es'));
             // Deduplicar por legajo (puede haber docs duplicados en Firestore)
@@ -142,10 +170,12 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
         return unsub;
     }, [evento.id, empresaId]);
 
-    async function handleUnassignGuard(turno: any) {
-        const nombre = turno.employeeName || turno.employeeId;
-        if (!window.confirm(`¿Desasignar a ${nombre} de este evento?`)) return;
+    async function unassignTurno(turno: any) {
         try {
+            const emp = empleados.find((e) => e.id === turno.employeeId || (e.uid && e.uid === turno.employeeId));
+            const srv = (evento.servicios || []).find((s) => s.id === turno.servicioId);
+            const fecha = srv?.fecha ? fmtFecha(srv.fecha) : '';
+            const horario = srv ? horarioBadge(srv) : '';
             if (turno.replacedCode) {
                 // Había un turno previo — revertir al código original
                 await updateDoc(doc(db, 'turnos', turno.id), {
@@ -169,11 +199,60 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     await updateDoc(doc(db, 'solicitudes_evento', sol.id), { status: 'convocado' });
                 }
             }
-            addToast(`${nombre} desasignado del evento`, 'success');
+            await addDoc(collection(db, 'user_notifications'), {
+                empresaId,
+                uid: emp?.uid || null,
+                employeeId: turno.employeeId || null,
+                type: 'EVENTO_DESAFECTADO',
+                target: 'employee',
+                title: `Desafectación de evento: ${evento.nombre}`,
+                body: `${srv?.nombre || turno.servicioNombre || 'Servicio'}${fecha ? ` · ${fecha}` : ''}${horario ? ` · ${horario}` : ''}.`,
+                eventoId: evento.id || null,
+                eventoNombre: evento.nombre || null,
+                servicioId: turno.servicioId || null,
+                servicioNombre: srv?.nombre || turno.servicioNombre || null,
+                read: false,
+                readAt: null,
+                createdAt: serverTimestamp(),
+            });
+            return true;
         } catch (e) {
             console.error(e);
-            addToast('Error al desasignar', 'error');
+            return false;
         }
+    }
+
+    function resolveTurnoGuardName(turno: any): string {
+        const rawName = String(turno?.employeeName || '').trim();
+        const rawId = String(turno?.employeeId || '').trim();
+        const fromEmp = empleados.find((e) => e.id === rawId || (e.uid && e.uid === rawId));
+        if (rawName && rawName !== rawId) return rawName;
+        if (fromEmp?.name) return fromEmp.name;
+        return rawName || rawId || 'Sin nombre';
+    }
+
+    async function handleUnassignGuard(turno: any) {
+        const nombre = resolveTurnoGuardName(turno);
+        if (!window.confirm(`¿Desasignar a ${nombre} de este evento?`)) return;
+        const ok = await unassignTurno(turno);
+        if (ok) addToast(`${nombre} desasignado del evento`, 'success');
+        else addToast('Error al desasignar', 'error');
+    }
+
+    async function handleUnassignMany(target: any[], label: string) {
+        if (target.length === 0) return;
+        if (!window.confirm(`¿Desasignar ${target.length} guardia(s) ${label}?`)) return;
+        let ok = 0;
+        let err = 0;
+        for (const t of target) {
+            // eslint-disable-next-line no-await-in-loop
+            const done = await unassignTurno(t);
+            if (done) ok++;
+            else err++;
+        }
+        setSelectedCronoTurnos(new Set());
+        if (ok > 0) addToast(`${ok} guardia(s) desasignado(s)`, 'success');
+        if (err > 0) addToast(`${err} guardia(s) no se pudieron desasignar`, 'error');
     }
 
     async function handleTogglePresence(turnoId: string, field: 'isPresent' | 'isAbsent' | 'isCompleted', value: boolean) {
@@ -185,16 +264,15 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
         }
     }
 
-    // Cargar solicitudes del evento
-    const loadSolicitudes = useCallback(async () => {
+    // Suscripción en tiempo real a solicitudes del evento
+    useEffect(() => {
         if (!evento.id) return;
-        try {
-            const sols = await solicitudEventoService.getByEvento(evento.id);
-            setSolicitudes(sols);
-        } catch { /* silencioso */ }
+        const q = query(collection(db, 'solicitudes_evento'), where('eventoId', '==', evento.id));
+        const unsub = onSnapshot(q, (snap) => {
+            setSolicitudes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SolicitudEvento)));
+        });
+        return unsub;
     }, [evento.id]);
-
-    useEffect(() => { void loadSolicitudes(); }, [loadSolicitudes]);
 
     // Cargar disponibilidad al cambiar servicio
     useEffect(() => {
@@ -265,8 +343,78 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
         setSending(true);
         const convocadoPor = getAuth().currentUser?.uid || '';
         const empMap = Object.fromEntries(empleados.map(e => [e.id, e]));
+        const pendingIds = Array.from(selected).filter((empId) => !yaEnviadosIds.has(empId));
+        const availableSlots = cupo > 0 ? Math.max(0, cupo - totalConfirmados) : Number.POSITIVE_INFINITY;
+        const selectedWithinCapacity = pendingIds.slice(0, availableSlots);
+        const overflow = pendingIds.length - selectedWithinCapacity.length;
+        const toAssignDirect = selectedWithinCapacity.filter((empId) => {
+            const code = String(availMap[empId] || 'libre').trim().toUpperCase();
+            return code === 'RET' || code === 'LIBRE';
+        });
+        const toConvocar = selectedWithinCapacity.filter((empId) => !toAssignDirect.includes(empId));
         try {
-            await Promise.all(Array.from(selected).map(async empId => {
+            for (const empId of toAssignDirect) {
+                const emp = empMap[empId];
+                if (!emp) continue;
+                const guardHours = selectedSrv.tipoTurno === '3x8'
+                    ? 8
+                    : selectedSrv.tipoTurno === '2x12'
+                        ? 12
+                        : calcHorasServicio(selectedSrv.horaInicio, selectedSrv.horaFin);
+                const solicitudRef = await addDoc(collection(db, 'solicitudes_evento'), {
+                    empresaId,
+                    eventoId: evento.id,
+                    eventoNombre: evento.nombre,
+                    servicioId: selectedSrv.id,
+                    servicioNombre: selectedSrv.nombre,
+                    servicioFecha: selectedSrv.fecha,
+                    empleadoId: empId,
+                    empleadoNombre: emp.name,
+                    status: 'aprobada',
+                    tipo: 'admin_asigna',
+                    convocadoPor,
+                    respondidoPor: convocadoPor,
+                    respondidoAt: serverTimestamp(),
+                    creadoAt: serverTimestamp(),
+                });
+                await assignGuardToEvent({
+                    empresaId,
+                    empleadoId: empId,
+                    empleadoNombre: emp.name,
+                    empleadoObjectiveId: emp.preferredObjectiveId || emp.objectiveId || undefined,
+                    empleadoObjectiveName: emp.preferredObjectiveName || emp.objectiveName || undefined,
+                    eventoId: evento.id!,
+                    eventoNombre: evento.nombre,
+                    clienteId: evento.clienteId,
+                    clienteNombre: evento.clienteNombre,
+                    servicioId: selectedSrv.id,
+                    servicioNombre: selectedSrv.nombre,
+                    servicioFecha: selectedSrv.fecha,
+                    horaInicio: selectedSrv.horaInicio,
+                    horaFin: selectedSrv.horaFin,
+                    horas: guardHours,
+                    solicitudId: solicitudRef.id,
+                    respondidoPor: convocadoPor,
+                });
+                await addDoc(collection(db, 'user_notifications'), {
+                    empresaId,
+                    uid: emp.uid || null,
+                    employeeId: empId,
+                    type: 'EVENTO_CONFIRMADO',
+                    target: 'employee',
+                    title: `Asignación directa: ${evento.nombre}`,
+                    body: `${selectedSrv.nombre} · ${fmtFecha(selectedSrv.fecha)} · ${horarioBadge(selectedSrv)}.`,
+                    eventoId: evento.id,
+                    eventoNombre: evento.nombre,
+                    servicioId: selectedSrv.id,
+                    servicioNombre: selectedSrv.nombre,
+                    read: false,
+                    readAt: null,
+                    createdAt: serverTimestamp(),
+                });
+            }
+
+            await Promise.all(toConvocar.map(async empId => {
                 const emp = empMap[empId];
                 if (!emp) return;
                 const solicitudId = await solicitudEventoService.convocar({
@@ -280,8 +428,6 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     empleadoNombre: emp.name,
                     convocadoPor,
                 });
-                // Bandeja + FCM (trigger onEmployeeNotificationCreated). employeeId siempre;
-                // uid si el legajo tiene Auth vinculado.
                 await addDoc(collection(db, 'user_notifications'), {
                     empresaId,
                     uid: emp.uid || null,
@@ -299,9 +445,12 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     createdAt: serverTimestamp(),
                 });
             }));
-            addToast(`Convocatoria enviada a ${selected.size} guardia${selected.size !== 1 ? 's' : ''}`, 'success');
+            const msgs: string[] = [];
+            if (toAssignDirect.length > 0) msgs.push(`${toAssignDirect.length} asignado(s) directo (RET/sin turno)`);
+            if (toConvocar.length > 0) msgs.push(`${toConvocar.length} convocado(s)`);
+            if (overflow > 0) msgs.push(`${overflow} omitido(s) por cupo`);
+            addToast(msgs.join(' · ') || 'Sin cambios', 'success');
             setSelected(new Set());
-            await loadSolicitudes();
             setTab('estado');
         } catch (e) {
             console.error(e);
@@ -667,19 +816,48 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         ).map(srv => {
                                             const srvT = evTurnos.filter(t => t.servicioId === srv.id);
                                             if (srvT.length === 0) return null;
+                                            const selectedSrvTurnos = srvT.filter((t) => selectedCronoTurnos.has(t.id));
                                             return (
                                                 <section key={srv.id}>
-                                                    <p className="text-[9px] font-black uppercase text-slate-400 tracking-wide mb-2 flex items-center gap-1.5">
-                                                        <span>{srv.nombre}</span>
-                                                        <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-black">{fmtFecha(srv.fecha)}</span>
-                                                        <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-medium">{horarioBadge(srv)}</span>
-                                                    </p>
+                                                    <div className="mb-2 flex items-center gap-2 flex-wrap">
+                                                        <p className="text-[9px] font-black uppercase text-slate-400 tracking-wide flex items-center gap-1.5">
+                                                            <span>{srv.nombre}</span>
+                                                            <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-black">{fmtFecha(srv.fecha)}</span>
+                                                            <span className="bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-medium">{horarioBadge(srv)}</span>
+                                                        </p>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => void handleUnassignMany(srvT, `del servicio "${srv.nombre}"`)}
+                                                            className="text-[10px] font-black uppercase text-rose-500 hover:text-rose-700 px-2 py-1 rounded-lg hover:bg-rose-50"
+                                                        >
+                                                            Desasignar todos
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            disabled={selectedSrvTurnos.length === 0}
+                                                            onClick={() => void handleUnassignMany(selectedSrvTurnos, `seleccionado(s) de "${srv.nombre}"`)}
+                                                            className="text-[10px] font-black uppercase text-amber-600 hover:text-amber-800 px-2 py-1 rounded-lg hover:bg-amber-50 disabled:opacity-40"
+                                                        >
+                                                            Desasignar selección ({selectedSrvTurnos.length})
+                                                        </button>
+                                                    </div>
                                                     <div className="space-y-1.5">
                                                         {srvT.map(turno => (
                                                             <div key={turno.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="h-3.5 w-3.5 rounded border-slate-300"
+                                                                    checked={selectedCronoTurnos.has(turno.id)}
+                                                                    onChange={(e) => {
+                                                                        const next = new Set(selectedCronoTurnos);
+                                                                        if (e.target.checked) next.add(turno.id);
+                                                                        else next.delete(turno.id);
+                                                                        setSelectedCronoTurnos(next);
+                                                                    }}
+                                                                />
                                                                 <div className="flex-1 min-w-0">
                                                                     <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">
-                                                                        {turno.employeeName || empleados.find(e => e.id === turno.employeeId)?.name || turno.employeeId}
+                                                                        {resolveTurnoGuardName(turno)}
                                                                     </p>
                                                                     <p className="text-[9px] text-slate-400">
                                                                         {(() => {
@@ -776,7 +954,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
                                                                 <CheckCircle size={12} className="text-emerald-500 shrink-0"/>
                                                                 <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">
-                                                                    {t.employeeName || empleados.find((e: EmpRow) => e.id === t.employeeId)?.name || t.employeeId}
+                                                                    {resolveTurnoGuardName(t)}
                                                                 </p>
                                                                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Planificador</span>
                                                             </div>
@@ -809,7 +987,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             <div key={t.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
                                                                 <CheckCircle size={12} className="text-emerald-500 shrink-0"/>
                                                                 <p className="text-xs font-medium text-slate-700 dark:text-slate-200 flex-1">
-                                                                    {t.employeeName || empleados.find((e: EmpRow) => e.id === t.employeeId)?.name || t.employeeId}
+                                                                    {resolveTurnoGuardName(t)}
                                                                 </p>
                                                                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Planificador</span>
                                                             </div>

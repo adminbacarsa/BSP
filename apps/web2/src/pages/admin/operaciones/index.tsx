@@ -1804,8 +1804,55 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     );
 };
 
+const isEventShift = (shift: any): boolean => {
+    const code = String(shift?.code || shift?.type || '').toUpperCase();
+    const origin = String(shift?.origin || '').toUpperCase();
+    return code === 'EV' || origin === 'EVENTO' || !!String(shift?.eventoId || '').trim();
+};
+
+const getEventGroupKey = (shift: any): string => {
+    const eventoId = String(shift?.eventoId || '').trim();
+    const servicioId = String(shift?.servicioId || '').trim();
+    if (eventoId || servicioId) return `EV_${eventoId || 'sin_evento'}_${servicioId || 'sin_servicio'}`;
+    const eventoNombre = String(shift?.eventoNombre || '').trim();
+    const servicioNombre = String(shift?.servicioNombre || '').trim();
+    return `EVNAME_${eventoNombre || 'evento'}_${servicioNombre || 'servicio'}`;
+};
+
+const getEventGroupLabel = (shift: any): string => {
+    const evento = String(shift?.eventoNombre || '').trim() || 'Evento sin nombre';
+    const servicio = String(shift?.servicioNombre || '').trim();
+    const puesto = String(shift?.positionName || '').trim();
+    if (servicio) return `Evento: ${evento} · ${servicio}`;
+    if (puesto) return `Evento: ${evento} · ${puesto}`;
+    return `Evento: ${evento}`;
+};
+
+const splitShiftsByEvent = (items: any[]) => {
+    const regular: any[] = [];
+    const groups = new Map<string, { id: string; label: string; items: any[] }>();
+    (items || []).forEach((shift: any) => {
+        if (!isEventShift(shift)) {
+            regular.push(shift);
+            return;
+        }
+        const groupKey = getEventGroupKey(shift);
+        if (!groups.has(groupKey)) {
+            groups.set(groupKey, {
+                id: groupKey,
+                label: getEventGroupLabel(shift),
+                items: [],
+            });
+        }
+        groups.get(groupKey)!.items.push(shift);
+    });
+    const eventGroups = Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return { regular, eventGroups };
+};
+
 const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, isAutoMode, isPublished }: any) => {
     const [expanded, setExpanded] = useState(true);
+    const split = useMemo(() => splitShiftsByEvent(group.items || []), [group.items]);
     return (
         <div className={`bg-white rounded-xl border shadow-sm overflow-hidden mb-3 ${isPublished === false ? 'border-amber-300' : 'border-slate-300'}`}>
             <div className={`px-3 py-2 border-b flex justify-between items-center cursor-pointer ${isPublished === false ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'}`} onClick={() => setExpanded(!expanded)}>
@@ -1821,7 +1868,32 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
             </div>
             {expanded && (
                 <div className="p-2 bg-slate-50 space-y-2">
-                    {group.items.map((s: any) => (
+                    {split.eventGroups.length > 0 && (
+                        <div className="space-y-2">
+                            {split.eventGroups.map((ev) => (
+                                <div key={ev.id} className="rounded-xl border border-amber-200 bg-amber-50/60">
+                                    <div className="px-2.5 py-1.5 border-b border-amber-200 flex items-center justify-between gap-2">
+                                        <span className="text-[10px] font-black uppercase tracking-wide text-amber-800 truncate">{ev.label}</span>
+                                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 shrink-0">{ev.items.length} guardia(s)</span>
+                                    </div>
+                                    <div className="p-1.5 space-y-1.5 bg-white/80">
+                                        {ev.items.map((s: any) => (
+                                            <GuardCard key={s.id} shift={s} viewTab={viewTab} isCompact={isCompact} isAutoMode={isAutoMode}
+                                                onOpenCheckout={(s: any) => modals.setCheckoutData({ isOpen: true, shift: s })}
+                                                onOpenAttendance={(s: any) => modals.setAttendanceData({ isOpen: true, shift: s })}
+                                                onOpenHandover={(s: any) => modals.setHandoverData({ isOpen: true, shift: s })}
+                                                onOpenInterrupt={(s: any) => modals.setInterruptData({ isOpen: true, shift: s })}
+                                                onOpenCoverage={(s: any) => modals.setCoverageData({ isOpen: true, shift: s })}
+                                                onReportPlanning={onReport} onOpenWorkedFranco={onOpenWorkedFranco}
+                                                onNovedadAbsence={onNovedadAbsence} onOpenWA={onOpenWA} onOpenAbsenceDecision={onOpenAbsenceDecision} onOpenRRHH={onOpenRRHH}
+                                                onOpenManualRetention={(s: any) => modals.setManualRetentionData({ isOpen: true, shift: s })}/>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {split.regular.map((s: any) => (
                         <GuardCard key={s.id} shift={s} viewTab={viewTab} isCompact={isCompact} isAutoMode={isAutoMode}
                             onOpenCheckout={(s: any) => modals.setCheckoutData({ isOpen: true, shift: s })}
                             onOpenAttendance={(s: any) => modals.setAttendanceData({ isOpen: true, shift: s })}
@@ -3297,6 +3369,7 @@ export default function OperacionesPage() {
             isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)
         );
         hoy.forEach((s:any) => {
+            if (isEventShift(s)) return;
             if (s.isFranco) return;
             const key = s.objectiveId || 'unknown';
             if (!map[key]) map[key] = { name: s.objectiveName || '—', client: s.clientName || '', total: 0, active: 0, absent: 0, vacant: 0, objectiveId: key };
@@ -3320,6 +3393,18 @@ export default function OperacionesPage() {
         });
     }, [logic.listData, isGrouped]);
 
+    const matchesViewTabForShift = (s: any) => {
+        switch(logic.viewTab) {
+            case 'ACTIVOS':    return s.isPresent && !s.isCompleted && !s.isRetention;
+            case 'RETENIDOS':  return s.isRetention;
+            case 'AUSENTES':   return s.isAbsent || s.isPotentialAbsence;
+            case 'VACANTES':   return s.isUnassigned;
+            case 'PLAN':       return s.isFuture && !s.isFranco && !s.isUnassigned;
+            case 'FRANCOS':    return s.isFranco;
+            default:           return !s.isFranco;
+        }
+    };
+
     // â"€â"€ VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad â"€â"€
     const objectivesWithAlerts = useMemo(() => {
         const now = new Date();
@@ -3330,6 +3415,7 @@ export default function OperacionesPage() {
             return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
         });
         hoy.forEach((s: any) => {
+            if (isEventShift(s)) return;
             if (s.isFranco) return;
             const key = s.objectiveId || 'unknown';
             if (!map.has(key)) {
@@ -3365,6 +3451,50 @@ export default function OperacionesPage() {
             })
             // Excluir objetivos sin actividad real (evita mostrar cronogramas no publicados)
             .filter(o => (o.active + o.absent + o.vacant + o.retention + o.plan) > 0);
+    }, [logic.processedData, logic.selectedClientId]);
+
+    const eventsWithAlerts = useMemo(() => {
+        const now = new Date();
+        const map = new Map<string, any>();
+        const hoy = logic.processedData.filter((s: any) => {
+            if (s.isCompleted && !s.isRetention) return false;
+            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
+            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+        });
+        hoy.forEach((s: any) => {
+            if (!isEventShift(s)) return;
+            if (s.isFranco) return;
+            const key = getEventGroupKey(s);
+            if (!map.has(key)) {
+                map.set(key, {
+                    eventKey: key,
+                    label: getEventGroupLabel(s),
+                    objectiveName: s.objectiveName || '—',
+                    client: s.clientName || '',
+                    clientId: s.clientId || '',
+                    active: 0, absent: 0, vacant: 0, retention: 0, plan: 0, total: 0,
+                    criticalShift: null as any,
+                    shifts: [] as any[],
+                });
+            }
+            const ev = map.get(key)!;
+            ev.total++;
+            ev.shifts.push(s);
+            if (s.isRetention)                              ev.retention++;
+            else if (s.isPresent && !s.isCompleted)        ev.active++;
+            else if (s.isAbsent || s.isPotentialAbsence) { ev.absent++; if (!ev.criticalShift) ev.criticalShift = s; }
+            else if (s.isUnassigned)                      { ev.vacant++; if (!ev.criticalShift) ev.criticalShift = s; }
+            else if (s.isFuture || s.isImminent)           ev.plan++;
+        });
+        const clientFilter = logic.selectedClientId;
+        return Array.from(map.values())
+            .filter(ev => !clientFilter || ev.clientId === clientFilter)
+            .sort((a, b) => {
+                const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;
+                const scoreB = b.absent * 3 + b.vacant * 2 + b.retention;
+                return scoreB - scoreA;
+            })
+            .filter(ev => (ev.active + ev.absent + ev.vacant + ev.retention + ev.plan) > 0);
     }, [logic.processedData, logic.selectedClientId]);
 
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData, setManualRetentionData };
@@ -3746,9 +3876,92 @@ export default function OperacionesPage() {
                         {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
                         {viewMode === 'objetivos' && (
                         <div className="p-2 space-y-1.5">
-                            {objectivesWithAlerts.length === 0 ? (
+                            {(eventsWithAlerts.length === 0 && objectivesWithAlerts.length === 0) ? (
                                 <div className="text-center py-10 text-slate-400 text-xs">Sin datos de objetivos</div>
-                            ) : objectivesWithAlerts.map(obj => {
+                            ) : (
+                                <>
+                                    {eventsWithAlerts.map((ev) => {
+                                        const pct = (ev.active + ev.retention) > 0 && ev.total > 0
+                                            ? Math.round(((ev.active + ev.retention) / Math.max(ev.total - ev.plan, 1)) * 100)
+                                            : ev.total > 0 ? 0 : 100;
+                                        const isCrit = ev.absent > 0 || ev.vacant > 0;
+                                        const isWarn = ev.retention > 0;
+                                        const expandKey = `EVENT__${ev.eventKey}`;
+                                        const isExpanded = expandedObjectiveId === expandKey;
+                                        const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-amber-300';
+                                        const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-amber-50/40';
+                                        const evShifts = (ev.shifts || []).filter((s: any) => matchesViewTabForShift(s));
+                                        return (
+                                            <div key={expandKey} className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-all`}>
+                                                <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2">
+                                                    <div className={`w-2.5 h-2.5 lg:w-2 lg:h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-amber-500'}`}/>
+                                                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedObjectiveId(isExpanded ? null : expandKey)}>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs font-black text-slate-800 truncate">{ev.label}</span>
+                                                            <span className="text-[9px] text-slate-400 shrink-0">{ev.client}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-3 mt-0.5">
+                                                            <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden max-w-[80px]">
+                                                                <div className="h-full rounded-full transition-all duration-500"
+                                                                    style={{
+                                                                        width: `${Math.min(100, pct)}%`,
+                                                                        backgroundColor: isCrit ? '#ef4444' : isWarn ? '#f59e0b' : '#d97706'
+                                                                    }}/>
+                                                            </div>
+                                                            <span className="text-[9px] font-black shrink-0" style={{color: isCrit ? '#dc2626' : isWarn ? '#d97706' : '#b45309'}}>
+                                                                {pct}%
+                                                            </span>
+                                                            <div className="flex items-center gap-1">
+                                                                {ev.active > 0 && <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1.5 rounded">{ev.active} act</span>}
+                                                                {ev.retention > 0 && <span className="text-[9px] font-bold text-orange-700 bg-orange-100 px-1.5 rounded animate-pulse">{ev.retention} ret</span>}
+                                                                {ev.absent > 0 && <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 rounded">{ev.absent} aus</span>}
+                                                                {ev.vacant > 0 && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 rounded">{ev.vacant} vac</span>}
+                                                                {ev.plan > 0 && <span className="text-[9px] text-slate-500 px-1">{ev.plan} plan</span>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        {(ev.absent > 0 || ev.vacant > 0) && ev.criticalShift && (
+                                                            <button onClick={() => setCoverageData({isOpen:true, shift:ev.criticalShift})}
+                                                                className="p-2 lg:p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 active:scale-95 transition-colors"
+                                                                title="Protocolo cobertura">
+                                                                <Siren size={14}/>
+                                                            </button>
+                                                        )}
+                                                        <button onClick={() => setExpandedObjectiveId(isExpanded ? null : expandKey)}
+                                                            className="p-2 lg:p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
+                                                            {isExpanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {isExpanded && (
+                                                    <div className="border-t border-slate-200 bg-white px-2 py-2 space-y-1.5">
+                                                        {evShifts.length === 0 ? (
+                                                            <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
+                                                        ) : evShifts.map((s: any) => (
+                                                            <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
+                                                                isAutoMode={session.isAutoMode}
+                                                                onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                                                                onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                                                                onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                                                                onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                                                                onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                                                                onReportPlanning={handleReportPlanning}
+                                                                onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+                                                                onNovedadAbsence={handleNovedadAbsence}
+                                                                onOpenWA={handleOpenWA}
+                                                                onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
+                                                                onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
+                                                                onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
+                                                                onRevertAbsence={handleRevertAbsence}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                    {objectivesWithAlerts.map(obj => {
                                 const pct = (obj.active + obj.retention) > 0 && obj.total > 0
                                     ? Math.round(((obj.active + obj.retention) / Math.max(obj.total - obj.plan, 1)) * 100)
                                     : obj.total > 0 ? 0 : 100;
@@ -3762,20 +3975,13 @@ export default function OperacionesPage() {
                                 const now2 = new Date();
                                 const objShifts = logic.processedData.filter((s: any) => {
                                     if (s.objectiveId !== obj.objectiveId) return false;
+                                    if (isEventShift(s)) return false;
                                     // Mismo filtro "hoy" que stats — excluye completados y virtuales vencidos de OTRO día
                                     if (s.isCompleted && !s.isRetention) return false;
                                     if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now2) && s.endDateObj.getTime() < now2.getTime()) return false;
                                     const hoy2 = isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
                                     if (!hoy2) return false;
-                                    switch(logic.viewTab) {
-                                        case 'ACTIVOS':    return s.isPresent && !s.isCompleted && !s.isRetention;
-                                        case 'RETENIDOS':  return s.isRetention;
-                                        case 'AUSENTES':   return s.isAbsent || s.isPotentialAbsence;
-                                        case 'VACANTES':   return s.isUnassigned; // incluye devueltas
-                                        case 'PLAN':       return s.isFuture && !s.isFranco && !s.isUnassigned;
-                                        case 'FRANCOS':    return s.isFranco;
-                                        default:           return !s.isFranco;
-                                    }
+                                    return matchesViewTabForShift(s);
                                 });
 
                                 return (
@@ -3858,6 +4064,8 @@ export default function OperacionesPage() {
                                     </div>
                                 );
                             })}
+                                </>
+                            )}
                         </div>
                         )}
 

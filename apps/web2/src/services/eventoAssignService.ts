@@ -93,6 +93,10 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
     const originalCode = existingTurno
         ? String(existingTurno.data().code || '').toUpperCase()
         : null;
+    const existingTurnoData = (existingTurno?.data() || {}) as Record<string, unknown>;
+    const isPassiveRetention = originalCode === 'RET'
+        || String(existingTurnoData.origin || '').toUpperCase() === 'RETEN'
+        || existingTurnoData.isReten === true;
 
     let originalObjectiveId: string | null = existingTurno?.data().objectiveId || empleadoObjectiveId || null;
     let originalObjectiveName: string | null = existingTurno?.data().objectiveName || empleadoObjectiveName || null;
@@ -168,7 +172,8 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
         });
     }
 
-    if (originalObjectiveId) {
+    const shouldCreateVacancyByEvent = !!existingTurno && !!originalObjectiveId && !isPassiveRetention;
+    if (shouldCreateVacancyByEvent) {
         const [y, m, d2] = servicioFecha.split('-');
         const fechaLabel = `${d2}/${m}/${y}`;
         const notifPayload = stampEmpresaId({
