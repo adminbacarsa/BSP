@@ -30,6 +30,8 @@ export interface SolicitudRefuerzo {
   cancelledByNombre?: string;
   cancelReason?: string;
   fecha: string;      // YYYY-MM-DD
+  /** Fin de vigencia inclusive (estructural temporal). Si vacío = solo `fecha`. */
+  fechaHasta?: string;
   startTime: string;  // HH:mm
   endTime: string;    // HH:mm
 

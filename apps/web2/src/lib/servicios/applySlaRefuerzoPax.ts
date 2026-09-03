@@ -7,6 +7,11 @@ import {
   type SlaChangeLogEntry,
 } from '@/services/slaService';
 import type { SolicitudRefuerzo } from '@/services/solicitudRefuerzoService';
+import {
+  appendPaxBoostRange,
+  normalizeYmd,
+  removePaxBoostBySolicitudId,
+} from '@/lib/servicios/paxBoostRanges';
 
 export type ApplySlaRefuerzoResult = {
     slaId: string;
@@ -123,14 +128,42 @@ export async function applySlaRefuerzoPax(
     if (!pos) throw new Error('No se encontró el puesto del SLA para aplicar el refuerzo');
 
     const posIdx = positions.indexOf(pos);
-    const { next: nextPos, shiftCode } = applyPaxDelta(pos, sol, addedPax);
+    const from = normalizeYmd(sol.fecha);
+    const hasRange = !!String(sol.fechaHasta || '').trim();
+    const to = hasRange ? normalizeYmd(sol.fechaHasta) : from;
+    const temporary = hasRange;
+
+    let nextPos: ServicePosition;
+    let shiftCode: string;
+
+    if (temporary) {
+      nextPos = {
+        ...pos,
+        allowedShiftTypes: [...(pos.allowedShiftTypes || [])],
+        paxBoostRanges: appendPaxBoostRange(pos.paxBoostRanges, {
+          from,
+          to,
+          delta: addedPax,
+          solicitudId: sol.id,
+          label: `+${addedPax} rotación`,
+        }),
+      };
+      shiftCode = '';
+    } else {
+      const applied = applyPaxDelta(pos, sol, addedPax);
+      nextPos = applied.next;
+      shiftCode = applied.shiftCode;
+    }
+
     positions[posIdx] = nextPos;
 
     const logEntry: Omit<SlaChangeLogEntry, 'at'> = {
         action: 'REFUERZO_ESTRUCTURAL',
-        detail: shiftCode
-            ? `+${addedPax} pax en ${nextPos.name} · ${shiftCode} desde ${sol.fecha || '—'}`
-            : `+${addedPax} rotación en ${nextPos.name} (todas las bandas) desde ${sol.fecha || '—'}`,
+        detail: temporary
+            ? `+${addedPax} rotación en ${nextPos.name} (${from} → ${to}) · temporal`
+            : shiftCode
+                ? `+${addedPax} pax en ${nextPos.name} · ${shiftCode} desde ${from || '—'}`
+                : `+${addedPax} rotación en ${nextPos.name} (todas las bandas) desde ${from || '—'}`,
         byUid: actor?.uid,
         byName: actor?.name,
         solicitudId: sol.id,
@@ -173,12 +206,33 @@ export async function revertSlaRefuerzoPax(
     if (!pos) throw new Error('No se encontró el puesto del SLA para revertir el refuerzo');
 
     const posIdx = positions.indexOf(pos);
-    const { next: nextPos, shiftCode } = applyPaxDelta(pos, sol, -revertPax);
+    const from = normalizeYmd(sol.fecha);
+    const hasRange = !!String(sol.fechaHasta || '').trim();
+    const to = hasRange ? normalizeYmd(sol.fechaHasta) : from;
+    const temporary = hasRange;
+
+    let nextPos: ServicePosition;
+    let shiftCode: string;
+
+    if (temporary) {
+      nextPos = {
+        ...pos,
+        allowedShiftTypes: [...(pos.allowedShiftTypes || [])],
+        paxBoostRanges: removePaxBoostBySolicitudId(pos.paxBoostRanges, sol.id),
+      };
+      shiftCode = '';
+    } else {
+      const applied = applyPaxDelta(pos, sol, -revertPax);
+      nextPos = applied.next;
+      shiftCode = applied.shiftCode;
+    }
     positions[posIdx] = nextPos;
 
     const logEntry: Omit<SlaChangeLogEntry, 'at'> = {
         action: 'REVERT_REFUERZO',
-        detail: `−${revertPax} pax en ${nextPos.name}${shiftCode ? ` · ${shiftCode}` : ''} (cancelación estructural)`,
+        detail: temporary
+            ? `−${revertPax} rotación temporal en ${nextPos.name} (${from} → ${to})`
+            : `−${revertPax} pax en ${nextPos.name}${shiftCode ? ` · ${shiftCode}` : ''} (cancelación estructural)`,
         byUid: actor?.uid,
         byName: actor?.name,
         solicitudId: sol.id,

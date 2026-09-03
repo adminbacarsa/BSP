@@ -77,7 +77,9 @@ export function buildServiceModificaciones(
       at: sol.fecha || ymdFromIso(String(sol.solicitadoAt || '')),
       kind: estructural ? 'ESTRUCTURAL' : (code === 'TURA' ? 'TURA' : 'RFZ'),
       title: estructural
-        ? `Estructural +${sol.cantidadPax || 1} pax`
+        ? (sol.fechaHasta
+          ? `Estructural +${sol.cantidadPax || 1} pax (${formatRefuerzoFechaAr(sol.fecha)} → ${formatRefuerzoFechaAr(sol.fechaHasta)})`
+          : `Estructural +${sol.cantidadPax || 1} pax permanente`)
         : `${code} puntual · ${sol.estado}`,
       detail: [
         fecha,

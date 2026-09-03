@@ -1,6 +1,7 @@
 import { slaCoversCalendarMonth, toYyyyMmDd } from '@/lib/firestoreDates';
 import { filterSlaRowsByEmpresa } from '@/lib/multiempresa';
 import { calculateSlaHoursForMonth } from '@/lib/servicios/slaHoursCalculator';
+import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
 import type { ServicePosition } from '@/services/slaService';
 import {
   derivePlanningPositionActiveDays,
@@ -435,6 +436,7 @@ export function getEffectiveShiftQuantityOnDate(
     excludedDates?: string[];
     excludedShiftDates?: Record<string, string[]>;
     excludedShiftPaxDates?: Record<string, Record<string, number>>;
+    paxBoostRanges?: Array<{ from: string; to: string; delta: number }>;
     shifts?: Array<{ code?: string; quantity?: number }>;
     allowedShiftTypes?: Array<{ code?: string; quantity?: number }>;
   } | null | undefined,
@@ -452,7 +454,8 @@ export function getEffectiveShiftQuantityOnDate(
   const baseRaw = shift?.quantity ?? fallbackQty ?? pos.qty ?? pos.quantity ?? 1;
   const base = Math.max(1, Math.floor(Number(baseRaw) || 1));
   const cut = getPlanningExcludedShiftPaxOnDate(pos, dateStr)[c] || 0;
-  return Math.max(0, base - cut);
+  const boost = paxBoostDeltaForDate(pos, dateStr);
+  return Math.max(0, base - cut + boost);
 }
 
 /**

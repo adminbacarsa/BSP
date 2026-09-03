@@ -79,6 +79,7 @@ import {
 } from '@/lib/servicios/auxiliaryPositionPolicy';
 import { isEncargadoPosition } from '@/lib/servicios/encargadoPosition';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
+import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
 
 export const WEEK_DAY_CODES = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
@@ -164,6 +165,7 @@ export function computePositionDayComposition(
     if (c && pax > 0) cutMap[c] = pax;
   }
   const hasPaxCuts = Object.keys(cutMap).length > 0;
+  const paxBoost = paxBoostDeltaForDate(pos, dateStr);
 
   // Si algún turno tiene quantity propio, usamos PAX por turno y NO aplicamos pos.quantity afuera.
   // Con exclusión parcial de PAX también forzamos modo por banda (base = shift.quantity ?? pos.quantity).
@@ -173,7 +175,7 @@ export function computePositionDayComposition(
     const code = String(v.code || '').toUpperCase();
     if (code && skip.has(code)) return;
     const baseQ = hasPerShiftQty ? (v.quantity ?? pos.quantity ?? 1) : 1;
-    const q = Math.max(0, Math.floor(Number(baseQ) || 1) - (cutMap[code] || 0));
+    const q = Math.max(0, Math.floor(Number(baseQ) || 1) - (cutMap[code] || 0) + paxBoost);
     if (q <= 0) return;
     const timeBlocks =
       Array.isArray(v.blocks) && v.blocks.length >= 2

@@ -342,6 +342,11 @@ export default function SupervisionPage() {
     return listYmdDatesInclusive(mFechaDesde, mFechaHasta);
   }, [mTipo, mAlcance, mFechaModo, mFechaDesde, mFechaHasta]);
 
+  const mFechasEstructuralPreview = useMemo(() => {
+    if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'ESTRUCTURAL' || mFechaModo !== 'RANGO' || !mFechaDesde) return [];
+    return listYmdDatesInclusive(mFechaDesde, mFechaHasta);
+  }, [mTipo, mAlcance, mFechaModo, mFechaDesde, mFechaHasta]);
+
   const mPaxEstructuralPreview = useMemo(() => {
     if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'ESTRUCTURAL' || !mSelPosId) return null;
     const pos = slaPositions.find((p) => p.id === mSelPosId);
@@ -356,8 +361,9 @@ export default function SupervisionPage() {
     const uniformCurrent = currents.length ? Math.min(...currents) : posBase;
     const uniformNext = uniformCurrent + delta;
     const allSame = bands.length > 0 && bands.every((b) => b.current === bands[0].current);
-    return { posName: pos.name, delta, bands, allSame, uniformCurrent, uniformNext };
-  }, [mTipo, mAlcance, mSelPosId, mPax, slaPositions]);
+    const isTemporary = mFechaModo === 'RANGO' && !!mFechaHasta;
+    return { posName: pos.name, delta, bands, allSame, uniformCurrent, uniformNext, isTemporary };
+  }, [mTipo, mAlcance, mSelPosId, mPax, mFechaModo, mFechaHasta, slaPositions]);
 
   // Cargar guardias con turno en el objetivo/fecha seleccionados (para TURA)
   useEffect(() => {
@@ -749,6 +755,7 @@ export default function SupervisionPage() {
         return;
       }
       const rfzUsaRango = !isAgregado && !esEstructural && mFechaModo === 'RANGO';
+      const estructuralUsaRango = esEstructural && mFechaModo === 'RANGO';
       const fechasRfz = rfzUsaRango
         ? listYmdDatesInclusive(mFechaDesde, mFechaHasta)
         : [mFechaDesde];
@@ -760,6 +767,19 @@ export default function SupervisionPage() {
         }
         if (fechasRfz.length > 31) {
           toast.error('Máximo 31 días por pedido RFZ');
+          return;
+        }
+      }
+
+      if (estructuralUsaRango) {
+        if (!mFechaHasta || mFechaHasta < mFechaDesde) {
+          toast.error('Indicá vigencia hasta válida (≥ desde)');
+          setManualSaving(false);
+          return;
+        }
+        if (mFechasEstructuralPreview.length > 93) {
+          toast.error('Máximo 93 días de refuerzo temporal (+pax al puesto)');
+          setManualSaving(false);
           return;
         }
       }
@@ -821,6 +841,7 @@ export default function SupervisionPage() {
         autorizadoPorUid:    user!.uid,
         autorizadoPorNombre: user!.displayName || user!.email || '',
         autorizadoAt:        Timestamp.now(),
+        ...(estructuralUsaRango && mFechaHasta ? { fechaHasta: mFechaHasta } : {}),
         ...(!isAgregado ? {
           cantidadPax: mPax,
           positionName: positionName || undefined,
@@ -846,7 +867,7 @@ export default function SupervisionPage() {
           cantidadPax: mPax,
           positionName: positionName || undefined,
           positionId,
-          shiftCode,
+          ...(estructuralUsaRango && mFechaHasta ? { fechaHasta: mFechaHasta } : {}),
         };
         const applied = await applySlaRefuerzoPax(manualSol, actor);
         await solicitudRefuerzoService.update(solicitudId, {
@@ -868,7 +889,11 @@ export default function SupervisionPage() {
           createdAt:      Timestamp.now(),
           origin:         'SUPERVISOR_MANUAL',
         });
-        toast.success(`+${mPax} pax aplicado al SLA. Planificación cubre la demanda extra (sin vacante RFZ).`);
+        toast.success(
+          estructuralUsaRango
+            ? `+${mPax} pax temporal en ${manualSol.positionName || 'puesto'} (${formatYmdAr(mFechaDesde)} → ${formatYmdAr(mFechaHasta)}) — planificá la dotación extra en ese período`
+            : `+${mPax} pax permanente en ${manualSol.positionName || 'puesto'}. Planificación cubre la demanda extra.`,
+        );
         resetManualForm();
         return;
       }
@@ -1394,7 +1419,7 @@ export default function SupervisionPage() {
               <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
                 <AlertCircle size={12}/>
                 {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
-                  ? '+ Pax al puesto: suma rotación en todas las bandas (M/T/N…). Planificación cubre la demanda. Queda en trazabilidad del servicio.'
+                  ? '+ Pax al puesto: rotación extra (permanente o por período). Planificación cubre la demanda. Queda en trazabilidad del servicio.'
                   : mTipo === 'AGREGADO_TURNO'
                     ? 'TURA: extensión del turno del guardia — plan/ops según contigüidad.'
                     : 'RFZ puntual: vacante extra en fecha → fila VACANTE RFZ → publicar → ops → prefactura.'}
@@ -1434,7 +1459,7 @@ export default function SupervisionPage() {
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => { setMAlcance(opt.id); if (opt.id === 'ESTRUCTURAL') { setMFechaModo('DIA'); setMFechaHasta(''); setMSelShiftCode(''); setMStart(''); setMEnd(''); } }}
+                    onClick={() => { setMAlcance(opt.id); if (opt.id === 'ESTRUCTURAL') { setMSelShiftCode(''); setMStart(''); setMEnd(''); } }}
                     className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${mAlcance === opt.id ? 'bg-amber-600 text-white border-amber-600' : 'border-slate-200 text-slate-600 hover:border-amber-300'}`}
                   >
                     {opt.label}
@@ -1443,10 +1468,10 @@ export default function SupervisionPage() {
               </div>
             )}
 
-            {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && (
+            {mTipo === 'REFUERZO_PUESTO' && (
               <div className="flex gap-2">
                 {([
-                  { id: 'DIA' as const, label: 'Un día' },
+                  { id: 'DIA' as const, label: mAlcance === 'ESTRUCTURAL' ? 'Permanente (desde)' : 'Un día' },
                   { id: 'RANGO' as const, label: 'Desde / hasta' },
                 ]).map((opt) => (
                   <button
@@ -1497,7 +1522,9 @@ export default function SupervisionPage() {
                     {mPaxEstructuralPreview.allSame
                       ? ` · todas las bandas: ${mPaxEstructuralPreview.uniformCurrent} → ${mPaxEstructuralPreview.uniformNext} pax`
                       : ` · +${mPaxEstructuralPreview.delta} pax por banda`}
-                    {' '}(+{mPaxEstructuralPreview.delta} rotación en el contrato)
+                    {mPaxEstructuralPreview.isTemporary
+                      ? ` · temporal${mFechasEstructuralPreview.length ? ` (${mFechasEstructuralPreview.length} días)` : ''}`
+                      : ' · permanente desde la vigencia'}
                   </p>
                 )}
                 {mSelPosId && (() => {
@@ -1509,7 +1536,9 @@ export default function SupervisionPage() {
                   if (mAlcance === 'ESTRUCTURAL') {
                     return (
                       <div>
-                        <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Bandas del puesto (todas suben)</label>
+                        <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                          Bandas del puesto{mPaxEstructuralPreview?.isTemporary ? ' (solo en el período)' : ' (permanente)'}
+                        </label>
                         <div className="flex gap-2 flex-wrap">
                           {shifts.map(s => {
                             const cur = s.quantity ?? posBase;
@@ -1583,9 +1612,32 @@ export default function SupervisionPage() {
                   </p>
                 )}
               </div>
+            ) : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && mFechaModo === 'RANGO' ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vigencia desde</label>
+                    <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vigencia hasta</label>
+                    <input type="date" value={mFechaHasta} min={mFechaDesde || undefined} onChange={e => setMFechaHasta(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                </div>
+                {mFechasEstructuralPreview.length > 0 && (
+                  <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    Refuerzo temporal · {mFechasEstructuralPreview.length} día{mFechasEstructuralPreview.length !== 1 ? 's' : ''}
+                    {' · '}{formatYmdAr(mFechasEstructuralPreview[0])}
+                    {mFechasEstructuralPreview.length > 1 ? ` → ${formatYmdAr(mFechasEstructuralPreview[mFechasEstructuralPreview.length - 1])}` : ''}
+                    {' · '}+{mPax} pax en todas las bandas (vuelve al contrato base fuera del rango)
+                  </p>
+                )}
+              </div>
             ) : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' ? (
               <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vigencia desde</label>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vigencia desde (permanente)</label>
                 <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
                   className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
               </div>
@@ -1748,6 +1800,7 @@ export default function SupervisionPage() {
                   || (mTipo === 'REFUERZO_PUESTO' && mAlcance !== 'ESTRUCTURAL' && (!mStart || !mEnd))
                   || (mTipo === 'AGREGADO_TURNO' && (!mStart || !mEnd))
                   || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && mFechaModo === 'RANGO' && !mFechaHasta)
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && mFechaModo === 'RANGO' && !mFechaHasta)
                   || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && slaPositions.some((p) => !isEventosPosition(p) && p.shifts.length > 0) && !mSelPosId)
                   || (mTipo === 'AGREGADO_TURNO' && (
                     Array.isArray(guardias) && guardias.length > 0
@@ -1759,7 +1812,9 @@ export default function SupervisionPage() {
                 className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
                 {manualSaving ? <RefreshCw size={14} className="animate-spin"/> : <Plus size={14}/>}
                 {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
-                  ? `Sumar ${mPax} pax al puesto`
+                  ? (mFechaModo === 'RANGO' && mFechaHasta
+                    ? `Sumar ${mPax} pax (${formatYmdAr(mFechaDesde)} → ${formatYmdAr(mFechaHasta)})`
+                    : `Sumar ${mPax} pax permanente al puesto`)
                   : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL'
                     ? mFechaModo === 'RANGO' && mFechasRfzPreview.length > 1
                       ? `Crear ${mFechasRfzPreview.length * mPax} RFZ (${mFechasRfzPreview.length} días)`

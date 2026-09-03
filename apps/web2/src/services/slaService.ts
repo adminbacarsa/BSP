@@ -43,6 +43,14 @@ export interface ServicePosition {
    * Si excludePax >= quantity del turno, equivale a excludedShiftDates.
    */
   excludedShiftPaxDates?: Record<string, Record<string, number>>;
+  /** Refuerzo temporal de rotación (+pax) por rango de fechas sin modificar quantity base. */
+  paxBoostRanges?: Array<{
+    from: string;
+    to: string;
+    delta: number;
+    solicitudId?: string;
+    label?: string;
+  }>;
   preferenciaGenero?: 'M' | 'F' | 'INDISTINTO';
   /** Encargado/Eventos: si false no suma horas vendidas SLA ni cierre cobertura. Eventos siempre false. */
   includeInSlaTotals?: boolean;
