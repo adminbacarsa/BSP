@@ -279,10 +279,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
     setListening(false);
   }, []);
 
-  const confirmAction = useCallback(async () => {
-    const action = pendingAction;
-    if (!action) return;
-    setPendingAction(null);
+  const executeAction = useCallback(async (action: PendingAction) => {
     setBusy(true);
     try {
       const call = httpsCallable(functions, 'executeAgentAction', { timeout: 30000 });
@@ -295,7 +292,14 @@ export function AssistantFloatingBubble(): React.ReactNode {
     } finally {
       setBusy(false);
     }
-  }, [pendingAction, empresaCtxId]);
+  }, [empresaCtxId]);
+
+  const confirmAction = useCallback(async () => {
+    const action = pendingAction;
+    if (!action) return;
+    setPendingAction(null);
+    await executeAction(action);
+  }, [pendingAction, executeAction]);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -320,7 +324,13 @@ export function AssistantFloatingBubble(): React.ReactNode {
       const rawReply = String(data?.reply ?? '').trim() || '(Sin respuesta.)';
       const { cleanText, action } = parseActionProposal(rawReply);
       setMsgs([...next, { role: 'assistant', content: cleanText }]);
-      if (action) setPendingAction(action);
+      if (action) {
+        if (empresa?.pilotoAutoEnabled) {
+          await executeAction(action);
+        } else {
+          setPendingAction(action);
+        }
+      }
     } catch (e: any) {
       const code = String(e?.code ?? '').replace(/^functions\//, '');
       const rawMsg =
@@ -358,7 +368,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
     } finally {
       setBusy(false);
     }
-  }, [busy, empresaCtxId, fullPath, input, isSuperAdmin, msgs, pathname, user]);
+  }, [busy, empresa, empresaCtxId, executeAction, fullPath, input, isSuperAdmin, msgs, pathname, user]);
 
   const endFabDrag = useCallback((e: React.PointerEvent, el: HTMLButtonElement) => {
       const d = dragRef.current;

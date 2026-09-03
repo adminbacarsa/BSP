@@ -3825,6 +3825,18 @@ async function dispatchAssistantToolCallInner(
       mes: args.mes != null ? Number(args.mes) : undefined,
       anio: args.anio != null ? Number(args.anio) : undefined,
     });
+  } else if (name === 'consultar_vacantes_dia') {
+    raw = await ejecutarConsultarVacantesDia(ctx, {
+      fecha: args.fecha != null ? String(args.fecha) : undefined,
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+    });
+  } else if (name === 'resumen_ausencias_pendientes') {
+    raw = await ejecutarResumenAusenciasPendientes(ctx, {
+      fecha_desde: args.fecha_desde != null ? String(args.fecha_desde) : undefined,
+      fecha_hasta: args.fecha_hasta != null ? String(args.fecha_hasta) : undefined,
+      limite: args.limite != null ? Number(args.limite) : undefined,
+    });
   } else {
     raw = { error: 'herramienta_desconocida', name };
   }
@@ -4249,6 +4261,110 @@ async function ejecutarProponerPlanificarObjetivoMes(
       label,
       payload: { objetivoId, clientId, objetivoNombre, year, month },
     },
+  };
+}
+
+async function ejecutarConsultarVacantesDia(
+  ctx: AssistantToolContext,
+  args: { fecha?: string; texto_objetivo?: string; id_objetivo?: string },
+): Promise<Record<string, unknown>> {
+  const fecha = args.fecha || ctx.referenceDateYsMmDd;
+  const db = admin.firestore();
+  const startTs = Timestamp.fromDate(startOfDayAr(fecha));
+  const endTs = Timestamp.fromDate(endOfDayAr(fecha));
+
+  let objetivoId = args.id_objetivo;
+  if (!objetivoId && args.texto_objetivo) {
+    const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+    if (found) objetivoId = found.id;
+  }
+
+  let turnosSnap;
+  if (objetivoId) {
+    turnosSnap = await db.collection('turnos')
+      .where('objectiveId', '==', objetivoId)
+      .where('startTime', '>=', startTs)
+      .where('startTime', '<', endTs)
+      .limit(200)
+      .get();
+  } else {
+    turnosSnap = await db.collection('turnos')
+      .where('empresaId', '==', ctx.empresaId)
+      .where('startTime', '>=', startTs)
+      .where('startTime', '<', endTs)
+      .limit(300)
+      .get();
+  }
+
+  const turnos = turnosSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  const ausentes = turnos.filter((t) => t.isAbsent === true && !t.draft);
+  const cubiertos = new Set(
+    turnos.filter((t) => t.origin === 'OPERATIONS_COVERAGE' || t.resolvedBy === 'OPERACIONES').map((t) => t.objectiveId + t.code + (t.startTime?.seconds ?? 0))
+  );
+
+  const vacantes = ausentes.map((t) => ({
+    objetivo: t.objetivoNombre ?? t.objectiveId,
+    banda: t.code,
+    empleado: t.empleadoNombre ?? t.employeeId,
+    cubierto: cubiertos.has(t.objectiveId + t.code + (t.startTime?.seconds ?? 0)),
+  }));
+
+  if (vacantes.length === 0) return { mensaje: `No hay vacantes registradas para el ${fecha}.`, fecha };
+  const sinCubrir = vacantes.filter((v) => !v.cubierto);
+  return {
+    fecha,
+    total_vacantes: vacantes.length,
+    sin_cubrir: sinCubrir.length,
+    vacantes: vacantes.slice(0, 50),
+    resumen: `${vacantes.length} vacante(s) el ${fecha}, ${sinCubrir.length} sin cubrir.`,
+  };
+}
+
+async function ejecutarResumenAusenciasPendientes(
+  ctx: AssistantToolContext,
+  args: { fecha_desde?: string; fecha_hasta?: string; limite?: number },
+): Promise<Record<string, unknown>> {
+  const ref = ctx.referenceDateYsMmDd;
+  const desde = args.fecha_desde || ref;
+  const hasta = args.fecha_hasta || desde;
+  const limite = Math.min(args.limite ?? 30, 80);
+  const db = admin.firestore();
+
+  const startTs = Timestamp.fromDate(startOfDayAr(desde));
+  const endTs = Timestamp.fromDate(endOfDayAr(hasta));
+
+  const turnosSnap = await db.collection('turnos')
+    .where('empresaId', '==', ctx.empresaId)
+    .where('isAbsent', '==', true)
+    .where('startTime', '>=', startTs)
+    .where('startTime', '<', endTs)
+    .orderBy('startTime', 'asc')
+    .limit(limite)
+    .get();
+
+  if (turnosSnap.empty) return { mensaje: `No hay ausencias registradas entre ${desde} y ${hasta}.` };
+
+  const ausencias = turnosSnap.docs.map((d) => {
+    const data = d.data() as any;
+    const starTs: Timestamp = data.startTime;
+    const fechaAR = new Date(starTs.toDate().getTime() - 3 * 3600000);
+    const fechaStr = fechaAR.toISOString().slice(0, 10);
+    return {
+      fecha: fechaStr,
+      empleado: data.empleadoNombre ?? data.employeeId,
+      objetivo: data.objetivoNombre ?? data.objectiveId,
+      banda: data.code,
+      resuelto: data.resolvedBy === 'OPERACIONES' || data.isReportedToPlanning === true,
+    };
+  });
+
+  const sinResolver = ausencias.filter((a) => !a.resuelto);
+  return {
+    rango: `${desde} a ${hasta}`,
+    total_ausencias: ausencias.length,
+    sin_resolver: sinResolver.length,
+    ausencias,
+    resumen: `${ausencias.length} ausencia(s) en el período, ${sinResolver.length} sin resolución de cobertura.`,
   };
 }
 

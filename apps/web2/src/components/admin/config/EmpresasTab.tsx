@@ -1,5 +1,5 @@
 ﻿import React, { useState, useRef } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio, MapPin } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio, MapPin, Zap } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
@@ -176,6 +176,22 @@ export default function EmpresasTab() {
 
   const [guardandoCc, setGuardandoCc] = useState(false);
   const ccActivo = empresa?.centroControlEnabled !== false;
+
+  const [guardandoPiloto, setGuardandoPiloto] = useState(false);
+  const pilotoActivo = empresa?.pilotoAutoEnabled === true;
+
+  const handleTogglePiloto = async () => {
+    if (!empresa) return;
+    setGuardandoPiloto(true);
+    try {
+      await guardarEmpresa(empresa.id, { pilotoAutoEnabled: !pilotoActivo } as any);
+      toast.success(pilotoActivo ? 'Piloto Automático desactivado' : 'Piloto Automático activado — el asistente ejecuta acciones sin confirmación');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setGuardandoPiloto(false);
+    }
+  };
   const [mapsKeyDraft, setMapsKeyDraft] = useState('');
   const [guardandoMaps, setGuardandoMaps] = useState(false);
   const [showMapsKey, setShowMapsKey] = useState(false);
@@ -571,6 +587,39 @@ export default function EmpresasTab() {
               >
                 <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${ccActivo ? 'translate-x-6' : 'translate-x-0'}`} />
                 {guardandoCc && <Loader2 size={12} className="absolute inset-0 m-auto animate-spin text-white" />}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {empresa && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${pilotoActivo ? 'bg-violet-500/15' : 'bg-slate-200'}`}>
+                <Zap size={18} className={pilotoActivo ? 'text-violet-600' : 'text-slate-400'} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Piloto Automático</h3>
+                <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                  Cuando está activo, el asistente ejecuta las acciones confirmadas automáticamente sin mostrar tarjeta de confirmación.
+                  Recomendado solo para operadores experimentados.
+                </p>
+              </div>
+            </div>
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={handleTogglePiloto}
+                disabled={guardandoPiloto}
+                role="switch"
+                aria-checked={pilotoActivo}
+                aria-label="Activar o desactivar Piloto Automático"
+                className={`relative h-8 w-14 rounded-full shrink-0 transition-colors disabled:opacity-60 ${pilotoActivo ? 'bg-violet-600' : 'bg-slate-300'}`}
+              >
+                <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${pilotoActivo ? 'translate-x-6' : 'translate-x-0'}`} />
+                {guardandoPiloto && <Loader2 size={12} className="absolute inset-0 m-auto animate-spin text-white" />}
               </button>
             )}
           </div>

@@ -382,6 +382,39 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
   },
 ];
 
+// ── Tools de consulta operativa extendida ────────────────────────────────────
+
+ASSISTANT_FUNCTION_DECLARATIONS.push(
+  {
+    name: 'consultar_vacantes_dia',
+    description:
+      'Lista los turnos del día que están vacantes (isAbsent=true o sin empleado asignado) en un objetivo o en todos los objetivos de la empresa. Usá para «qué turnos quedan vacantes hoy», «hay vacantes en el Casino esta tarde», «cuántas vacantes tenemos». Devuelve objetivo, banda/código y si ya fue cubierto.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre o fragmento del objetivo para filtrar. Omití para ver todos.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'resumen_ausencias_pendientes',
+    description:
+      'Lista ausencias recientes de la empresa que aún no tienen cobertura asignada (vacantes sin resolver). Usá para «ausencias sin resolver», «quiénes faltaron y no se cubrió», «pendientes de cobertura hoy». Filtra por fecha o rango.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha_desde: { type: SchemaType.STRING, description: 'YYYY-MM-DD inicio. Default: hoy cliente.' },
+        fecha_hasta: { type: SchemaType.STRING, description: 'YYYY-MM-DD fin. Default: igual a fecha_desde (solo hoy).' },
+        limite: { type: SchemaType.NUMBER, description: 'Máximo de filas (default 30).' },
+      },
+      required: [],
+    },
+  } as any,
+);
+
 // ── Tools de propuesta de acción (write con confirmación humana) ──────────────
 
 ASSISTANT_FUNCTION_DECLARATIONS.push(

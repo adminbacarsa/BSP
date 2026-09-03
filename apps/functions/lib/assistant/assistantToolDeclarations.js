@@ -361,6 +361,31 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS = [
     },
 ];
 exports.ASSISTANT_FUNCTION_DECLARATIONS.push({
+    name: 'consultar_vacantes_dia',
+    description: 'Lista los turnos del día que están vacantes (isAbsent=true o sin empleado asignado) en un objetivo o en todos los objetivos de la empresa. Usá para «qué turnos quedan vacantes hoy», «hay vacantes en el Casino esta tarde», «cuántas vacantes tenemos». Devuelve objetivo, banda/código y si ya fue cubierto.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            fecha: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre o fragmento del objetivo para filtrar. Omití para ver todos.' },
+            id_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        },
+        required: [],
+    },
+}, {
+    name: 'resumen_ausencias_pendientes',
+    description: 'Lista ausencias recientes de la empresa que aún no tienen cobertura asignada (vacantes sin resolver). Usá para «ausencias sin resolver», «quiénes faltaron y no se cubrió», «pendientes de cobertura hoy». Filtra por fecha o rango.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            fecha_desde: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD inicio. Default: hoy cliente.' },
+            fecha_hasta: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD fin. Default: igual a fecha_desde (solo hoy).' },
+            limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de filas (default 30).' },
+        },
+        required: [],
+    },
+});
+exports.ASSISTANT_FUNCTION_DECLARATIONS.push({
     name: 'proponer_extender_jornada',
     description: 'Propone extender la jornada de un empleado de 8h a 12h (M→D12, T→D12, N→N12) en un objetivo y fecha. Usá cuando pidan «extendé a García», «pasá a García a 12 horas», «necesito extender el turno de X». Buscá primero al empleado con buscar_empleados_por_nombre si no tenés su id. Requiere permiso OPERATIONS.',
     parameters: {

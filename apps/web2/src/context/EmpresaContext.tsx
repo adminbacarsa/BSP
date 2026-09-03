@@ -21,6 +21,7 @@ export interface Empresa {
   brandColor?: string;
   assistantEnabled?: boolean;
   centroControlEnabled?: boolean;
+  pilotoAutoEnabled?: boolean;
   migracionCompleta?: boolean;
   /** Maps JavaScript API — restringir por HTTP referrer en Google Cloud. */
   googleMapsApiKey?: string;
