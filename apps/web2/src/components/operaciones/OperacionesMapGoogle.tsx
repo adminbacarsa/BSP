@@ -7,7 +7,8 @@ import {
   OPERACIONES_MAP_OPTIONS,
   toLatLng,
 } from '@/lib/googleMapsConfig';
-import { toGoogleMapsIcon } from '@/lib/operaciones/mapMarkerIcons';
+import { toGoogleMapsIcon, truncateObjectiveLabel } from '@/lib/operaciones/mapMarkerIcons';
+import { MAP_OBJECTIVE_LABEL_CSS } from '@/components/operaciones/mapLabelStyles';
 import { useOperacionesMapMarkers } from '@/hooks/useOperacionesMapMarkers';
 import { OperacionesMapPopup } from '@/components/operaciones/OperacionesMapPopup';
 import { OperacionesMapChrome } from '@/components/operaciones/OperacionesMapChrome';
@@ -25,6 +26,8 @@ export type OperacionesMapProps = {
   onReportPlanning?: (shift: any) => void;
   /** Key runtime (empresa). Si falta, usa NEXT_PUBLIC_GOOGLE_MAPS_API_KEY. */
   apiKey?: string;
+  /** HUD táctico arriba: leyenda más abajo y padding de fitBounds. */
+  tacticalHud?: boolean;
 };
 
 const OperacionesMapGoogle = ({
@@ -37,6 +40,7 @@ const OperacionesMapGoogle = ({
   onOpenInterrupt,
   onOpenManualRetention,
   apiKey,
+  tacticalHud,
 }: OperacionesMapProps) => {
   const mapCenter = toLatLng(center);
   const markers = useOperacionesMapMarkers(allObjectives, filteredShifts);
@@ -64,8 +68,15 @@ const OperacionesMapGoogle = ({
     if (!map || markers.length === 0) return;
     const bounds = new google.maps.LatLngBounds();
     markers.forEach((m) => bounds.extend({ lat: m.lat, lng: m.lng }));
-    map.fitBounds(bounds, 48);
-  }, [markers]);
+    if (markers.length === 1) {
+      map.setCenter({ lat: markers[0].lat, lng: markers[0].lng });
+      map.setZoom(16);
+      return;
+    }
+    map.fitBounds(bounds, tacticalHud
+      ? { top: 96, right: 56, bottom: 88, left: 24 }
+      : 48);
+  }, [markers, tacticalHud]);
 
   useEffect(() => {
     fitMapToMarkers();
@@ -94,6 +105,7 @@ const OperacionesMapGoogle = ({
 
   return (
     <div className="relative h-full w-full">
+      <style>{MAP_OBJECTIVE_LABEL_CSS}</style>
       <GoogleMap
         mapContainerStyle={{ width: '100%', height: '100%' }}
         center={mapCenter || DEFAULT_MAP_CENTER}
@@ -112,6 +124,13 @@ const OperacionesMapGoogle = ({
             key={marker.id}
             position={{ lat: marker.lat, lng: marker.lng }}
             icon={markerIcons[marker.iconPreset]}
+            label={{
+              text: truncateObjectiveLabel(marker.name) || ' ',
+              color: '#0f172a',
+              fontSize: '10px',
+              fontWeight: '800',
+              className: 'cosp-obj-label',
+            }}
             title={`${marker.name} · ${marker.statusText}`}
             zIndex={marker.layerOrder === 0 ? 1 : marker.isEvent ? 600 : 500}
             onClick={() => setSelectedMarkerId(marker.id)}
@@ -121,6 +140,7 @@ const OperacionesMapGoogle = ({
         {selectedMarker && (
           <InfoWindow
             position={{ lat: selectedMarker.lat, lng: selectedMarker.lng }}
+            options={{ pixelOffset: new google.maps.Size(0, tacticalHud ? 12 : 0) }}
             onCloseClick={() => setSelectedMarkerId(null)}
           >
             <OperacionesMapPopup
@@ -134,7 +154,12 @@ const OperacionesMapGoogle = ({
           </InfoWindow>
         )}
       </GoogleMap>
-      <OperacionesMapChrome provider="google" markerCount={markers.length} onFit={fitMapToMarkers} />
+      <OperacionesMapChrome
+        provider="google"
+        markerCount={markers.length}
+        onFit={fitMapToMarkers}
+        legendClassName={tacticalHud ? 'top-20 left-3' : 'top-4 left-4'}
+      />
     </div>
   );
 };

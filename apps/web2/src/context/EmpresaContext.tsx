@@ -4,6 +4,7 @@ import { db, onSnapshotFresh } from '@/lib/firebase';
 import { useAuth } from './AuthContext';
 import { SUPERADMIN_EMPRESA_STORAGE_KEY } from '@/lib/multiempresa';
 import { applyCompanyTheme } from '@/lib/companyTheme';
+import { persistGoogleMapsApiKey } from '@/lib/googleMapsConfig';
 
 export interface Empresa {
   id: string;
@@ -103,6 +104,7 @@ export const EmpresaProvider = ({ children }: { children: React.ReactNode }) => 
             setDoc(doc(db, 'empresas', empresaId), { name: defaultName }, { merge: true }).catch(() => {});
           }
           setEmpresa({ id: snap.id, name: defaultName, ...data });
+          persistGoogleMapsApiKey(data.googleMapsApiKey);
           if (data.brandColor && /^#[0-9a-fA-F]{6}$/.test(data.brandColor)) {
             applyCompanyTheme(data.brandColor);
           }

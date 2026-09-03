@@ -1,14 +1,38 @@
 /** Configuración central Google Maps — Operaciones CC y futuros rondines. */
 export const GOOGLE_MAPS_LIBRARIES: ('geometry' | 'drawing' | 'places')[] = ['geometry'];
 
+const MAPS_KEY_CACHE = 'cosp_gmaps_key';
+
 export function getEnvGoogleMapsApiKey(): string {
   return String(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '').trim();
 }
 
-/** Prioridad: key de empresa (Firestore) → env NEXT_PUBLIC_GOOGLE_MAPS_API_KEY. */
+export function getCachedGoogleMapsApiKey(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return String(localStorage.getItem(MAPS_KEY_CACHE) ?? '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function persistGoogleMapsApiKey(key?: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const v = String(key ?? '').trim();
+    if (v) localStorage.setItem(MAPS_KEY_CACHE, v);
+    else localStorage.removeItem(MAPS_KEY_CACHE);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Prioridad: empresa (Firestore) → cache localStorage → env. */
 export function getGoogleMapsApiKey(runtimeKey?: string | null): string {
   const fromEmpresa = String(runtimeKey ?? '').trim();
   if (fromEmpresa) return fromEmpresa;
+  const cached = getCachedGoogleMapsApiKey();
+  if (cached) return cached;
   return getEnvGoogleMapsApiKey();
 }
 

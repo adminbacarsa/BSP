@@ -9,6 +9,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import EmpresaAfipSection from '@/components/admin/config/EmpresaAfipSection';
+import { persistGoogleMapsApiKey } from '@/lib/googleMapsConfig';
 
 function empresaWriteErrorMessage(err: unknown, isSuperAdmin: boolean): string {
   const code = err instanceof FirebaseError ? err.code : '';
@@ -623,6 +624,7 @@ export default function EmpresasTab() {
                     setGuardandoMaps(true);
                     try {
                       await guardarEmpresa(empresa.id, { googleMapsApiKey: mapsKeyDraft.trim() } as any);
+                      persistGoogleMapsApiKey(mapsKeyDraft.trim());
                       toast.success(mapsKeyDraft.trim() ? 'Key de Google Maps guardada' : 'Key de Google Maps quitada');
                     } catch (err) {
                       toast.error(empresaWriteErrorMessage(err, isSuperAdmin));

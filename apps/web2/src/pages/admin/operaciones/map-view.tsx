@@ -1401,11 +1401,12 @@ export default function TacticalMapView() {
             <Head><title>COSP TACTICAL V1.0</title></Head>
             <style>{POPUP_STYLES}</style>
             
-            <div className="absolute top-4 left-4 right-4 z-[1000] flex gap-2 justify-between pointer-events-none">
-                <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-2 flex items-center gap-3 border border-slate-200 pointer-events-auto">
-                    <div className="flex items-center gap-2 px-3 border-r border-slate-200 pr-4"><Radio className="text-rose-600 animate-pulse" size={20} /><div><h1 className="font-black text-slate-800 text-sm leading-none">COSP TACTICAL</h1><span className="text-[10px] text-slate-500 font-bold">V1.0</span></div></div>
-                    <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200"><Filter size={14} className="text-slate-400 ml-1"/><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none w-40 cursor-pointer"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-                    <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-64"><Search size={14} className="text-slate-400 ml-1"/><input className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar guardia, objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
+            <div className="absolute top-0 left-0 right-0 z-[1000] px-3 py-2 pointer-events-none">
+                <div className="flex flex-wrap items-center gap-2 justify-between">
+                <div className="bg-white/95 backdrop-blur shadow-lg rounded-xl px-2 py-1.5 flex items-center gap-2 border border-slate-200 pointer-events-auto min-h-0">
+                    <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200"><Radio className="text-rose-600 animate-pulse shrink-0" size={16} /><div className="leading-none"><h1 className="font-black text-slate-800 text-[11px]">COSP</h1><span className="text-[8px] text-slate-500 font-bold">TACTICAL</span></div></div>
+                    <div className="flex items-center gap-1.5 bg-slate-100 px-1.5 py-1 rounded-lg border border-slate-200"><Filter size={12} className="text-slate-400"/><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="bg-transparent text-[10px] font-bold text-slate-700 outline-none w-36 cursor-pointer"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                    <div className="flex items-center gap-1.5 bg-slate-100 px-1.5 py-1 rounded-lg border border-slate-200 w-52"><Search size={12} className="text-slate-400"/><input className="bg-transparent text-[10px] font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
                 </div>
                 <div className="flex items-center gap-2 pointer-events-auto">
                     {/* Mini chip cobertura */}
@@ -1449,12 +1450,14 @@ export default function TacticalMapView() {
                         <button onClick={() => setShowHelp(true)} className="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-slate-900 text-white hover:bg-slate-800">Ayuda</button>
                     </div>
                 </div>
+                </div>
             </div>
 
             <OperacionesMap
                 center={[-31.4201, -64.1888]}
                 allObjectives={logic.filteredObjectives}
                 filteredShifts={logic.listData}
+                tacticalHud
                 onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
                 onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} 
                 onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} 

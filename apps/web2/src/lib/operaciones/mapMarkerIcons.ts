@@ -43,6 +43,20 @@ export function buildOperacionesMarkerIcon(preset: OperacionesMarkerPreset): {
   };
 }
 
+export function truncateObjectiveLabel(name: string, max = 22): string {
+  const t = String(name || '').trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+export function escapeHtmlLabel(name: string): string {
+  return truncateObjectiveLabel(name)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 /** Convierte el descriptor a Icon de Google Maps (requiere API cargada). */
 export function toGoogleMapsIcon(preset: OperacionesMarkerPreset): google.maps.Icon {
   const base = buildOperacionesMarkerIcon(preset);
@@ -50,6 +64,7 @@ export function toGoogleMapsIcon(preset: OperacionesMarkerPreset): google.maps.I
     url: base.url,
     scaledSize: new google.maps.Size(base.scaledSize.width, base.scaledSize.height),
     anchor: new google.maps.Point(base.anchor.x, base.anchor.y),
+    labelOrigin: new google.maps.Point(18, 44),
   };
 }
 

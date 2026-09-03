@@ -16,15 +16,16 @@ export function OperacionesMapChrome({
   provider,
   markerCount,
   onFit,
+  legendClassName = 'top-4 left-4',
 }: {
   provider: 'google' | 'osm';
   markerCount: number;
   onFit?: () => void;
+  legendClassName?: string;
 }) {
   return (
     <>
-      {/* Arriba izquierda — deja libre abajo para Alertas y logo Google */}
-      <div className="absolute top-4 left-4 z-[450] pointer-events-auto max-w-[220px]">
+      <div className={`absolute z-[450] pointer-events-auto max-w-[220px] ${legendClassName}`}>
         <div className="rounded-2xl bg-slate-900/90 border border-slate-700/80 shadow-lg px-3 py-2 space-y-1.5">
           <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-slate-300">
             <MapPin size={11} className={provider === 'google' ? 'text-indigo-400' : 'text-amber-400'} />

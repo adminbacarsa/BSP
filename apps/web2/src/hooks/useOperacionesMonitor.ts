@@ -342,7 +342,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [rawShifts, rawRefuerzos]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);
-    const filteredObjectives = useMemo(() => selectedClientId ? objectives.filter(o => o.clientId === selectedClientId) : objectives, [objectives, selectedClientId]);
+    const foldSearch = (value: unknown) => String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
 
     const processedData = useMemo(() => {
         const currentTime = new Date(now.getTime());
@@ -892,11 +896,44 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
     }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 
+    const filteredObjectives = useMemo(() => {
+        let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;
+        const q = foldSearch(filterText);
+        if (!q) return list;
+        const idsFromShifts = new Set(
+            processedData
+                .filter((s: any) =>
+                    foldSearch(s.objectiveName).includes(q) ||
+                    foldSearch(s.positionName).includes(q) ||
+                    foldSearch(s.employeeName).includes(q)
+                )
+                .flatMap((s: any) => [String(s.objectiveId || ''), String(s.objectiveName || '')])
+        );
+        return list.filter((o: any) => {
+            const id = String(o.id || o.objectiveId || '');
+            return foldSearch(o.name).includes(q) ||
+                foldSearch(o.nombre).includes(q) ||
+                foldSearch(o.objectiveName).includes(q) ||
+                foldSearch(o.address).includes(q) ||
+                foldSearch(o.direccion).includes(q) ||
+                idsFromShifts.has(id) ||
+                idsFromShifts.has(String(o.name || ''));
+        });
+    }, [objectives, selectedClientId, filterText, processedData]);
+
     // ... Resto del hook igual ...
     const listData = useMemo(() => {
         let list = processedData;
         if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId);
-        if (filterText) { const lower = filterText.toLowerCase(); list = list.filter((s: any) => (s.employeeName||'').toLowerCase().includes(lower) || (s.clientName||'').toLowerCase().includes(lower)); }
+        if (filterText) {
+            const q = foldSearch(filterText);
+            list = list.filter((s: any) =>
+                foldSearch(s.employeeName).includes(q) ||
+                foldSearch(s.clientName).includes(q) ||
+                foldSearch(s.objectiveName).includes(q) ||
+                foldSearch(s.positionName).includes(q)
+            );
+        }
         // Base: solo turnos de hoy — OR turno activo/retenido que arrancó en el nocturno de ayer
         const hoy = list.filter((s:any) => {
             if (s.isCompleted && !s.isRetention) return false;
