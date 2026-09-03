@@ -286,6 +286,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 absenceReversedAt:   serverTimestamp(),
                 absenceReversedBy:   'OPERACIONES',
             });
+            if (incomingShift.linkedTuraId && incomingShift.turaContiguous) {
+                batch.update(doc(db, 'turnos', incomingShift.linkedTuraId), {
+                    coveredByParentPresence: true,
+                    isPresent: true,
+                    status: 'PRESENT',
+                    parentPresenceShiftId: incomingShift.id,
+                });
+            }
             // Si fue marcado AA, marcar la ausencia como "Llegada Tarde" (ya leímos aaDoc arriba)
             if (wasAutoAbsent && aaDoc) {
                 batch.update(aaDoc.ref, {
@@ -1623,8 +1631,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     // Badge de estado
     let badge = null;
     if (shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
-    else if (refuerzoLabel && shift.isUnassigned) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-fuchsia-600 text-white shrink-0">VACANTE {refuerzoLabel}</span>;
+    else if (refuerzoLabel && shift.isUnassigned) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${shift.isTuraCutSegment ? 'bg-violet-700' : 'bg-fuchsia-600'}`}>{shift.isTuraCutSegment ? 'TURA 2º tramo' : `VACANTE ${refuerzoLabel}`}</span>;
     else if (refuerzoLabel) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${refuerzoLabel === 'TURA' ? 'bg-violet-600' : 'bg-red-600'}`}>{refuerzoLabel}</span>;
+    else if (shift.turaContiguous) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0" title={shift.turaExtensionRange ? `Bloque ${shift.turaExtensionRange}` : 'TURA seguido'}>TURA seguido</span>;
     else if (shift.isUnassigned && shift.isPartialPlannedCoverage) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0">PARCIAL PLAN</span>;
     else if (shift.isUnassigned)     badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ATENCIÓN: relevo pendiente</span>;

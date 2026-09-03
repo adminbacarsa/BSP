@@ -19,6 +19,7 @@ import {
 import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
 import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
+import { isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
 import { applySlaRefuerzoPax, revertSlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import {
@@ -375,6 +376,8 @@ export default function SupervisionPage() {
             nombre: nombre || t.employeeId,
             empleadoId: t.employeeId,
             horario,
+            shiftStart: t.startTime,
+            shiftEnd: t.endTime,
             code: String(t.code || t.type || '').toUpperCase(),
             puesto: t.positionName || '',
           };
@@ -522,14 +525,22 @@ export default function SupervisionPage() {
     };
 
     const ids: string[] = [];
-    if (isAgregado) {
-      let parentPositionName: string | null = null;
-      if (sol.parentShiftId) {
-        try {
-          const ps = await getDoc(doc(db, 'turnos', sol.parentShiftId));
-          if (ps.exists()) parentPositionName = ps.data().positionName || null;
-        } catch { /* keep null */ }
-      }
+      if (isAgregado) {
+        let parentPositionName: string | null = null;
+        let turaContiguous: boolean | undefined;
+        if (sol.parentShiftId) {
+          try {
+            const ps = await getDoc(doc(db, 'turnos', sol.parentShiftId));
+            if (ps.exists()) {
+              const pdata = ps.data();
+              parentPositionName = pdata.positionName || null;
+              turaContiguous = isTuraContiguousToParent(
+                { ...pdata, fecha: sol.fecha },
+                { startTime: startISO, endTime: endISO, fecha: sol.fecha },
+              );
+            }
+          } catch { /* keep null */ }
+        }
       const ref = await addDoc(collection(db, 'turnos'), {
         ...base,
         employeeId:    sol.parentEmpleadoId  ?? null,
@@ -537,6 +548,7 @@ export default function SupervisionPage() {
         parentShiftId: sol.parentShiftId      ?? null,
         positionId:    sol.positionId ?? null,
         positionName:  sol.positionName || parentPositionName,
+        ...(turaContiguous !== undefined ? { turaContiguous } : {}),
       });
       ids.push(ref.id);
     } else {
@@ -804,9 +816,16 @@ export default function SupervisionPage() {
       if (isAgregado) {
         let created = 0;
         for (const guard of turaTargets) {
+          const parentStub = guard.shiftId
+            ? { startTime: guard.shiftStart, endTime: guard.shiftEnd, fecha: mFecha }
+            : null;
+          const turaContiguous = parentStub
+            ? isTuraContiguousToParent(parentStub, { startTime: startISO, endTime: endISO, fecha: mFecha })
+            : false;
           const turnoExtra: Record<string, unknown> = {
             ...base,
             employeeId: 'VACANTE',
+            turaContiguous,
           };
           if (positionName) turnoExtra.positionName = positionName;
           if (positionId) turnoExtra.positionId = positionId;

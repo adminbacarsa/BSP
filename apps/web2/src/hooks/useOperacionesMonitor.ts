@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
+import { combinedContiguousRangeLabel, isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -359,9 +360,25 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const filteredSLA = filterSlaRowsByEmpresa(servicesSLA, empresaId, scopeEmpresa, clientIds);
         const activeSlaMap = new Set(filteredSLA.map((s: any) => s.objectiveId));
 
+        const suppressedTuraIds = new Set<string>();
+        const parentTuraExt = new Map<string, { turaId: string; endDateObj: Date; tura: any }>();
+        mergedRawShifts.forEach((row) => {
+            const code = String(row.code || row.type || '').toUpperCase();
+            if (code !== 'TURA' || !row.parentShiftId) return;
+            const parent = mergedRawShifts.find((s) => s.id === row.parentShiftId);
+            if (!parent) return;
+            const contiguous = row.turaContiguous === true
+                || (row.turaContiguous !== false && isTuraContiguousToParent(parent, row));
+            if (contiguous && row.endDateObj instanceof Date) {
+                suppressedTuraIds.add(row.id);
+                parentTuraExt.set(row.parentShiftId, { turaId: row.id, endDateObj: row.endDateObj, tura: row });
+            }
+        });
+
         const realShifts = mergedRawShifts.map(shift => {
             if (!shift.shiftDateObj) return null;
             if (shift.draft === true) return null;
+            if (suppressedTuraIds.has(shift.id)) return null;
             // COVERED: solo descartar si es una vacante real (employeeId=VACANTE)
             // Si es una ausencia, mantener en processedData para tracking RRHH
             if (shift.status === 'COVERED' && !shift.isAbsent && (!shift.employeeId || shift.employeeId === 'VACANTE')) return null;
@@ -426,7 +443,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const shiftCode = String(shift.code || shift.type || '').toUpperCase();
             // RFZ publicado sin guardia = refuerzo por ausencia pendiente de asignar en Planificación
             const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
+            const isTuraVacante = shiftCode === 'TURA' && isUnassigned;
             if (isRfzVacante) finalEmpName = 'VACANTE: RFZ';
+            if (isTuraVacante) {
+                finalEmpName = shift.parentEmpleadoName
+                    ? `TURA · ${shift.parentEmpleadoName}`
+                    : 'VACANTE: TURA';
+            }
             // isOperationalVacancy: usado para la generación de vacantes virtuales y deduplicación.
             // Para el DISPLAY (contador OBJ, stats, tab VACANTES) se usa isUnassigned directamente
             // para incluir también las devueltas — ambas representan puestos sin cobertura real.
@@ -434,8 +457,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isFranco = !!shift.isFranco || shift.objectiveName === 'FRANCO';
             
             const isSinCobertura = !!shift.isSinCobertura;
-            // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA y RFZ por ausencia
-            if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante) return null;
+            // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA, RFZ y TURA (2º tramo cortado)
+            if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante && !isTuraVacante) return null;
+
+            const turaExt = parentTuraExt.get(shift.id);
+            const effectiveEndDateObj = (turaExt?.endDateObj instanceof Date ? turaExt.endDateObj : shift.endDateObj) as Date | undefined;
 
             const isEarlyStartScheduled = !!shift.isEarlyStart;
             const isPlannedSplitSegment = !!shift.coveragePackageId && (shift.coverageSegmentRole === 'EXTENSION' || shift.coverageSegmentRole === 'EARLY_START');
@@ -460,16 +486,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (isAwaitingCoverageCheckIn) minutesUntilStart = Math.min(minutesUntilStart, 0);
             let retentionMinutes = 0;
             // isRetention: por tiempo (pasó el horario) O por campo Firestore (retenido manualmente/automáticamente)
-            const isRetentionByTime  = isPresent && !isCompleted && shift.endDateObj && currentTime > shift.endDateObj;
+            const isRetentionByTime  = isPresent && !isCompleted && effectiveEndDateObj && currentTime > effectiveEndDateObj;
             // isRetentionByField: solo mostrar RECARGO si el turno ya terminó O si el operador
             // lo retuvo manualmente Y el turno ya pasó. Si el turno aún está vigente, el badge
             // se mostrará como "ATENCIÓN" pero no como retención activa hasta que pase el endTime.
-            const shiftEnded = shift.endDateObj ? currentTime > shift.endDateObj : false;
+            const shiftEnded = effectiveEndDateObj ? currentTime > effectiveEndDateObj : false;
             const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true && shiftEnded;
             const isPendingRetention = isPresent && !isCompleted && shift.isRetention === true && !shiftEnded;
             const isRetention = isRetentionByTime || isRetentionByField;
-            if (isRetentionByTime) {
-                retentionMinutes = Math.floor((currentTime.getTime() - shift.endDateObj.getTime()) / 60000);
+            if (isRetentionByTime && effectiveEndDateObj) {
+                retentionMinutes = Math.floor((currentTime.getTime() - effectiveEndDateObj.getTime()) / 60000);
             } else if (isRetentionByField && shift.autoRetentionAt?.seconds) {
                 retentionMinutes = Math.floor((currentTime.getTime() - shift.autoRetentionAt.seconds * 1000) / 60000);
             }
@@ -524,6 +550,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
 
+            const isTuraCutSegment = shiftCode === 'TURA' && !!shift.parentShiftId && !suppressedTuraIds.has(shift.id);
+
             return {
                 ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: rawPos,
                 phone,
@@ -533,8 +561,19 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 isPlannedSplitSegment, isPlannedLiberationRet, isPlannedExtensionImminent, plannedOperativelyCovered,
                 hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
-                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField, isSinCobertura,
-                isRfzVacante, isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',
+                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost,
+                duration: getDuration(shift.shiftDateObj, effectiveEndDateObj),
+                endDateObj: effectiveEndDateObj || shift.endDateObj,
+                countsForCoverage, isRetentionByField, isSinCobertura,
+                isRfzVacante, isTuraVacante, isTuraCutSegment,
+                turaRequiresSeparateCheckIn: isTuraCutSegment,
+                isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',
+                ...(turaExt ? {
+                    linkedTuraId: turaExt.turaId,
+                    turaContiguous: true,
+                    turaImputationPos: turaExt.tura.positionName,
+                    turaExtensionRange: combinedContiguousRangeLabel(shift, turaExt.tura),
+                } : {}),
                 vacancyOrigin: isRfzVacante ? 'ABSENCE' : shift.vacancyOrigin,
                 operacionallyCovered: plannedOperativelyCovered || !!shift.operacionallyCovered,
             };
