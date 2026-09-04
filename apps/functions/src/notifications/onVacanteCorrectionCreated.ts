@@ -10,7 +10,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
-const HANDLED_ORIGINS = new Set(['VACANTE_CORRECCION', 'VACANTE_POR_EVENTO']);
+const HANDLED_ORIGINS = new Set(['VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA']);
 
 function resolveDateStr(data: Record<string, unknown>): string {
   if (typeof data.scheduleDate === 'string' && data.scheduleDate) return data.scheduleDate;
@@ -81,6 +81,13 @@ export const onVacanteCorrectionCreated = functions
       body = isPlan
         ? `${causedBy} fue asignado al evento "${eventoNombre}". Queda vacante el ${slotDesc}. Requiere reasignación.`
         : `${causedBy} fue asignado al evento "${eventoNombre}". Queda vacante el ${slotDesc}. Cobertura operativa inmediata.`;
+    } else if (origin === 'VACANTE_POR_AUSENCIA') {
+      title = isPlan
+        ? `Guardia ausente — vacante en ${objectiveName || 'puesto'}`
+        : `⚠ Guardia ausente — cobertura urgente en ${objectiveName || 'puesto'}`;
+      body = isPlan
+        ? `${causedBy} no se presentó al ${slotDesc}. Requiere reasignación.`
+        : `${causedBy} no se presentó al ${slotDesc}. Se necesita cobertura inmediata.`;
     } else {
       title = isPlan
         ? `Vacante en planificación — ${objectiveName || 'puesto'}`

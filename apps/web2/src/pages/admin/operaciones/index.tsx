@@ -1581,7 +1581,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         const vOrigin = String(shift.origin || shift.vacancyOrigin || '');
         if (vOrigin === 'VACANTE_CORRECCION')   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-700 text-white shrink-0">CORRECCIÓN PLAN</span>;
         else if (vOrigin === 'VACANTE_POR_EVENTO') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-600 text-white shrink-0">POR EVENTO</span>;
-        else if (vOrigin === 'ABSENCE')         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">POR AUSENCIA</span>;
+        else if (vOrigin === 'VACANTE_POR_AUSENCIA' || vOrigin === 'ABSENCE') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">POR AUSENCIA</span>;
         else if (vOrigin === 'RRHH_NOVEDAD')    badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white shrink-0">NOVEDAD RRHH</span>;
         else if (vOrigin === 'NO_PLANNING' || vOrigin === 'SIN_PLANIFICAR') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white shrink-0">SIN PLANIFICAR</span>;
         else badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
