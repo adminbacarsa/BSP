@@ -199,6 +199,7 @@ export async function assignGuardToEvent(params: AssignGuardToEventParams): Prom
             clientName: originalClientName,
             startTime: originalStartTime || startTime,
             endTime: originalEndTime || endTime,
+            scheduleDate: servicioFecha,
             status: 'UNCOVERED',
             origin: 'VACANTE_POR_EVENTO',
             vacancyOrigin: 'EVENTO',
