@@ -805,7 +805,7 @@ export const executeAgentAction = functions.https.onCall(executeAgentActionHandl
 async function runModoDemoForEmpresa(
   db: admin.firestore.Firestore,
   empresaId: string,
-): Promise<{ presencias: number; cierres: number; retencion: number }> {
+): Promise<{ presencias: number; cierres: number; retencion: number; vacResueltas: number }> {
   const now = new Date();
   const nowTs = admin.firestore.Timestamp.fromDate(now);
   const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
@@ -815,9 +815,7 @@ async function runModoDemoForEmpresa(
     .where('empresaId', '==', empresaId)
     .where('startTime', '>=', windowStart)
     .where('startTime', '<=', windowEnd)
-    .where('draft', '==', false)
-    .where('isFranco', '==', false)
-    .limit(500)
+    .limit(600)
     .get();
 
   interface TIdx { shiftId: string; startMs: number; endMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean; }
@@ -845,14 +843,17 @@ async function runModoDemoForEmpresa(
   const batch = db.batch();
   let presencias = 0, cierres = 0, retencion = 0;
 
-  // Pase 1: marcar presentes a entrantes (con 10 min de adelanto para que el relevo
-  // esté presente antes de que el cron cierre al saliente en el mismo ciclo)
+  const isVacant = (t: any) => !t.employeeId || t.employeeId === 'VACANTE' || !!t.isUnassigned;
+  const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
+
+  // Pase 1: marcar presentes a entrantes con empleado asignado
   const LOOKAHEAD_MS = 10 * 60 * 1000;
   for (const doc of snap.docs) {
     const t = doc.data() as any;
-    if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted) continue;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (t.isAbsent || t.isPresent || t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime() + LOOKAHEAD_MS) continue; // dentro de 10 min → dar presente ya
+    if (startMs > now.getTime() + LOOKAHEAD_MS) continue;
     const oid = String(t.objectiveId || '');
     batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true, modoDemoAt: nowTs });
     presencias++;
@@ -864,14 +865,42 @@ async function runModoDemoForEmpresa(
   // Pase 2: cerrar salientes — en modo demo NO hay retención, siempre se cierra
   for (const doc of snap.docs) {
     const t = doc.data() as any;
-    if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted) continue;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (t.isAbsent || !t.isPresent || t.isCompleted) continue;
     const endMs = (t.endTime?.seconds ?? 0) * 1000;
     if (!endMs || endMs > now.getTime()) continue;
     batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
     cierres++;
   }
 
-  if (presencias + cierres > 0) {
+  // Pase 3: revertir ausencias auto-detectadas — en modo demo no hay ausentes
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (!t.isAbsent || t.isCompleted) continue;
+    const startMs = (t.startTime?.seconds ?? 0) * 1000;
+    if (startMs > now.getTime() + LOOKAHEAD_MS) continue;
+    const oid = String(t.objectiveId || '');
+    batch.update(doc.ref, { isAbsent: false, isPresent: true, presentAt: nowTs, autoPresencia: true, modoDemoAt: nowTs });
+    presencias++;
+    const idx = byObj.get(oid);
+    const entry = idx?.find(r => r.shiftId === doc.id);
+    if (entry) { entry.isAbsent = false; entry.isPresent = true; }
+  }
+
+  // Pase 4: completar slots vacantes para limpiar el conteo VAC
+  let vacResueltas = 0;
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (skipBase(t) || !isVacant(t)) continue;
+    if (t.isCompleted) continue;
+    const startMs = (t.startTime?.seconds ?? 0) * 1000;
+    if (startMs > now.getTime() + LOOKAHEAD_MS) continue;
+    batch.update(doc.ref, { isCompleted: true, status: 'COMPLETED', resolvedBy: 'MODO_DEMO', modoDemoAt: nowTs });
+    vacResueltas++;
+  }
+
+  if (presencias + cierres + vacResueltas > 0) {
     await batch.commit();
     // Descartar novedades RETENCION fire-and-forget (no bloquea el cron)
     snap.docs.forEach(doc => {
@@ -888,7 +917,7 @@ async function runModoDemoForEmpresa(
     });
   }
 
-  return { presencias, cierres, retencion };
+  return { presencias, cierres, retencion, vacResueltas };
 }
 
 export const modoDemoCron = functions
@@ -901,8 +930,8 @@ export const modoDemoCron = functions
     for (const empDoc of empSnap.docs) {
       try {
         const res = await runModoDemoForEmpresa(db, empDoc.id);
-        if (res.presencias + res.cierres > 0) {
-          console.log(`[modoDemoCron] ${empDoc.id}: presencias=${res.presencias} cierres=${res.cierres} retencion=${res.retencion}`);
+        if (res.presencias + res.cierres + (res as any).vacResueltas > 0) {
+          console.log(`[modoDemoCron] ${empDoc.id}: presencias=${res.presencias} cierres=${res.cierres} vac=${(res as any).vacResueltas ?? 0}`);
         }
       } catch (e) {
         console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);

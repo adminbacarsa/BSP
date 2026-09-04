@@ -25,6 +25,24 @@ type PendingAction = {
 
 const ACTION_MARKER_RE = /<!--COSP_ACTION:([\s\S]*?)-->/;
 
+const MODULE_SUGGESTIONS: Record<string, string[]> = {
+  OPERATIONS:  ['¿Cuántos guardias activos hay ahora?', 'Marcá presente a [nombre]', '¿Hay vacantes sin cubrir hoy?'],
+  PLANNING:    ['¿Cuántas horas planificadas tiene [guardia] este mes?', '¿Qué puestos tienen vacantes en [objetivo]?', 'Automatizá la planificación de [objetivo]'],
+  RRHH:        ['¿Cuántas ausencias tiene [guardia] este mes?', '¿Qué guardias están de vacaciones?', 'Registrá una ausencia para [guardia]'],
+  CLIENTS:     ['¿Cuántos clientes activos hay?', '¿Qué objetivos tiene el cliente [nombre]?'],
+  SERVICES:    ['¿Cuántos SLA vigentes hay?', '¿Cuáles son las horas contratadas de [cliente]?'],
+  REPORTS:     ['¿Cuántas horas realizó [guardia] en julio?', 'Mostrá el resumen de cobertura del mes'],
+  ANALYSIS:    ['¿Cuál es la cobertura real vs SLA este mes?', '¿Cuánto ausentismo hubo en los últimos 3 meses?'],
+  DASHBOARD:   ['¿Cómo estamos hoy operativamente?', '¿Cuántos guardias están activos ahora?'],
+  CONFIG:      ['¿Qué roles hay configurados?', '¿Cuántos usuarios tiene la empresa?'],
+};
+
+function buildGreeting(moduleKey: string | null, moduleName: string): string {
+  const suggestions = MODULE_SUGGESTIONS[moduleKey || ''] ?? MODULE_SUGGESTIONS['DASHBOARD']!;
+  const lines = suggestions.map((s) => `· ${s}`).join('\n');
+  return `¡Hola! Soy **VIGI**, tu asistente COSP.\nEstás en **${moduleName}**. Algunas cosas que podés consultarme:\n\n${lines}\n\nEscribí o hablá lo que necesitás.`;
+}
+
 function parseActionProposal(text: string): { cleanText: string; action: PendingAction | null } {
   const match = text.match(ACTION_MARKER_RE);
   if (!match) return { cleanText: text, action: null };
@@ -208,6 +226,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [greetingDone, setGreetingDone] = useState(false);
+  const currentPathRef = useRef(fullPath || pathname);
   const recognitionRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
@@ -244,6 +264,9 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const pathname = router.pathname || '/';
   const fullPath = (router.asPath || router.pathname || '/').split('?')[0] || pathname;
 
+  // Mantener ref actualizada con el path actual
+  currentPathRef.current = fullPath || pathname;
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [msgs, open, busy]);
@@ -252,8 +275,19 @@ export function AssistantFloatingBubble(): React.ReactNode {
     if (!user) {
       setMsgs([]);
       setOpen(false);
+      setGreetingDone(false);
     }
   }, [user]);
+
+  // Mostrar saludo con sugerencias al abrir, bloquea input hasta que aparezca
+  useEffect(() => {
+    if (!open || greetingDone) return;
+    const moduleKey = inferModuleKeyFromPath(currentPathRef.current);
+    const moduleName = moduleTitleEs(moduleKey);
+    const greeting = buildGreeting(moduleKey, moduleName);
+    setMsgs([{ role: 'assistant', content: greeting }]);
+    setGreetingDone(true);
+  }, [open, greetingDone]);
 
   const startListening = useCallback(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -494,7 +528,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
             </div>
             <button
               type="button"
-              onClick={() => setMsgs([])}
+              onClick={() => { setMsgs([]); setGreetingDone(false); }}
               className="shrink-0 rounded-xl p-2 text-slate-500 hover:bg-white/90 dark:hover:bg-slate-800"
               title="Limpiar conversación (sesión temporal)"
             >
@@ -509,14 +543,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
             {msgs.length === 0 && (
               <div className="rounded-xl border px-3 py-2.5 dark:bg-indigo-950/25"
                 style={{ borderColor: `${brandColor}30`, backgroundColor: `${brandColor}0d` }}>
-                <p className="text-[12px] leading-snug text-slate-600 dark:text-slate-400">
-                  Datos de la empresa o ayuda con este módulo. Por ejemplo:{' '}
-                  <span className="text-slate-700 dark:text-slate-300">
-                    «¿Cuántos empleados?» · «Horas de X en mayo» · «¿Quién está de turno hoy?»
-                  </span>
-                </p>
-                <p className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
-                  La charla no se guarda al cerrar sesión.
+                <p className="text-[12px] font-medium text-slate-500 dark:text-slate-400">
+                  Iniciando VIGI…
                 </p>
               </div>
             )}
@@ -575,16 +603,16 @@ export function AssistantFloatingBubble(): React.ReactNode {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send())}
-              placeholder={listening ? 'Escuchando…' : 'Escribí o hablá…'}
+              placeholder={!greetingDone ? 'Cargando…' : listening ? 'Escuchando…' : 'Escribí o hablá…'}
               className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-medium leading-normal text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-indigo-900"
-              disabled={busy}
+              disabled={busy || !greetingDone}
             />
             {typeof window !== 'undefined' &&
               ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) && (
               <button
                 type="button"
                 onClick={listening ? stopListening : startListening}
-                disabled={busy}
+                disabled={busy || !greetingDone}
                 className={`shrink-0 rounded-xl px-2.5 py-2 text-white shadow-sm disabled:opacity-40 transition-colors ${
                   listening ? 'animate-pulse' : ''
                 }`}
@@ -598,7 +626,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
             <button
               type="button"
               onClick={() => void send()}
-              disabled={busy || !input.trim()}
+              disabled={busy || !greetingDone || !input.trim()}
               className="shrink-0 rounded-xl px-3 py-2.5 text-white shadow-sm disabled:opacity-40"
               style={{ backgroundColor: brandColor }}
               aria-label="Enviar"
