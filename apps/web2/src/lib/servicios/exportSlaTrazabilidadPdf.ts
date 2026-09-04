@@ -73,22 +73,26 @@ export function exportSlaTrazabilidadPdf(opts: ExportSlaTrazabilidadPdfOpts): vo
     pdfSafe(row.title),
     pdfSafe(row.detail),
     row.hours != null && row.hours > 0 ? `${row.hours}h` : '—',
+    pdfSafe(row.solicitante || '—'),
+    pdfSafe(row.canal || '—'),
     pdfSafe(row.actor || '—'),
   ]);
 
   autoTable(doc, {
     startY: y + 2,
-    head: [['Fecha', 'Tipo', 'Accion', 'Detalle', 'Hs', 'Usuario']],
+    head: [['Fecha', 'Tipo', 'Accion', 'Detalle', 'Hs', 'Solicito', 'Por', 'Autorizo']],
     body,
-    styles: { fontSize: 7, cellPadding: 1.8, overflow: 'linebreak' },
+    styles: { fontSize: 6.5, cellPadding: 1.6, overflow: 'linebreak' },
     headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
     columnStyles: {
-      0: { cellWidth: 22 },
-      1: { cellWidth: 22 },
-      2: { cellWidth: 38 },
+      0: { cellWidth: 20 },
+      1: { cellWidth: 18 },
+      2: { cellWidth: 32 },
       3: { cellWidth: 'auto' },
-      4: { cellWidth: 14, halign: 'right' },
-      5: { cellWidth: 32 },
+      4: { cellWidth: 12, halign: 'right' },
+      5: { cellWidth: 28 },
+      6: { cellWidth: 28 },
+      7: { cellWidth: 26 },
     },
     margin: { left: 14, right: 14 },
   });

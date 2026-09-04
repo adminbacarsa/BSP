@@ -122,7 +122,7 @@ export function SlaTrazabilidadPanel({
             <p className="text-[11px] text-slate-400 font-medium py-2">Sin modificaciones en {monthLabel}.</p>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-              <table className="w-full min-w-[640px] text-left border-collapse">
+              <table className="w-full min-w-[880px] text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-100/80 dark:bg-slate-900/50 text-[9px] font-black uppercase text-slate-500 tracking-wide">
                     <th className="px-3 py-2 whitespace-nowrap">Fecha</th>
@@ -130,7 +130,9 @@ export function SlaTrazabilidadPanel({
                     <th className="px-3 py-2 whitespace-nowrap">Acción</th>
                     <th className="px-3 py-2">Detalle</th>
                     <th className="px-3 py-2 whitespace-nowrap text-right">Hs</th>
-                    <th className="px-3 py-2 whitespace-nowrap">Usuario</th>
+                    <th className="px-3 py-2 whitespace-nowrap">Solicitó</th>
+                    <th className="px-3 py-2 whitespace-nowrap">Por</th>
+                    <th className="px-3 py-2 whitespace-nowrap">Autorizó</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -147,16 +149,22 @@ export function SlaTrazabilidadPanel({
                           {row.kind}
                         </span>
                       </td>
-                      <td className="px-3 py-2 font-black text-slate-800 dark:text-slate-100 whitespace-nowrap max-w-[140px] truncate" title={row.title}>
+                      <td className="px-3 py-2 font-black text-slate-800 dark:text-slate-100 whitespace-nowrap max-w-[120px] truncate" title={row.title}>
                         {row.title}
                       </td>
-                      <td className="px-3 py-2 font-medium text-slate-600 dark:text-slate-300 max-w-[280px] truncate" title={row.detail}>
+                      <td className="px-3 py-2 font-medium text-slate-600 dark:text-slate-300 max-w-[220px] truncate" title={row.detail}>
                         {row.detail}
                       </td>
                       <td className="px-3 py-2 font-black text-indigo-600 text-right whitespace-nowrap">
                         {row.hours != null && row.hours > 0 ? `${row.hours}h` : '—'}
                       </td>
-                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap max-w-[120px] truncate" title={row.actor}>
+                      <td className="px-3 py-2 text-slate-700 dark:text-slate-200 whitespace-nowrap max-w-[100px] truncate font-bold" title={row.solicitante}>
+                        {row.solicitante || '—'}
+                      </td>
+                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap max-w-[110px] truncate" title={row.canal}>
+                        {row.canal || '—'}
+                      </td>
+                      <td className="px-3 py-2 text-slate-500 whitespace-nowrap max-w-[100px] truncate" title={row.actor}>
                         {row.actor || '—'}
                       </td>
                     </tr>

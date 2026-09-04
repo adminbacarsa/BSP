@@ -18,8 +18,35 @@ export type SlaModificacionRow = {
   title: string;
   detail: string;
   hours?: number;
+  /** Quien autorizó o registró el cambio en el sistema. */
   actor?: string;
+  /** Contacto o nombre del solicitante (cliente / pedido). */
+  solicitante?: string;
+  /** Origen y canal del pedido (portal, supervisión, teléfono, etc.). */
+  canal?: string;
 };
+
+const ORIGEN_LABELS: Record<string, string> = {
+  PORTAL_CLIENTE: 'Portal cliente',
+  SUPERVISOR_MANUAL: 'Supervisión',
+  MANUAL: 'Manual',
+};
+
+const CANAL_LABELS: Record<string, string> = {
+  TELEFONO: 'Teléfono',
+  WHATSAPP: 'WhatsApp',
+  EMAIL: 'Email',
+  PRESENCIAL: 'Presencial',
+};
+
+export function formatRefuerzoOrigenCanal(sol: Pick<SolicitudRefuerzo, 'origen' | 'canalSolicitud'>): string | undefined {
+  const parts: string[] = [];
+  const origen = String(sol.origen || '').trim();
+  if (origen) parts.push(ORIGEN_LABELS[origen] || origen.replace(/_/g, ' '));
+  const canal = String(sol.canalSolicitud || '').trim();
+  if (canal) parts.push(CANAL_LABELS[canal] || canal);
+  return parts.length > 0 ? parts.join(' · ') : undefined;
+}
 
 function ymdFromIso(iso?: string): string {
   if (!iso) return '';
@@ -63,6 +90,7 @@ export function buildServiceModificaciones(
       title: String(entry.action || 'CAMBIO').replace(/_/g, ' '),
       detail: entry.detail,
       actor: entry.byName,
+      canal: 'Servicios / SLA',
     });
   });
 
@@ -91,7 +119,9 @@ export function buildServiceModificaciones(
         cancelled && sol.cancelReason ? `Motivo: ${sol.cancelReason}` : sol.motivo,
       ].filter(Boolean).join(' · '),
       hours: hrs,
-      actor: sol.autorizadoPorNombre || sol.solicitadoPorNombre,
+      solicitante: String(sol.solicitadoPorNombre || '').trim() || undefined,
+      canal: formatRefuerzoOrigenCanal(sol),
+      actor: sol.autorizadoPorNombre || undefined,
     });
   });
 
@@ -115,6 +145,7 @@ export function buildServiceModificaciones(
         title: `${String(t.code || 'RFZ').toUpperCase()} ${t.employeeId && t.employeeId !== 'VACANTE' ? 'asignado' : 'vacante'}`,
         detail: [t.positionName, t.employeeName].filter(Boolean).join(' · ') || 'Turno extra',
         hours: hrs > 0 ? hrs : undefined,
+        actor: String((t as { autorizadoPorNombre?: string }).autorizadoPorNombre || '').trim() || undefined,
       });
     });
 
