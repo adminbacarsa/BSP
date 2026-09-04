@@ -6093,6 +6093,44 @@ export default function PlanificacionPage() {
                             await rollbackEventoSolicitud(existingEventoId, existingServicioId, empId);
                         }
                         deleteAllExisting();
+
+                        // Crear vacante en Firestore cuando una corrección quita un guardia de un turno publicado
+                        if (correctionMode) {
+                            const nonCoverageCodes = new Set(['F','FF','FP','FT','V','L','E','A','AA','PG','EV','RET']);
+                            const todayStr = new Date().toISOString().slice(0, 10);
+                            const isFutureOrToday = dateStr >= todayStr;
+                            if (!nonCoverageCodes.has(existingCodeUpper) && isFutureOrToday && existing?.startTime && existing?.endTime) {
+                                const nowH = new Date().getHours();
+                                const isTomorrow = dateStr > todayStr;
+                                const actionTarget = (!isTomorrow || nowH >= 19) ? 'OPERACIONES' : 'PLANIFICACION';
+                                const vacancyDoc: Record<string, unknown> = {
+                                    employeeId: 'VACANTE',
+                                    employeeName: 'VACANTE',
+                                    clientId: existing.clientId || selectedClient,
+                                    objectiveId: existing.objectiveId || resolveObjectiveForEmp(empId),
+                                    objectiveName: existing.objectiveName || '',
+                                    positionName: existing.positionName || 'General',
+                                    code: existingCodeUpper,
+                                    type: existing.type || existingCodeUpper,
+                                    startTime: existing.startTime,
+                                    endTime: existing.endTime,
+                                    scheduleDate: dateStr,
+                                    origin: 'VACANTE_CORRECCION',
+                                    vacancyOrigin: 'VACANTE_CORRECCION',
+                                    causedByEmployeeId: empId,
+                                    causedByEmployeeName: empName,
+                                    actionTarget,
+                                    isUnassigned: true,
+                                    draft: false,
+                                    createdAt: serverTimestamp(),
+                                    actorName: realActorName,
+                                };
+                                batch.set(doc(collection(db, 'turnos')), stampEmpresaId(vacancyDoc, empresaId));
+                                bumpBatchOp();
+                                await flushBatchWhenFull();
+                            }
+                        }
+
                         await registerPlanificacionCorreccion(
                             empId,
                             empName,

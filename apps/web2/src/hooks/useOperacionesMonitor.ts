@@ -745,9 +745,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                     id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
                                     vacancyOrigin: gap24Origin,
+                                    vacancyBand: bestName,
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
-                                    employeeName: `VACANTE: ${bestName}`,
+                                    employeeName: 'VACANTE',
                                     shiftDateObj: gap.start, endDateObj: gap.end,
                                     minutesUntilStart: 0, isValidEmployee: false
                                 });

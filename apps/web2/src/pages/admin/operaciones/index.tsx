@@ -1577,7 +1577,15 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (refuerzoLabel) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${refuerzoLabel === 'TURA' ? 'bg-violet-600' : 'bg-red-600'}`}>{refuerzoLabel}</span>;
     else if (shift.turaContiguous) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0" title={shift.turaExtensionRange ? `Bloque ${shift.turaExtensionRange}` : 'TURA seguido'}>TURA seguido</span>;
     else if (shift.isUnassigned && shift.isPartialPlannedCoverage) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0">PARCIAL PLAN</span>;
-    else if (shift.isUnassigned)     badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
+    else if (shift.isUnassigned) {
+        const vOrigin = String(shift.origin || shift.vacancyOrigin || '');
+        if (vOrigin === 'VACANTE_CORRECCION')   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-700 text-white shrink-0">CORRECCIÓN PLAN</span>;
+        else if (vOrigin === 'VACANTE_POR_EVENTO') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-600 text-white shrink-0">POR EVENTO</span>;
+        else if (vOrigin === 'ABSENCE')         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">POR AUSENCIA</span>;
+        else if (vOrigin === 'RRHH_NOVEDAD')    badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white shrink-0">NOVEDAD RRHH</span>;
+        else if (vOrigin === 'NO_PLANNING' || vOrigin === 'SIN_PLANIFICAR') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white shrink-0">SIN PLANIFICAR</span>;
+        else badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
+    }
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ATENCIÓN: relevo pendiente</span>;
     else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
     else if (shift.manualRetentionType === 'open')      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>MANUAL INDEF</span>;
