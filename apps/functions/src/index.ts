@@ -2122,6 +2122,7 @@ export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
+export { onVacanteCorrectionCreated } from './notifications/onVacanteCorrectionCreated';
 export { onSolicitudEventoCreated } from './notifications/onSolicitudEventoCreated';
 export { flushShiftNotifDigests } from './notifications/shiftNotifDigest';
 
