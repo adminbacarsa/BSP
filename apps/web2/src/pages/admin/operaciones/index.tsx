@@ -3807,9 +3807,9 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {/* Barra de sesión — indica modo operativo */}
-                        {(empresa as any)?.modoDemoEnabled ? (
-                            <div className="rounded-lg px-2 py-1 mb-1.5 border animate-pulse"
+                        {/* Badge MODO DEMO — independiente de la sesión del operador */}
+                        {(empresa as any)?.modoDemoEnabled && (
+                            <div className="rounded-lg px-2 py-1 mb-1 border"
                                 style={{ background: 'rgba(139,92,246,0.07)', borderColor: 'rgba(139,92,246,0.35)' }}>
                                 <div className="flex items-center gap-1.5">
                                     <span className="relative flex h-2 w-2 shrink-0">
@@ -3817,10 +3817,13 @@ export default function OperacionesPage() {
                                         <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: '#7c3aed' }}/>
                                     </span>
                                     <span className="text-[10px] font-black uppercase tracking-wide" style={{ color: '#6d28d9' }}>⚡ MODO DEMO</span>
-                                    <span className="ml-auto text-[8px] font-semibold px-1 py-0.5 rounded" style={{ background: 'rgba(139,92,246,0.15)', color: '#7c3aed' }}>Auto · Sim.</span>
+                                    <span className="ml-auto text-[8px] font-semibold px-1 py-0.5 rounded" style={{ background: 'rgba(139,92,246,0.15)', color: '#7c3aed' }}>Simulación activa</span>
                                 </div>
                             </div>
-                        ) : session.isAutoMode ? (
+                        )}
+
+                        {/* Barra de sesión — siempre visible; el operador inicia/finaliza su guardia independientemente del modo */}
+                        {session.isAutoMode ? (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1.5">
@@ -3854,7 +3857,7 @@ export default function OperacionesPage() {
                                     </div>
                                     {confirmEndSession ? (
                                         <div className="flex items-center gap-1 shrink-0">
-                                            <span className="text-[8px] text-rose-600 font-black">Â¿Confirmar?</span>
+                                            <span className="text-[8px] text-rose-600 font-black">¿Confirmar?</span>
                                             <button
                                                 onClick={async () => {
                                                     try {
