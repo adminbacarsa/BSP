@@ -2,6 +2,8 @@
  * Notifica a los usuarios admin cuando se crea una vacante de gestión:
  *   VACANTE_CORRECCION  → guardia quitado de turno publicado (planificación)
  *   VACANTE_POR_EVENTO  → guardia asignado a evento, turno original queda vacante
+ *   VACANTE_POR_AUSENCIA → guardia ausente (onGuardAbsenceDetected)
+ *   INTERRUPTION         → guardia se retiró anticipadamente y está solo en el objetivo
  *
  * Determina actionTarget según el turno del día:
  *   mañana antes de 19hs → PLANIFICACION  → VACANTE_PLANIFICACION (link /admin/planificacion)
@@ -10,7 +12,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
-const HANDLED_ORIGINS = new Set(['VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA']);
+const HANDLED_ORIGINS = new Set(['VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA', 'INTERRUPTION']);
 
 function resolveDateStr(data: Record<string, unknown>): string {
   if (typeof data.scheduleDate === 'string' && data.scheduleDate) return data.scheduleDate;
@@ -88,6 +90,9 @@ export const onVacanteCorrectionCreated = functions
       body = isPlan
         ? `${causedBy} no se presentó al ${slotDesc}. Requiere reasignación.`
         : `${causedBy} no se presentó al ${slotDesc}. Se necesita cobertura inmediata.`;
+    } else if (origin === 'INTERRUPTION') {
+      title = `⚡ Retiro anticipado — ${objectiveName || 'puesto'}`;
+      body = `${causedBy} se retiró anticipadamente del ${slotDesc}. El puesto quedó vacante. Se requiere cobertura inmediata.`;
     } else {
       title = isPlan
         ? `Vacante en planificación — ${objectiveName || 'puesto'}`

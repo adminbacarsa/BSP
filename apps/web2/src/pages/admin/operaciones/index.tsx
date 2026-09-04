@@ -445,9 +445,13 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
                 objectiveId: shift.objectiveId, objectiveName: shift.objectiveName,
                 positionName: shift.positionName,
                 employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)',
+                vacancyBand: (shift.positionName || 'PUESTO').toUpperCase(),
                 startTime: serverTimestamp(),
+                scheduleDate: new Date().toISOString().slice(0, 10),
                 status: 'UNCOVERED_REPORTED', isUnassigned: true, isPresent: false, isReported: true,
-                origin: 'INTERRUPTION', originRef: shift.id, createdAt: serverTimestamp(),
+                origin: 'INTERRUPTION', originRef: shift.id,
+                causedByEmployeeId: shift.employeeId, causedByEmployeeName: shift.employeeName,
+                createdAt: serverTimestamp(),
             }, shiftEmpresaId);
             if (endTs) vacancyPayload.endTime = endTs;
             const newRef = await addDoc(collection(db, 'turnos'), vacancyPayload);
@@ -1697,6 +1701,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         else if (vOrigin === 'VACANTE_POR_AUSENCIA' || vOrigin === 'ABSENCE') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">POR AUSENCIA</span>;
         else if (vOrigin === 'RRHH_NOVEDAD')    badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white shrink-0">NOVEDAD RRHH</span>;
         else if (vOrigin === 'NO_PLANNING' || vOrigin === 'SIN_PLANIFICAR') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white shrink-0">SIN PLANIFICAR</span>;
+        else if (vOrigin === 'INTERRUPTION') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-700 text-white shrink-0">RETIRO ANTICIP.</span>;
         else badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
     }
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ATENCIÓN: relevo pendiente</span>;

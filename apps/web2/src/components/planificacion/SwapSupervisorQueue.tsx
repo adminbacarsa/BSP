@@ -21,14 +21,14 @@ export function SwapSupervisorQueue({ empresaId }: { empresaId?: string | null }
   const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'swap_requests'), where('status', '==', 'PENDING_SUPERVISOR'));
+    const base = collection(db, 'swap_requests');
+    const q = empresaId
+      ? query(base, where('status', '==', 'PENDING_SUPERVISOR'), where('empresaId', '==', empresaId))
+      : query(base, where('status', '==', 'PENDING_SUPERVISOR'));
     const unsub = onSnapshot(
       q,
       (snap) => {
-        let list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as object) })) as SwapRow[];
-        if (empresaId) {
-          list = list.filter((r) => (r as { empresaId?: string }).empresaId === empresaId);
-        }
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as object) })) as SwapRow[];
         setRows(list);
       },
       (err) => {

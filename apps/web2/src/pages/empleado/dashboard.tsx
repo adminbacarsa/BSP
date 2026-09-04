@@ -8,7 +8,7 @@ import { solicitudEventoService, type SolicitudEvento } from '@/services/solicit
 import CredencialDigital from '@/components/empleado/CredencialDigital';
 import { MobilePreviewQrPanel } from '@/components/empleado/MobilePreviewQrPanel';
 import { app, db, functions, storage, auth, onSnapshotFresh } from '@/lib/firebase';
-import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
+import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp, onSnapshot } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -697,9 +697,35 @@ export default function EmployeeDashboard() {
 
   useEffect(() => {
     if (!user) return;
-    loadSwapRequests();
-    const t = setInterval(() => loadSwapRequests(), 60000);
-    return () => clearInterval(t);
+    let unsub1: (() => void) | undefined;
+    let unsub2: (() => void) | undefined;
+    let active = true;
+    const byId = new Map<string, any>();
+    resolveEmpDocId().then((empDocId) => {
+      if (!active || !empDocId) return;
+      const flush = () => setSwapRequests(Array.from(byId.values()));
+      unsub1 = onSnapshot(
+        query(collection(db, 'swap_requests'), where('requesterId', '==', empDocId)),
+        (snap) => {
+          snap.docChanges().forEach((ch) =>
+            ch.type === 'removed' ? byId.delete(ch.doc.id) : byId.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() })
+          );
+          flush();
+        },
+        (err) => console.error('[swap requester]', err)
+      );
+      unsub2 = onSnapshot(
+        query(collection(db, 'swap_requests'), where('targetId', '==', empDocId)),
+        (snap) => {
+          snap.docChanges().forEach((ch) =>
+            ch.type === 'removed' ? byId.delete(ch.doc.id) : byId.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() })
+          );
+          flush();
+        },
+        (err) => console.error('[swap target]', err)
+      );
+    });
+    return () => { active = false; unsub1?.(); unsub2?.(); };
   }, [user?.uid]);
 
   useEffect(() => {
@@ -1557,26 +1583,8 @@ export default function EmployeeDashboard() {
     }
   };
 
-  const loadSwapRequests = async () => {
-    if (!user) return;
-    try {
-      const empDocId = await resolveEmpDocId();
-      if (!empDocId) return;
-      const snap = await getDocs(query(
-        collection(db, 'swap_requests'),
-        where('requesterId', '==', empDocId)
-      ));
-      const snap2 = await getDocs(query(
-        collection(db, 'swap_requests'),
-        where('targetId', '==', empDocId)
-      ));
-      const all = [...snap.docs, ...snap2.docs].map(d => ({ id: d.id, ...d.data() }));
-      const unique = Array.from(new Map(all.map(r => [r.id, r])).values());
-      setSwapRequests(unique);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  const loadSwapRequests = async () => {}; // reemplazado por onSnapshot (ver useEffect abajo)
 
   const loadSwapCandidates = async () => {
     if (!user || !swapShiftId) return;
