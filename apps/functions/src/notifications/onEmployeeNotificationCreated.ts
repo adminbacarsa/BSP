@@ -15,8 +15,9 @@ const INBOX_NEEDS_FCM = new Set([
   'SOLICITUD_ESTADO_LLEGADA',   // ¿por qué no fichaste? ¿llegás tarde?
   'SOLICITUD_ESTADO_RELEVO',    // ¿llegás a relevar? hay un guardia esperando
   'RELEVO',                     // tu relevo llegó, turno finalizado
-  // Planificación
-  'VACANTE_PLANIFICACION',      // vacante por corrección post-publicación requiere reasignación
+  // Planificación / Operaciones
+  'VACANTE_PLANIFICACION',      // vacante por corrección — requiere reasignación en planificación
+  'VACANTE_OPERACIONES',        // vacante por corrección — requiere cobertura operativa urgente
 ]);
 
 async function collectTokens(
@@ -91,7 +92,9 @@ export const onEmployeeNotificationCreated = functions
           ? '/permutas'
           : type === 'VACANTE_PLANIFICACION'
             ? '/admin/planificacion'
-            : '/empleado/dashboard'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
+            : type === 'VACANTE_OPERACIONES'
+              ? '/admin/operaciones'
+              : '/empleado/dashboard'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
 
     try {
       const result = await admin.messaging().sendEachForMulticast({
