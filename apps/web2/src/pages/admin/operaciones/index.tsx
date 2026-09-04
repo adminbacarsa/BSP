@@ -1563,8 +1563,10 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const hoursUntilStart = shift.shiftDateObj ? (toDate(shift.shiftDateObj).getTime() - now.getTime()) / 3600000 : Infinity;
     const canReturn = canCover && shift.vacancyOrigin !== 'ABSENCE' && hoursUntilStart <= 12;
 
-    let name = shift.isUnassigned ? (shift.employeeName || 'VACANTE') : (shift.employeeName || 'Desconocido');
-    if (shift.isReportedToPlanning) name = name.replace('VACANTE: ', '');
+    let name = shift.isUnassigned
+        ? (shift.vacancyBand ? `VACANTE · ${shift.vacancyBand}` : (shift.employeeName || 'VACANTE'))
+        : (shift.employeeName || 'Desconocido');
+    if (shift.isReportedToPlanning) name = name.replace('VACANTE: ', '').replace('VACANTE · ', '');
     const refuerzoLabel = getRefuerzoLabel(shift);
     const avatarLabel = getGuardAvatarLabel(shift, name);
     const avatarClass = getGuardAvatarClass(shift);
