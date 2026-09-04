@@ -244,6 +244,62 @@ export default function EmployeeDashboard() {
   const allMonthRead = monthInbox.length > 0 && monthInbox.every((n) => n.read);
   const hasUnread = monthInbox.some((n) => !n.read);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [etaMinutes, setEtaMinutes] = useState(15);
+  const [respondingNotif, setRespondingNotif] = useState<string | null>(null);
+
+  const handleResponderLlegada = async (notif: any, respuesta: 'LLEGATARDE' | 'AUSENTE') => {
+    if (respondingNotif) return;
+    setRespondingNotif(notif.id);
+    const eId = empresaCtx?.id || empProfile?.empresaId || '';
+    try {
+      const shiftId = notif.data?.shiftId || notif.shiftId;
+      await updateDoc(doc(db, 'user_notifications', notif.id), {
+        read: true, readAt: serverTimestamp(),
+        respondido: true, respuesta, etaMinutes: respuesta === 'LLEGATARDE' ? etaMinutes : null,
+      });
+      if (respuesta === 'LLEGATARDE') {
+        if (shiftId) {
+          await updateDoc(doc(db, 'turnos', shiftId), {
+            expectedLateArrival: true, etaMinutes, lateArrivalAvisadoAt: serverTimestamp(),
+          });
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'LLEGADA_TARDE_AVISADA', status: 'pending',
+          title: 'Guardia avisa llegada tarde',
+          description: `${user?.displayName || 'Guardia'} avisa que llega en ${etaMinutes} min a ${notif.data?.objectiveName || notif.objectiveName || 'su puesto'}.`,
+          shiftId: shiftId || null, objectiveId: notif.data?.objectiveId || notif.objectiveId || null,
+          objectiveName: notif.data?.objectiveName || notif.objectiveName || null,
+          createdAt: serverTimestamp(), reportedBy: 'PORTAL_EMPLEADO',
+        }, eId));
+        addToast(`Avisado ✓ — llegás en ${etaMinutes} min.`, 'success');
+      } else {
+        if (shiftId) {
+          await updateDoc(doc(db, 'turnos', shiftId), {
+            isAbsent: true, absenceType: 'AA', autoAbsentAt: serverTimestamp(),
+          });
+          await addDoc(collection(db, 'ausencias'), stampEmpresaId({
+            shiftId, type: 'AA', absenceType: 'AA', status: 'Pendiente',
+            objectiveId: notif.data?.objectiveId || notif.objectiveId || null,
+            objectiveName: notif.data?.objectiveName || notif.objectiveName || null,
+            origin: 'PORTAL_EMPLEADO', createdAt: serverTimestamp(),
+          }, eId));
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'AUSENCIA_AUTO', status: 'pending',
+          title: 'Ausencia — avisó por portal',
+          description: `${user?.displayName || 'Guardia'} informó que no puede presentarse a ${notif.data?.objectiveName || 'su puesto'}.`,
+          shiftId: shiftId || null, objectiveId: notif.data?.objectiveId || notif.objectiveId || null,
+          objectiveName: notif.data?.objectiveName || notif.objectiveName || null,
+          createdAt: serverTimestamp(), reportedBy: 'PORTAL_EMPLEADO',
+        }, eId));
+        addToast('Registrado. El operador gestionará la cobertura.', 'info');
+      }
+    } catch {
+      addToast('Error al registrar la respuesta. Intentá de nuevo.', 'error');
+    } finally {
+      setRespondingNotif(null);
+    }
+  };
   const [showCompletedPanel, setShowCompletedPanel] = useState(false);
   const [completedView, setCompletedView] = useState<'HOY' | 'SEMANA' | 'MES'>('MES');
   const [showPresentHistory, setShowPresentHistory] = useState(false);
@@ -2079,10 +2135,57 @@ export default function EmployeeDashboard() {
                   <div key={n.id} className="border border-slate-800 rounded-xl p-3 bg-slate-950/50">
                     <div className="text-xs font-bold">{n.title || n.titulo || 'Notificación'}</div>
                     <div className="text-[11px] text-slate-300 mt-1">{n.body || n.mensaje || n.message || ''}</div>
-                    <div className="flex items-center justify-between mt-2">
-                      <span className="text-[10px] text-rose-500 font-bold">No leída</span>
-                      <button onClick={() => markNotificationRead(n.id)} className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-800 text-white">Marcar leída</button>
-                    </div>
+                    {n.type === 'SOLICITUD_ESTADO_LLEGADA' ? (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-400">Llego en</span>
+                          <input
+                            type="number" min={1} max={120} value={etaMinutes}
+                            onChange={e => setEtaMinutes(Math.max(1, Math.min(120, Number(e.target.value))))}
+                            className="w-16 px-2 py-1 rounded-lg bg-slate-800 text-white text-xs text-center border border-slate-700"
+                          />
+                          <span className="text-[11px] text-slate-400">min</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleResponderLlegada(n, 'LLEGATARDE')}
+                            disabled={respondingNotif === n.id}
+                            className="flex-1 px-3 py-2 rounded-lg text-[11px] font-black uppercase bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50"
+                          >
+                            Llego en {etaMinutes} min
+                          </button>
+                          <button
+                            onClick={() => handleResponderLlegada(n, 'AUSENTE')}
+                            disabled={respondingNotif === n.id}
+                            className="flex-1 px-3 py-2 rounded-lg text-[11px] font-black uppercase bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
+                          >
+                            No puedo ir
+                          </button>
+                        </div>
+                      </div>
+                    ) : n.type === 'SOLICITUD_ESTADO_RELEVO' ? (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          onClick={() => handleResponderLlegada(n, 'LLEGATARDE')}
+                          disabled={respondingNotif === n.id}
+                          className="flex-1 px-3 py-2 rounded-lg text-[11px] font-black uppercase bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50"
+                        >
+                          Estoy en camino
+                        </button>
+                        <button
+                          onClick={() => handleResponderLlegada(n, 'AUSENTE')}
+                          disabled={respondingNotif === n.id}
+                          className="flex-1 px-3 py-2 rounded-lg text-[11px] font-black uppercase bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
+                        >
+                          No puedo relevar
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-[10px] text-rose-500 font-bold">No leída</span>
+                        <button onClick={() => markNotificationRead(n.id)} className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-800 text-white">Marcar leída</button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
