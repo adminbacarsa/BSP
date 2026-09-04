@@ -575,6 +575,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const [showNoCoverage, setShowNoCoverage] = useState(false);
     const [noCoverageNotes, setNoCoverageNotes] = useState('');
     const [noCoverageLoading, setNoCoverageLoading] = useState(false);
+    const [swapConfirm, setSwapConfirm] = useState<any>(null);
+    const [swapLoading, setSwapLoading] = useState(false);
 
     if (!isOpen || !absenceShift) return null;
     if (absenceShift.isReportedToPlanning && absenceShift.isUnassigned) {
@@ -684,6 +686,23 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         const ph = item.phone || item.celular || '';
         setLocalWa({ isOpen: true, ctx: { employeeName: nombre, phone: ph, objectiveName: absenceShift.objectiveName, horaInicio: hiStart, horaFin: hiEnd } });
     };
+
+    // 5. PERMUTA: turnos futuros (próximos 7 días) mismo objetivo — solo cuando hay guardia ausente real
+    const hasRealAbsentEmployee = absenceShift.employeeId && absenceShift.employeeId !== 'VACANTE';
+    const permutaCandidates = hasRealAbsentEmployee
+        ? logic.processedData
+            .filter((s: any) => {
+                if (!s.employeeId || s.employeeId === 'VACANTE') return false;
+                if (s.id === absenceShift.id) return false;
+                if (s.objectiveId !== absenceShift.objectiveId) return false;
+                if (s.isCompleted || s.isAbsent || s.isFranco || s.isUnassigned) return false;
+                const shiftDate = toDate(s.shiftDateObj);
+                const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + 7);
+                return shiftDate > now && shiftDate <= cutoff;
+            })
+            .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
+            .slice(0, 8)
+        : [];
 
     const isRealVacantShift = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual && !String(absenceShift.id).startsWith('V124_') && !String(absenceShift.id).startsWith('SLA_GAP');
 
@@ -831,6 +850,56 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         finally { setLoading(null); }
     };
 
+    const handlePermuta = async () => {
+        if (!swapConfirm) return;
+        setSwapLoading(true);
+        try {
+            const absDateStr = (absenceShift.scheduleDate as string | undefined) || toDate(absenceShift.shiftDateObj).toISOString().slice(0, 10);
+            const tgtDateStr = (swapConfirm.scheduleDate as string | undefined) || toDate(swapConfirm.shiftDateObj).toISOString().slice(0, 10);
+            const actorName = getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+            const batch = writeBatch(db);
+            const swapRef = doc(collection(db, 'swap_requests'));
+            batch.set(swapRef, stampEmpresaId({
+                status: 'PENDING_SUPERVISOR',
+                objectiveId: absenceShift.objectiveId || '',
+                objectiveName: absenceShift.objectiveName || '',
+                requesterId: absenceShift.employeeId,
+                requesterUid: null,
+                requesterName: absenceShift.employeeName || '',
+                targetId: swapConfirm.employeeId,
+                targetUid: null,
+                targetName: swapConfirm.employeeName || '',
+                requesterShiftId: absenceShift.id,
+                targetShiftId: swapConfirm.id,
+                requesterShiftDate: absDateStr,
+                targetShiftDate: tgtDateStr,
+                requesterClientName: absenceShift.clientName || '',
+                requesterObjectiveName: absenceShift.objectiveName || '',
+                requesterPositionName: absenceShift.positionName || '',
+                targetClientName: swapConfirm.clientName || absenceShift.clientName || '',
+                targetObjectiveName: swapConfirm.objectiveName || absenceShift.objectiveName || '',
+                targetPositionName: swapConfirm.positionName || absenceShift.positionName || '',
+                initiatedByOperaciones: true,
+                initiatedByActorName: actorName,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, tenantId(absenceShift)));
+            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({
+                employeeId: swapConfirm.employeeId,
+                type: 'SWAP_REQUEST',
+                title: 'Permuta propuesta por Operaciones',
+                body: `Operaciones propone que cubrás el turno de ${absenceShift.employeeName || 'un guardia'} (${hiStart}–${hiEnd}). Tu turno del ${tgtDateStr} se intercambiaría. Pendiente de supervisión.`,
+                read: false,
+                createdAt: serverTimestamp(),
+            }, tenantId(absenceShift)));
+            await batch.commit();
+            toast.success(`Permuta propuesta a ${swapConfirm.employeeName} — pendiente de aprobación del supervisor`);
+            setSwapConfirm(null);
+            onClose();
+        } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+        finally { setSwapLoading(false); }
+    };
+
     return (
         <>
             <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
@@ -875,6 +944,23 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                             empty="No hay francos disponibles hoy."
                             items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleFranco(s)} label="CONVOCAR FT" color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
                         />
+                        {/* Permuta — solo cuando hay guardia ausente real */}
+                        {hasRealAbsentEmployee && (
+                            <CoverageSection num="5" title="Permuta · Intercambio de turno" colorClass="text-violet-700" badgeClass="bg-violet-500"
+                                empty="No hay turnos disponibles para permuta en los próximos 7 días."
+                                items={permutaCandidates.map((s: any) => (
+                                    <div key={s.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-violet-50 border border-violet-100 rounded-xl">
+                                        <div className="flex-1 min-w-0">
+                                            <p className="font-bold text-slate-800 text-sm truncate">{s.employeeName}</p>
+                                            <p className="text-[11px] text-violet-600 font-mono">{formatDateShort(s.shiftDateObj)} · {formatTimeSimple(s.shiftDateObj)}–{formatTimeSimple(s.endDateObj)}</p>
+                                        </div>
+                                        <button onClick={() => setSwapConfirm(s)} className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold rounded-lg transition-colors">
+                                            PROPONER
+                                        </button>
+                                    </div>
+                                ))}
+                            />
+                        )}
                         {/* Sin Cobertura — última medida */}
                         <div className="border-t border-slate-200 pt-4">
                             {!showNoCoverage ? (
@@ -933,6 +1019,31 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 </div>
             </div>
             <WAComposeModal isOpen={localWa.isOpen} onClose={() => setLocalWa(d => ({...d, isOpen: false}))} ctx={localWa.ctx}/>
+            {/* Confirmación de permuta */}
+            {swapConfirm && (
+                <div className="fixed inset-0 z-[9100] bg-slate-900/60 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5">
+                        <p className="font-black text-slate-800 text-sm mb-3 flex items-center gap-2"><ArrowLeftRight size={15} className="text-violet-600"/> Confirmar permuta</p>
+                        <p className="text-xs text-slate-600 mb-1">
+                            <span className="font-bold text-violet-700">{swapConfirm.employeeName}</span> cubrirá el turno de{' '}
+                            <span className="font-bold">{absenceShift.employeeName}</span> — hoy {hiStart}–{hiEnd}.
+                        </p>
+                        <p className="text-xs text-slate-600 mb-4">
+                            Su turno del <span className="font-bold">{formatDateShort(swapConfirm.shiftDateObj)}</span> ({formatTimeSimple(swapConfirm.shiftDateObj)}–{formatTimeSimple(swapConfirm.endDateObj)}) pasará a{' '}
+                            <span className="font-bold">{absenceShift.employeeName}</span> cuando regrese.
+                        </p>
+                        <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-4">
+                            ⏳ La permuta queda pendiente de aprobación del supervisor en Planificación.
+                        </p>
+                        <div className="flex gap-2">
+                            <button onClick={handlePermuta} disabled={swapLoading} className="flex-1 py-2.5 bg-violet-600 text-white rounded-xl text-xs font-bold hover:bg-violet-700 disabled:opacity-60 transition-colors">
+                                {swapLoading ? 'Guardando...' : 'CONFIRMAR PERMUTA'}
+                            </button>
+                            <button onClick={() => setSwapConfirm(null)} disabled={swapLoading} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors">Cancelar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 };
