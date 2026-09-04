@@ -851,16 +851,19 @@ async function runModoDemoForEmpresa(
     !!t.isSinCobertura;
   const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
 
-  // Pase 1: marcar presentes a entrantes con empleado asignado
-  const LOOKAHEAD_MS = 10 * 60 * 1000;
+  // Pase 1: marcar presentes — ventana [-15 min, +5 min] respecto al startTime del turno
+  // presentAt usa el startTime del turno para que los reportes reflejen hora planificada
+  const WINDOW_BEFORE_MS = 15 * 60 * 1000;
+  const WINDOW_AFTER_MS  =  5 * 60 * 1000;
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
     if (t.isAbsent || t.isPresent || t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime() + LOOKAHEAD_MS) continue;
+    if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue; // muy temprano
+    if (startMs < now.getTime() - WINDOW_AFTER_MS) continue;  // ventana cerrada
     const oid = String(t.objectiveId || '');
-    batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true, modoDemoAt: nowTs });
+    batch.update(doc.ref, { isPresent: true, presentAt: t.startTime, autoPresencia: true, modoDemoAt: nowTs });
     presencias++;
     const idx = byObj.get(oid);
     const entry = idx?.find(r => r.shiftId === doc.id);
@@ -884,9 +887,9 @@ async function runModoDemoForEmpresa(
     if (skipBase(t) || isVacant(t)) continue;
     if (!t.isAbsent || t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime() + LOOKAHEAD_MS) continue;
+    if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue;
     const oid = String(t.objectiveId || '');
-    batch.update(doc.ref, { isAbsent: false, isPresent: true, presentAt: nowTs, autoPresencia: true, modoDemoAt: nowTs });
+    batch.update(doc.ref, { isAbsent: false, isPresent: true, presentAt: t.startTime, autoPresencia: true, modoDemoAt: nowTs });
     presencias++;
     const idx = byObj.get(oid);
     const entry = idx?.find(r => r.shiftId === doc.id);
@@ -900,7 +903,7 @@ async function runModoDemoForEmpresa(
     if (skipBase(t) || !isVacant(t)) continue;
     if (t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime() + LOOKAHEAD_MS) continue;
+    if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue;
     batch.update(doc.ref, { isCompleted: true, status: 'COMPLETED', resolvedBy: 'MODO_DEMO', modoDemoAt: nowTs });
     vacResueltas++;
   }
@@ -993,7 +996,7 @@ async function runModoDemoForEmpresa(
           if (slotEnd <= slotStart) slotEnd.setDate(slotEnd.getDate() + 1); // nocturno
 
           // No crear turnos que aún no empezaron en más de 10 min
-          if (slotStart.getTime() > now.getTime() + LOOKAHEAD_MS) continue;
+          if (slotStart.getTime() > now.getTime() + WINDOW_BEFORE_MS) continue;
 
           // Contar cobertura existente para este slot
           const covKey = `${oid}_${startH}`;
@@ -1023,7 +1026,7 @@ async function runModoDemoForEmpresa(
               startTime: admin.firestore.Timestamp.fromDate(slotStart),
               endTime: admin.firestore.Timestamp.fromDate(slotEnd),
               isPresent: true,
-              presentAt: nowTs,
+              presentAt: admin.firestore.Timestamp.fromDate(slotStart),
               draft: false,
               origin: 'OPERATIONS_COVERAGE',
               autoPresencia: true,
