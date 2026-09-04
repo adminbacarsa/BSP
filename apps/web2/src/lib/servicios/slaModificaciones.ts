@@ -125,3 +125,45 @@ export function turnoExtraHours(t: { startTime?: unknown; endTime?: unknown; hou
   const hs = hoursFromShiftClock(t);
   return hs > 0 ? hs : 0;
 }
+
+export function formatModificacionFechaAr(at: string): string {
+  const d = String(at || '').slice(0, 10);
+  if (d.length !== 10) return d || '—';
+  return `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
+}
+
+/** Rango visible del mes KPI intersectado con vigencia del contrato SLA. */
+export function monthRangeForService(
+  year: number,
+  month: number,
+  service?: { startDate?: string; endDate?: string },
+): { start: string; end: string; label: string } | null {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const monthStart = `${year}-${pad(month + 1)}-01`;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const monthEnd = `${year}-${pad(month + 1)}-${pad(lastDay)}`;
+  let start = monthStart;
+  let end = monthEnd;
+  const sd = String(service?.startDate || '').slice(0, 10);
+  const ed = String(service?.endDate || '').slice(0, 10);
+  if (sd && sd > start) start = sd;
+  if (ed && ed < end) end = ed;
+  if (start > end) return null;
+  const label = new Date(year, month, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+  return { start, end, label };
+}
+
+/** Filtra modificaciones al mes del listado KPI y vigencia del servicio. */
+export function filterModificacionesForMonth(
+  rows: SlaModificacionRow[],
+  year: number,
+  month: number,
+  service?: { startDate?: string; endDate?: string },
+): SlaModificacionRow[] {
+  const range = monthRangeForService(year, month, service);
+  if (!range) return [];
+  return rows.filter((row) => {
+    const d = String(row.at || '').slice(0, 10);
+    return d.length === 10 && d >= range.start && d <= range.end;
+  });
+}

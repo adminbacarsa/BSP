@@ -71,7 +71,8 @@ import {
 import { solicitudRefuerzoService, type SolicitudRefuerzo } from '@/services/solicitudRefuerzoService';
 import { isSolicitudRefuerzoExtraVendible } from '@/lib/refuerzo/refuerzoDisplay';
 import { calcRefuerzoHorasVendidas } from '@/lib/refuerzo/refuerzoProforma';
-import { buildServiceModificaciones, turnoExtraHours } from '@/lib/servicios/slaModificaciones';
+import { turnoExtraHours } from '@/lib/servicios/slaModificaciones';
+import { SlaTrazabilidadPanel } from '@/components/servicios/SlaTrazabilidadPanel';
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
@@ -2549,39 +2550,15 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   <span className="font-bold font-mono">{srv.endDate}</span>
                   <span className="ml-auto text-base font-black text-indigo-600 dark:text-indigo-400">{total} hs totales</span>
                 </div>
-                {(() => {
-                  const mods = buildServiceModificaciones(srv, solicitudesRefuerzo, rfzTuraExtras);
-                  if (mods.length === 0) return null;
-                  return (
-                    <div>
-                      <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Modificaciones</p>
-                      <div className="space-y-1.5 max-h-56 overflow-y-auto">
-                        {mods.slice(0, 20).map((row) => {
-                          const d = String(row.at || '').slice(0, 10);
-                          const fecha = d.length === 10 ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : d;
-                          return (
-                            <div key={row.key} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded ${
-                                  row.kind === 'ESTRUCTURAL' ? 'bg-amber-100 text-amber-800'
-                                    : row.kind === 'TURA' ? 'bg-red-100 text-red-700'
-                                      : row.kind === 'RFZ' ? 'bg-rose-100 text-rose-700'
-                                        : 'bg-slate-100 text-slate-600'
-                                }`}>{row.kind}</span>
-                                <p className="text-[10px] font-black text-slate-700 dark:text-slate-200 flex-1 truncate">{row.title}</p>
-                                {row.hours != null && row.hours > 0 && (
-                                  <span className="text-[10px] font-black text-indigo-600">{row.hours}h</span>
-                                )}
-                              </div>
-                              <p className="text-[10px] text-slate-500 truncate">{row.detail}</p>
-                              <p className="text-[9px] text-slate-400">{fecha}{row.actor ? ` · ${row.actor}` : ''}</p>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
+                <SlaTrazabilidadPanel
+                  service={srv}
+                  solicitudes={solicitudesRefuerzo}
+                  turnos={rfzTuraExtras}
+                  kpiYear={kpiYear}
+                  kpiMonth={kpiMonth}
+                  empresaName={empresa?.name}
+                  defaultOpen={false}
+                />
                 <div>
                   <p className="text-[9px] font-black uppercase text-slate-400 mb-2">Dotación Operativa</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
@@ -3462,33 +3439,16 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               )}
             </div>
 
-            {(form.changeLog?.length || form.cancelReason || (isEditing && buildServiceModificaciones(form, solicitudesRefuerzo, rfzTuraExtras).length > 0)) ? (
-              <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
-                <h3 className="text-sm font-black uppercase text-slate-700 dark:text-white flex items-center gap-2 mb-3">
-                  <FileText size={16} className="text-indigo-500"/> Trazabilidad
-                </h3>
-                {form.cancelReason && (
-                  <p className="text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3">
-                    Baja del servicio: {form.cancelReason}
-                    {form.cancelledBy ? ` · ${form.cancelledBy}` : ''}
-                    {form.cancelledAt ? ` · ${form.cancelledAt.slice(8, 10)}/${form.cancelledAt.slice(5, 7)}/${form.cancelledAt.slice(0, 4)}` : ''}
-                  </p>
-                )}
-                <div className="space-y-2 max-h-56 overflow-y-auto">
-                  {buildServiceModificaciones(form, solicitudesRefuerzo, rfzTuraExtras).map((row) => {
-                    const d = String(row.at || '').slice(0, 10);
-                    const fecha = d.length === 10 ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : d;
-                    return (
-                      <div key={row.key} className="bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 px-3 py-2">
-                        <p className="text-[10px] font-black uppercase text-indigo-500">{row.title}</p>
-                        <p className="text-[11px] font-bold text-slate-700 dark:text-slate-200">{row.detail}{row.hours ? ` · ${row.hours}h` : ''}</p>
-                        <p className="text-[9px] text-slate-400">{fecha}{row.actor ? ` · ${row.actor}` : ''}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
+            <SlaTrazabilidadPanel
+              service={form}
+              solicitudes={solicitudesRefuerzo}
+              turnos={rfzTuraExtras}
+              kpiYear={kpiYear}
+              kpiMonth={kpiMonth}
+              empresaName={empresa?.name}
+              defaultOpen={false}
+              className="mt-8 p-0"
+            />
 
             {/* ── Cobertura de dotación ── */}
             <div className="mt-8 bg-slate-50 dark:bg-slate-900/30 p-6 rounded-xl border dark:border-slate-700/50">
