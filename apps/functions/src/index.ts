@@ -922,7 +922,125 @@ async function runModoDemoForEmpresa(
     });
   }
 
-  return { presencias, cierres, retencion, vacResueltas };
+  // Pase 5: auto-asignar empleados a slots SIN PLANIFICAR (vacantes del SLA sin turno hoy)
+  let autoAsignados = 0;
+  try {
+    const todayStr = now.toISOString().slice(0, 10);
+    const dayCode = ['D','L','M','X','J','V','S'][now.getDay()]; // 0=D,1=L...
+
+    const slaSnap = await db.collection('servicios_sla')
+      .where('empresaId', '==', empresaId)
+      .where('status', '==', 'active')
+      .limit(50)
+      .get();
+
+    const empSnap = await db.collection('empleados')
+      .where('empresaId', '==', empresaId)
+      .where('status', '==', 'ACTIVE')
+      .limit(200)
+      .get();
+
+    // índice: objectiveId → lista de empleados
+    const empByObj = new Map<string, { id: string; name: string }[]>();
+    for (const d of empSnap.docs) {
+      const e = d.data() as any;
+      const oid = String(e.preferredObjectiveId || '');
+      if (!oid) continue;
+      if (!empByObj.has(oid)) empByObj.set(oid, []);
+      empByObj.get(oid)!.push({ id: d.id, name: String(e.fullName || e.nombre || 'Guardia') });
+    }
+
+    // índice: objectiveId → turnos existentes hoy (para detectar cobertura)
+    const coveredSlots = new Set<string>(); // `${oid}_${startHH}`
+    for (const doc of snap.docs) {
+      const t = doc.data() as any;
+      if (skipBase(t) || isVacant(t) || t.isAbsent || t.isCompleted) continue;
+      const oid = String(t.objectiveId || '');
+      const sh = (t.startTime?.seconds ?? 0) * 1000;
+      const hh = new Date(sh).getHours();
+      coveredSlots.add(`${oid}_${hh}`);
+    }
+
+    // contadores rotativos por objetivo para repartir empleados
+    const empIdx = new Map<string, number>();
+
+    for (const slaDoc of slaSnap.docs) {
+      const sla = slaDoc.data() as any;
+      const oid = String(sla.objectiveId || '');
+      if (!oid) continue;
+
+      const positions: any[] = Array.isArray(sla.positions) ? sla.positions : [];
+      for (const pos of positions) {
+        if (pos.status === 'INACTIVE') continue;
+        if (pos.coverageType === 'eventos') continue;
+        const activeDays: string[] = Array.isArray(pos.activeDays) ? pos.activeDays : [];
+        if (activeDays.length > 0 && !activeDays.includes(dayCode)) continue;
+
+        const slots: any[] = Array.isArray(pos.allowedShiftTypes) ? pos.allowedShiftTypes : [];
+        const qty = pos.quantity || 1;
+
+        for (const slot of slots) {
+          if (slot.days && Array.isArray(slot.days) && slot.days.length > 0) {
+            if (!slot.days.includes(dayCode)) continue;
+          }
+
+          const [startH, startM] = String(slot.startTime || '08:00').split(':').map(Number);
+          const [endH, endM]     = String(slot.endTime   || '17:00').split(':').map(Number);
+          const slotStart = new Date(todayStr);
+          slotStart.setHours(startH, startM || 0, 0, 0);
+          let slotEnd = new Date(todayStr);
+          slotEnd.setHours(endH, endM || 0, 0, 0);
+          if (slotEnd <= slotStart) slotEnd.setDate(slotEnd.getDate() + 1); // nocturno
+
+          // No crear turnos que aún no empezaron en más de 10 min
+          if (slotStart.getTime() > now.getTime() + LOOKAHEAD_MS) continue;
+
+          // Contar cobertura existente para este slot
+          const covKey = `${oid}_${startH}`;
+          const existing = coveredSlots.has(covKey) ? 1 : 0;
+          const missing = Math.max(0, qty - existing);
+          if (missing === 0) continue;
+
+          const avail = empByObj.get(oid) || [];
+          if (avail.length === 0) continue;
+
+          for (let i = 0; i < missing; i++) {
+            const idx = (empIdx.get(oid) ?? 0) % avail.length;
+            empIdx.set(oid, idx + 1);
+            const emp = avail[idx];
+
+            const autoRef = db.collection('turnos').doc();
+            batch.set(autoRef, {
+              empresaId,
+              objectiveId: oid,
+              objectiveName: String(sla.objectiveName || ''),
+              clientId: String(sla.clientId || ''),
+              clientName: String(sla.clientName || ''),
+              positionName: String(pos.name || ''),
+              employeeId: emp.id,
+              employeeName: emp.name,
+              code: String(slot.code || 'M'),
+              startTime: admin.firestore.Timestamp.fromDate(slotStart),
+              endTime: admin.firestore.Timestamp.fromDate(slotEnd),
+              isPresent: true,
+              presentAt: nowTs,
+              draft: false,
+              origin: 'OPERATIONS_COVERAGE',
+              autoPresencia: true,
+              modoDemoAt: nowTs,
+              createdAt: nowTs,
+            });
+            autoAsignados++;
+            coveredSlots.add(covKey); // no asignar dos veces al mismo slot
+          }
+        }
+      }
+    }
+  } catch (e5) {
+    console.warn('[modoDemoCron] pase5 error:', (e5 as Error)?.message);
+  }
+
+  return { presencias, cierres, retencion, vacResueltas, autoAsignados } as any;
 }
 
 export const modoDemoCron = functions
@@ -935,8 +1053,8 @@ export const modoDemoCron = functions
     for (const empDoc of empSnap.docs) {
       try {
         const res = await runModoDemoForEmpresa(db, empDoc.id);
-        if (res.presencias + res.cierres + (res as any).vacResueltas > 0) {
-          console.log(`[modoDemoCron] ${empDoc.id}: presencias=${res.presencias} cierres=${res.cierres} vac=${(res as any).vacResueltas ?? 0}`);
+        if (res.presencias + res.cierres + (res as any).vacResueltas + (res as any).autoAsignados > 0) {
+          console.log(`[modoDemoCron] ${empDoc.id}: presencias=${res.presencias} cierres=${res.cierres} vac=${(res as any).vacResueltas ?? 0} auto=${(res as any).autoAsignados ?? 0}`);
         }
       } catch (e) {
         console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);

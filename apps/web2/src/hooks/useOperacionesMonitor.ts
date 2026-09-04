@@ -895,13 +895,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 shiftCoversVacancySlot(cover, v.shiftDateObj, v.endDateObj, v.positionName)
             ).length;
             if (coveringCount >= cap) return false;
-            // En modo demo, no mostrar vacantes SIN PLANIFICAR (faltan de planificación, no son operativas)
-            if (empresa?.modoDemoEnabled && v.vacancyOrigin === 'NO_PLANNING') return false;
             return true;
         });
 
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
-    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap, empresa]);
+    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 
     const filteredObjectives = useMemo(() => {
         let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;
