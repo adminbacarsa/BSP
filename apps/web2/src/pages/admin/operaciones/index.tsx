@@ -314,76 +314,80 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
         // Cerrar YA: el operador no espera el ACK del servidor / emulador.
         if (prevShiftId) onRelieved?.(prevShiftId);
         else onClose();
-        toast.success(status === 'LATE' ? 'Ingreso tarde registrado.' : 'Ingreso registrado.');
+        toast.success(
+            prevShiftId
+                ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
+                : (status === 'LATE' ? 'Ingreso tarde registrado.' : 'Ingreso registrado.')
+        );
 
-        try {
-            await batch.commit();
-
-            // Post-trabajo en background (no bloquea UI)
-            void (async () => {
-                try {
-                    if (wasAutoAbsent) {
-                        const absSnap = await getDocs(query(
-                            collection(db, 'ausencias'),
-                            where('shiftId', '==', incomingShift.id),
-                            limit(5)
-                        ));
-                        const aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA');
-                        if (aaDoc) {
-                            const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-                            const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : toDate(incomingShift.shiftDateObj);
-                            const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : toDate(incomingShift.endDateObj);
-                            const aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
-                            await updateDoc(aaDoc.ref, {
-                                type: 'Llegada Tarde',
-                                absenceType: 'LT',
-                                status: 'Confirmada',
-                                reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
-                                arrivedAt: serverTimestamp(),
-                            });
+        void batch.commit()
+            .then(() => {
+                void (async () => {
+                    try {
+                        if (wasAutoAbsent) {
+                            const absSnap = await getDocs(query(
+                                collection(db, 'ausencias'),
+                                where('shiftId', '==', incomingShift.id),
+                                limit(5)
+                            ));
+                            const aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA');
+                            if (aaDoc) {
+                                const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                                const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : toDate(incomingShift.shiftDateObj);
+                                const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : toDate(incomingShift.endDateObj);
+                                const aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+                                await updateDoc(aaDoc.ref, {
+                                    type: 'Llegada Tarde',
+                                    absenceType: 'LT',
+                                    status: 'Confirmada',
+                                    reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
+                                    arrivedAt: serverTimestamp(),
+                                });
+                            }
                         }
-                    }
 
-                    const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                    const _prev = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
-                    const _detail = _prev
-                        ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
-                        : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
-                    await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                        action: status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
-                        module: 'OPERACIONES',
-                        actorName: _actor,
-                        timestamp: serverTimestamp(),
-                        employeeId: incomingShift.employeeId,
-                        employeeName: incomingShift.employeeName,
-                        objectiveId: incomingShift.objectiveId,
-                        objectiveName: incomingShift.objectiveName,
-                        shiftId: incomingShift.id,
-                        details: _detail,
-                    }, tenantId));
+                        const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                        const _prev = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
+                        const _detail = _prev
+                            ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
+                            : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
+                        await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                            action: status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
+                            module: 'OPERACIONES',
+                            actorName: _actor,
+                            timestamp: serverTimestamp(),
+                            employeeId: incomingShift.employeeId,
+                            employeeName: incomingShift.employeeName,
+                            objectiveId: incomingShift.objectiveId,
+                            objectiveName: incomingShift.objectiveName,
+                            shiftId: incomingShift.id,
+                            details: _detail,
+                        }, tenantId));
 
-                    if (prevShiftId) {
-                        const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
-                        if (prevShift?.employeeId) {
-                            await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
-                                userId: prevShift.employeeId,
-                                type: 'RELEVO',
-                                title: 'Turno finalizado — relevado',
-                                body: `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizó.`,
-                                read: false,
-                                createdAt: serverTimestamp(),
-                            }, tenantId));
+                        if (prevShiftId) {
+                            const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
+                            if (prevShift?.employeeId) {
+                                await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                                    userId: prevShift.employeeId,
+                                    type: 'RELEVO',
+                                    title: 'Turno finalizado — relevado',
+                                    body: `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizó.`,
+                                    read: false,
+                                    createdAt: serverTimestamp(),
+                                }, tenantId));
+                            }
                         }
+                    } catch {
+                        /* post-trabajo no crítico */
+                    } finally {
+                        setSaving(false);
                     }
-                } catch {
-                    /* post-trabajo no crítico */
-                }
-            })();
-        } catch (e: any) {
-            toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
-        } finally {
-            setSaving(false);
-        }
+                })();
+            })
+            .catch((e: any) => {
+                toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
+                setSaving(false);
+            });
     };
 
     return (
