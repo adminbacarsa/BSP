@@ -841,7 +841,7 @@ async function runModoDemoForEmpresa(
     (byObj.get(oid) ?? []).some(r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - endMs) <= 90 * 60 * 1000);
 
   const batch = db.batch();
-  let presencias = 0, cierres = 0, retencion = 0;
+  let presencias = 0, cierres = 0;
 
   const isVacant = (t: any) =>
     !t.employeeId ||
@@ -851,20 +851,34 @@ async function runModoDemoForEmpresa(
     !!t.isSinCobertura;
   const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
 
-  // Pase 1: marcar presentes — ventana [-15 min, +5 min] respecto al startTime del turno
-  // Escribe realStartTime = startTime del turno para que la fichada aparezca en liquidación
+  // === Pase 1: Marcar presentes con fichada ===
+  // 80% puntuales (ventana [-15,+5]), 20% llegan tarde +12 min (hash determinístico del employeeId)
   const WINDOW_BEFORE_MS = 15 * 60 * 1000;
   const WINDOW_AFTER_MS  =  5 * 60 * 1000;
+  const LATE_DELAY_MS    = 12 * 60 * 1000;
+  const isLateArrival = (empId: string): boolean => {
+    let h = 0;
+    for (let i = 0; i < empId.length; i++) h = (h * 31 + empId.charCodeAt(i)) & 0xFFFFFF;
+    return (h % 5) === 0; // ~20%
+  };
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
     if (t.isAbsent || t.isPresent || t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue; // muy temprano
-    if (startMs < now.getTime() - WINDOW_AFTER_MS) continue;  // ventana cerrada
+    const empId = String(t.employeeId || '');
+    const late = isLateArrival(empId);
     const oid = String(t.objectiveId || '');
-    // realStartTime = hora planificada del turno → columna FICHADA en liquidación
-    batch.update(doc.ref, { isPresent: true, presentAt: t.startTime, realStartTime: t.startTime, autoPresencia: true, modoDemoAt: nowTs });
+    if (late) {
+      if (startMs > now.getTime() + 10 * 60 * 1000) continue;
+      if (startMs < now.getTime() - 15 * 60 * 1000) continue;
+      const lateTs = admin.firestore.Timestamp.fromMillis(startMs + LATE_DELAY_MS);
+      batch.update(doc.ref, { isPresent: true, presentAt: lateTs, realStartTime: lateTs, autoPresencia: true, llegadaTarde: true, modoDemoAt: nowTs });
+    } else {
+      if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue;
+      if (startMs < now.getTime() - WINDOW_AFTER_MS) continue;
+      batch.update(doc.ref, { isPresent: true, presentAt: t.startTime, realStartTime: t.startTime, autoPresencia: true, modoDemoAt: nowTs });
+    }
     presencias++;
     const idx = byObj.get(oid);
     const entry = idx?.find(r => r.shiftId === doc.id);
@@ -882,10 +896,17 @@ async function runModoDemoForEmpresa(
     cierres++;
   }
 
-  // Pase 3 eliminado: las ausencias siguen su flujo real (detectarAusencias → novedades RRHH → gestionarVacantes)
-  // El modo demo simula el circuito completo: quien no marcó en la ventana queda ausente normalmente.
+  // === Pase 3: Limpiar isAbsent+isCompleted inconsistentes ===
+  let absentClean = 0;
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (!t.isAbsent || !t.isCompleted) continue;
+    batch.update(doc.ref, { isAbsent: false, modoDemoAt: nowTs });
+    absentClean++;
+  }
 
-  // Pase 4: completar slots vacantes para limpiar el conteo VAC
+  // === Pase 4: Completar slots VAC/SIN_COBERTURA ===
   let vacResueltas = 0;
   for (const doc of snap.docs) {
     const t = doc.data() as any;
@@ -897,28 +918,42 @@ async function runModoDemoForEmpresa(
     vacResueltas++;
   }
 
-  if (presencias + cierres + vacResueltas > 0) {
+  // === Pase 5: Reportar ausencias al planificador ===
+  let reportadosPlan = 0;
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (!t.isAbsent || t.isCompleted || t.isReportedToPlanning) continue;
+    batch.update(doc.ref, { isReportedToPlanning: true, modoDemoAt: nowTs });
+    reportadosPlan++;
+  }
+
+  // Commit pases 1-5
+  if (presencias + cierres + absentClean + vacResueltas + reportadosPlan > 0) {
     await batch.commit();
-    // Descartar novedades RETENCION fire-and-forget (no bloquea el cron)
+    // Descartar novedades de retención (fire-and-forget)
     snap.docs.forEach(doc => {
       const t = doc.data() as any;
-      if (t.isPresent && !t.isCompleted) return; // solo los que cerramos
+      if (t.isPresent && !t.isCompleted) return;
       db.collection('novedades').where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(5).get()
         .then(ns => {
           if (ns.empty) return;
-          const b2 = db.batch();
+          const bRet = db.batch();
           ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
-            .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'MODO_DEMO' }));
-          return b2.commit();
+            .forEach(d => bRet.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'MODO_DEMO' }));
+          return bRet.commit();
         }).catch(() => {});
     });
   }
 
-  // Pase 5: auto-asignar empleados a slots SIN PLANIFICAR (vacantes del SLA sin turno hoy)
+  // === Pase 6: Auto-asignar SIN PLANIFICAR | Pase 7: FT automático ===
+  // Usan batch2 (batch principal ya fue committed arriba)
   let autoAsignados = 0;
+  let ftCreados = 0;
   try {
+    const batch2 = db.batch();
     const todayStr = now.toISOString().slice(0, 10);
-    const dayCode = ['D','L','M','X','J','V','S'][now.getDay()]; // 0=D,1=L...
+    const dayCode = ['D','L','M','X','J','V','S'][now.getDay()];
 
     const slaSnap = await db.collection('servicios_sla')
       .where('empresaId', '==', empresaId)
@@ -1002,7 +1037,7 @@ async function runModoDemoForEmpresa(
             const emp = avail[idx];
 
             const autoRef = db.collection('turnos').doc();
-            batch.set(autoRef, {
+            batch2.set(autoRef, {
               empresaId,
               objectiveId: oid,
               objectiveName: String(sla.objectiveName || ''),
@@ -1025,16 +1060,59 @@ async function runModoDemoForEmpresa(
               createdAt: nowTs,
             });
             autoAsignados++;
-            coveredSlots.add(covKey); // no asignar dos veces al mismo slot
+            coveredSlots.add(covKey);
           }
         }
       }
     }
-  } catch (e5) {
-    console.warn('[modoDemoCron] pase5 error:', (e5 as Error)?.message);
+
+    // --- Pase 7: FT automático ---
+    // Por cada ausencia abierta, busca un franco (F simple) en el mismo objetivo y lo convierte en FT
+    const absentByObj = new Map<string, { startTs: any; endTs: any }[]>();
+    for (const doc of snap.docs) {
+      const t = doc.data() as any;
+      if (!t.isAbsent || t.isCompleted || isVacant(t) || t.draft === true) continue;
+      const oid = String(t.objectiveId || '');
+      if (!oid) continue;
+      if (!absentByObj.has(oid)) absentByObj.set(oid, []);
+      absentByObj.get(oid)!.push({ startTs: t.startTime, endTs: t.endTime });
+    }
+    if (absentByObj.size > 0) {
+      const ftUsed = new Set<string>();
+      for (const doc of snap.docs) {
+        const t = doc.data() as any;
+        if (t.draft === true || t.isVirtual) continue;
+        if (t.code !== 'F' || t.isFrancoTrabajado || t.isCompleted) continue;
+        const oid = String(t.objectiveId || '');
+        const empId = String(t.employeeId || '');
+        if (!oid || !empId || ftUsed.has(empId)) continue;
+        const absents = absentByObj.get(oid);
+        if (!absents || absents.length === 0) continue;
+        const absent = absents.shift()!;
+        if (absentByObj.get(oid)!.length === 0) absentByObj.delete(oid);
+        ftUsed.add(empId);
+        batch2.update(doc.ref, {
+          code: 'FT',
+          isFranco: false,
+          isFrancoTrabajado: true,
+          isPresent: true,
+          presentAt: absent.startTs,
+          realStartTime: absent.startTs,
+          realEndTime: absent.endTs,
+          autoPresencia: true,
+          resolvedBy: 'MODO_DEMO',
+          modoDemoAt: nowTs,
+        });
+        ftCreados++;
+      }
+    }
+
+    if (autoAsignados + ftCreados > 0) await batch2.commit();
+  } catch (e67) {
+    console.warn('[modoDemoCron] pase6-7 error:', (e67 as Error)?.message);
   }
 
-  return { presencias, cierres, retencion, vacResueltas, autoAsignados } as any;
+  return { presencias, cierres, absentClean, vacResueltas, reportadosPlan, autoAsignados, ftCreados } as any;
 }
 
 export const modoDemoCron = functions
@@ -1047,8 +1125,9 @@ export const modoDemoCron = functions
     for (const empDoc of empSnap.docs) {
       try {
         const res = await runModoDemoForEmpresa(db, empDoc.id);
-        if (res.presencias + res.cierres + (res as any).vacResueltas + (res as any).autoAsignados > 0) {
-          console.log(`[modoDemoCron] ${empDoc.id}: presencias=${res.presencias} cierres=${res.cierres} vac=${(res as any).vacResueltas ?? 0} auto=${(res as any).autoAsignados ?? 0}`);
+        const r = res as any;
+        if (res.presencias + res.cierres + (r.vacResueltas||0) + (r.autoAsignados||0) + (r.ftCreados||0) > 0) {
+          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} cierre=${res.cierres} cleanAbs=${r.absentClean??0} vac=${r.vacResueltas??0} plan=${r.reportadosPlan??0} auto=${r.autoAsignados??0} ft=${r.ftCreados??0}`);
         }
       } catch (e) {
         console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);
