@@ -9,7 +9,7 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, getDoc, addDoc } from 'firebase/firestore';
 import {
   Shield, CheckCircle, XCircle, Users, AlertCircle,
-  RefreshCw, Plus, X, MessageSquare, User, Search, Ban,
+  RefreshCw, Plus, X, MessageSquare, User, Search, Ban, Pencil, Trash2, Lock,
 } from 'lucide-react';
 import {
   solicitudRefuerzoService,
@@ -34,6 +34,10 @@ import SupervisionTablero from '@/components/admin/supervision/SupervisionTabler
 import SupervisionNovedades from '@/components/admin/supervision/SupervisionNovedades';
 import SupervisionMas from '@/components/admin/supervision/SupervisionMas';
 import SupervisionClienteObjetivoPicker from '@/components/admin/supervision/SupervisionClienteObjetivoPicker';
+import { SupervisorPinInput } from '@/components/ui';
+import { verifySupervisorPin } from '@/lib/auth/verifySupervisorPin';
+import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
+import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -133,6 +137,143 @@ function AprobarModal({ solicitud, onClose, onConfirm }: {
             onClick={() => onConfirm(nota.trim())}
             className="flex-1 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs hover:bg-teal-700 transition-colors"
           >Aprobar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isRefuerzoPuntualGestionable(s: SolicitudRefuerzo): boolean {
+  if (s.alcance === 'ESTRUCTURAL' || s.slaApplied) return false;
+  return s.estado === 'APROBADA' || s.estado === 'ASIGNADA';
+}
+
+function EliminarRefuerzoModal({ solicitud, onClose, onConfirm, saving }: {
+  solicitud: SolicitudRefuerzo;
+  onClose: () => void;
+  onConfirm: (motivo: string, pin: string) => void;
+  saving: boolean;
+}) {
+  const [motivo, setMotivo] = useState('');
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const code = solicitud.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-slate-100 dark:border-slate-700">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
+            <Trash2 size={16} className="text-rose-500"/> Eliminar {code}
+          </h3>
+          <button type="button" onClick={onClose} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+        </div>
+        <p className="text-xs text-slate-500 mb-3">
+          Se quitará de planificación, operaciones, prefactura y trazabilidad de servicios.
+          <strong className="block mt-1 text-slate-700 dark:text-slate-200">{solicitud.objectiveName} · {solicitud.fecha} · {solicitud.startTime}–{solicitud.endTime}</strong>
+        </p>
+        <textarea
+          autoFocus
+          placeholder="Motivo de eliminación (requerido)..."
+          value={motivo}
+          onChange={e => setMotivo(e.target.value)}
+          className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl text-xs font-medium bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-white resize-none outline-none focus:border-rose-400 mb-3"
+          rows={2}
+        />
+        <label className="text-[10px] font-black uppercase text-slate-500 flex items-center gap-1 mb-1.5">
+          <Lock size={11}/> PIN de supervisión
+        </label>
+        <SupervisorPinInput
+          value={pin}
+          onChange={e => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPinError(''); }}
+          maxLength={4}
+          className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl text-center text-lg font-black tracking-[0.4em] bg-slate-50 dark:bg-slate-900 outline-none focus:border-rose-400"
+        />
+        {pinError && <p className="text-[10px] text-rose-600 font-bold mt-1">{pinError}</p>}
+        <div className="flex gap-2 mt-4">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">Cancelar</button>
+          <button
+            type="button"
+            disabled={!motivo.trim() || pin.length !== 4 || saving}
+            onClick={() => {
+              if (pin.length !== 4) { setPinError('PIN de 4 dígitos'); return; }
+              onConfirm(motivo.trim(), pin);
+            }}
+            className="flex-1 py-2.5 bg-rose-600 text-white rounded-xl font-black text-xs hover:bg-rose-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-1"
+          >
+            {saving ? <RefreshCw size={13} className="animate-spin"/> : <Trash2 size={13}/>}
+            Eliminar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditarRefuerzoModal({ solicitud, onClose, onConfirm, saving }: {
+  solicitud: SolicitudRefuerzo;
+  onClose: () => void;
+  onConfirm: (patch: { fecha: string; startTime: string; endTime: string; positionName: string; motivo: string }) => void;
+  saving: boolean;
+}) {
+  const [fecha, setFecha] = useState(solicitud.fecha);
+  const [startTime, setStartTime] = useState(String(solicitud.startTime || '').slice(0, 5));
+  const [endTime, setEndTime] = useState(String(solicitud.endTime || '').slice(0, 5));
+  const [positionName, setPositionName] = useState(String(solicitud.positionName || ''));
+  const [motivo, setMotivo] = useState(String(solicitud.motivo || ''));
+  const code = solicitud.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-slate-100 dark:border-slate-700 max-h-[90dvh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
+            <Pencil size={16} className="text-indigo-500"/> Modificar {code}
+          </h3>
+          <button type="button" onClick={onClose} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] font-black uppercase text-slate-500">Fecha</label>
+            <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+              className="w-full mt-1 px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold bg-white dark:bg-slate-900"/>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500">Desde</label>
+              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold bg-white dark:bg-slate-900"/>
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500">Hasta</label>
+              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold bg-white dark:bg-slate-900"/>
+            </div>
+          </div>
+          {solicitud.tipo === 'AGREGADO_TURNO' && (
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500">Imputación prefactura (puesto)</label>
+              <input type="text" value={positionName} onChange={e => setPositionName(e.target.value)} placeholder="Ej. Extras Eventos"
+                className="w-full mt-1 px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-medium bg-white dark:bg-slate-900"/>
+            </div>
+          )}
+          <div>
+            <label className="text-[10px] font-black uppercase text-slate-500">Motivo / nota</label>
+            <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2}
+              className="w-full mt-1 p-3 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-medium bg-white dark:bg-slate-900 resize-none"/>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">Cancelar</button>
+          <button
+            type="button"
+            disabled={!fecha || !startTime || !endTime || saving}
+            onClick={() => onConfirm({ fecha, startTime, endTime, positionName: positionName.trim(), motivo: motivo.trim() })}
+            className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-xs hover:bg-indigo-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-1"
+          >
+            {saving ? <RefreshCw size={13} className="animate-spin"/> : <Pencil size={13}/>}
+            Guardar cambios
+          </button>
         </div>
       </div>
     </div>
@@ -274,6 +415,9 @@ export default function SupervisionPage() {
   const [tab, setTab] = usePersistedState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('cosp:sup:tab', 'PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
+  const [eliminarTarget, setEliminarTarget] = useState<SolicitudRefuerzo | null>(null);
+  const [editarTarget, setEditarTarget] = useState<SolicitudRefuerzo | null>(null);
+  const [refuerzoActionSaving, setRefuerzoActionSaving] = useState(false);
   const [busqueda, setBusqueda] = useState('');
   const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroObjetivo, setFiltroObjetivo] = useState('');
@@ -1028,6 +1172,58 @@ export default function SupervisionPage() {
     }
   }, [user]);
 
+  const handleEliminarRefuerzo = useCallback(async (motivo: string, pin: string) => {
+    if (!eliminarTarget?.id || !user) return;
+    setRefuerzoActionSaving(true);
+    try {
+      const pinResult = await verifySupervisorPin(pin);
+      if (!pinResult.ok) {
+        toast.error('PIN de supervisión incorrecto');
+        return;
+      }
+      const actor = {
+        uid: user.uid,
+        name: user.displayName || user.email || 'Supervisor',
+        pinAuthorizerName: pinResult.name,
+      };
+      const { turnosDeleted, novedadesClosed } = await cancelRefuerzoPuntual(eliminarTarget, motivo, actor);
+      toast.success(
+        `${eliminarTarget.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ'} eliminada — ${turnosDeleted} turno(s), ${novedadesClosed} novedad(es). Autorizó: ${pinResult.name}`,
+      );
+      setEliminarTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo eliminar');
+    } finally {
+      setRefuerzoActionSaving(false);
+    }
+  }, [eliminarTarget, user]);
+
+  const handleEditarRefuerzo = useCallback(async (patch: {
+    fecha: string; startTime: string; endTime: string; positionName: string; motivo: string;
+  }) => {
+    if (!editarTarget?.id || !user) return;
+    setRefuerzoActionSaving(true);
+    try {
+      await modifyRefuerzoPuntual(
+        editarTarget,
+        {
+          fecha: patch.fecha,
+          startTime: patch.startTime,
+          endTime: patch.endTime,
+          positionName: patch.positionName || undefined,
+          motivo: patch.motivo,
+        },
+        { uid: user.uid, name: user.displayName || user.email || 'Supervisor' },
+      );
+      toast.success(`${editarTarget.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ'} actualizada en planificación, prefactura y trazabilidad`);
+      setEditarTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo modificar');
+    } finally {
+      setRefuerzoActionSaving(false);
+    }
+  }, [editarTarget, user]);
+
   const userName = user?.displayName || user?.email || 'Supervisor';
   const bandejaBadge = pendientes.length + ausencias.filter(a => a.type !== 'NO_PRESENTACION' && a.status === 'Pendiente').length;
 
@@ -1246,6 +1442,12 @@ export default function SupervisionPage() {
                                 <span>{s.motivoRechazo}</span>
                               </p>
                             )}
+                            {s.estado === 'CANCELADA' && s.cancelReason && (
+                              <p className="mt-1 text-[11px] text-slate-500 flex items-start gap-1">
+                                <Ban size={10} className="mt-0.5 shrink-0"/>
+                                <span>Cancelado: {s.cancelReason}{s.cancelledPinAuthorizer ? ` · PIN ${s.cancelledPinAuthorizer}` : ''}</span>
+                              </p>
+                            )}
                           </div>
                           {s.estado === 'PENDIENTE' && (
                             <div className="flex gap-2 shrink-0 w-full sm:w-auto">
@@ -1262,6 +1464,24 @@ export default function SupervisionPage() {
                           {s.estado === 'APROBADA' && (
                             <div className="flex flex-col items-end gap-2 shrink-0">
                               <span className="text-[10px] text-teal-600 font-bold">✓ {s.autorizadoPorNombre}</span>
+                              {isRefuerzoPuntualGestionable(s) && (
+                                <div className="flex gap-1.5 flex-wrap justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditarTarget(s)}
+                                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
+                                  >
+                                    <Pencil size={12}/> Editar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEliminarTarget(s)}
+                                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
+                                  >
+                                    <Trash2 size={12}/> Eliminar
+                                  </button>
+                                </div>
+                              )}
                               {s.alcance === 'ESTRUCTURAL' && s.slaApplied && (
                                 <button
                                   type="button"
@@ -1271,6 +1491,24 @@ export default function SupervisionPage() {
                                   <Ban size={12}/> Revertir +pax
                                 </button>
                               )}
+                            </div>
+                          )}
+                          {s.estado === 'ASIGNADA' && isRefuerzoPuntualGestionable(s) && (
+                            <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
+                              <button
+                                type="button"
+                                onClick={() => setEditarTarget(s)}
+                                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
+                              >
+                                <Pencil size={12}/> Editar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEliminarTarget(s)}
+                                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
+                              >
+                                <Trash2 size={12}/> Eliminar
+                              </button>
                             </div>
                           )}
                         </div>
@@ -1395,6 +1633,22 @@ export default function SupervisionPage() {
           solicitud={aprobarTarget}
           onClose={() => setAprobarTarget(null)}
           onConfirm={handleAprobar}
+        />
+      )}
+      {eliminarTarget && (
+        <EliminarRefuerzoModal
+          solicitud={eliminarTarget}
+          saving={refuerzoActionSaving}
+          onClose={() => setEliminarTarget(null)}
+          onConfirm={handleEliminarRefuerzo}
+        />
+      )}
+      {editarTarget && (
+        <EditarRefuerzoModal
+          solicitud={editarTarget}
+          saving={refuerzoActionSaving}
+          onClose={() => setEditarTarget(null)}
+          onConfirm={handleEditarRefuerzo}
         />
       )}
 

@@ -29,6 +29,10 @@ export interface SolicitudRefuerzo {
   cancelledByUid?: string;
   cancelledByNombre?: string;
   cancelReason?: string;
+  cancelledPinAuthorizer?: string;
+  modifiedAt?: Timestamp | string;
+  modifiedByUid?: string;
+  modifiedByNombre?: string;
   fecha: string;      // YYYY-MM-DD
   /** Fin de vigencia inclusive (estructural temporal). Si vacío = solo `fecha`. */
   fechaHasta?: string;

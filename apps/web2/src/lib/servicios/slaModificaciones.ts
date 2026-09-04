@@ -72,6 +72,7 @@ export function buildServiceModificaciones(
     const hrs = estructural ? undefined : calcRefuerzoHorasVendidas(sol);
     const horario = formatRefuerzoTimeRange(sol.startTime, sol.endTime);
     const fecha = formatRefuerzoFechaAr(sol.fecha);
+    const cancelled = sol.estado === 'CANCELADA';
     rows.push({
       key: `sol-${sol.id || sol.fecha}-${code}`,
       at: sol.fecha || ymdFromIso(String(sol.solicitadoAt || '')),
@@ -80,12 +81,14 @@ export function buildServiceModificaciones(
         ? (sol.fechaHasta
           ? `Estructural +${sol.cantidadPax || 1} pax (${formatRefuerzoFechaAr(sol.fecha)} → ${formatRefuerzoFechaAr(sol.fechaHasta)})`
           : `Estructural +${sol.cantidadPax || 1} pax permanente`)
-        : `${code} puntual · ${sol.estado}`,
+        : cancelled
+          ? `${code} cancelado`
+          : `${code} puntual · ${sol.estado}`,
       detail: [
         fecha,
         horario,
         sol.positionName || sol.parentEmpleadoName,
-        sol.motivo,
+        cancelled && sol.cancelReason ? `Motivo: ${sol.cancelReason}` : sol.motivo,
       ].filter(Boolean).join(' · '),
       hours: hrs,
       actor: sol.autorizadoPorNombre || sol.solicitadoPorNombre,
@@ -101,6 +104,7 @@ export function buildServiceModificaciones(
       return !!srv.objectiveName && t.objectiveName === srv.objectiveName;
     })
     .filter((t) => !t.solicitudRefuerzoId || !billed.has(t.solicitudRefuerzoId))
+    .filter((t) => (t as { isDeleted?: boolean }).isDeleted !== true)
     .forEach((t) => {
       const hrs = hoursFromShiftClock(t);
       const fecha = String(t.fecha || '').slice(0, 10) || ymdFromIso(String(t.startTime || ''));

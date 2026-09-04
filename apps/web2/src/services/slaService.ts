@@ -70,6 +70,8 @@ export interface ServicePosition {
 export type SlaChangeAction =
   | 'REFUERZO_ESTRUCTURAL'
   | 'REVERT_REFUERZO'
+  | 'CANCEL_REFUERZO_PUNTUAL'
+  | 'MODIFY_REFUERZO_PUNTUAL'
   | 'CANCEL_SERVICE'
   | 'BAJA_PUESTO'
   | 'REACTIVAR_PUESTO'

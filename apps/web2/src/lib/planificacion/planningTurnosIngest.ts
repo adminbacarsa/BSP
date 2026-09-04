@@ -78,6 +78,7 @@ export function ingestPlanningTurnosSnapshot(
     docs.forEach((d) => {
         const data = d.data();
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+        if (data.isDeleted === true) return;
         const code = (data.code || data.type || '').toString().toUpperCase();
 
         if (code === 'RFZ') {

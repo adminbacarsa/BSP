@@ -321,6 +321,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const unsubRfz = onSnapshot(refuerzosQ, (snap) => {
             setRawRefuerzos(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .filter(d => d.data().isDeleted !== true)
                 .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) }))
                 .filter((s: any) => {
                     const t = s.shiftDateObj instanceof Date ? s.shiftDateObj.getTime() : NaN;
@@ -338,7 +339,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const map = new Map<string, any>();
         rawShifts.forEach(s => map.set(s.id, s));
         rawRefuerzos.forEach(s => { if (!map.has(s.id)) map.set(s.id, s); });
-        return Array.from(map.values());
+        return Array.from(map.values()).filter((s) => s.isDeleted !== true);
     }, [rawShifts, rawRefuerzos]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);

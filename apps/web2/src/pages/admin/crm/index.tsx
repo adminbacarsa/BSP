@@ -1948,6 +1948,7 @@ export default function CRMPage() {
       const plannedCellGroups = new Map<string, { rows: any[]; objectiveName: string; positionName: string; dateKey: string }>();
 
       turnosEnriched.forEach((t) => {
+        if (t.isDeleted === true) return;
         if (!isCrmPlannedEligibleShift(t, slaExclusion)) return;
         if (t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
