@@ -1316,39 +1316,104 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     }
 });
 
+/**
+ * Motor único de presencia + auto-relevo FIFO 1:1.
+ * Canales: OPERATIONS | VIGI (vía executeAgentAction) | PORTAL (vía requestCheckIn).
+ */
+export const registrarPresencia = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const shiftId = String(data?.shiftId || '').trim();
+  if (!shiftId) {
+    throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+  }
+
+  const role = String(context.auth.token.role ?? '');
+  const allowedOps = [
+    'admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP',
+    'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'Operador', 'operador', 'ADMIN',
+  ];
+  const isOps = allowedOps.includes(role) || ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes(role);
+  if (!isOps) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo operadores pueden registrar presencia por este canal.');
+  }
+
+  const sourceRaw = String(data?.source || 'OPERATIONS').toUpperCase();
+  const source =
+    sourceRaw === 'VIGI' || sourceRaw === 'DEMO' || sourceRaw === 'MANUAL_RADIO' || sourceRaw === 'MANUAL_PHONE'
+      ? (sourceRaw as 'VIGI' | 'DEMO' | 'MANUAL_RADIO' | 'MANUAL_PHONE')
+      : 'OPERATIONS';
+
+  let overrideRelieveShiftId: string | null | undefined = undefined;
+  if (data?.skipAutoRelevo === true) {
+    overrideRelieveShiftId = null;
+  } else if (typeof data?.overrideRelieveShiftId === 'string' && data.overrideRelieveShiftId.trim()) {
+    overrideRelieveShiftId = data.overrideRelieveShiftId.trim();
+  } else if (data?.overrideRelieveShiftId === null) {
+    overrideRelieveShiftId = null;
+  }
+
+  const db = admin.firestore();
+  const { registrarPresencia: run } = await import('./fichajes/registrarPresencia');
+
+  try {
+    const result = await run(db, {
+      shiftId,
+      source,
+      operatorUid: context.auth.uid,
+      actorName: context.auth.token.name || context.auth.token.email || 'Operador',
+      overrideRelieveShiftId,
+      skipAutoRelevo: data?.skipAutoRelevo === true,
+      coords: data?.coords || null,
+      recordedAt: data?.recordedAt || null,
+    });
+    return {
+      success: true,
+      alreadyPresent: result.alreadyPresent === true,
+      relieved: result.relieved,
+    };
+  } catch (e) {
+    const msg = (e as Error)?.message || '';
+    if (msg === 'TURNO_NOT_FOUND') {
+      throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+    }
+    if (msg === 'SHIFT_ABSENT') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'El turno está marcado como ausencia. Revertí la ausencia antes de dar presente.',
+      );
+    }
+    throw new functions.https.HttpsError('internal', msg || 'Error al registrar presencia.');
+  }
+});
+
 // 1. Fichada Manual (Operador de Radio / Supervisor)
 export const registrarFichadaManual = functions.https.onCall(async (data, context) => {
     if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
     
-    // data: { shiftId, notes, method: 'RADIO' | 'PHONE' }
     const { shiftId, notes, method } = data;
+    if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
     const db = admin.firestore();
+    const source =
+      String(method || '').toUpperCase() === 'PHONE' ? 'MANUAL_PHONE' as const : 'MANUAL_RADIO' as const;
 
     try {
-        const shiftRef = db.collection('turnos').doc(shiftId);
-        const shiftDoc = await shiftRef.get();
-
-        if (!shiftDoc.exists) throw new Error("Turno no encontrado");
-
-        // Actualizamos el turno a estado "PRESENT"
-        await shiftRef.update({
-            status: 'PRESENT',
-            checkInTime: admin.firestore.FieldValue.serverTimestamp(),
-            checkInMethod: method || 'MANUAL', // 'RADIO', 'PHONE', 'WHATSAPP'
-            checkInOperator: context.auth.uid, // QuiÃ©n validÃ³ la fichada
-            operatorNotes: notes || ''
+        const { registrarPresencia: run } = await import('./fichajes/registrarPresencia');
+        const result = await run(db, {
+          shiftId,
+          source,
+          operatorUid: context.auth.uid,
+          actorName: context.auth.token.name || context.auth.token.email || 'Operador',
         });
-
-        // Log de auditorÃ­a (opcional)
-        await db.collection('audit_logs').add({
-            action: 'MANUAL_CHECKIN',
-            shiftId,
-            operator: context.auth.uid,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        return { success: true };
+        if (notes) {
+          await db.collection('turnos').doc(shiftId).update({ operatorNotes: notes }).catch(() => {});
+        }
+        return { success: true, alreadyPresent: result.alreadyPresent === true, relieved: result.relieved };
     } catch (error: any) {
+        const msg = error?.message || '';
+        if (msg === 'TURNO_NOT_FOUND') throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+        if (msg === 'SHIFT_ABSENT') throw new functions.https.HttpsError('failed-precondition', msg);
         throw new functions.https.HttpsError("internal", error.message);
     }
 });

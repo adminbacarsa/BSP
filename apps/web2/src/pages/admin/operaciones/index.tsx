@@ -28,6 +28,7 @@ import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
@@ -228,14 +229,13 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
         } catch (e: any) { toast.error('Error en intercambio: ' + (e?.message || String(e))); }
     };
 
-    const handleConfirm = async (prevShiftId: string | null) => {
+    const handleConfirm = (mode: 'auto' | 'override' | 'skip', prevShiftId?: string | null) => {
         if (saving) return;
-        // Un guardia tardío SIEMPRE puede dar presente — el relevo es secundario.
-        if (mustRelevar && !prevShiftId && status !== 'LATE') {
-            toast.error(`Puesto completo (${positionCapacity} pax). Seleccioná a quién relevar.`);
+        if (mustRelevar && mode === 'skip' && status !== 'LATE') {
+            toast.error(`Puesto completo (${positionCapacity} pax). Usá auto-relevo o elegí a quién relevar.`);
             return;
         }
-        if (mustRelevar && !prevShiftId && status === 'LATE') {
+        if (mustRelevar && mode === 'skip' && status === 'LATE') {
             toast.warning(`${incomingShift.employeeName} ingresó. Hay guardias en retención — relevalos manualmente.`);
         }
         if (!incomingShift?.id) {
@@ -243,13 +243,12 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             return;
         }
 
-        // Check de empresa en memoria (sin getDoc al servidor — era el cuello de botella).
         const shiftEmp = String(incomingShift.empresaId || '').trim();
         if (migracionCompleta && empresaId && shiftEmp && shiftEmp !== empresaId) {
             toast.error(`Operación bloqueada: el turno pertenece a «${shiftEmp}», no a «${empresaId}».`);
             return;
         }
-        if (prevShiftId) {
+        if (mode === 'override' && prevShiftId) {
             const prev = logic.processedData.find((s: any) => s.id === prevShiftId);
             const prevEmp = String(prev?.empresaId || '').trim();
             if (migracionCompleta && empresaId && prevEmp && prevEmp !== empresaId) {
@@ -259,135 +258,32 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
         }
 
         setSaving(true);
-        const tenantId = String(incomingShift.empresaId || empresaId || '').trim();
-        const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
-
-        const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
-            ? incomingShift.shiftDateObj
-            : toDate(incomingShift.shiftDateObj);
-        const isEarlyStartShift = !!incomingShift.isEarlyStart;
-        const incomingRealStart = isEarlyStartShift
-            ? (incomingShift.adjustedStartTime
-                ? (incomingShift.adjustedStartTime.toDate
-                    ? Timestamp.fromDate(incomingShift.adjustedStartTime.toDate())
-                    : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
-                : serverTimestamp())
-            : Timestamp.fromDate(incomingScheduledStart);
-
-        const batch = writeBatch(db);
-        batch.update(doc(db, 'turnos', incomingShift.id), stampEmpresaId({
-            isPresent: true,
-            status: 'PRESENT',
-            realStartTime: incomingRealStart,
-            lateArrivalAt: status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
-            isLate: status === 'LATE' || wasAutoAbsent,
-            isAbsent: false,
-            absenceType: null,
-            absenceDetectedAt: null,
-            absenceReversedAt: serverTimestamp(),
-            absenceReversedBy: 'OPERACIONES',
-        }, tenantId));
-
-        if (incomingShift.linkedTuraId && incomingShift.turaContiguous) {
-            batch.update(doc(db, 'turnos', incomingShift.linkedTuraId), stampEmpresaId({
-                coveredByParentPresence: true,
-                isPresent: true,
-                status: 'PRESENT',
-                parentPresenceShiftId: incomingShift.id,
-            }, tenantId));
-        }
-
-        if (prevShiftId) {
-            const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
-            const prevEnd = prevShift ? toDate(prevShift.endDateObj) : null;
-            const nowDate = new Date();
-            const isEarlyRelevo = !!(prevEnd && prevEnd > nowDate);
-            batch.update(doc(db, 'turnos', prevShiftId), stampEmpresaId({
-                realEndTime: isEarlyRelevo ? Timestamp.fromDate(prevEnd!) : serverTimestamp(),
-                isCompleted: true,
-                status: 'COMPLETED',
-                isPresent: false,
-                relievedEarly: isEarlyRelevo,
-            }, tenantId));
-        }
-
-        // Cerrar YA: el operador no espera el ACK del servidor / emulador.
-        if (prevShiftId) onRelieved?.(prevShiftId);
+        if (mode === 'override' && prevShiftId) onRelieved?.(prevShiftId);
         else onClose();
         toast.success(
-            prevShiftId
-                ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
-                : (status === 'LATE' ? 'Ingreso tarde registrado.' : 'Ingreso registrado.')
+            mode === 'skip'
+                ? (status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).')
+                : mode === 'override'
+                    ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
+                    : (status === 'LATE' ? 'Ingreso tarde — relevo automático FIFO.' : 'Ingreso — relevo automático FIFO.'),
         );
 
-        void batch.commit()
-            .then(() => {
-                void (async () => {
-                    try {
-                        if (wasAutoAbsent) {
-                            const absSnap = await getDocs(query(
-                                collection(db, 'ausencias'),
-                                where('shiftId', '==', incomingShift.id),
-                                limit(5)
-                            ));
-                            const aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA');
-                            if (aaDoc) {
-                                const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-                                const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : toDate(incomingShift.shiftDateObj);
-                                const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : toDate(incomingShift.endDateObj);
-                                const aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
-                                await updateDoc(aaDoc.ref, {
-                                    type: 'Llegada Tarde',
-                                    absenceType: 'LT',
-                                    status: 'Confirmada',
-                                    reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
-                                    arrivedAt: serverTimestamp(),
-                                });
-                            }
-                        }
-
-                        const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                        const _prev = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
-                        const _detail = _prev
-                            ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
-                            : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
-                        await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                            action: status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
-                            module: 'OPERACIONES',
-                            actorName: _actor,
-                            timestamp: serverTimestamp(),
-                            employeeId: incomingShift.employeeId,
-                            employeeName: incomingShift.employeeName,
-                            objectiveId: incomingShift.objectiveId,
-                            objectiveName: incomingShift.objectiveName,
-                            shiftId: incomingShift.id,
-                            details: _detail,
-                        }, tenantId));
-
-                        if (prevShiftId) {
-                            const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
-                            if (prevShift?.employeeId) {
-                                await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
-                                    userId: prevShift.employeeId,
-                                    type: 'RELEVO',
-                                    title: 'Turno finalizado — relevado',
-                                    body: `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizó.`,
-                                    read: false,
-                                    createdAt: serverTimestamp(),
-                                }, tenantId));
-                            }
-                        }
-                    } catch {
-                        /* post-trabajo no crítico */
-                    } finally {
-                        setSaving(false);
-                    }
-                })();
-            })
-            .catch((e: any) => {
-                toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
-                setSaving(false);
-            });
+        void registrarPresenciaOps({
+            shiftId: incomingShift.id,
+            source: 'OPERATIONS',
+            skipAutoRelevo: mode === 'skip',
+            overrideRelieveShiftId: mode === 'override' && prevShiftId ? prevShiftId : mode === 'skip' ? null : undefined,
+        }).then((res) => {
+            if (res.alreadyPresent) toast.message('El turno ya estaba marcado presente.');
+            else if (mode === 'auto' && res.relieved) {
+                toast.success(`Relevó a ${res.relieved.employeeName} (FIFO).`);
+                onRelieved?.(res.relieved.shiftId);
+            } else if (mode === 'auto' && !res.relieved) {
+                toast.message('Presente OK — no había saliente para relevar.');
+            }
+        }).catch((e: any) => {
+            toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
+        }).finally(() => setSaving(false));
     };
 
     return (
@@ -454,20 +350,24 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                         </div>
                     ) : (
                     <>
+                        <button type="button" onClick={() => handleConfirm('auto')}
+                            className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm mb-3 ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                            {status === 'LATE' ? 'DAR PRESENTE (TARDE) · AUTO-RELEVO' : 'DAR PRESENTE · AUTO-RELEVO FIFO'}
+                        </button>
                         {mustRelevar && (
                             <div className="mb-3 px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl">
-                                <p className="text-xs font-bold text-rose-600">Puesto al tope ({activeGuards.length}/{positionCapacity}). Selección a quién relevar.</p>
+                                <p className="text-xs font-bold text-rose-600">Puesto al tope ({activeGuards.length}/{positionCapacity}). Auto-relevo FIFO o forzá quién sale.</p>
                             </div>
                         )}
                         {activeGuards.length > 0 ? (
                             <div className="space-y-2 mb-3">
-                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Selección a quién relevar:</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Forzar relevo (opcional):</p>
                                 {activeGuards.map((s: any) => {
                                     const minutesWorked = s.totalMinutesWorked ?? 0;
                                     const hoursWorked = (minutesWorked / 60).toFixed(1);
                                     const isOver12h = minutesWorked >= 12 * 60;
                                     return (
-                                        <button key={s.id} onClick={() => handleConfirm(s.id)}
+                                        <button key={s.id} type="button" onClick={() => handleConfirm('override', s.id)}
                                             className={`w-full p-3 border rounded-xl flex justify-between items-center group ${s.isRetention ? 'border-orange-300 bg-orange-50/40 hover:bg-orange-50' : isOver12h ? 'border-red-200 bg-red-50/30 hover:bg-red-50/50' : 'border-slate-200 hover:bg-slate-50'}`}>
                                             <div className="flex items-center gap-2.5 text-left">
                                                 <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>
@@ -491,18 +391,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center mb-3 space-y-1">
                                 <p className="text-xs font-bold text-slate-600">No hay guardia saliente en el puesto</p>
                                 <p className="text-[11px] text-slate-500 leading-snug">
-                                    Podés registrar el ingreso igual: el puesto queda con este guardia, sin relevo.
+                                    El auto-relevo no encontrará saliente; el entrante queda solo en el puesto.
                                 </p>
                             </div>
                         )}
-                        {(!mustRelevar || activeGuards.length === 0) && (
-                            <button onClick={() => handleConfirm(null)}
-                                className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                                {activeGuards.length > 0
-                                    ? 'INGRESAR SIN RELEVAR'
-                                    : (status === 'LATE' ? 'INGRESAR SIN RELEVAR (TARDE)' : 'INGRESAR SIN RELEVAR')}
-                            </button>
-                        )}
+                        <button type="button" onClick={() => handleConfirm('skip')}
+                            className="w-full py-2.5 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors text-xs">
+                            INGRESAR SIN RELEVAR
+                        </button>
                     </>
                     )}
                 </div>
