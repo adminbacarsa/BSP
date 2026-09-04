@@ -195,6 +195,52 @@ export default function EmpresasTab() {
 
   const [guardandoModoDemo, setGuardandoModoDemo] = useState(false);
   const modoDemoActivo = empresa?.modoDemoEnabled === true;
+  const [demoSecondsLeft, setDemoSecondsLeft] = useState(0);
+  const demoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const demoCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const demoRunningRef = useRef(false);
+
+  React.useEffect(() => {
+    if (!modoDemoActivo || !empresaId) {
+      if (demoIntervalRef.current) { clearInterval(demoIntervalRef.current); demoIntervalRef.current = null; }
+      if (demoCountdownRef.current) { clearInterval(demoCountdownRef.current); demoCountdownRef.current = null; }
+      setDemoSecondsLeft(0);
+      return;
+    }
+    const INTERVAL_MS = 5 * 60 * 1000;
+    const runCycle = async () => {
+      if (demoRunningRef.current) return;
+      demoRunningRef.current = true;
+      setAutoPresenciaLoading(true);
+      try {
+        const fn = httpsCallable<{ empresaId: string; dryRun: boolean }, any>(functions, 'autoPresenciaYCierre');
+        const { data } = await fn({ empresaId, dryRun: false });
+        setAutoPresenciaResult(data);
+        if ((data?.presenciaMarcada ?? 0) > 0 || (data?.turnosCerrados ?? 0) > 0) {
+          toast.success(`Demo ▶ ${data.presenciaMarcada ?? 0} presencias, ${data.turnosCerrados ?? 0} cierres`);
+        }
+      } catch {
+        /* ciclo automático — fallo silencioso para no spamear */
+      } finally {
+        demoRunningRef.current = false;
+        setAutoPresenciaLoading(false);
+      }
+    };
+    void runCycle();
+    setDemoSecondsLeft(INTERVAL_MS / 1000);
+    demoIntervalRef.current = setInterval(() => {
+      void runCycle();
+      setDemoSecondsLeft(INTERVAL_MS / 1000);
+    }, INTERVAL_MS);
+    demoCountdownRef.current = setInterval(() => {
+      setDemoSecondsLeft(s => Math.max(0, s - 1));
+    }, 1000);
+    return () => {
+      if (demoIntervalRef.current) { clearInterval(demoIntervalRef.current); demoIntervalRef.current = null; }
+      if (demoCountdownRef.current) { clearInterval(demoCountdownRef.current); demoCountdownRef.current = null; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoDemoActivo, empresaId]);
 
   const handleToggleModoDemo = async () => {
     if (!empresa) return;
@@ -677,9 +723,14 @@ export default function EmpresasTab() {
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Modo Demo</h3>
                   {modoDemoActivo && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-wide animate-pulse">Activo</span>}
+                  {modoDemoActivo && demoSecondsLeft > 0 && (
+                    <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full tabular-nums">
+                      próx. {Math.floor(demoSecondsLeft / 60)}:{String(demoSecondsLeft % 60).padStart(2, '0')}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                  Cuando está activo, el sistema actúa como operador: da presentes al inicio del turno, cierra al finalizar y completa relevos automáticamente. Se ejecuta cada 5 minutos.
+                  Cuando está activo, el sistema actúa como operador: da presentes al inicio del turno, cierra al finalizar y completa relevos automáticamente. Se ejecuta cada 5 minutos (también en local).
                 </p>
               </div>
             </div>
