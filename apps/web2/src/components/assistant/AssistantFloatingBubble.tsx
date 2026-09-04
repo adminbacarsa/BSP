@@ -227,7 +227,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const [listening, setListening] = useState(false);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [greetingDone, setGreetingDone] = useState(false);
-  const currentPathRef = useRef(fullPath || pathname);
+  const currentPathRef = useRef('');
   const recognitionRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
