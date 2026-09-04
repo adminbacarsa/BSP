@@ -6,6 +6,7 @@ export type ObjectiveLiveSummary = {
   objectiveId: string;
   objectiveName: string;
   clientName: string;
+  clientId?: string;
   activos: number;
   vacantes: number;
   ausentes: number;
@@ -52,6 +53,7 @@ export function useSupervisionTablero(objectiveIds: string[], canViewAllObjectiv
           objectiveId: oid,
           objectiveName: s.objectiveName || oid,
           clientName: s.clientName || '',
+          clientId: s.clientId || undefined,
           activos: 0,
           vacantes: 0,
           ausentes: 0,

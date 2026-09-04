@@ -26,7 +26,7 @@ export const SUPERVISION_CAMPO_SECTIONS: SupervisionCampoNavSection[] = [
   { id: 'CONSIGNAS', label: 'Consignas', labelKey: 'supervision.campo.consignas' },
 ];
 
-export const SUPERVISION_CAMPO_SECTION_STORAGE_KEY = 'cosp:sup:campoSection';
+export const SUPERVISION_PEDIDOS_MES_STORAGE_KEY = 'cosp:sup:pedidosMes';
 
 export const SUPERVISION_DEFAULT_MAIN_TAB: SupervisionMainTab = 'TABLERO';
 

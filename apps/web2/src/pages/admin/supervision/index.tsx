@@ -47,11 +47,13 @@ import {
   SUPERVISION_MAIN_TABS,
   SUPERVISION_PEDIDO_CTA,
   SUPERVISION_CAMPO_SECTION_STORAGE_KEY,
+  SUPERVISION_PEDIDOS_MES_STORAGE_KEY,
 } from '@/lib/supervision/supervisionNav';
 import {
   SUPERVISION_PEDIDOS_VIEW_STORAGE_KEY,
   type SupervisionPedidosView,
 } from '@/lib/supervision/supervisionPedidos';
+import { solicitudEnMes } from '@/lib/supervision/supervisionLinks';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -433,6 +435,10 @@ export default function SupervisionPage() {
   const todayStr = new Date().toISOString().split('T')[0];
   const [ausenciasFecha, setAusenciasFecha] = useState(todayStr);
   const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
+  const [pedidosMes, setPedidosMes] = usePersistedState<string>(
+    SUPERVISION_PEDIDOS_MES_STORAGE_KEY,
+    currentMonthStr,
+  );
   const [licenciasMes, setLicenciasMes] = useState(currentMonthStr);
 
   // Cargar puestos del SLA activo cuando cambia el objetivo (para RFZ)
@@ -604,8 +610,11 @@ export default function SupervisionPage() {
         s.solicitadoPorNombre?.toLowerCase().includes(q),
       );
     }
+    if (tab === 'TODAS' && pedidosMes) {
+      list = list.filter(s => solicitudEnMes(s.fecha, pedidosMes));
+    }
     return list;
-  }, [visiblesBase, filtroCliente, filtroObjetivo, busqueda, scopedObjectives]);
+  }, [visiblesBase, filtroCliente, filtroObjetivo, busqueda, scopedObjectives, tab, pedidosMes]);
 
   const abrirRefuerzoDesdeAusencia = useCallback((a: Absence, fechaDia: string) => {
     setMainTab('BANDEJA');
@@ -1209,6 +1218,19 @@ export default function SupervisionPage() {
     }
   }, [editarTarget, user]);
 
+  const handleNuevoPedidoDesdeTablero = useCallback((opts: {
+    objectiveId: string;
+    clientId?: string;
+    objectiveName?: string;
+  }) => {
+    setMainTab('BANDEJA');
+    setTab('PENDIENTE');
+    setMClienteId(opts.clientId || '');
+    setMObjetivoId(opts.objectiveId);
+    setMMotivo(opts.objectiveName ? `Refuerzo ${opts.objectiveName}` : '');
+    setShowManualForm(true);
+  }, [setMainTab]);
+
   const userName = user?.displayName || user?.email || 'Supervisor';
   const bandejaBadge = pendientes.length + ausencias.filter(a => a.type !== 'NO_PRESENTACION' && a.status === 'Pendiente').length;
   const campoPulse = useSupervisionCampoPulse(empresaId, objectiveIds, canViewAllObjectives);
@@ -1265,7 +1287,11 @@ export default function SupervisionPage() {
 
         <div className="flex-1 px-4 pt-3 pb-28 lg:pb-6 max-w-5xl mx-auto w-full overflow-x-hidden">
           {mainTab === 'TABLERO' && (
-            <SupervisionTablero objectiveIds={objectiveIds} canViewAllObjectives={canViewAllObjectives} />
+            <SupervisionTablero
+              objectiveIds={objectiveIds}
+              canViewAllObjectives={canViewAllObjectives}
+              onNuevoPedido={handleNuevoPedidoDesdeTablero}
+            />
           )}
 
           {mainTab === 'CAMPO' && empresaId && user?.uid && (
@@ -1342,6 +1368,30 @@ export default function SupervisionPage() {
                     />
                   </div>
                   <SupervisionPedidosViewToggle value={pedidosView} onChange={setPedidosView} />
+                </div>
+              )}
+
+              {tab === 'TODAS' && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="text-[10px] font-black uppercase text-slate-500">Mes</label>
+                  <input
+                    type="month"
+                    value={pedidosMes}
+                    onChange={e => setPedidosMes(e.target.value)}
+                    className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"
+                  />
+                  {pedidosMes !== currentMonthStr && (
+                    <button
+                      type="button"
+                      onClick={() => setPedidosMes(currentMonthStr)}
+                      className="text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1"
+                    >
+                      <X size={11}/> Mes actual
+                    </button>
+                  )}
+                  <span className="text-[10px] text-slate-400 font-medium ml-auto">
+                    {visibles.length} en {pedidosMes.slice(5, 7)}/{pedidosMes.slice(0, 4)}
+                  </span>
                 </div>
               )}
 

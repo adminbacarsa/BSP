@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { RefreshCw, Users, AlertTriangle, UserX, Radio, X, Search, Phone, Clock } from 'lucide-react';
+import Link from 'next/link';
+import { RefreshCw, Users, AlertTriangle, UserX, Radio, X, Search, Phone, Clock, Calendar, ExternalLink, Plus } from 'lucide-react';
 import { useSupervisionTablero } from '@/hooks/useSupervisionTablero';
 import { COVERAGE_STATUS_STYLES } from '@/lib/supervision/supervisionUtils';
+import { buildOperacionesHref, buildPlanificacionHref } from '@/lib/supervision/supervisionLinks';
 
 type StatusFilter = 'ALL' | 'CRITICO' | 'ALERTA' | 'OK';
 
@@ -40,9 +42,11 @@ const CARD_STYLES: Record<'OK' | 'ALERTA' | 'CRITICO', string> = {
 export default function SupervisionTablero({
   objectiveIds,
   canViewAllObjectives,
+  onNuevoPedido,
 }: {
   objectiveIds: string[];
   canViewAllObjectives: boolean;
+  onNuevoPedido?: (opts: { objectiveId: string; clientId?: string; objectiveName?: string }) => void;
 }) {
   const { objectiveSummaries, totals, isReady, isStable, todayShifts } = useSupervisionTablero(
     objectiveIds,
@@ -316,8 +320,38 @@ export default function SupervisionTablero({
               </>
             )}
 
-            <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-700 flex items-center gap-1.5 text-[10px] text-slate-400">
-              <Clock size={11} /> Horario planificado · ingreso real cuando el guardia ficha
+            <div className="px-4 py-2.5 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-2">
+              <Link
+                href={buildPlanificacionHref({ objectiveId: detalle.objectiveId, clientId: detalle.clientId })}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition-colors"
+              >
+                <Calendar size={12} /> Planificación
+              </Link>
+              <Link
+                href={buildOperacionesHref({ clientId: detalle.clientId })}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition-colors"
+              >
+                <ExternalLink size={12} /> Operaciones
+              </Link>
+              {onNuevoPedido && (detalle.status === 'CRITICO' || detalle.vacantes > 0) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onNuevoPedido({
+                      objectiveId: detalle.objectiveId,
+                      clientId: detalle.clientId,
+                      objectiveName: detalle.objectiveName,
+                    });
+                    setDetalleId(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase bg-indigo-600 text-white hover:bg-indigo-700 transition-colors ml-auto"
+                >
+                  <Plus size={12} /> Nuevo pedido
+                </button>
+              )}
+              <span className="w-full lg:w-auto lg:ml-auto flex items-center gap-1.5 text-[10px] text-slate-400">
+                <Clock size={11} /> Horario planificado · ingreso real al fichar
+              </span>
             </div>
           </div>
         </div>

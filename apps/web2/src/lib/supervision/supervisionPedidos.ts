@@ -1,5 +1,6 @@
 import type { SolicitudRefuerzo, SolicitudEstado } from '@/services/solicitudRefuerzoService';
 import { formatYmdAr } from '@/lib/supervision/supervisionUtils';
+import { buildPlanificacionHref as buildPlanificacionHrefCore } from '@/lib/supervision/supervisionLinks';
 
 export type SupervisionPedidoKind = 'RFZ' | 'TURA' | 'ESTRUCTURAL';
 
@@ -51,16 +52,11 @@ export function pedidoDetalleResumen(sol: SolicitudRefuerzo): string {
 export function buildPlanificacionHref(
   sol: Pick<SolicitudRefuerzo, 'objectiveId' | 'clientId' | 'fecha'>,
 ): string {
-  const fecha = String(sol.fecha || '').slice(0, 10);
-  const [yStr, mStr] = fecha.split('-');
-  const y = Number(yStr);
-  const m = Number(mStr);
-  const q = new URLSearchParams();
-  q.set('objectiveId', sol.objectiveId);
-  if (sol.clientId) q.set('clientId', sol.clientId);
-  if (Number.isFinite(y) && y > 2000) q.set('year', String(y));
-  if (Number.isFinite(m) && m >= 1 && m <= 12) q.set('month', String(m));
-  return `/admin/planificacion/?${q.toString()}`;
+  return buildPlanificacionHrefCore({
+    objectiveId: sol.objectiveId,
+    clientId: sol.clientId,
+    fecha: sol.fecha,
+  });
 }
 
 export function canLinkToPlanificacion(estado: SolicitudEstado): boolean {
