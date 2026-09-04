@@ -843,7 +843,12 @@ async function runModoDemoForEmpresa(
   const batch = db.batch();
   let presencias = 0, cierres = 0, retencion = 0;
 
-  const isVacant = (t: any) => !t.employeeId || t.employeeId === 'VACANTE' || !!t.isUnassigned;
+  const isVacant = (t: any) =>
+    !t.employeeId ||
+    t.employeeId === 'VACANTE' ||
+    t.employeeId === 'SIN_COBERTURA' ||
+    !!t.isUnassigned ||
+    !!t.isSinCobertura;
   const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
 
   // Pase 1: marcar presentes a entrantes con empleado asignado
