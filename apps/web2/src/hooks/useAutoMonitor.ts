@@ -176,8 +176,56 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         }
       }
 
+      // ── Auto-relevo: cierre automático cuando el entrante ya está presente ──
+      // Agrupa por objetivo + puesto; si hay entrante presente y saliente activo → cierra saliente
+      const byPost = new Map<string, { incoming: any[]; outgoing: any[] }>();
+      for (const s of processedData) {
+        if (s.isFranco || s.isUnassigned || s.isCompleted || !s.isPresent) continue;
+        const key = `${s.objectiveId}||${String(s.positionName || '').trim().toLowerCase()}`;
+        if (!byPost.has(key)) byPost.set(key, { incoming: [], outgoing: [] });
+        const post = byPost.get(key)!;
+        const endMs = s.endDateObj?.getTime() || 0;
+        // Saliente: turno cuyo fin ya pasó o termina en ≤30 min y hay alguien más presente
+        if (endMs > 0 && endMs <= now.getTime() + 30 * 60 * 1000) {
+          post.outgoing.push(s);
+        } else {
+          post.incoming.push(s);
+        }
+      }
+      for (const [, { incoming, outgoing }] of byPost) {
+        if (incoming.length === 0 || outgoing.length === 0) continue;
+        // Relevar de más antiguo a más nuevo (por orden de llegada)
+        outgoing.sort((a, b) => (a.arrivedAt?.seconds || 0) - (b.arrivedAt?.seconds || 0));
+        for (const s of outgoing) {
+          if (processedIds.current.has(`autorelevo_${s.id}`)) continue;
+          processedIds.current.add(`autorelevo_${s.id}`);
+          if (isAutoMode) {
+            try {
+              await updateDoc(doc(db, 'turnos', s.id), {
+                isCompleted: true, status: 'COMPLETED',
+                realEndTime: serverTimestamp(), autoCompletedAt: serverTimestamp(),
+                completionReason: 'AUTO_RELEVO', isRetention: false,
+              });
+              if (s.employeeId) {
+                await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                  uid: s.employeeId, userId: s.employeeId,
+                  type: 'RELEVO', title: 'Tu relevo llegó — turno finalizado',
+                  body: `Tu turno en ${s.objectiveName || ''} terminó. Tu relevo está en el puesto.`,
+                  read: false, createdAt: serverTimestamp(),
+                }, empresaId));
+              }
+              toast.success(`🤖 Relevo: ${s.employeeName} relevado en ${s.objectiveName}`, { duration: 6000 });
+              sendBrowserNotif('Relevo completado', `${s.employeeName} → ${s.objectiveName}`);
+            } catch (e) { console.error('[autorelevo]', e); }
+          } else if (!isBaseline) {
+            toast.info(`↔️ Relevo listo: ${s.employeeName} puede ser relevado en ${s.objectiveName}`, { duration: 10000 });
+          }
+        }
+      }
+
       // ── RETENCIÓN T+0: guardia presente cuyo turno acaba de terminar ──────────
       // Escribe isRetention:true a Firestore inmediatamente → dispara onTurnoWrite → push al guardia
+      // Solo si hay continuidad planificada en el mismo puesto (turno sin continuidad se auto-cierra)
       const newlyRetained = processedData.filter(s => {
         if (!s.isPresent || s.isCompleted || s.isFranco || s.isUnassigned) return false;
         if (processedIds.current.has(`retention_set_${s.id}`)) return false;
@@ -185,7 +233,16 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         if (s.isCustomPost) return false;
         // isRetention computado (por tiempo) pero aún no guardado en Firestore
         const retentionByTime = s.endDateObj && (new Date()).getTime() > s.endDateObj.getTime();
-        return retentionByTime && !s.isRetention; // Firestore field not yet set
+        if (!retentionByTime || s.isRetention) return false;
+        // Sin continuidad: no retener — dejar que auto-completion cierre a los 2 min
+        const hasContinuity = processedData.some(other =>
+          other.id !== s.id &&
+          other.objectiveId === s.objectiveId &&
+          String(other.positionName || '').trim().toLowerCase() === String(s.positionName || '').trim().toLowerCase() &&
+          !other.isCompleted &&
+          (other.shiftDateObj?.getTime() || 0) >= (s.endDateObj?.getTime() || 0) - 15 * 60 * 1000
+        );
+        return hasContinuity;
       });
       for (const s of newlyRetained) {
         processedIds.current.add(`retention_set_${s.id}`);
@@ -194,6 +251,27 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
           retentionReason: 'FIN_TURNO_SIN_RELEVO',
           autoRetentionAt: serverTimestamp(),
         }).catch(e => console.warn('[retention T+0]', e));
+
+        // Notificar al entrante: ¿llegás tarde o no venís?
+        if (isAutoMode) {
+          const nextShift = processedData.find(other =>
+            other.id !== s.id &&
+            other.objectiveId === s.objectiveId &&
+            String(other.positionName || '').trim().toLowerCase() === String(s.positionName || '').trim().toLowerCase() &&
+            !other.isCompleted && !other.isPresent &&
+            (other.shiftDateObj?.getTime() || 0) >= (s.endDateObj?.getTime() || 0) - 15 * 60 * 1000
+          );
+          if (nextShift?.employeeId) {
+            addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+              uid: nextShift.employeeId, userId: nextShift.employeeId,
+              type: 'SOLICITUD_ESTADO_RELEVO',
+              title: '¿Llegás a tu turno?',
+              body: `Hay un guardia esperando tu relevo en ${s.objectiveName || ''}. ¿Llegás tarde o no podés venir? Avisá para coordinar cobertura.`,
+              read: false, createdAt: serverTimestamp(),
+              data: { shiftId: nextShift.id, objectiveId: nextShift.objectiveId },
+            }, empresaId)).catch(() => {});
+          }
+        }
       }
 
       // Guardias en retención > 30 min (solo puestos 24h — los custom se auto-cierran)
