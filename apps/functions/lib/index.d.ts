@@ -90,6 +90,8 @@ export declare const processEmpresaMigrateJob: import("firebase-functions/core")
     jobId: string;
 }>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
+export declare const scheduledTagTurnosArchiveTier: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const tagTurnosArchiveTier: functions.HttpsFunction & functions.Runnable<any>;
 export declare const scheduledBackup: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const updateBackupSchedule: import("firebase-functions/v2/https").CallableFunction<any, Promise<admin.firestore.DocumentData>, unknown>;
 export declare const lookupClientByCuit: functions.HttpsFunction & functions.Runnable<any>;

@@ -3675,6 +3675,41 @@ export const onAusenciaCreatedFromPortal = functions
     return null;
   });
 
+/**
+ * Retención: etiqueta archiveTier en turnos fuera de hot (diario 04:15 AR).
+ * No borra docs — fase 1. Callable manual: tagTurnosArchiveTier.
+ */
+export const scheduledTagTurnosArchiveTier = onScheduleV2(
+  {
+    schedule: '15 4 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    region: 'us-central1',
+  },
+  async () => {
+    const { tagTurnosArchiveTier } = await import('./ops/tagTurnosArchiveTier');
+    await tagTurnosArchiveTier({ maxDocs: 8000, dryRun: false });
+  },
+);
+
+export const tagTurnosArchiveTier = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const role = String(context.auth.token.role ?? '');
+  const allowed = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'admin', 'ADMIN', 'ADMIN_EMPRESA'];
+  if (!allowed.includes(role)) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo admin puede etiquetar archivo.');
+  }
+  const { tagTurnosArchiveTier: run } = await import('./ops/tagTurnosArchiveTier');
+  return run({
+    empresaId: data?.empresaId ? String(data.empresaId) : undefined,
+    dryRun: data?.dryRun === true,
+    maxDocs: typeof data?.maxDocs === 'number' ? data.maxDocs : 5000,
+  });
+});
+
 // Backup automático horario — el cron dispara cada hora; la hora real se configura en system_config/backup_schedule
 export const scheduledBackup = onScheduleV2(
   {
