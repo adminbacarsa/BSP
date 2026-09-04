@@ -852,7 +852,7 @@ async function runModoDemoForEmpresa(
   const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
 
   // Pase 1: marcar presentes — ventana [-15 min, +5 min] respecto al startTime del turno
-  // presentAt usa el startTime del turno para que los reportes reflejen hora planificada
+  // Escribe realStartTime = startTime del turno para que la fichada aparezca en liquidación
   const WINDOW_BEFORE_MS = 15 * 60 * 1000;
   const WINDOW_AFTER_MS  =  5 * 60 * 1000;
   for (const doc of snap.docs) {
@@ -863,38 +863,27 @@ async function runModoDemoForEmpresa(
     if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue; // muy temprano
     if (startMs < now.getTime() - WINDOW_AFTER_MS) continue;  // ventana cerrada
     const oid = String(t.objectiveId || '');
-    batch.update(doc.ref, { isPresent: true, presentAt: t.startTime, autoPresencia: true, modoDemoAt: nowTs });
+    // realStartTime = hora planificada del turno → columna FICHADA en liquidación
+    batch.update(doc.ref, { isPresent: true, presentAt: t.startTime, realStartTime: t.startTime, autoPresencia: true, modoDemoAt: nowTs });
     presencias++;
     const idx = byObj.get(oid);
     const entry = idx?.find(r => r.shiftId === doc.id);
     if (entry) entry.isPresent = true;
   }
 
-  // Pase 2: cerrar salientes — en modo demo NO hay retención, siempre se cierra
+  // Pase 2: cerrar salientes — usa endTime del turno (no nowTs) para que el egreso sea correcto
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
     if (t.isAbsent || !t.isPresent || t.isCompleted) continue;
     const endMs = (t.endTime?.seconds ?? 0) * 1000;
     if (!endMs || endMs > now.getTime()) continue;
-    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true, modoDemoAt: nowTs });
+    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: t.endTime, autoCierre: true, modoDemoAt: nowTs });
     cierres++;
   }
 
-  // Pase 3: revertir ausencias auto-detectadas — en modo demo no hay ausentes
-  for (const doc of snap.docs) {
-    const t = doc.data() as any;
-    if (skipBase(t) || isVacant(t)) continue;
-    if (!t.isAbsent || t.isCompleted) continue;
-    const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue;
-    const oid = String(t.objectiveId || '');
-    batch.update(doc.ref, { isAbsent: false, isPresent: true, presentAt: t.startTime, autoPresencia: true, modoDemoAt: nowTs });
-    presencias++;
-    const idx = byObj.get(oid);
-    const entry = idx?.find(r => r.shiftId === doc.id);
-    if (entry) { entry.isAbsent = false; entry.isPresent = true; }
-  }
+  // Pase 3 eliminado: las ausencias siguen su flujo real (detectarAusencias → novedades RRHH → gestionarVacantes)
+  // El modo demo simula el circuito completo: quien no marcó en la ventana queda ausente normalmente.
 
   // Pase 4: completar slots vacantes para limpiar el conteo VAC
   let vacResueltas = 0;
@@ -1027,6 +1016,8 @@ async function runModoDemoForEmpresa(
               endTime: admin.firestore.Timestamp.fromDate(slotEnd),
               isPresent: true,
               presentAt: admin.firestore.Timestamp.fromDate(slotStart),
+              realStartTime: admin.firestore.Timestamp.fromDate(slotStart),
+              realEndTime: admin.firestore.Timestamp.fromDate(slotEnd),
               draft: false,
               origin: 'OPERATIONS_COVERAGE',
               autoPresencia: true,
