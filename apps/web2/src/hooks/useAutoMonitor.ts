@@ -137,6 +137,26 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
             await createNovedad('LLEGADA_TARDE', 'Llegada Tarde',
               `${msg} llegó tarde al turno`, s, empresaId);
           }
+          // FCM al guardia: ¿por qué no fichaste? ¿llegás tarde?
+          if (s.employeeId) {
+            const existingNotif = await getDocs(query(
+              collection(db, 'user_notifications'),
+              where('shiftId', '==', s.id),
+              where('type', '==', 'SOLICITUD_ESTADO_LLEGADA'),
+              limit(1)
+            ));
+            if (existingNotif.empty) {
+              addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                uid: s.employeeId, userId: s.employeeId,
+                type: 'SOLICITUD_ESTADO_LLEGADA',
+                title: '¿Estás en camino?',
+                body: `Tu turno en ${s.objectiveName || ''} comenzó hace varios minutos y no registraste presencia. ¿Llegás tarde o no podés presentarte?`,
+                read: false, createdAt: serverTimestamp(),
+                shiftId: s.id,
+                data: { shiftId: s.id, objectiveId: s.objectiveId, objectiveName: s.objectiveName },
+              }, empresaId)).catch(() => {});
+            }
+          }
         }
       }
 
