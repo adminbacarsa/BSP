@@ -9,12 +9,11 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, getDoc, addDoc } from 'firebase/firestore';
 import {
   Shield, CheckCircle, XCircle, Users, AlertCircle,
-  RefreshCw, Plus, X, MessageSquare, User, Search, Ban, Pencil, Trash2, Lock,
+  RefreshCw, Plus, X, User, Search, Pencil, Trash2, Lock,
 } from 'lucide-react';
 import {
   solicitudRefuerzoService,
   SolicitudRefuerzo,
-  SolicitudEstado,
 } from '@/services/solicitudRefuerzoService';
 import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
@@ -23,42 +22,38 @@ import { isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
 import { applySlaRefuerzoPax, revertSlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import {
-  fmtTs, urgencyLevel, hoursSincePending, pendingHoursLabel, URGENCY_STYLES,
   filterAbsencesByObjectives, filterSolicitudesByObjectives,
   listYmdDatesInclusive, formatYmdAr,
+  normalizeSupervisionMainTab,
+  legacyMainTabToCampoSection,
   type SupervisionMainTab,
 } from '@/lib/supervision/supervisionUtils';
+import { supervisionCampoNavBadge } from '@/lib/supervision/supervisionCampoPulse';
 import { useSupervisorScope } from '@/hooks/useSupervisorScope';
+import { useSupervisionCampoPulse } from '@/hooks/useSupervisionCampoPulse';
 import SupervisionBottomNav from '@/components/admin/supervision/SupervisionBottomNav';
+import SupervisionNuevoPedidoButton from '@/components/admin/supervision/SupervisionNuevoPedidoButton';
+import SupervisionPedidosPanel from '@/components/admin/supervision/SupervisionPedidosPanel';
+import SupervisionPedidosViewToggle from '@/components/admin/supervision/SupervisionPedidosViewToggle';
 import SupervisionTablero from '@/components/admin/supervision/SupervisionTablero';
-import SupervisionNovedades from '@/components/admin/supervision/SupervisionNovedades';
-import SupervisionMas from '@/components/admin/supervision/SupervisionMas';
+import SupervisionCampo from '@/components/admin/supervision/SupervisionCampo';
 import SupervisionClienteObjetivoPicker from '@/components/admin/supervision/SupervisionClienteObjetivoPicker';
 import { SupervisorPinInput } from '@/components/ui';
 import { verifySupervisorPin } from '@/lib/auth/verifySupervisorPin';
 import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
 import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
+import {
+  SUPERVISION_DEFAULT_MAIN_TAB,
+  SUPERVISION_MAIN_TABS,
+  SUPERVISION_PEDIDO_CTA,
+  SUPERVISION_CAMPO_SECTION_STORAGE_KEY,
+} from '@/lib/supervision/supervisionNav';
+import {
+  SUPERVISION_PEDIDOS_VIEW_STORAGE_KEY,
+  type SupervisionPedidosView,
+} from '@/lib/supervision/supervisionPedidos';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
-
-function estadoBadge(estado: SolicitudEstado) {
-  const map: Record<SolicitudEstado, { label: string; cls: string }> = {
-    PENDIENTE:  { label: 'Pendiente',  cls: 'bg-amber-100 text-amber-700 border border-amber-200' },
-    APROBADA:   { label: 'Aprobada',   cls: 'bg-teal-100 text-teal-700 border border-teal-200' },
-    RECHAZADA:  { label: 'Rechazada',  cls: 'bg-rose-100 text-rose-700 border border-rose-200' },
-    ASIGNADA:   { label: 'Asignada',   cls: 'bg-indigo-100 text-indigo-700 border border-indigo-200' },
-    COMPLETADA: { label: 'Completada', cls: 'bg-slate-100 text-slate-600 border border-slate-200' },
-    CANCELADA:  { label: 'Cancelada',  cls: 'bg-slate-100 text-slate-400 border border-slate-200' },
-  };
-  const { label, cls } = map[estado] || map.PENDIENTE;
-  return <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${cls}`}>{label}</span>;
-}
-
-function tipoBadge(tipo: 'REFUERZO_PUESTO' | 'AGREGADO_TURNO') {
-  return tipo === 'REFUERZO_PUESTO'
-    ? <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-orange-100 text-orange-700 border border-orange-200">Refuerzo</span>
-    : <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-violet-100 text-violet-700 border border-violet-200">Agregado</span>;
-}
 
 // ─── Rechazar modal ─────────────────────────────────────────────────────────
 
@@ -141,11 +136,6 @@ function AprobarModal({ solicitud, onClose, onConfirm }: {
       </div>
     </div>
   );
-}
-
-function isRefuerzoPuntualGestionable(s: SolicitudRefuerzo): boolean {
-  if (s.alcance === 'ESTRUCTURAL' || s.slaApplied) return false;
-  return s.estado === 'APROBADA' || s.estado === 'ASIGNADA';
 }
 
 function EliminarRefuerzoModal({ solicitud, onClose, onConfirm, saving }: {
@@ -363,31 +353,6 @@ function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar, onGenerarR
   );
 }
 
-// ─── ParentShiftInfo ────────────────────────────────────────────────────────
-
-function ParentShiftInfo({ parentShiftId }: { parentShiftId?: string }) {
-  const [info, setInfo] = useState<{ code: string; start: string; end: string } | null>(null);
-  useEffect(() => {
-    if (!parentShiftId) return;
-    getDoc(doc(db, 'turnos', parentShiftId)).then(snap => {
-      if (!snap.exists()) return;
-      const d = snap.data();
-      const fmt = (ts: any): string => {
-        if (ts?.seconds) return new Date(ts.seconds * 1000).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-        if (typeof ts === 'string' && ts.includes('T')) return ts.split('T')[1]?.slice(0, 5) || ts;
-        return ts || '';
-      };
-      setInfo({ code: d.code || '?', start: fmt(d.startTime), end: fmt(d.endTime) });
-    }).catch(() => {});
-  }, [parentShiftId]);
-  if (!info) return null;
-  return (
-    <span className="text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded-lg">
-      {info.code} {info.start}–{info.end}
-    </span>
-  );
-}
-
 // ─── tipos locales ──────────────────────────────────────────────────────────
 
 interface SlaPosition {
@@ -411,7 +376,23 @@ export default function SupervisionPage() {
   const [ausencias, setAusencias] = useState<Absence[]>([]);
   const [vacaciones, setVacaciones] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mainTab, setMainTab] = usePersistedState<SupervisionMainTab>('cosp:sup:mainTab', 'BANDEJA');
+  const [mainTabStored, setMainTabStored] = usePersistedState<string>('cosp:sup:mainTab', SUPERVISION_DEFAULT_MAIN_TAB);
+  const mainTab = useMemo(() => normalizeSupervisionMainTab(mainTabStored), [mainTabStored]);
+  const setMainTab = useCallback((tab: SupervisionMainTab) => setMainTabStored(tab), [setMainTabStored]);
+
+  useEffect(() => {
+    if (mainTabStored === 'NOVEDADES' || mainTabStored === 'MAS') {
+      const section = legacyMainTabToCampoSection(mainTabStored);
+      if (section && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(SUPERVISION_CAMPO_SECTION_STORAGE_KEY, JSON.stringify(section));
+        } catch {
+          // ignore quota errors
+        }
+      }
+      setMainTabStored('CAMPO');
+    }
+  }, [mainTabStored, setMainTabStored]);
   const [tab, setTab] = usePersistedState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('cosp:sup:tab', 'PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
@@ -421,6 +402,10 @@ export default function SupervisionPage() {
   const [busqueda, setBusqueda] = useState('');
   const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroObjetivo, setFiltroObjetivo] = useState('');
+  const [pedidosView, setPedidosView] = usePersistedState<SupervisionPedidosView>(
+    SUPERVISION_PEDIDOS_VIEW_STORAGE_KEY,
+    'table',
+  );
 
   // Formulario manual supervisor
   const [showManualForm, setShowManualForm] = useState(false);
@@ -1226,6 +1211,8 @@ export default function SupervisionPage() {
 
   const userName = user?.displayName || user?.email || 'Supervisor';
   const bandejaBadge = pendientes.length + ausencias.filter(a => a.type !== 'NO_PRESENTACION' && a.status === 'Pendiente').length;
+  const campoPulse = useSupervisionCampoPulse(empresaId, objectiveIds, canViewAllObjectives);
+  const campoBadge = supervisionCampoNavBadge(campoPulse);
 
   return (
     <DashboardLayout>
@@ -1250,36 +1237,29 @@ export default function SupervisionPage() {
                 </p>
               </div>
             </div>
-            {mainTab === 'BANDEJA' && (
-              <button
-                type="button"
-                onClick={() => setShowManualForm(true)}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform"
-              >
-                <Plus size={14}/> Crear RFZ
-              </button>
-            )}
           </div>
           <div className="hidden lg:flex gap-2 max-w-5xl mx-auto mt-4">
-            {([
-              ['BANDEJA', 'Bandeja'],
-              ['TABLERO', 'Tablero'],
-              ['NOVEDADES', 'Novedades'],
-              ['MAS', 'Más'],
-            ] as [SupervisionMainTab, string][]).map(([id, label]) => (
+            {SUPERVISION_MAIN_TABS.map(({ id, label }) => {
+              const tabBadge = id === 'BANDEJA' ? bandejaBadge : id === 'CAMPO' ? campoBadge : 0;
+              return (
               <button
                 key={id}
                 type="button"
                 onClick={() => setMainTab(id)}
-                className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
+                className={`relative px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
                   mainTab === id
                     ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
                     : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50'
                 }`}
               >
                 {label}
+                {tabBadge > 0 && (
+                  <span className="ml-1.5 inline-flex min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black items-center justify-center align-middle">
+                    {tabBadge > 99 ? '99+' : tabBadge}
+                  </span>
+                )}
               </button>
-            ))}
+            );})}
           </div>
         </div>
 
@@ -1288,17 +1268,8 @@ export default function SupervisionPage() {
             <SupervisionTablero objectiveIds={objectiveIds} canViewAllObjectives={canViewAllObjectives} />
           )}
 
-          {mainTab === 'NOVEDADES' && user?.uid && (
-            <SupervisionNovedades
-              objectiveIds={objectiveIds}
-              objectives={scopedObjectives}
-              userUid={user.uid}
-              userName={userName}
-            />
-          )}
-
-          {mainTab === 'MAS' && empresaId && user?.uid && (
-            <SupervisionMas
+          {mainTab === 'CAMPO' && empresaId && user?.uid && (
+            <SupervisionCampo
               empresaId={empresaId}
               objectiveIds={objectiveIds}
               objectives={scopedObjectives}
@@ -1316,7 +1287,8 @@ export default function SupervisionPage() {
           const licencias   = ausencias.filter(a => a.type !== 'NO_PRESENTACION');
           return (
             <>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="flex gap-2 flex-wrap flex-1">
                 {(['PENDIENTE', 'TODAS'] as const).map(t => (
                   <button key={t} onClick={() => setTab(t)}
                     className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
@@ -1337,10 +1309,17 @@ export default function SupervisionPage() {
                   }`}>
                   <Users size={12}/> Vac / Lic ({vacaciones.filter(a => a.status === 'Pendiente').length > 0 ? `${vacaciones.filter(a => a.status === 'Pendiente').length} pend.` : vacaciones.length})
                 </button>
+                </div>
+                {(tab === 'PENDIENTE' || tab === 'TODAS') && (
+                  <SupervisionNuevoPedidoButton
+                    onClick={() => setShowManualForm(true)}
+                    className="hidden sm:flex"
+                  />
+                )}
               </div>
 
               {(tab === 'PENDIENTE' || tab === 'TODAS') && (
-                <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                   <div className="relative flex-1">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
@@ -1362,6 +1341,7 @@ export default function SupervisionPage() {
                       compact
                     />
                   </div>
+                  <SupervisionPedidosViewToggle value={pedidosView} onChange={setPedidosView} />
                 </div>
               )}
 
@@ -1375,146 +1355,23 @@ export default function SupervisionPage() {
                     <p className="text-slate-500 font-medium text-sm">
                       {tab === 'PENDIENTE' ? 'No hay solicitudes pendientes' : 'No hay solicitudes registradas'}
                     </p>
+                    <p className="text-[11px] text-slate-400 mt-1 mb-4">
+                      {tab === 'PENDIENTE'
+                        ? 'Los pedidos del portal cliente y los que cargues manualmente aparecen acá.'
+                        : 'Creá un RFZ, TURA o +pax cuando el cliente lo solicite por teléfono o WhatsApp.'}
+                    </p>
+                    <SupervisionNuevoPedidoButton onClick={() => setShowManualForm(true)} className="mx-auto" />
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {visibles.map(s => {
-                      const urg = urgencyLevel(s.fecha);
-                      const urgStyle = URGENCY_STYLES[urg];
-                      const pendH = s.estado === 'PENDIENTE' ? pendingHoursLabel(hoursSincePending(s.solicitadoAt)) : null;
-                      return (
-                      <div key={s.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
-                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap mb-1">
-                              {tipoBadge(s.tipo)}
-                              {estadoBadge(s.estado)}
-                              {s.alcance === 'ESTRUCTURAL' && (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">
-                                  Estructural{s.slaApplied ? ' · SLA' : ''}
-                                </span>
-                              )}
-                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${urgStyle.cls}`}>{urgStyle.label}</span>
-                              {pendH && <span className="text-[9px] font-bold text-amber-600">{pendH}</span>}
-                              <span className="text-[9px] text-slate-400 font-mono">{fmtTs(s.solicitadoAt)}</span>
-                            </div>
-                            <p className="font-black text-sm text-slate-800 dark:text-white truncate">{s.objectiveName}</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">{s.clientName}</p>
-                            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                                📅 {s.fecha} · {s.startTime}–{s.endTime}
-                              </span>
-                              {s.tipo === 'REFUERZO_PUESTO' && (
-                                <>
-                                  {s.cantidadPax && <span className="text-xs text-orange-600 font-bold">+{s.cantidadPax} pax</span>}
-                                  {(s as any).positionName && (
-                                    <span className="text-xs text-slate-500 font-medium flex items-center gap-1">📌 {(s as any).positionName}</span>
-                                  )}
-                                </>
-                              )}
-                              {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && (
-                                <span className="text-xs text-violet-600 font-bold flex items-center gap-1">
-                                  <User size={10}/>{s.parentEmpleadoName}
-                                </span>
-                              )}
-                              {s.tipo === 'AGREGADO_TURNO' && s.positionName && (
-                                <span className="text-xs text-rose-600 font-bold">→ {s.positionName}</span>
-                              )}
-                              {s.tipo === 'AGREGADO_TURNO' && (s as any).parentShiftId && (
-                                <ParentShiftInfo parentShiftId={(s as any).parentShiftId}/>
-                              )}
-                            </div>
-                            {s.solicitadoPorNombre && (
-                              <p className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
-                                <User size={10} className="shrink-0"/>
-                                Solicitado por <span className="font-bold text-slate-600 dark:text-slate-300 ml-1">{s.solicitadoPorNombre}</span>
-                              </p>
-                            )}
-                            {s.motivo && (
-                              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1">
-                                <MessageSquare size={10} className="mt-0.5 shrink-0"/>
-                                <span className="italic">"{s.motivo}"</span>
-                              </p>
-                            )}
-                            {s.motivoRechazo && (
-                              <p className="mt-1 text-[11px] text-rose-500 flex items-start gap-1">
-                                <XCircle size={10} className="mt-0.5 shrink-0"/>
-                                <span>{s.motivoRechazo}</span>
-                              </p>
-                            )}
-                            {s.estado === 'CANCELADA' && s.cancelReason && (
-                              <p className="mt-1 text-[11px] text-slate-500 flex items-start gap-1">
-                                <Ban size={10} className="mt-0.5 shrink-0"/>
-                                <span>Cancelado: {s.cancelReason}{s.cancelledPinAuthorizer ? ` · PIN ${s.cancelledPinAuthorizer}` : ''}</span>
-                              </p>
-                            )}
-                          </div>
-                          {s.estado === 'PENDIENTE' && (
-                            <div className="flex gap-2 shrink-0 w-full sm:w-auto">
-                              <button onClick={() => setRechazarTarget(s)}
-                                className="flex-1 sm:flex-none px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center justify-center gap-1">
-                                <XCircle size={13}/> Rechazar
-                              </button>
-                              <button onClick={() => setAprobarTarget(s)}
-                                className="flex-1 sm:flex-none px-3 py-2.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl font-black text-xs transition-colors flex items-center justify-center gap-1">
-                                <CheckCircle size={13}/> Aprobar
-                              </button>
-                            </div>
-                          )}
-                          {s.estado === 'APROBADA' && (
-                            <div className="flex flex-col items-end gap-2 shrink-0">
-                              <span className="text-[10px] text-teal-600 font-bold">✓ {s.autorizadoPorNombre}</span>
-                              {isRefuerzoPuntualGestionable(s) && (
-                                <div className="flex gap-1.5 flex-wrap justify-end">
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditarTarget(s)}
-                                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
-                                  >
-                                    <Pencil size={12}/> Editar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEliminarTarget(s)}
-                                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
-                                  >
-                                    <Trash2 size={12}/> Eliminar
-                                  </button>
-                                </div>
-                              )}
-                              {s.alcance === 'ESTRUCTURAL' && s.slaApplied && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancelarEstructural(s)}
-                                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
-                                >
-                                  <Ban size={12}/> Revertir +pax
-                                </button>
-                              )}
-                            </div>
-                          )}
-                          {s.estado === 'ASIGNADA' && isRefuerzoPuntualGestionable(s) && (
-                            <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
-                              <button
-                                type="button"
-                                onClick={() => setEditarTarget(s)}
-                                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
-                              >
-                                <Pencil size={12}/> Editar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEliminarTarget(s)}
-                                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
-                              >
-                                <Trash2 size={12}/> Eliminar
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );})}
-                  </div>
+                  <SupervisionPedidosPanel
+                    solicitudes={visibles}
+                    view={pedidosView}
+                    onAprobar={setAprobarTarget}
+                    onRechazar={setRechazarTarget}
+                    onEditar={setEditarTarget}
+                    onEliminar={setEliminarTarget}
+                    onRevertirEstructural={handleCancelarEstructural}
+                  />
                 )
               )}
 
@@ -1617,8 +1474,15 @@ export default function SupervisionPage() {
         <SupervisionBottomNav
           active={mainTab}
           onChange={setMainTab}
-          badges={{ BANDEJA: bandejaBadge }}
+          badges={{ BANDEJA: bandejaBadge, CAMPO: campoBadge }}
         />
+
+        {mainTab === 'BANDEJA' && (tab === 'PENDIENTE' || tab === 'TODAS') && !showManualForm && (
+          <SupervisionNuevoPedidoButton
+            variant="fab"
+            onClick={() => setShowManualForm(true)}
+          />
+        )}
       </div>
 
       {rechazarTarget && (
@@ -1665,11 +1529,12 @@ export default function SupervisionPage() {
             <div className="shrink-0 px-5 sm:px-6 pt-5 sm:pt-6 pb-3 space-y-3 border-b border-slate-100 dark:border-slate-700">
               <div className="flex items-center justify-between">
                 <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
-                  <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-lg text-[10px]">Manual</span>
-                  Cargar RFZ / TURA
+                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-lg text-[10px]">Manual</span>
+                  {SUPERVISION_PEDIDO_CTA.modalTitle}
                 </h3>
                 <button onClick={resetManualForm} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
               </div>
+              <p className="text-[10px] text-slate-500 font-bold">{SUPERVISION_PEDIDO_CTA.modalSubtitle}</p>
               <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
                 <AlertCircle size={12}/>
                 {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
@@ -2063,7 +1928,7 @@ export default function SupervisionPage() {
                   ))
                 }
                 onClick={handleCrearManual}
-                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
                 {manualSaving ? <RefreshCw size={14} className="animate-spin"/> : <Plus size={14}/>}
                 {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
                   ? (mFechaModo === 'RANGO' && mFechaHasta

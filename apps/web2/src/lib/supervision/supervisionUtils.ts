@@ -2,7 +2,25 @@ import { Timestamp } from 'firebase/firestore';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-export type SupervisionMainTab = 'TABLERO' | 'BANDEJA' | 'NOVEDADES' | 'MAS';
+export type SupervisionMainTab = 'TABLERO' | 'BANDEJA' | 'CAMPO';
+
+/** Sub-secciones del tab Campo (libro, rondas, consignas). */
+export type SupervisionCampoSection = 'NOVEDADES' | 'VISITAS' | 'CONSIGNAS';
+
+/** Tabs legacy — migración desde localStorage. */
+export type SupervisionMainTabLegacy = SupervisionMainTab | 'NOVEDADES' | 'MAS';
+
+export function normalizeSupervisionMainTab(tab: string | null | undefined): SupervisionMainTab {
+  if (tab === 'NOVEDADES' || tab === 'MAS') return 'CAMPO';
+  if (tab === 'TABLERO' || tab === 'BANDEJA' || tab === 'CAMPO') return tab;
+  return 'TABLERO';
+}
+
+export function legacyMainTabToCampoSection(tab: string | null | undefined): SupervisionCampoSection | null {
+  if (tab === 'NOVEDADES') return 'NOVEDADES';
+  if (tab === 'MAS') return 'VISITAS';
+  return null;
+}
 
 export type UrgencyLevel = 'HOY' | 'MANANA' | 'NORMAL';
 
