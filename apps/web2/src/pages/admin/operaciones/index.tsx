@@ -3549,6 +3549,45 @@ export default function OperacionesPage() {
             .filter(ev => (ev.active + ev.absent + ev.vacant + ev.retention + ev.plan) > 0);
     }, [logic.processedData, logic.selectedClientId]);
 
+    /** Sidebar objetivos/eventos: respeta tab (ACT/VAC/…) y búsqueda por nombre/cliente/guardia. */
+    const objectiveMatchesTab = (o: { active: number; absent: number; vacant: number; retention: number; plan: number; shifts?: any[] }) => {
+        switch (logic.viewTab) {
+            case 'ACTIVOS':   return o.active > 0;
+            case 'RETENIDOS': return o.retention > 0;
+            case 'AUSENTES':  return o.absent > 0;
+            case 'VACANTES':  return o.vacant > 0;
+            case 'PLAN':      return o.plan > 0;
+            case 'FRANCOS':   return (o.shifts || []).some((s: any) => s.isFranco);
+            case 'PRIORIDAD':
+            case 'NO_LLEGO':
+                return (o.shifts || []).some((s: any) => matchesViewTabForShift(s));
+            default:
+                return true;
+        }
+    };
+    const foldQ = (v: unknown) => String(v ?? '').trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const objectiveMatchesSearch = (o: { name?: string; client?: string; objectiveName?: string; label?: string; shifts?: any[] }) => {
+        const q = foldQ(logic.filterText);
+        if (!q) return true;
+        if (foldQ(o.name).includes(q) || foldQ(o.objectiveName).includes(q) || foldQ(o.client).includes(q) || foldQ(o.label).includes(q)) {
+            return true;
+        }
+        return (o.shifts || []).some((s: any) =>
+            foldQ(s.employeeName).includes(q) ||
+            foldQ(s.positionName).includes(q) ||
+            foldQ(s.objectiveName).includes(q)
+        );
+    };
+    const filteredObjectivesWithAlerts = useMemo(
+        () => objectivesWithAlerts.filter((o) => objectiveMatchesTab(o) && objectiveMatchesSearch(o)),
+        [objectivesWithAlerts, logic.viewTab, logic.filterText],
+    );
+    const filteredEventsWithAlerts = useMemo(
+        () => eventsWithAlerts.filter((ev) => objectiveMatchesTab(ev) && objectiveMatchesSearch(ev)),
+        [eventsWithAlerts, logic.viewTab, logic.filterText],
+    );
+
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData, setManualRetentionData };
     const tabs = [
         { id: 'PLAN',      label: 'PLAN',    count: logic.stats.plan,      color: 'text-indigo-600' },
@@ -3928,11 +3967,15 @@ export default function OperacionesPage() {
                         {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
                         {viewMode === 'objetivos' && (
                         <div className="p-2 space-y-1.5">
-                            {(eventsWithAlerts.length === 0 && objectivesWithAlerts.length === 0) ? (
-                                <div className="text-center py-10 text-slate-400 text-xs">Sin datos de objetivos</div>
+                            {(filteredEventsWithAlerts.length === 0 && filteredObjectivesWithAlerts.length === 0) ? (
+                                <div className="text-center py-10 text-slate-400 text-xs">
+                                    {logic.filterText.trim()
+                                        ? 'Sin objetivos que coincidan con la búsqueda'
+                                        : 'Sin objetivos en este filtro'}
+                                </div>
                             ) : (
                                 <>
-                                    {eventsWithAlerts.map((ev) => {
+                                    {filteredEventsWithAlerts.map((ev) => {
                                         const pct = (ev.active + ev.retention) > 0 && ev.total > 0
                                             ? Math.round(((ev.active + ev.retention) / Math.max(ev.total - ev.plan, 1)) * 100)
                                             : ev.total > 0 ? 0 : 100;
@@ -4013,7 +4056,7 @@ export default function OperacionesPage() {
                                             </div>
                                         );
                                     })}
-                                    {objectivesWithAlerts.map(obj => {
+                                    {filteredObjectivesWithAlerts.map(obj => {
                                 const pct = (obj.active + obj.retention) > 0 && obj.total > 0
                                     ? Math.round(((obj.active + obj.retention) / Math.max(obj.total - obj.plan, 1)) * 100)
                                     : obj.total > 0 ? 0 : 100;
