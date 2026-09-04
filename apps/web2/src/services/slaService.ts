@@ -107,10 +107,13 @@ export function appendSlaChangeLog(
   existing: SlaChangeLogEntry[] | undefined,
   entry: Omit<SlaChangeLogEntry, 'at'> & { at?: string },
 ): SlaChangeLogEntry[] {
-  const next: SlaChangeLogEntry = {
+  const raw: SlaChangeLogEntry = {
     ...entry,
     at: entry.at || new Date().toISOString(),
   };
+  const next = Object.fromEntries(
+    Object.entries(raw).filter(([, v]) => v !== undefined),
+  ) as SlaChangeLogEntry;
   return [...(existing || []), next].slice(-80);
 }
 

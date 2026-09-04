@@ -50,12 +50,16 @@ export async function appendRefuerzoPuntualSlaTrace(
   const logEntry: Omit<SlaChangeLogEntry, 'at'> = {
     action,
     detail: `${code}: ${detail}`,
-    byUid: actor?.uid,
-    byName: actor?.name,
-    solicitudId: sol.id,
-    positionId: sol.positionId || sol.slaAppliedPositionId,
-    positionName: sol.positionName,
-    shiftCode: sol.shiftCode || sol.slaAppliedShiftCode,
+    ...(actor?.uid ? { byUid: actor.uid } : {}),
+    ...(actor?.name ? { byName: actor.name } : {}),
+    ...(sol.id ? { solicitudId: sol.id } : {}),
+    ...((sol.positionId || sol.slaAppliedPositionId)
+      ? { positionId: sol.positionId || sol.slaAppliedPositionId }
+      : {}),
+    ...(sol.positionName ? { positionName: sol.positionName } : {}),
+    ...((sol.shiftCode || sol.slaAppliedShiftCode)
+      ? { shiftCode: sol.shiftCode || sol.slaAppliedShiftCode }
+      : {}),
   };
   await updateDoc(slaRef, {
     updatedAt: Timestamp.now(),
