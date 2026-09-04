@@ -3817,7 +3817,21 @@ export default function OperacionesPage() {
                                         <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: '#7c3aed' }}/>
                                     </span>
                                     <span className="text-[10px] font-black uppercase tracking-wide" style={{ color: '#6d28d9' }}>⚡ MODO DEMO</span>
-                                    <span className="ml-auto text-[8px] font-semibold px-1 py-0.5 rounded" style={{ background: 'rgba(139,92,246,0.15)', color: '#7c3aed' }}>Simulación activa</span>
+                                    {!isCCOperator && (
+                                        <button
+                                            className="ml-auto text-[8px] font-black px-1.5 py-0.5 rounded hover:opacity-80 transition-opacity"
+                                            style={{ background: 'rgba(139,92,246,0.2)', color: '#6d28d9' }}
+                                            onClick={async () => {
+                                                try {
+                                                    await updateDoc(doc(db, 'empresas', empresaId!), { modoDemoEnabled: false });
+                                                    toast.success('Modo demo desactivado');
+                                                } catch (e) {
+                                                    console.error(e);
+                                                    toast.error('No se pudo desactivar');
+                                                }
+                                            }}
+                                        >Desactivar</button>
+                                    )}
                                 </div>
                             </div>
                         )}
