@@ -6,11 +6,11 @@ import { useRouter } from 'next/router';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { toast } from 'sonner';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, waitForPendingWrites, getDocs } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, getDocs } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa, assertDocBelongsToEmpresa } from '@/lib/multiempresa';
+import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
@@ -50,8 +50,11 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelievedIds, onRelieved }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
-    const [saving, setSaving] = React.useState(false);
-    if (!isOpen || !incomingShift) return null;
+    const lockingRef = React.useRef(false);
+    if (!isOpen || !incomingShift) {
+        lockingRef.current = false;
+        return null;
+    }
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME'; if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
     const wasAbsent = incomingShift.isAbsent === true || incomingShift.absenceType === 'AA';
@@ -69,112 +72,157 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
         const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
         return minutesUntilEnd <= 15;
     });
-    const handleConfirm = async (prevShiftId: string | null) => {
-        if (saving) return;
+    const handleConfirm = (prevShiftId: string | null) => {
+        if (lockingRef.current) return;
         if (!incomingShift?.id) {
             toast.error('Turno sin ID — no se puede registrar el ingreso.');
             return;
         }
-        setSaving(true);
-        try {
-            await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
-            if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
 
-            const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
-            let aaDoc: any = null;
-            let aaHorario = '';
-            if (wasAutoAbsent) {
-                const absSnap = await getDocs(query(
-                    collection(db, 'ausencias'),
-                    where('shiftId', '==', incomingShift.id),
-                    limit(5)
-                ));
-                aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA') ?? null;
-                if (aaDoc) {
-                    const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-                    const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : toDate(incomingShift.shiftDateObj);
-                    const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : toDate(incomingShift.endDateObj);
-                    aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
-                }
+        // Check de empresa en memoria (sin getDoc al servidor — era el cuello de botella).
+        const shiftEmp = String(incomingShift.empresaId || '').trim();
+        if (migracionCompleta && empresaId && shiftEmp && shiftEmp !== empresaId) {
+            toast.error(`Operación bloqueada: el turno pertenece a «${shiftEmp}», no a «${empresaId}».`);
+            return;
+        }
+        if (prevShiftId) {
+            const prev = logic.processedData.find((s: any) => s.id === prevShiftId);
+            const prevEmp = String(prev?.empresaId || '').trim();
+            if (migracionCompleta && empresaId && prevEmp && prevEmp !== empresaId) {
+                toast.error('Operación bloqueada: el turno saliente pertenece a otra empresa.');
+                return;
             }
+        }
 
-            const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
-                ? incomingShift.shiftDateObj
-                : toDate(incomingShift.shiftDateObj);
-            const isEarlyStartShift = !!incomingShift.isEarlyStart;
-            const incomingRealStart = isEarlyStartShift
-                ? (incomingShift.adjustedStartTime
-                    ? (incomingShift.adjustedStartTime.toDate
-                        ? Timestamp.fromDate(incomingShift.adjustedStartTime.toDate())
-                        : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
-                    : serverTimestamp())
-                : Timestamp.fromDate(incomingScheduledStart);
+        lockingRef.current = true;
+        const tenantId = String(incomingShift.empresaId || empresaId || '').trim();
+        const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
 
-            await updateDocForEmpresa('turnos', incomingShift.id, {
+        const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
+            ? incomingShift.shiftDateObj
+            : toDate(incomingShift.shiftDateObj);
+        const isEarlyStartShift = !!incomingShift.isEarlyStart;
+        const incomingRealStart = isEarlyStartShift
+            ? (incomingShift.adjustedStartTime
+                ? (incomingShift.adjustedStartTime.toDate
+                    ? Timestamp.fromDate(incomingShift.adjustedStartTime.toDate())
+                    : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
+                : serverTimestamp())
+            : Timestamp.fromDate(incomingScheduledStart);
+
+        const batch = writeBatch(db);
+        batch.update(doc(db, 'turnos', incomingShift.id), stampEmpresaId({
+            isPresent: true,
+            status: 'PRESENT',
+            realStartTime: incomingRealStart,
+            lateArrivalAt: status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
+            isLate: status === 'LATE' || wasAutoAbsent,
+            isAbsent: false,
+            absenceType: null,
+            absenceDetectedAt: null,
+            absenceReversedAt: serverTimestamp(),
+            absenceReversedBy: 'OPERACIONES',
+        }, tenantId));
+
+        if (incomingShift.linkedTuraId && incomingShift.turaContiguous) {
+            batch.update(doc(db, 'turnos', incomingShift.linkedTuraId), stampEmpresaId({
+                coveredByParentPresence: true,
                 isPresent: true,
                 status: 'PRESENT',
-                realStartTime: incomingRealStart,
-                lateArrivalAt: status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
-                isLate: status === 'LATE' || wasAutoAbsent,
-                isAbsent: false,
-                absenceType: null,
-                absenceDetectedAt: null,
-                absenceReversedAt: serverTimestamp(),
-                absenceReversedBy: 'OPERACIONES',
-            }, empresaId, migracionCompleta);
-
-            if (incomingShift.linkedTuraId && incomingShift.turaContiguous) {
-                await updateDocForEmpresa('turnos', incomingShift.linkedTuraId, {
-                    coveredByParentPresence: true,
-                    isPresent: true,
-                    status: 'PRESENT',
-                    parentPresenceShiftId: incomingShift.id,
-                }, empresaId, migracionCompleta).catch(() => {});
-            }
-
-            if (wasAutoAbsent && aaDoc) {
-                await updateDoc(aaDoc.ref, {
-                    type: 'Llegada Tarde',
-                    absenceType: 'LT',
-                    status: 'Confirmada',
-                    reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
-                    arrivedAt: serverTimestamp(),
-                }).catch(() => {});
-            }
-
-            if (prevShiftId) {
-                const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
-                const prevEnd = prevShift ? toDate(prevShift.endDateObj) : null;
-                const nowDate = new Date();
-                const isEarlyRelevo = !!(prevEnd && prevEnd > nowDate);
-                const outgoingRealEnd = isEarlyRelevo ? Timestamp.fromDate(prevEnd!) : serverTimestamp();
-                await updateDocForEmpresa('turnos', prevShiftId, {
-                    realEndTime: outgoingRealEnd,
-                    isCompleted: true,
-                    status: 'COMPLETED',
-                    isPresent: false,
-                    relievedEarly: isEarlyRelevo,
-                }, empresaId, migracionCompleta);
-            }
-
-            if (prevShiftId && onRelieved) onRelieved(prevShiftId);
-            else onClose();
-            toast.success(status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).');
-
-            Promise.race([
-                waitForPendingWrites(db),
-                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
-            ]).catch(err => {
-                if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado.');
-                }
-            }).catch(() => {});
-        } catch (e: any) {
-            console.error('[HandoverModal map]', e);
-            toast.error('Error al registrar ingreso: ' + (e?.message || e?.code || String(e)));
-        } finally {
-            setSaving(false);
+                parentPresenceShiftId: incomingShift.id,
+            }, tenantId));
         }
+
+        if (prevShiftId) {
+            const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
+            const prevEnd = prevShift ? toDate(prevShift.endDateObj) : null;
+            const nowDate = new Date();
+            const isEarlyRelevo = !!(prevEnd && prevEnd > nowDate);
+            batch.update(doc(db, 'turnos', prevShiftId), stampEmpresaId({
+                realEndTime: isEarlyRelevo ? Timestamp.fromDate(prevEnd!) : serverTimestamp(),
+                isCompleted: true,
+                status: 'COMPLETED',
+                isPresent: false,
+                relievedEarly: isEarlyRelevo,
+            }, tenantId));
+        }
+
+        // Cerrar YA — con pico de ingresos el operador no puede esperar ACK de Firestore.
+        if (prevShiftId && onRelieved) onRelieved(prevShiftId);
+        else onClose();
+        toast.success(
+            prevShiftId
+                ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
+                : (status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).')
+        );
+
+        void batch.commit()
+            .then(() => {
+                void (async () => {
+                    try {
+                        if (wasAutoAbsent) {
+                            const absSnap = await getDocs(query(
+                                collection(db, 'ausencias'),
+                                where('shiftId', '==', incomingShift.id),
+                                limit(5)
+                            ));
+                            const aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA');
+                            if (aaDoc) {
+                                const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+                                const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : toDate(incomingShift.shiftDateObj);
+                                const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : toDate(incomingShift.endDateObj);
+                                const aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
+                                await updateDoc(aaDoc.ref, {
+                                    type: 'Llegada Tarde',
+                                    absenceType: 'LT',
+                                    status: 'Confirmada',
+                                    reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
+                                    arrivedAt: serverTimestamp(),
+                                });
+                            }
+                        }
+
+                        const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                        const _prev = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
+                        const _detail = _prev
+                            ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
+                            : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
+                        await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                            action: status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
+                            module: 'OPERACIONES',
+                            actorName: _actor,
+                            timestamp: serverTimestamp(),
+                            employeeId: incomingShift.employeeId,
+                            employeeName: incomingShift.employeeName,
+                            objectiveId: incomingShift.objectiveId,
+                            objectiveName: incomingShift.objectiveName,
+                            shiftId: incomingShift.id,
+                            details: _detail,
+                        }, tenantId));
+
+                        if (prevShiftId) {
+                            const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
+                            if (prevShift?.employeeId) {
+                                await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                                    userId: prevShift.employeeId,
+                                    type: 'RELEVO',
+                                    title: 'Turno finalizado — relevado',
+                                    body: `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizó.`,
+                                    read: false,
+                                    createdAt: serverTimestamp(),
+                                }, tenantId));
+                            }
+                        }
+                    } catch {
+                        /* post-trabajo no crítico */
+                    }
+                })();
+            })
+            .catch((e: any) => {
+                console.error('[HandoverModal map]', e);
+                toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
+                lockingRef.current = false;
+            });
     };
     return (
         <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
@@ -209,7 +257,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                         <div className="space-y-2 mb-3">
                             <p className="text-[10px] font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p>
                             {activeGuards.map((s:any) => (
-                                <button key={s.id} type="button" disabled={saving} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group disabled:opacity-60">
+                                <button key={s.id} type="button" onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group">
                                     <div className="text-left">
                                         <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span>
                                         <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span>
@@ -229,16 +277,12 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                     )}
                     <button
                         type="button"
-                        disabled={saving}
-                        onClick={() => { void handleConfirm(null); }}
-                        className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm disabled:opacity-60 flex items-center justify-center gap-2 ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                        onClick={() => handleConfirm(null)}
+                        className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                     >
-                        {saving ? <Loader2 size={16} className="animate-spin" /> : null}
-                        {saving
-                            ? 'GUARDANDO…'
-                            : (activeGuards.length > 0
-                                ? 'INGRESAR SIN RELEVAR'
-                                : (status === 'LATE' ? 'INGRESAR SIN RELEVAR (TARDE)' : 'INGRESAR SIN RELEVAR'))}
+                        {activeGuards.length > 0
+                            ? 'INGRESAR SIN RELEVAR'
+                            : (status === 'LATE' ? 'INGRESAR SIN RELEVAR (TARDE)' : 'INGRESAR SIN RELEVAR')}
                     </button>
                 </div>
             </div>
