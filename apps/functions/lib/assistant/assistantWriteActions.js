@@ -116,17 +116,25 @@ async function ejecutarConfirmarPresencia(empresaId, payload) {
     if (!shiftId)
         throw new Error('Payload incompleto: falta shiftId.');
     const db = admin.firestore();
-    await db.collection('turnos').doc(shiftId).update({
-        isPresent: true,
-        presentAt: firestore_1.Timestamp.now(),
-        modifiedByAgent: true,
-        modifiedByAgentAt: firestore_1.Timestamp.now(),
-        modifiedByAgentEmpresaId: empresaId,
+    const { registrarPresencia } = await Promise.resolve().then(() => require('../fichajes/registrarPresencia'));
+    const result = await registrarPresencia(db, {
+        shiftId,
+        source: 'VIGI',
+        actorName: 'Asistente COSP (VIGI)',
     });
     const nombre = empleadoNombre ?? 'Empleado';
     const sitio = objetivoNombre ? ` en **${objetivoNombre}**` : '';
     const dia = fecha ? ` el ${fecha}` : '';
-    return { ok: true, message: `✓ Presencia confirmada: **${nombre}**${dia}${sitio} marcado como presente.` };
+    if (result.alreadyPresent) {
+        return { ok: true, message: `✓ **${nombre}** ya estaba presente${dia}${sitio}.` };
+    }
+    const relevo = result.relieved
+        ? ` Relevó a **${result.relieved.employeeName}** (FIFO).`
+        : '';
+    return {
+        ok: true,
+        message: `✓ Presencia confirmada: **${nombre}**${dia}${sitio} marcado como presente.${relevo}`,
+    };
 }
 async function ejecutarRegistrarAusencia(empresaId, payload) {
     const { shiftId, empleadoId, objetivoId, fecha, empleadoNombre, objetivoNombre, motivo } = payload;

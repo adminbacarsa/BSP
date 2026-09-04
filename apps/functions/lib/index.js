@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = void 0;
+exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -1070,32 +1070,94 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', msg || 'Error al registrar fichaje.');
     }
 });
+exports.registrarPresencia = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    }
+    const shiftId = String(data?.shiftId || '').trim();
+    if (!shiftId) {
+        throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+    }
+    const role = String(context.auth.token.role ?? '');
+    const allowedOps = [
+        'admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP',
+        'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'Operador', 'operador', 'ADMIN',
+    ];
+    const isOps = allowedOps.includes(role) || ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes(role);
+    if (!isOps) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo operadores pueden registrar presencia por este canal.');
+    }
+    const sourceRaw = String(data?.source || 'OPERATIONS').toUpperCase();
+    const source = sourceRaw === 'VIGI' || sourceRaw === 'DEMO' || sourceRaw === 'MANUAL_RADIO' || sourceRaw === 'MANUAL_PHONE'
+        ? sourceRaw
+        : 'OPERATIONS';
+    let overrideRelieveShiftId = undefined;
+    if (data?.skipAutoRelevo === true) {
+        overrideRelieveShiftId = null;
+    }
+    else if (typeof data?.overrideRelieveShiftId === 'string' && data.overrideRelieveShiftId.trim()) {
+        overrideRelieveShiftId = data.overrideRelieveShiftId.trim();
+    }
+    else if (data?.overrideRelieveShiftId === null) {
+        overrideRelieveShiftId = null;
+    }
+    const db = admin.firestore();
+    const { registrarPresencia: run } = await Promise.resolve().then(() => require('./fichajes/registrarPresencia'));
+    try {
+        const result = await run(db, {
+            shiftId,
+            source,
+            operatorUid: context.auth.uid,
+            actorName: context.auth.token.name || context.auth.token.email || 'Operador',
+            overrideRelieveShiftId,
+            skipAutoRelevo: data?.skipAutoRelevo === true,
+            coords: data?.coords || null,
+            recordedAt: data?.recordedAt || null,
+        });
+        return {
+            success: true,
+            alreadyPresent: result.alreadyPresent === true,
+            relieved: result.relieved,
+        };
+    }
+    catch (e) {
+        const msg = e?.message || '';
+        if (msg === 'TURNO_NOT_FOUND') {
+            throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+        }
+        if (msg === 'SHIFT_ABSENT') {
+            throw new functions.https.HttpsError('failed-precondition', 'El turno está marcado como ausencia. Revertí la ausencia antes de dar presente.');
+        }
+        throw new functions.https.HttpsError('internal', msg || 'Error al registrar presencia.');
+    }
+});
 exports.registrarFichadaManual = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
     const { shiftId, notes, method } = data;
+    if (!shiftId)
+        throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
     const db = admin.firestore();
+    const source = String(method || '').toUpperCase() === 'PHONE' ? 'MANUAL_PHONE' : 'MANUAL_RADIO';
     try {
-        const shiftRef = db.collection('turnos').doc(shiftId);
-        const shiftDoc = await shiftRef.get();
-        if (!shiftDoc.exists)
-            throw new Error("Turno no encontrado");
-        await shiftRef.update({
-            status: 'PRESENT',
-            checkInTime: admin.firestore.FieldValue.serverTimestamp(),
-            checkInMethod: method || 'MANUAL',
-            checkInOperator: context.auth.uid,
-            operatorNotes: notes || ''
-        });
-        await db.collection('audit_logs').add({
-            action: 'MANUAL_CHECKIN',
+        const { registrarPresencia: run } = await Promise.resolve().then(() => require('./fichajes/registrarPresencia'));
+        const result = await run(db, {
             shiftId,
-            operator: context.auth.uid,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
+            source,
+            operatorUid: context.auth.uid,
+            actorName: context.auth.token.name || context.auth.token.email || 'Operador',
         });
-        return { success: true };
+        if (notes) {
+            await db.collection('turnos').doc(shiftId).update({ operatorNotes: notes }).catch(() => { });
+        }
+        return { success: true, alreadyPresent: result.alreadyPresent === true, relieved: result.relieved };
     }
     catch (error) {
+        const msg = error?.message || '';
+        if (msg === 'TURNO_NOT_FOUND')
+            throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+        if (msg === 'SHIFT_ABSENT')
+            throw new functions.https.HttpsError('failed-precondition', msg);
         throw new functions.https.HttpsError("internal", error.message);
     }
 });

@@ -27,6 +27,7 @@ export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Ru
 export declare const syncSystemUserClaims: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
+export declare const registrarPresencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const notificarLlegadaTarde: functions.HttpsFunction & functions.Runnable<any>;
