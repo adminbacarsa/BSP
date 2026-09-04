@@ -3807,17 +3807,31 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {/* Barra de sesión compacta */}
-                        {session.isAutoMode ? (
+                        {/* Barra de sesión — indica modo operativo */}
+                        {(empresa as any)?.modoDemoEnabled ? (
+                            <div className="rounded-lg px-2 py-1 mb-1.5 border animate-pulse"
+                                style={{ background: 'rgba(139,92,246,0.07)', borderColor: 'rgba(139,92,246,0.35)' }}>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="relative flex h-2 w-2 shrink-0">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: '#7c3aed' }}/>
+                                        <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: '#7c3aed' }}/>
+                                    </span>
+                                    <span className="text-[10px] font-black uppercase tracking-wide" style={{ color: '#6d28d9' }}>⚡ MODO DEMO</span>
+                                    <span className="ml-auto text-[8px] font-semibold px-1 py-0.5 rounded" style={{ background: 'rgba(139,92,246,0.15)', color: '#7c3aed' }}>Auto · Sim.</span>
+                                </div>
+                            </div>
+                        ) : session.isAutoMode ? (
                             <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1.5">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"/>
+                                        <span className="relative flex h-2 w-2 shrink-0">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"/>
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"/>
+                                        </span>
                                         <span className="text-[10px] font-black text-amber-700 uppercase">
-                                            {isCCOperator ? 'Iniciando guardiaâ€¦' : 'Modo Automático'}
+                                            {isCCOperator ? 'Iniciando guardia…' : 'Modo Automático'}
                                         </span>
                                     </div>
-                                    {/* Operadores CC: no muestran el botón — se auto-inicia */}
                                     {!isCCOperator && (
                                         <button onClick={session.startSession} className="px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700">INICIAR GUARDIA</button>
                                     )}
