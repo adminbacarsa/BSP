@@ -489,15 +489,15 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS.push({
     parameters: { type: generative_ai_1.SchemaType.OBJECT, properties: {}, required: [] },
 }, {
     name: 'activar_modo_demo',
-    description: 'Activa el Modo Demo continuo para la empresa: el sistema dará presentes, cerrará turnos y hará relevos automáticamente cada 5 minutos sin intervención manual. Usá para «activá el modo demo», «quiero que de presentes solo», «modo automático encendido».',
+    description: 'Enciende el flag persistente de Modo Demo para que el cron automático corra cada 5 minutos en producción. Usá SOLO para «encender el modo demo», «prender el automático», «habilitar modo demo», «modo demo on». NO usar para ejecutar un ciclo ahora mismo — para eso usá ejecutar_auto_presencia_cierre.',
     parameters: { type: generative_ai_1.SchemaType.OBJECT, properties: {}, required: [] },
 }, {
     name: 'desactivar_modo_demo',
-    description: 'Desactiva el Modo Demo continuo. Los turnos dejan de cerrarse y darse presente automáticamente. Usá para «desactivá el modo demo», «apagá el automático», «modo demo off».',
+    description: 'Apaga el flag persistente de Modo Demo. Usá para «apagar el modo demo», «deshabilitar modo demo», «modo demo off», «desactivar el automático».',
     parameters: { type: generative_ai_1.SchemaType.OBJECT, properties: {}, required: [] },
 }, {
     name: 'ejecutar_auto_presencia_cierre',
-    description: 'Actúa como operador automático: marca presencia a los guardias que ya iniciaron turno sin fichar, cierra los turnos que terminaron, y completa los relevos (cuando llega el reemplazo, cierra al saliente automáticamente en el mismo ciclo). Usar con simulacion=false para «activar modo demo», «activá modo demo», «actuar como operador», «dar presentes y cerrar turnos», «hacer los relevos automáticos». Con simulacion=true (o para «simulá», «qué haría») muestra un preview sin modificar nada.',
+    description: 'Ejecuta UN CICLO AHORA MISMO como operador: marca presencia a los guardias que ya iniciaron turno sin fichar, cierra los turnos que terminaron, y completa relevos en el mismo ciclo. Usá para «ejecutá el modo demo», «corré el ciclo», «procesá los turnos ahora», «dar presentes ahora», «cerrar turnos ahora», «hacé los relevos». Con simulacion=true muestra preview sin modificar. Con simulacion=false (default al pedir ejecutar) aplica los cambios reales.',
     parameters: {
         type: generative_ai_1.SchemaType.OBJECT,
         properties: {
