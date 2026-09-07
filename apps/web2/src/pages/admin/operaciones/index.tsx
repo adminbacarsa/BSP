@@ -456,6 +456,19 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
             if (endTs) vacancyPayload.endTime = endTs;
             const newRef = await addDoc(collection(db, 'turnos'), vacancyPayload);
             onVacancyCreated({ ...vacancyPayload, id: newRef.id, isUnassigned: true });
+            // Ausencia por retiro anticipado → RRHH
+            const _shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj || Date.now());
+            const _dateStr = `${_shiftDate.getFullYear()}-${String(_shiftDate.getMonth()+1).padStart(2,'0')}-${String(_shiftDate.getDate()).padStart(2,'0')}`;
+            addDoc(collection(db, 'ausencias'), stampEmpresaId({
+                employeeId: shift.employeeId, employeeName: shift.employeeName || '',
+                startDate: _dateStr, endDate: _dateStr,
+                type: 'Retiro Anticipado', absenceType: 'AA',
+                origin: 'INTERRUPTION', shiftId: shift.id,
+                objectiveId: shift.objectiveId || null, objectiveName: shift.objectiveName || null,
+                positionName: shift.positionName || null,
+                reason: `Retiro anticipado — ${shift.objectiveName || ''} (${shift.positionName || ''})`,
+                status: 'Confirmada', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+            }, shiftEmpresaId)).catch(() => {});
             // Bitácora
             {
                 const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';

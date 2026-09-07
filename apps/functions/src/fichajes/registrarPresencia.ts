@@ -501,6 +501,41 @@ export async function registrarPresencia(
     })
     .catch(() => {});
 
+  // Llegada tarde (sin AA previa) → crear registro LT en ausencias para RRHH
+  if (isLate && !shiftData.absenceType) {
+    void (async () => {
+      try {
+        const startMs2 = scheduledStartTs?.toMillis?.() ?? 0;
+        const arDate = new Date(startMs2 - 3 * 60 * 60 * 1000); // UTC-3
+        const dateStr = `${arDate.getUTCFullYear()}-${String(arDate.getUTCMonth()+1).padStart(2,'0')}-${String(arDate.getUTCDate()).padStart(2,'0')}`;
+        const existing = await db.collection('ausencias').where('shiftId', '==', shiftId).limit(1).get();
+        if (existing.empty) {
+          await db.collection('ausencias').add({
+            employeeId: empId || null,
+            employeeName: shiftData.employeeName || '',
+            startDate: dateStr,
+            endDate: dateStr,
+            type: 'Llegada Tarde',
+            absenceType: 'LT',
+            origin: 'LATE_ARRIVAL',
+            shiftId,
+            objectiveId: shiftData.objectiveId || null,
+            objectiveName: shiftData.objectiveName || null,
+            positionName: shiftData.positionName || null,
+            reason: `Llegada tarde — ${shiftData.objectiveName || ''} (${shiftData.positionName || ''})`,
+            arrivedAt: FieldValue.serverTimestamp(),
+            status: 'Confirmada',
+            createdAt: FieldValue.serverTimestamp(),
+            empresaId: shiftData.empresaId || null,
+            reportedBy: source,
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+  }
+
   // AA → LT en background
   if (shiftData.absenceType === 'AA') {
     void (async () => {

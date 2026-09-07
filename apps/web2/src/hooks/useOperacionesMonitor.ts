@@ -542,11 +542,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15;
             const minutesPastStart = -minutesUntilStart;
             // Guardia tardanza: ventana T+5 → T+60 (sin novedad RRHH)
-            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 60;
-            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 60;
-            const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(60 - minutesPastStart)) : null;
-            // Potencial ausencia: T+60 sin confirmar presencia (fallback administrativo)
-            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 60;
+            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
+            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
+            const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(30 - minutesPastStart)) : null;
+            // Potencial ausencia: T+30 sin confirmar presencia — fallback si el cron no alcanzó a correr
+            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 30;
 
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
