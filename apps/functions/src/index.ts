@@ -2,7 +2,7 @@
 import * as functions from 'firebase-functions/v1';
 import { onCall as onCallV2, HttpsError as HttpsErrorV2 } from 'firebase-functions/v2/https';
 import { onSchedule as onScheduleV2 } from 'firebase-functions/v2/scheduler';
-import { onDocumentWritten as onDocumentWrittenV2 } from 'firebase-functions/v2/firestore';
+import { onDocumentWritten as onDocumentWrittenV2, onDocumentUpdated as onDocumentUpdatedV2 } from 'firebase-functions/v2/firestore';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { runBackup, resolveDriveBackupFolderId, syncDriveBackups, deleteDriveBackup, getBackupDb } from './backup/backup.service';
@@ -905,7 +905,6 @@ async function runModoDemoForEmpresa(
   // Guarda con hash % 10 === 0 que lleva >5 min sin presentarse → marcarlo ausente
   let ausenciasDemo = 0;
   const ABSENT_MIN_MS = 5 * 60 * 1000;
-  const newlyAbsentShifts: any[] = []; // Pase 1c: iniciar cascada post-commit
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
@@ -928,7 +927,6 @@ async function runModoDemoForEmpresa(
       employeeName: t.employeeName || null, positionName: t.positionName || null,
       empresaId, createdAt: nowTs, reportedBy: 'MODO_DEMO', source: 'MODO_DEMO', modoDemoAt: nowTs,
     });
-    newlyAbsentShifts.push({ id: doc.id, ...t });
     ausenciasDemo++;
   }
 
@@ -978,23 +976,6 @@ async function runModoDemoForEmpresa(
   // Commit pases 1-5 + 1b
   if (presencias + cierres + absentClean + vacResueltas + reportadosPlan + ausenciasDemo > 0) {
     await batch.commit();
-
-    // === Pase 1c: Iniciar cascada de cobertura para ausencias recién detectadas ===
-    if (newlyAbsentShifts.length > 0) {
-      Promise.all(newlyAbsentShifts.map(s =>
-        iniciarCascadaCobertura(db, {
-          id: s.id,
-          objectiveId: String(s.objectiveId || ''),
-          objectiveName: String(s.objectiveName || ''),
-          clientId: String(s.clientId || ''),
-          clientName: String(s.clientName || ''),
-          code: String(s.code || ''),
-          startTime: s.startTime,
-          endTime: s.endTime,
-          empresaId,
-        }).catch(e => console.warn('[modoDemoCron] iniciarCascada error:', (e as Error)?.message))
-      )).catch(() => {});
-    }
 
     // Descartar novedades de retención (fire-and-forget)
     snap.docs.forEach(doc => {
@@ -1207,6 +1188,45 @@ export const modoDemoCron = functions
       }
     }
   });
+
+// =========================================================
+// TRIGGER: iniciar cascada de cobertura cuando un turno queda ausente
+// Dispara para CUALQUIER empresa con centroControlEnabled (demo o real).
+// En MODO DEMO el cron marca isAbsent=true → esto dispara la cascada.
+// En MODO AUTO los guardias/operadores lo hacen → mismo trigger.
+export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
+  { document: 'turnos/{shiftId}', region: 'us-central1', timeoutSeconds: 60 },
+  async (event) => {
+    const before = event.data.before.data() as any;
+    const after  = event.data.after.data()  as any;
+
+    // Solo cuando isAbsent cambia de false/undefined a true
+    if (before.isAbsent === after.isAbsent || !after.isAbsent) return;
+    // Ignorar borradores y turnos virtuales
+    if (after.draft || after.isVirtual) return;
+
+    const empresaId: string = after.empresaId || '';
+    if (!empresaId) return;
+
+    const db = admin.firestore();
+    const empresaDoc = await db.doc(`empresas/${empresaId}`).get();
+    if (!empresaDoc.exists) return;
+    const centroControlEnabled = empresaDoc.data()?.centroControlEnabled !== false;
+    if (!centroControlEnabled) return;
+
+    await iniciarCascadaCobertura(db, {
+      id: event.params.shiftId,
+      objectiveId:    String(after.objectiveId   || ''),
+      objectiveName:  String(after.objectiveName  || ''),
+      clientId:       String(after.clientId       || ''),
+      clientName:     String(after.clientName     || ''),
+      code:           String(after.code           || ''),
+      startTime: after.startTime,
+      endTime:   after.endTime,
+      empresaId,
+    });
+  }
+);
 
 // =========================================================
 // AUTO PRESENCIA Y CIERRE — callable SuperAdmin (modo prueba)
