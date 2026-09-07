@@ -56,9 +56,9 @@ function fmtHs(n: number) {
   return `${n.toLocaleString('es-AR', { maximumFractionDigits: 1 })} h`;
 }
 
-function ratioTone(pct: number) {
-  if (pct >= 100) return 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/40';
-  if (pct >= 80) return 'text-amber-800 bg-amber-50 dark:text-amber-200 dark:bg-amber-950/40';
+function lostHoursTone(hs: number) {
+  if (hs <= 0) return 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/40';
+  if (hs < 40) return 'text-amber-800 bg-amber-50 dark:text-amber-200 dark:bg-amber-950/40';
   return 'text-rose-800 bg-rose-50 dark:text-rose-200 dark:bg-rose-950/40';
 }
 
@@ -255,16 +255,13 @@ async function loadTurnosForObjectiveMonth(
   }
 }
 
-async function loadAusenciasPrev(
+async function loadAusenciasForEmps(
   empresaId: string,
   empIds: Set<string>,
-  year: number,
-  month: number,
+  fromYmd: string,
+  toYmd: string,
 ): Promise<any[]> {
   if (!empIds.size) return [];
-  const { start, end } = monthBounds(year, month);
-  const startKey = `${year}-${String(month + 1).padStart(2, '0')}-01`;
-  const endKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
   try {
     const snap = await getDocs(
       query(collection(db, 'ausencias'), where('empresaId', '==', empresaId)),
@@ -277,11 +274,24 @@ async function loadAusenciasPrev(
         const s = String((a as any).startDate || '').slice(0, 10);
         const e = String((a as any).endDate || s).slice(0, 10);
         if (!s) return false;
-        return s <= endKey && e >= startKey;
+        return s <= toYmd && e >= fromYmd;
       });
   } catch {
     return [];
   }
+}
+
+/** @deprecated usar loadAusenciasForEmps */
+async function loadAusenciasPrev(
+  empresaId: string,
+  empIds: Set<string>,
+  year: number,
+  month: number,
+): Promise<any[]> {
+  const { end } = monthBounds(year, month);
+  const startKey = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+  const endKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+  return loadAusenciasForEmps(empresaId, empIds, startKey, endKey);
 }
 
 export function ServiceCapacityViabilityModal({
@@ -303,6 +313,7 @@ export function ServiceCapacityViabilityModal({
   const [turnosMes, setTurnosMes] = useState<any[]>([]);
   const [turnosPrev, setTurnosPrev] = useState<any[]>([]);
   const [ausenciasPrev, setAusenciasPrev] = useState<any[]>([]);
+  const [ausenciasVac, setAusenciasVac] = useState<any[]>([]);
   const [tiposNovedad, setTiposNovedad] = useState<NovedadType[]>([]);
 
   useEffect(() => {
@@ -361,15 +372,20 @@ export function ServiceCapacityViabilityModal({
 
         if (cancelled) return;
         const empIds = new Set(employees.map((e) => e.id));
-        const [aus, tipos] = await Promise.all([
+        const daysInMes = new Date(year, month + 1, 0).getDate();
+        const ytdFrom = `${year}-01-01`;
+        const ytdTo = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMes).padStart(2, '0')}`;
+        const [ausPrev, ausVac, tipos] = await Promise.all([
           loadAusenciasPrev(empresaId, empIds, prev.year, prev.month),
+          loadAusenciasForEmps(empresaId, empIds, ytdFrom, ytdTo),
           novedadTypeService.listByEmpresa(empresaId).catch(() => [] as NovedadType[]),
         ]);
         if (cancelled) return;
         setEmps(employees);
         setTurnosMes(tm);
         setTurnosPrev(tp);
-        setAusenciasPrev(aus);
+        setAusenciasPrev(ausPrev);
+        setAusenciasVac(ausVac);
         setTiposNovedad(tipos);
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'No se pudo cargar el estudio');
@@ -391,11 +407,13 @@ export function ServiceCapacityViabilityModal({
       year,
       month,
       ausenciasPrev,
+      ausenciasVac,
       turnosPrev,
+      turnosMes,
       tiposNovedad,
       employeesAlreadyResolved: true,
     });
-  }, [service, emps, year, month, ausenciasPrev, turnosPrev, tiposNovedad]);
+  }, [service, emps, year, month, ausenciasPrev, ausenciasVac, turnosPrev, turnosMes, tiposNovedad]);
 
   const report: ServiceObjectiveMonthReport | null = useMemo(() => {
     if (!service) return null;
@@ -523,9 +541,12 @@ export function ServiceCapacityViabilityModal({
                   <p className="text-[9px] font-black uppercase text-slate-500">Capacidad neta</p>
                   <p className="text-2xl font-black tabular-nums text-emerald-600 dark:text-emerald-400">{fmtHs(capacity.capacityNetHs)}</p>
                 </div>
-                <div className={`rounded-2xl border border-slate-200 dark:border-slate-700 p-3 shadow-sm ${ratioTone(capacity.ratioPct)}`}>
-                  <p className="text-[9px] font-black uppercase opacity-70">Ratio</p>
-                  <p className="text-2xl font-black tabular-nums">{capacity.ratioPct}%</p>
+                <div className={`rounded-2xl border border-slate-200 dark:border-slate-700 p-3 shadow-sm ${lostHoursTone(capacity.horasPerdidas)}`}>
+                  <p className="text-[9px] font-black uppercase opacity-70">Hs perdidas</p>
+                  <p className="text-2xl font-black tabular-nums">{fmtHs(capacity.horasPerdidas)}</p>
+                  <p className="text-[9px] font-bold opacity-60 mt-0.5">
+                    {capacity.horasPerdidas <= 0 ? 'Paquete cubierto' : 'Faltan vs SLA'}
+                  </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950/40 p-3 shadow-sm">
                   <p className="text-[9px] font-black uppercase text-slate-500">Plantilla / aus. ant.</p>
@@ -551,13 +572,16 @@ export function ServiceCapacityViabilityModal({
                 <p className="text-[9px] font-black uppercase text-slate-500 tracking-wide">Oferta vs paquete (techo {capacity.techoHs} h)</p>
                 <BarRow label="SLA mes" value={capacity.slaHsMonth} max={maxBarCap} color="#4f46e5" />
                 <BarRow label="Bruta (esquema)" value={capacity.capacityBrutaHs} max={maxBarCap} color="#64748b" />
-                <BarRow label="Tras vacaciones" value={capacity.capacityAfterVacHs} max={maxBarCap} color="#f59e0b" />
+                <BarRow label="Tras V del mes" value={capacity.capacityAfterVacHs} max={maxBarCap} color="#f59e0b" />
                 <BarRow label="Neta" value={capacity.capacityNetHs} max={maxBarCap} color="#10b981" />
               </div>
 
               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
                 <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-950/50 border-b border-slate-100 dark:border-slate-800">
-                  <p className="text-[9px] font-black uppercase text-slate-500">Guardias preferidos</p>
+                  <p className="text-[9px] font-black uppercase text-slate-500">Guardias — vacaciones reales</p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-0.5">
+                    Der. = derecho CCT · Tom. = V autorizadas en el año · Pend. = der − tom · VAC mes = días V en este mes (restan capacidad)
+                  </p>
                 </div>
                 <div className="overflow-x-auto max-h-72">
                   <table className="w-full text-[11px]">
@@ -565,17 +589,19 @@ export function ServiceCapacityViabilityModal({
                       <tr>
                         <th className="text-left px-3 py-2">Guardia</th>
                         <th className="text-right px-2 py-2">Ant.</th>
-                        <th className="text-right px-2 py-2">Vac/año</th>
+                        <th className="text-right px-2 py-2">Der.</th>
+                        <th className="text-right px-2 py-2">Tom.</th>
+                        <th className="text-right px-2 py-2">Pend.</th>
                         <th className="text-left px-2 py-2">Turno</th>
                         <th className="text-right px-2 py-2">Esquema</th>
-                        <th className="text-right px-2 py-2">Vac hs</th>
+                        <th className="text-right px-2 py-2">VAC mes</th>
                         <th className="text-right px-3 py-2">Neta</th>
                       </tr>
                     </thead>
                     <tbody>
                       {capacity.guards.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-3 py-8 text-center text-slate-400 font-bold">
+                          <td colSpan={9} className="px-3 py-8 text-center text-slate-400 font-bold">
                             Sin plantilla ACTIVE vinculada (preferido / dotación / malla)
                           </td>
                         </tr>
@@ -585,11 +611,19 @@ export function ServiceCapacityViabilityModal({
                             <td className="px-3 py-2 font-bold text-slate-800 dark:text-slate-100">{g.name}</td>
                             <td className="px-2 py-2 text-right tabular-nums">{g.yearsSeniority}a</td>
                             <td className="px-2 py-2 text-right tabular-nums">{g.vacationDaysYear}d</td>
+                            <td className="px-2 py-2 text-right tabular-nums">{g.vacationDaysTakenYtd}d</td>
+                            <td className="px-2 py-2 text-right tabular-nums font-black text-indigo-600 dark:text-indigo-400">
+                              {g.vacationDaysPending}d
+                            </td>
                             <td className="px-2 py-2 font-black text-indigo-600 dark:text-indigo-400">
                               {g.tipificado ? g.shiftCode : '—'}
                             </td>
                             <td className="px-2 py-2 text-right tabular-nums">{fmtHs(g.schemeHsMonth)}</td>
-                            <td className="px-2 py-2 text-right tabular-nums">{fmtHs(g.vacationHsMonth)}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">
+                              {g.vacationDaysInMonth > 0
+                                ? `${g.vacationDaysInMonth}d / ${fmtHs(g.vacationHsMonth)}`
+                                : '0'}
+                            </td>
                             <td className="px-3 py-2 text-right tabular-nums font-black">{fmtHs(g.netHs)}</td>
                           </tr>
                         ))

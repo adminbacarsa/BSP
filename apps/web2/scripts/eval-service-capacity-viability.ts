@@ -75,8 +75,35 @@ assert(cap.plantilla === 2, `plantilla=2 got ${cap.plantilla}`);
 assert(cap.slaHsMonth > 0, `slaHsMonth>0 got ${cap.slaHsMonth}`);
 assert(cap.guards[0].scheme === WorkScheme.SixTwo, 'esquema 6x2 para M/N');
 assert(cap.guards.every((g) => g.netHs <= 200), 'neta ≤ 200');
+assert(cap.horasPerdidas === Math.max(0, cap.gapHs), 'horasPerdidas = max(0, gap)');
+assert(cap.guards.every((g) => g.vacationHsMonth === 0), 'sin V en mes → VAC mes 0');
+assert(cap.guards.every((g) => g.vacationDaysPending === g.vacationDaysYear), 'sin tomadas → pend = derecho');
 assert(cap.ausentismo.modo === 'sin_indice', 'sin historial → sin_indice');
 console.log('  SLA', cap.slaHsMonth, 'neta', cap.capacityNetHs, 'ratio', cap.ratioPct);
+
+// V autorizadas en el mes restan capacidad real
+{
+  const withVac = buildServiceCapacityViability({
+    service,
+    employees: [emps[0]],
+    year: 2026,
+    month: 7,
+    ausenciasVac: [
+      {
+        employeeId: 'e1',
+        type: 'Vacaciones',
+        status: 'Autorizada',
+        startDate: '2026-08-10',
+        endDate: '2026-08-16',
+      },
+    ],
+  });
+  const g = withVac.guards[0];
+  assert(g.vacationDaysInMonth === 7, `VAC mes 7d got ${g.vacationDaysInMonth}`);
+  assert(g.vacationDaysTakenYtd === 7, `tomadas YTD 7 got ${g.vacationDaysTakenYtd}`);
+  assert(g.vacationDaysPending === g.vacationDaysYear - 7, 'pend = der - tom');
+  assert(g.vacationHsMonth === 7 * 8, `VAC hs ${g.vacationHsMonth}`);
+}
 
 // preferredObjectiveId = id del documento SLA (como en Planificación)
 {

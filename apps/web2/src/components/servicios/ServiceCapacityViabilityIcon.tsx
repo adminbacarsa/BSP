@@ -5,37 +5,38 @@ import { Gauge } from 'lucide-react';
 
 export interface ServiceCapacityViabilityIconProps {
   onOpen: () => void;
-  /** Ratio capacidad neta / SLA (%). Null = sin dato. */
-  ratioPct?: number | null;
+  /** Horas perdidas vs SLA (0 = cubierto). Null = sin dato. */
+  horasPerdidas?: number | null;
   plantilla?: number;
 }
 
 export function ServiceCapacityViabilityIcon({
   onOpen,
-  ratioPct,
+  horasPerdidas,
   plantilla,
 }: ServiceCapacityViabilityIconProps) {
-  const hasRatio = typeof ratioPct === 'number' && Number.isFinite(ratioPct);
+  const has = typeof horasPerdidas === 'number' && Number.isFinite(horasPerdidas);
+  const lost = has ? Math.max(0, horasPerdidas!) : 0;
   const tone =
-    !hasRatio
+    !has
       ? 'ring-indigo-400/50 text-indigo-700 bg-indigo-50 dark:bg-indigo-950/40 dark:text-indigo-300'
-      : ratioPct! >= 100
+      : lost <= 0
         ? 'ring-emerald-500/40 text-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300'
-        : ratioPct! >= 80
+        : lost < 40
           ? 'ring-amber-500/40 text-amber-800 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-200'
           : 'ring-rose-500/40 text-rose-800 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-300';
 
   const badgeTone =
-    !hasRatio
+    !has
       ? ''
-      : ratioPct! >= 100
+      : lost <= 0
         ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
-        : ratioPct! >= 80
+        : lost < 40
           ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200'
           : 'bg-rose-100 text-rose-900 dark:bg-rose-950/50 dark:text-rose-200';
 
-  const title = hasRatio
-    ? `Viabilidad — ratio capacidad/SLA ${Math.round(ratioPct!)}%${plantilla != null ? ` · ${plantilla} preferidos` : ''}`
+  const title = has
+    ? `Viabilidad — hs perdidas ${lost}${plantilla != null ? ` · ${plantilla} en plantilla` : ''}`
     : 'Viabilidad del servicio (capacidad 200 + informe mes)';
 
   return (
@@ -50,12 +51,12 @@ export function ServiceCapacityViabilityIcon({
     >
       <Gauge size={12} strokeWidth={2.5} />
       <span className="hidden sm:inline">Viab.</span>
-      {hasRatio && (
+      {has && (
         <span
           className={`tabular-nums min-w-[1.6rem] text-center rounded px-0.5 text-[9px] font-black leading-none py-0.5 ${badgeTone}`}
           aria-hidden
         >
-          {Math.round(ratioPct!)}%
+          {lost <= 0 ? 'OK' : `${Math.round(lost)}h`}
         </span>
       )}
     </button>
