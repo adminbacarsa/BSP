@@ -1740,7 +1740,7 @@ export default function EmployeeDashboard() {
     }
   };
 
-  const handleResponderConvocatoria = async (convocatoriaId: string, response: 'ACCEPTED' | 'REJECTED') => {
+  const handleResponderConvocatoriaCobertura = async (convocatoriaId: string, response: 'ACCEPTED' | 'REJECTED') => {
     if (!user) return;
     setConvBusy(true);
     try {
@@ -3167,14 +3167,14 @@ export default function EmployeeDashboard() {
                       )}
                       <div className="flex gap-2 mt-3">
                         <button
-                          onClick={() => handleResponderConvocatoria(conv.id, 'ACCEPTED')}
+                          onClick={() => handleResponderConvocatoriaCobertura(conv.id, 'ACCEPTED')}
                           disabled={convBusy}
                           className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase disabled:opacity-50 transition-colors"
                         >
                           Acepto
                         </button>
                         <button
-                          onClick={() => handleResponderConvocatoria(conv.id, 'REJECTED')}
+                          onClick={() => handleResponderConvocatoriaCobertura(conv.id, 'REJECTED')}
                           disabled={convBusy}
                           className="flex-1 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-[11px] font-black uppercase disabled:opacity-50 transition-colors"
                         >
