@@ -545,7 +545,11 @@ export function ServiceCapacityViabilityModal({
                   <p className="text-[9px] font-black uppercase opacity-70">Hs perdidas</p>
                   <p className="text-2xl font-black tabular-nums">{fmtHs(capacity.horasPerdidas)}</p>
                   <p className="text-[9px] font-bold opacity-60 mt-0.5">
-                    {capacity.horasPerdidas <= 0 ? 'Paquete cubierto' : 'Faltan vs SLA'}
+                    {capacity.horasPerdidas > 0
+                      ? 'SLA − neta'
+                      : capacity.holguraHs > 0
+                        ? `Holgura +${fmtHs(capacity.holguraHs)}`
+                        : 'Paquete cubierto'}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-950/40 p-3 shadow-sm">
@@ -555,6 +559,9 @@ export function ServiceCapacityViabilityModal({
                     <span className="text-sm font-bold text-slate-500 ml-1">
                       · {capacity.ausentismo.modo === 'sin_indice' ? 's/índice' : `${capacity.ausentismo.indicePct}%`}
                     </span>
+                  </p>
+                  <p className="text-[9px] font-bold text-slate-400 mt-0.5">
+                    {capacity.coverageProfile.label} · tope {capacity.weeklyCapHs} h/sem
                   </p>
                 </div>
               </div>
@@ -569,18 +576,20 @@ export function ServiceCapacityViabilityModal({
               </div>
 
               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm space-y-2">
-                <p className="text-[9px] font-black uppercase text-slate-500 tracking-wide">Oferta vs paquete (techo {capacity.techoHs} h)</p>
+                <p className="text-[9px] font-black uppercase text-slate-500 tracking-wide">
+                  Oferta vs paquete (techo {capacity.techoHs} h · {capacity.weeklyCapHs} h/sem · {capacity.coverageProfile.label})
+                </p>
                 <BarRow label="SLA mes" value={capacity.slaHsMonth} max={maxBarCap} color="#4f46e5" />
-                <BarRow label="Bruta (esquema)" value={capacity.capacityBrutaHs} max={maxBarCap} color="#64748b" />
-                <BarRow label="Tras V del mes" value={capacity.capacityAfterVacHs} max={maxBarCap} color="#f59e0b" />
-                <BarRow label="Neta" value={capacity.capacityNetHs} max={maxBarCap} color="#10b981" />
+                <BarRow label="Bruta (CCT+obj)" value={capacity.capacityBrutaHs} max={maxBarCap} color="#64748b" />
+                <BarRow label="Tras V cobrada" value={capacity.capacityAfterVacHs} max={maxBarCap} color="#f59e0b" />
+                <BarRow label="Neta (−aus)" value={capacity.capacityNetHs} max={maxBarCap} color="#10b981" />
               </div>
 
               <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
                 <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-950/50 border-b border-slate-100 dark:border-slate-800">
-                  <p className="text-[9px] font-black uppercase text-slate-500">Guardias — vacaciones reales</p>
+                  <p className="text-[9px] font-black uppercase text-slate-500">Guardias — capacidad del mes</p>
                   <p className="text-[10px] font-bold text-slate-400 mt-0.5">
-                    Der. = derecho CCT · Tom. = V autorizadas en el año · Pend. = der − tom · VAC mes = días V en este mes (restan capacidad)
+                    Pend. se reparte hasta el 31/12 · VAC cobrada = max(V del mes, cuota del pendiente) · neta aplica índice aus. mes ant. sin V
                   </p>
                 </div>
                 <div className="overflow-x-auto max-h-72">
@@ -594,7 +603,7 @@ export function ServiceCapacityViabilityModal({
                         <th className="text-right px-2 py-2">Pend.</th>
                         <th className="text-left px-2 py-2">Turno</th>
                         <th className="text-right px-2 py-2">Esquema</th>
-                        <th className="text-right px-2 py-2">VAC mes</th>
+                        <th className="text-right px-2 py-2">VAC cob.</th>
                         <th className="text-right px-3 py-2">Neta</th>
                       </tr>
                     </thead>
@@ -619,9 +628,9 @@ export function ServiceCapacityViabilityModal({
                               {g.tipificado ? g.shiftCode : '—'}
                             </td>
                             <td className="px-2 py-2 text-right tabular-nums">{fmtHs(g.schemeHsMonth)}</td>
-                            <td className="px-2 py-2 text-right tabular-nums">
-                              {g.vacationDaysInMonth > 0
-                                ? `${g.vacationDaysInMonth}d / ${fmtHs(g.vacationHsMonth)}`
+                            <td className="px-2 py-2 text-right tabular-nums" title={`V mes ${g.vacationDaysInMonth}d · reserva ${g.vacationDaysReserveMonth}d`}>
+                              {g.vacationDaysCharged > 0
+                                ? `${g.vacationDaysCharged}d / ${fmtHs(g.vacationHsMonth)}`
                                 : '0'}
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums font-black">{fmtHs(g.netHs)}</td>

@@ -1,7 +1,8 @@
 /**
- * Viabilidad de capacidad por servicio: paquete SLA del mes vs oferta neta
- * de guardias del objetivo (techo 200 CCT, francos de esquema, vacaciones
- * reales del mes + saldo tomadas/pendientes del año, ausentismo mes ant. sin V).
+ * Viabilidad de capacidad por servicio: paquete SLA del mes vs oferta neta.
+ * Neta = min(200, ciclo descanso CCT, 48 h/sem, cupo L–V/L–D/24h del objetivo)
+ *        − vacaciones cobradas (max(V del mes, pendiente repartido hasta 31/12))
+ *        × (1 − índice aus. mes ant. sin V).
  */
 
 import type { ServicePosition, ServiceSLA } from '@/services/slaService';
@@ -49,11 +50,15 @@ export type GuardCapacityRow = {
   vacationDaysTakenYtd: number;
   /** max(0, derecho − tomadas). */
   vacationDaysPending: number;
-  /** Días V que pisan el mes (ausencias + celdas V malla). */
+  /** Días V ya cargados que pisan el mes. */
   vacationDaysInMonth: number;
-  /** Horas restadas este mes = días en mes × jornada. */
+  /** Reserva prorrateada del pendiente sobre el resto del año (hasta 31/12). */
+  vacationDaysReserveMonth: number;
+  /** Días que restan capacidad este mes = max(V reales, reserva). */
+  vacationDaysCharged: number;
+  /** Horas restadas este mes = charged × jornada. */
   vacationHsMonth: number;
-  /** Prorrateo 365 (referencia; ya no resta capacidad). */
+  /** Prorrateo 365 del derecho (solo referencia). */
   vacationDaysMonthProrated: number;
   shiftCode: ShiftBandCode;
   scheme: WorkScheme;
@@ -62,6 +67,16 @@ export type GuardCapacityRow = {
   brutoCapHs: number;
   netHs: number;
   tipificado: boolean;
+};
+
+export type CoverageCalendarKind = 'L_V' | 'L_S' | 'L_D' | 'H24';
+
+export type ServiceCoverageProfile = {
+  kind: CoverageCalendarKind;
+  label: string;
+  workDaysPerWeek: number;
+  prefer12h: boolean;
+  scheme: WorkScheme;
 };
 
 export type ShiftMixRow = {
@@ -75,15 +90,20 @@ export type ServiceCapacityViability = {
   month: number;
   daysInMonth: number;
   techoHs: number;
+  weeklyCapHs: number;
+  coverageProfile: ServiceCoverageProfile;
   slaHsMonth: number;
   plantilla: number;
   capacityBrutaHs: number;
   capacityAfterVacHs: number;
   capacityNetHs: number;
   ratioPct: number;
+  /** SLA − neta (positivo = faltan). */
   gapHs: number;
-  /** Horas que faltan para cubrir el paquete SLA (0 si sobra capacidad). */
+  /** max(0, SLA − neta). */
   horasPerdidas: number;
+  /** max(0, neta − SLA). */
+  holguraHs: number;
   ausentismo: {
     prevYear: number;
     prevMonth: number;
@@ -309,6 +329,137 @@ export function countVacationShiftDaysInMonth(
   return days.size;
 }
 
+const WEEKLY_CAP_HS = SUVICO_POLICY.ALERTS.WEEK_BILLABLE_HOURS_DEFAULT; // 48
+
+/**
+ * Calendario del objetivo según puestos SLA (L–V / L–S / L–D / 24h).
+ * El ciclo 6×2 / 4×2 modela interjornada ~12 h y descanso ≥35 h tras racha 48 h.
+ */
+export function inferServiceCoverageProfile(
+  positions: ServicePosition[] | undefined,
+): ServiceCoverageProfile {
+  const pos = (positions || []).filter(
+    (p) => String(p.status || 'ACTIVE').toUpperCase() !== 'INACTIVE' && p.coverageType !== 'eventos',
+  );
+  let has24 = false;
+  let has12 = false;
+  const dayHits: Record<string, number> = { L: 0, M: 0, X: 0, J: 0, V: 0, S: 0, D: 0 };
+  for (const p of pos) {
+    if (p.coverageType === '24hs') has24 = true;
+    if (p.coverageType === '12hs_diurno' || p.coverageType === '12hs_nocturno') has12 = true;
+    const ads = p.activeDays?.length ? p.activeDays : ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+    for (const d of ads) {
+      const k = String(d).toUpperCase();
+      if (k in dayHits) dayHits[k] += 1;
+    }
+    for (const sh of p.allowedShiftTypes || []) {
+      const c = String(sh.code || '').toUpperCase();
+      if (c === 'D12' || c === 'N12' || Number(sh.hours) >= 12) has12 = true;
+    }
+  }
+  const weekday = dayHits.L + dayHits.M + dayHits.X + dayHits.J + dayHits.V;
+  const sat = dayHits.S;
+  const sun = dayHits.D;
+  if (has24 || (weekday > 0 && sat > 0 && sun > 0)) {
+    return {
+      kind: 'H24',
+      label: '24 h / L–D',
+      workDaysPerWeek: 7,
+      prefer12h: has12,
+      scheme: has12 ? WorkScheme.FourTwo : WorkScheme.SixTwo,
+    };
+  }
+  if (weekday > 0 && sat > 0 && sun === 0) {
+    return {
+      kind: 'L_S',
+      label: 'L–S',
+      workDaysPerWeek: 6,
+      prefer12h: has12,
+      scheme: has12 ? WorkScheme.FourTwo : WorkScheme.SixOne,
+    };
+  }
+  if (weekday > 0 && sat === 0 && sun === 0) {
+    return {
+      kind: 'L_V',
+      label: 'L–V',
+      workDaysPerWeek: 5,
+      prefer12h: false,
+      scheme: WorkScheme.SixOne,
+    };
+  }
+  return {
+    kind: 'L_D',
+    label: 'L–D',
+    workDaysPerWeek: 7,
+    prefer12h: has12,
+    scheme: has12 ? WorkScheme.FourTwo : WorkScheme.SixTwo,
+  };
+}
+
+/**
+ * Hs brutas/mes: min(techo 200, ciclo descanso CCT, tope 48 h/sem, cupo del calendario del objetivo).
+ */
+export function baseBillableHsForMonth(opts: {
+  daysInMonth: number;
+  profile: ServiceCoverageProfile;
+  jornadaHs: number;
+  scheme: WorkScheme;
+}): number {
+  const { daysInMonth, profile, jornadaHs, scheme } = opts;
+  const cycleHs = billableHoursOneHeadInMonth(daysInMonth, scheme, 'rational_hours');
+  const weeklyCapMonth = (daysInMonth / 7) * WEEKLY_CAP_HS;
+  const objWeekly = Math.min(WEEKLY_CAP_HS, profile.workDaysPerWeek * jornadaHs);
+  const objMonth = (daysInMonth / 7) * objWeekly;
+  return Math.min(CCT_HS_TECHO_MENSUAL, cycleHs, weeklyCapMonth, objMonth);
+}
+
+/**
+ * Vacaciones del mes: no descuenta los 14 de golpe.
+ * Reparte el pendiente (derecho − tomadas) desde el 1º del mes hasta el 31/12,
+ * y cobra max(V ya cargadas en el mes, cuota prorrateada).
+ */
+export function vacationChargeDaysForMonth(opts: {
+  pendingDays: number;
+  actualVacDaysInMonth: number;
+  daysInMonth: number;
+  year: number;
+  monthIndex0: number;
+}): { chargeDays: number; reserveProrated: number; daysLeftInYear: number } {
+  const monthStart = new Date(opts.year, opts.monthIndex0, 1, 12, 0, 0, 0);
+  const yearEnd = new Date(opts.year, 11, 31, 12, 0, 0, 0);
+  const daysLeft = Math.max(1, Math.round((yearEnd.getTime() - monthStart.getTime()) / 86400000) + 1);
+  const reserveProrated = Math.max(0, opts.pendingDays) * (opts.daysInMonth / daysLeft);
+  const chargeDays = Math.max(opts.actualVacDaysInMonth, reserveProrated);
+  return { chargeDays, reserveProrated, daysLeftInYear: daysLeft };
+}
+
+export function dominantShiftFromMalla(
+  turnos: any[],
+  employeeId: string,
+  year: number,
+  monthIndex0: number,
+): ShiftBandCode {
+  const prefix = `${year}-${String(monthIndex0 + 1).padStart(2, '0')}-`;
+  const counts: Partial<Record<ShiftBandCode, number>> = {};
+  for (const t of turnos || []) {
+    if (String(t.employeeId || '') !== employeeId) continue;
+    const key = resolveTurnoScheduleDateKey(t);
+    if (!key || !key.startsWith(prefix)) continue;
+    const code = normalizeShiftBandCode(t.code || t.type);
+    if (code === 'SIN_TIPIFICAR') continue;
+    counts[code] = (counts[code] || 0) + 1;
+  }
+  let best: ShiftBandCode = 'SIN_TIPIFICAR';
+  let n = 0;
+  (Object.keys(counts) as ShiftBandCode[]).forEach((c) => {
+    if ((counts[c] || 0) > n) {
+      n = counts[c] || 0;
+      best = c;
+    }
+  });
+  return best;
+}
+
 export function buildServiceCapacityViability(opts: {
   service: Pick<ServiceSLA, 'startDate' | 'endDate' | 'positions' | 'excludedDates' | 'objectiveId'> & {
     id?: string;
@@ -342,6 +493,7 @@ export function buildServiceCapacityViability(opts: {
   const ytdTo = ymd(year, month, days);
   const monthFrom = ymd(year, month, 1);
   const monthTo = ytdTo;
+  const coverageProfile = inferServiceCoverageProfile(service.positions);
 
   const slaRow = calculateSlaHoursForMonth(
     service.positions || [],
@@ -409,11 +561,38 @@ export function buildServiceCapacityViability(opts: {
     });
     const vacDaysMalla = countVacationShiftDaysInMonth(turnosMes, emp.id, year, month);
     const vacDaysInMonth = Math.max(vacDaysAusMes, vacDaysMalla);
-    const code = resolveEmpShiftCode(emp, objectiveId, serviceId);
-    const { scheme, jornadaHs, tipificado } = schemeFromShiftCode(code);
-    const schemeHs = billableHoursOneHeadInMonth(days, scheme, 'rational_hours');
+    const { chargeDays, reserveProrated } = vacationChargeDaysForMonth({
+      pendingDays: pending,
+      actualVacDaysInMonth: vacDaysInMonth,
+      daysInMonth: days,
+      year,
+      monthIndex0: month,
+    });
+
+    let code = resolveEmpShiftCode(emp, objectiveId, serviceId);
+    let tipificado = code !== 'SIN_TIPIFICAR';
+    if (!tipificado) {
+      const fromMalla = dominantShiftFromMalla(turnosMes, emp.id, year, month);
+      if (fromMalla !== 'SIN_TIPIFICAR') {
+        code = fromMalla;
+        tipificado = true;
+      }
+    }
+    const fromCode = schemeFromShiftCode(code);
+    const scheme = tipificado ? fromCode.scheme : coverageProfile.scheme;
+    const jornadaHs = tipificado
+      ? fromCode.jornadaHs
+      : coverageProfile.prefer12h
+        ? 12
+        : 8;
+    const schemeHs = baseBillableHsForMonth({
+      daysInMonth: days,
+      profile: coverageProfile,
+      jornadaHs,
+      scheme,
+    });
     const bruto = Math.min(CCT_HS_TECHO_MENSUAL, schemeHs);
-    const vacHs = vacDaysInMonth * jornadaHs;
+    const vacHs = chargeDays * jornadaHs;
     const afterVac = Math.max(0, bruto - vacHs);
     const net = afterVac * ausFactor;
     mixCount[code] += 1;
@@ -425,6 +604,8 @@ export function buildServiceCapacityViability(opts: {
       vacationDaysTakenYtd: takenYtd,
       vacationDaysPending: pending,
       vacationDaysInMonth: vacDaysInMonth,
+      vacationDaysReserveMonth: r1(reserveProrated),
+      vacationDaysCharged: r1(chargeDays),
       vacationHsMonth: r1(vacHs),
       vacationDaysMonthProrated: r1(vacDaysMonthProrated),
       shiftCode: code,
@@ -444,6 +625,7 @@ export function buildServiceCapacityViability(opts: {
   const capacityNetHs = r1(guards.reduce((s, g) => s + g.netHs, 0));
   const gapHs = r1(slaHsMonth - capacityNetHs);
   const horasPerdidas = r1(Math.max(0, gapHs));
+  const holguraHs = r1(Math.max(0, -gapHs));
   const ratioPct = slaHsMonth > 0 ? r1((capacityNetHs / slaHsMonth) * 100) : (preferred.length ? 100 : 0);
 
   const hints = slaShiftHints(service.positions);
@@ -452,7 +634,7 @@ export function buildServiceCapacityViability(opts: {
     .map((code) => ({ code, guards: mixCount[code], slaHint: hints[code] }))
     .filter((r) => r.guards > 0 || r.code !== 'SIN_TIPIFICAR');
 
-  const vacMesTotal = guards.reduce((s, g) => s + g.vacationDaysInMonth, 0);
+  const vacChargeTotal = r1(guards.reduce((s, g) => s + g.vacationDaysCharged, 0));
   let conclusion: string;
   if (preferred.length === 0) {
     conclusion =
@@ -460,9 +642,14 @@ export function buildServiceCapacityViability(opts: {
   } else if (slaHsMonth <= 0) {
     conclusion = 'El servicio no genera horas SLA en este mes (fuera de vigencia o sin puestos computables).';
   } else if (gapHs <= 0) {
-    conclusion = `Paquete cubierto: capacidad neta ${capacityNetHs} h ≥ SLA ${slaHsMonth} h. Vacaciones del mes: ${vacMesTotal} d (solo restan V reales, no prorrateo anual).`;
+    conclusion =
+      `Paquete cubierto: neta ${capacityNetHs} h ≥ SLA ${slaHsMonth} h (holgura ${holguraHs} h). ` +
+      `Objetivo ${coverageProfile.label}; tope ${WEEKLY_CAP_HS} h/sem + descanso ciclo; ` +
+      `vacaciones cobradas ${vacChargeTotal} d (pendiente repartido hasta 31/12, no los 14 de golpe).`;
   } else {
-    conclusion = `Faltan ${horasPerdidas} h: SLA ${slaHsMonth} h vs capacidad ${capacityNetHs} h. Vacaciones del mes: ${vacMesTotal} d.`;
+    conclusion =
+      `Hs perdidas ${horasPerdidas} h (SLA ${slaHsMonth} − neta ${capacityNetHs}). ` +
+      `Objetivo ${coverageProfile.label}; vacaciones cobradas ${vacChargeTotal} d (cuota del pendiente hasta 31/12).`;
   }
 
   return {
@@ -470,6 +657,8 @@ export function buildServiceCapacityViability(opts: {
     month,
     daysInMonth: days,
     techoHs: CCT_HS_TECHO_MENSUAL,
+    weeklyCapHs: WEEKLY_CAP_HS,
+    coverageProfile,
     slaHsMonth,
     plantilla: preferred.length,
     capacityBrutaHs,
@@ -478,6 +667,7 @@ export function buildServiceCapacityViability(opts: {
     ratioPct,
     gapHs,
     horasPerdidas,
+    holguraHs,
     ausentismo: {
       prevYear: prev.year,
       prevMonth: prev.month,

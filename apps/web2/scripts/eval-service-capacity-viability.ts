@@ -6,6 +6,7 @@ import './eval-bootstrap-env';
 import {
   buildServiceCapacityViability,
   vacationCalendarDaysBySeniority,
+  vacationChargeDaysForMonth,
   yearsSeniorityAt,
 } from '../src/lib/servicios/serviceCapacityViability';
 import { buildServiceObjectiveMonthReport } from '../src/lib/servicios/serviceObjectiveMonthReport';
@@ -76,12 +77,13 @@ assert(cap.slaHsMonth > 0, `slaHsMonth>0 got ${cap.slaHsMonth}`);
 assert(cap.guards[0].scheme === WorkScheme.SixTwo, 'esquema 6x2 para M/N');
 assert(cap.guards.every((g) => g.netHs <= 200), 'neta ≤ 200');
 assert(cap.horasPerdidas === Math.max(0, cap.gapHs), 'horasPerdidas = max(0, gap)');
-assert(cap.guards.every((g) => g.vacationHsMonth === 0), 'sin V en mes → VAC mes 0');
-assert(cap.guards.every((g) => g.vacationDaysPending === g.vacationDaysYear), 'sin tomadas → pend = derecho');
+assert(typeof cap.holguraHs === 'number', 'holguraHs definido');
+assert(cap.guards.every((g) => g.vacationDaysCharged > 0), 'pendiente se reparte → VAC cobrada > 0');
+assert(cap.guards.every((g) => g.vacationDaysCharged < g.vacationDaysPending), 'no cobra los 14 de golpe');
 assert(cap.ausentismo.modo === 'sin_indice', 'sin historial → sin_indice');
-console.log('  SLA', cap.slaHsMonth, 'neta', cap.capacityNetHs, 'ratio', cap.ratioPct);
+console.log('  SLA', cap.slaHsMonth, 'neta', cap.capacityNetHs, 'perfil', cap.coverageProfile.label);
 
-// V autorizadas en el mes restan capacidad real
+// V autorizadas en el mes restan al menos esos días
 {
   const withVac = buildServiceCapacityViability({
     service,
@@ -102,7 +104,21 @@ console.log('  SLA', cap.slaHsMonth, 'neta', cap.capacityNetHs, 'ratio', cap.rat
   assert(g.vacationDaysInMonth === 7, `VAC mes 7d got ${g.vacationDaysInMonth}`);
   assert(g.vacationDaysTakenYtd === 7, `tomadas YTD 7 got ${g.vacationDaysTakenYtd}`);
   assert(g.vacationDaysPending === g.vacationDaysYear - 7, 'pend = der - tom');
-  assert(g.vacationHsMonth === 7 * 8, `VAC hs ${g.vacationHsMonth}`);
+  assert(g.vacationDaysCharged >= 7, `cobrada ≥ 7 got ${g.vacationDaysCharged}`);
+}
+
+// Reserva pendiente sin V en mes (ago: 31/153 * 14)
+{
+  const { chargeDays, reserveProrated, daysLeftInYear } = vacationChargeDaysForMonth({
+    pendingDays: 14,
+    actualVacDaysInMonth: 0,
+    daysInMonth: 31,
+    year: 2026,
+    monthIndex0: 7,
+  });
+  assert(daysLeftInYear === 153, `días resto año ago→dic ${daysLeftInYear}`);
+  assert(Math.abs(reserveProrated - (14 * 31) / 153) < 0.01, 'reserva = 14*31/153');
+  assert(Math.abs(chargeDays - reserveProrated) < 0.01, 'sin V reales cobra reserva');
 }
 
 // preferredObjectiveId = id del documento SLA (como en Planificación)
