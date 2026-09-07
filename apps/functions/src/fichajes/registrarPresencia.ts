@@ -254,6 +254,61 @@ export async function registrarPresencia(
 
   await shiftRef.update(incomingPatch);
 
+  // Notificación de confirmación al guardia (no bloqueante)
+  void (async () => {
+    try {
+      const isPortal = source === 'PORTAL_GPS';
+      const title = isPortal ? 'Presente registrado' : 'Operador registró tu ingreso';
+      const body = isPortal
+        ? `Tu ingreso en ${shiftData.objectiveName || 'el puesto'} fue confirmado.`
+        : `${actorName || 'El operador'} registró tu ingreso en ${shiftData.objectiveName || 'el puesto'}.`;
+      const notifType = 'CHECKIN_CONFIRMADO';
+
+      const notifRef = await db.collection('user_notifications').add({
+        type: notifType,
+        title,
+        body,
+        employeeId: empId || null,
+        userId: empId || null,
+        shiftId,
+        objectiveId: shiftData.objectiveId || null,
+        objectiveName: shiftData.objectiveName || null,
+        empresaId: shiftData.empresaId || null,
+        read: false,
+        readAt: null,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      // FCM push (solo si la app no está abierta)
+      const [byEmp, byUid] = await Promise.all([
+        empId ? db.collection('device_tokens').where('employeeId', '==', empId).get() : Promise.resolve({ docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] }),
+        (async () => {
+          if (!empId) return { docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] };
+          const empDoc = await db.collection('empleados').doc(empId).get();
+          const uid = empDoc.data()?.uid;
+          if (!uid) return { docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] };
+          return db.collection('device_tokens').where('uid', '==', uid).get();
+        })(),
+      ]);
+      const tokenSet = new Set<string>();
+      [...byEmp.docs, ...byUid.docs].forEach((d) => {
+        const t = d.data()?.token;
+        if (typeof t === 'string' && t.length > 10) tokenSet.add(t);
+      });
+      const tokens = Array.from(tokenSet);
+      if (tokens.length > 0) {
+        const link = `/empleado/dashboard?notif=${notifRef.id}`;
+        await admin.messaging().sendEachForMulticast({
+          data: { type: notifType, title, body, shiftId, notificationId: notifRef.id, link },
+          webpush: { headers: { Urgency: 'normal' }, fcmOptions: { link } },
+          tokens,
+        });
+      }
+    } catch (e) {
+      console.warn('[registrarPresencia] notifyPresenceConfirmed:', (e as Error)?.message);
+    }
+  })();
+
   // Novedad ingreso (no bloqueante)
   void db
     .collection('novedades')

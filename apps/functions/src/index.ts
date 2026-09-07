@@ -3059,8 +3059,7 @@ export const detectarAusencias = functions
       const elapsedMin = (nowMs - startMs) / 60000;
 
       // â"€â"€ AUSENTE: T+30 sin marcar presente → ausencia automÃ¡tica AA â"€â"€
-      // T+60: guardia tiene 60 min para marcar presencia antes de ser marcado AA
-      if (elapsedMin >= 60) {
+      if (elapsedMin >= 30) {
         // Evitar procesar dos veces — pero antes corregir fecha si hay ausencia con fecha incorrecta
         if (shift.absenceDetectedAt) {
           // Corrección retroactiva: turnos nocturnos cuya ausencia fue guardada con fecha UTC en vez de UTC-3

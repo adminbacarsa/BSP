@@ -685,6 +685,34 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         })
         .slice(0, 12);
 
+    // RET pasivos: mismo objetivo, turno con code='RET' hoy, en standby
+    const retPasivos = logic.processedData
+        .filter((s: any) => {
+            if (s.isCompleted || s.isPresent) return false;
+            if ((s.code || '').toUpperCase() !== 'RET') return false;
+            if (s.objectiveId !== absenceShift.objectiveId) return false;
+            if (!isSameDay(s.shiftDateObj, now)) return false;
+            return true;
+        })
+        .map((s: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+            return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '' };
+        });
+
+    // ESC: mismo objetivo, turno con code='ESC' hoy, redirigible al puesto
+    const escuelas = logic.processedData
+        .filter((s: any) => {
+            if (s.isCompleted) return false;
+            if ((s.code || '').toUpperCase() !== 'ESC') return false;
+            if (s.objectiveId !== absenceShift.objectiveId) return false;
+            if (!isSameDay(s.shiftDateObj, now)) return false;
+            return true;
+        })
+        .map((s: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+            return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '' };
+        });
+
     const openLocalWA = (item: any) => {
         const nombre = item.employeeName || item.fullName || '';
         const ph = item.phone || item.celular || '';
@@ -854,6 +882,70 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         finally { setLoading(null); }
     };
 
+    const handleActivateRet = async (s: any) => {
+        setLoading('retpas_' + s.id);
+        try {
+            const batch = writeBatch(db);
+            batch.update(doc(db, 'turnos', s.id), {
+                isRetentionActivated: true,
+                activatedForAbsenceId: absenceShift.id,
+                activatedAt: serverTimestamp(),
+                activatedBy: 'OPERACIONES',
+            });
+            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({
+                userId: s.employeeId, type: 'RET_ACTIVADO', title: 'Retén activado',
+                read: false,
+                body: `Procedé al puesto ${absenceShift.positionName} en ${absenceShift.objectiveName} — retención activada.`,
+                objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+                shiftId: s.id, createdAt: serverTimestamp(),
+            }, tenantId(s)));
+            markCoverageResolved(batch, 'RET_PASIVO', s);
+            await batch.commit();
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({
+                type: 'RET_ACTIVADO', title: 'Retén pasivo activado', status: 'pending',
+                employeeId: s.employeeId, employeeName: s.employeeName || s.fullName,
+                objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+                shiftId: s.id, description: `${s.employeeName || s.fullName} activado (RET) en ${absenceShift.objectiveName}`,
+                createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+            }, tenantId(s)));
+            toast.success(`${s.employeeName || s.fullName} activado como retén`);
+            onClose();
+        } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+        finally { setLoading(null); }
+    };
+
+    const handleActivateEsc = async (s: any) => {
+        setLoading('esc_' + s.id);
+        try {
+            const batch = writeBatch(db);
+            batch.update(doc(db, 'turnos', s.id), {
+                isEscRedirected: true,
+                redirectedForAbsenceId: absenceShift.id,
+                redirectedAt: serverTimestamp(),
+                redirectedBy: 'OPERACIONES',
+            });
+            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({
+                userId: s.employeeId, type: 'ESC_REDIRIGIDO', title: 'Escuela redirigida',
+                read: false,
+                body: `Tu turno de escuela fue redirigido al puesto ${absenceShift.positionName} en ${absenceShift.objectiveName}.`,
+                objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+                shiftId: s.id, createdAt: serverTimestamp(),
+            }, tenantId(s)));
+            markCoverageResolved(batch, 'ESCUELA', s);
+            await batch.commit();
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({
+                type: 'ESC_REDIRIGIDO', title: 'Escuela redirigida al puesto', status: 'pending',
+                employeeId: s.employeeId, employeeName: s.employeeName || s.fullName,
+                objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+                shiftId: s.id, description: `${s.employeeName || s.fullName} redirigido desde ESC en ${absenceShift.objectiveName}`,
+                createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+            }, tenantId(s)));
+            toast.success(`${s.employeeName || s.fullName} redirigido desde escuela`);
+            onClose();
+        } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+        finally { setLoading(null); }
+    };
+
     const handlePermuta = async () => {
         if (!swapConfirm) return;
         setSwapLoading(true);
@@ -940,17 +1032,25 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                             empty="No hay turno próximo planificado."
                             items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleAdelantar(s)} label="ADELANTAR" color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}
                         />
-                        <CoverageSection num="3" title="Retenes · Sin turno hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
-                            empty="No hay retenes disponibles."
+                        <CoverageSection num="3" title="Retención Pasiva · Guardia en standby (RET)" colorClass="text-amber-700" badgeClass="bg-amber-500"
+                            empty="No hay guardias en retención pasiva en este objetivo."
+                            items={retPasivos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'retpas_'+s.id} onAction={()=>handleActivateRet(s)} label="ACTIVAR" color="bg-amber-500 hover:bg-amber-600" loading={loading} onWA={openLocalWA}/>)}
+                        />
+                        <CoverageSection num="4" title="Escuela · Redirigir turno ESC al puesto" colorClass="text-teal-700" badgeClass="bg-teal-500"
+                            empty="No hay turnos de escuela disponibles para redirigir."
+                            items={escuelas.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'esc_'+s.id} onAction={()=>handleActivateEsc(s)} label="REDIRIGIR" color="bg-teal-600 hover:bg-teal-700" loading={loading} onWA={openLocalWA}/>)}
+                        />
+                        <CoverageSection num="5" title="Sin Turno · Disponibles hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
+                            empty="No hay guardias disponibles sin turno asignado."
                             items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleReten(e)} label="CONVOCAR" color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}
                         />
-                        <CoverageSection num="4" title="Francos · Día libre" colorClass="text-blue-700" badgeClass="bg-blue-500"
+                        <CoverageSection num="6" title="Francos · Día libre (FT)" colorClass="text-blue-700" badgeClass="bg-blue-500"
                             empty="No hay francos disponibles hoy."
                             items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleFranco(s)} label="CONVOCAR FT" color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
                         />
                         {/* Permuta — solo cuando hay guardia ausente real */}
                         {hasRealAbsentEmployee && (
-                            <CoverageSection num="5" title="Permuta · Intercambio de turno" colorClass="text-violet-700" badgeClass="bg-violet-500"
+                            <CoverageSection num="7" title="Permuta · Intercambio de turno" colorClass="text-violet-700" badgeClass="bg-violet-500"
                                 empty="No hay turnos disponibles para permuta en los próximos 7 días."
                                 items={permutaCandidates.map((s: any) => (
                                     <div key={s.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-violet-50 border border-violet-100 rounded-xl">
