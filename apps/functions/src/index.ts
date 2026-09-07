@@ -1781,11 +1781,6 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
 
         const shiftData = shiftSnap.data() as any;
 
-        const cc = await loadCentroControlState(db);
-        if (!cc.isEnabled(shiftData.empresaId)) {
-            return { success: true, skipped: 'centro_control_off' };
-        }
-
         await shiftRef.update({
             lateArrivalAt: now,
             checkInStatus: 'LATE_PENDING',
