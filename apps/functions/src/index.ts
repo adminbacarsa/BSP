@@ -23,6 +23,7 @@ import {
   isAdminBackupRole,
 } from './backup/backup-auth.util';
 import { createNestApp } from './main';
+import { iniciarCascadaCobertura, simularRespuestasConvocatorias } from './coverage/convocatoriasCobertura';
 import { INestApplicationContext } from '@nestjs/common';
 
 // Servicios expuestos por NestJS
@@ -904,6 +905,7 @@ async function runModoDemoForEmpresa(
   // Guarda con hash % 10 === 0 que lleva >5 min sin presentarse → marcarlo ausente
   let ausenciasDemo = 0;
   const ABSENT_MIN_MS = 5 * 60 * 1000;
+  const newlyAbsentShifts: any[] = []; // Pase 1c: iniciar cascada post-commit
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
@@ -926,6 +928,7 @@ async function runModoDemoForEmpresa(
       employeeName: t.employeeName || null, positionName: t.positionName || null,
       empresaId, createdAt: nowTs, reportedBy: 'MODO_DEMO', source: 'MODO_DEMO', modoDemoAt: nowTs,
     });
+    newlyAbsentShifts.push({ id: doc.id, ...t });
     ausenciasDemo++;
   }
 
@@ -975,6 +978,24 @@ async function runModoDemoForEmpresa(
   // Commit pases 1-5 + 1b
   if (presencias + cierres + absentClean + vacResueltas + reportadosPlan + ausenciasDemo > 0) {
     await batch.commit();
+
+    // === Pase 1c: Iniciar cascada de cobertura para ausencias recién detectadas ===
+    if (newlyAbsentShifts.length > 0) {
+      Promise.all(newlyAbsentShifts.map(s =>
+        iniciarCascadaCobertura(db, {
+          id: s.id,
+          objectiveId: String(s.objectiveId || ''),
+          objectiveName: String(s.objectiveName || ''),
+          clientId: String(s.clientId || ''),
+          clientName: String(s.clientName || ''),
+          code: String(s.code || ''),
+          startTime: s.startTime,
+          endTime: s.endTime,
+          empresaId,
+        }).catch(e => console.warn('[modoDemoCron] iniciarCascada error:', (e as Error)?.message))
+      )).catch(() => {});
+    }
+
     // Descartar novedades de retención (fire-and-forget)
     snap.docs.forEach(doc => {
       const t = doc.data() as any;
@@ -1156,7 +1177,15 @@ async function runModoDemoForEmpresa(
     console.warn('[modoDemoCron] pase6-7 error:', (e67 as Error)?.message);
   }
 
-  return { presencias, cierres, absentClean, vacResueltas, reportadosPlan, ausenciasDemo, autoAsignados, ftCreados } as any;
+  // === Pase 8: Simular respuestas de guardias a convocatorias (MODO DEMO) ===
+  let convRespuestas = 0;
+  try {
+    convRespuestas = await simularRespuestasConvocatorias(db, empresaId);
+  } catch (e8) {
+    console.warn('[modoDemoCron] pase8 error:', (e8 as Error)?.message);
+  }
+
+  return { presencias, cierres, absentClean, vacResueltas, reportadosPlan, ausenciasDemo, autoAsignados, ftCreados, convRespuestas } as any;
 }
 
 export const modoDemoCron = functions
@@ -1170,8 +1199,8 @@ export const modoDemoCron = functions
       try {
         const res = await runModoDemoForEmpresa(db, empDoc.id);
         const r = res as any;
-        if (res.presencias + res.cierres + (r.vacResueltas||0) + (r.autoAsignados||0) + (r.ftCreados||0) > 0) {
-          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} cierre=${res.cierres} cleanAbs=${r.absentClean??0} vac=${r.vacResueltas??0} plan=${r.reportadosPlan??0} absDemo=${r.ausenciasDemo??0} auto=${r.autoAsignados??0} ft=${r.ftCreados??0}`);
+        if (res.presencias + res.cierres + (r.vacResueltas||0) + (r.autoAsignados||0) + (r.ftCreados||0) + (r.convRespuestas||0) > 0) {
+          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} cierre=${res.cierres} cleanAbs=${r.absentClean??0} vac=${r.vacResueltas??0} plan=${r.reportadosPlan??0} absDemo=${r.ausenciasDemo??0} auto=${r.autoAsignados??0} ft=${r.ftCreados??0} conv=${r.convRespuestas??0}`);
         }
       } catch (e) {
         console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);

@@ -812,6 +812,132 @@ export const getCandidatosCobertura = functions
     return { candidates: results };
   });
 
+// ─── MODO DEMO: arrancar cascada desde step 0 para un turno ausente ──────────
+
+export interface ShiftDataForCascade {
+  id: string;
+  objectiveId: string;
+  objectiveName?: string;
+  clientId?: string;
+  clientName?: string;
+  code?: string;
+  startTime: Timestamp;
+  endTime?: Timestamp;
+  empresaId: string;
+}
+
+export async function iniciarCascadaCobertura(
+  db: admin.firestore.Firestore,
+  shift: ShiftDataForCascade,
+): Promise<void> {
+  // Si ya hay una convocatoria activa para este turno, no crear otra
+  const existing = await db.collection('convocatorias_cobertura')
+    .where('shiftId', '==', shift.id)
+    .where('status', 'in', ['PENDING', 'ESCALATED'])
+    .limit(1)
+    .get();
+  if (!existing.empty) return;
+
+  const baseConvData: ConvocatoriaCoberturaDoc = {
+    empresaId: shift.empresaId,
+    shiftId: shift.id,
+    objectiveId: String(shift.objectiveId || ''),
+    objectiveName: String(shift.objectiveName || ''),
+    clientId: String(shift.clientId || ''),
+    clientName: String(shift.clientName || ''),
+    shiftCode: String(shift.code || ''),
+    startTime: shift.startTime,
+    endTime: shift.endTime,
+    aptitudesRequeridas: [],
+    type: 'RET',
+    urgency: getUrgency(shift.startTime),
+    cascadeStep: 0,
+    candidateEmployeeId: '',
+    candidateEmployeeName: '',
+    status: 'PENDING',
+    timeoutAt: Timestamp.now(),
+    createdAt: Timestamp.now(),
+    createdBy: 'MODO_DEMO',
+  };
+
+  // Iterar la cascada desde el primer paso hasta encontrar candidato
+  for (const type of CASCADE_ORDER) {
+    if (type === 'FT') {
+      await dispararBroadcastFT(db, baseConvData);
+      return;
+    }
+    const candidate = await findBestCandidate(db, baseConvData, type);
+    if (!candidate) continue;
+
+    await crearConvocatoriaDoc(db, {
+      ...baseConvData,
+      type,
+      cascadeStep: CASCADE_ORDER.indexOf(type),
+      candidateEmployeeId: candidate.id,
+      candidateEmployeeName: candidate.name,
+      candidateUid: candidate.uid,
+      ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
+      ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
+      createdBy: 'MODO_DEMO',
+    });
+    return;
+  }
+
+  // Sin candidatos en ningún paso
+  await db.collection('novedades').add({
+    type: 'VACANTE_SIN_COBERTURA',
+    shiftId: shift.id,
+    objectiveId: shift.objectiveId,
+    objectiveName: shift.objectiveName || '',
+    empresaId: shift.empresaId,
+    message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (MODO DEMO).`,
+    resolved: false,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
+// ─── MODO DEMO: simular respuestas de guardias a convocatorias ────────────────
+
+export async function simularRespuestasConvocatorias(
+  db: admin.firestore.Firestore,
+  empresaId: string,
+): Promise<number> {
+  const THINK_TIME_MS = 90 * 1000; // guardia "piensa" 90 s antes de responder
+  const now = Timestamp.now();
+  const cutoffMs = now.toMillis() - THINK_TIME_MS;
+
+  const snap = await db.collection('convocatorias_cobertura')
+    .where('empresaId', '==', empresaId)
+    .where('status', 'in', ['PENDING', 'ESCALATED'])
+    .limit(50)
+    .get();
+
+  let respondidas = 0;
+  for (const convDoc of snap.docs) {
+    const conv = convDoc.data() as ConvocatoriaCoberturaDoc;
+    const createdMs = conv.createdAt instanceof Timestamp ? conv.createdAt.toMillis() : 0;
+    if (createdMs > cutoffMs) continue; // aún en el tiempo de "pensado"
+
+    // Determinístico por id: chars % 10 → 0-7 acepta (80%), 8-9 rechaza (20%)
+    const hashVal = convDoc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
+    const accept = hashVal <= 7;
+
+    try {
+      if (accept) {
+        await convDoc.ref.update({ status: 'ACCEPTED', respondedAt: now, respondedBy: 'MODO_DEMO' });
+        await resolverCobertura(db, { ...conv, id: convDoc.id });
+      } else {
+        await convDoc.ref.update({ status: 'REJECTED', respondedAt: now, rejectionReason: 'MODO_DEMO_AUTO', respondedBy: 'MODO_DEMO' });
+        await avanzarCascada(db, { ...conv, id: convDoc.id }, 'REJECTED');
+      }
+      respondidas++;
+    } catch (e) {
+      console.warn('[simularRespuestasConvocatorias]', convDoc.id, (e as Error)?.message);
+    }
+  }
+  return respondidas;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SCHEDULER: checkConvocatoriaTimeouts
 // Cada 5 min: detecta convocatorias PENDING vencidas y avanza la cascada.
