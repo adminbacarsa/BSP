@@ -852,14 +852,18 @@ async function runModoDemoForEmpresa(
   const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
 
   // === Pase 1: Marcar presentes con fichada ===
-  // 80% puntuales (ventana [-15,+5]), 20% llegan tarde +12 min (hash determinístico del employeeId)
+  // Hash determinístico: 60% puntuales [-15,+5], 30% llegan tarde +12 min, 10% ausentes (Pase 1b)
   const WINDOW_BEFORE_MS = 15 * 60 * 1000;
   const WINDOW_AFTER_MS  =  5 * 60 * 1000;
   const LATE_DELAY_MS    = 12 * 60 * 1000;
-  const isLateArrival = (empId: string): boolean => {
+  type ShiftCat = 'puntual' | 'late' | 'absent';
+  const shiftCategory = (empId: string): ShiftCat => {
     let h = 0;
     for (let i = 0; i < empId.length; i++) h = (h * 31 + empId.charCodeAt(i)) & 0xFFFFFF;
-    return (h % 5) === 0; // ~20%
+    const m = h % 10;
+    if (m === 0) return 'absent'; // 10%
+    if (m <= 3)  return 'late';   // 30%
+    return 'puntual';             // 60%
   };
   for (const doc of snap.docs) {
     const t = doc.data() as any;
@@ -867,13 +871,24 @@ async function runModoDemoForEmpresa(
     if (t.isAbsent || t.isPresent || t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
     const empId = String(t.employeeId || '');
-    const late = isLateArrival(empId);
+    const cat = shiftCategory(empId);
     const oid = String(t.objectiveId || '');
-    if (late) {
+    if (cat === 'absent') continue; // se procesa en Pase 1b
+    if (cat === 'late') {
       if (startMs > now.getTime() + 10 * 60 * 1000) continue;
       if (startMs < now.getTime() - 15 * 60 * 1000) continue;
       const lateTs = admin.firestore.Timestamp.fromMillis(startMs + LATE_DELAY_MS);
       batch.update(doc.ref, { isPresent: true, presentAt: lateTs, realStartTime: lateTs, autoPresencia: true, llegadaTarde: true, modoDemoAt: nowTs });
+      // Novedad LLEGADA_TARDE directamente (useAutoMonitor la omite porque isPresent ya es true)
+      const novRef = db.collection('novedades').doc();
+      batch.set(novRef, {
+        type: 'LLEGADA_TARDE', status: 'pending', title: 'Llegada Tarde',
+        description: `${t.employeeName || 'Guardia'} llegó ${LATE_DELAY_MS / 60000} min tarde — ${t.objectiveName || ''}`,
+        shiftId: doc.id, clientId: t.clientId || null, objectiveId: oid || null,
+        objectiveName: t.objectiveName || null, employeeId: empId || null,
+        employeeName: t.employeeName || null, positionName: t.positionName || null,
+        empresaId, createdAt: nowTs, reportedBy: 'SISTEMA_AUTO', source: 'MODO_DEMO', modoDemoAt: nowTs,
+      });
     } else {
       if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue;
       if (startMs < now.getTime() - WINDOW_AFTER_MS) continue;
@@ -883,6 +898,35 @@ async function runModoDemoForEmpresa(
     const idx = byObj.get(oid);
     const entry = idx?.find(r => r.shiftId === doc.id);
     if (entry) entry.isPresent = true;
+  }
+
+  // === Pase 1b: Simular ausencias (bucket 'absent') ===
+  // Guarda con hash % 10 === 0 que lleva >5 min sin presentarse → marcarlo ausente
+  let ausenciasDemo = 0;
+  const ABSENT_MIN_MS = 5 * 60 * 1000;
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (t.isAbsent || t.isPresent || t.isCompleted) continue;
+    const startMs = (t.startTime?.seconds ?? 0) * 1000;
+    if (startMs > now.getTime() - ABSENT_MIN_MS) continue; // turno empezó hace <5 min → esperar
+    const empId = String(t.employeeId || '');
+    if (shiftCategory(empId) !== 'absent') continue;
+    batch.update(doc.ref, {
+      isAbsent: true, status: 'ABSENT', absenceType: 'AA',
+      absenceDetectedAt: nowTs, absenceDetectedBy: 'MODO_DEMO', modoDemoAt: nowTs,
+    });
+    // Novedad AUSENCIA_AUTO — alimenta el globito del sidebar
+    const novRef = db.collection('novedades').doc();
+    batch.set(novRef, {
+      type: 'AUSENCIA_AUTO', status: 'pending', title: 'Ausencia Automática (Demo)',
+      description: `${t.employeeName || 'Empleado'} no se presentó — ${t.objectiveName || ''} (MODO DEMO)`,
+      shiftId: doc.id, clientId: t.clientId || null, objectiveId: t.objectiveId || null,
+      objectiveName: t.objectiveName || null, employeeId: empId || null,
+      employeeName: t.employeeName || null, positionName: t.positionName || null,
+      empresaId, createdAt: nowTs, reportedBy: 'MODO_DEMO', source: 'MODO_DEMO', modoDemoAt: nowTs,
+    });
+    ausenciasDemo++;
   }
 
   // Pase 2: cerrar salientes — usa endTime del turno (no nowTs) para que el egreso sea correcto
@@ -928,8 +972,8 @@ async function runModoDemoForEmpresa(
     reportadosPlan++;
   }
 
-  // Commit pases 1-5
-  if (presencias + cierres + absentClean + vacResueltas + reportadosPlan > 0) {
+  // Commit pases 1-5 + 1b
+  if (presencias + cierres + absentClean + vacResueltas + reportadosPlan + ausenciasDemo > 0) {
     await batch.commit();
     // Descartar novedades de retención (fire-and-forget)
     snap.docs.forEach(doc => {
@@ -1112,7 +1156,7 @@ async function runModoDemoForEmpresa(
     console.warn('[modoDemoCron] pase6-7 error:', (e67 as Error)?.message);
   }
 
-  return { presencias, cierres, absentClean, vacResueltas, reportadosPlan, autoAsignados, ftCreados } as any;
+  return { presencias, cierres, absentClean, vacResueltas, reportadosPlan, ausenciasDemo, autoAsignados, ftCreados } as any;
 }
 
 export const modoDemoCron = functions
@@ -1127,7 +1171,7 @@ export const modoDemoCron = functions
         const res = await runModoDemoForEmpresa(db, empDoc.id);
         const r = res as any;
         if (res.presencias + res.cierres + (r.vacResueltas||0) + (r.autoAsignados||0) + (r.ftCreados||0) > 0) {
-          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} cierre=${res.cierres} cleanAbs=${r.absentClean??0} vac=${r.vacResueltas??0} plan=${r.reportadosPlan??0} auto=${r.autoAsignados??0} ft=${r.ftCreados??0}`);
+          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} cierre=${res.cierres} cleanAbs=${r.absentClean??0} vac=${r.vacResueltas??0} plan=${r.reportadosPlan??0} absDemo=${r.ausenciasDemo??0} auto=${r.autoAsignados??0} ft=${r.ftCreados??0}`);
         }
       } catch (e) {
         console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);

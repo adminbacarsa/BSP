@@ -423,7 +423,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     const q = query(
       collection(db, 'novedades'),
       where('empresaId', '==', empresaId),
-      where('type', '==', 'VACANTE_OPERATIVA'),
+      where('type', 'in', ['VACANTE_OPERATIVA', 'AUSENCIA_AUTO', 'LLEGADA_TARDE']),
       where('status', '==', 'pending'),
     );
     const unsub = onSnapshotFresh(q, snap => {
