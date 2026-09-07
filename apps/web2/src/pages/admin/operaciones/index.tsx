@@ -21,10 +21,11 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, query, where, orderBy, limit, getDocs, waitForPendingWrites } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, query, where, orderBy, limit, getDocs, waitForPendingWrites, onSnapshot } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
-import { db, onSnapshotFresh } from '@/lib/firebase';
+import { app, db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
@@ -594,6 +595,46 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const [noCoverageLoading, setNoCoverageLoading] = useState(false);
     const [swapConfirm, setSwapConfirm] = useState<any>(null);
     const [swapLoading, setSwapLoading] = useState(false);
+    const [pendingConvocatorias, setPendingConvocatorias] = useState<any[]>([]);
+    const [convocatoriaLoading, setConvocatoriaLoading] = useState<string | null>(null);
+
+    // Suscripción en tiempo real a convocatorias pendientes para esta vacante
+    useEffect(() => {
+        if (!isOpen || !absenceShift?.id) { setPendingConvocatorias([]); return; }
+        const q = query(
+            collection(db, 'convocatorias_cobertura'),
+            where('shiftId', '==', absenceShift.id),
+            where('status', '==', 'PENDING'),
+        );
+        const unsub = onSnapshot(q, (snap) => {
+            setPendingConvocatorias(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        }, (err) => console.error('[convocatoria modal]', err));
+        return () => unsub();
+    }, [isOpen, absenceShift?.id]);
+
+    const handleConvocarConvocatoria = async (candidateEmployeeId: string, type: string) => {
+        if (!absenceShift?.id || !empresaId) return;
+        setConvocatoriaLoading(type + '_' + candidateEmployeeId);
+        try {
+            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'crearConvocatoriaCobertura');
+            await fn({ shiftId: absenceShift.id, candidateEmployeeId, type, empresaId });
+            toast.success('Convocatoria enviada — esperando respuesta del guardia');
+        } catch (e: any) {
+            toast.error('Error al convocar: ' + (e?.message || String(e)));
+        } finally {
+            setConvocatoriaLoading(null);
+        }
+    };
+
+    const handleCancelarConvocatoria = async (convId: string) => {
+        try {
+            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'cancelarConvocatoriaCobertura');
+            await fn({ convocatoriaId: convId });
+            toast.info('Convocatoria cancelada');
+        } catch (e: any) {
+            toast.error('Error: ' + (e?.message || String(e)));
+        }
+    };
 
     if (!isOpen || !absenceShift) return null;
     if (absenceShift.isReportedToPlanning && absenceShift.isUnassigned) {
@@ -1037,6 +1078,37 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                         </span>
                     </div>
                     <div className="p-4 overflow-y-auto custom-scrollbar space-y-5 flex-1">
+                        {/* ── Convocatorias en curso ── */}
+                        {pendingConvocatorias.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 space-y-2">
+                                <p className="text-[10px] font-black uppercase text-amber-700 flex items-center gap-1.5">
+                                    <AlarmClock size={11}/> Convocatorias en curso
+                                </p>
+                                {pendingConvocatorias.map((c: any) => {
+                                    const typeLabel: Record<string, string> = { RET: 'RET', VOLANTE: 'Volante', SIN_TURNO_CON_EXP: 'Sin turno', EXTEND: 'Extensión', ADVANCE: 'Adelanto', SIN_TURNO: 'Sin turno', FT: 'FT' };
+                                    const timeoutDate = c.timeoutAt?.seconds ? new Date(c.timeoutAt.seconds * 1000) : null;
+                                    const minsLeft = timeoutDate ? Math.max(0, Math.round((timeoutDate.getTime() - Date.now()) / 60000)) : null;
+                                    return (
+                                        <div key={c.id} className="flex items-center justify-between gap-2 bg-white border border-amber-200 rounded-lg px-3 py-2">
+                                            <div>
+                                                <span className="text-xs font-bold text-slate-800">{c.candidateEmployeeName}</span>
+                                                <span className="text-[10px] text-slate-500 ml-1.5">({typeLabel[c.type] || c.type})</span>
+                                                {minsLeft !== null && (
+                                                    <span className="text-[10px] text-amber-600 ml-1.5 flex-inline">· {minsLeft}m restantes</span>
+                                                )}
+                                            </div>
+                                            <button
+                                                onClick={() => handleCancelarConvocatoria(c.id)}
+                                                className="text-[10px] text-rose-600 hover:text-rose-800 font-bold uppercase px-2 py-1 rounded border border-rose-200 hover:bg-rose-50 transition-colors"
+                                            >
+                                                Cancelar
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+
                         <CoverageSection num="1" title="Retención · Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
                             empty="No hay guardias presentes en este objetivo."
                             items={retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>handleRetener(s)} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}
@@ -1055,11 +1127,11 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                         />
                         <CoverageSection num="5" title="Sin Turno · Disponibles hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
                             empty="No hay guardias disponibles sin turno asignado."
-                            items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleReten(e)} label="CONVOCAR" color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}
+                            items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleConvocarConvocatoria(e.id, 'SIN_TURNO_CON_EXP')} label={convocatoriaLoading === `SIN_TURNO_CON_EXP_${e.id}` ? 'Enviando...' : 'CONVOCAR'} color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}
                         />
                         <CoverageSection num="6" title="Francos · Día libre (FT)" colorClass="text-blue-700" badgeClass="bg-blue-500"
                             empty="No hay francos disponibles hoy."
-                            items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleFranco(s)} label="CONVOCAR FT" color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
+                            items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleConvocarConvocatoria(s.employeeId, 'FT')} label={convocatoriaLoading === `FT_${s.employeeId}` ? 'Enviando...' : 'CONVOCAR FT'} color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
                         />
                         {/* Permuta — solo cuando hay guardia ausente real */}
                         {hasRealAbsentEmployee && (

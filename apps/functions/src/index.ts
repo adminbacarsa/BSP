@@ -1780,6 +1780,14 @@ export {
   rejectSwapRequestSupervisor,
 } from './swap/swapPortal';
 
+export {
+  crearConvocatoriaCobertura,
+  responderConvocatoriaCobertura,
+  cancelarConvocatoriaCobertura,
+  getCandidatosCobertura,
+  checkConvocatoriaTimeouts,
+} from './coverage/convocatoriasCobertura';
+
 export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
 
 // =========================================================
@@ -1960,11 +1968,20 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         const existing = await admin.auth().getUserByEmail(email);
         uid = existing.uid;
         alreadyExisted = true;
+        await admin.auth().setCustomUserClaims(uid, {
+          role: 'employee',
+          type: 'employee',
+          ...(empresaId ? { empresaId } : {}),
+        });
       } catch (e: any) {
         if (e.code === 'auth/user-not-found') {
           const tempPass = Math.random().toString(36).slice(2, 14) + Math.random().toString(36).slice(2, 6).toUpperCase();
           const newUser = await admin.auth().createUser({ email, password: tempPass, displayName: name });
-          await admin.auth().setCustomUserClaims(newUser.uid, { role: 'employee', type: 'employee' });
+          await admin.auth().setCustomUserClaims(newUser.uid, {
+            role: 'employee',
+            type: 'employee',
+            ...(empresaId ? { empresaId } : {}),
+          });
           uid = newUser.uid;
         } else {
           throw e;
@@ -2127,8 +2144,21 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
   const email = userRecord.email;
   if (!email) throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
 
-  // 1. Establecer contraseÃ±a
+  // 1. Establecer contraseña
   await admin.auth().updateUser(uid, { password });
+
+  // Claim empresaId para reglas Firestore (eventos / solicitudes)
+  try {
+    const empSnap = await db.collection('empleados').doc(employeeId).get();
+    const empEmpresaId = (empSnap.data()?.empresaId || '').toString();
+    await admin.auth().setCustomUserClaims(uid, {
+      role: 'employee',
+      type: 'employee',
+      ...(empEmpresaId ? { empresaId: empEmpresaId } : {}),
+    });
+  } catch (e) {
+    console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
+  }
 
   // 2. Marcar token como usado
   await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
@@ -4384,11 +4414,23 @@ export const setEmployeePortalPassword = functions.https.onCall(async (data, con
   } catch (e: any) {
     if (e.code === 'auth/user-not-found') {
       const newUser = await admin.auth().createUser({ email, password, displayName: empName });
-      await admin.auth().setCustomUserClaims(newUser.uid, { role: 'employee', type: 'employee' });
+      await admin.auth().setCustomUserClaims(newUser.uid, {
+        role: 'employee',
+        type: 'employee',
+        ...(empresaId ? { empresaId } : {}),
+      });
       uid = newUser.uid;
     } else {
       throw e;
     }
+  }
+
+  if (alreadyExisted) {
+    await admin.auth().setCustomUserClaims(uid, {
+      role: 'employee',
+      type: 'employee',
+      ...(empresaId ? { empresaId } : {}),
+    });
   }
 
   await db.collection('empleados').doc(employeeId).update({

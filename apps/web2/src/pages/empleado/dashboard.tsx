@@ -312,6 +312,8 @@ export default function EmployeeDashboard() {
   const [swapPeopleList, setSwapPeopleList] = useState<{ key: string; name: string }[]>([]);
   const [swapRequests, setSwapRequests] = useState<any[]>([]);
   const [swapBusy, setSwapBusy] = useState(false);
+  const [convocatoriasCobertura, setConvocatoriasCobertura] = useState<any[]>([]);
+  const [convBusy, setConvBusy] = useState(false);
   const [swapSearched, setSwapSearched] = useState(false);
   const [swapSearch, setSwapSearch] = useState('');
   const [swapPersonKey, setSwapPersonKey] = useState('');
@@ -726,6 +728,35 @@ export default function EmployeeDashboard() {
       );
     });
     return () => { active = false; unsub1?.(); unsub2?.(); };
+  }, [user?.uid]);
+
+  // ── Convocatorias de cobertura operativa ─────────────────────────────────
+  useEffect(() => {
+    if (!user?.uid) return;
+    let active = true;
+    const resolveId = async () => {
+      const byUid = await getDocs(query(collection(db, 'empleados'), where('uid', '==', user.uid)));
+      return byUid.empty ? user.uid : byUid.docs[0].id;
+    };
+    let unsub: (() => void) | undefined;
+    resolveId().then((empId) => {
+      if (!active || !empId) return;
+      unsub = onSnapshot(
+        query(
+          collection(db, 'convocatorias_cobertura'),
+          where('candidateEmployeeId', '==', empId),
+          where('status', '==', 'PENDING'),
+          orderBy('createdAt', 'desc'),
+          limit(10),
+        ),
+        (snap) => {
+          if (!active) return;
+          setConvocatoriasCobertura(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        },
+        (err) => console.error('[convocatorias_cobertura]', err),
+      );
+    });
+    return () => { active = false; unsub?.(); };
   }, [user?.uid]);
 
   useEffect(() => {
@@ -1706,6 +1737,21 @@ export default function EmployeeDashboard() {
       addToast('No se pudo confirmar', 'error');
     } finally {
       setSwapBusy(false);
+    }
+  };
+
+  const handleResponderConvocatoria = async (convocatoriaId: string, response: 'ACCEPTED' | 'REJECTED') => {
+    if (!user) return;
+    setConvBusy(true);
+    try {
+      const callable = httpsCallable(functions, 'responderConvocatoriaCobertura');
+      await callable({ convocatoriaId, response });
+      addToast(response === 'ACCEPTED' ? '¡Confirmaste la cobertura!' : 'Rechazaste la convocatoria', response === 'ACCEPTED' ? 'success' : 'info');
+    } catch (e: any) {
+      console.error(e);
+      addToast(e?.message || 'Error al responder la convocatoria', 'error');
+    } finally {
+      setConvBusy(false);
     }
   };
 
@@ -3080,6 +3126,65 @@ export default function EmployeeDashboard() {
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ===== CONVOCATORIAS DE COBERTURA OPERATIVA ===== */}
+          {convocatoriasCobertura.length > 0 && (
+            <div className="bg-slate-900 border border-rose-600/50 rounded-2xl p-4">
+              <p className="text-[10px] font-black uppercase text-rose-400 mb-3 flex items-center gap-2">
+                <Bell size={12}/> Convocatoria de cobertura
+              </p>
+              <div className="space-y-3">
+                {convocatoriasCobertura.map((conv: any) => {
+                  const startDate = toDate(conv.startTime);
+                  const timeoutDate = toDate(conv.timeoutAt);
+                  const now = new Date();
+                  const minutesLeft = timeoutDate ? Math.max(0, Math.round((timeoutDate.getTime() - now.getTime()) / 60000)) : null;
+                  const urgencyColor = conv.urgency === 'URGENTE' ? 'text-rose-400' : conv.urgency === 'INTERMEDIO' ? 'text-amber-400' : 'text-sky-400';
+                  const typeLabel: Record<string, string> = {
+                    RET: 'Retención (RET)',
+                    VOLANTE: 'Cobertura volante',
+                    SIN_TURNO_CON_EXP: 'Cobertura disponible',
+                    EXTEND: 'Extensión de jornada',
+                    ADVANCE: 'Adelanto de turno',
+                    SIN_TURNO: 'Cobertura disponible',
+                    FT: 'Franco Trabajado (FT)',
+                  };
+                  return (
+                    <div key={conv.id} className="border border-rose-800/40 rounded-xl p-3 bg-rose-950/20">
+                      <div className={`text-[10px] font-black uppercase mb-1 ${urgencyColor}`}>
+                        {conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? '⚠ INTERMEDIO' : 'NORMAL'} — {typeLabel[conv.type] || conv.type}
+                      </div>
+                      <div className="font-bold text-slate-200 text-sm">{conv.objectiveName || 'Puesto'}</div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        {conv.clientName ? `${conv.clientName} · ` : ''}{conv.shiftCode || ''}{startDate ? ` · ${formatTime(conv.startTime)}` : ''}
+                      </div>
+                      {minutesLeft !== null && minutesLeft > 0 && (
+                        <div className="text-[10px] text-amber-400 mt-1 flex items-center gap-1">
+                          <Clock size={10}/> Tiempo para responder: {minutesLeft} min
+                        </div>
+                      )}
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => handleResponderConvocatoria(conv.id, 'ACCEPTED')}
+                          disabled={convBusy}
+                          className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase disabled:opacity-50 transition-colors"
+                        >
+                          Acepto
+                        </button>
+                        <button
+                          onClick={() => handleResponderConvocatoria(conv.id, 'REJECTED')}
+                          disabled={convBusy}
+                          className="flex-1 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-[11px] font-black uppercase disabled:opacity-50 transition-colors"
+                        >
+                          No puedo
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 

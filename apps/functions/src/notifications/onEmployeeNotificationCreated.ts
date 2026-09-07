@@ -18,6 +18,8 @@ const INBOX_NEEDS_FCM = new Set([
   // Planificación / Operaciones
   'VACANTE_PLANIFICACION',      // vacante — requiere reasignación en planificación
   'VACANTE_OPERACIONES',        // vacante — requiere cobertura operativa urgente
+  // Convocatoria de cobertura operativa (cascada RET → FT)
+  'CONVOCATORIA_COBERTURA',     // llamado a cubrir turno vacante — requiere respuesta en 10 min
 ]);
 
 async function collectTokens(
@@ -94,7 +96,9 @@ export const onEmployeeNotificationCreated = functions
             ? '/admin/planificacion'
             : type === 'VACANTE_OPERACIONES'
               ? '/admin/operaciones'
-              : '/empleado/dashboard'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
+              : type === 'CONVOCATORIA_COBERTURA'
+                ? '/empleado/dashboard'
+                : '/empleado/dashboard'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
 
     try {
       const result = await admin.messaging().sendEachForMulticast({
