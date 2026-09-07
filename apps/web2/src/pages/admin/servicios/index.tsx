@@ -13,10 +13,9 @@ import {
   AlertCircle, Info, Sun, Moon, Activity, RotateCw, CheckCircle, FileText,
   Clock, Layers, Building2, ChevronDown, ChevronRight, LayoutGrid, List, UserCheck, User, Ban
 } from 'lucide-react';
-import { ServiceShiftSchemeModal } from '@/components/servicios/ServiceShiftSchemeModal';
-import { ServiceShiftSchemeIcon } from '@/components/servicios/ServiceShiftSchemeIcon';
+import { ServiceCapacityViabilityModal } from '@/components/servicios/ServiceCapacityViabilityModal';
+import { ServiceCapacityViabilityIcon } from '@/components/servicios/ServiceCapacityViabilityIcon';
 import { EventosPanel } from '@/components/servicios/EventosPanel';
-import { analyzeShiftSchemesForService } from '@/lib/servicios/shiftSchemeAdvisor';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/context/AuthContext';
@@ -2276,13 +2275,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                       </span>
                                     </div>
                                     {(() => {
-                                      const shiftAdvice = analyzeShiftSchemesForService(srv);
                                       return (
-                                        <ServiceShiftSchemeIcon
-                                          hasIssues={
-                                            shiftAdvice.issues.length > 0 || shiftAdvice.soldShiftAnalyses.length > 0
-                                          }
-                                          complexityScore={shiftAdvice.coverComplexity.score}
+                                        <ServiceCapacityViabilityIcon
                                           onOpen={() =>
                                             setShiftModal({
                                               open: true,
@@ -2405,10 +2399,18 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             </div>
           )}
 
-          <ServiceShiftSchemeModal
+          <ServiceCapacityViabilityModal
             open={shiftModal.open}
             onClose={() => setShiftModal({ open: false, service: null })}
             service={shiftModal.service}
+            empresaId={empresaId}
+            preferredEmployees={
+              shiftModal.service && form.objectiveId === shiftModal.service.objectiveId
+                ? coverageEmps
+                : undefined
+            }
+            initialYear={kpiYear}
+            initialMonth={kpiMonth}
           />
           </>)}
         </div>
