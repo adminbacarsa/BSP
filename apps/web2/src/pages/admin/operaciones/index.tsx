@@ -8,7 +8,7 @@ import {
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
-    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle,
+    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, Bell, ChevronLeft, XCircle, Zap,
     FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -601,10 +601,11 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     // Suscripción en tiempo real a convocatorias pendientes para esta vacante
     useEffect(() => {
         if (!isOpen || !absenceShift?.id) { setPendingConvocatorias([]); return; }
+        // PENDING: esperando dentro del timeout · ESCALATED: timeout vencido pero aún activa
         const q = query(
             collection(db, 'convocatorias_cobertura'),
             where('shiftId', '==', absenceShift.id),
-            where('status', '==', 'PENDING'),
+            where('status', 'in', ['PENDING', 'ESCALATED']),
         );
         const unsub = onSnapshot(q, (snap) => {
             setPendingConvocatorias(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -1093,9 +1094,11 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                                             <div>
                                                 <span className="text-xs font-bold text-slate-800">{c.candidateEmployeeName}</span>
                                                 <span className="text-[10px] text-slate-500 ml-1.5">({typeLabel[c.type] || c.type})</span>
-                                                {minsLeft !== null && (
-                                                    <span className="text-[10px] text-amber-600 ml-1.5 flex-inline">· {minsLeft}m restantes</span>
-                                                )}
+                                                {c.status === 'ESCALATED' ? (
+                                                    <span className="text-[10px] text-orange-500 ml-1.5">· esperando aún</span>
+                                                ) : minsLeft !== null && minsLeft > 0 ? (
+                                                    <span className="text-[10px] text-amber-600 ml-1.5">· {minsLeft}m restantes</span>
+                                                ) : null}
                                             </div>
                                             <button
                                                 onClick={() => handleCancelarConvocatoria(c.id)}
@@ -2294,7 +2297,7 @@ export default function OperacionesPage() {
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
     const [authorizedAbsences, setAuthorizedAbsences] = useState<any[]>([]);
-    const [absencesPanelOpen, setAbsencesPanelOpen] = useState(true);
+    const [absencesPanelOpen, setAbsencesPanelOpen] = useState(false);
     // Refresh key: reconecta listeners al volver de background o recuperar red
     const [listenerRefreshKey, setListenerRefreshKey] = useState(0);
     useEffect(() => {
@@ -3783,6 +3786,51 @@ export default function OperacionesPage() {
         { id: 'FRANCOS',   label: 'FRANC',   count: logic.stats.francos,   color: 'text-blue-600' }
     ];
 
+    const mapVisible = !isExternalMap && !mapCollapsed;
+
+    const dayStatusKpi = useMemo(() => {
+        const hasStats = (logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0;
+        if (!hasStats) return null;
+        const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+        const cubiertos = logic.stats.activos + logic.stats.retenidos;
+        const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+        const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : total > 0 ? 0 : 100;
+        const isCrisis = cobertura < 50;
+        const isWarning = cobertura >= 50 && cobertura < 80;
+        const isOk = cobertura >= 80;
+        return {
+            cobertura,
+            cubiertos,
+            total,
+            isCrisis,
+            isWarning,
+            isOk,
+            barColor: isOk ? 'bg-emerald-500' : isWarning ? 'bg-amber-500' : 'bg-rose-500',
+            pctColor: isOk ? 'text-emerald-600' : isWarning ? 'text-amber-600' : 'text-rose-600',
+            bannerBg: isCrisis ? 'bg-rose-50 border-rose-300' : isWarning ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200',
+        };
+    }, [logic.stats]);
+
+    const priorityShiftsForAlerts = useMemo(() => {
+        const now = new Date();
+        const hoy = logic.processedData.filter((s: any) =>
+            isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted),
+        );
+        return hoy.filter((s: any) =>
+            (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco,
+        );
+    }, [logic.processedData]);
+
+    const totalAlertsCount = pendingNovedades.length + priorityShiftsForAlerts.length;
+
+    const coverageHasIssues = useMemo(
+        () => coverageByObjective.some((obj) => {
+            const pct = obj.total > 0 ? Math.round((obj.active / obj.total) * 100) : 0;
+            return pct < 50 || obj.absent > 0 || obj.vacant > 0;
+        }),
+        [coverageByObjective],
+    );
+
     if (!(logic.isStable ?? logic.isReady)) return (
         <DashboardLayout>
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
@@ -3818,120 +3866,37 @@ export default function OperacionesPage() {
                 </div>
             )}
             
-            {/* â"€â"€ Banda Estado del Día â"€â"€ */}
-            {(logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0 && (() => {
-                const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-                const cubiertos = logic.stats.activos + logic.stats.retenidos;
-                // Solo sobre turnos que debieron iniciar (excluye los planificados para más tarde)
-                const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-                const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : total > 0 ? 0 : 100;
-                const isCrisis  = cobertura < 50;
-                const isWarning = cobertura >= 50 && cobertura < 80;
-                const isOk      = cobertura >= 80;
-                const barColor  = isOk ? 'bg-emerald-500' : isWarning ? 'bg-amber-500' : 'bg-rose-500';
-                const pctColor  = isOk ? 'text-emerald-600' : isWarning ? 'text-amber-600' : 'text-rose-600';
-                const bannerBg  = isCrisis ? 'bg-rose-50 border-rose-300' : isWarning ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200';
-                return (
-                    <div className={`mx-2 mb-2 border rounded-xl shadow-sm ${bannerBg}`}>
-                        {/* Fila principal */}
-                        <div className="px-3 py-2 flex flex-wrap items-center gap-2 sm:gap-4">
-                            <div className="flex items-center gap-2">
-                                {isCrisis && <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block shrink-0"/>}
-                                <span className={`text-[10px] font-black uppercase tracking-wider shrink-0 ${isCrisis ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-slate-400'}`}>
-                                    {isCrisis ? 'âš  COBERTURA CRÍTICA' : isWarning ? '▲ ATENCIÓN' : 'Estado del día'}
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-2 flex-1 min-w-[120px]">
-                                <div className="shrink-0">
-                                    <span className={`text-2xl font-black tabular-nums leading-none block ${pctColor}`}>{cobertura}%</span>
-                                    {logic.stats.plan > 0 && (
-                                        <span className="text-[8px] font-bold text-slate-400 leading-none whitespace-nowrap">
-                                            +{logic.stats.plan} en espera
-                                        </span>
-                                    )}
+            <div className="flex flex-col lg:flex-row gap-2 lg:gap-4 p-2 animate-in fade-in relative min-h-0 h-[calc(100vh-120px)] lg:h-[calc(100vh-88px)]">
+                {!isExternalMap && !mapCollapsed && (
+                    <div className="flex-1 min-h-0 max-h-[38%] lg:max-h-none lg:flex-[3] flex flex-col gap-1.5">
+                        {dayStatusKpi && (
+                            <div className={`shrink-0 border rounded-xl shadow-sm px-3 py-1.5 flex items-center gap-2 sm:gap-3 ${dayStatusKpi.bannerBg}`}>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                    {dayStatusKpi.isCrisis && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"/>}
+                                    <span className={`text-[9px] font-black uppercase tracking-wider ${dayStatusKpi.isCrisis ? 'text-rose-600' : dayStatusKpi.isWarning ? 'text-amber-600' : 'text-slate-400'}`}>
+                                        {dayStatusKpi.isCrisis ? 'Crítica' : dayStatusKpi.isWarning ? 'Atención' : 'Estado'}
+                                    </span>
                                 </div>
-                                <div className="flex-1 h-3 bg-white/70 border border-slate-200 rounded-full overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all duration-500 ${barColor} ${isCrisis ? 'animate-pulse' : ''}`} style={{ width: `${cobertura}%` }}/>
+                                <span className={`text-xl font-black tabular-nums leading-none shrink-0 ${dayStatusKpi.pctColor}`}>{dayStatusKpi.cobertura}%</span>
+                                <div className="flex-1 h-2 bg-white/70 border border-slate-200 rounded-full overflow-hidden min-w-[60px]">
+                                    <div className={`h-full rounded-full transition-all duration-500 ${dayStatusKpi.barColor}`} style={{ width: `${dayStatusKpi.cobertura}%` }}/>
                                 </div>
-                            </div>
-                            <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-                                {[
-                                    { label: 'Activos',  val: cubiertos,              cls: isOk ? 'text-emerald-600' : 'text-slate-500', bg: 'bg-emerald-50' },
-                                    { label: 'Vacantes', val: logic.stats.vacantes,   cls: logic.stats.vacantes > 0 ? 'text-rose-600 font-black' : 'text-slate-400', bg: logic.stats.vacantes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
-                                    { label: 'Ausentes', val: logic.stats.ausentes,   cls: logic.stats.ausentes > 0 ? 'text-rose-700 font-black' : 'text-slate-400', bg: logic.stats.ausentes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
-                                    { label: 'Plan',     val: total,                  cls: 'text-slate-600', bg: 'bg-slate-50' },
-                                ].map(m => (
-                                    <div key={m.label} className={`text-center px-2 py-1 rounded-lg ${m.bg}`}>
-                                        <div className={`text-base leading-none ${m.cls}`}>{m.val}</div>
-                                        <div className="text-[8px] text-slate-400 uppercase mt-0.5 font-bold">{m.label}</div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                        {/* Barra de alertas rápidas cuando hay crisis */}
-                        {isCrisis && (logic.stats.vacantes > 0 || logic.stats.ausentes > 0) && (
-                            <div className="px-3 pb-2 flex gap-2 flex-wrap">
-                                {logic.stats.ausentes > 0 && (
-                                    <button onClick={() => logic.setViewTab('AUSENTES' as any)}
-                                        className="flex items-center gap-1.5 px-3 py-2 lg:py-1 bg-rose-600 text-white text-xs lg:text-[10px] font-black rounded-lg hover:bg-rose-700 active:scale-95 transition-colors">
-                                        <AlertTriangle size={13}/> {logic.stats.ausentes} AUSENTES — Gestionar
-                                    </button>
-                                )}
-                                {logic.stats.vacantes > 0 && (
-                                    <button onClick={() => logic.setViewTab('VACANTES' as any)}
-                                        className="flex items-center gap-1.5 px-3 py-2 lg:py-1 bg-rose-100 text-rose-700 border border-rose-300 text-xs lg:text-[10px] font-black rounded-lg hover:bg-rose-200 active:scale-95 transition-colors">
-                                        <UserX size={13}/> {logic.stats.vacantes} VACANTES — Ver
-                                    </button>
-                                )}
+                                <div className="hidden sm:flex items-center gap-2 shrink-0">
+                                    {[
+                                        { label: 'Act', val: dayStatusKpi.cubiertos, cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+                                        { label: 'Vac', val: logic.stats.vacantes, cls: logic.stats.vacantes > 0 ? 'text-rose-600' : 'text-slate-400', bg: logic.stats.vacantes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                        { label: 'Aus', val: logic.stats.ausentes, cls: logic.stats.ausentes > 0 ? 'text-rose-700' : 'text-slate-400', bg: logic.stats.ausentes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                        { label: 'Plan', val: dayStatusKpi.total, cls: 'text-slate-600', bg: 'bg-slate-50' },
+                                    ].map((m) => (
+                                        <div key={m.label} className={`text-center px-1.5 py-0.5 rounded-lg ${m.bg}`}>
+                                            <div className={`text-xs font-black leading-none ${m.cls}`}>{m.val}</div>
+                                            <div className="text-[7px] text-slate-400 uppercase font-bold">{m.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
-                    </div>
-                );
-            })()}
-
-            {/* â"€â"€ GRID COBERTURA POR OBJETIVO (colapsable) â"€â"€ */}
-            {coverageByObjective.length > 0 && (
-                <div className="mx-2 mb-2">
-                    <button onClick={() => setShowCoverageGrid(v => !v)}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 transition-colors text-left">
-                        <Layers size={13} className="text-indigo-500 shrink-0"/>
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex-1">Cobertura por objetivo</span>
-                        <span className="text-[9px] text-slate-400">{coverageByObjective.length} objetivos</span>
-                        <ChevronDown size={12} className={`text-slate-400 transition-transform ${showCoverageGrid ? 'rotate-180' : ''}`}/>
-                    </button>
-                    {showCoverageGrid && (
-                        <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
-                            {coverageByObjective.map(obj => {
-                                const pct = obj.total > 0 ? Math.round((obj.active / obj.total) * 100) : 0;
-                                const hasIssue = obj.absent > 0 || obj.vacant > 0;
-                                const isCrit = pct < 50;
-                                return (
-                                    <div key={obj.objectiveId} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-left ${isCrit ? 'bg-rose-50 border-rose-200' : hasIssue ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-[10px] font-black truncate" style={{ color: isCrit ? '#dc2626' : hasIssue ? '#d97706' : '#1e293b' }}>{obj.name}</p>
-                                            <p className="text-[9px] truncate" style={{ color: 'var(--txt3)' }}>{obj.client}</p>
-                                        </div>
-                                        <div className="text-right shrink-0">
-                                            <p className="text-[11px] font-black" style={{ color: isCrit ? '#dc2626' : hasIssue ? '#d97706' : '#10b981' }}>{pct}%</p>
-                                            <p className="text-[9px]" style={{ color: 'var(--txt3)' }}>{obj.active}/{obj.total}</p>
-                                        </div>
-                                        {hasIssue && (
-                                            <div className="text-[9px] shrink-0 text-right leading-tight">
-                                                {obj.absent > 0 && <div className="text-rose-600 font-bold">{obj.absent}aus</div>}
-                                                {obj.vacant > 0 && <div className="text-amber-600 font-bold">{obj.vacant}vac</div>}
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <div className={`flex flex-col lg:flex-row gap-2 lg:gap-4 p-2 animate-in fade-in relative ${mapCollapsed || isExternalMap ? 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]' : 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]'}`}>
-                {!isExternalMap && !mapCollapsed && (
-                    <div className="flex-1 max-h-[38%] lg:max-h-none lg:flex-[3] bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
+                        <div className="flex-1 min-h-0 bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
                         <OperacionesMap
                             center={[-31.4201, -64.1888]}
                             allObjectives={logic.filteredObjectives}
@@ -3946,6 +3911,7 @@ export default function OperacionesPage() {
                         <div className="absolute top-4 right-4 z-[1000] flex gap-2">
                             <button onClick={() => setMapCollapsed(true)} className="bg-white p-2 rounded-lg shadow hover:bg-slate-100" title="Colapsar mapa"><ChevronLeft size={18} className="text-slate-600"/></button>
                             <button onClick={handleUndockMap} className="hidden lg:flex bg-white p-2 rounded-lg shadow hover:bg-slate-100"><MonitorUp size={18} className="text-indigo-600"/></button>
+                        </div>
                         </div>
                     </div>
                 )}
@@ -3968,7 +3934,7 @@ export default function OperacionesPage() {
                     </>
                 )}
 
-                <div className={`bg-white rounded-xl border border-slate-200 flex flex-col shadow-sm ${isExternalMap || mapCollapsed ? 'w-full' : 'flex-1 lg:flex-[2]'}`}>
+                <div className={`bg-white rounded-xl border border-slate-200 flex flex-col min-h-0 shadow-sm relative ${isExternalMap || mapCollapsed ? 'w-full' : 'flex-1 lg:flex-[2]'}`}>
                     <div className="px-3 pt-2 pb-2 border-b">
                         {/* Fila 1: título + controles */}
                         <div className="flex justify-between items-center mb-1.5">
@@ -3992,98 +3958,32 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {/* Badge MODO DEMO — independiente de la sesión del operador */}
-                        {(empresa as any)?.modoDemoEnabled && (
-                            <div className="rounded-lg px-2 py-1 mb-1 border"
-                                style={{ background: 'rgba(139,92,246,0.07)', borderColor: 'rgba(139,92,246,0.35)' }}>
-                                <div className="flex items-center gap-1.5">
-                                    <span className="relative flex h-2 w-2 shrink-0">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: '#7c3aed' }}/>
-                                        <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: '#7c3aed' }}/>
-                                    </span>
-                                    <span className="text-[10px] font-black uppercase tracking-wide" style={{ color: '#6d28d9' }}>⚡ MODO DEMO</span>
-                                    {!isCCOperator && (
-                                        <button
-                                            className="ml-auto text-[8px] font-black px-1.5 py-0.5 rounded hover:opacity-80 transition-opacity"
-                                            style={{ background: 'rgba(139,92,246,0.2)', color: '#6d28d9' }}
-                                            onClick={async () => {
-                                                try {
-                                                    await updateDoc(doc(db, 'empresas', empresaId!), { modoDemoEnabled: false });
-                                                    toast.success('Modo demo desactivado');
-                                                } catch (e) {
-                                                    console.error(e);
-                                                    toast.error('No se pudo desactivar');
-                                                }
-                                            }}
-                                        >Desactivar</button>
-                                    )}
+                        {!mapVisible && dayStatusKpi && (
+                            <div className={`mb-1.5 shrink-0 border rounded-lg px-2 py-1 flex items-center gap-2 ${dayStatusKpi.bannerBg}`}>
+                                <span className={`text-lg font-black tabular-nums leading-none shrink-0 ${dayStatusKpi.pctColor}`}>{dayStatusKpi.cobertura}%</span>
+                                <div className="flex-1 h-1.5 bg-white/70 border border-slate-200 rounded-full overflow-hidden">
+                                    <div className={`h-full rounded-full ${dayStatusKpi.barColor}`} style={{ width: `${dayStatusKpi.cobertura}%` }}/>
                                 </div>
+                                <span className="text-[8px] font-bold text-slate-500 shrink-0">{dayStatusKpi.cubiertos} act · {logic.stats.vacantes} vac</span>
                             </div>
                         )}
 
-                        {/* Barra de sesión — siempre visible; el operador inicia/finaliza su guardia independientemente del modo */}
-                        {session.isAutoMode ? (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="relative flex h-2 w-2 shrink-0">
-                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"/>
-                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"/>
-                                        </span>
-                                        <span className="text-[10px] font-black text-amber-700 uppercase">
-                                            {isCCOperator ? 'Iniciando guardia…' : 'Modo Automático'}
-                                        </span>
-                                    </div>
-                                    {!isCCOperator && (
-                                        <button onClick={session.startSession} className="px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700">INICIAR GUARDIA</button>
-                                    )}
+                        <div className="flex flex-wrap items-center gap-1 mb-1.5 shrink-0">
+                            {(empresa as any)?.modoDemoEnabled && (
+                                <button type="button" disabled={isCCOperator} onClick={async () => { if (isCCOperator) return; try { await updateDoc(doc(db, 'empresas', empresaId!), { modoDemoEnabled: false }); toast.success('Modo demo desactivado'); } catch (e) { console.error(e); toast.error('No se pudo desactivar'); } }} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-violet-100 border-violet-300 text-violet-800 hover:bg-violet-200 disabled:opacity-50" title="Desactivar modo demo"><Zap size={10}/> Demo ON</button>
+                            )}
+                            {session.isAutoMode ? (
+                                <button type="button" onClick={session.startSession} disabled={isCCOperator} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200 disabled:opacity-50"><PlayCircle size={10}/> {isCCOperator ? 'Auto…' : 'Iniciar guardia'}</button>
+                            ) : confirmEndSession ? (
+                                <div className="flex items-center gap-0.5">
+                                    <button type="button" onClick={async () => { try { await session.endSession(); toast.success('Sesión finalizada'); setConfirmEndSession(false); } catch (e) { console.error(e); toast.error('No se pudo finalizar'); } }} className="px-2 py-1 rounded-lg text-[8px] font-black bg-rose-600 text-white">Sí, fin</button>
+                                    <button type="button" onClick={() => setConfirmEndSession(false)} className="px-2 py-1 rounded-lg text-[8px] font-black bg-slate-200 text-slate-700">No</button>
                                 </div>
-                                {session.activeSessions.length > 0 && (
-                                    <p className="text-[9px] text-amber-800 leading-tight">
-                                        <span className="font-black">En guardia:</span>{' '}
-                                        {session.activeSessions.map(s => s.operatorName).join(' · ')}
-                                    </p>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"/>
-                                        <span className="text-[10px] font-black text-slate-700 uppercase truncate max-w-[110px]">{session.mySession?.operatorName}</span>
-                                        {elapsed && <span className="text-[9px] font-mono text-slate-500 bg-white px-1 py-0.5 rounded border">{elapsed}</span>}
-                                        <span className="text-[9px] text-emerald-700 font-bold bg-emerald-100 px-1 rounded">TU GUARDIA</span>
-                                    </div>
-                                    {confirmEndSession ? (
-                                        <div className="flex items-center gap-1 shrink-0">
-                                            <span className="text-[8px] text-rose-600 font-black">¿Confirmar?</span>
-                                            <button
-                                                onClick={async () => {
-                                                    try {
-                                                        await session.endSession();
-                                                        toast.success('Sesión finalizada');
-                                                        setConfirmEndSession(false);
-                                                    } catch (e) {
-                                                        console.error(e);
-                                                        toast.error('No se pudo finalizar la sesión');
-                                                    }
-                                                }}
-                                                className="px-1.5 py-1 bg-rose-600 text-white text-[8px] font-black rounded-lg hover:bg-rose-700"
-                                            >Sí</button>
-                                            <button onClick={() => setConfirmEndSession(false)} className="px-1.5 py-1 bg-slate-200 text-slate-700 text-[8px] font-black rounded-lg hover:bg-slate-300">No</button>
-                                        </div>
-                                    ) : (
-                                        <button onClick={() => setConfirmEndSession(true)} className="px-2 py-1 bg-slate-700 text-white text-[9px] font-black rounded-lg hover:bg-slate-900 shrink-0">Finalizar Sesión</button>
-                                    )}
-                                </div>
-                                {session.otherSessions.length > 0 && (
-                                    <p className="text-[9px] text-emerald-800 leading-tight">
-                                        <span className="font-black">También en guardia:</span>{' '}
-                                        {session.otherSessions.map(s => s.operatorName).join(' · ')}
-                                    </p>
-                                )}
-                            </div>
-                        )}
+                            ) : (
+                                <button type="button" onClick={() => setConfirmEndSession(true)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-emerald-100 border-emerald-300 text-emerald-900 hover:bg-emerald-200"><Shield size={10}/> Guardia{elapsed ? ` · ${elapsed}` : ''}</button>
+                            )}
+                            <button type="button" onClick={() => setNotifPanelOpen(v => !v)} className={`ml-auto flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${totalAlertsCount > 0 ? 'bg-rose-600 border-rose-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`}><Bell size={10} className={totalAlertsCount > 0 ? 'animate-pulse' : ''}/>{totalAlertsCount > 0 ? totalAlertsCount : 'Alertas'}</button>
+                        </div>
 
                         {/* Búsqueda + cliente en una fila */}
                         <div className="flex gap-1.5 mb-1.5">
@@ -4104,7 +4004,7 @@ export default function OperacionesPage() {
                                 const isActive = logic.viewTab === t.id;
                                 return (
                                     <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
-                                        className={`relative flex-1 px-1 py-2 lg:py-1.5 rounded-lg transition-all active:scale-95 whitespace-nowrap flex flex-col items-center gap-0
+                                        className={`relative flex-1 px-1 py-1 lg:py-1 rounded-lg transition-all active:scale-95 whitespace-nowrap flex flex-col items-center gap-0
                                             ${isActive
                                                 ? (isUrgent ? 'bg-rose-600 text-white shadow' : 'bg-slate-800 text-white shadow')
                                                 : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-slate-50 text-slate-400 hover:bg-slate-100')
@@ -4178,7 +4078,7 @@ export default function OperacionesPage() {
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-y-auto bg-slate-50">
+                    <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50">
 
                         {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
                         {viewMode === 'objetivos' && (
@@ -4628,31 +4528,85 @@ export default function OperacionesPage() {
                         )}
                       </>)}
                     </div>
+
+                    {coverageByObjective.length > 0 && (
+                        <div className={`border-t border-slate-200 bg-white shrink-0 flex flex-col ${showCoverageGrid ? 'max-h-[35vh]' : ''}`}>
+                            <button type="button" onClick={() => setShowCoverageGrid(v => !v)} className="px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50 text-left shrink-0">
+                                <Layers size={12} className="text-indigo-500 shrink-0"/>
+                                <span className="text-[9px] font-black text-slate-600 uppercase flex-1">Cobertura por objetivo</span>
+                                {coverageHasIssues && !showCoverageGrid && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"/>}
+                                <span className="text-[9px] text-slate-400">{coverageByObjective.length}</span>
+                                <ChevronDown size={12} className={`text-slate-400 transition-transform ${showCoverageGrid ? 'rotate-180' : ''}`}/>
+                            </button>
+                            {showCoverageGrid && (
+                                <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 space-y-1">
+                                    {coverageByObjective.map(obj => {
+                                        const pct = obj.total > 0 ? Math.round((obj.active / obj.total) * 100) : 0;
+                                        const hasIssue = obj.absent > 0 || obj.vacant > 0;
+                                        const isCrit = pct < 50;
+                                        return (
+                                            <div key={obj.objectiveId} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${isCrit ? 'bg-rose-50 border-rose-200' : hasIssue ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[10px] font-black truncate text-slate-800">{obj.name}</p>
+                                                    <p className="text-[9px] truncate text-slate-400">{obj.client}</p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <p className={`text-[11px] font-black ${isCrit ? 'text-rose-600' : hasIssue ? 'text-amber-600' : 'text-emerald-600'}`}>{pct}%</p>
+                                                    <p className="text-[9px] text-slate-400">{obj.active}/{obj.total}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {mapVisible && notifPanelOpen && (
+                        <div className="absolute inset-x-0 bottom-0 z-[90] max-h-[min(70vh,520px)] flex flex-col bg-white rounded-t-2xl shadow-2xl border border-slate-200 mx-0 lg:mx-1 lg:mb-1 lg:rounded-xl overflow-hidden">
+                            <div className="bg-slate-900 px-3 py-2 flex items-center gap-2 shrink-0">
+                                <Siren size={14} className="text-rose-400"/>
+                                <span className="text-xs font-black uppercase text-white flex-1">Alertas</span>
+                                {totalAlertsCount > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlertsCount}</span>}
+                                <button type="button" onClick={() => setNotifPanelOpen(false)} className="p-1 hover:bg-white/10 rounded-lg"><X size={14} className="text-slate-400"/></button>
+                            </div>
+                            <div className="flex-1 min-h-0 overflow-y-auto">
+                                {priorityShiftsForAlerts.length === 0 && pendingNovedades.length === 0 ? (
+                                    <p className="p-4 text-center text-xs text-slate-400">Sin alertas pendientes</p>
+                                ) : (
+                                    <>
+                                        {priorityShiftsForAlerts.slice(0, 8).map((s: any) => (
+                                            <div key={s.id} className="px-3 py-2 border-b border-slate-100 text-[10px]">
+                                                <p className="font-bold text-slate-800 truncate">{s.employeeName || '—'} · {s.objectiveName}</p>
+                                                <p className="text-slate-400 truncate">{s.positionName}</p>
+                                            </div>
+                                        ))}
+                                        {pendingNovedades.slice(0, 12).map((n: any) => (
+                                            <div key={n.id} className="px-3 py-2 border-b border-slate-50 text-[10px] flex items-center gap-2">
+                                                <span className="flex-1 truncate font-bold text-slate-700">{n.objectiveName || n.employeeName || n.type}</span>
+                                                <button type="button" onClick={() => setDetailNovedad(n)} className="text-[9px] font-black text-indigo-600 shrink-0">VER</button>
+                                            </div>
+                                        ))}
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                {/* PANEL FLOTANTE DE ALERTAS — siempre visible (también con mapa undocked) */}
+                {/* Panel alertas flotante — solo mapa colapsado o undocked */}
                 <React.Fragment>
                 {/* Backdrop mobile cuando panel abierto */}
                 {notifPanelOpen && <div className="fixed inset-0 bg-black/40 z-[999] lg:hidden" onClick={() => setNotifPanelOpen(false)}/>}
-                <div className={notifPanelOpen
-                    ? 'fixed bottom-0 left-0 right-0 z-[1000] lg:absolute lg:inset-auto lg:bottom-8 lg:left-8'
-                    : 'absolute bottom-8 left-8 z-[1000]'}>
+                {(mapCollapsed || isExternalMap) && notifPanelOpen && (
+                <div className="fixed bottom-0 left-0 right-0 z-[1000] lg:absolute lg:inset-auto lg:bottom-8 lg:left-8">
                 {(() => {
                     // Calcular priority shifts con el MISMO filtro que stats.prioridad (hoy + activos)
                     const _now = new Date();
                     const _hoy = logic.processedData.filter((s:any) => isSameDay(s.shiftDateObj, _now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
                     const priorityShiftsPanel = _hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
                     const totalAlerts = pendingNovedades.length + priorityShiftsPanel.length;
-                    return !notifPanelOpen ? (
-                    <button onClick={() => setNotifPanelOpen(true)}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg font-black uppercase text-sm transition-all hover:scale-105 ${totalAlerts > 0 ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white'}`}>
-                        <Siren size={15} className={totalAlerts > 0 ? 'animate-pulse' : ''}/>
-                        Alertas
-                        <span className={`text-xs font-black px-2 py-0.5 rounded-full ${totalAlerts > 0 ? 'bg-white text-rose-600' : 'bg-white/20 text-white'}`}>
-                            {totalAlerts}
-                        </span>
-                    </button>
-                ) : (
+                    return (
                     <div className="w-full lg:w-[480px] flex flex-col bg-white rounded-t-2xl lg:rounded-xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[92vh] lg:max-h-[70vh]">
                         <div className="bg-slate-900 rounded-t-2xl">
                             {/* Drag handle — solo mobile */}
@@ -4827,6 +4781,7 @@ export default function OperacionesPage() {
                     );
                 })()}
                 </div>
+                )}
                 </React.Fragment>
 
             </div>

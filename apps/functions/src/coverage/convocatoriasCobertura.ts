@@ -38,7 +38,10 @@ export interface ConvocatoriaCoberturaDoc {
   // Para ADVANCE: el próximo turno a adelantar
   advanceShiftId?: string;
 
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'TIMEOUT' | 'CANCELLED';
+  // PENDING: esperando respuesta dentro del timeout
+  // ESCALATED: timeout vencido, avanzamos al siguiente paso pero AÚN acepta respuesta
+  // ACCEPTED / REJECTED / CANCELLED: estado final
+  status: 'PENDING' | 'ESCALATED' | 'ACCEPTED' | 'REJECTED' | 'TIMEOUT' | 'CANCELLED';
   timeoutAt: Timestamp;
 
   createdAt: Timestamp;
@@ -49,7 +52,9 @@ export interface ConvocatoriaCoberturaDoc {
   resolvedAt?: Timestamp;
 }
 
-const TIMEOUT_MINUTES = 10;
+// 3 min: tiempo de espera por paso antes de avanzar al siguiente.
+// El paso anterior queda ESCALATED (sigue aceptando). El primero que confirma gana.
+const TIMEOUT_MINUTES = 3;
 
 // ─── Helper: crear notificación interna (dispara FCM via trigger) ─────────────
 
@@ -469,13 +474,14 @@ async function resolverCobertura(
     });
   }
 
-  // Cancelar otras convocatorias PENDING del mismo shiftId (ej. FT broadcast)
-  const otherPending = await db.collection('convocatorias_cobertura')
-    .where('shiftId', '==', conv.shiftId)
-    .where('status', '==', 'PENDING')
-    .get();
+  // Cancelar todas las convocatorias activas del mismo shiftId (PENDING y ESCALATED)
+  // — el primero que confirma de cualquier paso gana; los demás quedan cancelados
+  const [pendingSnap, escalatedSnap] = await Promise.all([
+    db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'PENDING').get(),
+    db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'ESCALATED').get(),
+  ]);
 
-  for (const d of otherPending.docs) {
+  for (const d of [...pendingSnap.docs, ...escalatedSnap.docs]) {
     if (d.id !== conv.id) {
       batch.update(d.ref, { status: 'CANCELLED', cancelledAt: FieldValue.serverTimestamp() });
     }
@@ -622,7 +628,8 @@ export const responderConvocatoriaCobertura = functions
     }
     const conv = convSnap.data() as ConvocatoriaCoberturaDoc;
 
-    if (conv.status !== 'PENDING') {
+    // Acepta PENDING y ESCALATED — el paso anterior sigue activo incluso si ya avanzamos
+    if (conv.status !== 'PENDING' && conv.status !== 'ESCALATED') {
       throw new functions.https.HttpsError('failed-precondition', `La convocatoria ya fue ${conv.status}.`);
     }
 
@@ -806,9 +813,9 @@ export const getCandidatosCobertura = functions
 
 export const checkConvocatoriaTimeouts = onSchedule(
   {
-    schedule: 'every 5 minutes',
+    schedule: 'every 1 minutes',
     timeZone: 'America/Argentina/Buenos_Aires',
-    timeoutSeconds: 120,
+    timeoutSeconds: 60,
     memory: '256MiB',
   },
   async () => {
@@ -826,7 +833,8 @@ export const checkConvocatoriaTimeouts = onSchedule(
     for (const d of timedOut.docs) {
       const conv = d.data() as ConvocatoriaCoberturaDoc;
       try {
-        await d.ref.update({ status: 'TIMEOUT', timedOutAt: now });
+        // ESCALATED: sigue activa (puede responder), pero ya avanzamos al siguiente paso
+        await d.ref.update({ status: 'ESCALATED', escalatedAt: now });
         await avanzarCascada(db, { ...conv, id: d.id }, 'TIMEOUT');
       } catch (e) {
         console.error(`[checkConvocatoriaTimeouts] Error en ${d.id}:`, (e as Error).message);

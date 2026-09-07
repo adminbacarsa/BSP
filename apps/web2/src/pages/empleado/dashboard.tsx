@@ -745,7 +745,7 @@ export default function EmployeeDashboard() {
         query(
           collection(db, 'convocatorias_cobertura'),
           where('candidateEmployeeId', '==', empId),
-          where('status', '==', 'PENDING'),
+          where('status', 'in', ['PENDING', 'ESCALATED']),
           orderBy('createdAt', 'desc'),
           limit(10),
         ),
