@@ -613,12 +613,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         return () => unsub();
     }, [isOpen, absenceShift?.id]);
 
-    const handleConvocarConvocatoria = async (candidateEmployeeId: string, type: string) => {
+    const handleConvocarConvocatoria = async (candidateEmployeeId: string, type: string, extraData?: Record<string, string>) => {
         if (!absenceShift?.id || !empresaId) return;
         setConvocatoriaLoading(type + '_' + candidateEmployeeId);
         try {
             const fn = httpsCallable(getFunctions(app, 'us-central1'), 'crearConvocatoriaCobertura');
-            await fn({ shiftId: absenceShift.id, candidateEmployeeId, type, empresaId });
+            await fn({ shiftId: absenceShift.id, candidateEmployeeId, type, empresaId, ...extraData });
             toast.success('Convocatoria enviada — esperando respuesta del guardia');
         } catch (e: any) {
             toast.error('Error al convocar: ' + (e?.message || String(e)));
@@ -1118,7 +1118,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                         />
                         <CoverageSection num="2" title="Adelanto · Próximo turno planificado" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
                             empty="No hay turno próximo planificado."
-                            items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleAdelantar(s)} label="ADELANTAR" color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}
+                            items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleConvocarConvocatoria(s.employeeId, 'ADVANCE', { advanceShiftId: s.id })} label={convocatoriaLoading === `ADVANCE_${s.employeeId}` ? 'Enviando...' : 'CONVOCAR'} color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}
                         />
                         <CoverageSection num="3" title="Retención Pasiva · Guardia en standby (RET)" colorClass="text-amber-700" badgeClass="bg-amber-500"
                             empty="No hay guardias en retención pasiva en este objetivo."
@@ -2224,6 +2224,27 @@ export default function OperacionesPage() {
         }
     }, []);
     const [confirmEndSession, setConfirmEndSession] = useState(false);
+    const [toggleModoDemoLoading, setToggleModoDemoLoading] = useState(false);
+    const modoDemoActivo = empresa?.modoDemoEnabled === true;
+
+    const handleToggleModoDemo = async () => {
+        if (isCCOperator || !empresaId) return;
+        setToggleModoDemoLoading(true);
+        try {
+            const next = !modoDemoActivo;
+            await updateDoc(doc(db, 'empresas', empresaId), { modoDemoEnabled: next });
+            toast.success(
+                next
+                    ? 'Modo demo activado — presentes y cierres automáticos cada 5 min'
+                    : 'Modo demo desactivado'
+            );
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo cambiar el modo demo');
+        } finally {
+            setToggleModoDemoLoading(false);
+        }
+    };
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [handoverData, setHandoverData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -2295,6 +2316,7 @@ export default function OperacionesPage() {
     const [cierreObs, setCierreObs] = useState('');
     const [cierreLoading, setCierreLoading] = useState(false);
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
+    const [activeConvsByObjective, setActiveConvsByObjective] = useState<Record<string, number>>({});
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
     const [authorizedAbsences, setAuthorizedAbsences] = useState<any[]>([]);
     const [absencesPanelOpen, setAbsencesPanelOpen] = useState(false);
@@ -2382,6 +2404,25 @@ export default function OperacionesPage() {
         );
         return () => unsub();
     }, [empresaId, empresa, listenerRefreshKey]);
+
+    // Convocatorias activas por objetivo — para badge lateral
+    useEffect(() => {
+        if (!empresaId) { setActiveConvsByObjective({}); return; }
+        const q = query(
+            collection(db, 'convocatorias_cobertura'),
+            where('empresaId', '==', empresaId),
+            where('status', 'in', ['PENDING', 'ESCALATED']),
+        );
+        const unsub = onSnapshot(q, (snap) => {
+            const byObj: Record<string, number> = {};
+            snap.docs.forEach(d => {
+                const objId = d.data().objectiveId;
+                if (objId) byObj[objId] = (byObj[objId] || 0) + 1;
+            });
+            setActiveConvsByObjective(byObj);
+        });
+        return () => unsub();
+    }, [empresaId]);
 
     useEffect(() => {
         const todayStr = new Date().toLocaleDateString('en-CA');
@@ -3789,25 +3830,31 @@ export default function OperacionesPage() {
     const mapVisible = !isExternalMap && !mapCollapsed;
 
     const dayStatusKpi = useMemo(() => {
-        const hasStats = (logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0;
-        if (!hasStats) return null;
         const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
         const cubiertos = logic.stats.activos + logic.stats.retenidos;
         const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-        const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : total > 0 ? 0 : 100;
-        const isCrisis = cobertura < 50;
-        const isWarning = cobertura >= 50 && cobertura < 80;
-        const isOk = cobertura >= 80;
+        const isEmpty = total === 0;
+        const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : 0;
+        const isCrisis = !isEmpty && cobertura < 50;
+        const isWarning = !isEmpty && cobertura >= 50 && cobertura < 80;
+        const isOk = !isEmpty && cobertura >= 80;
         return {
             cobertura,
             cubiertos,
             total,
+            isEmpty,
             isCrisis,
             isWarning,
             isOk,
-            barColor: isOk ? 'bg-emerald-500' : isWarning ? 'bg-amber-500' : 'bg-rose-500',
-            pctColor: isOk ? 'text-emerald-600' : isWarning ? 'text-amber-600' : 'text-rose-600',
-            bannerBg: isCrisis ? 'bg-rose-50 border-rose-300' : isWarning ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200',
+            barColor: isEmpty ? 'bg-slate-300' : isOk ? 'bg-emerald-500' : isWarning ? 'bg-amber-500' : 'bg-rose-500',
+            pctColor: isEmpty ? 'text-slate-500' : isOk ? 'text-emerald-600' : isWarning ? 'text-amber-600' : 'text-rose-600',
+            bannerBg: isEmpty
+                ? 'bg-white/95 backdrop-blur-sm border-slate-300'
+                : isCrisis
+                    ? 'bg-rose-50/95 backdrop-blur-sm border-rose-300'
+                    : isWarning
+                        ? 'bg-amber-50/95 backdrop-blur-sm border-amber-300'
+                        : 'bg-white/95 backdrop-blur-sm border-slate-200',
         };
     }, [logic.stats]);
 
@@ -3866,41 +3913,15 @@ export default function OperacionesPage() {
                 </div>
             )}
             
-            <div className="flex flex-col lg:flex-row gap-2 lg:gap-4 p-2 animate-in fade-in relative min-h-0 h-[calc(100vh-120px)] lg:h-[calc(100vh-88px)]">
+            <div className="flex flex-col lg:flex-row gap-2 lg:gap-4 p-2 animate-in fade-in relative min-h-0 h-[calc(100vh-120px)] lg:h-[calc(100vh-88px)] lg:items-stretch">
                 {!isExternalMap && !mapCollapsed && (
-                    <div className="flex-1 min-h-0 max-h-[38%] lg:max-h-none lg:flex-[3] flex flex-col gap-1.5">
-                        {dayStatusKpi && (
-                            <div className={`shrink-0 border rounded-xl shadow-sm px-3 py-1.5 flex items-center gap-2 sm:gap-3 ${dayStatusKpi.bannerBg}`}>
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                    {dayStatusKpi.isCrisis && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"/>}
-                                    <span className={`text-[9px] font-black uppercase tracking-wider ${dayStatusKpi.isCrisis ? 'text-rose-600' : dayStatusKpi.isWarning ? 'text-amber-600' : 'text-slate-400'}`}>
-                                        {dayStatusKpi.isCrisis ? 'Crítica' : dayStatusKpi.isWarning ? 'Atención' : 'Estado'}
-                                    </span>
-                                </div>
-                                <span className={`text-xl font-black tabular-nums leading-none shrink-0 ${dayStatusKpi.pctColor}`}>{dayStatusKpi.cobertura}%</span>
-                                <div className="flex-1 h-2 bg-white/70 border border-slate-200 rounded-full overflow-hidden min-w-[60px]">
-                                    <div className={`h-full rounded-full transition-all duration-500 ${dayStatusKpi.barColor}`} style={{ width: `${dayStatusKpi.cobertura}%` }}/>
-                                </div>
-                                <div className="hidden sm:flex items-center gap-2 shrink-0">
-                                    {[
-                                        { label: 'Act', val: dayStatusKpi.cubiertos, cls: 'text-emerald-600', bg: 'bg-emerald-50' },
-                                        { label: 'Vac', val: logic.stats.vacantes, cls: logic.stats.vacantes > 0 ? 'text-rose-600' : 'text-slate-400', bg: logic.stats.vacantes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
-                                        { label: 'Aus', val: logic.stats.ausentes, cls: logic.stats.ausentes > 0 ? 'text-rose-700' : 'text-slate-400', bg: logic.stats.ausentes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
-                                        { label: 'Plan', val: dayStatusKpi.total, cls: 'text-slate-600', bg: 'bg-slate-50' },
-                                    ].map((m) => (
-                                        <div key={m.label} className={`text-center px-1.5 py-0.5 rounded-lg ${m.bg}`}>
-                                            <div className={`text-xs font-black leading-none ${m.cls}`}>{m.val}</div>
-                                            <div className="text-[7px] text-slate-400 uppercase font-bold">{m.label}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                        <div className="flex-1 min-h-0 bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
+                    <div className="flex-1 min-h-[240px] max-h-[42vh] lg:max-h-none lg:min-h-0 lg:flex-[3] relative rounded-xl border border-slate-200 overflow-hidden shadow-inner bg-slate-100">
+                        <div className="absolute inset-0 z-0">
                         <OperacionesMap
                             center={[-31.4201, -64.1888]}
                             allObjectives={logic.filteredObjectives}
-                            filteredShifts={logic.listData}
+                            filteredShifts={logic.mapShiftData}
+                            tacticalHud
                             onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }}
                             onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
                             onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
@@ -3908,10 +3929,35 @@ export default function OperacionesPage() {
                             onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
                             onReportPlanning={handleReportPlanning}
                         />
-                        <div className="absolute top-4 right-4 z-[1000] flex gap-2">
+                        </div>
+                        <div className={`absolute top-2 left-2 right-14 z-[2000] border rounded-xl shadow-lg px-3 py-1.5 flex items-center gap-2 sm:gap-3 pointer-events-none ${dayStatusKpi.bannerBg}`}>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                {dayStatusKpi.isCrisis && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"/>}
+                                <span className={`text-[9px] font-black uppercase tracking-wider ${dayStatusKpi.isEmpty ? 'text-slate-500' : dayStatusKpi.isCrisis ? 'text-rose-600' : dayStatusKpi.isWarning ? 'text-amber-600' : 'text-slate-400'}`}>
+                                    {dayStatusKpi.isEmpty ? 'Sin turnos' : dayStatusKpi.isCrisis ? 'Crítica' : dayStatusKpi.isWarning ? 'Atención' : 'Estado'}
+                                </span>
+                            </div>
+                            <span className={`text-xl font-black tabular-nums leading-none shrink-0 ${dayStatusKpi.pctColor}`}>{dayStatusKpi.isEmpty ? '—' : `${dayStatusKpi.cobertura}%`}</span>
+                            <div className="flex-1 h-2 bg-white/70 border border-slate-200 rounded-full overflow-hidden min-w-[48px]">
+                                <div className={`h-full rounded-full transition-all duration-500 ${dayStatusKpi.barColor}`} style={{ width: dayStatusKpi.isEmpty ? '0%' : `${dayStatusKpi.cobertura}%` }}/>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                {[
+                                    { label: 'Plan', val: logic.stats.plan, cls: 'text-indigo-600', bg: 'bg-indigo-50' },
+                                    { label: 'Act', val: dayStatusKpi.cubiertos, cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+                                    { label: 'Vac', val: logic.stats.vacantes, cls: logic.stats.vacantes > 0 ? 'text-rose-600' : 'text-slate-400', bg: logic.stats.vacantes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                    { label: 'Aus', val: logic.stats.ausentes, cls: logic.stats.ausentes > 0 ? 'text-rose-700' : 'text-slate-400', bg: logic.stats.ausentes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                ].map((m) => (
+                                    <div key={m.label} className={`text-center px-1 py-0.5 rounded ${m.bg}`}>
+                                        <div className={`text-[10px] font-black leading-none ${m.cls}`}>{m.val}</div>
+                                        <div className="text-[6px] text-slate-400 uppercase font-bold">{m.label}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="absolute top-4 right-4 z-[2002] flex gap-2 pointer-events-auto">
                             <button onClick={() => setMapCollapsed(true)} className="bg-white p-2 rounded-lg shadow hover:bg-slate-100" title="Colapsar mapa"><ChevronLeft size={18} className="text-slate-600"/></button>
                             <button onClick={handleUndockMap} className="hidden lg:flex bg-white p-2 rounded-lg shadow hover:bg-slate-100"><MonitorUp size={18} className="text-indigo-600"/></button>
-                        </div>
                         </div>
                     </div>
                 )}
@@ -3958,20 +4004,31 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {!mapVisible && dayStatusKpi && (
+                        {!mapVisible && (
                             <div className={`mb-1.5 shrink-0 border rounded-lg px-2 py-1 flex items-center gap-2 ${dayStatusKpi.bannerBg}`}>
-                                <span className={`text-lg font-black tabular-nums leading-none shrink-0 ${dayStatusKpi.pctColor}`}>{dayStatusKpi.cobertura}%</span>
+                                <span className={`text-lg font-black tabular-nums leading-none shrink-0 ${dayStatusKpi.pctColor}`}>{dayStatusKpi.isEmpty ? '—' : `${dayStatusKpi.cobertura}%`}</span>
                                 <div className="flex-1 h-1.5 bg-white/70 border border-slate-200 rounded-full overflow-hidden">
-                                    <div className={`h-full rounded-full ${dayStatusKpi.barColor}`} style={{ width: `${dayStatusKpi.cobertura}%` }}/>
+                                    <div className={`h-full rounded-full ${dayStatusKpi.barColor}`} style={{ width: dayStatusKpi.isEmpty ? '0%' : `${dayStatusKpi.cobertura}%` }}/>
                                 </div>
-                                <span className="text-[8px] font-bold text-slate-500 shrink-0">{dayStatusKpi.cubiertos} act · {logic.stats.vacantes} vac</span>
+                                <span className="text-[8px] font-bold text-slate-500 shrink-0">{dayStatusKpi.cubiertos} act · {logic.stats.vacantes} vac · {logic.stats.plan} plan</span>
                             </div>
                         )}
 
                         <div className="flex flex-wrap items-center gap-1 mb-1.5 shrink-0">
-                            {(empresa as any)?.modoDemoEnabled && (
-                                <button type="button" disabled={isCCOperator} onClick={async () => { if (isCCOperator) return; try { await updateDoc(doc(db, 'empresas', empresaId!), { modoDemoEnabled: false }); toast.success('Modo demo desactivado'); } catch (e) { console.error(e); toast.error('No se pudo desactivar'); } }} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-violet-100 border-violet-300 text-violet-800 hover:bg-violet-200 disabled:opacity-50" title="Desactivar modo demo"><Zap size={10}/> Demo ON</button>
-                            )}
+                            <button
+                                type="button"
+                                disabled={isCCOperator || toggleModoDemoLoading}
+                                onClick={handleToggleModoDemo}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border disabled:opacity-50 transition-colors ${
+                                    modoDemoActivo
+                                        ? 'bg-violet-100 border-violet-300 text-violet-800 hover:bg-violet-200'
+                                        : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
+                                }`}
+                                title={modoDemoActivo ? 'Desactivar modo demo' : 'Activar modo demo'}
+                            >
+                                <Zap size={10} className={modoDemoActivo ? 'text-violet-700' : 'text-slate-400'} />
+                                {toggleModoDemoLoading ? 'Demo…' : modoDemoActivo ? 'Demo ON' : 'Demo OFF'}
+                            </button>
                             {session.isAutoMode ? (
                                 <button type="button" onClick={session.startSession} disabled={isCCOperator} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200 disabled:opacity-50"><PlayCircle size={10}/> {isCCOperator ? 'Auto…' : 'Iniciar guardia'}</button>
                             ) : confirmEndSession ? (
@@ -4226,6 +4283,7 @@ export default function OperacionesPage() {
                                                         {obj.retention > 0 && <span className="text-[9px] font-bold text-orange-700 bg-orange-100 px-1.5 rounded animate-pulse">{obj.retention} ret</span>}
                                                         {obj.absent > 0 && <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 rounded">{obj.absent} aus</span>}
                                                         {obj.vacant > 0 && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 rounded">{obj.vacant} vac</span>}
+                                                        {(activeConvsByObjective[obj.objectiveId] || 0) > 0 && <span className="text-[9px] font-bold text-purple-700 bg-purple-100 px-1.5 rounded animate-pulse">{activeConvsByObjective[obj.objectiveId]} conv</span>}
                                                         {obj.plan > 0 && <span className="text-[9px] text-slate-500 px-1">{obj.plan} plan</span>}
                                                     </div>
                                                 </div>
