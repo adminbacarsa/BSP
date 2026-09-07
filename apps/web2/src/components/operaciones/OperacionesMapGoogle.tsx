@@ -9,7 +9,7 @@ import {
 } from '@/lib/googleMapsConfig';
 import { toGoogleMapsIcon, truncateObjectiveLabel } from '@/lib/operaciones/mapMarkerIcons';
 import { MAP_OBJECTIVE_LABEL_CSS } from '@/components/operaciones/mapLabelStyles';
-import { useOperacionesMapMarkers } from '@/hooks/useOperacionesMapMarkers';
+import { useOperacionesMapMarkers, type OperacionesMapMarker } from '@/hooks/useOperacionesMapMarkers';
 import { OperacionesMapPopup } from '@/components/operaciones/OperacionesMapPopup';
 import { OperacionesMapChrome } from '@/components/operaciones/OperacionesMapChrome';
 
@@ -30,6 +30,43 @@ export type OperacionesMapProps = {
   tacticalHud?: boolean;
 };
 
+const MAP_OPTIONS = OPERACIONES_MAP_OPTIONS as google.maps.MapOptions;
+
+const MapMarker = React.memo(function MapMarker({
+  marker,
+  icon,
+  tacticalHud,
+  onSelect,
+}: {
+  marker: OperacionesMapMarker;
+  icon: google.maps.Icon | undefined;
+  tacticalHud?: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const label = useMemo(
+    () => ({
+      text: truncateObjectiveLabel(marker.name) || ' ',
+      color: '#f8fafc',
+      fontSize: '11px',
+      fontWeight: '700' as const,
+      className: 'cosp-obj-label',
+    }),
+    [marker.name],
+  );
+
+  return (
+    <Marker
+      position={{ lat: marker.lat, lng: marker.lng }}
+      icon={icon}
+      label={label}
+      title={`${marker.name} · ${marker.statusText}`}
+      zIndex={marker.layerOrder === 0 ? 1 : marker.isEvent ? 600 : 500}
+      onClick={() => onSelect(marker.id)}
+      options={{ optimized: true }}
+    />
+  );
+});
+
 const OperacionesMapGoogle = ({
   center,
   allObjectives = [],
@@ -46,6 +83,8 @@ const OperacionesMapGoogle = ({
   const markers = useOperacionesMapMarkers(allObjectives, filteredShifts);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
+  const initialFitDoneRef = useRef(false);
+  const markerIdsKeyRef = useRef('');
   const resolvedKey = getGoogleMapsApiKey(apiKey);
 
   const { isLoaded, loadError } = useJsApiLoader({
@@ -63,6 +102,11 @@ const OperacionesMapGoogle = ({
     return cache;
   }, [markers, isLoaded]);
 
+  const markerIdsKey = useMemo(
+    () => markers.map((m) => m.id).sort().join('|'),
+    [markers],
+  );
+
   const fitMapToMarkers = useCallback(() => {
     const map = mapRef.current;
     if (!map || markers.length === 0) return;
@@ -73,14 +117,41 @@ const OperacionesMapGoogle = ({
       map.setZoom(16);
       return;
     }
-    map.fitBounds(bounds, tacticalHud
-      ? { top: 96, right: 56, bottom: 88, left: 24 }
-      : 48);
+    map.fitBounds(
+      bounds,
+      tacticalHud ? { top: 96, right: 56, bottom: 88, left: 24 } : 48,
+    );
   }, [markers, tacticalHud]);
 
+  // Auto-ajuste solo al cargar o cuando cambia el conjunto de objetivos (filtro cliente/búsqueda).
+  // No re-fit en cada tick de Firestore (evita parpadeo de pines).
   useEffect(() => {
-    fitMapToMarkers();
-  }, [fitMapToMarkers]);
+    if (!isLoaded || !mapRef.current || markers.length === 0) return;
+    const idsChanged = markerIdsKeyRef.current !== markerIdsKey;
+    if (!initialFitDoneRef.current || idsChanged) {
+      fitMapToMarkers();
+      initialFitDoneRef.current = true;
+      markerIdsKeyRef.current = markerIdsKey;
+    }
+  }, [isLoaded, markers.length, markerIdsKey, fitMapToMarkers]);
+
+  // Tras cambios de layout (flex/absolute), Google Maps a veces queda en 0×0 hasta un resize.
+  useEffect(() => {
+    if (!isLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    const runResize = () => google.maps.event.trigger(map, 'resize');
+    runResize();
+    const t1 = window.setTimeout(runResize, 120);
+    const t2 = window.setTimeout(runResize, 400);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [isLoaded]);
+
+  const handleSelectMarker = useCallback((id: string) => {
+    setSelectedMarkerId(id);
+  }, []);
 
   const selectedMarker = markers.find((m) => m.id === selectedMarkerId) ?? null;
 
@@ -110,30 +181,28 @@ const OperacionesMapGoogle = ({
         mapContainerStyle={{ width: '100%', height: '100%' }}
         center={mapCenter || DEFAULT_MAP_CENTER}
         zoom={13}
-        options={OPERACIONES_MAP_OPTIONS as google.maps.MapOptions}
+        options={MAP_OPTIONS}
         onLoad={(map) => {
           mapRef.current = map;
-          fitMapToMarkers();
+          if (markers.length > 0 && !initialFitDoneRef.current) {
+            fitMapToMarkers();
+            initialFitDoneRef.current = true;
+            markerIdsKeyRef.current = markerIdsKey;
+          }
         }}
         onUnmount={() => {
           mapRef.current = null;
+          initialFitDoneRef.current = false;
+          markerIdsKeyRef.current = '';
         }}
       >
         {markers.map((marker) => (
-          <Marker
+          <MapMarker
             key={marker.id}
-            position={{ lat: marker.lat, lng: marker.lng }}
+            marker={marker}
             icon={markerIcons[marker.iconPreset]}
-            label={{
-              text: truncateObjectiveLabel(marker.name) || ' ',
-              color: '#f8fafc',
-              fontSize: '11px',
-              fontWeight: '700',
-              className: 'cosp-obj-label',
-            }}
-            title={`${marker.name} · ${marker.statusText}`}
-            zIndex={marker.layerOrder === 0 ? 1 : marker.isEvent ? 600 : 500}
-            onClick={() => setSelectedMarkerId(marker.id)}
+            tacticalHud={tacticalHud}
+            onSelect={handleSelectMarker}
           />
         ))}
 

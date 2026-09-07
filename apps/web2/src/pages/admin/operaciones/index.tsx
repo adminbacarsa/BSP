@@ -2174,18 +2174,26 @@ export default function OperacionesPage() {
     // Supervisores y superadmin pueden entrar sin iniciar guardia
     const isCCOperator = !isSuperAdmin && (userRole === 'OPERADOR' || userRole === 'OPERADOR_CC');
 
-    // Auto-inicio de guardia para rol OPERADOR cuando data está lista
+    const modoDemoActivo = empresa?.modoDemoEnabled === true;
+    const manualGuardiaOn = !session.loading && !!session.mySession;
+    /** Estados mutuamente excluyentes: Demo ON | Auto ON | Manual ON */
+    const ccDemoOn = modoDemoActivo;
+    const ccAutoOn = !ccDemoOn && !manualGuardiaOn;
+    const ccManualOn = !ccDemoOn && manualGuardiaOn;
+
+    // Auto-inicio de guardia para rol OPERADOR cuando data está lista (no en modo Demo)
     const autoStartedRef = useRef(false);
     useEffect(() => {
         if (!centroControlEnabled) return;
         if (!isCCOperator) return;
+        if (modoDemoActivo) return;
         if (!logic.isReady) return;
         if (session.loading) return;
         if (session.isMySession) return;
         if (autoStartedRef.current) return;
         autoStartedRef.current = true;
         session.startSession().catch(e => console.warn('[CC auto-start]', e));
-    }, [centroControlEnabled, isCCOperator, logic.isReady, session.loading, session.isMySession]);
+    }, [centroControlEnabled, isCCOperator, modoDemoActivo, logic.isReady, session.loading, session.isMySession]);
 
     // Audit log: registra cada vez que el modo automático cambia (operador entra/sale de guardia)
     const prevAutoModeRef = useRef<boolean | null>(null);
@@ -2225,24 +2233,58 @@ export default function OperacionesPage() {
     }, []);
     const [confirmEndSession, setConfirmEndSession] = useState(false);
     const [toggleModoDemoLoading, setToggleModoDemoLoading] = useState(false);
-    const modoDemoActivo = empresa?.modoDemoEnabled === true;
+    const [guardiaActionLoading, setGuardiaActionLoading] = useState(false);
 
     const handleToggleModoDemo = async () => {
-        if (isCCOperator || !empresaId) return;
+        if (!isSuperAdmin || isCCOperator || !empresaId) return;
         setToggleModoDemoLoading(true);
         try {
             const next = !modoDemoActivo;
+            if (next && session.isMySession) {
+                await session.endSession();
+            }
             await updateDoc(doc(db, 'empresas', empresaId), { modoDemoEnabled: next });
             toast.success(
                 next
-                    ? 'Modo demo activado — presentes y cierres automáticos cada 5 min'
-                    : 'Modo demo desactivado'
+                    ? 'Demo ON · Auto OFF · Manual OFF'
+                    : 'Demo OFF · Auto ON · Manual OFF',
             );
         } catch (e) {
             console.error(e);
             toast.error('No se pudo cambiar el modo demo');
         } finally {
             setToggleModoDemoLoading(false);
+        }
+    };
+
+    const handleStartManualGuardia = async () => {
+        if (isCCOperator || !empresaId) return;
+        setGuardiaActionLoading(true);
+        try {
+            if (modoDemoActivo) {
+                await updateDoc(doc(db, 'empresas', empresaId), { modoDemoEnabled: false });
+            }
+            await session.startSession();
+            toast.success('Demo OFF · Auto OFF · Manual ON');
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo iniciar guardia manual');
+        } finally {
+            setGuardiaActionLoading(false);
+        }
+    };
+
+    const handleEndManualGuardia = async () => {
+        setGuardiaActionLoading(true);
+        try {
+            await session.endSession();
+            setConfirmEndSession(false);
+            toast.success('Demo OFF · Auto ON · Manual OFF');
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo cerrar la guardia manual');
+        } finally {
+            setGuardiaActionLoading(false);
         }
     };
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -4015,29 +4057,87 @@ export default function OperacionesPage() {
                         )}
 
                         <div className="flex flex-wrap items-center gap-1 mb-1.5 shrink-0">
-                            <button
-                                type="button"
-                                disabled={isCCOperator || toggleModoDemoLoading}
-                                onClick={handleToggleModoDemo}
-                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border disabled:opacity-50 transition-colors ${
-                                    modoDemoActivo
-                                        ? 'bg-violet-100 border-violet-300 text-violet-800 hover:bg-violet-200'
-                                        : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
+                            {isSuperAdmin ? (
+                                <button
+                                    type="button"
+                                    disabled={isCCOperator || toggleModoDemoLoading || ccManualOn}
+                                    onClick={handleToggleModoDemo}
+                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border disabled:opacity-50 transition-colors ${
+                                        ccDemoOn
+                                            ? 'bg-violet-600 border-violet-700 text-white shadow-sm'
+                                            : 'bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200'
+                                    }`}
+                                    title={ccManualOn ? 'Cerrá la guardia manual antes de activar Demo' : 'Simulación lab: presentes y cierres cada 5 min (solo SuperAdmin)'}
+                                >
+                                    <Zap size={10} />
+                                    {toggleModoDemoLoading ? 'Demo…' : `Demo ${ccDemoOn ? 'ON' : 'OFF'}`}
+                                </button>
+                            ) : ccDemoOn ? (
+                                <span
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-violet-100 border-violet-300 text-violet-800"
+                                    title="Modo demo activo en la empresa (configurado por administrador)"
+                                >
+                                    <Zap size={10} className="text-violet-600" />
+                                    Demo ON · lab
+                                </span>
+                            ) : null}
+                            <span
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border ${
+                                    ccAutoOn
+                                        ? 'bg-cyan-600 border-cyan-700 text-white shadow-sm'
+                                        : 'bg-slate-50 border-slate-200 text-slate-400'
                                 }`}
-                                title={modoDemoActivo ? 'Desactivar modo demo' : 'Activar modo demo'}
+                                title="CC automático: sin operador en guardia; crons y monitor en servidor"
                             >
-                                <Zap size={10} className={modoDemoActivo ? 'text-violet-700' : 'text-slate-400'} />
-                                {toggleModoDemoLoading ? 'Demo…' : modoDemoActivo ? 'Demo ON' : 'Demo OFF'}
-                            </button>
-                            {session.isAutoMode ? (
-                                <button type="button" onClick={session.startSession} disabled={isCCOperator} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200 disabled:opacity-50"><PlayCircle size={10}/> {isCCOperator ? 'Auto…' : 'Iniciar guardia'}</button>
-                            ) : confirmEndSession ? (
+                                <Radio size={10} />
+                                Auto {ccAutoOn ? 'ON' : 'OFF'}
+                            </span>
+                            <span
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border ${
+                                    ccManualOn
+                                        ? 'bg-emerald-600 border-emerald-700 text-white shadow-sm'
+                                        : 'bg-slate-50 border-slate-200 text-slate-400'
+                                }`}
+                                title="Operador registrado en guardia manual"
+                            >
+                                <Shield size={10} />
+                                Manual {ccManualOn ? 'ON' : 'OFF'}{ccManualOn && elapsed ? ` · ${elapsed}` : ''}
+                            </span>
+                            {ccAutoOn && !isCCOperator && (
+                                <button
+                                    type="button"
+                                    onClick={handleStartManualGuardia}
+                                    disabled={guardiaActionLoading}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200 disabled:opacity-50"
+                                >
+                                    <PlayCircle size={10} />
+                                    {guardiaActionLoading ? '…' : 'Activar manual'}
+                                </button>
+                            )}
+                            {ccManualOn && confirmEndSession ? (
                                 <div className="flex items-center gap-0.5">
-                                    <button type="button" onClick={async () => { try { await session.endSession(); toast.success('Sesión finalizada'); setConfirmEndSession(false); } catch (e) { console.error(e); toast.error('No se pudo finalizar'); } }} className="px-2 py-1 rounded-lg text-[8px] font-black bg-rose-600 text-white">Sí, fin</button>
+                                    <button
+                                        type="button"
+                                        onClick={handleEndManualGuardia}
+                                        disabled={guardiaActionLoading}
+                                        className="px-2 py-1 rounded-lg text-[8px] font-black bg-rose-600 text-white disabled:opacity-50"
+                                    >
+                                        Sí, cerrar manual
+                                    </button>
                                     <button type="button" onClick={() => setConfirmEndSession(false)} className="px-2 py-1 rounded-lg text-[8px] font-black bg-slate-200 text-slate-700">No</button>
                                 </div>
-                            ) : (
-                                <button type="button" onClick={() => setConfirmEndSession(true)} className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-emerald-100 border-emerald-300 text-emerald-900 hover:bg-emerald-200"><Shield size={10}/> Guardia{elapsed ? ` · ${elapsed}` : ''}</button>
+                            ) : ccManualOn ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setConfirmEndSession(true)}
+                                    disabled={guardiaActionLoading}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border border-emerald-400 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                                >
+                                    Cerrar manual
+                                </button>
+                            ) : null}
+                            {isCCOperator && ccAutoOn && (
+                                <span className="text-[8px] font-bold text-amber-700 px-1">Iniciando guardia…</span>
                             )}
                             <button type="button" onClick={() => setNotifPanelOpen(v => !v)} className={`ml-auto flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${totalAlertsCount > 0 ? 'bg-rose-600 border-rose-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`}><Bell size={10} className={totalAlertsCount > 0 ? 'animate-pulse' : ''}/>{totalAlertsCount > 0 ? totalAlertsCount : 'Alertas'}</button>
                         </div>

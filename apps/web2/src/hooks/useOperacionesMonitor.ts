@@ -958,6 +958,27 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             default:           return hoy;
         }
     }, [processedData, viewTab, filterText, selectedClientId, now]);
+
+    /** Turnos de hoy para el mapa (sin filtro de pestaña ACT/VAC/etc.). */
+    const mapShiftData = useMemo(() => {
+        let list = processedData;
+        if (selectedClientId) list = list.filter((s: any) => s.clientId === selectedClientId);
+        if (filterText) {
+            const q = foldSearch(filterText);
+            list = list.filter((s: any) =>
+                foldSearch(s.employeeName).includes(q) ||
+                foldSearch(s.clientName).includes(q) ||
+                foldSearch(s.objectiveName).includes(q) ||
+                foldSearch(s.positionName).includes(q)
+            );
+        }
+        return list.filter((s: any) => {
+            if (s.isCompleted && !s.isRetention) return false;
+            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
+            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+        });
+    }, [processedData, filterText, selectedClientId, now]);
+
     const stats = useMemo(() => { const hoy = processedData.filter(s => {
             if (s.isCompleted && !s.isRetention) return false;
             if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
@@ -1373,7 +1394,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         filterText, setFilterText, isCompact, setIsCompact,
         handleAction,
         viewTab, setViewTab,
-        stats, listData,
+        stats, listData, mapShiftData,
         uniqueClients, selectedClientId, setSelectedClientId,
         filteredObjectives,
         employees,

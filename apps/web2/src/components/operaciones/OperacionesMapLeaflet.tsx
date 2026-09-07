@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -28,11 +28,16 @@ const createLeafletIcon = (preset: string, name: string) => {
 const MapUpdater = ({
   markers,
   fitRef,
+  markerIdsKey,
 }: {
   markers: { lat: number; lng: number }[];
   fitRef: React.MutableRefObject<(() => void) | null>;
+  markerIdsKey: string;
 }) => {
   const map = useMap();
+  const initialFitDoneRef = useRef(false);
+  const markerIdsKeyRef = useRef('');
+
   const fit = useCallback(() => {
     if (markers.length === 0) return;
     if (markers.length === 1) {
@@ -45,8 +50,17 @@ const MapUpdater = ({
 
   useEffect(() => {
     fitRef.current = fit;
-    fit();
   }, [fit, fitRef]);
+
+  useEffect(() => {
+    if (markers.length === 0) return;
+    const idsChanged = markerIdsKeyRef.current !== markerIdsKey;
+    if (!initialFitDoneRef.current || idsChanged) {
+      fit();
+      initialFitDoneRef.current = true;
+      markerIdsKeyRef.current = markerIdsKey;
+    }
+  }, [markers.length, markerIdsKey, fit]);
 
   return null;
 };
@@ -66,6 +80,21 @@ const OperacionesMapLeaflet = ({
   const basemap = getMapBasemapConfig();
   const mapCenter = Array.isArray(center) ? center : [center.lat, center.lng];
   const fitRef = useRef<(() => void) | null>(null);
+  const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+
+  const markerIdsKey = useMemo(
+    () => markers.map((m) => m.id).sort().join('|'),
+    [markers],
+  );
+
+  const getLeafletIcon = useCallback((marker: { id: string; iconPreset: string; name: string }) => {
+    const cacheKey = `${marker.id}:${marker.iconPreset}:${marker.name}`;
+    const cached = iconCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+    const icon = createLeafletIcon(marker.iconPreset, marker.name);
+    iconCacheRef.current.set(cacheKey, icon);
+    return icon;
+  }, []);
 
   return (
     <div className="relative h-full w-full operaciones-map-leaflet">
@@ -84,13 +113,13 @@ const OperacionesMapLeaflet = ({
       </div>
       <MapContainer center={mapCenter as [number, number]} zoom={13} style={{ height: '100%', width: '100%' }} className="z-0">
         <TileLayer url={basemap.url} attribution={basemap.attribution} />
-        <MapUpdater markers={markers} fitRef={fitRef} />
+        <MapUpdater markers={markers} fitRef={fitRef} markerIdsKey={markerIdsKey} />
 
         {markers.map((marker) => (
           <Marker
             key={marker.id}
             position={[marker.lat, marker.lng]}
-            icon={createLeafletIcon(marker.iconPreset, marker.name)}
+            icon={getLeafletIcon(marker)}
             title={`${marker.name} · ${marker.statusText}`}
             zIndexOffset={marker.layerOrder === 0 ? 0 : marker.isEvent ? 600 : 500}
           >
