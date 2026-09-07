@@ -23,6 +23,7 @@ import { novedadTypeService } from '@/services/novedadTypeService';
 import type { NovedadType } from '@/lib/rrhh/novedadTypes';
 import {
   buildServiceCapacityViability,
+  employeeBelongsToObjective,
   isActiveEmployeeStatus,
   monthBounds,
   prevCalendarMonth,
@@ -84,17 +85,82 @@ function BarRow({
   );
 }
 
-async function loadPreferredEmployees(empresaId: string, objectiveId: string): Promise<CapacityEmployeeInput[]> {
+async function loadPreferredByField(
+  empresaId: string,
+  fieldValue: string,
+): Promise<CapacityEmployeeInput[]> {
+  if (!fieldValue) return [];
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, 'empleados'),
+        where('empresaId', '==', empresaId),
+        where('preferredObjectiveId', '==', fieldValue),
+      ),
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as object) }) as CapacityEmployeeInput);
+  } catch {
+    return [];
+  }
+}
+
+async function loadEmpresaEmployees(empresaId: string): Promise<CapacityEmployeeInput[]> {
   const snap = await getDocs(
-    query(
-      collection(db, 'empleados'),
-      where('empresaId', '==', empresaId),
-      where('preferredObjectiveId', '==', objectiveId),
-    ),
+    query(collection(db, 'empleados'), where('empresaId', '==', empresaId)),
   );
-  return snap.docs
-    .map((d) => ({ id: d.id, ...(d.data() as object) }) as CapacityEmployeeInput)
-    .filter((e) => isActiveEmployeeStatus(e.status));
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as object) }) as CapacityEmployeeInput);
+}
+
+function mergeEmployeesById(...lists: CapacityEmployeeInput[][]): CapacityEmployeeInput[] {
+  const map = new Map<string, CapacityEmployeeInput>();
+  for (const list of lists) {
+    for (const e of list) {
+      if (!e?.id) continue;
+      if (!map.has(e.id)) map.set(e.id, e);
+    }
+  }
+  return [...map.values()].filter((e) => isActiveEmployeeStatus(e.status));
+}
+
+/**
+ * Plantilla del servicio: preferidos (objetivo o id SLA), dotación,
+ * positionAssignments del SLA y quienes aparecen en la malla del mes.
+ */
+async function loadServicePlantilla(opts: {
+  empresaId: string;
+  objectiveId: string;
+  serviceId: string;
+  assignmentIds: string[];
+  mallaEmpIds: string[];
+  seed?: CapacityEmployeeInput[];
+}): Promise<CapacityEmployeeInput[]> {
+  const { empresaId, objectiveId, serviceId } = opts;
+  const [byObj, bySla] = await Promise.all([
+    loadPreferredByField(empresaId, objectiveId),
+    loadPreferredByField(empresaId, serviceId),
+  ]);
+
+  let merged = mergeEmployeesById(opts.seed || [], byObj, bySla);
+
+  const needScan =
+    merged.length === 0 ||
+    opts.assignmentIds.some((id) => !merged.some((e) => e.id === id)) ||
+    opts.mallaEmpIds.some((id) => !merged.some((e) => e.id === id));
+
+  if (needScan) {
+    const all = await loadEmpresaEmployees(empresaId);
+    const extraIds = new Set(
+      [...opts.assignmentIds, ...opts.mallaEmpIds].map((x) => String(x || '').trim()).filter(Boolean),
+    );
+    const matched = all.filter(
+      (e) =>
+        isActiveEmployeeStatus(e.status) &&
+        (employeeBelongsToObjective(e, objectiveId, serviceId) || extraIds.has(e.id)),
+    );
+    merged = mergeEmployeesById(merged, matched);
+  }
+
+  return merged;
 }
 
 async function loadTurnosForObjectiveMonth(
@@ -104,17 +170,47 @@ async function loadTurnosForObjectiveMonth(
   month: number,
 ): Promise<any[]> {
   const { start, end } = monthBounds(year, month);
-  const q = query(
-    collection(db, 'turnos'),
-    where('empresaId', '==', empresaId),
-    where('objectiveId', '==', objectiveId),
-    where('startTime', '>=', Timestamp.fromDate(start)),
-    where('startTime', '<=', Timestamp.fromDate(end)),
-  );
+  const startIso = start.toISOString();
+  const endIso = end.toISOString();
+  const inMonth = (t: any) => {
+    const raw = t.startTime;
+    let ms: number | null = null;
+    if (raw?.toDate) ms = raw.toDate().getTime();
+    else if (typeof raw?.seconds === 'number') ms = raw.seconds * 1000;
+    else if (typeof raw === 'string' || raw instanceof Date) {
+      const d = new Date(raw);
+      if (!Number.isNaN(d.getTime())) ms = d.getTime();
+    }
+    if (ms == null) {
+      const sk = String(t.scheduleDate || '').slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(sk)) {
+        const [y, m, d] = sk.split('-').map(Number);
+        ms = new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+      }
+    }
+    return ms != null && ms >= start.getTime() && ms <= end.getTime();
+  };
+
+  const mapDocs = (snap: { docs: Array<{ id: string; data: () => any }> }) =>
+    snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
   try {
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const snap = await getDocs(
+      query(
+        collection(db, 'turnos'),
+        where('empresaId', '==', empresaId),
+        where('objectiveId', '==', objectiveId),
+        where('startTime', '>=', Timestamp.fromDate(start)),
+        where('startTime', '<=', Timestamp.fromDate(end)),
+      ),
+    );
+    const rows = mapDocs(snap);
+    if (rows.length) return rows;
   } catch {
+    /* fallback abajo */
+  }
+
+  try {
     const snap = await getDocs(
       query(
         collection(db, 'turnos'),
@@ -123,9 +219,39 @@ async function loadTurnosForObjectiveMonth(
         where('startTime', '<=', Timestamp.fromDate(end)),
       ),
     );
-    return snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((t) => !empresaId || String((t as any).empresaId || '') === empresaId);
+    const rows = mapDocs(snap).filter(
+      (t) => !empresaId || String((t as any).empresaId || '') === empresaId,
+    );
+    if (rows.length) return rows;
+  } catch {
+    /* fallback abajo */
+  }
+
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'turnos'), where('objectiveId', '==', objectiveId)),
+    );
+    return mapDocs(snap).filter(
+      (t) =>
+        (!empresaId || String((t as any).empresaId || '') === empresaId) &&
+        inMonth(t),
+    );
+  } catch {
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, 'turnos'),
+          where('objectiveId', '==', objectiveId),
+          where('startTime', '>=', startIso),
+          where('startTime', '<=', endIso),
+        ),
+      );
+      return mapDocs(snap).filter(
+        (t) => !empresaId || String((t as any).empresaId || '') === empresaId,
+      );
+    } catch {
+      return [];
+    }
   }
 }
 
@@ -196,19 +322,46 @@ export function ServiceCapacityViabilityModal({
       setError(null);
       try {
         const oid = String(service.objectiveId || '').trim();
-        let employees = (preferredEmployees || []).filter(
-          (e) =>
-            isActiveEmployeeStatus(e.status) &&
-            (!oid || String(e.preferredObjectiveId || '') === oid),
-        );
-        if (!employees.length && oid) {
-          employees = await loadPreferredEmployees(empresaId, oid);
-        }
+        const sid = String(service.id || '').trim();
+        const assignmentIds = (service.positionAssignments || [])
+          .map((a) => String(a.employeeId || '').trim())
+          .filter(Boolean);
+
         const prev = prevCalendarMonth(year, month);
+        const [tm, tp] = await Promise.all([
+          oid ? loadTurnosForObjectiveMonth(empresaId, oid, year, month) : Promise.resolve([] as any[]),
+          oid ? loadTurnosForObjectiveMonth(empresaId, oid, prev.year, prev.month) : Promise.resolve([] as any[]),
+        ]);
+        if (cancelled) return;
+
+        const mallaEmpIds = [
+          ...new Set(
+            [...tm, ...tp]
+              .map((t) => String(t.employeeId || '').trim())
+              .filter((id) => id && id.toUpperCase() !== 'VACANTE'),
+          ),
+        ];
+
+        const seed = (preferredEmployees || []).filter((e) =>
+          isActiveEmployeeStatus(e.status) &&
+          (employeeBelongsToObjective(e, oid, sid) || mallaEmpIds.includes(e.id) || assignmentIds.includes(e.id)),
+        );
+
+        const employees =
+          oid || sid
+            ? await loadServicePlantilla({
+                empresaId,
+                objectiveId: oid,
+                serviceId: sid,
+                assignmentIds,
+                mallaEmpIds,
+                seed,
+              })
+            : seed;
+
+        if (cancelled) return;
         const empIds = new Set(employees.map((e) => e.id));
-        const [tm, tp, aus, tipos] = await Promise.all([
-          oid ? loadTurnosForObjectiveMonth(empresaId, oid, year, month) : Promise.resolve([]),
-          oid ? loadTurnosForObjectiveMonth(empresaId, oid, prev.year, prev.month) : Promise.resolve([]),
+        const [aus, tipos] = await Promise.all([
           loadAusenciasPrev(empresaId, empIds, prev.year, prev.month),
           novedadTypeService.listByEmpresa(empresaId).catch(() => [] as NovedadType[]),
         ]);
@@ -240,6 +393,7 @@ export function ServiceCapacityViabilityModal({
       ausenciasPrev,
       turnosPrev,
       tiposNovedad,
+      employeesAlreadyResolved: true,
     });
   }, [service, emps, year, month, ausenciasPrev, turnosPrev, tiposNovedad]);
 
@@ -422,7 +576,7 @@ export function ServiceCapacityViabilityModal({
                       {capacity.guards.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="px-3 py-8 text-center text-slate-400 font-bold">
-                            Sin preferidos ACTIVE en este objetivo
+                            Sin plantilla ACTIVE vinculada (preferido / dotación / malla)
                           </td>
                         </tr>
                       ) : (

@@ -78,6 +78,27 @@ assert(cap.guards.every((g) => g.netHs <= 200), 'neta ≤ 200');
 assert(cap.ausentismo.modo === 'sin_indice', 'sin historial → sin_indice');
 console.log('  SLA', cap.slaHsMonth, 'neta', cap.capacityNetHs, 'ratio', cap.ratioPct);
 
+// preferredObjectiveId = id del documento SLA (como en Planificación)
+{
+  const bySlaId = buildServiceCapacityViability({
+    service: { ...service, id: 'sla-doc-1' },
+    employees: [
+      {
+        id: 'e3',
+        name: 'Guardia SLA-id',
+        status: 'ACTIVE',
+        preferredObjectiveId: 'sla-doc-1',
+        startDate: '2020-01-01',
+        planificacionDotacion: { 'sla-doc-1': { shiftCode: 'T' } },
+      },
+    ],
+    year: 2026,
+    month: 7,
+  });
+  assert(bySlaId.plantilla === 1, 'preferredObjectiveId=SLA id cuenta en plantilla');
+  assert(bySlaId.capacityNetHs > 0, 'capacidad > 0 con preferido por SLA id');
+}
+
 const turnos = [
   {
     id: 't1',

@@ -155,9 +155,36 @@ export function schemeFromShiftCode(code: ShiftBandCode): { scheme: WorkScheme; 
   return { scheme: WorkScheme.SixTwo, jornadaHs: 8, tipificado: false };
 }
 
-function resolveEmpShiftCode(emp: CapacityEmployeeInput, objectiveId: string): ShiftBandCode {
-  const dot = emp.planificacionDotacion?.[objectiveId];
-  return normalizeShiftBandCode(dot?.shiftCode);
+/**
+ * Misma regla que Planificación: `preferredObjectiveId` puede ser el id del objetivo
+ * o el id del documento SLA; también cuenta `planificacionDotacion[objetivo|sla]`.
+ */
+export function employeeBelongsToObjective(
+  emp: CapacityEmployeeInput,
+  objectiveId: string,
+  serviceId?: string,
+): boolean {
+  const oid = String(objectiveId || '').trim();
+  const sid = String(serviceId || '').trim();
+  const pref = String(emp.preferredObjectiveId || '').trim();
+  if (pref && oid && pref === oid) return true;
+  if (pref && sid && pref === sid) return true;
+  const dot = emp.planificacionDotacion || {};
+  if (oid && dot[oid]) return true;
+  if (sid && dot[sid]) return true;
+  return false;
+}
+
+function resolveEmpShiftCode(
+  emp: CapacityEmployeeInput,
+  objectiveId: string,
+  serviceId?: string,
+): ShiftBandCode {
+  const dot = emp.planificacionDotacion || {};
+  const oid = String(objectiveId || '').trim();
+  const sid = String(serviceId || '').trim();
+  const entry = (oid && dot[oid]) || (sid && dot[sid]) || undefined;
+  return normalizeShiftBandCode(entry?.shiftCode);
 }
 
 function slaShiftHints(positions: ServicePosition[] | undefined): Record<ShiftBandCode, string> {
@@ -195,7 +222,9 @@ export function monthBounds(year: number, monthIndex0: number): { start: Date; e
 }
 
 export function buildServiceCapacityViability(opts: {
-  service: Pick<ServiceSLA, 'startDate' | 'endDate' | 'positions' | 'excludedDates' | 'objectiveId'>;
+  service: Pick<ServiceSLA, 'startDate' | 'endDate' | 'positions' | 'excludedDates' | 'objectiveId'> & {
+    id?: string;
+  };
   employees: CapacityEmployeeInput[];
   year: number;
   /** 0–11 */
@@ -203,11 +232,17 @@ export function buildServiceCapacityViability(opts: {
   ausenciasPrev?: any[];
   turnosPrev?: any[];
   tiposNovedad?: NovedadType[];
+  /**
+   * Si true, no vuelve a filtrar por preferido (la lista ya viene resuelta:
+   * preferidos + dotación + asignaciones SLA + malla).
+   */
+  employeesAlreadyResolved?: boolean;
 }): ServiceCapacityViability {
   const { service, year, month } = opts;
   const days = daysInCalendarMonth(year, month);
   const asOf = new Date(year, month + 1, 0, 12, 0, 0, 0);
   const objectiveId = String(service.objectiveId || '').trim();
+  const serviceId = String(service.id || '').trim();
 
   const slaRow = calculateSlaHoursForMonth(
     service.positions || [],
@@ -221,8 +256,9 @@ export function buildServiceCapacityViability(opts: {
 
   const preferred = (opts.employees || []).filter((e) => {
     if (!isActiveEmployeeStatus(e.status)) return false;
-    if (!objectiveId) return true;
-    return String(e.preferredObjectiveId || '').trim() === objectiveId;
+    if (opts.employeesAlreadyResolved) return true;
+    if (!objectiveId && !serviceId) return true;
+    return employeeBelongsToObjective(e, objectiveId, serviceId);
   });
 
   const prev = prevCalendarMonth(year, month);
@@ -255,7 +291,7 @@ export function buildServiceCapacityViability(opts: {
     const years = yearsSeniorityAt(start, asOf);
     const vacYear = vacationCalendarDaysBySeniority(years);
     const vacDaysMonth = (vacYear * days) / 365;
-    const code = resolveEmpShiftCode(emp, objectiveId);
+    const code = resolveEmpShiftCode(emp, objectiveId, serviceId);
     const { scheme, jornadaHs, tipificado } = schemeFromShiftCode(code);
     const schemeHs = billableHoursOneHeadInMonth(days, scheme, 'rational_hours');
     const bruto = Math.min(CCT_HS_TECHO_MENSUAL, schemeHs);
@@ -296,7 +332,8 @@ export function buildServiceCapacityViability(opts: {
 
   let conclusion: string;
   if (preferred.length === 0) {
-    conclusion = 'Sin guardias preferidos al objetivo: no hay oferta de capacidad para contrastar el paquete SLA.';
+    conclusion =
+      'Sin plantilla vinculada al objetivo (preferredObjectiveId, planificacionDotacion ni malla del mes): no hay oferta de capacidad para contrastar el paquete SLA.';
   } else if (slaHsMonth <= 0) {
     conclusion = 'El servicio no genera horas SLA en este mes (fuera de vigencia o sin puestos computables).';
   } else if (gapHs <= 0) {
