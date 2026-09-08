@@ -959,25 +959,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         }
     }, [processedData, viewTab, filterText, selectedClientId, now]);
 
-    /** Turnos de hoy para el mapa (sin filtro de pestaña ACT/VAC/etc.). */
-    const mapShiftData = useMemo(() => {
-        let list = processedData;
-        if (selectedClientId) list = list.filter((s: any) => s.clientId === selectedClientId);
-        if (filterText) {
-            const q = foldSearch(filterText);
-            list = list.filter((s: any) =>
-                foldSearch(s.employeeName).includes(q) ||
-                foldSearch(s.clientName).includes(q) ||
-                foldSearch(s.objectiveName).includes(q) ||
-                foldSearch(s.positionName).includes(q)
-            );
-        }
-        return list.filter((s: any) => {
-            if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        });
-    }, [processedData, filterText, selectedClientId, now]);
+    /** Objetivos con geo para el mapa según pestaña/filtro activo (PLAN, ACT, VAC, etc.). */
+    const mapTabObjectives = useMemo(() => {
+        const ids = new Set(
+            listData.map((s: any) => String(s.objectiveId ?? '').trim()).filter(Boolean),
+        );
+        return filteredObjectives.filter((o: any) =>
+            ids.has(String(o.id ?? o.objectiveId ?? '').trim()),
+        );
+    }, [listData, filteredObjectives]);
 
     const stats = useMemo(() => { const hoy = processedData.filter(s => {
             if (s.isCompleted && !s.isRetention) return false;
@@ -1394,7 +1384,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         filterText, setFilterText, isCompact, setIsCompact,
         handleAction,
         viewTab, setViewTab,
-        stats, listData, mapShiftData,
+        stats, listData, mapTabObjectives,
         uniqueClients, selectedClientId, setSelectedClientId,
         filteredObjectives,
         employees,

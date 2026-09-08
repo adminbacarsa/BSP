@@ -1398,8 +1398,8 @@ export default function TacticalMapView() {
 
             <OperacionesMap
                 center={[-31.4201, -64.1888]}
-                allObjectives={logic.filteredObjectives}
-                filteredShifts={logic.mapShiftData}
+                allObjectives={logic.mapTabObjectives}
+                filteredShifts={logic.listData}
                 tacticalHud
                 onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
                 onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} 
