@@ -438,9 +438,18 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const displayPos = isFranco && (rawPos === 'General' || !rawPos) ? 'Franco' : rawPos;
 
             // Solo mostrar turnos de objetivos con planificación publicada.
-            // Sin excepción: ni turnos operativos, ni ausentes, ni presentes
-            // de un objetivo BORRADOR aparecen en el monitor.
-            {
+            // Excepción: turnos operativos (RETEN/OPERATIONS_COVERAGE/SLA_VIRTUAL/EVENTO) siempre visibles
+            // porque no tienen doc en planificacion_estados.
+            const isClientRefuerzoPlanificado = shift.origin === 'CLIENT_REQUEST'
+                && (shiftCodeUpper === 'RFZ' || shiftCodeUpper === 'TURA');
+            const isOperationalOrigin = shift.origin === 'RETEN'
+                || shift.origin === 'OPERATIONS_COVERAGE'
+                || shift.origin === 'SLA_VIRTUAL'
+                || (shift.origin === 'CLIENT_REQUEST' && !isClientRefuerzoPlanificado)
+                || shift.origin === 'EVENTO'
+                || !!shift.isReten
+                || shift.resolvedBy === 'OPERACIONES';
+            if (!isOperationalOrigin) {
                 const shiftDate = shift.shiftDateObj!;
                 const pubKey = planificacionPublishLookupKey(
                     shift.objectiveId,
