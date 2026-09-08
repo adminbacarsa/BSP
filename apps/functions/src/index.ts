@@ -3418,6 +3418,36 @@ export const gestionarVacantes = functions
 
     if (snap.empty) return null;
 
+    // Pre-fetch planificacion_estados para todos los objetivos con vacantes de planning
+    // Los turnos operativos (RETEN/OPERATIONS_COVERAGE/SLA_VIRTUAL) siempre se procesan.
+    const planKeySet = new Set<string>();
+    for (const docSnap of snap.docs) {
+      const sh = docSnap.data();
+      if (sh.draft === true) continue;
+      if (sh.isUnassigned !== true && sh.employeeId !== 'VACANTE') continue;
+      const shOrigin = String(sh.origin || '');
+      const isOps = ['RETEN','OPERATIONS_COVERAGE','SLA_VIRTUAL'].includes(shOrigin) || !!sh.isReten || sh.resolvedBy === 'OPERACIONES';
+      if (!isOps && sh.objectiveId) {
+        const startMs = sh.startTime?.toMillis?.() ?? 0;
+        if (startMs) {
+          const d = new Date(startMs);
+          planKeySet.add(`${sh.objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`);
+        }
+      }
+    }
+    const publishedPlanKeys = new Set<string>();
+    const planKeyArr = Array.from(planKeySet);
+    for (let i = 0; i < planKeyArr.length; i += 30) {
+      const chunk = planKeyArr.slice(i, i + 30);
+      if (chunk.length === 0) continue;
+      const pubSnap = await db.collection('planificacion_estados')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+        .get();
+      for (const d of pubSnap.docs) {
+        publishedPlanKeys.add(d.id);
+      }
+    }
+
     let sentToPlanning = 0;
     let sentToProtocol = 0;
 
@@ -3425,10 +3455,23 @@ export const gestionarVacantes = functions
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
-      // Ignorar borradores de planificación (no publicados)
+      // Ignorar borradores de planificación (draft flag)
       if (shift.draft === true) continue;
       // Solo vacantes sin asignación
       if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE') continue;
+      // Turnos de planning: solo procesar si la planificación está publicada (BORRADOR → skip)
+      {
+        const shOrigin = String(shift.origin || '');
+        const isOps = ['RETEN','OPERATIONS_COVERAGE','SLA_VIRTUAL'].includes(shOrigin) || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
+        if (!isOps && shift.objectiveId) {
+          const startMs2 = shift.startTime?.toMillis?.() ?? 0;
+          if (startMs2) {
+            const d = new Date(startMs2);
+            const planKey = `${shift.objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`;
+            if (!publishedPlanKeys.has(planKey)) continue;
+          }
+        }
+      }
 
       // Ignorar si ya fue cancelada o resuelta
       const st = (shift.status || '').toUpperCase();
