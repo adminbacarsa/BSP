@@ -373,6 +373,20 @@ async function findBestCandidate(
     }
   }
 
+  // Empleados que ya tienen convocatoria PENDING/ESCALATED en OTRO turno.
+  // Evita que la misma persona sea convocada a múltiples objetivos simultáneamente.
+  const activeConvSnap = await db.collection('convocatorias_cobertura')
+    .where('empresaId', '==', conv.empresaId)
+    .where('status', 'in', ['PENDING', 'ESCALATED'])
+    .get();
+  const alreadyConvocadoIds = new Set<string>();
+  for (const d of activeConvSnap.docs) {
+    const c = d.data();
+    if (c.shiftId !== conv.shiftId && c.candidateEmployeeId) {
+      alreadyConvocadoIds.add(String(c.candidateEmployeeId));
+    }
+  }
+
   for (const empDoc of empSnap.docs) {
     const emp = empDoc.data();
     const empId = empDoc.id;
@@ -387,7 +401,7 @@ async function findBestCandidate(
     }
 
     if (type === 'VOLANTE') {
-      if (busyEmpIds.has(empId)) continue;
+      if (busyEmpIds.has(empId) || alreadyConvocadoIds.has(empId)) continue;
       if (!(emp.volante || []).includes(conv.objectiveId)) continue;
       const check = checkEligibility(emp, ctx, 'VOLANTE');
       if (check.eligible) {
@@ -397,7 +411,7 @@ async function findBestCandidate(
     }
 
     if (type === 'SIN_TURNO_CON_EXP') {
-      if (busyEmpIds.has(empId) || francoEmpIds.has(empId) || retEmpIds.has(empId)) continue;
+      if (busyEmpIds.has(empId) || francoEmpIds.has(empId) || retEmpIds.has(empId) || alreadyConvocadoIds.has(empId)) continue;
       const isTitular = emp.preferredObjectiveId === conv.objectiveId;
       const hasExp = !!(emp.experienciaObjetivos || {})[conv.objectiveId];
       if (!isTitular && !hasExp) continue;
@@ -409,7 +423,7 @@ async function findBestCandidate(
     }
 
     if (type === 'SIN_TURNO') {
-      if (busyEmpIds.has(empId) || francoEmpIds.has(empId) || retEmpIds.has(empId)) continue;
+      if (busyEmpIds.has(empId) || francoEmpIds.has(empId) || retEmpIds.has(empId) || alreadyConvocadoIds.has(empId)) continue;
       const check = checkEligibility(emp, ctx, 'SIN_TURNO');
       if (check.eligible) {
         const uid = await findEmployeeUid(db, empId, emp);
