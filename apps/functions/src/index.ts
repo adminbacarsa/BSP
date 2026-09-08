@@ -891,9 +891,20 @@ async function runModoDemoForEmpresa(
         empresaId, createdAt: nowTs, reportedBy: 'SISTEMA_AUTO', source: 'MODO_DEMO', modoDemoAt: nowTs,
       });
     } else {
-      if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue;
-      if (startMs < now.getTime() - WINDOW_AFTER_MS) continue;
-      batch.update(doc.ref, { isPresent: true, presentAt: t.startTime, realStartTime: t.startTime, autoPresencia: true, modoDemoAt: nowTs });
+      // Para adelantos (isEarlyStart), usar adjustedStartTime como hora real de inicio
+      const isEarlyShift = t.isEarlyStart === true && !!t.adjustedStartTime;
+      const actualStartTs = isEarlyShift ? t.adjustedStartTime : t.startTime;
+      const actualStartMs = (actualStartTs?.seconds ?? 0) * 1000;
+      const shiftEndMs = (t.endTime?.seconds ?? 0) * 1000;
+      if (isEarlyShift) {
+        // Ventana amplia: hasta 4h en el pasado, mientras el turno no haya terminado
+        if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS) continue;
+        if (shiftEndMs && shiftEndMs < now.getTime()) continue;
+      } else {
+        if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS) continue;
+        if (actualStartMs < now.getTime() - WINDOW_AFTER_MS) continue;
+      }
+      batch.update(doc.ref, { isPresent: true, presentAt: actualStartTs, realStartTime: actualStartTs, autoPresencia: true, modoDemoAt: nowTs });
     }
     presencias++;
     const idx = byObj.get(oid);
@@ -963,14 +974,16 @@ async function runModoDemoForEmpresa(
     ausenciasDemo++;
   }
 
-  // Pase 2: cerrar salientes — usa endTime del turno (no nowTs) para que el egreso sea correcto
+  // Pase 2: cerrar salientes — respeta extensiones/retenciones para que realEndTime sea correcto para liquidación
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
     if (t.isAbsent || !t.isPresent || t.isCompleted) continue;
-    const endMs = (t.endTime?.seconds ?? 0) * 1000;
+    // Si hay retención activa, el turno real termina en retentionUntil, no en endTime planificado
+    const actualEndTs = t.retentionUntil ?? t.manualRetentionUntil ?? t.endTime;
+    const endMs = (actualEndTs?.seconds ?? 0) * 1000;
     if (!endMs || endMs > now.getTime()) continue;
-    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: t.endTime, autoCierre: true, modoDemoAt: nowTs });
+    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: actualEndTs, autoCierre: true, modoDemoAt: nowTs });
     cierres++;
   }
 
