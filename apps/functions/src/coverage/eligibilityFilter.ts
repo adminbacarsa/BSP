@@ -109,10 +109,10 @@ export function deriveCandidateType(
 
 export const CASCADE_ORDER: CandidateType[] = [
   'RET',
+  'ADVANCE',
   'VOLANTE',
   'SIN_TURNO_CON_EXP',
   'EXTEND',
-  'ADVANCE',
   'SIN_TURNO',
   'FT',
 ];

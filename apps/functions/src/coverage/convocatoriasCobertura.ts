@@ -518,6 +518,13 @@ async function resolverCobertura(
       extendedAt: FieldValue.serverTimestamp(),
       resolvedBy,
     });
+    batch.update(db.collection('turnos').doc(conv.shiftId), {
+      coveredByEmployeeId: conv.candidateEmployeeId,
+      coveredByEmployeeName: conv.candidateEmployeeName,
+      coverageType: 'EXTEND',
+      coverageResolvedAt: FieldValue.serverTimestamp(),
+      coverageConvocatoriaId: conv.id,
+    });
   } else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
     const nextRef = db.collection('turnos').doc(conv.advanceShiftId);
     batch.update(nextRef, {
@@ -526,6 +533,13 @@ async function resolverCobertura(
       advancedBy: 'CONVOCATORIA',
       advancedAt: FieldValue.serverTimestamp(),
       resolvedBy,
+    });
+    batch.update(db.collection('turnos').doc(conv.shiftId), {
+      coveredByEmployeeId: conv.candidateEmployeeId,
+      coveredByEmployeeName: conv.candidateEmployeeName,
+      coverageType: 'ADVANCE',
+      coverageResolvedAt: FieldValue.serverTimestamp(),
+      coverageConvocatoriaId: conv.id,
     });
   } else if (conv.type === 'RET') {
     const vacantRef = db.collection('turnos').doc(conv.shiftId);
@@ -696,7 +710,7 @@ export const crearConvocatoriaCobertura = functions
       endTime: shift.endTime,
       aptitudesRequeridas: [],
       type,
-      cascadeStep: ['RET', 'VOLANTE', 'SIN_TURNO_CON_EXP', 'EXTEND', 'ADVANCE', 'SIN_TURNO', 'FT'].indexOf(type),
+      cascadeStep: CASCADE_ORDER.indexOf(type),
       candidateEmployeeId,
       candidateEmployeeName: empName,
       candidateUid: uid || undefined,
@@ -936,6 +950,59 @@ export const getCandidatosCobertura = functions
     return { candidates: results };
   });
 
+// ─── Helper: asignación directa RET (obligatorio, sin flujo accept/reject) ───
+
+async function asignarRETDirecto(
+  db: admin.firestore.Firestore,
+  baseConv: ConvocatoriaCoberturaDoc,
+  candidate: { id: string; name: string; uid?: string | null },
+  createdBy: string,
+): Promise<void> {
+  const convId = db.collection('convocatorias_cobertura').doc().id;
+  const now = Timestamp.now();
+  const retConv: ConvocatoriaCoberturaDoc & { id: string } = {
+    ...baseConv,
+    id: convId,
+    type: 'RET',
+    cascadeStep: CASCADE_ORDER.indexOf('RET'),
+    candidateEmployeeId: candidate.id,
+    candidateEmployeeName: candidate.name,
+    candidateUid: candidate.uid ?? undefined,
+    status: 'ACCEPTED',
+    timeoutAt: now,
+    createdAt: now,
+    createdBy,
+    resolvedAt: now,
+  };
+
+  await db.collection('convocatorias_cobertura').doc(convId).set({
+    ...retConv,
+    createdAt: FieldValue.serverTimestamp(),
+    resolvedAt: FieldValue.serverTimestamp(),
+  });
+
+  await resolverCobertura(db, retConv);
+
+  const startTime = retConv.startTime instanceof Timestamp
+    ? retConv.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
+    : '--:--';
+  await db.collection('user_notifications').add({
+    uid: candidate.uid || null,
+    employeeId: candidate.id,
+    type: 'CONVOCATORIA_COBERTURA',
+    title: '⚡ Turno RET asignado',
+    body: `Fuiste asignado para cubrir turno ${baseConv.shiftCode || ''} en ${baseConv.objectiveName || 'el puesto'} desde las ${startTime}. Confirmá lectura.`,
+    empresaId: baseConv.empresaId,
+    convocatoriaId: convId,
+    shiftId: baseConv.shiftId,
+    objectiveId: baseConv.objectiveId,
+    isReadReceipt: true,
+    read: false,
+    readAt: null,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
 // ─── MODO DEMO: arrancar cascada desde step 0 para un turno ausente ──────────
 
 export interface ShiftDataForCascade {
@@ -993,6 +1060,11 @@ export async function iniciarCascadaCobertura(
     }
     const candidate = await findBestCandidate(db, baseConvData, type);
     if (!candidate) continue;
+
+    if (type === 'RET') {
+      await asignarRETDirecto(db, baseConvData, candidate, createdBy);
+      return;
+    }
 
     await crearConvocatoriaDoc(db, {
       ...baseConvData,

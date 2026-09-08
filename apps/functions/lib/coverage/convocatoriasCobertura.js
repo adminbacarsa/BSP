@@ -378,6 +378,13 @@ async function resolverCobertura(db, conv) {
             extendedAt: firestore_1.FieldValue.serverTimestamp(),
             resolvedBy,
         });
+        batch.update(db.collection('turnos').doc(conv.shiftId), {
+            coveredByEmployeeId: conv.candidateEmployeeId,
+            coveredByEmployeeName: conv.candidateEmployeeName,
+            coverageType: 'EXTEND',
+            coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
+            coverageConvocatoriaId: conv.id,
+        });
     }
     else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
         const nextRef = db.collection('turnos').doc(conv.advanceShiftId);
@@ -387,6 +394,13 @@ async function resolverCobertura(db, conv) {
             advancedBy: 'CONVOCATORIA',
             advancedAt: firestore_1.FieldValue.serverTimestamp(),
             resolvedBy,
+        });
+        batch.update(db.collection('turnos').doc(conv.shiftId), {
+            coveredByEmployeeId: conv.candidateEmployeeId,
+            coveredByEmployeeName: conv.candidateEmployeeName,
+            coverageType: 'ADVANCE',
+            coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
+            coverageConvocatoriaId: conv.id,
         });
     }
     else if (conv.type === 'RET') {
@@ -518,7 +532,7 @@ exports.crearConvocatoriaCobertura = functions
         endTime: shift.endTime,
         aptitudesRequeridas: [],
         type,
-        cascadeStep: ['RET', 'VOLANTE', 'SIN_TURNO_CON_EXP', 'EXTEND', 'ADVANCE', 'SIN_TURNO', 'FT'].indexOf(type),
+        cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf(type),
         candidateEmployeeId,
         candidateEmployeeName: empName,
         candidateUid: uid || undefined,
@@ -703,6 +717,48 @@ exports.getCandidatosCobertura = functions
     });
     return { candidates: results };
 });
+async function asignarRETDirecto(db, baseConv, candidate, createdBy) {
+    const convId = db.collection('convocatorias_cobertura').doc().id;
+    const now = firestore_1.Timestamp.now();
+    const retConv = {
+        ...baseConv,
+        id: convId,
+        type: 'RET',
+        cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf('RET'),
+        candidateEmployeeId: candidate.id,
+        candidateEmployeeName: candidate.name,
+        candidateUid: candidate.uid ?? undefined,
+        status: 'ACCEPTED',
+        timeoutAt: now,
+        createdAt: now,
+        createdBy,
+        resolvedAt: now,
+    };
+    await db.collection('convocatorias_cobertura').doc(convId).set({
+        ...retConv,
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
+        resolvedAt: firestore_1.FieldValue.serverTimestamp(),
+    });
+    await resolverCobertura(db, retConv);
+    const startTime = retConv.startTime instanceof firestore_1.Timestamp
+        ? retConv.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
+        : '--:--';
+    await db.collection('user_notifications').add({
+        uid: candidate.uid || null,
+        employeeId: candidate.id,
+        type: 'CONVOCATORIA_COBERTURA',
+        title: '⚡ Turno RET asignado',
+        body: `Fuiste asignado para cubrir turno ${baseConv.shiftCode || ''} en ${baseConv.objectiveName || 'el puesto'} desde las ${startTime}. Confirmá lectura.`,
+        empresaId: baseConv.empresaId,
+        convocatoriaId: convId,
+        shiftId: baseConv.shiftId,
+        objectiveId: baseConv.objectiveId,
+        isReadReceipt: true,
+        read: false,
+        readAt: null,
+        createdAt: firestore_1.FieldValue.serverTimestamp(),
+    });
+}
 async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
     const existing = await db.collection('convocatorias_cobertura')
         .where('shiftId', '==', shift.id)
@@ -740,6 +796,10 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         const candidate = await findBestCandidate(db, baseConvData, type);
         if (!candidate)
             continue;
+        if (type === 'RET') {
+            await asignarRETDirecto(db, baseConvData, candidate, createdBy);
+            return;
+        }
         await crearConvocatoriaDoc(db, {
             ...baseConvData,
             type,
