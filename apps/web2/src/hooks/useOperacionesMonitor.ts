@@ -613,6 +613,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 if (now > serviceEnd) return;
             }
 
+            // Sin cronograma publicado para este objetivo/mes → el servicio aún no entró en operación.
+            // No generar vacantes hasta que planificación publique el crono.
+            const nowYear = now.getFullYear();
+            const nowMonth = now.getMonth() + 1;
+            if (!publishStatusMap[planificacionPublishLookupKey(sla.objectiveId, nowYear, nowMonth)]) return;
+
             // Vacantes "virtuales" = huecos del SLA vs turnos reales. Si no hay ningún documento
             // en `turnos` para este objetivo hoy (p. ej. base vaciada o aún sin planificar),
             // no generar tarjetas fantasma: el contador de vacantes reflejaba solo SLA activo.
