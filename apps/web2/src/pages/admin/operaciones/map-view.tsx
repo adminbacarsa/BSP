@@ -1310,23 +1310,37 @@ export default function TacticalMapView() {
         catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     };
 
-    // --- SYNC FILTROS (cliente y búsqueda; la solapa NO se hereda del panel: el mapa expandido abre siempre en MAPA GENERAL) ---
+    // --- SYNC FILTROS con CC (cliente, búsqueda y solapa activa) ---
     useEffect(() => {
-        logic.setViewTab('TODOS');
         const syncFilters = () => {
             const saved = localStorage.getItem('crono_ops_filters');
             if (saved) {
                 try {
-                    const { client, text } = JSON.parse(saved);
+                    const { client, text, tab } = JSON.parse(saved);
                     logic.setSelectedClientId(client ?? '');
                     logic.setFilterText(text ?? '');
-                } catch (e) { console.error(e); }
+                    const allowed = ['TODOS', 'PRIORIDAD', 'NO_LLEGO', 'PLAN', 'ACTIVOS', 'RETENIDOS', 'VACANTES', 'AUSENTES', 'FRANCOS'];
+                    if (tab && allowed.includes(tab)) logic.setViewTab(tab as typeof logic.viewTab);
+                    else logic.setViewTab('TODOS');
+                } catch (e) { console.error(e); logic.setViewTab('TODOS'); }
+            } else {
+                logic.setViewTab('TODOS');
             }
         };
         syncFilters();
-        window.addEventListener('storage', (e) => { if (e.key === 'crono_ops_filters') syncFilters(); });
-        return () => window.removeEventListener('storage', () => {});
+        const onStorage = (e: StorageEvent) => { if (e.key === 'crono_ops_filters') syncFilters(); };
+        window.addEventListener('storage', onStorage);
+        return () => window.removeEventListener('storage', onStorage);
     }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        localStorage.setItem('crono_ops_filters', JSON.stringify({
+            tab: logic.viewTab,
+            client: logic.selectedClientId,
+            text: logic.filterText,
+        }));
+    }, [logic.viewTab, logic.selectedClientId, logic.filterText]);
 
     const tabs = [
         { id: 'PRIORIDAD', label: 'PRIO', count: logic.stats.prioridad, color: 'text-rose-600' },

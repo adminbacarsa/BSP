@@ -25,6 +25,49 @@ const getDuration = (start: Date, end: Date) => { if (!start || !end) return 0; 
 const createDateFromTime = (timeStr: string, baseDate: Date) => { if (!timeStr) return null; const [hours, minutes] = timeStr.split(':').map(Number); const d = new Date(baseDate); d.setHours(hours, minutes, 0, 0); return d; };
 const getDayCode = (date: Date) => ['D', 'L', 'M', 'X', 'J', 'V', 'S'][date.getDay()];
 
+const FRANCO_REST_CODES = new Set(['F', 'FF', 'FP']);
+
+/** Franco de descanso (F/FF/FP), no FT ni franco ya convocado a trabajar. */
+export function isRestFrancoShift(shift: any): boolean {
+    if (!shift || shift.isFrancoTrabajado) return false;
+    const code = String(shift.code || shift.type || '').toUpperCase();
+    if (FRANCO_REST_CODES.has(code)) return true;
+    if (shift.isFrancoCompensatorio) return true;
+    if (shift.isFranco || shift.objectiveName === 'FRANCO') return true;
+    return false;
+}
+
+export function isOpsShiftHoy(s: any, now: Date): boolean {
+    if (s.isCompleted && !s.isRetention && !isRestFrancoShift(s)) return false;
+    if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
+    return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+}
+
+export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
+    switch (viewTab) {
+        case 'TODOS':
+            return !s.isFranco;
+        case 'PRIORIDAD':
+            return (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco;
+        case 'NO_LLEGO':
+            return (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad;
+        case 'PLAN':
+            return (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet;
+        case 'ACTIVOS':
+            return s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention;
+        case 'RETENIDOS':
+            return s.isRetention;
+        case 'VACANTES':
+            return s.isUnassigned;
+        case 'AUSENTES':
+            return s.isAbsent || s.isPotentialAbsence;
+        case 'FRANCOS':
+            return s.isFranco;
+        default:
+            return !s.isFranco;
+    }
+}
+
 // HELPER: GAPS (SOLO FALLBACK)
 const findTimeGaps = (shifts: any[], baseDate: Date) => {
     const timeline = new Int8Array(1440).fill(0); 
@@ -388,13 +431,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // COVERED: solo descartar si es una vacante real (employeeId=VACANTE)
             // Si es una ausencia, mantener en processedData para tracking RRHH
             if (shift.status === 'COVERED' && !shift.isAbsent && (!shift.employeeId || shift.employeeId === 'VACANTE')) return null;
+            const shiftCodeUpper = String(shift.code || shift.type || '').toUpperCase();
+            const isFranco = isRestFrancoShift({ ...shift, code: shiftCodeUpper });
             const rawPos = (shift.positionName || '').trim();
-            if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') return null;
+            if ((!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') && !isFranco) return null;
+            const displayPos = isFranco && (rawPos === 'General' || !rawPos) ? 'Franco' : rawPos;
 
             // Solo mostrar turnos de planificación publicada. Los turnos operativos
             // (retén, cobertura, auto-reportados) y los ya procesados (presentes/ausentes)
             // siempre se muestran sin importar el estado de publicación.
-            const shiftCodeUpper = String(shift.code || shift.type || '').toUpperCase();
             const isClientRefuerzoPlanificado = shift.origin === 'CLIENT_REQUEST'
                 && (shiftCodeUpper === 'RFZ' || shiftCodeUpper === 'TURA');
             const isOperationalOrigin = shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'SLA_VIRTUAL' || (shift.origin === 'CLIENT_REQUEST' && !isClientRefuerzoPlanificado) || shift.origin === 'EVENTO' || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
@@ -469,8 +514,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Para el DISPLAY (contador OBJ, stats, tab VACANTES) se usa isUnassigned directamente
             // para incluir también las devueltas — ambas representan puestos sin cobertura real.
             const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
-            const isFranco = !!shift.isFranco || shift.objectiveName === 'FRANCO';
-            
+
             const isSinCobertura = !!shift.isSinCobertura;
             // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA, RFZ y TURA (2º tramo cortado)
             if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante && !isTuraVacante) return null;
@@ -569,7 +613,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 && (!!shift.parentShiftId || !!parentEmpleadoId);
 
             return {
-                ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: rawPos,
+                ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: displayPos,
                 phone,
                 employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
@@ -945,24 +989,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 foldSearch(s.positionName).includes(q)
             );
         }
-        // Base: solo turnos de hoy — OR turno activo/retenido que arrancó en el nocturno de ayer
-        const hoy = list.filter((s:any) => {
-            if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        });
-        switch (viewTab) {
-            case 'TODOS':      return hoy.filter((s:any) => !s.isFranco);
-            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco);
-            case 'NO_LLEGO':   return hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad);
-            case 'PLAN':       return hoy.filter((s:any) => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet);
-            case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention);
-            case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention); // isPendingRetention va en PRIORIDAD, no aquí
-            case 'VACANTES':   return hoy.filter((s:any) => s.isUnassigned); // incluye devueltas — un puesto sin guardia presente ES una vacante
-            case 'AUSENTES':   return hoy.filter((s:any) => s.isAbsent || s.isPotentialAbsence);
-            case 'FRANCOS':    return hoy.filter((s:any) => s.isFranco);
-            default:           return hoy;
-        }
+        const hoy = list.filter((s: any) => isOpsShiftHoy(s, now));
+        return hoy.filter((s: any) => shiftMatchesOpsViewTab(s, viewTab));
     }, [processedData, viewTab, filterText, selectedClientId, now]);
 
     /** Objetivos con geo para el mapa según pestaña/filtro activo (PLAN, ACT, VAC, etc.). */
@@ -975,11 +1003,23 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         );
     }, [listData, filteredObjectives]);
 
-    const stats = useMemo(() => { const hoy = processedData.filter(s => {
-            if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad).length, plan: hoy.filter(s => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, rrhh_urgente: hoy.filter(s => s.isRRHHUrgent && !s.isFranco).length, rrhh_planificado: hoy.filter(s => s.isRRHHPlanned && !s.isFranco).length, total: hoy.length }; }, [processedData, now]);
+    const stats = useMemo(() => {
+        const hoy = processedData.filter((s) => isOpsShiftHoy(s, now));
+        return {
+            prioridad: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PRIORIDAD')).length,
+            no_llego: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'NO_LLEGO')).length,
+            plan: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PLAN')).length,
+            activos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'ACTIVOS')).length,
+            retenidos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'RETENIDOS')).length,
+            vacantes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'VACANTES')).length,
+            devueltas: hoy.filter((s) => s.isUnassigned && s.isReportedToPlanning).length,
+            ausentes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'AUSENTES')).length,
+            francos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS')).length,
+            rrhh_urgente: hoy.filter((s) => s.isRRHHUrgent && !s.isFranco).length,
+            rrhh_planificado: hoy.filter((s) => s.isRRHHPlanned && !s.isFranco).length,
+            total: hoy.length,
+        };
+    }, [processedData, now]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {
