@@ -37,6 +37,8 @@ export interface ConvocatoriaCoberturaDoc {
   extendShiftId?: string;
   // Para ADVANCE: el próximo turno a adelantar
   advanceShiftId?: string;
+  // Para FT: el turno franco del candidato que se convierte a FT
+  ftShiftId?: string;
 
   // PENDING: esperando respuesta dentro del timeout
   // ESCALATED: timeout vencido, avanzamos al siguiente paso pero AÚN acepta respuesta
@@ -134,6 +136,25 @@ async function avanzarCascada(
     return;
   }
 
+  // Novedad para ops: el candidato anterior no respondió / rechazó
+  await db.collection('novedades').add({
+    type: 'CONVOCATORIA_ESCALADA',
+    shiftId: conv.shiftId,
+    objectiveId: conv.objectiveId,
+    objectiveName: conv.objectiveName || '',
+    clientId: conv.clientId || null,
+    empresaId: conv.empresaId,
+    title: reason === 'REJECTED' ? 'Convocatoria rechazada' : 'Sin respuesta — escalando',
+    message: `${conv.candidateEmployeeName} ${reason === 'REJECTED' ? 'rechazó' : 'no respondió'} — escalando a ${nextType} en ${conv.objectiveName || 'objetivo'}`,
+    coverageType: conv.type,
+    nextCoverageType: nextType,
+    candidateEmployeeId: conv.candidateEmployeeId,
+    candidateEmployeeName: conv.candidateEmployeeName,
+    status: 'unread',
+    resolved: false,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
   await crearConvocatoriaDoc(db, {
     ...conv,
     type: nextType,
@@ -171,6 +192,31 @@ async function crearConvocatoriaDoc(
 
   const ref = await db.collection('convocatorias_cobertura').add(docData);
   await crearNotifConvocatoria(db, { ...docData, id: ref.id });
+
+  // Novedad para ops — trazabilidad en Bitácora
+  const typeLabel: Record<string, string> = {
+    RET: 'RET', EXTEND: 'Extender jornada', ADVANCE: 'Adelantar turno',
+    FT: 'Franco Trabajado', VOLANTE: 'Volante',
+    SIN_TURNO: 'Sin turno', SIN_TURNO_CON_EXP: 'Sin turno (con exp.)',
+  };
+  await db.collection('novedades').add({
+    type: 'CONVOCATORIA_ENVIADA',
+    convocatoriaId: ref.id,
+    shiftId: data.shiftId,
+    objectiveId: data.objectiveId,
+    objectiveName: data.objectiveName || '',
+    clientId: data.clientId || null,
+    empresaId: data.empresaId,
+    title: 'Convocatoria enviada',
+    message: `${typeLabel[data.type] || data.type} → ${data.candidateEmployeeName} — turno ${data.shiftCode || ''} en ${data.objectiveName || 'objetivo'}`,
+    coverageType: data.type,
+    candidateEmployeeId: data.candidateEmployeeId,
+    candidateEmployeeName: data.candidateEmployeeName,
+    status: 'unread',
+    resolved: false,
+    createdAt: now,
+  });
+
   return ref.id;
 }
 
@@ -388,17 +434,18 @@ async function dispararBroadcastFT(
     .limit(500)
     .get();
 
-  const francoEmpIds = new Set<string>();
+  // Mapa empId → shiftId del turno franco para poder actualizar el turno cuando acepte
+  const francoShiftByEmp = new Map<string, string>();
   for (const d of allTodaySnap.docs) {
     const t = d.data();
     if (!t.employeeId) continue;
     const code = String(t.code || '').toUpperCase();
-    if (['F', 'FF', 'FP'].includes(code)) francoEmpIds.add(t.employeeId);
+    if (['F', 'FF', 'FP'].includes(code)) francoShiftByEmp.set(t.employeeId, d.id);
   }
 
   const batch: Promise<string>[] = [];
   for (const empDoc of empSnap.docs) {
-    if (!francoEmpIds.has(empDoc.id)) continue;
+    if (!francoShiftByEmp.has(empDoc.id)) continue;
     const emp = empDoc.data();
     const check = checkEligibility(emp, ctx as any, 'FT');
     if (!check.eligible) continue;
@@ -411,6 +458,7 @@ async function dispararBroadcastFT(
         candidateEmployeeId: empDoc.id,
         candidateEmployeeName: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empDoc.id,
         candidateUid: uid || undefined,
+        ftShiftId: francoShiftByEmp.get(empDoc.id),
         createdBy: 'AUTO',
       }),
     );
@@ -459,14 +507,31 @@ async function resolverCobertura(
       isRetentionActivated: true,
       retentionActivatedAt: FieldValue.serverTimestamp(),
     });
+  } else if (conv.type === 'FT') {
+    // FT: convertir el turno franco del guardia → FT (no reasignar el turno de QUIROGA)
+    if (conv.ftShiftId) {
+      const ftRef = db.collection('turnos').doc(conv.ftShiftId);
+      batch.update(ftRef, {
+        code: 'FT',
+        isFranco: false,
+        isFrancoTrabajado: true,
+        isPresent: true,
+        presentAt: conv.startTime,
+        realStartTime: conv.startTime,
+        realEndTime: conv.endTime || null,
+        resolvedBy: 'OPERACIONES',
+        coveredShiftId: conv.shiftId,
+        assignedByConvocatoria: conv.id,
+        assignedAt: FieldValue.serverTimestamp(),
+      });
+    }
   } else {
-    // FT, VOLANTE, SIN_TURNO, SIN_TURNO_CON_EXP: asignar guardia al turno vacante
+    // VOLANTE, SIN_TURNO, SIN_TURNO_CON_EXP: asignar guardia al turno vacante
     const vacantRef = db.collection('turnos').doc(conv.shiftId);
-    const codeFinal = conv.type === 'FT' ? 'FT' : String(conv.shiftCode || 'M');
     batch.update(vacantRef, {
       employeeId: conv.candidateEmployeeId,
       employeeName: conv.candidateEmployeeName,
-      code: codeFinal,
+      code: String(conv.shiftCode || 'M'),
       origin: 'OPERATIONS_COVERAGE',
       resolvedBy: 'OPERACIONES',
       assignedByConvocatoria: conv.id,
@@ -487,15 +552,26 @@ async function resolverCobertura(
     }
   }
 
-  // Novedad para ops
+  // Novedad para ops — aparece en Bitácora
   const novedadRef = db.collection('novedades').doc();
+  const typeLabel: Record<string, string> = {
+    RET: 'RET activado', EXTEND: 'Jornada extendida', ADVANCE: 'Turno adelantado',
+    FT: 'Franco Trabajado', VOLANTE: 'Cobertura volante',
+    SIN_TURNO: 'Guardia disponible', SIN_TURNO_CON_EXP: 'Guardia con experiencia',
+  };
   batch.set(novedadRef, {
     type: 'COBERTURA_RESUELTA',
     shiftId: conv.shiftId,
     objectiveId: conv.objectiveId,
     objectiveName: conv.objectiveName || '',
+    clientId: conv.clientId || null,
     empresaId: conv.empresaId,
-    message: `Turno ${conv.shiftCode || ''} cubierto por ${conv.candidateEmployeeName} (${conv.type})`,
+    title: 'Cobertura resuelta',
+    message: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
+    coverageType: conv.type,
+    candidateEmployeeId: conv.candidateEmployeeId,
+    candidateEmployeeName: conv.candidateEmployeeName,
+    status: 'unread',
     resolved: false,
     createdAt: FieldValue.serverTimestamp(),
   });

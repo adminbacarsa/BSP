@@ -1015,12 +1015,15 @@ async function runModoDemoForEmpresa(
 
     // índice: objectiveId → lista de empleados
     const empByObj = new Map<string, { id: string; name: string }[]>();
+    const allEmps: { id: string; name: string }[] = [];
     for (const d of empSnap.docs) {
       const e = d.data() as any;
+      const emp = { id: d.id, name: String(e.fullName || e.nombre || 'Guardia') };
+      allEmps.push(emp);
       const oid = String(e.preferredObjectiveId || '');
       if (!oid) continue;
       if (!empByObj.has(oid)) empByObj.set(oid, []);
-      empByObj.get(oid)!.push({ id: d.id, name: String(e.fullName || e.nombre || 'Guardia') });
+      empByObj.get(oid)!.push(emp);
     }
 
     // índice: objectiveId → turnos existentes hoy (para detectar cobertura)
@@ -1074,7 +1077,9 @@ async function runModoDemoForEmpresa(
           const missing = Math.max(0, qty - existing);
           if (missing === 0) continue;
 
-          const avail = empByObj.get(oid) || [];
+          // Fallback demo: si no hay empleados con preferredObjectiveId para este objetivo
+          // usar el pool general de activos de la empresa
+          const avail = empByObj.get(oid)?.length ? empByObj.get(oid)! : allEmps;
           if (avail.length === 0) continue;
 
           for (let i = 0; i < missing; i++) {
@@ -1113,29 +1118,24 @@ async function runModoDemoForEmpresa(
     }
 
     // --- Pase 7: FT automático ---
-    // Por cada ausencia abierta, busca un franco (F simple) en el mismo objetivo y lo convierte en FT
-    const absentByObj = new Map<string, { startTs: any; endTs: any }[]>();
+    // Por cada ausencia abierta, busca un franco (F simple) de la empresa y lo convierte en FT.
+    // En MODO DEMO el franco puede cubrir cualquier objetivo (no solo el propio).
+    const allAbsentsFlat: { startTs: any; endTs: any }[] = [];
     for (const doc of snap.docs) {
       const t = doc.data() as any;
       if (!t.isAbsent || t.isCompleted || isVacant(t) || t.draft === true) continue;
-      const oid = String(t.objectiveId || '');
-      if (!oid) continue;
-      if (!absentByObj.has(oid)) absentByObj.set(oid, []);
-      absentByObj.get(oid)!.push({ startTs: t.startTime, endTs: t.endTime });
+      allAbsentsFlat.push({ startTs: t.startTime, endTs: t.endTime });
     }
-    if (absentByObj.size > 0) {
+    if (allAbsentsFlat.length > 0) {
       const ftUsed = new Set<string>();
       for (const doc of snap.docs) {
+        if (allAbsentsFlat.length === 0) break;
         const t = doc.data() as any;
         if (t.draft === true || t.isVirtual) continue;
         if (t.code !== 'F' || t.isFrancoTrabajado || t.isCompleted) continue;
-        const oid = String(t.objectiveId || '');
         const empId = String(t.employeeId || '');
-        if (!oid || !empId || ftUsed.has(empId)) continue;
-        const absents = absentByObj.get(oid);
-        if (!absents || absents.length === 0) continue;
-        const absent = absents.shift()!;
-        if (absentByObj.get(oid)!.length === 0) absentByObj.delete(oid);
+        if (!empId || ftUsed.has(empId)) continue;
+        const absent = allAbsentsFlat.shift()!;
         ftUsed.add(empId);
         batch2.update(doc.ref, {
           code: 'FT',
