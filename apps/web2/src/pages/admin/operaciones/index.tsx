@@ -10,7 +10,7 @@ import {
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
     MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, Bell, ChevronLeft, XCircle, Zap,
-    FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer
+    FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy } from '@/hooks/useOperacionesMonitor';
@@ -2097,48 +2097,114 @@ const sortObjectiveCards = (a: any, b: any, mode: ObjectivesSortMode) => {
     return String(a.client || '').localeCompare(String(b.client || ''), 'es', { sensitivity: 'base' });
 };
 
-/** Panel expandido flotante: no empuja la grilla mult columna. */
+const findScrollParent = (el: HTMLElement | null): HTMLElement | null => {
+    let node = el?.parentElement ?? null;
+    while (node) {
+        const { overflowY } = window.getComputedStyle(node);
+        if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') return node;
+        node = node.parentElement;
+    }
+    return null;
+};
+
+/** Panel expandido flotante: anclado al objetivo seleccionado, scroll interno. */
 function ObjectiveExpandOverlay({
     open,
     anchorRef,
     onClose,
+    title,
+    subtitle,
     children,
 }: {
     open: boolean;
     anchorRef: RefObject<HTMLElement | null>;
     onClose: () => void;
+    title?: string;
+    subtitle?: string;
     children: ReactNode;
 }) {
     const [style, setStyle] = useState<React.CSSProperties>({ visibility: 'hidden' });
+    const showPanelRef = useRef(false);
+    const scrollParentRef = useRef<HTMLElement | null>(null);
 
     useLayoutEffect(() => {
-        if (!open) return;
+        if (!open) {
+            showPanelRef.current = false;
+            return;
+        }
+
+        showPanelRef.current = false;
+
         const update = () => {
             const el = anchorRef.current;
             if (!el) return;
             const r = el.getBoundingClientRect();
-            const width = Math.min(Math.max(r.width, 280), window.innerWidth - 16);
-            const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-            const spaceBelow = window.innerHeight - r.bottom - 12;
-            const spaceAbove = r.top - 12;
-            const openBelow = spaceBelow >= 180 || spaceBelow >= spaceAbove;
-            const maxHeight = Math.max(180, Math.min(560, openBelow ? spaceBelow : spaceAbove));
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const margin = 8;
+            const gap = 4;
+            const maxPanel = Math.min(380, Math.floor(vh * 0.42));
+            const width = Math.min(Math.max(r.width, 300), vw - margin * 2);
+            const left = Math.max(margin, Math.min(r.left, vw - width - margin));
+
+            const spaceBelow = vh - r.bottom - margin;
+            const spaceAbove = r.top - margin;
+            const cardInLowerHalf = r.top > vh * 0.52;
+
+            let top: number;
+            let maxHeight: number;
+
+            if (cardInLowerHalf) {
+                const compact = Math.min(maxPanel, 280, Math.max(140, spaceAbove));
+                maxHeight = compact;
+                top = Math.max(margin, r.top - gap - maxHeight);
+                maxHeight = Math.min(maxHeight, r.top - gap - top);
+            } else if (spaceBelow >= 120 || spaceBelow >= spaceAbove) {
+                top = r.bottom + gap;
+                maxHeight = Math.min(maxPanel, Math.max(140, spaceBelow));
+                if (top + maxHeight > vh - margin) maxHeight = Math.max(120, vh - margin - top);
+            } else {
+                maxHeight = Math.min(maxPanel, Math.max(140, spaceAbove));
+                top = Math.max(margin, r.top - gap - maxHeight);
+                maxHeight = Math.min(maxHeight, r.top - gap - top);
+            }
+
+            maxHeight = Math.max(120, maxHeight);
+
             setStyle({
                 position: 'fixed',
-                top: openBelow ? r.bottom + 4 : Math.max(8, r.top - maxHeight - 4),
+                top,
                 left,
                 width,
                 maxHeight,
                 zIndex: 8000,
-                visibility: 'visible',
+                visibility: showPanelRef.current ? 'visible' : 'hidden',
             });
         };
+
+        const el = anchorRef.current;
+        if (el) {
+            scrollParentRef.current = findScrollParent(el);
+            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+
         update();
+        const t1 = window.setTimeout(update, 120);
+        const t2 = window.setTimeout(() => {
+            showPanelRef.current = true;
+            update();
+        }, 380);
+
         window.addEventListener('scroll', update, true);
         window.addEventListener('resize', update);
+        scrollParentRef.current?.addEventListener('scroll', update, { passive: true });
+
         return () => {
+            window.clearTimeout(t1);
+            window.clearTimeout(t2);
             window.removeEventListener('scroll', update, true);
             window.removeEventListener('resize', update);
+            scrollParentRef.current?.removeEventListener('scroll', update);
         };
     }, [open, anchorRef]);
 
@@ -2146,12 +2212,28 @@ function ObjectiveExpandOverlay({
 
     return createPortal(
         <>
-            <div className="fixed inset-0 z-[7990]" onClick={onClose} aria-hidden />
+            <div className="fixed inset-0 z-[7990] bg-slate-900/25" onClick={onClose} aria-hidden />
             <div
                 style={style}
-                className="overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-2xl custom-scrollbar"
+                className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
             >
-                {children}
+                {(title || subtitle) && (
+                    <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-2 border-b border-indigo-700 bg-indigo-600 px-3 py-2 text-white">
+                        <div className="min-w-0">
+                            {title && <div className="truncate text-xs font-black uppercase leading-tight">{title}</div>}
+                            {subtitle && <div className="truncate text-[9px] font-medium text-indigo-200">{subtitle}</div>}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="shrink-0 rounded-lg p-1.5 transition-colors hover:bg-indigo-500"
+                            title="Cerrar"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                )}
+                <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">{children}</div>
             </div>
         </>,
         document.body,
@@ -2167,6 +2249,8 @@ function OpsObjectiveGridCard({
     bgColor,
     header,
     expandedBody,
+    overlayTitle,
+    overlaySubtitle,
 }: {
     useOverlay: boolean;
     isExpanded: boolean;
@@ -2175,6 +2259,8 @@ function OpsObjectiveGridCard({
     bgColor: string;
     header: ReactNode;
     expandedBody: ReactNode;
+    overlayTitle?: string;
+    overlaySubtitle?: string;
 }) {
     const cardRef = useRef<HTMLDivElement>(null);
 
@@ -2196,6 +2282,8 @@ function OpsObjectiveGridCard({
                     open={isExpanded}
                     anchorRef={cardRef}
                     onClose={() => onToggleExpand(false)}
+                    title={overlayTitle}
+                    subtitle={overlaySubtitle}
                 >
                     <div className="px-2 py-2 space-y-1.5">{expandedBody}</div>
                 </ObjectiveExpandOverlay>
@@ -2272,6 +2360,8 @@ const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWor
                     open={expanded}
                     anchorRef={cardRef}
                     onClose={() => setExpanded(false)}
+                    title={group.name}
+                    subtitle={group.client}
                 >
                     {expandedBody}
                 </ObjectiveExpandOverlay>
@@ -2366,6 +2456,7 @@ export default function OperacionesPage() {
     }, [session.isAutoMode, session.loading]);
 
     const [detailNovedad, setDetailNovedad] = useState<any>(null);
+    const [cascadeConvs, setCascadeConvs] = useState<any[]>([]);
     const [showDebugPanel, setShowDebugPanel] = useState(false);
     const [isExternalMap, setIsExternalMap] = useState(false);
     const [mapCollapsed, setMapCollapsed] = useState(false);
@@ -2448,7 +2539,7 @@ export default function OperacionesPage() {
     const [viewMode, setViewMode] = usePersistedState<'objetivos' | 'lista'>('cosp:ops:viewMode', 'objetivos');
     const [expandedObjectiveId, setExpandedObjectiveId] = usePersistedState<string | null>('cosp:ops:expandedObj', null);
     const [objectivesSortMode, setObjectivesSortMode] = usePersistedState<ObjectivesSortMode>('cosp:ops:objSort', 'cliente');
-    const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'>('reciente');
+    const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'|'cascada'>('reciente');
     const [bitacoraOpen, setBitacoraOpen] = useState(false);
     const [bitacoraExpanded, setBitacoraExpanded] = useState<string | null>(null);
     const [bitacoraFiltroObj, setBitacoraFiltroObj] = useState<string>('');
@@ -2526,6 +2617,24 @@ export default function OperacionesPage() {
     const recentAtendidas = useMemo(() =>
         empNovedades.filter(n => n.status === 'ATENDIDA' || n.status === 'atendida').slice(0, 8),
     [empNovedades]);
+
+    // Suscripción en tiempo real a convocatorias de cascada (últimas 4h)
+    useEffect(() => {
+        if (!empresaId || isExternalMap) return;
+        const since = Timestamp.fromMillis(Date.now() - 4 * 60 * 60 * 1000);
+        const q = query(
+            collection(db, 'convocatorias_cobertura'),
+            where('empresaId', '==', empresaId),
+            where('createdAt', '>=', since),
+            orderBy('createdAt', 'desc'),
+            limit(100),
+        );
+        const unsub = onSnapshot(q, snap => {
+            setCascadeConvs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, () => {});
+        return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [empresaId, isExternalMap]);
 
     const COVERAGE_GRACE_MINUTES = 60; // tiempo de gracia para gestionar cobertura
 
@@ -4521,6 +4630,8 @@ export default function OperacionesPage() {
                                                 onToggleExpand={(next) => setExpandedObjectiveId(next ? expandKey : null)}
                                                 borderColor={borderColor}
                                                 bgColor={bgColor}
+                                                overlayTitle={ev.label}
+                                                overlaySubtitle={ev.client}
                                                 expandedBody={
                                                     evShifts.length === 0 ? (
                                                         <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
@@ -4616,6 +4727,8 @@ export default function OperacionesPage() {
                                         onToggleExpand={(next) => setExpandedObjectiveId(next ? obj.objectiveId : null)}
                                         borderColor={borderColor}
                                         bgColor={bgColor}
+                                        overlayTitle={obj.name}
+                                        overlaySubtitle={obj.client}
                                         expandedBody={
                                             objShifts.length === 0 ? (
                                                 <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
@@ -4731,15 +4844,17 @@ export default function OperacionesPage() {
                             { id:'reciente' as const,    label:'Actividad',   count: logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length },
                             { id:'operaciones' as const, label:'Operaciones', count: logic.recentLogs.filter((l:any)=>{ const a=(l.action||'').toUpperCase(); return OPS_ACTIONS.has(a); }).length },
                             ...(alertsOnCc ? [{ id:'alertas' as const, label:'Novedades', count: pendingNovedades.length, urgent: pendingNovedades.length > 0 }] : []),
+                            ...(alertsOnCc ? [{ id:'cascada' as const, label:'Cascada', count: cascadeConvs.filter(c=>c.status==='PENDING'||c.status==='ESCALATED').length, urgent: cascadeConvs.some(c=>c.status==='PENDING'||c.status==='ESCALATED') }] : []),
                           ]).map(t => (
                             <button key={t.id} onClick={() => setBitacoraTab(t.id)}
                               className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors
                                 ${bitacoraTab===t.id
-                                  ? ((t as any).urgent ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white')
-                                  : ((t as any).urgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:bg-slate-100')}`}>
+                                  ? ((t as any).urgent ? 'bg-violet-600 text-white' : 'bg-slate-800 text-white')
+                                  : ((t as any).urgent && t.id==='cascada' ? 'bg-violet-50 text-violet-700 border border-violet-200' : (t as any).urgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:bg-slate-100')}`}>
                               {t.id === 'alertas' && <Siren size={10}/>}
+                              {t.id === 'cascada' && <GitBranch size={10}/>}
                               {t.label}
-                              <span className={`text-[9px] font-black px-1 rounded-full ${bitacoraTab===t.id ? 'bg-white/20' : (t as any).urgent ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500'}`}>{t.count}</span>
+                              <span className={`text-[9px] font-black px-1 rounded-full ${bitacoraTab===t.id ? 'bg-white/20' : (t as any).urgent && t.id==='cascada' ? 'bg-violet-500 text-white animate-pulse' : (t as any).urgent ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500'}`}>{t.count}</span>
                             </button>
                           ))}
                           <div className="ml-auto flex items-center gap-1">
@@ -4943,6 +5058,85 @@ export default function OperacionesPage() {
                           )}
                         </div>
                         )}
+
+                        {/* ── Tab Cascada ── */}
+                        {bitacoraTab === 'cascada' && (() => {
+                          const TYPE_LABEL: Record<string, string> = {
+                            RET: 'Retención', VOLANTE: 'Volante', SIN_TURNO_CON_EXP: 'Disp. c/exp',
+                            EXTEND: 'Extensión', ADVANCE: 'Adelanto', SIN_TURNO: 'Disponible', FT: 'Franco Trab.',
+                            LLEGADA_TARDE: 'Llegada Tarde',
+                          };
+                          const STATUS_META: Record<string, { icon: string; cls: string; label: string }> = {
+                            PENDING:   { icon: '⏳', cls: 'text-amber-700 bg-amber-50 border-amber-200', label: 'Esperando' },
+                            ESCALATED: { icon: '↗', cls: 'text-blue-700 bg-blue-50 border-blue-200', label: 'Escalado' },
+                            ACCEPTED:  { icon: '✓', cls: 'text-emerald-700 bg-emerald-50 border-emerald-200', label: 'Aceptó' },
+                            REJECTED:  { icon: '✗', cls: 'text-rose-700 bg-rose-50 border-rose-200', label: 'Rechazó' },
+                            TIMEOUT:   { icon: '⏰', cls: 'text-slate-500 bg-slate-50 border-slate-200', label: 'Sin resp.' },
+                            CANCELLED: { icon: '✕', cls: 'text-slate-400 bg-slate-50 border-slate-100', label: 'Cancelado' },
+                          };
+                          // Agrupar por shiftId
+                          const byShift = new Map<string, any[]>();
+                          for (const c of cascadeConvs) {
+                            if (!byShift.has(c.shiftId)) byShift.set(c.shiftId, []);
+                            byShift.get(c.shiftId)!.push(c);
+                          }
+                          const groups = Array.from(byShift.entries());
+                          if (groups.length === 0) {
+                            return (
+                              <div className="flex-1 overflow-y-auto p-6 text-center">
+                                <GitBranch size={24} className="mx-auto mb-2 text-violet-300"/>
+                                <p className="text-xs font-bold text-slate-400">Sin convocatorias en las últimas 4h</p>
+                                <p className="text-[9px] text-slate-300 mt-1">Las convocatorias aparecen aquí cuando la cascada se activa.</p>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="flex-1 overflow-y-auto">
+                              {groups.map(([shiftId, convs]) => {
+                                const first = convs[0];
+                                const hasActive = convs.some(c => c.status === 'PENDING' || c.status === 'ESCALATED');
+                                const isResolved = convs.some(c => c.status === 'ACCEPTED');
+                                return (
+                                  <div key={shiftId} className={`border-b border-slate-100 ${hasActive ? 'bg-violet-50/40' : ''}`}>
+                                    {/* Header del turno */}
+                                    <div className={`px-3 py-1.5 flex items-center gap-2 ${hasActive ? 'bg-violet-100/50' : 'bg-slate-50'}`}>
+                                      <GitBranch size={10} className={hasActive ? 'text-violet-600' : 'text-slate-400'}/>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-[9px] font-black text-slate-700 truncate">{first.objectiveName || 'Objetivo'}</p>
+                                        <p className="text-[8px] text-slate-400 truncate">
+                                          {first.shiftCode} · {first.startTime?.toDate?.()?.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Buenos_Aires'}) ?? '--'}
+                                          {isResolved && <span className="ml-1 text-emerald-600 font-bold">· ✓ CUBIERTO</span>}
+                                        </p>
+                                      </div>
+                                      <span className={`text-[8px] font-black px-1 rounded ${hasActive ? 'bg-violet-200 text-violet-700' : isResolved ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                                        {convs.length} paso{convs.length !== 1 ? 's' : ''}
+                                      </span>
+                                    </div>
+                                    {/* Lista de convocatorias */}
+                                    {convs.map(c => {
+                                      const sm = STATUS_META[c.status] || STATUS_META.TIMEOUT;
+                                      const ts = c.createdAt?.toDate?.()?.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Buenos_Aires'});
+                                      const respondedTs = c.respondedAt?.toDate?.()?.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Buenos_Aires'});
+                                      return (
+                                        <div key={c.id} className={`px-3 py-1.5 flex items-center gap-2 border-l-2 ml-3 ${c.status==='PENDING'||c.status==='ESCALATED' ? 'border-violet-400' : c.status==='ACCEPTED' ? 'border-emerald-400' : 'border-slate-200'}`}>
+                                          <span className="text-[10px] shrink-0">{sm.icon}</span>
+                                          <div className="flex-1 min-w-0">
+                                            <p className="text-[9px] font-bold text-slate-800 truncate">{c.candidateEmployeeName}</p>
+                                            <p className="text-[8px] text-slate-400 truncate">{TYPE_LABEL[c.type] || c.type}</p>
+                                          </div>
+                                          <div className="text-right shrink-0">
+                                            <span className={`text-[8px] font-black px-1 py-0.5 rounded border ${sm.cls}`}>{sm.label}</span>
+                                            <p className="text-[8px] text-slate-300 font-mono mt-0.5">{respondedTs ?? ts ?? '--'}</p>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                       </>)}
                     </div>
 
