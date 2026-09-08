@@ -306,23 +306,27 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         processedIds.current.add(`retention_${s.id}`);
         const msg = `${s.employeeName} lleva ${s.retentionMinutes}min de retención en ${s.objectiveName}`;
         if (isAutoMode) {
-          // ID determinístico → setDoc idempotente, sin race condition entre tabs
+          // Solo crear si no existe — no sobreescribir novedades ya atendidas
           const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
-          await setDoc(doc(db, 'novedades', `autoreten_${safeId}`), stampEmpresaId({
-            type: 'RETENCION_DETECTADA',
-            status: 'pending',
-            title: 'Recargo Automático Detectado',
-            description: msg,
-            shiftId: s.id || null,
-            clientId: s.clientId || null,
-            objectiveId: s.objectiveId || null,
-            objectiveName: s.objectiveName || null,
-            employeeId: s.employeeId || null,
-            employeeName: s.employeeName || null,
-            positionName: s.positionName || null,
-            createdAt: serverTimestamp(),
-            reportedBy: 'SISTEMA_AUTO',
-          }, String(s.empresaId || empresaId || '').trim()), { merge: false }).catch(() => {});
+          const novedadRef = doc(db, 'novedades', `autoreten_${safeId}`);
+          const existing = await getDoc(novedadRef).catch(() => null);
+          if (!existing?.exists()) {
+            await setDoc(novedadRef, stampEmpresaId({
+              type: 'RETENCION_DETECTADA',
+              status: 'pending',
+              title: 'Recargo Automático Detectado',
+              description: msg,
+              shiftId: s.id || null,
+              clientId: s.clientId || null,
+              objectiveId: s.objectiveId || null,
+              objectiveName: s.objectiveName || null,
+              employeeId: s.employeeId || null,
+              employeeName: s.employeeName || null,
+              positionName: s.positionName || null,
+              createdAt: serverTimestamp(),
+              reportedBy: 'SISTEMA_AUTO',
+            }, String(s.empresaId || empresaId || '').trim()), { merge: false }).catch(() => {});
+          }
         }
       }
       if (!isBaseline) {
@@ -365,6 +369,11 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
             if (turnoSnap.exists() && (freshData?.isCompleted || naturalRetention)) {
               continue;
             }
+            // Guarda extra: no re-completar si ya fue auto-completado recientemente (evita duplicados por re-mount)
+            const lastAutoComplete = freshData?.autoCompletedAt?.toMillis?.() ?? 0;
+            if (lastAutoComplete && (Date.now() - lastAutoComplete) < 120_000) {
+              continue;
+            }
             await updateDoc(doc(db, 'turnos', s.id), {
               status: 'COMPLETED', isCompleted: true,
               realEndTime: serverTimestamp(), autoCompletedAt: serverTimestamp(),
@@ -398,22 +407,27 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         const hrs = ((s.totalMinutesWorked ?? 0) / 60).toFixed(1);
         const msg = `${s.employeeName} lleva ${hrs}h en ${s.objectiveName} — ${s.positionName}`;
         if (isAutoMode) {
+          // Solo crear si no existe — no sobreescribir novedades ya atendidas
           const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
-          await setDoc(doc(db, 'novedades', `autorecargo_${safeId}`), stampEmpresaId({
-            type: 'RECARGO_12H',
-            status: 'pending',
-            title: 'Guardia más de 12h en servicio',
-            description: msg,
-            shiftId: s.id || null,
-            clientId: s.clientId || null,
-            objectiveId: s.objectiveId || null,
-            objectiveName: s.objectiveName || null,
-            employeeId: s.employeeId || null,
-            employeeName: s.employeeName || null,
-            positionName: s.positionName || null,
-            createdAt: serverTimestamp(),
-            reportedBy: 'SISTEMA_AUTO',
-          }, String(s.empresaId || empresaId || '').trim()), { merge: false }).catch(() => {});
+          const novedadRef = doc(db, 'novedades', `autorecargo_${safeId}`);
+          const existing = await getDoc(novedadRef).catch(() => null);
+          if (!existing?.exists()) {
+            await setDoc(novedadRef, stampEmpresaId({
+              type: 'RECARGO_12H',
+              status: 'pending',
+              title: 'Guardia más de 12h en servicio',
+              description: msg,
+              shiftId: s.id || null,
+              clientId: s.clientId || null,
+              objectiveId: s.objectiveId || null,
+              objectiveName: s.objectiveName || null,
+              employeeId: s.employeeId || null,
+              employeeName: s.employeeName || null,
+              positionName: s.positionName || null,
+              createdAt: serverTimestamp(),
+              reportedBy: 'SISTEMA_AUTO',
+            }, String(s.empresaId || empresaId || '').trim()), { merge: false }).catch(() => {});
+          }
         }
         if (!isBaseline) {
           toast.error(`🚨 +12h: ${msg}`, {
