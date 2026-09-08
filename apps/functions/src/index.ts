@@ -997,23 +997,6 @@ async function runModoDemoForEmpresa(
     cierres++;
   }
 
-  // === Pase 2b: Cerrar turnos AUSENTES cuyo endTime ya pasó ===
-  // Pase 2 no los cierra (requiere isPresent:true). Los ausentes vencidos quedan eternamente
-  // en AUSENTES+VENCIDO del panel. Una vez pasada la ventana del turno los cerramos.
-  for (const doc of snap.docs) {
-    const t = doc.data() as any;
-    if (skipBase(t) || isVacant(t)) continue;
-    if (!t.isAbsent || t.isCompleted) continue;
-    const endTimeMs2 = (t.endTime?.seconds ?? 0) * 1000;
-    if (!endTimeMs2 || endTimeMs2 > now.getTime()) continue;
-    batch.update(doc.ref, {
-      status: 'COMPLETED', isCompleted: true,
-      autoCierre: true, completionReason: 'AUTO_SHIFT_END',
-      modoDemoAt: nowTs,
-    });
-    cierres++;
-  }
-
   // === Pase 3: Limpiar isAbsent+isCompleted inconsistentes ===
   let absentClean = 0;
   for (const doc of snap.docs) {
@@ -1103,15 +1086,17 @@ async function runModoDemoForEmpresa(
     const activeEmpAtObj = new Set<string>(); // `${oid}_${empId}` — empleados ya con turno en este objetivo hoy
     for (const doc of snap.docs) {
       const t = doc.data() as any;
-      if (skipBase(t) || isVacant(t) || t.isAbsent) continue;
-      // Incluir completados: si el slot ya fue cubierto hoy (aunque ya terminó) no generar nuevo turno
+      if (skipBase(t) || isVacant(t)) continue;
       const oid = String(t.objectiveId || '');
-      const sh = (t.startTime?.seconds ?? 0) * 1000;
-      const hh = new Date(sh).getHours();
-      coveredSlots.add(`${oid}_${hh}`);
+      // Empleado ausente: no cubre el slot, pero tampoco puede ser reasignado
       if (t.employeeId && t.employeeId !== 'VACANTE') {
         activeEmpAtObj.add(`${oid}_${t.employeeId}`);
       }
+      if (t.isAbsent) continue; // slot no cubierto → Pase 6/7 busca reemplazo
+      // Incluir completados: si el slot ya fue cubierto hoy (aunque ya terminó) no generar nuevo turno
+      const sh = (t.startTime?.seconds ?? 0) * 1000;
+      const hh = new Date(sh).getHours();
+      coveredSlots.add(`${oid}_${hh}`);
     }
 
     // contadores rotativos por objetivo para repartir empleados
