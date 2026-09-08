@@ -917,6 +917,39 @@ async function runModoDemoForEmpresa(
       isAbsent: true, status: 'ABSENT', absenceType: 'AA',
       absenceDetectedAt: nowTs, absenceDetectedBy: 'MODO_DEMO', modoDemoAt: nowTs,
     });
+    // Ausencia en colección ausencias — planificación muestra overlay AUS, RRHH registra la novedad
+    {
+      const startMs2 = (t.startTime?.seconds ?? 0) * 1000;
+      const arDate2 = new Date(startMs2 - 3 * 60 * 60 * 1000);
+      const dateStr2 = `${arDate2.getUTCFullYear()}-${String(arDate2.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate2.getUTCDate()).padStart(2, '0')}`;
+      const st2 = t.startTime?.toDate ? t.startTime.toDate() : new Date(startMs2);
+      const et2 = t.endTime?.seconds ? new Date((t.endTime.seconds) * 1000) : null;
+      const fmtT2 = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+      const horario2 = et2 ? `${fmtT2(st2)} - ${fmtT2(et2)}` : fmtT2(st2);
+      const ausRef = db.collection('ausencias').doc();
+      batch.set(ausRef, {
+        employeeId: empId,
+        employeeName: t.employeeName || '',
+        startDate: dateStr2,
+        endDate: dateStr2,
+        type: 'No Presentacion',
+        absenceType: 'AA',
+        origin: 'AUTO_DEMO',
+        shiftId: doc.id,
+        objectiveId: t.objectiveId || null,
+        objectiveName: t.objectiveName || '',
+        clientId: t.clientId || null,
+        empresaId,
+        positionName: t.positionName || '',
+        shiftCode: (t.code || '').toUpperCase() || null,
+        reason: `No presentacion al turno ${horario2} - ${t.objectiveName || ''} (${t.positionName || ''})`,
+        status: 'Confirmada',
+        hasCertificate: false,
+        createdAt: nowTs,
+        source: 'MODO_DEMO',
+        modoDemoAt: nowTs,
+      });
+    }
     // Novedad AUSENCIA_AUTO — alimenta el globito del sidebar
     const novRef = db.collection('novedades').doc();
     batch.set(novRef, {
@@ -995,7 +1028,6 @@ async function runModoDemoForEmpresa(
   // === Pase 6: Auto-asignar SIN PLANIFICAR | Pase 7: FT automático ===
   // Usan batch2 (batch principal ya fue committed arriba)
   let autoAsignados = 0;
-  let ftCreados = 0;
   try {
     const batch2 = db.batch();
     const todayStr = now.toISOString().slice(0, 10);
@@ -1117,43 +1149,9 @@ async function runModoDemoForEmpresa(
       }
     }
 
-    // --- Pase 7: FT automático ---
-    // Por cada ausencia abierta, busca un franco (F simple) de la empresa y lo convierte en FT.
-    // En MODO DEMO el franco puede cubrir cualquier objetivo (no solo el propio).
-    const allAbsentsFlat: { startTs: any; endTs: any }[] = [];
-    for (const doc of snap.docs) {
-      const t = doc.data() as any;
-      if (!t.isAbsent || t.isCompleted || isVacant(t) || t.draft === true) continue;
-      allAbsentsFlat.push({ startTs: t.startTime, endTs: t.endTime });
-    }
-    if (allAbsentsFlat.length > 0) {
-      const ftUsed = new Set<string>();
-      for (const doc of snap.docs) {
-        if (allAbsentsFlat.length === 0) break;
-        const t = doc.data() as any;
-        if (t.draft === true || t.isVirtual) continue;
-        if (t.code !== 'F' || t.isFrancoTrabajado || t.isCompleted) continue;
-        const empId = String(t.employeeId || '');
-        if (!empId || ftUsed.has(empId)) continue;
-        const absent = allAbsentsFlat.shift()!;
-        ftUsed.add(empId);
-        batch2.update(doc.ref, {
-          code: 'FT',
-          isFranco: false,
-          isFrancoTrabajado: true,
-          isPresent: true,
-          presentAt: absent.startTs,
-          realStartTime: absent.startTs,
-          realEndTime: absent.endTs,
-          autoPresencia: true,
-          resolvedBy: 'MODO_DEMO',
-          modoDemoAt: nowTs,
-        });
-        ftCreados++;
-      }
-    }
+    // FT lo maneja la cascade vía onTurnoAbsenciaDetectada → convocatoriasCobertura (sin Pase 7 aquí).
 
-    if (autoAsignados + ftCreados > 0) await batch2.commit();
+    if (autoAsignados > 0) await batch2.commit();
   } catch (e67) {
     console.warn('[modoDemoCron] pase6-7 error:', (e67 as Error)?.message);
   }
@@ -1166,7 +1164,7 @@ async function runModoDemoForEmpresa(
     console.warn('[modoDemoCron] pase8 error:', (e8 as Error)?.message);
   }
 
-  return { presencias, cierres, absentClean, vacResueltas, reportadosPlan, ausenciasDemo, autoAsignados, ftCreados, convRespuestas } as any;
+  return { presencias, cierres, absentClean, vacResueltas, reportadosPlan, ausenciasDemo, autoAsignados, convRespuestas } as any;
 }
 
 export const modoDemoCron = functions
@@ -1180,8 +1178,8 @@ export const modoDemoCron = functions
       try {
         const res = await runModoDemoForEmpresa(db, empDoc.id);
         const r = res as any;
-        if (res.presencias + res.cierres + (r.vacResueltas||0) + (r.autoAsignados||0) + (r.ftCreados||0) + (r.convRespuestas||0) > 0) {
-          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} cierre=${res.cierres} cleanAbs=${r.absentClean??0} vac=${r.vacResueltas??0} plan=${r.reportadosPlan??0} absDemo=${r.ausenciasDemo??0} auto=${r.autoAsignados??0} ft=${r.ftCreados??0} conv=${r.convRespuestas??0}`);
+        if (res.presencias + res.cierres + (r.vacResueltas||0) + (r.autoAsignados||0) + (r.convRespuestas||0) > 0) {
+          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} cierre=${res.cierres} cleanAbs=${r.absentClean??0} vac=${r.vacResueltas??0} plan=${r.reportadosPlan??0} absDemo=${r.ausenciasDemo??0} auto=${r.autoAsignados??0} conv=${r.convRespuestas??0}`);
         }
       } catch (e) {
         console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);
