@@ -115,7 +115,9 @@ async function avanzarCascada(
   conv: ConvocatoriaCoberturaDoc & { id: string },
   reason: 'REJECTED' | 'TIMEOUT',
 ): Promise<void> {
-  const nextType = nextCascadeStep(conv.type);
+  // LLEGADA_TARDE no participa en la cascada de cobertura
+  if (conv.type === 'LLEGADA_TARDE') return;
+  const nextType = nextCascadeStep(conv.type as CandidateType);
   if (!nextType) {
     // Cascada agotada: notificar a ops
     await db.collection('novedades').add({
