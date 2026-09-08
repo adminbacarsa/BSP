@@ -2878,11 +2878,19 @@ export default function OperacionesPage() {
 
     const prevPendingCount = useRef(0);
     useEffect(() => {
+        if (isExternalMap) return;
         if (pendingNovedades.length > prevPendingCount.current) {
             setNotifPanelOpen(true);
         }
         prevPendingCount.current = pendingNovedades.length;
-    }, [pendingNovedades.length]);
+    }, [pendingNovedades.length, isExternalMap]);
+
+    /** Mapa undocked: cerrar panel de alertas en CC (el host pasa al map-view). */
+    useEffect(() => {
+        if (!isExternalMap) return;
+        setNotifPanelOpen(false);
+        setBitacoraTab((t) => (t === 'alertas' ? 'reciente' : t));
+    }, [isExternalMap]);
 
     // ── Alertas sonoras: disparar cuando llegan novedades nuevas
     useEffect(() => {
@@ -3988,6 +3996,8 @@ export default function OperacionesPage() {
     const mapVisible = !isExternalMap && !mapCollapsed;
     /** Panel operaciones a ancho completo (mapa en otra pantalla o colapsado). */
     const wideOpsPanel = isExternalMap || mapCollapsed;
+    /** Alertas flotantes / campana: solo en CC cuando el mapa táctico no está undocked. */
+    const alertsOnCc = !isExternalMap;
     const objectivesLayoutClass = wideOpsPanel
         ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 auto-rows-min items-start content-start'
         : 'space-y-1.5';
@@ -4032,6 +4042,12 @@ export default function OperacionesPage() {
     }, [logic.processedData]);
 
     const totalAlertsCount = pendingNovedades.length + priorityShiftsForAlerts.length;
+
+    /** Al cerrar mapa undocked, restaurar panel de alertas en CC si hay pendientes. */
+    useEffect(() => {
+        if (isExternalMap) return;
+        if (totalAlertsCount > 0) setNotifPanelOpen(true);
+    }, [isExternalMap, totalAlertsCount]);
 
     const coverageHasIssues = useMemo(
         () => coverageByObjective.some((obj) => {
@@ -4277,7 +4293,13 @@ export default function OperacionesPage() {
                             {isCCOperator && ccAutoOn && (
                                 <span className="text-[8px] font-bold text-amber-700 px-1">Iniciando guardia…</span>
                             )}
-                            <button type="button" onClick={() => setNotifPanelOpen(v => !v)} className={`ml-auto flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${totalAlertsCount > 0 ? 'bg-rose-600 border-rose-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`}><Bell size={10} className={totalAlertsCount > 0 ? 'animate-pulse' : ''}/>{totalAlertsCount > 0 ? totalAlertsCount : 'Alertas'}</button>
+                            {alertsOnCc ? (
+                                <button type="button" onClick={() => setNotifPanelOpen(v => !v)} className={`ml-auto flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${totalAlertsCount > 0 ? 'bg-rose-600 border-rose-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`}><Bell size={10} className={totalAlertsCount > 0 ? 'animate-pulse' : ''}/>{totalAlertsCount > 0 ? totalAlertsCount : 'Alertas'}</button>
+                            ) : (
+                                <span className="ml-auto flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border border-indigo-200 bg-indigo-50 text-indigo-700" title="Las alertas se gestionan en la ventana del mapa táctico">
+                                    <MonitorUp size={10}/> Alertas en mapa
+                                </span>
+                            )}
                         </div>
 
                         {/* Búsqueda + cliente en una fila */}
@@ -4678,7 +4700,7 @@ export default function OperacionesPage() {
                         {!bitacoraOpen && logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length > 0 && (
                           <span className="text-[9px] text-slate-400 mr-1">{logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length} eventos</span>
                         )}
-                        {!bitacoraOpen && pendingNovedades.length > 0 && (
+                        {!bitacoraOpen && alertsOnCc && pendingNovedades.length > 0 && (
                           <span className="text-[9px] font-black bg-rose-500 text-white px-1.5 rounded-full animate-pulse mr-1">{pendingNovedades.length}</span>
                         )}
                         {bitacoraOpen ? <ChevronDown size={12} className="text-slate-400"/> : <ChevronRight size={12} className="text-slate-400"/>}
@@ -4689,7 +4711,7 @@ export default function OperacionesPage() {
                           {([
                             { id:'reciente' as const,    label:'Actividad',   count: logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length },
                             { id:'operaciones' as const, label:'Operaciones', count: logic.recentLogs.filter((l:any)=>{ const a=(l.action||'').toUpperCase(); return OPS_ACTIONS.has(a); }).length },
-                            { id:'alertas' as const,     label:'Novedades',   count: pendingNovedades.length, urgent: pendingNovedades.length > 0 },
+                            ...(alertsOnCc ? [{ id:'alertas' as const, label:'Novedades', count: pendingNovedades.length, urgent: pendingNovedades.length > 0 }] : []),
                           ]).map(t => (
                             <button key={t.id} onClick={() => setBitacoraTab(t.id)}
                               className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors
@@ -4938,7 +4960,7 @@ export default function OperacionesPage() {
                         </div>
                     )}
 
-                    {mapVisible && notifPanelOpen && (
+                    {mapVisible && alertsOnCc && notifPanelOpen && (
                         <div className="absolute inset-x-0 bottom-0 z-[90] max-h-[min(70vh,520px)] flex flex-col bg-white rounded-t-2xl shadow-2xl border border-slate-200 mx-0 lg:mx-1 lg:mb-1 lg:rounded-xl overflow-hidden">
                             <div className="bg-slate-900 px-3 py-2 flex items-center gap-2 shrink-0">
                                 <Siren size={14} className="text-rose-400"/>
@@ -4973,8 +4995,8 @@ export default function OperacionesPage() {
                 {/* Panel alertas flotante — solo mapa colapsado o undocked */}
                 <React.Fragment>
                 {/* Backdrop mobile cuando panel abierto */}
-                {notifPanelOpen && <div className="fixed inset-0 bg-black/40 z-[999] lg:hidden" onClick={() => setNotifPanelOpen(false)}/>}
-                {(mapCollapsed || isExternalMap) && notifPanelOpen && (
+                {alertsOnCc && notifPanelOpen && <div className="fixed inset-0 bg-black/40 z-[999] lg:hidden" onClick={() => setNotifPanelOpen(false)}/>}
+                {alertsOnCc && mapCollapsed && notifPanelOpen && (
                 <div className="fixed bottom-0 left-0 right-0 z-[1000] lg:absolute lg:inset-auto lg:bottom-8 lg:left-8">
                 {(() => {
                     // Calcular priority shifts con el MISMO filtro que stats.prioridad (hoy + activos)

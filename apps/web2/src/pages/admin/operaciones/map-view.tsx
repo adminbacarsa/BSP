@@ -1104,7 +1104,7 @@ export default function TacticalMapView() {
         return () => unsub();
     }, [empresaId, empresa, migracionCompleta, refreshKey]);
     const recentlyRelievedRef = useRef<Set<string>>(new Set());
-    const prevPendingCount = useRef(0);
+    const prevPendingCount = useRef(-1);
     useEffect(() => {
         if (pendingNovedades.length > prevPendingCount.current) setNotifPanelOpen(true);
         prevPendingCount.current = pendingNovedades.length;
