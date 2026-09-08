@@ -3142,6 +3142,7 @@ export default function EmployeeDashboard() {
                   const now = new Date();
                   const minutesLeft = timeoutDate ? Math.max(0, Math.round((timeoutDate.getTime() - now.getTime()) / 60000)) : null;
                   const urgencyColor = conv.urgency === 'URGENTE' ? 'text-rose-400' : conv.urgency === 'INTERMEDIO' ? 'text-amber-400' : 'text-sky-400';
+                  const isLlegadaTarde = conv.type === 'LLEGADA_TARDE';
                   const typeLabel: Record<string, string> = {
                     RET: 'Retención (RET)',
                     VOLANTE: 'Cobertura volante',
@@ -3150,13 +3151,17 @@ export default function EmployeeDashboard() {
                     ADVANCE: 'Adelanto de turno',
                     SIN_TURNO: 'Cobertura disponible',
                     FT: 'Franco Trabajado (FT)',
+                    LLEGADA_TARDE: '¿Estás en camino?',
                   };
                   return (
-                    <div key={conv.id} className="border border-rose-800/40 rounded-xl p-3 bg-rose-950/20">
-                      <div className={`text-[10px] font-black uppercase mb-1 ${urgencyColor}`}>
-                        {conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? '⚠ INTERMEDIO' : 'NORMAL'} — {typeLabel[conv.type] || conv.type}
+                    <div key={conv.id} className={`border rounded-xl p-3 ${isLlegadaTarde ? 'border-amber-600/50 bg-amber-950/20' : 'border-rose-800/40 bg-rose-950/20'}`}>
+                      <div className={`text-[10px] font-black uppercase mb-1 ${isLlegadaTarde ? 'text-amber-400' : urgencyColor}`}>
+                        {isLlegadaTarde ? '⏰ LLEGADA TARDE' : `${conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? '⚠ INTERMEDIO' : 'NORMAL'} — ${typeLabel[conv.type] || conv.type}`}
                       </div>
                       <div className="font-bold text-slate-200 text-sm">{conv.objectiveName || 'Puesto'}</div>
+                      {isLlegadaTarde && (
+                        <div className="text-[11px] text-amber-300 mt-1">Tu turno ya comenzó. ¿Estás en camino?</div>
+                      )}
                       <div className="text-[11px] text-slate-400 mt-0.5">
                         {conv.clientName ? `${conv.clientName} · ` : ''}{conv.shiftCode || ''}{startDate ? ` · ${formatTime(conv.startTime)}` : ''}
                       </div>
@@ -3171,14 +3176,14 @@ export default function EmployeeDashboard() {
                           disabled={convBusy}
                           className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase disabled:opacity-50 transition-colors"
                         >
-                          Acepto
+                          {isLlegadaTarde ? 'Sí, voy' : 'Acepto'}
                         </button>
                         <button
                           onClick={() => handleResponderConvocatoriaCobertura(conv.id, 'REJECTED')}
                           disabled={convBusy}
                           className="flex-1 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-[11px] font-black uppercase disabled:opacity-50 transition-colors"
                         >
-                          No puedo
+                          {isLlegadaTarde ? 'No voy' : 'No puedo'}
                         </button>
                       </div>
                     </div>

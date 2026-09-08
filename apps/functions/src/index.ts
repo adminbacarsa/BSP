@@ -23,7 +23,7 @@ import {
   isAdminBackupRole,
 } from './backup/backup-auth.util';
 import { createNestApp } from './main';
-import { iniciarCascadaCobertura, simularRespuestasConvocatorias } from './coverage/convocatoriasCobertura';
+import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
 import { INestApplicationContext } from '@nestjs/common';
 
 // Servicios expuestos por NestJS
@@ -1222,7 +1222,7 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
       startTime: after.startTime,
       endTime:   after.endTime,
       empresaId,
-    });
+    }, 'AUTO');
   }
 );
 
@@ -3044,8 +3044,29 @@ export const detectarAusencias = functions
 
       if (!s.objectiveId || !posName || !empId) continue;
 
-      // Marcar que ya se enviÃ³ la alerta temprana
+      // Marcar que ya se procesó la alerta temprana
       await earlyDoc.ref.update({ earlyRetentionAlertAt: now });
+
+      // Preguntar al guardia tardío si viene antes de marcarlo ausente
+      try {
+        const empUidSnap = await db.collection('empleados').doc(s.employeeId).get();
+        const empUid: string | undefined = empUidSnap.data()?.uid;
+        await crearConvocatoriaLlegadaTarde(db, {
+          id: earlyDoc.id,
+          empresaId: empId,
+          objectiveId: s.objectiveId,
+          objectiveName: s.objectiveName || '',
+          clientId: s.clientId || '',
+          shiftCode: (s.code || '').toUpperCase(),
+          startTime: s.startTime,
+          endTime: s.endTime,
+          employeeId: s.employeeId,
+          employeeName: s.employeeName || '',
+          employeeUid: empUid,
+        });
+      } catch (e) {
+        console.warn('[detectarAusencias] Error creando LLEGADA_TARDE:', e);
+      }
 
       // Buscar guardia saliente presente en el mismo puesto
       try {
@@ -3454,6 +3475,18 @@ export const gestionarVacantes = functions
         });
 
         sentToProtocol++;
+        // Disparar cascade automática para la vacante ya iniciada
+        await iniciarCascadaCobertura(db, {
+          id: docSnap.id,
+          empresaId: shiftEmpresaId(shift) || '',
+          objectiveId: String(shift.objectiveId || ''),
+          objectiveName: String(shift.objectiveName || ''),
+          clientId: String(shift.clientId || ''),
+          clientName: String(shift.clientName || ''),
+          code: String(shift.code || ''),
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+        }, 'AUTO');
         continue;
       }
 
@@ -3498,6 +3531,18 @@ export const gestionarVacantes = functions
         });
 
         sentToProtocol++;
+        // Disparar cascade automática para la vacante a T-1h
+        await iniciarCascadaCobertura(db, {
+          id: docSnap.id,
+          empresaId: shiftEmpresaId(shift) || '',
+          objectiveId: String(shift.objectiveId || ''),
+          objectiveName: String(shift.objectiveName || ''),
+          clientId: String(shift.clientId || ''),
+          clientName: String(shift.clientName || ''),
+          code: String(shift.code || ''),
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+        }, 'AUTO');
 
       // ── T-3h: Devolver a Planificación ────────────────────────────
       } else if (minutesUntil <= 180 && !shift.vacanteReportadaAt && !shift.isReportedToPlanning) {

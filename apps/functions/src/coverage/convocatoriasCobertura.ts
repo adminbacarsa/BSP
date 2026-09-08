@@ -13,6 +13,9 @@ import {
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
+// ConvocatoriaType amplía CandidateType con LLEGADA_TARDE (pregunta al guardia tardío)
+export type ConvocatoriaType = CandidateType | 'LLEGADA_TARDE';
+
 export interface ConvocatoriaCoberturaDoc {
   empresaId: string;
   shiftId: string;           // vacante que se quiere cubrir
@@ -25,7 +28,7 @@ export interface ConvocatoriaCoberturaDoc {
   endTime?: Timestamp;
   aptitudesRequeridas?: string[];
 
-  type: CandidateType;
+  type: ConvocatoriaType;
   urgency: 'URGENTE' | 'INTERMEDIO' | 'NORMAL';
   cascadeStep: number;       // índice en CASCADE_ORDER (0-based)
 
@@ -67,7 +70,7 @@ async function crearNotifConvocatoria(
   const urgencyLabel =
     conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
 
-  const typeLabel: Record<CandidateType, string> = {
+  const typeLabel: Record<ConvocatoriaType, string> = {
     RET: 'Retención (RET)',
     VOLANTE: 'Cobertura volante',
     SIN_TURNO_CON_EXP: 'Cobertura disponible',
@@ -75,6 +78,7 @@ async function crearNotifConvocatoria(
     ADVANCE: 'Adelanto de turno',
     SIN_TURNO: 'Cobertura disponible',
     FT: 'Franco Trabajado (FT)',
+    LLEGADA_TARDE: '¿Estás en camino?',
   };
 
   const startDate =
@@ -82,12 +86,18 @@ async function crearNotifConvocatoria(
       ? conv.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
       : '--:--';
 
+  const isLlegadaTarde = conv.type === 'LLEGADA_TARDE';
+  const title = isLlegadaTarde ? '⏰ ¿Estás en camino?' : `[${urgencyLabel}] Cobertura requerida`;
+  const body  = isLlegadaTarde
+    ? `Tu turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'el puesto'} comenzó a las ${startDate}. Confirmá si estás en camino en los próximos ${TIMEOUT_MINUTES} min.`
+    : `${typeLabel[conv.type]} en ${conv.objectiveName || 'el puesto'} — turno ${conv.shiftCode || ''} ${startDate}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`;
+
   await db.collection('user_notifications').add({
     uid: conv.candidateUid || null,
     employeeId: conv.candidateEmployeeId,
     type: 'CONVOCATORIA_COBERTURA',
-    title: `[${urgencyLabel}] Cobertura requerida`,
-    body: `${typeLabel[conv.type]} en ${conv.objectiveName || 'el puesto'} — turno ${conv.shiftCode || ''} ${startDate}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`,
+    title,
+    body,
     empresaId: conv.empresaId,
     convocatoriaId: conv.id,
     shiftId: conv.shiftId,
@@ -476,6 +486,11 @@ async function resolverCobertura(
 ): Promise<void> {
   const batch = db.batch();
 
+  // Trazabilidad: quién/qué resolvió la cobertura
+  const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
+                   : conv.createdBy === 'AUTO' ? 'AUTO'
+                   : 'OPERACIONES';
+
   if (conv.type === 'EXTEND' && conv.extendShiftId) {
     const shiftRef = db.collection('turnos').doc(conv.extendShiftId);
     const newCode = String(conv.shiftCode || 'M').toUpperCase().startsWith('N') ? 'N12' : 'D12';
@@ -484,31 +499,28 @@ async function resolverCobertura(
       isExtended: true,
       extendedBy: 'CONVOCATORIA',
       extendedAt: FieldValue.serverTimestamp(),
-      resolvedBy: 'OPERACIONES',
+      resolvedBy,
     });
   } else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
     const nextRef = db.collection('turnos').doc(conv.advanceShiftId);
-    // Adelantar: ajustar startTime al inicio del turno vacante
     batch.update(nextRef, {
       startTime: conv.startTime,
       isAdvanced: true,
       advancedBy: 'CONVOCATORIA',
       advancedAt: FieldValue.serverTimestamp(),
-      resolvedBy: 'OPERACIONES',
+      resolvedBy,
     });
   } else if (conv.type === 'RET') {
-    // Activar el RET: se asigna al turno vacante
     const vacantRef = db.collection('turnos').doc(conv.shiftId);
     batch.update(vacantRef, {
       employeeId: conv.candidateEmployeeId,
       employeeName: conv.candidateEmployeeName,
       origin: 'OPERATIONS_COVERAGE',
-      resolvedBy: 'OPERACIONES',
+      resolvedBy,
       isRetentionActivated: true,
       retentionActivatedAt: FieldValue.serverTimestamp(),
     });
   } else if (conv.type === 'FT') {
-    // FT: convertir el turno franco del guardia → FT (no reasignar el turno de QUIROGA)
     if (conv.ftShiftId) {
       const ftRef = db.collection('turnos').doc(conv.ftShiftId);
       batch.update(ftRef, {
@@ -519,21 +531,21 @@ async function resolverCobertura(
         presentAt: conv.startTime,
         realStartTime: conv.startTime,
         realEndTime: conv.endTime || null,
-        resolvedBy: 'OPERACIONES',
+        resolvedBy,
         coveredShiftId: conv.shiftId,
         assignedByConvocatoria: conv.id,
         assignedAt: FieldValue.serverTimestamp(),
       });
     }
   } else {
-    // VOLANTE, SIN_TURNO, SIN_TURNO_CON_EXP: asignar guardia al turno vacante
+    // VOLANTE, SIN_TURNO, SIN_TURNO_CON_EXP
     const vacantRef = db.collection('turnos').doc(conv.shiftId);
     batch.update(vacantRef, {
       employeeId: conv.candidateEmployeeId,
       employeeName: conv.candidateEmployeeName,
       code: String(conv.shiftCode || 'M'),
       origin: 'OPERATIONS_COVERAGE',
-      resolvedBy: 'OPERACIONES',
+      resolvedBy,
       assignedByConvocatoria: conv.id,
       assignedAt: FieldValue.serverTimestamp(),
     });
@@ -726,6 +738,27 @@ export const responderConvocatoriaCobertura = functions
 
     const now = Timestamp.now();
 
+    if (conv.type === 'LLEGADA_TARDE') {
+      // Caso especial: el guardia tardío confirma si viene o no
+      if (response === 'ACCEPTED') {
+        await convRef.update({ status: 'ACCEPTED', respondedAt: now, resolvedAt: now });
+        await db.collection('turnos').doc(conv.shiftId).update({
+          lateArrivalConfirmed: true,
+          lateArrivalConfirmedAt: now,
+        });
+      } else {
+        await convRef.update({ status: 'REJECTED', respondedAt: now, rejectionReason: rejectionReason || null });
+        // No viene → marcar ausente → onTurnoAbsenciaDetectada dispara cascade
+        await db.collection('turnos').doc(conv.shiftId).update({
+          isAbsent: true,
+          status: 'ABSENT',
+          absenceType: 'AA',
+          absenceDetectedBy: 'LLEGADA_TARDE_RECHAZADA',
+        });
+      }
+      return { success: true };
+    }
+
     if (response === 'ACCEPTED') {
       await convRef.update({
         status: 'ACCEPTED',
@@ -739,7 +772,6 @@ export const responderConvocatoriaCobertura = functions
         respondedAt: now,
         rejectionReason: rejectionReason || null,
       });
-      // Notificar a ops
       await db.collection('novedades').add({
         type: 'CONVOCATORIA_RECHAZADA',
         shiftId: conv.shiftId,
@@ -750,7 +782,6 @@ export const responderConvocatoriaCobertura = functions
         resolved: false,
         createdAt: FieldValue.serverTimestamp(),
       });
-      // Avanzar cascada
       await avanzarCascada(db, { ...conv, id: convocatoriaId }, 'REJECTED');
     }
 
@@ -905,6 +936,7 @@ export interface ShiftDataForCascade {
 export async function iniciarCascadaCobertura(
   db: admin.firestore.Firestore,
   shift: ShiftDataForCascade,
+  createdBy = 'AUTO',
 ): Promise<void> {
   // Si ya hay una convocatoria activa para este turno, no crear otra
   const existing = await db.collection('convocatorias_cobertura')
@@ -933,7 +965,7 @@ export async function iniciarCascadaCobertura(
     status: 'PENDING',
     timeoutAt: Timestamp.now(),
     createdAt: Timestamp.now(),
-    createdBy: 'MODO_DEMO',
+    createdBy,
   };
 
   // Iterar la cascada desde el primer paso hasta encontrar candidato
@@ -954,7 +986,7 @@ export async function iniciarCascadaCobertura(
       candidateUid: candidate.uid,
       ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
       ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
-      createdBy: 'MODO_DEMO',
+      createdBy,
     });
     return;
   }
@@ -1041,12 +1073,86 @@ export const checkConvocatoriaTimeouts = onSchedule(
     for (const d of timedOut.docs) {
       const conv = d.data() as ConvocatoriaCoberturaDoc;
       try {
-        // ESCALATED: sigue activa (puede responder), pero ya avanzamos al siguiente paso
-        await d.ref.update({ status: 'ESCALATED', escalatedAt: now });
-        await avanzarCascada(db, { ...conv, id: d.id }, 'TIMEOUT');
+        if (conv.type === 'LLEGADA_TARDE') {
+          // Guardia no confirmó que viene → marcar ausente → trigger cascade
+          await d.ref.update({ status: 'TIMEOUT', escalatedAt: now });
+          await db.collection('turnos').doc(conv.shiftId).update({
+            isAbsent: true,
+            status: 'ABSENT',
+            absenceType: 'AA',
+            absenceDetectedBy: 'LLEGADA_TARDE_TIMEOUT',
+          });
+          console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout → isAbsent=true en ${conv.shiftId}`);
+        } else {
+          // Cascada regular: ESCALATED sigue activa, avanzar al siguiente paso
+          await d.ref.update({ status: 'ESCALATED', escalatedAt: now });
+          await avanzarCascada(db, { ...conv, id: d.id }, 'TIMEOUT');
+        }
       } catch (e) {
         console.error(`[checkConvocatoriaTimeouts] Error en ${d.id}:`, (e as Error).message);
       }
     }
   },
 );
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPER EXPORTADO: crearConvocatoriaLlegadaTarde
+// Pregunta al guardia tardío si viene antes de marcarlo ausente.
+// Lo llama detectarAusencias BLOQUE 1 cuando detecta T+0 sin check-in.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function crearConvocatoriaLlegadaTarde(
+  db: admin.firestore.Firestore,
+  shift: {
+    id: string;
+    empresaId: string;
+    objectiveId: string;
+    objectiveName: string;
+    clientId: string;
+    shiftCode: string;
+    startTime: Timestamp;
+    endTime?: Timestamp;
+    employeeId: string;
+    employeeName: string;
+    employeeUid?: string;
+  },
+): Promise<void> {
+  // Idempotencia: no crear segunda convocatoria LLEGADA_TARDE para el mismo turno
+  const existing = await db.collection('convocatorias_cobertura')
+    .where('shiftId', '==', shift.id)
+    .where('type', '==', 'LLEGADA_TARDE')
+    .where('status', 'in', ['PENDING', 'ESCALATED'])
+    .limit(1)
+    .get();
+  if (!existing.empty) return;
+
+  const now = Timestamp.now();
+  const timeoutAt = Timestamp.fromMillis(now.toMillis() + TIMEOUT_MINUTES * 60 * 1000);
+
+  const convRef = db.collection('convocatorias_cobertura').doc();
+  const convData: ConvocatoriaCoberturaDoc = {
+    empresaId: shift.empresaId,
+    shiftId: shift.id,
+    objectiveId: shift.objectiveId,
+    objectiveName: shift.objectiveName,
+    clientId: shift.clientId,
+    shiftCode: shift.shiftCode,
+    startTime: shift.startTime,
+    endTime: shift.endTime,
+    type: 'LLEGADA_TARDE',
+    urgency: getUrgency(shift.startTime),
+    cascadeStep: -1,
+    candidateEmployeeId: shift.employeeId,
+    candidateEmployeeName: shift.employeeName,
+    candidateUid: shift.employeeUid,
+    aptitudesRequeridas: [],
+    status: 'PENDING',
+    timeoutAt,
+    createdAt: now,
+    createdBy: 'AUTO',
+  };
+
+  await convRef.set(convData);
+  await crearNotifConvocatoria(db, { ...convData, id: convRef.id });
+  console.log(`[crearConvocatoriaLlegadaTarde] Enviada a ${shift.employeeName} para turno ${shift.id}`);
+}
