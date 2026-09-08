@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { collection, query, where, addDoc, updateDoc, doc, getDoc, getDocs, limit, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, query, where, addDoc, setDoc, updateDoc, doc, getDoc, getDocs, limit, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { stampEmpresaId } from '@/lib/multiempresa';
@@ -306,16 +306,23 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         processedIds.current.add(`retention_${s.id}`);
         const msg = `${s.employeeName} lleva ${s.retentionMinutes}min de retención en ${s.objectiveName}`;
         if (isAutoMode) {
-          // Dedup: no crear novedad si ya existe una RETENCION_DETECTADA para este turno
-          const existingReten = await getDocs(query(
-            collection(db, 'novedades'),
-            where('shiftId', '==', s.id),
-            where('type', '==', 'RETENCION_DETECTADA'),
-            limit(1)
-          ));
-          if (existingReten.empty) {
-            await createNovedad('RETENCION_DETECTADA', 'Recargo Automático Detectado', msg, s, empresaId);
-          }
+          // ID determinístico → setDoc idempotente, sin race condition entre tabs
+          const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+          await setDoc(doc(db, 'novedades', `autoreten_${safeId}`), stampEmpresaId({
+            type: 'RETENCION_DETECTADA',
+            status: 'pending',
+            title: 'Recargo Automático Detectado',
+            description: msg,
+            shiftId: s.id || null,
+            clientId: s.clientId || null,
+            objectiveId: s.objectiveId || null,
+            objectiveName: s.objectiveName || null,
+            employeeId: s.employeeId || null,
+            employeeName: s.employeeName || null,
+            positionName: s.positionName || null,
+            createdAt: serverTimestamp(),
+            reportedBy: 'SISTEMA_AUTO',
+          }, String(s.empresaId || empresaId || '').trim()), { merge: false }).catch(() => {});
         }
       }
       if (!isBaseline) {
@@ -391,16 +398,22 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         const hrs = ((s.totalMinutesWorked ?? 0) / 60).toFixed(1);
         const msg = `${s.employeeName} lleva ${hrs}h en ${s.objectiveName} — ${s.positionName}`;
         if (isAutoMode) {
-          // Dedup: no crear novedad si ya existe una RECARGO_12H para este turno
-          const existingRecargo = await getDocs(query(
-            collection(db, 'novedades'),
-            where('shiftId', '==', s.id),
-            where('type', '==', 'RECARGO_12H'),
-            limit(1)
-          ));
-          if (existingRecargo.empty) {
-            await createNovedad('RECARGO_12H', 'Guardia más de 12h en servicio', msg, s, empresaId);
-          }
+          const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+          await setDoc(doc(db, 'novedades', `autorecargo_${safeId}`), stampEmpresaId({
+            type: 'RECARGO_12H',
+            status: 'pending',
+            title: 'Guardia más de 12h en servicio',
+            description: msg,
+            shiftId: s.id || null,
+            clientId: s.clientId || null,
+            objectiveId: s.objectiveId || null,
+            objectiveName: s.objectiveName || null,
+            employeeId: s.employeeId || null,
+            employeeName: s.employeeName || null,
+            positionName: s.positionName || null,
+            createdAt: serverTimestamp(),
+            reportedBy: 'SISTEMA_AUTO',
+          }, String(s.empresaId || empresaId || '').trim()), { merge: false }).catch(() => {});
         }
         if (!isBaseline) {
           toast.error(`🚨 +12h: ${msg}`, {

@@ -3425,6 +3425,8 @@ export const gestionarVacantes = functions
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
+      // Ignorar borradores de planificación (no publicados)
+      if (shift.draft === true) continue;
       // Solo vacantes sin asignación
       if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE') continue;
 
