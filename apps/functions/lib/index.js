@@ -808,17 +808,27 @@ async function runModoDemoForEmpresa(db, empresaId) {
         });
         ausenciasDemo++;
     }
+    const MAX_RETENTION_TOLERANCE_MS = 15 * 60 * 1000;
     for (const doc of snap.docs) {
         const t = doc.data();
         if (skipBase(t) || isVacant(t))
             continue;
         if (t.isAbsent || !t.isPresent || t.isCompleted)
             continue;
-        const actualEndTs = t.retentionUntil ?? t.manualRetentionUntil ?? t.endTime;
-        const endMs = (actualEndTs?.seconds ?? 0) * 1000;
-        if (!endMs || endMs > now.getTime())
+        const endTimeMs = (t.endTime?.seconds ?? 0) * 1000;
+        if (!endTimeMs)
             continue;
-        batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: actualEndTs, autoCierre: true, modoDemoAt: nowTs });
+        const retentionTs = t.retentionUntil ?? t.manualRetentionUntil;
+        const retentionMs = retentionTs ? ((retentionTs.seconds ?? 0) * 1000) : 0;
+        const cappedEndMs = retentionMs > 0
+            ? Math.min(retentionMs, endTimeMs + MAX_RETENTION_TOLERANCE_MS)
+            : endTimeMs;
+        if (cappedEndMs > now.getTime())
+            continue;
+        const realEndTs = retentionMs > 0 && retentionMs <= endTimeMs + MAX_RETENTION_TOLERANCE_MS
+            ? retentionTs
+            : t.endTime;
+        batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: realEndTs, autoCierre: true, completionReason: 'AUTO_SHIFT_END', modoDemoAt: nowTs });
         cierres++;
     }
     let absentClean = 0;
@@ -902,7 +912,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
         const coveredSlots = new Set();
         for (const doc of snap.docs) {
             const t = doc.data();
-            if (skipBase(t) || isVacant(t) || t.isAbsent || t.isCompleted)
+            if (skipBase(t) || isVacant(t) || t.isAbsent)
                 continue;
             const oid = String(t.objectiveId || '');
             const sh = (t.startTime?.seconds ?? 0) * 1000;

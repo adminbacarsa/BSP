@@ -974,16 +974,26 @@ async function runModoDemoForEmpresa(
     ausenciasDemo++;
   }
 
-  // Pase 2: cerrar salientes — respeta extensiones/retenciones para que realEndTime sea correcto para liquidación
+  // Pase 2: cerrar salientes — tolerancia máx. 15 min sobre endTime (relevo demorado u retención)
+  const MAX_RETENTION_TOLERANCE_MS = 15 * 60 * 1000;
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
     if (t.isAbsent || !t.isPresent || t.isCompleted) continue;
-    // Si hay retención activa, el turno real termina en retentionUntil, no en endTime planificado
-    const actualEndTs = t.retentionUntil ?? t.manualRetentionUntil ?? t.endTime;
-    const endMs = (actualEndTs?.seconds ?? 0) * 1000;
-    if (!endMs || endMs > now.getTime()) continue;
-    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: actualEndTs, autoCierre: true, modoDemoAt: nowTs });
+    const endTimeMs = (t.endTime?.seconds ?? 0) * 1000;
+    if (!endTimeMs) continue;
+    const retentionTs = t.retentionUntil ?? t.manualRetentionUntil;
+    const retentionMs = retentionTs ? ((retentionTs.seconds ?? 0) * 1000) : 0;
+    // Cierre efectivo: si hay retención dentro del margen, úsarla; si excede los 15 min, forzar endTime+15min
+    const cappedEndMs = retentionMs > 0
+      ? Math.min(retentionMs, endTimeMs + MAX_RETENTION_TOLERANCE_MS)
+      : endTimeMs;
+    if (cappedEndMs > now.getTime()) continue;
+    // realEndTime para liquidación: usar retención si estaba dentro del margen; sino, endTime contratado
+    const realEndTs = retentionMs > 0 && retentionMs <= endTimeMs + MAX_RETENTION_TOLERANCE_MS
+      ? retentionTs
+      : t.endTime;
+    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: realEndTs, autoCierre: true, completionReason: 'AUTO_SHIFT_END', modoDemoAt: nowTs });
     cierres++;
   }
 
@@ -1075,7 +1085,8 @@ async function runModoDemoForEmpresa(
     const coveredSlots = new Set<string>(); // `${oid}_${startHH}`
     for (const doc of snap.docs) {
       const t = doc.data() as any;
-      if (skipBase(t) || isVacant(t) || t.isAbsent || t.isCompleted) continue;
+      if (skipBase(t) || isVacant(t) || t.isAbsent) continue;
+      // Incluir completados: si el slot ya fue cubierto hoy (aunque ya terminó) no generar nuevo turno
       const oid = String(t.objectiveId || '');
       const sh = (t.startTime?.seconds ?? 0) * 1000;
       const hh = new Date(sh).getHours();
