@@ -1,4 +1,5 @@
-﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
+﻿import React, { useState, useMemo, useEffect, useRef, useLayoutEffect, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
@@ -12,7 +13,7 @@ import {
     FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
+import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
@@ -2075,6 +2076,131 @@ const splitShiftsByEvent = (items: any[]) => {
     return { regular, eventGroups };
 };
 
+type ObjectivesSortMode = 'critico' | 'cliente' | 'nombre';
+
+const objectiveCardLabel = (o: { name?: string; label?: string }) =>
+    String(o.name || o.label || '').trim();
+
+const sortObjectiveCards = (a: any, b: any, mode: ObjectivesSortMode) => {
+    if (mode === 'critico') {
+        const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;
+        const scoreB = b.absent * 3 + b.vacant * 2 + b.retention;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+    }
+    if (mode === 'cliente') {
+        const byClient = String(a.client || '').localeCompare(String(b.client || ''), 'es', { sensitivity: 'base' });
+        if (byClient !== 0) return byClient;
+        return objectiveCardLabel(a).localeCompare(objectiveCardLabel(b), 'es', { sensitivity: 'base' });
+    }
+    const byName = objectiveCardLabel(a).localeCompare(objectiveCardLabel(b), 'es', { sensitivity: 'base' });
+    if (byName !== 0) return byName;
+    return String(a.client || '').localeCompare(String(b.client || ''), 'es', { sensitivity: 'base' });
+};
+
+/** Panel expandido flotante: no empuja la grilla mult columna. */
+function ObjectiveExpandOverlay({
+    open,
+    anchorRef,
+    onClose,
+    children,
+}: {
+    open: boolean;
+    anchorRef: RefObject<HTMLElement | null>;
+    onClose: () => void;
+    children: ReactNode;
+}) {
+    const [style, setStyle] = useState<React.CSSProperties>({ visibility: 'hidden' });
+
+    useLayoutEffect(() => {
+        if (!open) return;
+        const update = () => {
+            const el = anchorRef.current;
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            const width = Math.min(Math.max(r.width, 280), window.innerWidth - 16);
+            const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+            const maxHeight = Math.max(140, Math.min(420, window.innerHeight - r.bottom - 12));
+            setStyle({
+                position: 'fixed',
+                top: r.bottom + 4,
+                left,
+                width,
+                maxHeight,
+                zIndex: 8000,
+                visibility: 'visible',
+            });
+        };
+        update();
+        window.addEventListener('scroll', update, true);
+        window.addEventListener('resize', update);
+        return () => {
+            window.removeEventListener('scroll', update, true);
+            window.removeEventListener('resize', update);
+        };
+    }, [open, anchorRef]);
+
+    if (!open || typeof document === 'undefined') return null;
+
+    return createPortal(
+        <>
+            <div className="fixed inset-0 z-[7990]" onClick={onClose} aria-hidden />
+            <div
+                style={style}
+                className="overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-2xl custom-scrollbar"
+            >
+                {children}
+            </div>
+        </>,
+        document.body,
+    );
+}
+
+/** Tarjeta de objetivo/evento en grilla: expande en overlay si mult columna. */
+function OpsObjectiveGridCard({
+    useOverlay,
+    isExpanded,
+    onToggleExpand,
+    borderColor,
+    bgColor,
+    header,
+    expandedBody,
+}: {
+    useOverlay: boolean;
+    isExpanded: boolean;
+    onToggleExpand: (next: boolean) => void;
+    borderColor: string;
+    bgColor: string;
+    header: ReactNode;
+    expandedBody: ReactNode;
+}) {
+    const cardRef = useRef<HTMLDivElement>(null);
+
+    return (
+        <div className={`min-w-0 ${isExpanded && useOverlay ? 'relative z-40' : ''}`}>
+            <div
+                ref={cardRef}
+                className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-shadow ${isExpanded ? 'ring-2 ring-indigo-300 shadow-lg' : 'shadow-sm'}`}
+            >
+                {header}
+                {isExpanded && !useOverlay && (
+                    <div className="border-t border-slate-200 bg-white px-2 py-2 space-y-1.5">
+                        {expandedBody}
+                    </div>
+                )}
+            </div>
+            {useOverlay && (
+                <ObjectiveExpandOverlay
+                    open={isExpanded}
+                    anchorRef={cardRef}
+                    onClose={() => onToggleExpand(false)}
+                >
+                    <div className="px-2 py-2 space-y-1.5">{expandedBody}</div>
+                </ObjectiveExpandOverlay>
+            )}
+        </div>
+    );
+}
+
 const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, isAutoMode, isPublished, layoutGrid }: any) => {
     const [expanded, setExpanded] = useState(!layoutGrid);
     const split = useMemo(() => splitShiftsByEvent(group.items || []), [group.items]);
@@ -2302,6 +2428,7 @@ export default function OperacionesPage() {
     const [isGrouped, setIsGrouped] = useState(true);
     const [viewMode, setViewMode] = usePersistedState<'objetivos' | 'lista'>('cosp:ops:viewMode', 'objetivos');
     const [expandedObjectiveId, setExpandedObjectiveId] = usePersistedState<string | null>('cosp:ops:expandedObj', null);
+    const [objectivesSortMode, setObjectivesSortMode] = usePersistedState<ObjectivesSortMode>('cosp:ops:objSort', 'cliente');
     const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'>('reciente');
     const [bitacoraOpen, setBitacoraOpen] = useState(false);
     const [bitacoraExpanded, setBitacoraExpanded] = useState<string | null>(null);
@@ -2359,6 +2486,8 @@ export default function OperacionesPage() {
     const [cierreLoading, setCierreLoading] = useState(false);
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
     const [activeConvsByObjective, setActiveConvsByObjective] = useState<Record<string, number>>({});
+    const [activeConvsList, setActiveConvsList] = useState<any[]>([]);
+    const [convsPanelOpen, setConvsPanelOpen] = useState(true);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
     const [authorizedAbsences, setAuthorizedAbsences] = useState<any[]>([]);
     const [absencesPanelOpen, setAbsencesPanelOpen] = useState(false);
@@ -3716,27 +3845,13 @@ export default function OperacionesPage() {
         });
     }, [logic.listData, isGrouped]);
 
-    const matchesViewTabForShift = (s: any) => {
-        switch(logic.viewTab) {
-            case 'ACTIVOS':    return s.isPresent && !s.isCompleted && !s.isRetention;
-            case 'RETENIDOS':  return s.isRetention;
-            case 'AUSENTES':   return s.isAbsent || s.isPotentialAbsence;
-            case 'VACANTES':   return s.isUnassigned;
-            case 'PLAN':       return s.isFuture && !s.isFranco && !s.isUnassigned;
-            case 'FRANCOS':    return s.isFranco;
-            default:           return !s.isFranco;
-        }
-    };
+    const matchesViewTabForShift = (s: any) => shiftMatchesOpsViewTab(s, logic.viewTab);
 
     // â"€â"€ VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad â"€â"€
     const objectivesWithAlerts = useMemo(() => {
         const now = new Date();
         const map = new Map<string, any>();
-        const hoy = logic.processedData.filter((s: any) => {
-            if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        });
+        const hoy = logic.processedData.filter((s: any) => isOpsShiftHoy(s, now));
         hoy.forEach((s: any) => {
             if (isEventShift(s)) return;
             if (s.isFranco) return;
@@ -3779,11 +3894,7 @@ export default function OperacionesPage() {
     const eventsWithAlerts = useMemo(() => {
         const now = new Date();
         const map = new Map<string, any>();
-        const hoy = logic.processedData.filter((s: any) => {
-            if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        });
+        const hoy = logic.processedData.filter((s: any) => isOpsShiftHoy(s, now));
         hoy.forEach((s: any) => {
             if (!isEventShift(s)) return;
             if (s.isFranco) return;
@@ -3831,6 +3942,7 @@ export default function OperacionesPage() {
             case 'FRANCOS':   return (o.shifts || []).some((s: any) => s.isFranco);
             case 'PRIORIDAD':
             case 'NO_LLEGO':
+            case 'TODOS':
                 return (o.shifts || []).some((s: any) => matchesViewTabForShift(s));
             default:
                 return true;
@@ -3851,12 +3963,16 @@ export default function OperacionesPage() {
         );
     };
     const filteredObjectivesWithAlerts = useMemo(
-        () => objectivesWithAlerts.filter((o) => objectiveMatchesTab(o) && objectiveMatchesSearch(o)),
-        [objectivesWithAlerts, logic.viewTab, logic.filterText],
+        () => objectivesWithAlerts
+            .filter((o) => objectiveMatchesTab(o) && objectiveMatchesSearch(o))
+            .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode)),
+        [objectivesWithAlerts, logic.viewTab, logic.filterText, objectivesSortMode],
     );
     const filteredEventsWithAlerts = useMemo(
-        () => eventsWithAlerts.filter((ev) => objectiveMatchesTab(ev) && objectiveMatchesSearch(ev)),
-        [eventsWithAlerts, logic.viewTab, logic.filterText],
+        () => eventsWithAlerts
+            .filter((ev) => objectiveMatchesTab(ev) && objectiveMatchesSearch(ev))
+            .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode)),
+        [eventsWithAlerts, logic.viewTab, logic.filterText, objectivesSortMode],
     );
 
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData, setManualRetentionData };
@@ -3875,8 +3991,6 @@ export default function OperacionesPage() {
     const objectivesLayoutClass = wideOpsPanel
         ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 auto-rows-min items-start content-start'
         : 'space-y-1.5';
-    const objectiveCardSpan = (expanded: boolean) =>
-        wideOpsPanel && expanded ? 'col-span-full' : '';
 
     const dayStatusKpi = useMemo(() => {
         const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
@@ -4047,6 +4161,18 @@ export default function OperacionesPage() {
                                     </button>
                                 </div>
                                 {viewMode === 'lista' && <button onClick={() => setIsGrouped(!isGrouped)} className={`px-2 py-1 font-bold text-[9px] rounded-lg border flex items-center gap-1 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={10}/>{isGrouped ? 'AGRUP.' : 'FLAT'}</button>}
+                                {viewMode === 'objetivos' && (
+                                    <select
+                                        value={objectivesSortMode}
+                                        onChange={(e) => setObjectivesSortMode(e.target.value as ObjectivesSortMode)}
+                                        className="px-1.5 py-1 text-[9px] font-black rounded-lg border border-slate-200 bg-slate-50 text-slate-600 outline-none cursor-pointer max-w-[88px]"
+                                        title="Orden de tarjetas"
+                                    >
+                                        <option value="cliente">Cliente</option>
+                                        <option value="nombre">A → Z</option>
+                                        <option value="critico">Crítico</option>
+                                    </select>
+                                )}
                                 {isExternalMap && (
                                     <span className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border border-indigo-200 hidden sm:inline">
                                         Vista mult columna
@@ -4247,10 +4373,85 @@ export default function OperacionesPage() {
                         </div>
                     )}
 
+                    {/* ── Panel convocatorias activas ── */}
+                    {activeConvsList.length > 0 && (
+                        <div className="px-3 py-1.5 border-b border-purple-100 bg-purple-50/60 shrink-0">
+                            <button
+                                onClick={() => setConvsPanelOpen(v => !v)}
+                                className="flex items-center gap-1.5 w-full text-left"
+                            >
+                                <Radio size={10} className="text-purple-600 shrink-0 animate-pulse"/>
+                                <span className="text-[9px] font-black text-purple-700 uppercase flex-1">Convocatorias activas</span>
+                                <span className="text-[9px] font-black bg-purple-600 text-white px-1.5 py-0.5 rounded-full">{activeConvsList.length}</span>
+                                {convsPanelOpen ? <ChevronUp size={10} className="text-purple-500 ml-1"/> : <ChevronDown size={10} className="text-purple-500 ml-1"/>}
+                            </button>
+                            {convsPanelOpen && (
+                                <div className="mt-1.5 space-y-1">
+                                    {activeConvsList.map((conv: any) => {
+                                        const urgColors: Record<string, string> = {
+                                            URGENTE: 'bg-rose-100 text-rose-700',
+                                            INTERMEDIO: 'bg-amber-100 text-amber-800',
+                                            NORMAL: 'bg-sky-100 text-sky-700',
+                                        };
+                                        const typeLabel: Record<string, string> = {
+                                            RET: 'RET', VOLANTE: 'VOL', SIN_TURNO_CON_EXP: 'EXP',
+                                            EXTEND: 'EXT', ADVANCE: 'ADV', SIN_TURNO: 'ST', FT: 'FT',
+                                        };
+                                        const urgColor = urgColors[conv.urgency] || 'bg-slate-100 text-slate-600';
+                                        const nowMs = Date.now();
+                                        const timeoutMs = conv.timeoutAt?.seconds ? conv.timeoutAt.seconds * 1000 : 0;
+                                        const minsLeft = timeoutMs ? Math.max(0, Math.round((timeoutMs - nowMs) / 60000)) : null;
+                                        return (
+                                            <div key={conv.id} className="flex items-center gap-2 bg-white border border-purple-100 rounded-lg px-2 py-1">
+                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 ${urgColor}`}>{typeLabel[conv.type] || conv.type}</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-[10px] font-bold text-slate-700 truncate">{conv.candidateEmployeeName || '—'}</div>
+                                                    <div className="text-[9px] text-slate-400 truncate">{conv.objectiveName || ''}{conv.shiftCode ? ` · ${conv.shiftCode}` : ''}</div>
+                                                </div>
+                                                {minsLeft !== null && (
+                                                    <span className={`text-[9px] font-mono shrink-0 ${minsLeft <= 1 ? 'text-rose-600 font-black' : 'text-slate-500'}`}>
+                                                        {minsLeft}m
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50">
 
                         {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-                        {viewMode === 'objetivos' && (
+                        {viewMode === 'objetivos' && logic.viewTab === 'FRANCOS' && (
+                        <div className={`p-2 ${objectivesLayoutClass}`}>
+                            {logic.listData.length === 0 ? (
+                                <div className="text-center py-10 text-slate-400 text-xs col-span-full">
+                                    {logic.filterText.trim() ? 'Sin francos que coincidan con la búsqueda' : 'Sin guardias de franco hoy'}
+                                </div>
+                            ) : (
+                                logic.listData.map((s: any) => (
+                                    <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode}
+                                        onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                                        onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                                        onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                                        onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                                        onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                                        onReportPlanning={handleReportPlanning}
+                                        onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+                                        onNovedadAbsence={handleNovedadAbsence}
+                                        onOpenWA={handleOpenWA}
+                                        onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
+                                        onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
+                                        onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
+                                        onRevertAbsence={handleRevertAbsence}
+                                    />
+                                ))
+                            )}
+                        </div>
+                        )}
+                        {viewMode === 'objetivos' && logic.viewTab !== 'FRANCOS' && (
                         <div className={`p-2 ${objectivesLayoutClass}`}>
                             {(filteredEventsWithAlerts.length === 0 && filteredObjectivesWithAlerts.length === 0) ? (
                                 <div className="text-center py-10 text-slate-400 text-xs">
@@ -4272,8 +4473,37 @@ export default function OperacionesPage() {
                                         const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-amber-50/40';
                                         const evShifts = (ev.shifts || []).filter((s: any) => matchesViewTabForShift(s));
                                         return (
-                                            <div key={expandKey} className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-all min-w-0 ${objectiveCardSpan(isExpanded)}`}>
-                                                <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2">
+                                            <OpsObjectiveGridCard
+                                                key={expandKey}
+                                                useOverlay={wideOpsPanel}
+                                                isExpanded={isExpanded}
+                                                onToggleExpand={(next) => setExpandedObjectiveId(next ? expandKey : null)}
+                                                borderColor={borderColor}
+                                                bgColor={bgColor}
+                                                expandedBody={
+                                                    evShifts.length === 0 ? (
+                                                        <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
+                                                    ) : evShifts.map((s: any) => (
+                                                        <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
+                                                            isAutoMode={session.isAutoMode}
+                                                            onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                                                            onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                                                            onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                                                            onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                                                            onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                                                            onReportPlanning={handleReportPlanning}
+                                                            onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+                                                            onNovedadAbsence={handleNovedadAbsence}
+                                                            onOpenWA={handleOpenWA}
+                                                            onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
+                                                            onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
+                                                            onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
+                                                            onRevertAbsence={handleRevertAbsence}
+                                                        />
+                                                    ))
+                                                }
+                                                header={(
+                                                    <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2">
                                                     <div className={`w-2.5 h-2.5 lg:w-2 lg:h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-amber-500'}`}/>
                                                     <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedObjectiveId(isExpanded ? null : expandKey)}>
                                                         <div className="flex items-center gap-2">
@@ -4313,32 +4543,9 @@ export default function OperacionesPage() {
                                                             {isExpanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
                                                         </button>
                                                     </div>
-                                                </div>
-                                                {isExpanded && (
-                                                    <div className="border-t border-slate-200 bg-white px-2 py-2 space-y-1.5">
-                                                        {evShifts.length === 0 ? (
-                                                            <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
-                                                        ) : evShifts.map((s: any) => (
-                                                            <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
-                                                                isAutoMode={session.isAutoMode}
-                                                                onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
-                                                                onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
-                                                                onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
-                                                                onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
-                                                                onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
-                                                                onReportPlanning={handleReportPlanning}
-                                                                onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
-                                                                onNovedadAbsence={handleNovedadAbsence}
-                                                                onOpenWA={handleOpenWA}
-                                                                onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
-                                                                onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
-                                                                onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
-                                                                onRevertAbsence={handleRevertAbsence}
-                                                            />
-                                                        ))}
                                                     </div>
                                                 )}
-                                            </div>
+                                            />
                                         );
                                     })}
                                     {filteredObjectivesWithAlerts.map(obj => {
@@ -4356,17 +4563,41 @@ export default function OperacionesPage() {
                                 const objShifts = logic.processedData.filter((s: any) => {
                                     if (s.objectiveId !== obj.objectiveId) return false;
                                     if (isEventShift(s)) return false;
-                                    // Mismo filtro "hoy" que stats — excluye completados y virtuales vencidos de OTRO día
-                                    if (s.isCompleted && !s.isRetention) return false;
-                                    if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now2) && s.endDateObj.getTime() < now2.getTime()) return false;
-                                    const hoy2 = isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-                                    if (!hoy2) return false;
+                                    if (!isOpsShiftHoy(s, now2)) return false;
                                     return matchesViewTabForShift(s);
                                 });
 
                                 return (
-                                    <div key={obj.objectiveId} className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-all min-w-0 ${objectiveCardSpan(isExpanded)}`}>
-                                        {/* Header del objetivo */}
+                                    <OpsObjectiveGridCard
+                                        key={obj.objectiveId}
+                                        useOverlay={wideOpsPanel}
+                                        isExpanded={isExpanded}
+                                        onToggleExpand={(next) => setExpandedObjectiveId(next ? obj.objectiveId : null)}
+                                        borderColor={borderColor}
+                                        bgColor={bgColor}
+                                        expandedBody={
+                                            objShifts.length === 0 ? (
+                                                <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
+                                            ) : objShifts.map((s: any) => (
+                                                <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
+                                                    isAutoMode={session.isAutoMode}
+                                                    onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                                                    onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                                                    onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                                                    onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                                                    onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                                                    onReportPlanning={handleReportPlanning}
+                                                    onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+                                                    onNovedadAbsence={handleNovedadAbsence}
+                                                    onOpenWA={handleOpenWA}
+                                                    onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
+                                                    onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
+                                                    onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
+                                                    onRevertAbsence={handleRevertAbsence}
+                                                />
+                                            ))
+                                        }
+                                        header={(
                                         <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2">
                                             {/* Indicador color */}
                                             <div className={`w-2.5 h-2.5 lg:w-2 lg:h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-emerald-500'}`}/>
@@ -4416,33 +4647,8 @@ export default function OperacionesPage() {
                                                 </button>
                                             </div>
                                         </div>
-
-                                        {/* Guardias expandidos */}
-                                        {isExpanded && (
-                                            <div className="border-t border-slate-200 bg-white px-2 py-2 space-y-1.5">
-                                                {objShifts.length === 0 ? (
-                                                    <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
-                                                ) : objShifts.map((s: any) => (
-                                                    <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
-                                                        isAutoMode={session.isAutoMode}
-                                                        onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
-                                                        onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
-                                                        onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
-                                                        onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
-                                                        onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
-                                                        onReportPlanning={handleReportPlanning}
-                                                        onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
-                                                        onNovedadAbsence={handleNovedadAbsence}
-                                                        onOpenWA={handleOpenWA}
-                                                        onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
-                                                        onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
-                                                        onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
-                                                        onRevertAbsence={handleRevertAbsence}
-                                                    />
-                                                ))}
-                                            </div>
                                         )}
-                                    </div>
+                                    />
                                 );
                             })}
                                 </>
