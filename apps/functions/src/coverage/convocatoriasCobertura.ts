@@ -148,6 +148,13 @@ async function avanzarCascada(
     return;
   }
 
+  // Obtener teléfono del candidato anterior para WhatsApp directo desde la novedad
+  let candidatePhone: string | null = null;
+  if (conv.candidateEmployeeId) {
+    const empSnap = await db.collection('empleados').doc(conv.candidateEmployeeId).get();
+    if (empSnap.exists) candidatePhone = empSnap.data()?.telefono || null;
+  }
+
   // Novedad para ops: el candidato anterior no respondió / rechazó
   await db.collection('novedades').add({
     type: 'CONVOCATORIA_ESCALADA',
@@ -162,6 +169,7 @@ async function avanzarCascada(
     nextCoverageType: nextType,
     candidateEmployeeId: conv.candidateEmployeeId,
     candidateEmployeeName: conv.candidateEmployeeName,
+    candidatePhone,
     status: 'unread',
     resolved: false,
     createdAt: FieldValue.serverTimestamp(),

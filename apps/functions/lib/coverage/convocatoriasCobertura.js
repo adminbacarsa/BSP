@@ -72,6 +72,12 @@ async function avanzarCascada(db, conv, reason) {
         await avanzarCascada(db, fakeConv, reason);
         return;
     }
+    let candidatePhone = null;
+    if (conv.candidateEmployeeId) {
+        const empSnap = await db.collection('empleados').doc(conv.candidateEmployeeId).get();
+        if (empSnap.exists)
+            candidatePhone = empSnap.data()?.telefono || null;
+    }
     await db.collection('novedades').add({
         type: 'CONVOCATORIA_ESCALADA',
         shiftId: conv.shiftId,
@@ -85,6 +91,7 @@ async function avanzarCascada(db, conv, reason) {
         nextCoverageType: nextType,
         candidateEmployeeId: conv.candidateEmployeeId,
         candidateEmployeeName: conv.candidateEmployeeName,
+        candidatePhone,
         status: 'unread',
         resolved: false,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
