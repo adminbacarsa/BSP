@@ -437,13 +437,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if ((!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') && !isFranco) return null;
             const displayPos = isFranco && (rawPos === 'General' || !rawPos) ? 'Franco' : rawPos;
 
-            // Solo mostrar turnos de planificación publicada.
-            // Los turnos operativos (retén, cobertura, SLA_VIRTUAL, evento) siempre se muestran.
-            // Los turnos de planificación BORRADOR nunca se muestran, sin excepción.
-            const isClientRefuerzoPlanificado = shift.origin === 'CLIENT_REQUEST'
-                && (shiftCodeUpper === 'RFZ' || shiftCodeUpper === 'TURA');
-            const isOperationalOrigin = shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'SLA_VIRTUAL' || (shift.origin === 'CLIENT_REQUEST' && !isClientRefuerzoPlanificado) || shift.origin === 'EVENTO' || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
-            if (!isOperationalOrigin) {
+            // Solo mostrar turnos de objetivos con planificación publicada.
+            // Sin excepción: ni turnos operativos, ni ausentes, ni presentes
+            // de un objetivo BORRADOR aparecen en el monitor.
+            {
                 const shiftDate = shift.shiftDateObj!;
                 const pubKey = planificacionPublishLookupKey(
                     shift.objectiveId,
@@ -878,9 +875,25 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
         // ── Deduplicar realShifts por id (evita que un doc duplicado en Firestore se muestre dos veces)
         const seenIds = new Set<string>();
-        const dedupedRealShifts = realShifts.filter(s => {
+        const dedupByIdShifts = realShifts.filter(s => {
             if (seenIds.has(s.id)) return false;
             seenIds.add(s.id);
+            return true;
+        });
+
+        // ── Deduplicar por (employeeId, objectiveId, startTime) para eliminar turnos
+        //    OPERATIONS_COVERAGE duplicados que crea la cascada al procesar la misma vacante varias veces.
+        //    Preferir el turno con isPresent:true o el primero encontrado.
+        const seenEmpObjTime = new Map<string, boolean>();
+        const dedupedRealShifts = dedupByIdShifts.filter(s => {
+            if (!s.employeeId || s.employeeId === 'VACANTE') return true; // vacantes siempre
+            const startMs = s.shiftDateObj?.getTime?.() ?? 0;
+            const key = `${s.employeeId}|${s.objectiveId}|${startMs}`;
+            if (seenEmpObjTime.has(key)) {
+                // Ya hay uno — solo reemplazar si este tiene isPresent y el anterior no
+                return false;
+            }
+            seenEmpObjTime.set(key, !!s.isPresent);
             return true;
         });
 
