@@ -2107,7 +2107,7 @@ const findScrollParent = (el: HTMLElement | null): HTMLElement | null => {
     return null;
 };
 
-/** Panel expandido flotante: anclado al objetivo seleccionado, scroll interno. */
+/** Panel expandido pegado al objetivo: abajo abre ↓, objetivos inferiores abren ↑. */
 function ObjectiveExpandOverlay({
     open,
     anchorRef,
@@ -2124,16 +2124,9 @@ function ObjectiveExpandOverlay({
     children: ReactNode;
 }) {
     const [style, setStyle] = useState<React.CSSProperties>({ visibility: 'hidden' });
-    const showPanelRef = useRef(false);
-    const scrollParentRef = useRef<HTMLElement | null>(null);
 
     useLayoutEffect(() => {
-        if (!open) {
-            showPanelRef.current = false;
-            return;
-        }
-
-        showPanelRef.current = false;
+        if (!open) return;
 
         const update = () => {
             const el = anchorRef.current;
@@ -2141,70 +2134,57 @@ function ObjectiveExpandOverlay({
             const r = el.getBoundingClientRect();
             const vw = window.innerWidth;
             const vh = window.innerHeight;
-            const margin = 8;
+            const pad = 8;
             const gap = 4;
-            const maxPanel = Math.min(380, Math.floor(vh * 0.42));
-            const width = Math.min(Math.max(r.width, 300), vw - margin * 2);
-            const left = Math.max(margin, Math.min(r.left, vw - width - margin));
+            const maxPanel = 280;
+            const width = Math.min(Math.max(r.width, 280), vw - pad * 2);
+            const left = Math.max(pad, Math.min(r.left, vw - width - pad));
 
-            const spaceBelow = vh - r.bottom - margin;
-            const spaceAbove = r.top - margin;
-            const cardInLowerHalf = r.top > vh * 0.52;
+            const spaceBelow = vh - r.bottom - pad;
+            const spaceAbove = r.top - pad;
+            const cardMid = (r.top + r.bottom) / 2;
+            const openUp = cardMid > vh * 0.55 || (spaceBelow < spaceAbove && spaceBelow < maxPanel * 0.85);
 
-            let top: number;
-            let maxHeight: number;
-
-            if (cardInLowerHalf) {
-                const compact = Math.min(maxPanel, 280, Math.max(140, spaceAbove));
-                maxHeight = compact;
-                top = Math.max(margin, r.top - gap - maxHeight);
-                maxHeight = Math.min(maxHeight, r.top - gap - top);
-            } else if (spaceBelow >= 120 || spaceBelow >= spaceAbove) {
-                top = r.bottom + gap;
-                maxHeight = Math.min(maxPanel, Math.max(140, spaceBelow));
-                if (top + maxHeight > vh - margin) maxHeight = Math.max(120, vh - margin - top);
+            if (openUp) {
+                const maxHeight = Math.min(maxPanel, Math.max(96, spaceAbove));
+                setStyle({
+                    position: 'fixed',
+                    bottom: vh - r.top + gap,
+                    top: 'auto',
+                    left,
+                    width,
+                    maxHeight,
+                    zIndex: 8000,
+                    visibility: 'visible',
+                });
             } else {
-                maxHeight = Math.min(maxPanel, Math.max(140, spaceAbove));
-                top = Math.max(margin, r.top - gap - maxHeight);
-                maxHeight = Math.min(maxHeight, r.top - gap - top);
+                const maxHeight = Math.min(maxPanel, Math.max(96, spaceBelow));
+                setStyle({
+                    position: 'fixed',
+                    top: r.bottom + gap,
+                    bottom: 'auto',
+                    left,
+                    width,
+                    maxHeight,
+                    zIndex: 8000,
+                    visibility: 'visible',
+                });
             }
-
-            maxHeight = Math.max(120, maxHeight);
-
-            setStyle({
-                position: 'fixed',
-                top,
-                left,
-                width,
-                maxHeight,
-                zIndex: 8000,
-                visibility: showPanelRef.current ? 'visible' : 'hidden',
-            });
         };
 
-        const el = anchorRef.current;
-        if (el) {
-            scrollParentRef.current = findScrollParent(el);
-            el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        }
-
         update();
-        const t1 = window.setTimeout(update, 120);
-        const t2 = window.setTimeout(() => {
-            showPanelRef.current = true;
-            update();
-        }, 380);
+        const raf = requestAnimationFrame(update);
+        const scrollParent = findScrollParent(anchorRef.current);
 
         window.addEventListener('scroll', update, true);
         window.addEventListener('resize', update);
-        scrollParentRef.current?.addEventListener('scroll', update, { passive: true });
+        scrollParent?.addEventListener('scroll', update, { passive: true });
 
         return () => {
-            window.clearTimeout(t1);
-            window.clearTimeout(t2);
+            cancelAnimationFrame(raf);
             window.removeEventListener('scroll', update, true);
             window.removeEventListener('resize', update);
-            scrollParentRef.current?.removeEventListener('scroll', update);
+            scrollParent?.removeEventListener('scroll', update);
         };
     }, [open, anchorRef]);
 
