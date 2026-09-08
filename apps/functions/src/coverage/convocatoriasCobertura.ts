@@ -319,9 +319,10 @@ async function findBestCandidate(
   }
 
   // Para RET, VOLANTE, SIN_TURNO_CON_EXP, SIN_TURNO: buscar en empleados activos
+  // status puede ser 'ACTIVE', 'active' o 'activo' según cómo fue cargado el legajo
   const empSnap = await db.collection('empleados')
     .where('empresaId', '==', conv.empresaId)
-    .where('status', '==', 'ACTIVE')
+    .where('status', 'in', ['ACTIVE', 'active', 'activo', 'ACTIVO'])
     .limit(200)
     .get();
 
@@ -430,7 +431,7 @@ async function dispararBroadcastFT(
 
   const empSnap = await db.collection('empleados')
     .where('empresaId', '==', conv.empresaId)
-    .where('status', '==', 'ACTIVE')
+    .where('status', 'in', ['ACTIVE', 'active', 'activo', 'ACTIVO'])
     .limit(200)
     .get();
 

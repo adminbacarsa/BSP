@@ -1041,7 +1041,7 @@ async function runModoDemoForEmpresa(
 
     const empSnap = await db.collection('empleados')
       .where('empresaId', '==', empresaId)
-      .where('status', '==', 'ACTIVE')
+      .where('status', 'in', ['ACTIVE', 'active', 'activo', 'ACTIVO'])
       .limit(200)
       .get();
 
