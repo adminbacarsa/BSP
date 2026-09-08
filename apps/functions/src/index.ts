@@ -1158,7 +1158,10 @@ async function runModoDemoForEmpresa(
             }
             if (!emp) continue; // todos los empleados del objetivo ya tienen turno
 
-            const autoRef = db.collection('turnos').doc();
+            // ID determinístico: si el cron corre dos veces, sobreescribe el mismo doc en lugar de crear uno nuevo
+            const slotDateStr = todayStr.replace(/-/g, '');
+            const autoId = `demo_${empresaId}_${oid}_${emp.id}_${slotDateStr}_${startH}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+            const autoRef = db.collection('turnos').doc(autoId);
             batch2.set(autoRef, {
               empresaId,
               objectiveId: oid,

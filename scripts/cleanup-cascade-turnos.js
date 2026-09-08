@@ -49,12 +49,15 @@ async function batchDelete(col, ids) {
   process.stdout.write('\n');
 }
 
-function toPlanKey(objectiveId, startTime) {
+function toPlanKey(empresaId, objectiveId, startTime) {
   let d;
   if (startTime?.toDate)        d = startTime.toDate();
   else if (startTime?.seconds)  d = new Date(startTime.seconds * 1000);
   else                          d = new Date();
-  return `${objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`;
+  // Formato real en Firestore: ${empresaId}_${objectiveId}_${year}_${month}
+  // Fallback sin empresa para docs legacy
+  const prefix = empresaId ? `${empresaId}_` : '';
+  return `${prefix}${objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`;
 }
 
 function toMillis(startTime) {
@@ -86,7 +89,7 @@ async function run() {
   const byPlanKey = new Map(); // planKey → [{ id, data }]
   snap.docs.forEach(d => {
     const data = d.data();
-    const k = toPlanKey(data.objectiveId, data.startTime);
+    const k = toPlanKey(data.empresaId, data.objectiveId, data.startTime);
     if (!byPlanKey.has(k)) byPlanKey.set(k, []);
     byPlanKey.get(k).push({ id: d.id, data });
   });
@@ -103,7 +106,7 @@ async function run() {
       .get();
     pSnap.docs.forEach(d => publishedKeys.add(d.id));
   }
-  console.log(`   Publicados: ${publishedKeys.size}  /  BORRADOR: ${allKeys.size - publishedKeys.size}\n`);
+  console.log(`   Publicados: ${publishedKeys.size}  /  BORRADOR: ${allKeys.length - publishedKeys.size}\n`);
 
   // ── A: eliminar docs de grupos SIN planificacion publicada ───────────────────
   const borradorKeys = allKeys.filter(k => !publishedKeys.has(k));
@@ -114,13 +117,13 @@ async function run() {
 
   // Mostrar muestra de lo que se va a borrar
   if (borradorKeys.length > 0) {
-    console.log(`A. Docs de objetivos BORRADOR → ${toDeleteBorrador.length} turnos a eliminar`);
-    borradorKeys.slice(0, 3).forEach(k => {
+    console.log(`A. Docs de objetivos SIN planificacion publicada → ${toDeleteBorrador.length} turnos a eliminar`);
+    borradorKeys.slice(0, 5).forEach(k => {
       const docs = byPlanKey.get(k);
       const s = docs[0].data;
-      console.log(`   • ${k} — ${docs.length} docs, ej: emp=${s.employeeId?.slice(0,8)} ${s.startTime?.toDate?.()?.toISOString()?.slice(0,16)}`);
+      console.log(`   • ${k} — ${docs.length} docs, ej: emp=${(s.employeeId||'').slice(0,8)} ${s.startTime?.toDate?.()?.toISOString()?.slice(0,16)}`);
     });
-    if (borradorKeys.length > 3) console.log(`   ... y ${borradorKeys.length - 3} grupos más`);
+    if (borradorKeys.length > 5) console.log(`   ... y ${borradorKeys.length - 5} grupos más`);
     if (!DRY_RUN) {
       process.stdout.write(`   Borrando `);
       await batchDelete('turnos', toDeleteBorrador);
@@ -157,7 +160,6 @@ async function run() {
         const thisPresent     = d.data.isPresent === true;
         const existingPresent = existing.data.isPresent === true;
         if (!existingPresent && thisPresent) {
-          // Este tiene presencia y el anterior no → conservar este
           toDeleteDedup.push(existing.id);
           seen.set(key, d);
         } else {
@@ -179,14 +181,79 @@ async function run() {
   } else {
     console.log('   ✅ Sin duplicados que eliminar');
   }
+  console.log();
+
+  // ── C: deduplicar duplicados de modoDemo (mismo emp × obj × hora, sin importar planning) ──
+  // Agrupa TODOS los OPERATIONS_COVERAGE por (objectiveId × employeeId × startHour).
+  // Si hay > 1, prefiere el doc con ID determinístico (empieza con "demo_"); si no, el que tiene isPresent.
+  const toDeleteDemoDedup = [];
+  let demoDupGroups = 0;
+  const demoSeen = new Map(); // `${objectiveId}|${employeeId}|${dateDay}|${startH}` → {id, data}
+
+  snap.docs.forEach(d => {
+    const { employeeId, objectiveId, startTime } = d.data;
+    if (!employeeId || employeeId === 'VACANTE' || !objectiveId) return;
+    const ms = toMillis(startTime);
+    if (!ms) return;
+    const dt = new Date(ms);
+    const dateDay = `${dt.getFullYear()}${String(dt.getMonth()+1).padStart(2,'0')}${String(dt.getDate()).padStart(2,'0')}`;
+    const startH  = dt.getHours();
+    const key = `${objectiveId}|${employeeId}|${dateDay}|${startH}`;
+
+    if (!demoSeen.has(key)) {
+      demoSeen.set(key, { id: d.id, data: d.data });
+    } else {
+      demoDupGroups++;
+      const existing = demoSeen.get(key);
+      const thisIsDeterministic     = d.id.startsWith('demo_');
+      const existingIsDeterministic = existing.id.startsWith('demo_');
+      const thisPresent     = d.data.isPresent === true;
+      const existingPresent = existing.data.isPresent === true;
+
+      // Prioridad: ID determinístico > isPresent > cualquier otro
+      if (thisIsDeterministic && !existingIsDeterministic) {
+        toDeleteDemoDedup.push(existing.id);
+        demoSeen.set(key, { id: d.id, data: d.data });
+      } else if (!thisIsDeterministic && existingIsDeterministic) {
+        toDeleteDemoDedup.push(d.id);
+      } else if (!existingPresent && thisPresent) {
+        toDeleteDemoDedup.push(existing.id);
+        demoSeen.set(key, { id: d.id, data: d.data });
+      } else {
+        toDeleteDemoDedup.push(d.id);
+      }
+    }
+  });
+
+  // Quitar los que ya están en toDeleteBorrador o toDeleteDedup (no borrar dos veces)
+  const alreadyMarked = new Set([...toDeleteBorrador, ...toDeleteDedup]);
+  const toDeleteDemoDedupFinal = toDeleteDemoDedup.filter(id => !alreadyMarked.has(id));
+
+  console.log(`C. Duplicados modoDemo (emp×obj×hora): ${demoDupGroups} grupos  |  a eliminar: ${toDeleteDemoDedupFinal.length}`);
+  if (toDeleteDemoDedupFinal.length > 0) {
+    // Mostrar muestra
+    toDeleteDemoDedupFinal.slice(0, 5).forEach(id => console.log(`   • ${id}`));
+    if (toDeleteDemoDedupFinal.length > 5) console.log(`   ... y ${toDeleteDemoDedupFinal.length - 5} más`);
+    if (!DRY_RUN) {
+      process.stdout.write(`   Borrando `);
+      await batchDelete('turnos', toDeleteDemoDedupFinal);
+      console.log(`   ✅ Eliminados: ${toDeleteDemoDedupFinal.length}`);
+    } else {
+      console.log(`   ⏭  Dry-run: se eliminarían ${toDeleteDemoDedupFinal.length}`);
+    }
+  } else {
+    console.log('   ✅ Sin duplicados modoDemo que eliminar');
+  }
 
   // ── Resumen ──────────────────────────────────────────────────────────────────
-  const totalEliminados = DRY_RUN ? 0 : toDeleteBorrador.length + toDeleteDedup.length;
+  const totalEliminados = DRY_RUN ? 0 : toDeleteBorrador.length + toDeleteDedup.length + toDeleteDemoDedupFinal.length;
+  const totalSerían     = toDeleteBorrador.length + toDeleteDedup.length + toDeleteDemoDedupFinal.length;
   console.log('\n── RESUMEN ─────────────────────────────────────────────────────');
   console.log(`   OPERATIONS_COVERAGE leídos        : ${snap.size}`);
-  console.log(`   Eliminados (BORRADOR)              : ${DRY_RUN ? '—' : toDeleteBorrador.length}  ${DRY_RUN ? `(serían ${toDeleteBorrador.length})` : ''}`);
-  console.log(`   Eliminados (duplicados publicados) : ${DRY_RUN ? '—' : toDeleteDedup.length}  ${DRY_RUN ? `(serían ${toDeleteDedup.length})` : ''}`);
-  console.log(`   Total eliminados                   : ${DRY_RUN ? '—' : totalEliminados}  ${DRY_RUN ? `(serían ${toDeleteBorrador.length + toDeleteDedup.length})` : ''}`);
+  console.log(`   Eliminados (BORRADOR)              : ${DRY_RUN ? `—  (serían ${toDeleteBorrador.length})` : toDeleteBorrador.length}`);
+  console.log(`   Eliminados (duplicados publicados) : ${DRY_RUN ? `—  (serían ${toDeleteDedup.length})` : toDeleteDedup.length}`);
+  console.log(`   Eliminados (duplicados modoDemo)   : ${DRY_RUN ? `—  (serían ${toDeleteDemoDedupFinal.length})` : toDeleteDemoDedupFinal.length}`);
+  console.log(`   Total eliminados                   : ${DRY_RUN ? `—  (serían ${totalSerían})` : totalEliminados}`);
   if (DRY_RUN) console.log('\n   ℹ️  Ejecutá sin --dry-run para aplicar los cambios.');
   console.log();
 }
