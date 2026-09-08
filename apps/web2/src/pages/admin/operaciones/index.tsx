@@ -4078,12 +4078,19 @@ export default function OperacionesPage() {
             foldQ(s.objectiveName).includes(q)
         );
     };
-    const filteredObjectivesWithAlerts = useMemo(
-        () => objectivesWithAlerts
-            .filter((o) => objectiveMatchesTab(o) && objectiveMatchesSearch(o))
-            .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode)),
-        [objectivesWithAlerts, logic.viewTab, logic.filterText, objectivesSortMode],
-    );
+    const filteredObjectivesWithAlerts = useMemo(() => {
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = today.getMonth() + 1;
+        return objectivesWithAlerts
+            .filter((o) => {
+                if (!objectiveMatchesTab(o) || !objectiveMatchesSearch(o)) return false;
+                // Ocultar objetivos BORRADOR (planificación no publicada)
+                const pubKey = `${o.objectiveId}_${y}_${m}`;
+                return !!logic.publishStatusMap[pubKey];
+            })
+            .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode));
+    }, [objectivesWithAlerts, logic.viewTab, logic.filterText, objectivesSortMode, logic.publishStatusMap]);
     const filteredEventsWithAlerts = useMemo(
         () => eventsWithAlerts
             .filter((ev) => objectiveMatchesTab(ev) && objectiveMatchesSearch(ev))
@@ -4794,7 +4801,7 @@ export default function OperacionesPage() {
                         {viewMode === 'lista' && (
                         <div className={`p-3 ${wideOpsPanel ? objectivesLayoutClass : 'space-y-2'}`}>
                         {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> :
-                            isGrouped ? (groupedList.map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished} layoutGrid={wideOpsPanel}/>; })) :
+                            isGrouped ? (groupedList.filter((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; return !!logic.publishStatusMap[pubKey]; }).map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished} layoutGrid={wideOpsPanel}/>; })) :
                             (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})} onRevertAbsence={handleRevertAbsence}/>))
                         }
                         </div>
