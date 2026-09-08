@@ -3442,26 +3442,26 @@ export const gestionarVacantes = functions
       if (minutesUntil < 0 && !shift.vacanteProtocoloAt) {
         await docSnap.ref.update({ vacanteProtocoloAt: now, vacanteEscalada: true });
 
-        const existsProto = await db.collection('novedades')
-          .where('shiftId', '==', docSnap.id)
-          .where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA')
-          .limit(1).get();
-
-        if (existsProto.empty) {
-          await db.collection('novedades').add({
-            type: 'VACANTE_PROTOCOLO_COBERTURA',
-            status: 'PENDIENTE',
-            shiftId: docSnap.id,
-            objectiveId: shift.objectiveId || null,
-            objectiveName: shift.objectiveName || '',
-            clientId: shift.clientId || null,
-            empresaId: shiftEmpresaId(shift) || null,
-            positionName: shift.positionName || '',
-            description: `⚠️ PROTOCOLO: Vacante ACTIVA en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cobertura. Turno ya iniciado hace ${Math.round(Math.abs(minutesUntil))} min.`,
-            minutesUntilStart: Math.round(minutesUntil),
-            createdAt: now,
-            source: 'SYSTEM_SCHEDULER',
-          });
+        {
+          const safeId = docSnap.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+          const protRef = db.collection('novedades').doc(`autodev_prot_${safeId}`);
+          const existDoc = await protRef.get();
+          if (!existDoc.exists) {
+            await protRef.set({
+              type: 'VACANTE_PROTOCOLO_COBERTURA',
+              status: 'PENDIENTE',
+              shiftId: docSnap.id,
+              objectiveId: shift.objectiveId || null,
+              objectiveName: shift.objectiveName || '',
+              clientId: shift.clientId || null,
+              empresaId: shiftEmpresaId(shift) || null,
+              positionName: shift.positionName || '',
+              description: `⚠️ PROTOCOLO: Vacante ACTIVA en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cobertura. Turno ya iniciado hace ${Math.round(Math.abs(minutesUntil))} min.`,
+              minutesUntilStart: Math.round(minutesUntil),
+              createdAt: now,
+              source: 'SYSTEM_SCHEDULER',
+            });
+          }
         }
 
         await db.collection('audit_logs').add({
@@ -3497,27 +3497,27 @@ export const gestionarVacantes = functions
           vacanteEscalada: true,
         });
 
-        // Evitar duplicar novedad
-        const existsProto = await db.collection('novedades')
-          .where('shiftId', '==', docSnap.id)
-          .where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA')
-          .limit(1).get();
-
-        if (existsProto.empty) {
-          await db.collection('novedades').add({
-            type: 'VACANTE_PROTOCOLO_COBERTURA',
-            status: 'PENDIENTE',
-            shiftId: docSnap.id,
-            objectiveId: shift.objectiveId || null,
-            objectiveName: shift.objectiveName || '',
-            clientId: shift.clientId || null,
-            empresaId: shiftEmpresaId(shift) || null,
-            positionName: shift.positionName || '',
-            description: `⚠️ PROTOCOLO: Vacante en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cubrir a ${Math.round(minutesUntil)} min del inicio. Requiere acción inmediata de Operaciones.`,
-            minutesUntilStart: Math.round(minutesUntil),
-            createdAt: now,
-            source: 'SYSTEM_SCHEDULER',
-          });
+        // ID determinístico = mismo que usa el front (autodev_prot_) para evitar duplicar
+        {
+          const safeId = docSnap.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+          const protRef = db.collection('novedades').doc(`autodev_prot_${safeId}`);
+          const existDoc = await protRef.get();
+          if (!existDoc.exists) {
+            await protRef.set({
+              type: 'VACANTE_PROTOCOLO_COBERTURA',
+              status: 'PENDIENTE',
+              shiftId: docSnap.id,
+              objectiveId: shift.objectiveId || null,
+              objectiveName: shift.objectiveName || '',
+              clientId: shift.clientId || null,
+              empresaId: shiftEmpresaId(shift) || null,
+              positionName: shift.positionName || '',
+              description: `⚠️ PROTOCOLO: Vacante en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cubrir a ${Math.round(minutesUntil)} min del inicio. Requiere acción inmediata de Operaciones.`,
+              minutesUntilStart: Math.round(minutesUntil),
+              createdAt: now,
+              source: 'SYSTEM_SCHEDULER',
+            });
+          }
         }
 
         await db.collection('audit_logs').add({
