@@ -809,7 +809,7 @@ async function runModoDemoForEmpresa(
 ): Promise<{ presencias: number; cierres: number; retencion: number; vacResueltas: number }> {
   const now = new Date();
   const nowTs = admin.firestore.Timestamp.fromDate(now);
-  const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+  const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 26 * 3600000)); // 26h cubre turnos de 12hs que empezaron ayer y aún activos
   const windowEnd   = admin.firestore.Timestamp.fromDate(new Date(now.getTime() +  2 * 3600000));
 
   const snap = await db.collection('turnos')
@@ -1083,6 +1083,7 @@ async function runModoDemoForEmpresa(
 
     // índice: objectiveId → turnos existentes hoy (para detectar cobertura)
     const coveredSlots = new Set<string>(); // `${oid}_${startHH}`
+    const activeEmpAtObj = new Set<string>(); // `${oid}_${empId}` — empleados ya con turno en este objetivo hoy
     for (const doc of snap.docs) {
       const t = doc.data() as any;
       if (skipBase(t) || isVacant(t) || t.isAbsent) continue;
@@ -1091,6 +1092,9 @@ async function runModoDemoForEmpresa(
       const sh = (t.startTime?.seconds ?? 0) * 1000;
       const hh = new Date(sh).getHours();
       coveredSlots.add(`${oid}_${hh}`);
+      if (t.employeeId && t.employeeId !== 'VACANTE') {
+        activeEmpAtObj.add(`${oid}_${t.employeeId}`);
+      }
     }
 
     // contadores rotativos por objetivo para repartir empleados
@@ -1139,9 +1143,18 @@ async function runModoDemoForEmpresa(
           if (avail.length === 0) continue;
 
           for (let i = 0; i < missing; i++) {
-            const idx = (empIdx.get(oid) ?? 0) % avail.length;
-            empIdx.set(oid, idx + 1);
-            const emp = avail[idx];
+            // Buscar empleado disponible que no tenga turno activo en este objetivo hoy
+            let emp: { id: string; name: string } | null = null;
+            for (let tries = 0; tries < avail.length; tries++) {
+              const idx = (empIdx.get(oid) ?? 0) % avail.length;
+              empIdx.set(oid, idx + 1);
+              const candidate = avail[idx];
+              if (!activeEmpAtObj.has(`${oid}_${candidate.id}`)) {
+                emp = candidate;
+                break;
+              }
+            }
+            if (!emp) continue; // todos los empleados del objetivo ya tienen turno
 
             const autoRef = db.collection('turnos').doc();
             batch2.set(autoRef, {
@@ -1168,6 +1181,7 @@ async function runModoDemoForEmpresa(
             });
             autoAsignados++;
             coveredSlots.add(covKey);
+            activeEmpAtObj.add(`${oid}_${emp.id}`);
           }
         }
       }

@@ -644,7 +644,7 @@ exports.executeAgentAction = functions.https.onCall(executeAgentActionHandler);
 async function runModoDemoForEmpresa(db, empresaId) {
     const now = new Date();
     const nowTs = admin.firestore.Timestamp.fromDate(now);
-    const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+    const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 26 * 3600000));
     const windowEnd = admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 2 * 3600000));
     const snap = await db.collection('turnos')
         .where('empresaId', '==', empresaId)
@@ -910,6 +910,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
             empByObj.get(oid).push(emp);
         }
         const coveredSlots = new Set();
+        const activeEmpAtObj = new Set();
         for (const doc of snap.docs) {
             const t = doc.data();
             if (skipBase(t) || isVacant(t) || t.isAbsent)
@@ -918,6 +919,9 @@ async function runModoDemoForEmpresa(db, empresaId) {
             const sh = (t.startTime?.seconds ?? 0) * 1000;
             const hh = new Date(sh).getHours();
             coveredSlots.add(`${oid}_${hh}`);
+            if (t.employeeId && t.employeeId !== 'VACANTE') {
+                activeEmpAtObj.add(`${oid}_${t.employeeId}`);
+            }
         }
         const empIdx = new Map();
         for (const slaDoc of slaSnap.docs) {
@@ -960,9 +964,18 @@ async function runModoDemoForEmpresa(db, empresaId) {
                     if (avail.length === 0)
                         continue;
                     for (let i = 0; i < missing; i++) {
-                        const idx = (empIdx.get(oid) ?? 0) % avail.length;
-                        empIdx.set(oid, idx + 1);
-                        const emp = avail[idx];
+                        let emp = null;
+                        for (let tries = 0; tries < avail.length; tries++) {
+                            const idx = (empIdx.get(oid) ?? 0) % avail.length;
+                            empIdx.set(oid, idx + 1);
+                            const candidate = avail[idx];
+                            if (!activeEmpAtObj.has(`${oid}_${candidate.id}`)) {
+                                emp = candidate;
+                                break;
+                            }
+                        }
+                        if (!emp)
+                            continue;
                         const autoRef = db.collection('turnos').doc();
                         batch2.set(autoRef, {
                             empresaId,
@@ -988,6 +1001,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
                         });
                         autoAsignados++;
                         coveredSlots.add(covKey);
+                        activeEmpAtObj.add(`${oid}_${emp.id}`);
                     }
                 }
             }
