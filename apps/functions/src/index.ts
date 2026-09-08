@@ -997,6 +997,23 @@ async function runModoDemoForEmpresa(
     cierres++;
   }
 
+  // === Pase 2b: Cerrar turnos AUSENTES cuyo endTime ya pasó ===
+  // Pase 2 no los cierra (requiere isPresent:true). Los ausentes vencidos quedan eternamente
+  // en AUSENTES+VENCIDO del panel. Una vez pasada la ventana del turno los cerramos.
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (!t.isAbsent || t.isCompleted) continue;
+    const endTimeMs2 = (t.endTime?.seconds ?? 0) * 1000;
+    if (!endTimeMs2 || endTimeMs2 > now.getTime()) continue;
+    batch.update(doc.ref, {
+      status: 'COMPLETED', isCompleted: true,
+      autoCierre: true, completionReason: 'AUTO_SHIFT_END',
+      modoDemoAt: nowTs,
+    });
+    cierres++;
+  }
+
   // === Pase 3: Limpiar isAbsent+isCompleted inconsistentes ===
   let absentClean = 0;
   for (const doc of snap.docs) {
