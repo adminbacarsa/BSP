@@ -5282,12 +5282,20 @@ export default function OperacionesPage() {
                                                 <p className="text-slate-400 truncate">{s.positionName}</p>
                                             </div>
                                         ))}
-                                        {pendingNovedades.slice(0, 12).map((n: any) => (
+                                        {pendingNovedades.slice(0, 12).map((n: any) => {
+                                            const tl: Record<string,string> = { AUSENCIA_CORTO_PLAZO:'URGENTE', AVISO_AUSENCIA_ANTICIPADA:'ANTIC', VACANTE_PROTOCOLO_COBERTURA:'PROT', AUSENCIA_AUTO:'AUS', AUSENCIA_OPERATIVA:'AUS', LLEGADA_TARDE:'TARDE', POSICION_SIN_RELEVO:'REL', RETENCION_LARGA:'REC', RELEVO_INMINENTE:'RELEVO', TURNO_COMPLETADO_AUTO:'FIN' };
+                                            const label = tl[n.type] || (n.type || '').replace(/_/g,' ').slice(0,8).toUpperCase();
+                                            return (
                                             <div key={n.id} className="px-3 py-2 border-b border-slate-50 text-[10px] flex items-center gap-2">
-                                                <span className="flex-1 truncate font-bold text-slate-700">{n.objectiveName || n.employeeName || n.type}</span>
+                                                <span className="text-[8px] font-black bg-slate-700 text-white px-1 py-0.5 rounded shrink-0">{label}</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-bold text-slate-700 truncate">{n.employeeName ? `${n.employeeName} · ${n.objectiveName || ''}` : (n.objectiveName || n.type)}</p>
+                                                    {n.description && <p className="text-slate-400 truncate">{n.description}</p>}
+                                                </div>
                                                 <button type="button" onClick={() => setDetailNovedad(n)} className="text-[9px] font-black text-indigo-600 shrink-0">VER</button>
                                             </div>
-                                        ))}
+                                            );
+                                        })}
                                     </>
                                 )}
                             </div>
@@ -5304,7 +5312,14 @@ export default function OperacionesPage() {
                 {(() => {
                     // Calcular priority shifts con el MISMO filtro que stats.prioridad (hoy + activos)
                     const _now = new Date();
-                    const _hoy = logic.processedData.filter((s:any) => isSameDay(s.shiftDateObj, _now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
+                    const _hoy = logic.processedData.filter((s:any) => {
+                        if (isSameDay(s.shiftDateObj, _now)) return true;
+                        if ((s.isPresent || s.isRetention) && !s.isCompleted) {
+                            const sm = s.shiftDateObj?.getTime?.() ?? 0;
+                            return sm > 0 && (_now.getTime() - sm) <= 48 * 60 * 60 * 1000;
+                        }
+                        return false;
+                    });
                     const priorityShiftsPanel = _hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
                     const totalAlerts = pendingNovedades.length + priorityShiftsPanel.length;
                     return (

@@ -1469,7 +1469,14 @@ export default function TacticalMapView() {
             {(() => {
                 // Ghost badge fix: mismo filtro que stats.prioridad
                 const _now = new Date();
-                const _hoy = logic.processedData.filter((s:any) => isSameDay(s.shiftDateObj, _now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
+                const _hoy = logic.processedData.filter((s:any) => {
+                    if (isSameDay(s.shiftDateObj, _now)) return true;
+                    if ((s.isPresent || s.isRetention) && !s.isCompleted) {
+                        const sm = s.shiftDateObj?.getTime?.() ?? 0;
+                        return sm > 0 && (_now.getTime() - sm) <= 48 * 60 * 60 * 1000;
+                    }
+                    return false;
+                });
                 const priorityShiftsPanel = _hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
                 // Guardias que no llegaron: T+5 → T+60
                 const lateShiftsPanel = _hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified) && !s.isFranco && !s.isAbsent);

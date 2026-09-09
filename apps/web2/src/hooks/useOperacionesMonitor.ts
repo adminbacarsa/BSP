@@ -40,7 +40,13 @@ export function isRestFrancoShift(shift: any): boolean {
 export function isOpsShiftHoy(s: any, now: Date): boolean {
     if (s.isCompleted && !s.isRetention && !isRestFrancoShift(s)) return false;
     if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-    return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
+    if (isSameDay(s.shiftDateObj, now)) return true;
+    // Turnos presentes/retenidos de días anteriores: límite de 48h para excluir zombie shifts
+    if ((s.isPresent || s.isRetention) && !s.isCompleted) {
+        const startMs = (s.shiftDateObj as Date)?.getTime?.() ?? 0;
+        return startMs > 0 && (now.getTime() - startMs) <= 48 * 60 * 60 * 1000;
+    }
+    return false;
 }
 
 export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
