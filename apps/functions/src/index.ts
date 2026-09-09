@@ -1246,8 +1246,8 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
     // Ignorar borradores y turnos virtuales
     if (after.draft || after.isVirtual) return;
 
-    const empresaId: string = after.empresaId || '';
-    if (!empresaId) return;
+    // Fallback 'bacarsa' para turnos legacy sin empresaId (mismo patrón que centroControlGuard)
+    const empresaId: string = String(after.empresaId || '').trim() || 'bacarsa';
 
     const db = admin.firestore();
     const empresaDoc = await db.doc(`empresas/${empresaId}`).get();
@@ -3566,7 +3566,7 @@ export const gestionarVacantes = functions
         // Disparar cascade automática para la vacante ya iniciada
         await iniciarCascadaCobertura(db, {
           id: docSnap.id,
-          empresaId: shiftEmpresaId(shift) || '',
+          empresaId: shiftEmpresaId(shift) || 'bacarsa',
           objectiveId: String(shift.objectiveId || ''),
           objectiveName: String(shift.objectiveName || ''),
           clientId: String(shift.clientId || ''),
@@ -3622,7 +3622,7 @@ export const gestionarVacantes = functions
         // Disparar cascade automática para la vacante a T-1h
         await iniciarCascadaCobertura(db, {
           id: docSnap.id,
-          empresaId: shiftEmpresaId(shift) || '',
+          empresaId: shiftEmpresaId(shift) || 'bacarsa',
           objectiveId: String(shift.objectiveId || ''),
           objectiveName: String(shift.objectiveName || ''),
           clientId: String(shift.clientId || ''),

@@ -913,15 +913,17 @@ async function runModoDemoForEmpresa(db, empresaId) {
         const activeEmpAtObj = new Set();
         for (const doc of snap.docs) {
             const t = doc.data();
-            if (skipBase(t) || isVacant(t) || t.isAbsent)
+            if (skipBase(t) || isVacant(t))
                 continue;
             const oid = String(t.objectiveId || '');
-            const sh = (t.startTime?.seconds ?? 0) * 1000;
-            const hh = new Date(sh).getHours();
-            coveredSlots.add(`${oid}_${hh}`);
             if (t.employeeId && t.employeeId !== 'VACANTE') {
                 activeEmpAtObj.add(`${oid}_${t.employeeId}`);
             }
+            if (t.isAbsent)
+                continue;
+            const sh = (t.startTime?.seconds ?? 0) * 1000;
+            const hh = new Date(sh).getHours();
+            coveredSlots.add(`${oid}_${hh}`);
         }
         const empIdx = new Map();
         for (const slaDoc of slaSnap.docs) {
@@ -976,7 +978,9 @@ async function runModoDemoForEmpresa(db, empresaId) {
                         }
                         if (!emp)
                             continue;
-                        const autoRef = db.collection('turnos').doc();
+                        const slotDateStr = todayStr.replace(/-/g, '');
+                        const autoId = `demo_${empresaId}_${oid}_${emp.id}_${slotDateStr}_${startH}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+                        const autoRef = db.collection('turnos').doc(autoId);
                         batch2.set(autoRef, {
                             empresaId,
                             objectiveId: oid,
@@ -1049,9 +1053,7 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
         return;
     if (after.draft || after.isVirtual)
         return;
-    const empresaId = after.empresaId || '';
-    if (!empresaId)
-        return;
+    const empresaId = String(after.empresaId || '').trim() || 'bacarsa';
     const db = admin.firestore();
     const empresaDoc = await db.doc(`empresas/${empresaId}`).get();
     if (!empresaDoc.exists)
@@ -3025,7 +3027,7 @@ exports.gestionarVacantes = functions
             sentToProtocol++;
             await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
                 id: docSnap.id,
-                empresaId: shiftEmpresaId(shift) || '',
+                empresaId: shiftEmpresaId(shift) || 'bacarsa',
                 objectiveId: String(shift.objectiveId || ''),
                 objectiveName: String(shift.objectiveName || ''),
                 clientId: String(shift.clientId || ''),
@@ -3074,7 +3076,7 @@ exports.gestionarVacantes = functions
             sentToProtocol++;
             await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
                 id: docSnap.id,
-                empresaId: shiftEmpresaId(shift) || '',
+                empresaId: shiftEmpresaId(shift) || 'bacarsa',
                 objectiveId: String(shift.objectiveId || ''),
                 objectiveName: String(shift.objectiveName || ''),
                 clientId: String(shift.clientId || ''),
