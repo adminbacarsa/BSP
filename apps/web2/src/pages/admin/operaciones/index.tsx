@@ -3252,6 +3252,7 @@ export default function OperacionesPage() {
         const objMap = new Map<string,any>();
         todayShifts.forEach((s:any) => {
             if (!s.objectiveId) return;
+            if (s.isVirtual) return; // excluir slots SLA_VIRTUAL sintéticos del informe
             if (!objMap.has(s.objectiveId)) objMap.set(s.objectiveId,{name:s.objectiveName||s.objectiveId,plan:0,activo:0,compl:0,ausente:0,vacante:0,ret:0,planHrs:0,realHrs:0,tardanzas:0});
             const o = objMap.get(s.objectiveId);
             o.plan++;
@@ -4085,9 +4086,16 @@ export default function OperacionesPage() {
         return objectivesWithAlerts
             .filter((o) => {
                 if (!objectiveMatchesTab(o) || !objectiveMatchesSearch(o)) return false;
-                // Ocultar objetivos BORRADOR (planificación no publicada)
                 const pubKey = `${o.objectiveId}_${y}_${m}`;
-                return !!logic.publishStatusMap[pubKey];
+                if (logic.publishStatusMap[pubKey]) return true;
+                // Mostrar aunque no haya planificación publicada si tiene turnos de origen operativo
+                return (o.shifts || []).some((s: any) =>
+                    s.origin === 'RETEN' ||
+                    s.origin === 'OPERATIONS_COVERAGE' ||
+                    s.origin === 'SLA_VIRTUAL' ||
+                    s.isReten === true ||
+                    s.resolvedBy === 'OPERACIONES'
+                );
             })
             .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode));
     }, [objectivesWithAlerts, logic.viewTab, logic.filterText, objectivesSortMode, logic.publishStatusMap]);

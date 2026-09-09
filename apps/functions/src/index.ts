@@ -915,6 +915,7 @@ async function runModoDemoForEmpresa(
   // === Pase 1b: Simular ausencias (bucket 'absent') ===
   // Guarda con hash % 10 === 0 que lleva >5 min sin presentarse → marcarlo ausente
   let ausenciasDemo = 0;
+  const absentShiftIds = new Set<string>(); // IDs marcados ausentes aquí (usados en Pase 6)
   const ABSENT_MIN_MS = 5 * 60 * 1000;
   for (const doc of snap.docs) {
     const t = doc.data() as any;
@@ -971,6 +972,7 @@ async function runModoDemoForEmpresa(
       employeeName: t.employeeName || null, positionName: t.positionName || null,
       empresaId, createdAt: nowTs, reportedBy: 'MODO_DEMO', source: 'MODO_DEMO', modoDemoAt: nowTs,
     });
+    absentShiftIds.add(doc.id);
     ausenciasDemo++;
   }
 
@@ -1088,12 +1090,24 @@ async function runModoDemoForEmpresa(
       const t = doc.data() as any;
       if (skipBase(t) || isVacant(t)) continue;
       const oid = String(t.objectiveId || '');
-      // Empleado ausente: no cubre el slot, pero tampoco puede ser reasignado
       if (t.employeeId && t.employeeId !== 'VACANTE') {
         activeEmpAtObj.add(`${oid}_${t.employeeId}`);
       }
-      if (t.isAbsent) continue; // slot no cubierto → Pase 6/7 busca reemplazo
-      // Incluir completados: si el slot ya fue cubierto hoy (aunque ya terminó) no generar nuevo turno
+      if (t.isAbsent) continue;
+      // Simular Pase 1b: este turno fue marcado ausente en el batch (aún no commitado)
+      if (absentShiftIds.has(doc.id)) continue;
+      // Simular Pase 2: turno presente cuyo tiempo de cierre ya venció (será cerrado en batch)
+      if (t.isPresent && !t.isCompleted) {
+        const endTimeMs = (t.endTime?.seconds ?? 0) * 1000;
+        if (endTimeMs) {
+          const retentionTs = t.retentionUntil ?? t.manualRetentionUntil;
+          const retentionMs = retentionTs ? ((retentionTs.seconds ?? 0) * 1000) : 0;
+          const cappedEndMs = retentionMs > 0
+            ? Math.min(retentionMs, endTimeMs + MAX_RETENTION_TOLERANCE_MS)
+            : endTimeMs;
+          if (cappedEndMs <= now.getTime()) continue;
+        }
+      }
       const sh = (t.startTime?.seconds ?? 0) * 1000;
       const hh = new Date(sh).getHours();
       coveredSlots.add(`${oid}_${hh}`);
