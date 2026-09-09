@@ -575,6 +575,11 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
                             {formatDateShort(item.shiftDateObj)} · {formatTimeSimple(item.shiftDateObj)}–{formatTimeSimple(item.endDateObj)}
                         </span>
                     )}
+                    {item.horasYaTrabajadas !== undefined && (
+                        <span className={`text-[10px] font-bold ${item.horasYaTrabajadas >= 10 ? 'text-rose-600' : item.horasYaTrabajadas >= 8 ? 'text-amber-600' : 'text-slate-500'}`}>
+                            {item.horasYaTrabajadas.toFixed(1)}h trabajadas · puede {Math.max(0, 12 - item.horasYaTrabajadas).toFixed(1)}h más
+                        </span>
+                    )}
                 </div>
             </div>
             <div className="flex gap-1 shrink-0">
@@ -598,6 +603,11 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const [swapLoading, setSwapLoading] = useState(false);
     const [pendingConvocatorias, setPendingConvocatorias] = useState<any[]>([]);
     const [convocatoriaLoading, setConvocatoriaLoading] = useState<string | null>(null);
+    const [currentStep, setCurrentStep] = useState(0);
+    const [stepActionSent, setStepActionSent] = useState(false);
+
+    // Reset de paso al cambiar de turno ausente
+    useEffect(() => { setCurrentStep(0); setStepActionSent(false); }, [absenceShift?.id]);
 
     // Suscripción en tiempo real a convocatorias pendientes para esta vacante
     useEffect(() => {
@@ -618,8 +628,27 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         if (!absenceShift?.id || !empresaId) return;
         setConvocatoriaLoading(type + '_' + candidateEmployeeId);
         try {
+            // Materializar turno virtual antes de convocar: la callable busca en Firestore por ID real
+            let shiftId = absenceShift.id;
+            const isVirtualId = absenceShift.isVirtual || String(shiftId).startsWith('V124_') || String(shiftId).startsWith('SLA_GAP');
+            if (isVirtualId) {
+                const newRef = doc(collection(db, 'turnos'));
+                await setDoc(newRef, stampEmpresaId({
+                    clientId: absenceShift.clientId || null,
+                    clientName: absenceShift.clientName || null,
+                    objectiveId: absenceShift.objectiveId || null,
+                    objectiveName: absenceShift.objectiveName || null,
+                    positionName: absenceShift.positionName || null,
+                    employeeId: 'VACANTE', employeeName: 'VACANTE',
+                    startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+                    endTime: Timestamp.fromDate(toDate(absenceShift.endDateObj)),
+                    status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
+                    origin: 'SLA_VIRTUAL', createdAt: serverTimestamp(),
+                }, String(absenceShift.empresaId || empresaId || '').trim()));
+                shiftId = newRef.id;
+            }
             const fn = httpsCallable(getFunctions(app, 'us-central1'), 'crearConvocatoriaCobertura');
-            await fn({ shiftId: absenceShift.id, candidateEmployeeId, type, empresaId, ...extraData });
+            await fn({ shiftId, candidateEmployeeId, type, empresaId, ...extraData });
             toast.success('Convocatoria enviada — esperando respuesta del guardia');
         } catch (e: any) {
             toast.error('Error al convocar: ' + (e?.message || String(e)));
@@ -659,10 +688,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         if (s.objectiveId !== absenceShift.objectiveId) return false;
         if (s.positionName !== absenceShift.positionName) return false;
         if (s.id === absenceShift.id) return false;
-        // Verificar que el turno ya empezó (no mostrar turnos futuros)
         const shiftStartMs = s.shiftDateObj ? toDate(s.shiftDateObj).getTime() : 0;
         return shiftStartMs > 0 && now.getTime() >= shiftStartMs;
-    });
+    }).map((s: any) => ({
+        ...s,
+        horasYaTrabajadas: Math.max(0, (now.getTime() - toDate(s.shiftDateObj).getTime()) / 3600000),
+    }));
 
     // 2. ADELANTO: solo el turno siguiente más próximo en el mismo objetivo/posición — HOY únicamente
     const adelanto = logic.processedData.filter((s: any) =>
@@ -699,7 +730,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
 
     // 3. RETENES: empleados sin turno hoy — sin restricciones, ordenados por experiencia, luego cercanía
     const busyIds = new Set(
-        logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now) && !s.isFranco).map((s: any) => s.employeeId)
+        logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now)).map((s: any) => s.employeeId)
     );
     const retenes = (logic.employees || [])
         .filter((e: any) => !busyIds.has(e.id) && !isRestricted(e)) // â† excluir restringidos
@@ -784,6 +815,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 if (s.id === absenceShift.id) return false;
                 if (s.objectiveId !== absenceShift.objectiveId) return false;
                 if (s.isCompleted || s.isAbsent || s.isFranco || s.isUnassigned) return false;
+                if (s.positionName !== absenceShift.positionName) return false;
                 const shiftDate = toDate(s.shiftDateObj);
                 const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + 7);
                 return shiftDate > now && shiftDate <= cutoff;
@@ -1052,6 +1084,58 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         finally { setSwapLoading(false); }
     };
 
+    // Pasos activos: solo los que tienen candidatos (se muestran de a uno)
+    const stepDefs = [
+        retencion.length > 0 ? {
+            key: 'ret', colorClass: 'text-orange-700', badgeClass: 'bg-orange-500',
+            title: 'Retención · Guardia presente en el objetivo',
+            warning: adelanto.length === 0 ? 'Sin turno siguiente planificado — la retención no garantiza cobertura continua' : null,
+            node: <div className="space-y-1.5">{retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>{handleRetener(s);setStepActionSent(true);}} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        adelanto.length > 0 ? {
+            key: 'adel', colorClass: 'text-indigo-700', badgeClass: 'bg-indigo-500',
+            title: 'Adelanto · Próximo turno planificado', warning: null,
+            node: <div className="space-y-1.5">{adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>{handleConvocarConvocatoria(s.employeeId,'ADVANCE',{advanceShiftId:s.id});setStepActionSent(true);}} label={convocatoriaLoading===`ADVANCE_${s.employeeId}`?'Enviando...':'CONVOCAR'} color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        retPasivos.length > 0 ? {
+            key: 'retpas', colorClass: 'text-amber-700', badgeClass: 'bg-amber-500',
+            title: 'Retención Pasiva · Guardia en standby (RET)', warning: null,
+            node: <div className="space-y-1.5">{retPasivos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'retpas_'+s.id} onAction={()=>{handleActivateRet(s);setStepActionSent(true);}} label="ACTIVAR" color="bg-amber-500 hover:bg-amber-600" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        escuelas.length > 0 ? {
+            key: 'esc', colorClass: 'text-teal-700', badgeClass: 'bg-teal-500',
+            title: 'Escuela · Redirigir turno ESC al puesto', warning: null,
+            node: <div className="space-y-1.5">{escuelas.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'esc_'+s.id} onAction={()=>{handleActivateEsc(s);setStepActionSent(true);}} label="REDIRIGIR" color="bg-teal-600 hover:bg-teal-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        retenes.length > 0 ? {
+            key: 'sinturno', colorClass: 'text-slate-700', badgeClass: 'bg-slate-600',
+            title: 'Sin Turno · Disponibles hoy', warning: null,
+            node: <div className="space-y-1.5">{retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>{handleConvocarConvocatoria(e.id,'SIN_TURNO_CON_EXP');setStepActionSent(true);}} label={convocatoriaLoading===`SIN_TURNO_CON_EXP_${e.id}`?'Enviando...':'CONVOCAR'} color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        francos.length > 0 ? {
+            key: 'ft', colorClass: 'text-blue-700', badgeClass: 'bg-blue-500',
+            title: 'Francos · Día libre (FT)', warning: null,
+            node: <div className="space-y-1.5">{francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>{handleConvocarConvocatoria(s.employeeId,'FT');setStepActionSent(true);}} label={convocatoriaLoading===`FT_${s.employeeId}`?'Enviando...':'CONVOCAR FT'} color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        (hasRealAbsentEmployee && permutaCandidates.length > 0) ? {
+            key: 'permuta', colorClass: 'text-violet-700', badgeClass: 'bg-violet-500',
+            title: 'Permuta · Intercambio de turno', warning: null,
+            node: <div className="space-y-1.5">{permutaCandidates.map((s: any) => (
+                <div key={s.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-violet-50 border border-violet-100 rounded-xl">
+                    <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-800 text-sm truncate">{s.employeeName}</p>
+                        <p className="text-[11px] text-violet-600 font-mono">{formatDateShort(s.shiftDateObj)} · {formatTimeSimple(s.shiftDateObj)}–{formatTimeSimple(s.endDateObj)}</p>
+                    </div>
+                    <button onClick={() => setSwapConfirm(s)} className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold rounded-lg transition-colors">PROPONER</button>
+                </div>
+            ))}</div>,
+        } : null,
+    ].filter(Boolean) as { key: string; colorClass: string; badgeClass: string; title: string; warning: string | null; node: React.ReactNode }[];
+    const safeStep = Math.min(currentStep, Math.max(0, stepDefs.length - 1));
+    const activeStep = stepDefs[safeStep] || null;
+    const isLastStep = safeStep >= stepDefs.length - 1;
+    const goNext = () => { setCurrentStep(s => Math.min(s + 1, stepDefs.length - 1)); setStepActionSent(false); };
+
     return (
         <>
             <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
@@ -1113,46 +1197,50 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                             </div>
                         )}
 
-                        <CoverageSection num="1" title="Retención · Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
-                            empty="No hay guardias presentes en este objetivo."
-                            items={retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>handleRetener(s)} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        <CoverageSection num="2" title="Adelanto · Próximo turno planificado" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
-                            empty="No hay turno próximo planificado."
-                            items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleConvocarConvocatoria(s.employeeId, 'ADVANCE', { advanceShiftId: s.id })} label={convocatoriaLoading === `ADVANCE_${s.employeeId}` ? 'Enviando...' : 'CONVOCAR'} color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        <CoverageSection num="3" title="Retención Pasiva · Guardia en standby (RET)" colorClass="text-amber-700" badgeClass="bg-amber-500"
-                            empty="No hay guardias en retención pasiva en este objetivo."
-                            items={retPasivos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'retpas_'+s.id} onAction={()=>handleActivateRet(s)} label="ACTIVAR" color="bg-amber-500 hover:bg-amber-600" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        <CoverageSection num="4" title="Escuela · Redirigir turno ESC al puesto" colorClass="text-teal-700" badgeClass="bg-teal-500"
-                            empty="No hay turnos de escuela disponibles para redirigir."
-                            items={escuelas.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'esc_'+s.id} onAction={()=>handleActivateEsc(s)} label="REDIRIGIR" color="bg-teal-600 hover:bg-teal-700" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        <CoverageSection num="5" title="Sin Turno · Disponibles hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
-                            empty="No hay guardias disponibles sin turno asignado."
-                            items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleConvocarConvocatoria(e.id, 'SIN_TURNO_CON_EXP')} label={convocatoriaLoading === `SIN_TURNO_CON_EXP_${e.id}` ? 'Enviando...' : 'CONVOCAR'} color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        <CoverageSection num="6" title="Francos · Día libre (FT)" colorClass="text-blue-700" badgeClass="bg-blue-500"
-                            empty="No hay francos disponibles hoy."
-                            items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleConvocarConvocatoria(s.employeeId, 'FT')} label={convocatoriaLoading === `FT_${s.employeeId}` ? 'Enviando...' : 'CONVOCAR FT'} color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        {/* Permuta — solo cuando hay guardia ausente real */}
-                        {hasRealAbsentEmployee && (
-                            <CoverageSection num="7" title="Permuta · Intercambio de turno" colorClass="text-violet-700" badgeClass="bg-violet-500"
-                                empty="No hay turnos disponibles para permuta en los próximos 7 días."
-                                items={permutaCandidates.map((s: any) => (
-                                    <div key={s.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-violet-50 border border-violet-100 rounded-xl">
-                                        <div className="flex-1 min-w-0">
-                                            <p className="font-bold text-slate-800 text-sm truncate">{s.employeeName}</p>
-                                            <p className="text-[11px] text-violet-600 font-mono">{formatDateShort(s.shiftDateObj)} · {formatTimeSimple(s.shiftDateObj)}–{formatTimeSimple(s.endDateObj)}</p>
-                                        </div>
-                                        <button onClick={() => setSwapConfirm(s)} className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold rounded-lg transition-colors">
-                                            PROPONER
-                                        </button>
+                        {/* ── Protocolo paso a paso ── */}
+                        {stepDefs.length === 0 ? (
+                            <div className="text-center py-8 text-slate-400 text-xs">
+                                No hay opciones de cobertura disponibles en este momento.
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {/* Barra de progreso por pasos */}
+                                <div className="flex items-center gap-1">
+                                    {stepDefs.map((step, i) => (
+                                        <button key={step.key} onClick={() => { setCurrentStep(i); setStepActionSent(false); }}
+                                            className={`flex-1 h-1.5 rounded-full transition-all ${i === safeStep ? step.badgeClass : i < safeStep ? 'bg-slate-300' : 'bg-slate-100'}`}
+                                            title={step.title}
+                                        />
+                                    ))}
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className={`text-[10px] font-black uppercase tracking-wider ${activeStep?.colorClass}`}>
+                                        Paso {safeStep + 1} de {stepDefs.length} · {activeStep?.title}
+                                    </span>
+                                </div>
+                                {activeStep?.warning && (
+                                    <div className="flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 text-[11px] text-amber-700">
+                                        <AlertTriangle size={12} className="shrink-0 mt-0.5"/>
+                                        <span>{activeStep.warning}</span>
                                     </div>
-                                ))}
-                            />
+                                )}
+                                {activeStep?.node}
+                                <div className="flex items-center gap-2 pt-1">
+                                    {safeStep > 0 && (
+                                        <button onClick={() => { setCurrentStep(s => s - 1); setStepActionSent(false); }}
+                                            className="text-[11px] text-slate-500 hover:text-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white">
+                                            ← Anterior
+                                        </button>
+                                    )}
+                                    <div className="flex-1"/>
+                                    {!isLastStep && (
+                                        <button onClick={goNext}
+                                            className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-colors ${stepActionSent ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
+                                            {stepActionSent ? '✓ Enviado · Siguiente →' : 'Siguiente paso →'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
                         )}
                         {/* Sin Cobertura — última medida */}
                         <div className="border-t border-slate-200 pt-4">
@@ -2761,8 +2849,12 @@ export default function OperacionesPage() {
         // Persistir en localStorage para no re-abrir tras recarga
         try { localStorage.setItem(ABSENT_ACK_KEY, JSON.stringify([...autoAbsentTriggeredRef.current])); } catch {}
         logic.setViewTab('AUSENTES');
-        setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
-    }, [logic.processedData]);
+        if (session.isAutoMode) {
+            toast.info(`AUTO: ausencia detectada — ${newlyAbsent[0].employeeName} · ${newlyAbsent[0].objectiveName}. Gestionando cobertura automáticamente.`);
+        } else {
+            setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
+        }
+    }, [logic.processedData, session.isAutoMode]);
 
     const openHandoverFromNovedad = (novedad: any) => {
         const targetShift = novedad.shiftId
@@ -4094,7 +4186,10 @@ export default function OperacionesPage() {
                     s.origin === 'OPERATIONS_COVERAGE' ||
                     s.origin === 'SLA_VIRTUAL' ||
                     s.isReten === true ||
-                    s.resolvedBy === 'OPERACIONES'
+                    s.resolvedBy === 'OPERACIONES' ||
+                    s.isVirtual === true ||
+                    s.isPresent === true ||
+                    s.isAbsent === true
                 );
             })
             .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode));
