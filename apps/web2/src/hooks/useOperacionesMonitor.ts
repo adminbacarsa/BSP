@@ -296,6 +296,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             snap.docs.forEach(d => {
                 if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
                 const data = d.data() as Record<string, unknown>;
+                // Solo considerar publicado si el doc tiene publishedAt (un borrador o despublicado no lo tiene)
+                if (!data.publishedAt) return;
                 const parsed = parsePlanificacionEstadoDocId(d.id);
                 if (parsed) {
                     registerPublishedState(map, parsed.objectiveId, parsed.year, parsed.month);
