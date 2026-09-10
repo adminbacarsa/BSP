@@ -1005,7 +1005,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
     // ... Resto del hook igual ...
     const listData = useMemo(() => {
-        let list = processedData;
+        const vy = now.getFullYear();
+        const vm = now.getMonth() + 1;
+        const isVisible = (s: any) => {
+            if (publishStatusMap[`${s.objectiveId}_${vy}_${vm}`]) return true;
+            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
+        };
+        let list = processedData.filter(isVisible);
         if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId);
         if (filterText) {
             const q = foldSearch(filterText);
@@ -1018,7 +1024,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         }
         const hoy = list.filter((s: any) => isOpsShiftHoy(s, now));
         return hoy.filter((s: any) => shiftMatchesOpsViewTab(s, viewTab));
-    }, [processedData, viewTab, filterText, selectedClientId, now]);
+    }, [processedData, viewTab, filterText, selectedClientId, now, publishStatusMap]);
 
     /** Objetivos con geo para el mapa según pestaña/filtro activo (PLAN, ACT, VAC, etc.). */
     const mapTabObjectives = useMemo(() => {
@@ -1031,7 +1037,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [listData, filteredObjectives]);
 
     const stats = useMemo(() => {
-        const hoy = processedData.filter((s) => isOpsShiftHoy(s, now));
+        const sy = now.getFullYear();
+        const sm = now.getMonth() + 1;
+        const hoy = processedData.filter((s) => isOpsShiftHoy(s, now)).filter((s: any) => {
+            if (publishStatusMap[`${s.objectiveId}_${sy}_${sm}`]) return true;
+            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
+        });
         return {
             prioridad: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PRIORIDAD')).length,
             no_llego: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'NO_LLEGO')).length,
@@ -1046,7 +1057,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             rrhh_planificado: hoy.filter((s) => s.isRRHHPlanned && !s.isFranco).length,
             total: hoy.length,
         };
-    }, [processedData, now]);
+    }, [processedData, now, publishStatusMap]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {

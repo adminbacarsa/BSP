@@ -4183,13 +4183,10 @@ export default function OperacionesPage() {
                 // Mostrar aunque no haya planificación publicada si tiene turnos de origen operativo
                 return (o.shifts || []).some((s: any) =>
                     s.origin === 'RETEN' ||
-                    s.origin === 'OPERATIONS_COVERAGE' ||
                     s.origin === 'SLA_VIRTUAL' ||
                     s.isReten === true ||
                     s.resolvedBy === 'OPERACIONES' ||
-                    s.isVirtual === true ||
-                    s.isPresent === true ||
-                    s.isAbsent === true
+                    s.isVirtual === true
                 );
             })
             .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode));
