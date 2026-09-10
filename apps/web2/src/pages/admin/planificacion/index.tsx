@@ -3334,6 +3334,21 @@ export default function PlanificacionPage() {
     /** Slots cerrados y fechas pasadas bloqueadas solo con cronograma publicado (salvo modo corrección). */
     const enforcePlanningClosureRules = isCronogramaPublicado && !correctionMode;
 
+    /** Multiselección / barra masiva: borrador siempre; publicado solo en modo corrección. */
+    const allowPlanningMultiSelect = !isCronogramaPublicado || correctionMode;
+
+    useEffect(() => {
+        if (allowPlanningMultiSelect) return;
+        setSelection((prev) => {
+            if (!prev.start || !prev.end) return prev;
+            if (prev.start.r === prev.end.r && prev.start.c === prev.end.c) return prev;
+            return { start: null, end: null };
+        });
+        setIsDragging(false);
+        setColumnSelectMode(false);
+        setColumnSelectSource(null);
+    }, [allowPlanningMultiSelect]);
+
     const isPlanningDateLocked = useCallback(
         (dateStr: string) => (enforcePlanningClosureRules ? isDateLocked(dateStr) : false),
         [enforcePlanningClosureRules],
@@ -6922,6 +6937,10 @@ export default function PlanificacionPage() {
     
     // Bulk: inyecta el puesto dueño del código SLA (no el default "Puesto 1") y respeta cupos de cobertura.
     const applyBulkChange = (shiftConfig: any, opts?: { onlyEmpId?: string }) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
         const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)];
@@ -7238,6 +7257,10 @@ export default function PlanificacionPage() {
 
     /** Completa la selección forzando un puesto SLA (elige banda por emp / primer turno del puesto). */
     const applyBulkPositionFill = (posName: string) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
 
@@ -7672,6 +7695,10 @@ export default function PlanificacionPage() {
         intent: 'SURPLUS' | 'TRAINING',
         opts?: { onlyEmpId?: string; positionName?: string },
     ) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
         const minC = Math.min(selection.start.c, selection.end?.c ?? selection.start.c);
@@ -7964,6 +7991,7 @@ export default function PlanificacionPage() {
 
     /** Copia la selección actual al portapapeles. Devuelve bounds o null. */
     const copySelectionToClipboard = useCallback((asCut: boolean) => {
+        if (!allowPlanningMultiSelect) return null;
         if (!selection.start) return null;
         const minR = Math.min(selection.start.r, selection.end?.r ?? selection.start.r);
         const maxR = Math.max(selection.start.r, selection.end?.r ?? selection.start.r);
@@ -7985,9 +8013,13 @@ export default function PlanificacionPage() {
         setClipboardDim({ rows: maxR - minR + 1, cols: maxC - minC + 1 });
         setClipboardIsCut(asCut);
         return { minR, maxR, minC, maxC, cells };
-    }, [selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+    }, [allowPlanningMultiSelect, selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
 
     const pasteClipboardAt = useCallback((targetRow: number, targetCol: number) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para pegar en masa.');
+            return;
+        }
         if (!clipboard) return;
         const prev = pendingChangesRef.current;
         const newChanges = { ...prev };
@@ -8021,9 +8053,13 @@ export default function PlanificacionPage() {
                 : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
         );
         if (clipboardIsCut) setClipboardIsCut(false);
-    }, [clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
+    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
 
     const cutSelection = useCallback(() => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         const bounds = copySelectionToClipboard(true);
         if (!bounds) return;
@@ -8047,7 +8083,7 @@ export default function PlanificacionPage() {
         }
         commitPendingChanges(newChanges);
         toast.success(`${cut} celda(s) cortada(s) — Ctrl+V para pegar`);
-    }, [isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
+    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
 
     // Atajos: Ctrl+C copiar, Ctrl+X cortar, Ctrl+V pegar, Ctrl+Z deshacer
     useEffect(() => {
@@ -8059,6 +8095,11 @@ export default function PlanificacionPage() {
             if (mod && key === 'z' && !e.shiftKey) {
                 e.preventDefault();
                 undoLastPending();
+                return;
+            }
+            if (!allowPlanningMultiSelect && mod && (key === 'c' || key === 'x' || key === 'v')) {
+                e.preventDefault();
+                toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
                 return;
             }
             if (mod && key === 'c' && selection.start) {
@@ -8086,7 +8127,7 @@ export default function PlanificacionPage() {
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [selection, clipboard, copySelectionToClipboard, cutSelection, pasteClipboardAt, undoLastPending]);
+    }, [allowPlanningMultiSelect, selection, clipboard, copySelectionToClipboard, cutSelection, pasteClipboardAt, undoLastPending]);
 
     const handleMouseUp = () => {
         setIsDragging(false);
@@ -8135,12 +8176,19 @@ export default function PlanificacionPage() {
         } 
     };
     const handleMouseDown = (r: number, c: number) => { if (!selectedObjective || comparingSnapshot || isServiceLocked) return; setIsDragging(true); setSelection({ start: {r, c}, end: {r, c} }); };
-    const handleMouseEnter = (r: number, c: number) => { if (!isDragging) return; setSelection(prev => ({ ...prev, end: {r, c} })); };
+    const handleMouseEnter = (r: number, c: number) => {
+        if (!isDragging || !allowPlanningMultiSelect) return;
+        setSelection(prev => ({ ...prev, end: {r, c} }));
+    };
     const isCellSelected = (r: number, c: number) => selection.start && r >= Math.min(selection.start.r, selection.end!.r) && r <= Math.max(selection.start.r, selection.end!.r) && c >= Math.min(selection.start.c, selection.end!.c) && c <= Math.max(selection.start.c, selection.end!.c);
 
     // ── COLUMN SELECT (long press on day header) ──────────────────────────────
     const handleDayHeaderMouseDown = (dayIndex: number) => {
         if (!selectedObjective || comparingSnapshot || isServiceLocked) return;
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para selección masiva.');
+            return;
+        }
         // Segundo clic en la misma fuente: cancela
         if (columnSelectMode && columnSelectSource === dayIndex) {
             setColumnSelectMode(false); setColumnSelectSource(null); setIsDragging(false);
@@ -8153,7 +8201,7 @@ export default function PlanificacionPage() {
         setSelection({ start: { r: 0, c: dayIndex }, end: { r: displayedEmployees.length - 1, c: dayIndex } });
     };
     const handleDayHeaderMouseEnter = (dayIndex: number) => {
-        if (!columnSelectMode || !isDragging) return;
+        if (!allowPlanningMultiSelect || !columnSelectMode || !isDragging) return;
         setSelection(prev => prev.start ? ({ start: prev.start, end: { r: displayedEmployees.length - 1, c: dayIndex } }) : prev);
     };
     const handleDayHeaderMouseUpOrLeave = () => { clearTimeout(longPressTimer.current); };
@@ -8161,6 +8209,10 @@ export default function PlanificacionPage() {
     // Seleccionar fila completa (click en nombre de empleado)
     const handleRowHeaderClick = (rowIndex: number) => {
         if (!selectedObjective || comparingSnapshot || isServiceLocked || columnSelectMode) return;
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para selección masiva.');
+            return;
+        }
         setSelection({ start: { r: rowIndex, c: 0 }, end: { r: rowIndex, c: daysInMonth.length - 1 } });
     };
 
@@ -10309,7 +10361,7 @@ export default function PlanificacionPage() {
                                         const _billHint = _billBr && _billBr.gross > 0
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? [activeShift?.eventoNombre, activeShift?.servicioNombre].filter(Boolean).join(' · ')
                                                     : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
@@ -11827,7 +11879,7 @@ export default function PlanificacionPage() {
                 </div>
 
                 {/* BARRA FLOTANTE */}
-                {!comparingSnapshot && !isServiceLocked && (
+                {!comparingSnapshot && !isServiceLocked && allowPlanningMultiSelect && (
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
