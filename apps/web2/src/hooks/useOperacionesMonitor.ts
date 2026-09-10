@@ -66,6 +66,8 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
         case 'VACANTES':
             return s.isUnassigned;
         case 'AUSENTES':
+            // RET nunca "falta": es stand-by pasivo, si no se activa simplemente no trabajó ese día
+            if (s.isRetention || s.origin === 'RETEN' || s.isReten) return false;
             return s.isAbsent || s.isPotentialAbsence;
         case 'FRANCOS':
             return s.isFranco;

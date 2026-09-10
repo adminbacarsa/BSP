@@ -2835,6 +2835,8 @@ export default function OperacionesPage() {
         const now = Date.now();
         const newlyAbsent = logic.processedData.filter((s: any) => {
             if (!s.isAbsent || s.absenceType !== 'AA') return false;
+            // RET es stand-by pasivo: no dispara cobertura si no fue convocado
+            if (s.isRetention || s.origin === 'RETEN' || s.isReten) return false;
             if (!isSameDay(s.shiftDateObj, new Date())) return false;
             if (autoAbsentTriggeredRef.current.has(s.id)) return false;
             // No auto-abrir si ya pasó el tiempo de gracia — el operador puede abrir manualmente
