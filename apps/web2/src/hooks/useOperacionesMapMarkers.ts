@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { OperacionesMarkerPreset } from '@/lib/operaciones/mapMarkerIcons';
+import { isActionableOpsVacancy, isVacancyDescubierto } from '@/hooks/useOperacionesMonitor';
 
 export type OperacionesMapMarker = {
   id: string;
@@ -81,17 +82,27 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
               : new Date();
             const diffMin = (now.getTime() - start.getTime()) / 60000;
             const isReportedOrReturned = s.isUnassigned && s.isReportedToPlanning;
+            const isDescubierto = s.isUnassigned && (s.isDescubierto || isVacancyDescubierto(s, now));
+            const isActionableVac = isActionableOpsVacancy(s, now);
             const event = isEventShift(s);
 
-            if (isReportedOrReturned && priority < 5) {
-              const isReturned = s.status === 'UNCOVERED_REPORTED' || s.origin === 'INTERRUPTION';
-              iconPreset = 'VIOLET';
-              statusText = isReturned ? 'DEVUELTA A PLANIF.' : 'VACANTE REPORTADA';
-              priority = 5;
-            } else if ((s.isUnassigned || s.isAbsent || s.isPotentialAbsence) && priority < 5) {
+            if (isActionableVac && priority < 5) {
               iconPreset = 'RED';
-              statusText = event ? 'EVENTO · VACANTE/AUS' : s.isUnassigned ? 'VACANTE' : 'AUSENCIA';
+              statusText = event ? 'EVENTO · VACANTE/AUS' : 'VACANTE';
               priority = 5;
+            } else if ((s.isAbsent || s.isPotentialAbsence) && priority < 5) {
+              iconPreset = 'RED';
+              statusText = event ? 'EVENTO · VACANTE/AUS' : 'AUSENCIA';
+              priority = 5;
+            } else if (isDescubierto && priority < 4.2) {
+              iconPreset = 'GRAY';
+              statusText = 'DESCUBIERTO';
+              priority = 4.2;
+            } else if (isReportedOrReturned && priority < 4) {
+              // Tratamiento hecho — no pintar como vacante roja
+              iconPreset = 'VIOLET';
+              statusText = 'DEVUELTA A PLANIF.';
+              priority = 4;
             } else if (event && priority < 4.5) {
               iconPreset = 'AMBER';
               statusText = 'EVENTO';
@@ -106,6 +117,7 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
               !s.isPotentialAbsence &&
               !s.isCompleted &&
               !s.isFranco &&
+              !s.isUnassigned &&
               diffMin > 5 &&
               priority < 3
             ) {

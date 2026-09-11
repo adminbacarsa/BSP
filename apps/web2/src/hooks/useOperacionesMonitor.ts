@@ -49,9 +49,47 @@ export function isOpsShiftHoy(s: any, now: Date): boolean {
     return false;
 }
 
+/** Fracción del slot ya transcurrida (≥1 = turno terminado). Null si faltan fechas. */
+export const VACANCY_DESCUBIERTO_RATIO = 0.55;
+
+export function getVacancyElapsedRatio(s: any, now: Date = new Date()): number | null {
+    const start = s?.shiftDateObj instanceof Date ? s.shiftDateObj : getSafeDate(s?.shiftDateObj);
+    const end = s?.endDateObj instanceof Date ? s.endDateObj : getSafeDate(s?.endDateObj);
+    if (!start || !end) return null;
+    let startMs = start.getTime();
+    let endMs = end.getTime();
+    if (endMs <= startMs) endMs += 86400000;
+    const dur = endMs - startMs;
+    if (dur <= 0) return null;
+    return (now.getTime() - startMs) / dur;
+}
+
+/** Vacante ya no accionable: slot terminado o >55% del turno, o doc SIN COBERTURA. */
+export function isVacancyDescubierto(s: any, now: Date = new Date()): boolean {
+    if (!s?.isUnassigned) return false;
+    if (s.isSinCobertura || s.status === 'SIN_COBERTURA') return true;
+    if (typeof s.isDescubierto === 'boolean') return s.isDescubierto;
+    const ratio = getVacancyElapsedRatio(s, now);
+    if (ratio == null) return false;
+    return ratio >= VACANCY_DESCUBIERTO_RATIO;
+}
+
+/**
+ * Vacante viva para Ops (tab VAC / sirena / mapa rojo):
+ * sin devolver a planificación y aún dentro de la ventana accionable (<55%).
+ */
+export function isActionableOpsVacancy(s: any, now: Date = new Date()): boolean {
+    if (!s?.isUnassigned) return false;
+    if (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true) return false;
+    if (isVacancyDescubierto(s, now)) return false;
+    return true;
+}
+
 export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
     switch (viewTab) {
         case 'TODOS':
+            // Devueltas y descubiertas no son “cola viva”: salen de TODOS/VAC.
+            if (s.isUnassigned && (s.isReportedToPlanning || isVacancyDescubierto(s))) return false;
             return !s.isFranco;
         case 'PRIORIDAD':
             return (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco;
@@ -64,7 +102,7 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
         case 'RETENIDOS':
             return s.isRetention;
         case 'VACANTES':
-            return s.isUnassigned;
+            return isActionableOpsVacancy(s);
         case 'AUSENTES':
             // RET nunca "falta": es stand-by pasivo, si no se activa simplemente no trabajó ese día
             if (s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') return false;
@@ -524,8 +562,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     : 'VACANTE: TURA';
             }
             // isOperationalVacancy: usado para la generación de vacantes virtuales y deduplicación.
-            // Para el DISPLAY (contador OBJ, stats, tab VACANTES) se usa isUnassigned directamente
-            // para incluir también las devueltas — ambas representan puestos sin cobertura real.
+            // Display VAC / mapa rojo: solo isActionableOpsVacancy (no DEVUELTO ni >55%/fin).
             const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
 
             const isSinCobertura = !!shift.isSinCobertura;
@@ -534,6 +571,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const turaExt = parentTuraExt.get(shift.id);
             const effectiveEndDateObj = (turaExt?.endDateObj instanceof Date ? turaExt.endDateObj : shift.endDateObj) as Date | undefined;
+            const isDescubierto = isUnassigned && (
+                isSinCobertura ||
+                (() => {
+                    const ratio = getVacancyElapsedRatio(
+                        { shiftDateObj: shift.shiftDateObj, endDateObj: effectiveEndDateObj || shift.endDateObj },
+                        currentTime,
+                    );
+                    return ratio != null && ratio >= VACANCY_DESCUBIERTO_RATIO;
+                })()
+            );
 
             const isEarlyStartScheduled = !!shift.isEarlyStart;
             const isPlannedSplitSegment = !!shift.coveragePackageId && (shift.coverageSegmentRole === 'EXTENSION' || shift.coverageSegmentRole === 'EARLY_START');
@@ -612,8 +659,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Los turnos origin==='SLA_VIRTUAL' son solo notificaciones hacia planificación:
             // el puesto sigue descubierto y NO cuentan como cobertura real.
             const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
-            // isSinCobertura NO cuenta como cobertura: la vacante debe seguir visible en
-            // el tab VACANTES y en el PDF. Solo suprimimos el duplicado virtual en el dedup.
+            // isSinCobertura / descubierto NO cuentan como cobertura real ni como VAC accionable.
             const countsForCoverage = !isAutoNotification && (
                 (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
                 (isReportedToPlanning && !isValidEmployee) ||
@@ -638,7 +684,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost,
                 duration: getDuration(shift.shiftDateObj, effectiveEndDateObj),
                 endDateObj: effectiveEndDateObj || shift.endDateObj,
-                countsForCoverage, isRetentionByField, isSinCobertura,
+                countsForCoverage, isRetentionByField, isSinCobertura, isDescubierto,
                 isRfzVacante, isTuraVacante, isTuraCutSegment,
                 turaRequiresSeparateCheckIn: isTuraCutSegment,
                 isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',
@@ -916,19 +962,24 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             return true;
         });
 
-        // ── Suprimir DEVUELTO/SLA_VIRTUAL del display cuando ya no son accionables:
-        //    a) el slot ya terminó (vacante pasada)
-        //    b) hay guardias plan/presentes suficientes para cubrir el slot
-        //       → planning ya asignó alguien; la vacante está resuelta aunque el guardia no llegó
+        // ── Ocultar DEVUELTO del display: ya tuvo tratamiento (Planificación).
+        //    Siguen en dedupedRealShifts para cubrir/suprimir virtuales del mismo slot.
+        //    Descubiertos (>55%/fin) salen del tab VAC vía isActionableOpsVacancy; el PDF
+        //    puede seguir viéndolos en processedData como isDescubierto / isSinCobertura.
         const suppressedDevuelto = new Set<string>();
         dedupedRealShifts.forEach(s => {
-            if (!s.isUnassigned || !s.isReportedToPlanning || !s.shiftDateObj || !s.endDateObj) return;
-            // a) Slot ya terminó
-            if (s.endDateObj.getTime() < now.getTime()) {
+            if (!s.isUnassigned || !s.shiftDateObj || !s.endDateObj) return;
+            if (s.isReportedToPlanning) {
                 suppressedDevuelto.add(s.id);
                 return;
             }
-            // b) Cobertura (plan + presentes) suficiente
+            // Slot ya terminado sin doc SIN_COBERTURA: no mostrar como cola viva
+            // (el flag isDescubierto + tab VAC ya los excluye; esto limpia TODOS también)
+            if (!s.isSinCobertura && s.endDateObj.getTime() < now.getTime()) {
+                suppressedDevuelto.add(s.id);
+                return;
+            }
+            // Cobertura (plan + presentes) suficiente → planning ya asignó
             const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
             if (cap <= 0) return;
             const coveringCount = dedupedRealShifts.filter(cover =>
@@ -948,6 +999,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Auto-expirar: slot de un día anterior que ya terminó → no mostrar
             const vacancyIsToday = isSameDay(v.shiftDateObj, now);
             if (!vacancyIsToday && v.endDateObj.getTime() < now.getTime()) return false;
+            // Descubierto (>55% o fin de turno): no regenerar virtual como VAC
+            if (isVacancyDescubierto(v, now)) return false;
             // normalizePosMatch para que "Puesto Rondín" === "Rondín" (sin prefijo ni acentos)
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
@@ -961,11 +1014,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 Math.abs((s.shiftDateObj?.getTime() || 0) - (v.shiftDateObj?.getTime() || 0)) < 7200000 &&
                 sameSlot(s))) return false;
             // Suprimir si ya existe el doc autosinc_ SIN COBERTURA para este slot
-            // El doc real reemplaza la vacante virtual — queda visible en VACANTES con badge SIN COB.
             if (dedupedRealShifts.some(s => s.isSinCobertura && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             // Suprimir si hay guardias plan O presentes suficientes para el slot
-            // (mejora: un guardia en PLAN ya resuelve la vacante aunque no haya hecho check-in)
             const cap = getPositionCapacity(filteredSLA, v.objectiveId, v.positionName);
             const coveringCount = dedupedRealShifts.filter((cover: any) =>
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
@@ -975,7 +1026,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             ).length;
             if (coveringCount >= cap) return false;
             return true;
-        });
+        }).map(v => ({
+            ...v,
+            isDescubierto: isVacancyDescubierto(v, now),
+        }));
 
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
     }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);

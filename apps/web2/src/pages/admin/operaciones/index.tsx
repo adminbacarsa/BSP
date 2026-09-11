@@ -13,7 +13,7 @@ import {
     FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy } from '@/hooks/useOperacionesMonitor';
+import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
@@ -62,7 +62,7 @@ const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
 const getGuardAvatarLabel = (shift: any, name: string): string => {
     const ref = getRefuerzoLabel(shift);
     if (ref) return ref;
-    if (shift?.isUnassigned && !shift?.isReportedToPlanning) return '!';
+    if (shift?.isUnassigned && isActionableOpsVacancy(shift)) return '!';
     return (name[0] || '?').toUpperCase();
 };
 
@@ -70,7 +70,7 @@ const getGuardAvatarClass = (shift: any): string => {
     const ref = getRefuerzoLabel(shift);
     if (ref === 'RFZ') return 'bg-red-100 text-red-700';
     if (ref === 'TURA') return 'bg-violet-100 text-violet-700';
-    if (shift?.isUnassigned && !shift?.isReportedToPlanning) return 'bg-rose-100 text-rose-600';
+    if (shift?.isUnassigned && isActionableOpsVacancy(shift)) return 'bg-rose-100 text-rose-600';
     return 'bg-slate-200 text-slate-600';
 };
 
@@ -1928,6 +1928,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
 
     if (shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
+    else if (shift.isDescubierto || shift.isSinCobertura) { accentColor = 'bg-slate-400'; rowBg = 'bg-slate-50'; }
     else if (shift.isResolvedByOps)   { accentColor = 'bg-indigo-500';  rowBg = 'bg-indigo-50/40'; }
     else if (shift.isUnassigned)       { accentColor = 'bg-rose-500';    rowBg = 'bg-rose-50/40'; }
     else if (shift.isRetention)        { accentColor = 'bg-orange-500';  rowBg = 'bg-orange-50/40'; }
@@ -1950,7 +1951,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     );
     const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
-    const canCover = !!(shift.isOperationalVacancy ?? (shift.isUnassigned && !shift.isReportedToPlanning));
+    const canCover = isActionableOpsVacancy(shift);
     // Devolver a planificación: solo vacantes NO originadas por ausencia, dentro de las 12h previas al inicio
     const hoursUntilStart = shift.shiftDateObj ? (toDate(shift.shiftDateObj).getTime() - now.getTime()) / 3600000 : Infinity;
     const canReturn = canCover && shift.vacancyOrigin !== 'ABSENCE' && hoursUntilStart <= 12;
@@ -1959,6 +1960,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         ? (shift.vacancyBand ? `VACANTE · ${shift.vacancyBand}` : (shift.employeeName || 'VACANTE'))
         : (shift.employeeName || 'Desconocido');
     if (shift.isReportedToPlanning) name = name.replace('VACANTE: ', '').replace('VACANTE · ', '');
+    if (shift.isDescubierto || shift.isSinCobertura) {
+        name = (shift.vacancyBand ? `DESCUBIERTO · ${shift.vacancyBand}` : 'DESCUBIERTO');
+    }
     const refuerzoLabel = getRefuerzoLabel(shift);
     const avatarLabel = getGuardAvatarLabel(shift, name);
     const avatarClass = getGuardAvatarClass(shift);
@@ -1966,6 +1970,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     // Badge de estado
     let badge = null;
     if (shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
+    else if (shift.isDescubierto || shift.isSinCobertura) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-500 text-white shrink-0">DESCUBIERTO</span>;
     else if (shift.isTuraCutSegment) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-700 text-white shrink-0">TURA 2º tramo</span>;
     else if (refuerzoLabel && shift.isUnassigned) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 bg-fuchsia-600`}>{`VACANTE ${refuerzoLabel}`}</span>;
     else if (refuerzoLabel) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${refuerzoLabel === 'TURA' ? 'bg-violet-600' : 'bg-red-600'}`}>{refuerzoLabel}</span>;
@@ -2006,7 +2011,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
             </div>
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 leading-tight">
-                    <span className={`text-[11px] font-black truncate ${shift.isUnassigned && !shift.isReportedToPlanning ? 'text-rose-600' : 'text-slate-800'}`}>{name}</span>
+                    <span className={`text-[11px] font-black truncate ${isActionableOpsVacancy(shift) ? 'text-rose-600' : 'text-slate-800'}`}>{name}</span>
                     {badge}
                 </div>
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
@@ -3353,7 +3358,7 @@ export default function OperacionesPage() {
             if (s.isPresent && !s.isCompleted) o.activo++;
             if (s.isCompleted) o.compl++;
             if (s.isAbsent || s.isPotentialAbsence) o.ausente++;
-            if (s.isUnassigned) o.vacante++;
+            if (s.isUnassigned && !s.isReportedToPlanning) o.vacante++;
             if (s.isRetention) o.ret++;
             try { const ph=(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000; if(ph>0&&ph<=24)o.planHrs+=ph; } catch {}
             if (s.isCompleted) {
@@ -4039,7 +4044,7 @@ export default function OperacionesPage() {
             map[key].total++;
             if (s.isPresent || s.isRetention) map[key].active++;
             if (s.isAbsent || s.isPotentialAbsence) map[key].absent++;
-            if (s.isUnassigned) map[key].vacant++;
+            if (isActionableOpsVacancy(s)) map[key].vacant++;
         });
         return Object.values(map)
             .filter(o => o.total > 0)
@@ -4085,7 +4090,7 @@ export default function OperacionesPage() {
             if (s.isRetention)                               obj.retention++;
             else if (s.isPresent && !s.isCompleted)          obj.active++;
             else if (s.isAbsent || s.isPotentialAbsence)   { obj.absent++;  if (!obj.criticalShift) obj.criticalShift = s; }
-            else if (s.isUnassigned)                       { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; } // incluye devueltas
+            else if (isActionableOpsVacancy(s))            { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; }
             else if (s.isFuture || s.isImminent)             obj.plan++;
         });
         // Aplicar filtro de cliente si está activo
@@ -4128,7 +4133,7 @@ export default function OperacionesPage() {
             if (s.isRetention)                              ev.retention++;
             else if (s.isPresent && !s.isCompleted)        ev.active++;
             else if (s.isAbsent || s.isPotentialAbsence) { ev.absent++; if (!ev.criticalShift) ev.criticalShift = s; }
-            else if (s.isUnassigned)                      { ev.vacant++; if (!ev.criticalShift) ev.criticalShift = s; }
+            else if (isActionableOpsVacancy(s))           { ev.vacant++; if (!ev.criticalShift) ev.criticalShift = s; }
             else if (s.isFuture || s.isImminent)           ev.plan++;
         });
         const clientFilter = logic.selectedClientId;
