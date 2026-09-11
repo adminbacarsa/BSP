@@ -197,6 +197,23 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
     }
   };
 
+  /** Escribe la respuesta del guardia a una convocatoria de cobertura. */
+  const respond = async (id: string, response: 'ACCEPTED' | 'REJECTED') => {
+    try {
+      await updateDoc(doc(db, 'user_notifications', id), {
+        response,
+        respondedAt: serverTimestamp(),
+        read: true,
+        readAt: serverTimestamp(),
+        dismissed: true,
+        status: 'INACTIVE',
+      });
+    } catch (e) {
+      console.warn('[usePortalInbox] respond', e);
+      throw e;
+    }
+  };
+
   /** Soft-delete: el vigilador no puede deleteDoc (reglas); se oculta con dismissed. */
   const dismiss = async (id: string) => {
     try {
@@ -268,6 +285,7 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
     unreadCount,
     markRead,
     acknowledge,
+    respond,
     dismiss,
     markAllUnreadRead,
     dismissAll,
