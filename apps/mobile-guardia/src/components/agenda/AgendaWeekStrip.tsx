@@ -64,7 +64,7 @@ export function AgendaWeekStrip({ days, cellsByKey, selectedKey, onSelectDay }: 
               style={[styles.codes, { color: selected ? palette.onPrimary : accent }]}
               numberOfLines={1}
             >
-              {codes.length > 0 ? codes.join(' ') : '—'}
+              {codes.length > 0 ? codes.join(' · ') : '—'}
             </Text>
           </Pressable>
         );

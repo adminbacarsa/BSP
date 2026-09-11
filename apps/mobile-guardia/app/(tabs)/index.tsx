@@ -130,7 +130,13 @@ function HoyScreenContent() {
   const timing = mainShift ? getCheckInTiming(mainShift, now, { relaxWindow: labRelaxedCheckIn }) : null;
   const heroInProgress = !!mainShift && isShiftInProgress(mainShift, now);
   const isHeroToday = !!mainShift && shiftStartsToday(mainShift, now);
-  const heroSectionLabel = heroInProgress ? 'Turno actual' : 'Próximo turno';
+  const isOpsHero =
+    !!mainShift && String(mainShift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+  const heroSectionLabel = isOpsHero
+    ? 'Turno asignado'
+    : heroInProgress
+      ? 'Turno actual'
+      : 'Próximo turno';
 
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
