@@ -13,7 +13,7 @@ import {
     FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy } from '@/hooks/useOperacionesMonitor';
+import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
@@ -2038,6 +2038,16 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
+    const dayTag = opsShiftDayLabel(shift.shiftDateObj, now);
+    const dayTagEl = dayTag.key === 'hoy'
+        ? null
+        : <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${dayTag.key === 'manana' ? 'bg-sky-600 text-white' : 'bg-slate-500 text-white'}`}>{dayTag.label}</span>;
+    const dayInlineClass = dayTag.key === 'hoy'
+        ? 'text-slate-400'
+        : dayTag.key === 'manana'
+            ? 'text-sky-600'
+            : 'text-amber-500';
+
     if (isCompact) return (
         <div className={`relative flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200/80 mb-1 shadow-sm hover:shadow-md transition-all ${rowBg}`}>
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${accentColor}`}/>
@@ -2047,11 +2057,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 leading-tight">
                     <span className={`text-[11px] font-black truncate ${isActionableOpsVacancy(shift) ? 'text-rose-600' : 'text-slate-800'}`}>{name}</span>
+                    {dayTagEl}
                     {badge}
                 </div>
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
                     <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
-                    <span className={`shrink-0 font-bold ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
+                    <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
                 </div>
             </div>
@@ -2098,7 +2109,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             <span className="text-[10px] text-slate-400">{shift.clientName || shift.objectiveName}</span>
                         </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">{badge}</div>
+                    <div className="flex items-center gap-1.5 shrink-0">{dayTagEl}{badge}</div>
                 </div>
                 {/* Fila 2: objetivo · posición */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1.5 pl-10">
@@ -2110,7 +2121,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         <span className="text-violet-600 font-bold shrink-0">+TURA {shift.turaImputationPos}</span>
                     )}
                     <span className="ml-auto font-mono text-slate-600 shrink-0 flex items-center gap-1">
-                        <span className={`font-bold not-font-mono text-[9px] ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
+                        <span className={`font-bold not-font-mono text-[9px] ${dayInlineClass}`}>{dayTag.label}</span>
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>

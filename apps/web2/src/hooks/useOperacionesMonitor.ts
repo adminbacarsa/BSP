@@ -37,16 +37,59 @@ export function isRestFrancoShift(shift: any): boolean {
     return false;
 }
 
+/**
+ * Ventana operativa del CC (no solo “día calendario”).
+ * Sin lookahead, un 00:00→08:00 de mañana no aparece en PLAN a la noche
+ * y parece que nadie releva / no hay continuidad.
+ */
+export const OPS_PLAN_LOOKAHEAD_MS = 16 * 60 * 60 * 1000;
+
 export function isOpsShiftHoy(s: any, now: Date): boolean {
     if (s.isCompleted && !s.isRetention && !isRestFrancoShift(s)) return false;
     if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
     if (isSameDay(s.shiftDateObj, now)) return true;
-    // Turnos presentes/retenidos de días anteriores: límite de 48h para excluir zombie shifts
+
+    const nowMs = now.getTime();
+    const startMs = (s.shiftDateObj as Date)?.getTime?.() ?? 0;
+    let endMs = (s.endDateObj as Date)?.getTime?.() ?? 0;
+    if (startMs > 0 && endMs > 0 && endMs <= startMs) endMs += 86400000;
+
+    // Presentes/retenidos de días anteriores (zombies acotados a 48h)
     if ((s.isPresent || s.isRetention) && !s.isCompleted) {
-        const startMs = (s.shiftDateObj as Date)?.getTime?.() ?? 0;
-        return startMs > 0 && (now.getTime() - startMs) <= 48 * 60 * 60 * 1000;
+        return startMs > 0 && (nowMs - startMs) <= 48 * 60 * 60 * 1000;
     }
+
+    // Turno en curso por horario (p.ej. N que empezó ayer y termina hoy) — continuidad
+    if (startMs > 0 && endMs > nowMs && startMs <= nowMs) return true;
+
+    // Próximos turnos (madrugada / primer turno de mañana) aunque el start sea “mañana”
+    if (startMs > nowMs && startMs - nowMs <= OPS_PLAN_LOOKAHEAD_MS) return true;
+
     return false;
+}
+
+/** Etiqueta de día para turnos en ventana operativa (lookahead incluye mañana). */
+export function opsShiftDayLabel(shiftDate: any, now: Date = new Date()): {
+    key: 'hoy' | 'manana' | 'otro';
+    label: string;
+} {
+    const d = shiftDate instanceof Date ? shiftDate : getSafeDate(shiftDate);
+    if (!d) return { key: 'otro', label: '—' };
+    if (isSameDay(d, now)) return { key: 'hoy', label: 'HOY' };
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (isSameDay(d, tomorrow)) return { key: 'manana', label: 'MAÑANA' };
+    try {
+        const label = d.toLocaleDateString('es-AR', {
+            weekday: 'short',
+            day: '2-digit',
+            month: '2-digit',
+            timeZone: 'America/Argentina/Cordoba',
+        }).toUpperCase();
+        return { key: 'otro', label };
+    } catch {
+        return { key: 'otro', label: '--/--' };
+    }
 }
 
 /** Fracción del slot ya transcurrida (≥1 = turno terminado). Null si faltan fechas. */
