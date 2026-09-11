@@ -1374,8 +1374,9 @@ export default function TacticalMapView() {
                     {(() => {
                         const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
                         const cubiertos = logic.stats.activos + logic.stats.retenidos;
-                        const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-                        const pct = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : null;
+                        const huecos = logic.stats.vacantes;
+                        const debieronIniciar = cubiertos + huecos;
+                        const pct = total === 0 ? null : (debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : 100);
                         if (pct === null) return null;
                         const isCrisis = pct < 50;
                         const isWarn = pct >= 50 && pct < 80;

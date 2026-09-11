@@ -1954,7 +1954,7 @@ const shiftPostLabel = (shift: any): string => {
 const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, onOpenManualRetention, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
 
-    if (shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
+    if (shift.isUnassigned && shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
     else if (shift.isDescubierto || shift.isSinCobertura) { accentColor = 'bg-slate-400'; rowBg = 'bg-slate-50'; }
     else if (shift.isResolvedByOps)   { accentColor = 'bg-indigo-500';  rowBg = 'bg-indigo-50/40'; }
     else if (shift.isUnassigned)       { accentColor = 'bg-rose-500';    rowBg = 'bg-rose-50/40'; }
@@ -1986,7 +1986,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     let name = shift.isUnassigned
         ? (shift.vacancyBand ? `VACANTE · ${shift.vacancyBand}` : (shift.employeeName || 'VACANTE'))
         : (shift.employeeName || 'Desconocido');
-    if (shift.isReportedToPlanning) name = name.replace('VACANTE: ', '').replace('VACANTE · ', '');
+    if (shift.isUnassigned && shift.isReportedToPlanning) name = name.replace('VACANTE: ', '').replace('VACANTE · ', '');
     if (shift.isDescubierto || shift.isSinCobertura) {
         name = (shift.vacancyBand ? `DESCUBIERTO · ${shift.vacancyBand}` : 'DESCUBIERTO');
     }
@@ -1996,7 +1996,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
 
     // Badge de estado
     let badge = null;
-    if (shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
+    if (shift.isUnassigned && shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
     else if (shift.isDescubierto || shift.isSinCobertura) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-500 text-white shrink-0">DESCUBIERTO</span>;
     else if (shift.isTuraCutSegment) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-700 text-white shrink-0">TURA 2º tramo</span>;
     else if (refuerzoLabel && shift.isUnassigned) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 bg-fuchsia-600`}>{`VACANTE ${refuerzoLabel}`}</span>;
@@ -2051,7 +2051,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`p-1.5 border rounded-lg hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title={shift.phone ? 'WhatsApp' : 'Sin teléfono'}><MessageCircle size={12}/></button>)}
                 {canCover && viewTab === 'VACANTES' && (<button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button>)}
                 {canReturn && viewTab === 'VACANTES' && (<button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button>)}
-                {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] font-bold text-slate-500 uppercase px-1 shrink-0">Devuelto</span>)}
+                {shift.isUnassigned && shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] font-bold text-slate-500 uppercase px-1 shrink-0">Devuelto</span>)}
                 {viewTab === 'PLAN' && (<><button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`p-1.5 rounded-lg transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`} title="Dar presente"><PlayCircle size={12}/></button><button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={12}/></button></>)}
                 {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
                     <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={12}/></button>
@@ -2132,7 +2132,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     {canReturn && viewTab === 'VACANTES' && (
                         <button onClick={handleReport} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-700 text-white rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"><CornerUpLeft size={11}/>DEVOLVER</button>
                     )}
-                    {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1 px-2 py-1.5"><CornerUpLeft size={10}/>Devuelto</span>)}
+                    {shift.isUnassigned && shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1 px-2 py-1.5"><CornerUpLeft size={10}/>Devuelto</span>)}
                     {viewTab === 'PLAN' && (<>
                         {!shift.hasRRHHNovedad && <button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}><PlayCircle size={11}/>DAR PRESENTE</button>}
                         {shift.hasRRHHNovedad
@@ -4254,9 +4254,12 @@ export default function OperacionesPage() {
     const dayStatusKpi = useMemo(() => {
         const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
         const cubiertos = logic.stats.activos + logic.stats.retenidos;
-        const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+        // Cobertura operativa = puestos con gente / (puestos con gente + vacantes abiertas).
+        // Un ausente ya cubierto no baja el %: el reemplazo está en ACT y no hay VAC.
+        const huecos = logic.stats.vacantes;
+        const debieronIniciar = cubiertos + huecos;
         const isEmpty = total === 0;
-        const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : 0;
+        const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : (isEmpty ? 0 : 100);
         const isCrisis = !isEmpty && cobertura < 50;
         const isWarning = !isEmpty && cobertura >= 50 && cobertura < 80;
         const isOk = !isEmpty && cobertura >= 80;
@@ -4300,8 +4303,9 @@ export default function OperacionesPage() {
 
     const coverageHasIssues = useMemo(
         () => coverageByObjective.some((obj) => {
-            const pct = obj.total > 0 ? Math.round((obj.active / obj.total) * 100) : 0;
-            return pct < 50 || obj.absent > 0 || obj.vacant > 0;
+            const denom = obj.active + obj.vacant;
+            const pct = denom > 0 ? Math.round((obj.active / denom) * 100) : 100;
+            return pct < 50 || obj.vacant > 0;
         }),
         [coverageByObjective],
     );
@@ -4733,11 +4737,11 @@ export default function OperacionesPage() {
                             ) : (
                                 <>
                                     {filteredEventsWithAlerts.map((ev) => {
-                                        const pct = (ev.active + ev.retention) > 0 && ev.total > 0
-                                            ? Math.round(((ev.active + ev.retention) / Math.max(ev.total - ev.plan, 1)) * 100)
-                                            : ev.total > 0 ? 0 : 100;
-                                        const isCrit = ev.absent > 0 || ev.vacant > 0;
-                                        const isWarn = ev.retention > 0;
+                                        const onPost = ev.active + ev.retention;
+                                        const denom = onPost + ev.vacant;
+                                        const pct = denom > 0 ? Math.round((onPost / denom) * 100) : 100;
+                                        const isCrit = ev.vacant > 0;
+                                        const isWarn = ev.retention > 0 || (ev.absent > 0 && ev.vacant === 0);
                                         const expandKey = `EVENT__${ev.eventKey}`;
                                         const isExpanded = expandedObjectiveId === expandKey;
                                         const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-amber-300';
@@ -4804,7 +4808,7 @@ export default function OperacionesPage() {
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center gap-1 shrink-0">
-                                                        {(ev.absent > 0 || ev.vacant > 0) && ev.criticalShift && (
+                                                        {(ev.vacant > 0) && ev.criticalShift && (
                                                             <button onClick={() => setCoverageData({isOpen:true, shift:ev.criticalShift})}
                                                                 className="p-2 lg:p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 active:scale-95 transition-colors"
                                                                 title="Protocolo cobertura">
@@ -4822,11 +4826,12 @@ export default function OperacionesPage() {
                                         );
                                     })}
                                     {filteredObjectivesWithAlerts.map(obj => {
-                                const pct = (obj.active + obj.retention) > 0 && obj.total > 0
-                                    ? Math.round(((obj.active + obj.retention) / Math.max(obj.total - obj.plan, 1)) * 100)
-                                    : obj.total > 0 ? 0 : 100;
-                                const isCrit = obj.absent > 0 || obj.vacant > 0;
-                                const isWarn = obj.retention > 0;
+                                // % = gente en puesto / (gente + vacantes abiertas). Ausente cubierto no baja.
+                                const onPost = obj.active + obj.retention;
+                                const denom = onPost + obj.vacant;
+                                const pct = denom > 0 ? Math.round((onPost / denom) * 100) : 100;
+                                const isCrit = obj.vacant > 0;
+                                const isWarn = obj.retention > 0 || (obj.absent > 0 && obj.vacant === 0);
                                 const isExpanded = expandedObjectiveId === obj.objectiveId;
                                 const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-slate-200';
                                 const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-white';
@@ -4909,7 +4914,7 @@ export default function OperacionesPage() {
 
                                             {/* Acciones rápidas */}
                                             <div className="flex items-center gap-1 shrink-0">
-                                                {(obj.absent > 0 || obj.vacant > 0) && obj.criticalShift && (
+                                                {(obj.vacant > 0) && obj.criticalShift && (
                                                     <button onClick={() => setCoverageData({isOpen:true, shift:obj.criticalShift})}
                                                         className="p-2 lg:p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 active:scale-95 transition-colors"
                                                         title="Protocolo cobertura">
@@ -5273,8 +5278,9 @@ export default function OperacionesPage() {
                             {showCoverageGrid && (
                                 <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 space-y-1">
                                     {coverageByObjective.map(obj => {
-                                        const pct = obj.total > 0 ? Math.round((obj.active / obj.total) * 100) : 0;
-                                        const hasIssue = obj.absent > 0 || obj.vacant > 0;
+                                        const denom = obj.active + obj.vacant;
+                                        const pct = denom > 0 ? Math.round((obj.active / denom) * 100) : 100;
+                                        const hasIssue = obj.vacant > 0;
                                         const isCrit = pct < 50;
                                         return (
                                             <div key={obj.objectiveId} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${isCrit ? 'bg-rose-50 border-rose-200' : hasIssue ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
