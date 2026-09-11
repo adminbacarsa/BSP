@@ -251,6 +251,10 @@ interface PanelProps {
 function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinimize, unsubRefs }: PanelProps) {
   const [loading, setLoading] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
+  // Refs para siempre apuntar a la versión más reciente de las funciones de confirmación
+  // y evitar closures stale en los callbacks de onSnapshot
+  const confirmCandidateRef = useRef<() => Promise<void>>(async () => {});
+  const confirmDualRef = useRef<(role: 'ext' | 'adv') => Promise<void>>(async () => {});
   const tid = s.empresaId;
   const absenceShift = s.absentShift;
   const step = STEPS[s.currentStep];
@@ -342,15 +346,18 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   // ── Acciones ────────────────────────────────────────────────────────────────
   const listenNotif = (notifId: string, role: 'single' | 'ext' | 'adv') => {
     if (unsubRefs[`${s.id}_${role}`]) unsubRefs[`${s.id}_${role}`]();
+    let handled = false;
     unsubRefs[`${s.id}_${role}`] = onSnapshot(doc(db, 'user_notifications', notifId), snap => {
       const data = snap.data();
-      if (!data) return;
+      if (!data || handled) return;
       if (data.response === 'ACCEPTED') {
-        if (role === 'single') onUpd({ pending: null, awaitingPhone: false });
-        else if (role === 'ext') onUpd({ pendingExt: null, confirmedExt: data.userId });
-        else onUpd({ pendingAdv: null, confirmedAdv: data.userId });
-        toast.info('El guardia aceptó la notificación');
+        handled = true;
+        toast.info('El guardia aceptó — confirmando automáticamente');
+        if (role === 'single') void confirmCandidateRef.current();
+        else if (role === 'ext') void confirmDualRef.current('ext');
+        else void confirmDualRef.current('adv');
       } else if (data.response === 'REJECTED') {
+        handled = true;
         if (role === 'single') onUpd({ pending: null, awaitingPhone: false, status: 'SELECTING' });
         else if (role === 'ext') onUpd({ pendingExt: null });
         else onUpd({ pendingAdv: null });
@@ -423,6 +430,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     finally { setLoading(null); }
   };
+  // Mantener ref siempre actualizado (evita closures stale en onSnapshot)
+  confirmCandidateRef.current = confirmCandidate;
 
   const rejectCandidate = () => onUpd({ status: 'SELECTING', pending: null, awaitingPhone: false });
   const skipStep = () => {
@@ -500,6 +509,9 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     finally { setLoading(null); }
   };
+
+  // Mantener ref siempre actualizado (evita closures stale en onSnapshot)
+  confirmDualRef.current = confirmDual;
 
   const rejectDual = (role: 'ext' | 'adv') => {
     if (role === 'ext') onUpd({ pendingExt: null, selectedExtId: null });
