@@ -409,10 +409,10 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
       if (step.key === 'SIN_TURNO') {
         const newRef = doc(collection(db, 'turnos'));
-        batch.set(newRef, stampEmpresaId({ employeeId: empId, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)), endTime: Timestamp.fromDate(absenceEnd), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id || null, createdAt: serverTimestamp() }, tid));
-        markCovered('RETEN');
+        batch.set(newRef, stampEmpresaId({ employeeId: empId, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, code: absenceShift.code || 'T', startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)), endTime: Timestamp.fromDate(absenceEnd), status: 'PENDING', origin: 'OPERATIONS_COVERAGE', resolvedBy: 'OPERACIONES', absenceShiftId: absenceShift.id || null, createdAt: serverTimestamp() }, tid));
+        markCovered('SIN_TURNO');
         await batch.commit();
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_ASIGNADA', title: 'Cobertura asignada', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} asignado a cubrir vacante en ${absenceShift.objectiveName} (${hiStart}–${hiEnd})`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
       } else if (step.key === 'RET_PASIVO' || step.key === 'ESC') {
         batch.update(doc(db, 'turnos', shiftId), { coverageRedirectedTo: absenceShift.objectiveId, coverageRedirectedAt: serverTimestamp(), resolvedBy: 'OPERACIONES' });
         markCovered(step.key);

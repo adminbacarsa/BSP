@@ -1201,7 +1201,7 @@ export default function TacticalMapView() {
                     if (vacShift.isVirtual || !novedad.shiftId) {
                         const newRef = doc(collection(db, 'turnos'));
                         await setDoc(newRef, stampEmpresaId({ clientId: vacShift.clientId, clientName: vacShift.clientName, objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName, positionName: vacShift.positionName, employeeId: 'VACANTE', employeeName: 'VACANTE', startTime: Timestamp.fromDate(vacShift.shiftDateObj), endTime: Timestamp.fromDate(vacShift.endDateObj), status: 'UNCOVERED_REPORTED', isReported: true, origin: 'SLA_VIRTUAL', createdAt: serverTimestamp() }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
-                        openCoverageProtocol({ ...vacShift, id: newRef.id });
+                        openCoverageProtocol({ ...vacShift, id: newRef.id, isVirtual: false });
                     } else { openCoverageProtocol(vacShift); }
                 } else { toast.info('Vacante no encontrada. Verificá en mapa.'); }
             } else if (novedad.type === 'TURA_EXTENSION' || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'TURA' && novedad.parentEmpleadoId)) {
