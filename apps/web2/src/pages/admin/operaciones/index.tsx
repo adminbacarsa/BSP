@@ -28,6 +28,14 @@ import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
 import { app, db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
+import {
+    novedadActorName,
+    novedadBodyText,
+    novedadHeadline,
+    novedadSubline,
+    isInformationalNovedad,
+    COBERTURA_RESUELTA_META,
+} from '@/lib/operaciones/novedadAlertDisplay';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
@@ -1620,6 +1628,7 @@ const WorkedDayOffModal = ({ isOpen, onClose, shift }: any) => {
 // â"€â"€ Popup de detalle de novedad â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const TYPE_META: Record<string, { label: string; bg: string; text: string; border: string }> = {
     AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',   bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
+    AUSENCIA_OPERATIVA:           { label: 'AUSENCIA',        bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
     AUSENCIA_CORTO_PLAZO:         { label: 'URGENTE',         bg: 'bg-red-600',    text: 'text-white',     border: 'border-red-500' },
     AVISO_AUSENCIA_ANTICIPADA:    { label: 'ANTICIPADA',      bg: 'bg-amber-500',  text: 'text-white',     border: 'border-amber-400' },
     VACANTE_PROTOCOLO_COBERTURA:  { label: 'PROTOCOLO',       bg: 'bg-orange-500', text: 'text-white',     border: 'border-orange-400' },
@@ -1634,19 +1643,31 @@ const TYPE_META: Record<string, { label: string; bg: string; text: string; borde
     REFUERZO_CLIENTE_PENDIENTE:   { label: 'REFUERZO CLIENTE', bg: 'bg-violet-600', text: 'text-white',   border: 'border-violet-500' },
     VACANTE_OPERATIVA:            { label: 'VACANTE RFZ/TURA', bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-500' },
     TURA_EXTENSION:               { label: 'TURA EXT', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
+    LLEGADA_TARDE:                { label: 'LLEGADA TARDE',   bg: 'bg-amber-500',  text: 'text-white',     border: 'border-amber-400' },
+    COBERTURA_RESUELTA:           { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.bg, text: COBERTURA_RESUELTA_META.text, border: COBERTURA_RESUELTA_META.border },
+    TURNO_COMPLETADO_AUTO:        { label: 'TURNO FIN',       bg: 'bg-slate-600',  text: 'text-white',     border: 'border-slate-500' },
+    INGRESO_AUTOREGISTRO:         { label: 'INGRESO',         bg: 'bg-teal-600',   text: 'text-white',     border: 'border-teal-500' },
 };
 const DEFAULT_META = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
 
-const AUTO_CLOSE_MS = 3000;
+/** Auto-cierre solo en informativas cortas; al abrir VER no apurar al operador. */
+const AUTO_CLOSE_MS = 10000;
 
 const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onClose: () => void; onAtender: (n: any) => void }) => {
-    const [remaining, setRemaining] = React.useState(AUTO_CLOSE_MS);
+    const isInfo = isInformationalNovedad(novedad);
+    const autoMs = isInfo ? 0 : AUTO_CLOSE_MS;
+    const [remaining, setRemaining] = React.useState(autoMs || AUTO_CLOSE_MS);
     const intervalRef = React.useRef<any>(null);
     const meta = TYPE_META[novedad?.type] ?? DEFAULT_META;
+    const actor = novedadActorName(novedad);
+    const body = novedadBodyText(novedad) || novedadSubline(novedad);
 
     React.useEffect(() => {
-        if (!novedad) return;
-        setRemaining(AUTO_CLOSE_MS);
+        if (!novedad || !autoMs) {
+            clearInterval(intervalRef.current);
+            return;
+        }
+        setRemaining(autoMs);
         const tick = 50;
         intervalRef.current = setInterval(() => {
             setRemaining(r => {
@@ -1655,15 +1676,16 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
             });
         }, tick);
         return () => clearInterval(intervalRef.current);
-    }, [novedad?.id]);
+    }, [novedad?.id, autoMs]);
 
     if (!novedad) return null;
 
     const ts = novedad.createdAt?.seconds ? new Date(novedad.createdAt.seconds * 1000) : null;
-    const pct = (remaining / AUTO_CLOSE_MS) * 100;
+    const pct = autoMs ? (remaining / autoMs) * 100 : 100;
 
     const pause = () => clearInterval(intervalRef.current);
     const resume = () => {
+        if (!autoMs) return;
         clearInterval(intervalRef.current);
         const tick = 50;
         intervalRef.current = setInterval(() => {
@@ -1689,16 +1711,16 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                 <div className="h-1 w-full bg-white/10">
                     <div
                         className={`h-full ${meta.bg} transition-none`}
-                        style={{ width: `${pct}%`, transition: 'width 50ms linear' }}
+                        style={{ width: `${pct}%`, transition: autoMs ? 'width 50ms linear' : undefined }}
                     />
                 </div>
 
                 {/* Header */}
-                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between`}>
+                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between gap-2`}>
                     <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>
-                        {novedad.title ? String(novedad.title).slice(0, 48) : meta.label}
+                        {meta.label}
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                         {ts && (
                             <span className="text-[10px] font-mono text-white/70">
                                 {ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })}
@@ -1710,20 +1732,18 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
 
                 {/* Cuerpo */}
                 <div className="px-5 py-4 space-y-3">
-                    {/* Empleado */}
-                    {novedad.employeeName && (
+                    {actor && (
                         <div className="flex items-center gap-2">
                             <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-sm font-black text-white shrink-0">
-                                {novedad.employeeName[0]?.toUpperCase()}
+                                {actor[0]?.toUpperCase()}
                             </div>
-                            <div>
-                                <p className="text-white font-black text-sm leading-tight">{novedad.employeeName}</p>
+                            <div className="min-w-0">
+                                <p className="text-white font-black text-sm leading-tight truncate">{actor}</p>
                                 {novedad.positionName && <p className="text-white/50 text-[10px]">{novedad.positionName}</p>}
                             </div>
                         </div>
                     )}
 
-                    {/* Objetivo */}
                     {novedad.objectiveName && (
                         <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2">
                             <MapPin size={13} className="text-white/40 shrink-0"/>
@@ -1731,7 +1751,12 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                         </div>
                     )}
 
-                    {/* Refuerzo / vacante cliente */}
+                    {novedad.type === 'COBERTURA_RESUELTA' && novedad.coverageType && (
+                        <p className="text-[10px] font-black uppercase tracking-wide text-emerald-300/90">
+                            Tipo: {String(novedad.coverageType)}
+                        </p>
+                    )}
+
                     {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA' || novedad.type === 'TURA_EXTENSION') && (
                         <div className="space-y-1.5 text-xs text-white/80">
                             {novedad.tipoSolicitud && (
@@ -1755,14 +1780,14 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                         </div>
                     )}
 
-                    {/* Descripción completa */}
-                    {novedad.description && (
-                        <p className="text-white/70 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
-                            {novedad.description}
+                    {body ? (
+                        <p className="text-white/80 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
+                            {body}
                         </p>
+                    ) : (
+                        <p className="text-white/40 text-xs italic">Sin detalle adicional en esta alerta.</p>
                     )}
 
-                    {/* Tiempo al turno */}
                     {novedad.minutesBeforeShift != null && novedad.minutesBeforeShift > 0 && (
                         <div className="flex items-center gap-1.5 text-amber-400">
                             <Clock size={12}/>
@@ -1774,14 +1799,16 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                 {/* Footer: acción + auto-cierre */}
                 <div className="px-4 pb-4 flex items-center justify-between gap-3">
                     <span className="text-white/30 text-[10px]">
-                        Cerrando en {Math.ceil(remaining / 1000)}s · hover para pausar
+                        {autoMs
+                            ? `Cerrando en ${Math.ceil(remaining / 1000)}s · hover para pausar`
+                            : 'Confirmá lectura para quitarla de Alertas'}
                     </span>
                     <button
                         onClick={() => { onAtender(novedad); onClose(); }}
                         className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black text-white transition-all hover:scale-105 ${meta.bg}`}
                     >
                         <CheckCircle size={13}/>
-                        ATENDER
+                        {isInfo ? 'ENTENDIDO' : 'ATENDER'}
                     </button>
                 </div>
             </div>
@@ -5086,6 +5113,7 @@ export default function OperacionesPage() {
                               LLEGADA_TARDE:               { label: 'TARDE',   bg: 'bg-amber-400 text-white animate-pulse', border: 'border-l-amber-400' },
                               TURNO_COMPLETADO_AUTO:       { label: 'FIN',     bg: 'bg-slate-100 text-slate-600',           border: 'border-l-slate-300' },
                               INGRESO_AUTOREGISTRO:        { label: 'INGRESO', bg: 'bg-teal-100 text-teal-700',             border: 'border-l-teal-500' },
+                              COBERTURA_RESUELTA:          { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.listBg, border: COBERTURA_RESUELTA_META.listBorder },
                             };
                             const getMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
                             const groups: { type: string; items: any[] }[] = [];
@@ -5111,22 +5139,21 @@ export default function OperacionesPage() {
                                   </div>
                                   {items.map((n: any) => {
                                     const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                                    const headline = novedadHeadline(n);
+                                    const sub = novedadSubline(n);
                                     return (
                                       <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${meta.border} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
                                         <div className="flex-1 min-w-0">
                                           <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                            {n.employeeName && n.objectiveName
-                                              ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                              : n.objectiveName || n.employeeName || n.type}
-                                            {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
+                                            {headline}
                                           </p>
-                                          <p className="text-[9px] text-slate-400 truncate leading-tight">{n.description || '-'}</p>
+                                          <p className="text-[9px] text-slate-400 truncate leading-tight">{sub || '—'}</p>
                                         </div>
                                         <span className="text-[9px] text-slate-400 font-mono shrink-0">
                                           {ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}
                                         </span>
                                         <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
-                                          className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0" title="Atender">
+                                          className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0" title={isInformationalNovedad(n) ? 'Entendido' : 'Atender'}>
                                           <CheckCircle size={11}/>
                                         </button>
                                       </div>
@@ -5287,14 +5314,16 @@ export default function OperacionesPage() {
                                             </div>
                                         ))}
                                         {pendingNovedades.slice(0, 12).map((n: any) => {
-                                            const tl: Record<string,string> = { AUSENCIA_CORTO_PLAZO:'URGENTE', AVISO_AUSENCIA_ANTICIPADA:'ANTIC', VACANTE_PROTOCOLO_COBERTURA:'PROT', AUSENCIA_AUTO:'AUS', AUSENCIA_OPERATIVA:'AUS', LLEGADA_TARDE:'TARDE', POSICION_SIN_RELEVO:'REL', RETENCION_LARGA:'REC', RELEVO_INMINENTE:'RELEVO', TURNO_COMPLETADO_AUTO:'FIN' };
+                                            const tl: Record<string,string> = { AUSENCIA_CORTO_PLAZO:'URGENTE', AVISO_AUSENCIA_ANTICIPADA:'ANTIC', VACANTE_PROTOCOLO_COBERTURA:'PROT', AUSENCIA_AUTO:'AUS', AUSENCIA_OPERATIVA:'AUS', LLEGADA_TARDE:'TARDE', POSICION_SIN_RELEVO:'REL', RETENCION_LARGA:'REC', RELEVO_INMINENTE:'RELEVO', TURNO_COMPLETADO_AUTO:'FIN', COBERTURA_RESUELTA:'CUBIERTO' };
                                             const label = tl[n.type] || (n.type || '').replace(/_/g,' ').slice(0,8).toUpperCase();
+                                            const headline = novedadHeadline(n);
+                                            const sub = novedadSubline(n);
                                             return (
                                             <div key={n.id} className="px-3 py-2 border-b border-slate-50 text-[10px] flex items-center gap-2">
-                                                <span className="text-[8px] font-black bg-slate-700 text-white px-1 py-0.5 rounded shrink-0">{label}</span>
+                                                <span className={`text-[8px] font-black px-1 py-0.5 rounded shrink-0 ${n.type === 'COBERTURA_RESUELTA' ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-white'}`}>{label}</span>
                                                 <div className="flex-1 min-w-0">
-                                                    <p className="font-bold text-slate-700 truncate">{n.employeeName ? `${n.employeeName} · ${n.objectiveName || ''}` : (n.objectiveName || n.type)}</p>
-                                                    {n.description && <p className="text-slate-400 truncate">{n.description}</p>}
+                                                    <p className="font-bold text-slate-700 truncate">{headline}</p>
+                                                    {sub ? <p className="text-slate-400 truncate">{sub}</p> : null}
                                                 </div>
                                                 <button type="button" onClick={() => setDetailNovedad(n)} className="text-[9px] font-black text-indigo-600 shrink-0">VER</button>
                                             </div>
@@ -5447,6 +5476,7 @@ export default function OperacionesPage() {
                                     INGRESO_AUTOREGISTRO:        { label: 'INGRESO', bg: 'bg-teal-100 text-teal-700',                border: 'border-l-teal-500',   actionBg: 'bg-teal-600 hover:bg-teal-700' },
                                     VACANTE_OPERATIVA:           { label: 'VAC RFZ', bg: 'bg-fuchsia-100 text-fuchsia-800',         border: 'border-l-fuchsia-500', actionBg: 'bg-fuchsia-700 hover:bg-fuchsia-800' },
                                     TURA_EXTENSION:              { label: 'TURA',    bg: 'bg-violet-100 text-violet-800',           border: 'border-l-violet-500', actionBg: 'bg-violet-700 hover:bg-violet-800' },
+                                    COBERTURA_RESUELTA:          { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.listBg, border: COBERTURA_RESUELTA_META.listBorder, actionBg: COBERTURA_RESUELTA_META.actionBg },
                                 };
                                 const getMeta = (t: string) => NOV_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300', actionBg: 'bg-slate-700 hover:bg-slate-800' };
                                 // Agrupar por tipo
@@ -5475,18 +5505,18 @@ export default function OperacionesPage() {
                                             </div>
                                             {items.map((n: any) => {
                                                 const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                                                const headline = novedadHeadline(n);
+                                                const sub = novedadSubline(n);
                                                 return (
                                                     <div key={n.id} className={`flex items-center gap-2 px-3 py-1.5 border-l-4 ${meta.border} bg-white border-b border-slate-50 hover:bg-slate-50/50 transition-colors`}>
                                                         <div className="flex-1 min-w-0">
                                                             <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                                                {n.employeeName && n.objectiveName
-                                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                                                    : n.objectiveName || n.employeeName || n.type}
+                                                                {headline}
                                                             </p>
-                                                            <p className="text-[9px] text-slate-400 truncate leading-tight">{n.positionName || n.description || ''}</p>
+                                                            {sub ? <p className="text-[9px] text-slate-400 truncate leading-tight">{sub}</p> : null}
                                                         </div>
                                                         <span className="text-[9px] font-mono text-slate-500 w-10 text-right shrink-0">{ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}</span>
-                                        <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }} className="p-1 bg-slate-700 text-white rounded hover:bg-slate-800 transition-colors shrink-0" title="Atender"><CheckCircle size={10}/></button>
+                                        <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }} className="p-1 bg-slate-700 text-white rounded hover:bg-slate-800 transition-colors shrink-0" title={isInformationalNovedad(n) ? 'Entendido' : 'Atender'}><CheckCircle size={10}/></button>
                                                         <button onClick={() => { setNotifPanelOpen(false); setDetailNovedad(n); }}
                                                             className={`text-[9px] font-black text-white px-2 py-1 rounded-lg w-16 text-center shrink-0 transition-colors ${meta.actionBg}`}>VER</button>
                                                     </div>

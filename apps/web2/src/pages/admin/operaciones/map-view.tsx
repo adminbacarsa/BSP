@@ -28,6 +28,14 @@ import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, Lo
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
 import { WAComposeModal } from '@/components/common/WAComposeModal';
+import {
+    novedadActorName,
+    novedadBodyText,
+    novedadHeadline,
+    novedadSubline,
+    isInformationalNovedad,
+    COBERTURA_RESUELTA_META,
+} from '@/lib/operaciones/novedadAlertDisplay';
 import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-400 font-mono">CARGANDO MAPA TÁCTICO...</div>, ssr: false });
@@ -767,6 +775,7 @@ const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if 
 // ── NOVEDAD DETAIL POPUP ─────────────────────────────────────────────────────
 const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; border: string }> = {
     AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',  bg: 'bg-rose-600',   text: 'text-white', border: 'border-rose-500' },
+    AUSENCIA_OPERATIVA:           { label: 'AUSENCIA',       bg: 'bg-rose-600',   text: 'text-white', border: 'border-rose-500' },
     AUSENCIA_CORTO_PLAZO:         { label: 'URGENTE',        bg: 'bg-red-600',    text: 'text-white', border: 'border-red-500' },
     AVISO_AUSENCIA_ANTICIPADA:    { label: 'ANTICIPADA',     bg: 'bg-amber-500',  text: 'text-white', border: 'border-amber-400' },
     VACANTE_PROTOCOLO_COBERTURA:  { label: 'PROTOCOLO',      bg: 'bg-orange-500', text: 'text-white', border: 'border-orange-400' },
@@ -781,18 +790,27 @@ const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; b
     REFUERZO_CLIENTE_PENDIENTE:   { label: 'REFUERZO CLIENTE', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
     VACANTE_OPERATIVA:            { label: 'VACANTE RFZ/TURA', bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-500' },
     TURA_EXTENSION:               { label: 'TURA EXT', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
+    LLEGADA_TARDE:                { label: 'LLEGADA TARDE',  bg: 'bg-amber-500',  text: 'text-white', border: 'border-amber-400' },
+    COBERTURA_RESUELTA:           { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.bg, text: COBERTURA_RESUELTA_META.text, border: COBERTURA_RESUELTA_META.border },
 };
 const DEFAULT_META_MAP = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
-const AUTO_CLOSE_MAP = 3000;
+const AUTO_CLOSE_MAP = 10000;
 
 const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; onClose: () => void; onAtender: (n: any) => void }) => {
-    const [remaining, setRemaining] = React.useState(AUTO_CLOSE_MAP);
+    const isInfo = isInformationalNovedad(novedad);
+    const autoMs = isInfo ? 0 : AUTO_CLOSE_MAP;
+    const [remaining, setRemaining] = React.useState(autoMs || AUTO_CLOSE_MAP);
     const intervalRef = React.useRef<any>(null);
     const meta = TYPE_META_MAP[novedad?.type] ?? DEFAULT_META_MAP;
+    const actor = novedadActorName(novedad);
+    const body = novedadBodyText(novedad) || novedadSubline(novedad);
 
     React.useEffect(() => {
-        if (!novedad) return;
-        setRemaining(AUTO_CLOSE_MAP);
+        if (!novedad || !autoMs) {
+            clearInterval(intervalRef.current);
+            return;
+        }
+        setRemaining(autoMs);
         const tick = 50;
         intervalRef.current = setInterval(() => {
             setRemaining(r => {
@@ -801,14 +819,15 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
             });
         }, tick);
         return () => clearInterval(intervalRef.current);
-    }, [novedad?.id]);
+    }, [novedad?.id, autoMs]);
 
     if (!novedad) return null;
 
     const ts = novedad.createdAt?.seconds ? new Date(novedad.createdAt.seconds * 1000) : null;
-    const pct = (remaining / AUTO_CLOSE_MAP) * 100;
+    const pct = autoMs ? (remaining / autoMs) * 100 : 100;
     const pause = () => clearInterval(intervalRef.current);
     const resume = () => {
+        if (!autoMs) return;
         clearInterval(intervalRef.current);
         const tick = 50;
         intervalRef.current = setInterval(() => {
@@ -830,17 +849,15 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                 onMouseEnter={pause}
                 onMouseLeave={resume}
             >
-                {/* Barra auto-cierre */}
                 <div className="h-1 w-full bg-white/10">
                     <div className={`h-full ${meta.bg} transition-none`}
-                         style={{ width: `${pct}%`, transition: 'width 50ms linear' }} />
+                         style={{ width: `${pct}%`, transition: autoMs ? 'width 50ms linear' : undefined }} />
                 </div>
-                {/* Header */}
-                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between`}>
+                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between gap-2`}>
                     <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>
-                        {novedad.title ? String(novedad.title).slice(0, 48) : meta.label}
+                        {meta.label}
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                         {ts && (
                             <span className="text-[10px] font-mono text-white/70">
                                 {ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })}
@@ -849,15 +866,14 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                         <button onClick={onClose} className="text-white/60 hover:text-white transition-colors"><X size={14}/></button>
                     </div>
                 </div>
-                {/* Cuerpo */}
                 <div className="px-5 py-4 space-y-3">
-                    {novedad.employeeName && (
+                    {actor && (
                         <div className="flex items-center gap-2">
                             <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-sm font-black text-white shrink-0">
-                                {novedad.employeeName[0]?.toUpperCase()}
+                                {actor[0]?.toUpperCase()}
                             </div>
-                            <div>
-                                <p className="text-white font-black text-sm leading-tight">{novedad.employeeName}</p>
+                            <div className="min-w-0">
+                                <p className="text-white font-black text-sm leading-tight truncate">{actor}</p>
                                 {novedad.positionName && <p className="text-white/50 text-[10px]">{novedad.positionName}</p>}
                             </div>
                         </div>
@@ -868,57 +884,31 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                             <span className="text-white/90 text-xs font-bold">{novedad.objectiveName}</span>
                         </div>
                     )}
-                    {novedad.clientName && novedad.clientName !== novedad.objectiveName && (
-                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5">
-                            <span className="text-white/40 text-[10px] shrink-0">Cliente</span>
-                            <span className="text-white/70 text-xs">{novedad.clientName}</span>
-                        </div>
-                    )}
-                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA' || novedad.type === 'TURA_EXTENSION') && (
-                        <div className="space-y-1.5 text-xs text-white/80">
-                            {novedad.tipoSolicitud && (
-                                <p><span className="text-white/50">Tipo:</span> <span className="font-bold text-white">{novedad.tipoSolicitud}</span></p>
-                            )}
-                            {(novedad.fecha || novedad.startTime) && (
-                                <p><span className="text-white/50">Cuándo:</span> {novedad.fecha || '—'} · {novedad.startTime || ''}{novedad.endTime ? `–${novedad.endTime}` : ''}</p>
-                            )}
-                            {novedad.cantidadPax != null && novedad.tipoSolicitud === 'RFZ' && (
-                                <p><span className="text-white/50">Personas:</span> {novedad.cantidadPax}</p>
-                            )}
-                            {novedad.horasVendidasEstimadas != null && (
-                                <p><span className="text-white/50">Hs. vendidas (pactadas):</span> {novedad.horasVendidasEstimadas}h</p>
-                            )}
-                            {novedad.parentEmpleadoName && (
-                                <p><span className="text-white/50">Guardia base:</span> {novedad.parentEmpleadoName}</p>
-                            )}
-                            {novedad.motivo && (
-                                <p className="text-white/60 italic">{novedad.motivo}</p>
-                            )}
-                        </div>
-                    )}
-                    {novedad.description && (
-                        <p className="text-white/70 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
-                            {novedad.description}
+                    {novedad.type === 'COBERTURA_RESUELTA' && novedad.coverageType && (
+                        <p className="text-[10px] font-black uppercase tracking-wide text-emerald-300/90">
+                            Tipo: {String(novedad.coverageType)}
                         </p>
                     )}
-                    {novedad.minutesBeforeShift != null && novedad.minutesBeforeShift > 0 && (
-                        <div className="flex items-center gap-1.5 text-amber-400">
-                            <Clock size={12}/>
-                            <span className="text-xs font-bold">{novedad.minutesBeforeShift} min al inicio del turno</span>
-                        </div>
+                    {body ? (
+                        <p className="text-white/80 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
+                            {body}
+                        </p>
+                    ) : (
+                        <p className="text-white/40 text-xs italic">Sin detalle adicional en esta alerta.</p>
                     )}
                 </div>
-                {/* Footer */}
                 <div className="px-4 pb-4 flex items-center justify-between gap-3">
                     <span className="text-white/30 text-[10px]">
-                        Cerrando en {Math.ceil(remaining / 1000)}s · hover pausa
+                        {autoMs
+                            ? `Cerrando en ${Math.ceil(remaining / 1000)}s · hover pausa`
+                            : 'Confirmá lectura para quitarla de Alertas'}
                     </span>
                     <button
                         onClick={() => { onAtender(novedad); onClose(); }}
                         className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black text-white transition-all hover:scale-105 ${meta.bg}`}
                     >
                         <CheckCircle size={13}/>
-                        ATENDER
+                        {isInfo ? 'ENTENDIDO' : 'ATENDER'}
                     </button>
                 </div>
             </div>
@@ -1525,26 +1515,24 @@ export default function TacticalMapView() {
                     REFUERZO_CLIENTE_PENDIENTE:  { label: 'RFZ CLI', bg: 'bg-violet-100 text-violet-800',       border: 'border-l-violet-500' },
                     VACANTE_OPERATIVA:           { label: 'VAC RFZ', bg: 'bg-fuchsia-100 text-fuchsia-800',     border: 'border-l-fuchsia-500' },
                     TURA_EXTENSION:              { label: 'TURA', bg: 'bg-violet-100 text-violet-800',       border: 'border-l-violet-500' },
+                    COBERTURA_RESUELTA:          { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.listBg, border: COBERTURA_RESUELTA_META.listBorder },
                 };
                 const getNovMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
 
                 const renderNovedad = (n: any) => {
                     const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
                     const meta = getNovMeta(n.type);
+                    const headline = novedadHeadline(n);
+                    const sub = novedadSubline(n);
                     return (
                         <div key={n.id}
                             onClick={() => setDetailNovedad(n)}
                             className={`px-3 py-2 flex items-center gap-2 border-l-4 ${meta.border} border-b border-slate-50 hover:bg-slate-50/80 transition-colors cursor-pointer`}>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[11px] font-bold text-slate-800 leading-snug truncate">
-                                    {n.title
-                                        ? String(n.title)
-                                        : n.employeeName && n.objectiveName
-                                            ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                            : n.objectiveName || n.employeeName || n.type}
-                                    {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
+                                    {headline}
                                 </p>
-                                <p className="text-[9px] text-slate-400 leading-tight truncate">{n.description || '-'}</p>
+                                <p className="text-[9px] text-slate-400 leading-tight truncate">{sub || '—'}</p>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
                                 <span className="text-[9px] text-slate-400 font-mono">
@@ -1557,7 +1545,7 @@ export default function TacticalMapView() {
                                     </button>
                                 )}
                                 <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
-                                    className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Atender">
+                                    className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title={isInformationalNovedad(n) ? 'Entendido' : 'Atender'}>
                                     <CheckCircle size={10}/>
                                 </button>
                             </div>
@@ -1788,44 +1776,11 @@ export default function TacticalMapView() {
                 ctx={waData.ctx}
             />
             {detailNovedad && (
-                <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setDetailNovedad(null)}>
-                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">
-                                {detailNovedad.title ? String(detailNovedad.title).slice(0, 48) : (TYPE_META_MAP as any)[detailNovedad?.type]?.label || detailNovedad?.type}
-                            </span>
-                            <button onClick={() => setDetailNovedad(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                                <X size={16}/>
-                            </button>
-                        </div>
-                        {detailNovedad.employeeName && (
-                            <p className="font-bold text-slate-800 text-sm mb-1">{detailNovedad.employeeName}</p>
-                        )}
-                        {detailNovedad.objectiveName && (
-                            <p className="text-xs text-slate-500 mb-1">{detailNovedad.objectiveName}</p>
-                        )}
-                        {(detailNovedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || detailNovedad.type === 'VACANTE_OPERATIVA') && (
-                            <div className="text-xs text-slate-600 mb-3 space-y-1">
-                                {detailNovedad.fecha && <p><span className="text-slate-400">Fecha:</span> {detailNovedad.fecha}</p>}
-                                {(detailNovedad.startTime || detailNovedad.endTime) && (
-                                    <p><span className="text-slate-400">Horario:</span> {detailNovedad.startTime || ''}{detailNovedad.endTime ? `–${detailNovedad.endTime}` : ''}</p>
-                                )}
-                                {detailNovedad.horasVendidasEstimadas != null && (
-                                    <p><span className="text-slate-400">Hs. pactadas:</span> {detailNovedad.horasVendidasEstimadas}h</p>
-                                )}
-                            </div>
-                        )}
-                        {detailNovedad.description && (
-                            <p className="text-sm text-slate-600 mb-4 leading-relaxed">{detailNovedad.description}</p>
-                        )}
-                        <button
-                            onClick={() => { handleAtenderNovedad(detailNovedad); setDetailNovedad(null); }}
-                            className="w-full py-2.5 bg-slate-800 text-white text-sm font-bold rounded-xl hover:bg-slate-700 transition-colors"
-                        >
-                            ATENDER
-                        </button>
-                    </div>
-                </div>
+                <NovedadDetailPopupMap
+                    novedad={detailNovedad}
+                    onClose={() => setDetailNovedad(null)}
+                    onAtender={handleAtenderNovedad}
+                />
             )}
         </div>
     );
