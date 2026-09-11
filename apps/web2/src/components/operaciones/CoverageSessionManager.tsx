@@ -355,7 +355,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     setLoading('notif_' + empId);
     try {
       const ref = await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
-        userId: empId,
+        employeeId: empId,
+        userId: empId,   // legacy compat
         type: 'CONVOCATORIA_COBERTURA',
         title: `Protocolo de cobertura · ${step.label}`,
         body: `Se te solicita cubrir el turno en ${absenceShift.objectiveName} (${hiStart}–${hiEnd}).`,
@@ -431,8 +432,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       const extEmpId = extShift?.employeeId || s.selectedExtId!;
       const advEmpId = advShift?.employeeId || s.selectedAdvId!;
       const [extRef, advRef] = await Promise.all([
-        addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: extEmpId, type: 'RETENCION', title: 'Extensión de jornada', body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: extShift?.id || null, protocolStep: 'RETENCION_EXT', read: false, createdAt: serverTimestamp() }, tid)),
-        addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: advEmpId, type: 'ADELANTO', title: 'Adelanto de turno', body: `Tu turno en ${absenceShift.objectiveName} fue adelantado.`, objectiveId: absenceShift.objectiveId, shiftId: advShift?.id || null, protocolStep: 'RETENCION_ADV', read: false, createdAt: serverTimestamp() }, tid)),
+        addDoc(collection(db, 'user_notifications'), stampEmpresaId({ employeeId: extEmpId, userId: extEmpId, type: 'RETENCION', title: 'Extensión de jornada', body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: extShift?.id || null, protocolStep: 'RETENCION_EXT', read: false, createdAt: serverTimestamp() }, tid)),
+        addDoc(collection(db, 'user_notifications'), stampEmpresaId({ employeeId: advEmpId, userId: advEmpId, type: 'ADELANTO', title: 'Adelanto de turno', body: `Tu turno en ${absenceShift.objectiveName} fue adelantado.`, objectiveId: absenceShift.objectiveId, shiftId: advShift?.id || null, protocolStep: 'RETENCION_ADV', read: false, createdAt: serverTimestamp() }, tid)),
       ]);
       onUpd({ status: 'PENDING_DUAL', pendingExt: { notifId: extRef.id, empId: extEmpId, sec: step.timeoutSec }, pendingAdv: { notifId: advRef.id, empId: advEmpId, sec: step.timeoutSec } });
       listenNotif(extRef.id, 'ext');
