@@ -1,0 +1,1790 @@
+{
+  "titulo": "Control Directivo",
+  "empresa": "Bacar",
+  "periodo": "Agosto 2026",
+  "periodoDesde": "2026-08-01",
+  "periodoHasta": "2026-08-31",
+  "generado": "2026-09-02T18:08:56Z",
+  "modo": "estatico",
+  "linkModo": "flat",
+  "driveFolderId": null,
+  "navLinks": [
+    {
+      "id": "control_directivo",
+      "label": "Control Directivo",
+      "href": "index.html"
+    },
+    {
+      "id": "ventas_cobranzas",
+      "label": "Ventas y cobranzas",
+      "href": "ventas-cobranzas.html"
+    },
+    {
+      "id": "facturas",
+      "label": "Facturas",
+      "href": "facturas-electronicas.html"
+    },
+    {
+      "id": "compras",
+      "label": "Compras",
+      "href": "compras.html"
+    },
+    {
+      "id": "mano_obra",
+      "label": "Costo laboral",
+      "href": "mano-de-obra.html"
+    },
+    {
+      "id": "camioneros",
+      "label": "Camioneros",
+      "href": "camioneros.html"
+    },
+    {
+      "id": "imputacion",
+      "label": "Editor UN",
+      "href": "listado-imputacion.html"
+    }
+  ],
+  "modulos": {
+    "ventas_cobranzas": {
+      "ventas": 4031937882.28,
+      "fc": 4137174491.01,
+      "nc": -1582833.85,
+      "nd": 1584093.16,
+      "cobranzas": 4196251775.9,
+      "cxcAlta": 5009379837.31,
+      "cxcPago": 4827326635.31,
+      "impuesto": -215946763.76,
+      "gapCobroVenta": 164313893.62,
+      "n": 1525,
+      "nRubros": 11,
+      "nCanales": 7,
+      "topRubros": [
+        {
+          "label": "INGRESOS POR SEGURIDAD PRIVADA",
+          "valor": 1708523047.83,
+          "pct": 42.37
+        },
+        {
+          "label": "SERVICIOS TERCERIZADOS DE TESORERIA",
+          "valor": 1340173242.12,
+          "pct": 33.24
+        },
+        {
+          "label": "INGRESOS POR RECAUDACION",
+          "valor": 954721523.61,
+          "pct": 23.68
+        },
+        {
+          "label": "ALQUILER CAJAS DE SEGURIDAD",
+          "valor": 12179984.46,
+          "pct": 0.3
+        },
+        {
+          "label": "OTROS INGRESOS",
+          "valor": 4471627.96,
+          "pct": 0.11
+        },
+        {
+          "label": "ING. POR SERVICIOS DE ATM",
+          "valor": 3995990.0,
+          "pct": 0.1
+        },
+        {
+          "label": "INGRESOS POR TRASLADOS",
+          "valor": 3534569.3,
+          "pct": 0.09
+        },
+        {
+          "label": "INGRESOS POR SERVICIOS",
+          "valor": 3121458.71,
+          "pct": 0.08
+        }
+      ],
+      "topCanales": [
+        {
+          "label": "Banco Provincia",
+          "valor": 2629193987.29,
+          "pct": 62.66
+        },
+        {
+          "label": "Banco Julio",
+          "valor": 989600456.28,
+          "pct": 23.58
+        },
+        {
+          "label": "Cheques de terceros",
+          "valor": 423943425.26,
+          "pct": 10.1
+        },
+        {
+          "label": "Retención SUSS",
+          "valor": 94815272.87,
+          "pct": 2.26
+        },
+        {
+          "label": "Caja",
+          "valor": 40228840.0,
+          "pct": 0.96
+        },
+        {
+          "label": "Banco Patagonia",
+          "valor": 16439443.12,
+          "pct": 0.39
+        },
+        {
+          "label": "Compensación cuentas",
+          "valor": 2030351.08,
+          "pct": 0.05
+        }
+      ],
+      "concTop5Rubros": 0.9971,
+      "concTop5Canales": 0.9956,
+      "periodo": "01/08/2026 al 31/08/2026",
+      "tipoCorte": "efecto_contable",
+      "fuente": "\\\\192.168.0.57\\Sistemas\\reporte-272.xls"
+    },
+    "facturas": {
+      "bruto": 4473109298.48,
+      "nc": 127337820.32,
+      "neto": 4345771478.16,
+      "n": 167,
+      "nFc": 148,
+      "nNc": 19,
+      "nClientes": 77,
+      "ticket": 30223711.48,
+      "topClientes": [
+        {
+          "label": "BANCO DE LA PROVINCIA DE CORDOBA SA",
+          "valor": 1768962883.84,
+          "pct": 40.71
+        },
+        {
+          "label": "MINISTERIO DE SALUD",
+          "valor": 654261960.02,
+          "pct": 15.06
+        },
+        {
+          "label": "LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.",
+          "valor": 490534141.11,
+          "pct": 11.29
+        },
+        {
+          "label": "CET S.A.- CONCESIONARIA DE ENTRETENIMIENTOS Y TURISMO",
+          "valor": 306250901.69,
+          "pct": 7.05
+        },
+        {
+          "label": "CAMINOS DE LAS SIERRAS S.A.",
+          "valor": 266006337.64,
+          "pct": 6.12
+        },
+        {
+          "label": "TRANSPORTADORA DE CAUDALES JUNCADELLA S.A.",
+          "valor": 136382307.69,
+          "pct": 3.14
+        },
+        {
+          "label": "CONIFERAL SACIF",
+          "valor": 112025917.01,
+          "pct": 2.58
+        },
+        {
+          "label": "TADICOR S.A.",
+          "valor": 69266831.1,
+          "pct": 1.59
+        },
+        {
+          "label": "MIGUEL BECERRA S.A.",
+          "valor": 67901332.04,
+          "pct": 1.56
+        },
+        {
+          "label": "SECRETARIA GENERAL DE HABITAT Y DESARROLLO EMPRENDEDOR O. P.",
+          "valor": 48500000.0,
+          "pct": 1.12
+        }
+      ],
+      "concTop5Clientes": 0.8022,
+      "serieDiaria": [
+        {
+          "fecha": "2026-08-03",
+          "neto": 764017781.32,
+          "n": 70
+        },
+        {
+          "fecha": "2026-08-06",
+          "neto": 4681121.18,
+          "n": 10
+        },
+        {
+          "fecha": "2026-08-07",
+          "neto": 6897198.73,
+          "n": 1
+        },
+        {
+          "fecha": "2026-08-10",
+          "neto": 10947754.11,
+          "n": 10
+        },
+        {
+          "fecha": "2026-08-18",
+          "neto": 10506722.54,
+          "n": 7
+        },
+        {
+          "fecha": "2026-08-19",
+          "neto": -2375243.19,
+          "n": 2
+        },
+        {
+          "fecha": "2026-08-24",
+          "neto": 3680449.83,
+          "n": 2
+        },
+        {
+          "fecha": "2026-08-25",
+          "neto": -3017959.99,
+          "n": 2
+        },
+        {
+          "fecha": "2026-08-27",
+          "neto": 103290560.83,
+          "n": 3
+        },
+        {
+          "fecha": "2026-08-28",
+          "neto": 20219721.1,
+          "n": 4
+        },
+        {
+          "fecha": "2026-08-31",
+          "neto": 3426923371.7,
+          "n": 56
+        }
+      ],
+      "porLetra": [
+        {
+          "label": "A",
+          "valor": 3699407425.19,
+          "pct": 82.7
+        },
+        {
+          "label": "B",
+          "valor": 773701873.29,
+          "pct": 17.3
+        }
+      ],
+      "periodoDesde": "2026-08-01",
+      "periodoHasta": "2026-08-31",
+      "tipoCorte": "fecha_emision_cae",
+      "fuente": "DATOS.CSV"
+    },
+    "compras": {
+      "total": 517610961.86,
+      "bruto": 708702790.83,
+      "nc": 191091828.97,
+      "neto": 287495625.81,
+      "iva": 59137419.72,
+      "n": 725,
+      "nComp": 677,
+      "nProv": 287,
+      "nCta": 57,
+      "topProveedores": [
+        {
+          "label": "FILMEC S.A.",
+          "valor": 67111338.22,
+          "pct": 12.97
+        },
+        {
+          "label": "ASOCIACION DEPORTIVA ATENAS",
+          "valor": 40000000.0,
+          "pct": 7.73
+        },
+        {
+          "label": "PERMAQUIM S.A.",
+          "valor": 34902711.27,
+          "pct": 6.74
+        },
+        {
+          "label": "LA VOZ DEL INTERIOR S.A.",
+          "valor": 34606000.0,
+          "pct": 6.69
+        },
+        {
+          "label": "ASOCIACION BOCHAS SPORT CLUB",
+          "valor": 18000000.0,
+          "pct": 3.48
+        },
+        {
+          "label": "NARTSAP DESARROLLOS S.R.L.",
+          "valor": 16764495.55,
+          "pct": 3.24
+        },
+        {
+          "label": "CIRCULO CERRADO SA DE AHORRO P",
+          "valor": 11192034.41,
+          "pct": 2.16
+        },
+        {
+          "label": "PUBLICIDAD EXTERIOR S.R.L.",
+          "valor": 10102363.34,
+          "pct": 1.95
+        },
+        {
+          "label": "INDEPENDIENTE DEPORTIVO  SOCIA",
+          "valor": 10000000.0,
+          "pct": 1.93
+        },
+        {
+          "label": "SERVI OESTE S.A.",
+          "valor": 8848915.34,
+          "pct": 1.71
+        }
+      ],
+      "topCuentas": [
+        {
+          "label": "Publicidad",
+          "valor": 102565498.5,
+          "pct": 19.82
+        },
+        {
+          "label": "Gastos Taller",
+          "valor": 63663459.62,
+          "pct": 12.3
+        },
+        {
+          "label": "Honorarios de Terceros",
+          "valor": 59055141.57,
+          "pct": 11.41
+        },
+        {
+          "label": "Carteles y Elementos Publicitarios",
+          "valor": 37150663.48,
+          "pct": 7.18
+        },
+        {
+          "label": "Combustibles y Lubricantes",
+          "valor": 28461405.03,
+          "pct": 5.5
+        },
+        {
+          "label": "Servicios p/ Recontadoras  Sumadoras E Impresoras",
+          "valor": 21518095.5,
+          "pct": 4.16
+        },
+        {
+          "label": "Comunicaciones",
+          "valor": 17309295.51,
+          "pct": 3.34
+        },
+        {
+          "label": "Viaticos Bpc",
+          "valor": 14842429.23,
+          "pct": 2.87
+        },
+        {
+          "label": "Alquiler de Planta",
+          "valor": 13154971.6,
+          "pct": 2.54
+        },
+        {
+          "label": "Repuestos y Reparaciones",
+          "valor": 12026207.24,
+          "pct": 2.32
+        }
+      ],
+      "concTop5Prov": 0.376,
+      "periodo": "Agosto 2026",
+      "tipoCorte": "fecha_imputacion_efecto",
+      "fuente": "compras.CSV"
+    },
+    "mano_obra": {
+      "costo": 2607246188.23,
+      "neto": 1745849190.0,
+      "contrib": 487469515.22,
+      "prov": 163165713.9,
+      "extras": 115381814.08,
+      "avgCosto": 3021142.74,
+      "avgNeto": 2023000.22,
+      "n": 863,
+      "nCc": 13,
+      "topCentros": [
+        {
+          "label": "SERVICIO DE SEGURIDAD PRIVADA - Personal Permanente",
+          "valor": 1380494851.42,
+          "pct": 52.95
+        },
+        {
+          "label": "SERVICIOS DE TESORERIA TERCERIZADOS",
+          "valor": 551444256.05,
+          "pct": 21.15
+        },
+        {
+          "label": "PROTECCION DE VALORES",
+          "valor": 273667857.74,
+          "pct": 10.5
+        },
+        {
+          "label": "TESORERIA",
+          "valor": 119846444.26,
+          "pct": 4.6
+        },
+        {
+          "label": "ADMINISTRACIÓN CENTRAL",
+          "valor": 81682879.78,
+          "pct": 3.13
+        },
+        {
+          "label": "GRUAS",
+          "valor": 46407687.56,
+          "pct": 1.78
+        },
+        {
+          "label": "SEGURIDAD PLANTA",
+          "valor": 43908631.44,
+          "pct": 1.68
+        },
+        {
+          "label": "COMERCIAL",
+          "valor": 40795307.84,
+          "pct": 1.56
+        }
+      ],
+      "topSecciones": [
+        {
+          "label": "Seguridad Privada",
+          "valor": 1389261011.51,
+          "pct": 53.28
+        },
+        {
+          "label": "Cajero Bpc",
+          "valor": 524825530.18,
+          "pct": 20.13
+        },
+        {
+          "label": "Operaciones",
+          "valor": 262911908.88,
+          "pct": 10.08
+        },
+        {
+          "label": "Tesorería",
+          "valor": 146465170.13,
+          "pct": 5.62
+        },
+        {
+          "label": "Administracion",
+          "valor": 130387796.63,
+          "pct": 5.0
+        },
+        {
+          "label": "Seguridad",
+          "valor": 48638896.08,
+          "pct": 1.87
+        }
+      ],
+      "concTop5Cc": 0.9232,
+      "periodo": "Agosto 2026",
+      "tipoCorte": "liquidacion_mensual",
+      "fuente": "c:\\Users\\Mauro\\Downloads\\liquidacion.xls"
+    },
+    "camioneros": {
+      "n": 74,
+      "nActivos": 72,
+      "hsNormales": 7828.4,
+      "hs50": 0,
+      "hs100": 0,
+      "reloj": 12837.4,
+      "iceEq": 17679.07,
+      "markup": 1.3772,
+      "avgIce": 245.54,
+      "topChoferes": [
+        {
+          "label": "BUSTOS Roberto Adrian",
+          "valor": 640.4,
+          "leg": "2956",
+          "pct": 3.62
+        },
+        {
+          "label": "GRANADO Rodrigo Rafael",
+          "valor": 568.65,
+          "leg": "285",
+          "pct": 3.22
+        },
+        {
+          "label": "PUCHETA Jorge Rodolfo",
+          "valor": 476.05,
+          "leg": "197",
+          "pct": 2.69
+        },
+        {
+          "label": "CHACON Diego Ezequiel",
+          "valor": 419.28,
+          "leg": "3570",
+          "pct": 2.37
+        },
+        {
+          "label": "BENITEZ Martin Ariel",
+          "valor": 409.95,
+          "leg": "3573",
+          "pct": 2.32
+        },
+        {
+          "label": "ASCARI Lucas Javier",
+          "valor": 383.6,
+          "leg": "2575",
+          "pct": 2.17
+        },
+        {
+          "label": "HEREDIA Jonathan Ezequiel",
+          "valor": 377.13,
+          "leg": "3038",
+          "pct": 2.13
+        },
+        {
+          "label": "REYNOSO Roberto Isaac",
+          "valor": 363.73,
+          "leg": "3283",
+          "pct": 2.06
+        }
+      ],
+      "alertas": {
+        "altoExtra": 13,
+        "sobre200h": 24,
+        "licenciasJ": 220
+      },
+      "mix": {
+        "normales": 61.0,
+        "h50": 0.0,
+        "h100": 0.0
+      },
+      "periodo": "26/07/2026 al 25/08/2026",
+      "tipoCorte": "cct_camioneros_26_25",
+      "fuente": "Legajos Online CSV",
+      "unidad": "horas"
+    }
+  },
+  "pnl": {
+    "ventasContables": 4031937882.28,
+    "facturasNetas": 4345771478.16,
+    "cobranzas": 4196251775.9,
+    "comprasImputadas": 517610961.86,
+    "costoLaboral": 2607246188.23,
+    "margenBrutoRef": 907080732.19,
+    "mobSobreVentas": 0.6466,
+    "comprasSobreVentas": 0.1284,
+    "margenSobreVentas": 0.225,
+    "deltaFacturasVentas": 313833595.88
+  },
+  "composicion": [
+    {
+      "label": "Costo laboral",
+      "valor": 2607246188.23,
+      "color": "#fb7185",
+      "tipo": "costo"
+    },
+    {
+      "label": "Compras",
+      "valor": 517610961.86,
+      "color": "#fbbf24",
+      "tipo": "costo"
+    },
+    {
+      "label": "Margen bruto ref.",
+      "valor": 907080732.1900002,
+      "color": "#6366f1",
+      "tipo": "margen"
+    }
+  ],
+  "ingresos": [
+    {
+      "label": "Ventas contables",
+      "valor": 4031937882.28,
+      "color": "#34d399"
+    },
+    {
+      "label": "Facturas CAE",
+      "valor": 4345771478.16,
+      "color": "#38bdf8"
+    },
+    {
+      "label": "Cobranzas",
+      "valor": 4196251775.9,
+      "color": "#818cf8"
+    }
+  ],
+  "indicadores": [
+    {
+      "id": "margen",
+      "label": "Margen bruto ref.",
+      "valor": 907080732.1900002,
+      "fmt": "peso",
+      "pct": 0.22497388567828325,
+      "estado": "ok",
+      "meta": "Referencia operativa"
+    },
+    {
+      "id": "mob",
+      "label": "MOB / ventas",
+      "valor": 0.6466484019232066,
+      "fmt": "pct",
+      "estado": "warn",
+      "meta": "Costo empleador sobre ingreso"
+    },
+    {
+      "id": "cobranza",
+      "label": "Cobranzas / ventas",
+      "valor": 1.0407530816241353,
+      "fmt": "pct",
+      "estado": "info",
+      "meta": "Liquidez del mes"
+    },
+    {
+      "id": "conc_cli",
+      "label": "Conc. top 5 clientes",
+      "valor": 0.8022,
+      "fmt": "pct",
+      "estado": "warn",
+      "meta": "Facturación AFIP"
+    }
+  ],
+  "subPaneles": [
+    {
+      "id": "ventas_cobranzas",
+      "titulo": "Ventas y cobranzas",
+      "kicker": "Contabilidad · Reporte 272",
+      "href": "ventas-cobranzas.html",
+      "color": "#34d399",
+      "kpis": [
+        {
+          "l": "Ventas netas",
+          "v": 4031937882.28,
+          "u": "$"
+        },
+        {
+          "l": "Cobranzas",
+          "v": 4196251775.9,
+          "u": "$"
+        },
+        {
+          "l": "Gap cobro−venta",
+          "v": 164313893.62,
+          "u": "$"
+        },
+        {
+          "l": "Alta CxC",
+          "v": 5009379837.31,
+          "u": "$"
+        }
+      ],
+      "chartLabel": "Ventas por rubro",
+      "chartTotal": 4031937882.28,
+      "chartItems": [
+        {
+          "label": "INGRESOS POR SEGURIDAD PRIVADA",
+          "valor": 1708523047.83,
+          "pct": 42.37
+        },
+        {
+          "label": "SERVICIOS TERCERIZADOS DE TESORERIA",
+          "valor": 1340173242.12,
+          "pct": 33.24
+        },
+        {
+          "label": "INGRESOS POR RECAUDACION",
+          "valor": 954721523.61,
+          "pct": 23.68
+        },
+        {
+          "label": "ALQUILER CAJAS DE SEGURIDAD",
+          "valor": 12179984.46,
+          "pct": 0.3
+        },
+        {
+          "label": "OTROS INGRESOS",
+          "valor": 4471627.96,
+          "pct": 0.11
+        },
+        {
+          "label": "ING. POR SERVICIOS DE ATM",
+          "valor": 3995990.0,
+          "pct": 0.1
+        },
+        {
+          "label": "INGRESOS POR TRASLADOS",
+          "valor": 3534569.3,
+          "pct": 0.09
+        },
+        {
+          "label": "INGRESOS POR SERVICIOS",
+          "valor": 3121458.71,
+          "pct": 0.08
+        }
+      ],
+      "secChartLabel": "Cobranzas por canal",
+      "secChartTotal": 4196251775.9,
+      "secChartItems": [
+        {
+          "label": "Banco Provincia",
+          "valor": 2629193987.29,
+          "pct": 62.66
+        },
+        {
+          "label": "Banco Julio",
+          "valor": 989600456.28,
+          "pct": 23.58
+        },
+        {
+          "label": "Cheques de terceros",
+          "valor": 423943425.26,
+          "pct": 10.1
+        },
+        {
+          "label": "Retención SUSS",
+          "valor": 94815272.87,
+          "pct": 2.26
+        },
+        {
+          "label": "Caja",
+          "valor": 40228840.0,
+          "pct": 0.96
+        },
+        {
+          "label": "Banco Patagonia",
+          "valor": 16439443.12,
+          "pct": 0.39
+        },
+        {
+          "label": "Compensación cuentas",
+          "valor": 2030351.08,
+          "pct": 0.05
+        }
+      ],
+      "nota": "11 rubros · 7 canales · 1525 renglones contables"
+    },
+    {
+      "id": "facturas",
+      "titulo": "Facturación electrónica",
+      "kicker": "AFIP · CAE",
+      "href": "facturas-electronicas.html",
+      "color": "#38bdf8",
+      "kpis": [
+        {
+          "l": "Neto facturado",
+          "v": 4345771478.16,
+          "u": "$"
+        },
+        {
+          "l": "Bruto FC",
+          "v": 4473109298.48,
+          "u": "$"
+        },
+        {
+          "l": "Notas de crédito",
+          "v": 127337820.32,
+          "u": "$"
+        },
+        {
+          "l": "Ticket medio FC",
+          "v": 30223711.48,
+          "u": "$"
+        }
+      ],
+      "chartLabel": "Top clientes (% neto)",
+      "chartTotal": 4345771478.16,
+      "chartItems": [
+        {
+          "label": "BANCO DE LA PROVINCIA DE CORDOBA SA",
+          "valor": 1768962883.84,
+          "pct": 40.71
+        },
+        {
+          "label": "MINISTERIO DE SALUD",
+          "valor": 654261960.02,
+          "pct": 15.06
+        },
+        {
+          "label": "LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.",
+          "valor": 490534141.11,
+          "pct": 11.29
+        },
+        {
+          "label": "CET S.A.- CONCESIONARIA DE ENTRETENIMIENTOS Y TURISMO",
+          "valor": 306250901.69,
+          "pct": 7.05
+        },
+        {
+          "label": "CAMINOS DE LAS SIERRAS S.A.",
+          "valor": 266006337.64,
+          "pct": 6.12
+        },
+        {
+          "label": "TRANSPORTADORA DE CAUDALES JUNCADELLA S.A.",
+          "valor": 136382307.69,
+          "pct": 3.14
+        },
+        {
+          "label": "CONIFERAL SACIF",
+          "valor": 112025917.01,
+          "pct": 2.58
+        },
+        {
+          "label": "TADICOR S.A.",
+          "valor": 69266831.1,
+          "pct": 1.59
+        },
+        {
+          "label": "MIGUEL BECERRA S.A.",
+          "valor": 67901332.04,
+          "pct": 1.56
+        },
+        {
+          "label": "SECRETARIA GENERAL DE HABITAT Y DESARROLLO EMPRENDEDOR O. P.",
+          "valor": 48500000.0,
+          "pct": 1.12
+        }
+      ],
+      "serie": [
+        {
+          "fecha": "2026-08-03",
+          "neto": 764017781.32,
+          "n": 70
+        },
+        {
+          "fecha": "2026-08-06",
+          "neto": 4681121.18,
+          "n": 10
+        },
+        {
+          "fecha": "2026-08-07",
+          "neto": 6897198.73,
+          "n": 1
+        },
+        {
+          "fecha": "2026-08-10",
+          "neto": 10947754.11,
+          "n": 10
+        },
+        {
+          "fecha": "2026-08-18",
+          "neto": 10506722.54,
+          "n": 7
+        },
+        {
+          "fecha": "2026-08-19",
+          "neto": -2375243.19,
+          "n": 2
+        },
+        {
+          "fecha": "2026-08-24",
+          "neto": 3680449.83,
+          "n": 2
+        },
+        {
+          "fecha": "2026-08-25",
+          "neto": -3017959.99,
+          "n": 2
+        },
+        {
+          "fecha": "2026-08-27",
+          "neto": 103290560.83,
+          "n": 3
+        },
+        {
+          "fecha": "2026-08-28",
+          "neto": 20219721.1,
+          "n": 4
+        },
+        {
+          "fecha": "2026-08-31",
+          "neto": 3426923371.7,
+          "n": 56
+        }
+      ],
+      "nota": "77 clientes · 148 FC · 19 NC"
+    },
+    {
+      "id": "compras",
+      "titulo": "Compras imputadas",
+      "kicker": "Gastos · Fecha efecto",
+      "href": "compras.html",
+      "color": "#fbbf24",
+      "kpis": [
+        {
+          "l": "Total imputado",
+          "v": 517610961.86,
+          "u": "$"
+        },
+        {
+          "l": "Bruto FC/ND",
+          "v": 708702790.83,
+          "u": "$"
+        },
+        {
+          "l": "NC",
+          "v": 191091828.97,
+          "u": "$"
+        },
+        {
+          "l": "IVA crédito",
+          "v": 59137419.72,
+          "u": "$"
+        }
+      ],
+      "chartLabel": "Top proveedores",
+      "chartTotal": 517610961.86,
+      "chartItems": [
+        {
+          "label": "FILMEC S.A.",
+          "valor": 67111338.22,
+          "pct": 12.97
+        },
+        {
+          "label": "ASOCIACION DEPORTIVA ATENAS",
+          "valor": 40000000.0,
+          "pct": 7.73
+        },
+        {
+          "label": "PERMAQUIM S.A.",
+          "valor": 34902711.27,
+          "pct": 6.74
+        },
+        {
+          "label": "LA VOZ DEL INTERIOR S.A.",
+          "valor": 34606000.0,
+          "pct": 6.69
+        },
+        {
+          "label": "ASOCIACION BOCHAS SPORT CLUB",
+          "valor": 18000000.0,
+          "pct": 3.48
+        },
+        {
+          "label": "NARTSAP DESARROLLOS S.R.L.",
+          "valor": 16764495.55,
+          "pct": 3.24
+        },
+        {
+          "label": "CIRCULO CERRADO SA DE AHORRO P",
+          "valor": 11192034.41,
+          "pct": 2.16
+        },
+        {
+          "label": "PUBLICIDAD EXTERIOR S.R.L.",
+          "valor": 10102363.34,
+          "pct": 1.95
+        },
+        {
+          "label": "INDEPENDIENTE DEPORTIVO  SOCIA",
+          "valor": 10000000.0,
+          "pct": 1.93
+        },
+        {
+          "label": "SERVI OESTE S.A.",
+          "valor": 8848915.34,
+          "pct": 1.71
+        }
+      ],
+      "secChartLabel": "Por cuenta contable",
+      "secChartTotal": 517610961.86,
+      "secChartItems": [
+        {
+          "label": "Publicidad",
+          "valor": 102565498.5,
+          "pct": 19.82
+        },
+        {
+          "label": "Gastos Taller",
+          "valor": 63663459.62,
+          "pct": 12.3
+        },
+        {
+          "label": "Honorarios de Terceros",
+          "valor": 59055141.57,
+          "pct": 11.41
+        },
+        {
+          "label": "Carteles y Elementos Publicitarios",
+          "valor": 37150663.48,
+          "pct": 7.18
+        },
+        {
+          "label": "Combustibles y Lubricantes",
+          "valor": 28461405.03,
+          "pct": 5.5
+        },
+        {
+          "label": "Servicios p/ Recontadoras  Sumadoras E Impresoras",
+          "valor": 21518095.5,
+          "pct": 4.16
+        },
+        {
+          "label": "Comunicaciones",
+          "valor": 17309295.51,
+          "pct": 3.34
+        },
+        {
+          "label": "Viaticos Bpc",
+          "valor": 14842429.23,
+          "pct": 2.87
+        },
+        {
+          "label": "Alquiler de Planta",
+          "valor": 13154971.6,
+          "pct": 2.54
+        },
+        {
+          "label": "Repuestos y Reparaciones",
+          "valor": 12026207.24,
+          "pct": 2.32
+        }
+      ],
+      "nota": "287 proveedores · 57 cuentas · 677 comprobantes"
+    },
+    {
+      "id": "mano_obra",
+      "titulo": "Costo laboral",
+      "kicker": "Liquidación · Empleador",
+      "href": "mano-de-obra.html",
+      "color": "#fb7185",
+      "kpis": [
+        {
+          "l": "Costo laboral",
+          "v": 2607246188.23,
+          "u": "$"
+        },
+        {
+          "l": "Neto a pagar",
+          "v": 1745849190.0,
+          "u": "$"
+        },
+        {
+          "l": "Contribuciones",
+          "v": 487469515.22,
+          "u": "$"
+        },
+        {
+          "l": "Extras ($)",
+          "v": 115381814.08,
+          "u": "$"
+        }
+      ],
+      "chartLabel": "Por centro de costo",
+      "chartTotal": 2607246188.23,
+      "chartItems": [
+        {
+          "label": "SERVICIO DE SEGURIDAD PRIVADA - Personal Permanente",
+          "valor": 1380494851.42,
+          "pct": 52.95
+        },
+        {
+          "label": "SERVICIOS DE TESORERIA TERCERIZADOS",
+          "valor": 551444256.05,
+          "pct": 21.15
+        },
+        {
+          "label": "PROTECCION DE VALORES",
+          "valor": 273667857.74,
+          "pct": 10.5
+        },
+        {
+          "label": "TESORERIA",
+          "valor": 119846444.26,
+          "pct": 4.6
+        },
+        {
+          "label": "ADMINISTRACIÓN CENTRAL",
+          "valor": 81682879.78,
+          "pct": 3.13
+        },
+        {
+          "label": "GRUAS",
+          "valor": 46407687.56,
+          "pct": 1.78
+        },
+        {
+          "label": "SEGURIDAD PLANTA",
+          "valor": 43908631.44,
+          "pct": 1.68
+        },
+        {
+          "label": "COMERCIAL",
+          "valor": 40795307.84,
+          "pct": 1.56
+        }
+      ],
+      "secChartLabel": "Por sección",
+      "secChartTotal": 2607246188.23,
+      "secChartItems": [
+        {
+          "label": "Seguridad Privada",
+          "valor": 1389261011.51,
+          "pct": 53.28
+        },
+        {
+          "label": "Cajero Bpc",
+          "valor": 524825530.18,
+          "pct": 20.13
+        },
+        {
+          "label": "Operaciones",
+          "valor": 262911908.88,
+          "pct": 10.08
+        },
+        {
+          "label": "Tesorería",
+          "valor": 146465170.13,
+          "pct": 5.62
+        },
+        {
+          "label": "Administracion",
+          "valor": 130387796.63,
+          "pct": 5.0
+        },
+        {
+          "label": "Seguridad",
+          "valor": 48638896.08,
+          "pct": 1.87
+        }
+      ],
+      "nota": "863 legajos · 13 centros · prom 3,021,143 $/persona"
+    },
+    {
+      "id": "camioneros",
+      "titulo": "Transporte Camioneros",
+      "kicker": "LOL · Horas ICE",
+      "href": "camioneros.html",
+      "color": "#a78bfa",
+      "kpis": [
+        {
+          "l": "ICE equivalente",
+          "v": 17679.07,
+          "u": "h"
+        },
+        {
+          "l": "Horas reloj",
+          "v": 12837.4,
+          "u": "h"
+        },
+        {
+          "l": "Markup ICE",
+          "v": 1.3772,
+          "u": "x"
+        },
+        {
+          "l": "Prom ICE/activo",
+          "v": 245.54,
+          "u": "h"
+        }
+      ],
+      "chartLabel": "Top choferes (ICE)",
+      "chartTotal": 17679.07,
+      "chartItems": [
+        {
+          "label": "BUSTOS Roberto Adrian",
+          "valor": 640.4,
+          "leg": "2956",
+          "pct": 3.62
+        },
+        {
+          "label": "GRANADO Rodrigo Rafael",
+          "valor": 568.65,
+          "leg": "285",
+          "pct": 3.22
+        },
+        {
+          "label": "PUCHETA Jorge Rodolfo",
+          "valor": 476.05,
+          "leg": "197",
+          "pct": 2.69
+        },
+        {
+          "label": "CHACON Diego Ezequiel",
+          "valor": 419.28,
+          "leg": "3570",
+          "pct": 2.37
+        },
+        {
+          "label": "BENITEZ Martin Ariel",
+          "valor": 409.95,
+          "leg": "3573",
+          "pct": 2.32
+        },
+        {
+          "label": "ASCARI Lucas Javier",
+          "valor": 383.6,
+          "leg": "2575",
+          "pct": 2.17
+        },
+        {
+          "label": "HEREDIA Jonathan Ezequiel",
+          "valor": 377.13,
+          "leg": "3038",
+          "pct": 2.13
+        },
+        {
+          "label": "REYNOSO Roberto Isaac",
+          "valor": 363.73,
+          "leg": "3283",
+          "pct": 2.06
+        }
+      ],
+      "alertas": {
+        "altoExtra": 13,
+        "sobre200h": 24,
+        "licenciasJ": 220
+      },
+      "mix": {
+        "normales": 61.0,
+        "h50": 0.0,
+        "h100": 0.0
+      },
+      "nota": "72 activos de 74 · período 26/07/2026 al 25/08/2026"
+    }
+  ],
+  "unidadesNegocio": {
+    "unidades": [
+      {
+        "id": "seguridad",
+        "nombre": "Seguridad privada",
+        "color": "#34d399",
+        "operativa": true,
+        "ventas": 1708523047.83,
+        "mob": 1458968363.05,
+        "comprasDirectas": 18722438.51,
+        "comprasProrrateo": 0.0,
+        "compras": 112925462.85,
+        "margen": 136629221.93,
+        "margenDirecto": 298080066.09,
+        "margenPct": 0.08,
+        "margenDirectoPct": 0.1745,
+        "mobPct": 0.8539,
+        "detalleVentas": [
+          {
+            "label": "INGRESOS POR SEGURIDAD PRIVADA",
+            "valor": 1708523047.83
+          }
+        ],
+        "detalleMob": [
+          {
+            "label": "SERVICIO DE SEGURIDAD PRIVADA - Personal Permanente",
+            "valor": 1380494851.42
+          },
+          {
+            "label": "SERVICIO DE SEGURIDAD PRIVADA - Eventuales Bacar",
+            "valor": 11225691.81
+          }
+        ],
+        "detalleCompras": [
+          {
+            "label": "Comunicaciones",
+            "valor": 17309295.51
+          },
+          {
+            "label": "Equipos de Comunicacion",
+            "valor": 1200000.0
+          },
+          {
+            "label": "Aranceles Anmac",
+            "valor": 120000.0
+          },
+          {
+            "label": "I.t.v.",
+            "valor": 93143.0
+          }
+        ],
+        "mobDirecto": 1391720543.23,
+        "mobOverhead": 67247819.82,
+        "comprasOverheadCorp": 94203024.34,
+        "ventasCorp": 0.0,
+        "mobOperativo": 1391720543.23,
+        "comprasAsignadas": 18722438.51,
+        "comprasOperativas": 18722438.51,
+        "gastosPropios": 1410442981.74,
+        "gastoCorporativo": 161450844.16,
+        "costoCorporativo": 161450844.16
+      },
+      {
+        "id": "tesoreria_bpc",
+        "nombre": "Tesorería BPC",
+        "color": "#a78bfa",
+        "operativa": true,
+        "ventas": 1340173242.12,
+        "mob": 585068165.96,
+        "comprasDirectas": 14842429.23,
+        "comprasProrrateo": 0.0,
+        "compras": 61943941.4,
+        "margen": 693161134.76,
+        "margenDirecto": 773886556.84,
+        "margenPct": 0.5172,
+        "margenDirectoPct": 0.5775,
+        "mobPct": 0.4366,
+        "detalleVentas": [
+          {
+            "label": "SERVICIOS TERCERIZADOS DE TESORERIA",
+            "valor": 1340173242.12
+          }
+        ],
+        "detalleMob": [
+          {
+            "label": "SERVICIOS DE TESORERIA TERCERIZADOS",
+            "valor": 551444256.05
+          }
+        ],
+        "detalleCompras": [
+          {
+            "label": "Viaticos Bpc",
+            "valor": 14842429.23
+          }
+        ],
+        "mobDirecto": 551444256.05,
+        "mobOverhead": 33623909.91,
+        "comprasOverheadCorp": 47101512.17,
+        "ventasCorp": 0.0,
+        "mobOperativo": 551444256.05,
+        "comprasAsignadas": 14842429.23,
+        "comprasOperativas": 14842429.23,
+        "gastosPropios": 566286685.28,
+        "gastoCorporativo": 80725422.08,
+        "costoCorporativo": 80725422.08
+      },
+      {
+        "id": "transporte_caudales",
+        "nombre": "Transporte de caudales",
+        "color": "#38bdf8",
+        "operativa": true,
+        "ventas": 975370385.32,
+        "mob": 505594001.69,
+        "comprasDirectas": 170036012.98,
+        "comprasProrrateo": 0.0,
+        "compras": 327041053.55,
+        "margen": 142735330.08,
+        "margenDirecto": 411820070.34,
+        "margenPct": 0.1463,
+        "margenDirectoPct": 0.4222,
+        "mobPct": 0.5184,
+        "detalleVentas": [
+          {
+            "label": "INGRESOS POR RECAUDACION",
+            "valor": 954721523.61
+          },
+          {
+            "label": "ALQUILER CAJAS DE SEGURIDAD",
+            "valor": 12179984.46
+          },
+          {
+            "label": "OTROS INGRESOS",
+            "valor": 4471627.96
+          },
+          {
+            "label": "ING. POR SERVICIOS DE ATM",
+            "valor": 3995990.0
+          },
+          {
+            "label": "AJUSTE GLOBAL DE GASTOS",
+            "valor": 1259.31
+          },
+          {
+            "label": "DIFERENCIAS POR REDONDEO",
+            "valor": -0.02
+          }
+        ],
+        "detalleMob": [
+          {
+            "label": "PROTECCION DE VALORES",
+            "valor": 273667857.74
+          },
+          {
+            "label": "TESORERIA",
+            "valor": 119846444.26
+          }
+        ],
+        "detalleCompras": [
+          {
+            "label": "Gastos Taller",
+            "valor": 63663459.62
+          },
+          {
+            "label": "Combustibles y Lubricantes",
+            "valor": 28461405.03
+          },
+          {
+            "label": "Servicios p/ Recontadoras  Sumadoras E Impresoras",
+            "valor": 21518095.5
+          },
+          {
+            "label": "Repuestos y Reparaciones",
+            "valor": 12026207.24
+          },
+          {
+            "label": "Alquiler Equipos / Maquinas",
+            "valor": 11876150.0
+          },
+          {
+            "label": "Plan de Ahorro",
+            "valor": 11192034.41
+          },
+          {
+            "label": "Rodados",
+            "valor": 10865326.0
+          },
+          {
+            "label": "Bolsas y Precintos",
+            "valor": 3537100.8
+          },
+          {
+            "label": "Comestibles y Refrigerios",
+            "valor": 2574153.03
+          },
+          {
+            "label": "Maquinas de Oficina",
+            "valor": 1591229.77
+          },
+          {
+            "label": "Ferreteria y Herramientas Varias",
+            "valor": 1020910.82
+          },
+          {
+            "label": "Bolsas Recaudadoras",
+            "valor": 630000.0
+          },
+          {
+            "label": "Cerrajeria",
+            "valor": 624900.01
+          },
+          {
+            "label": "Gastos Camara de Caudales",
+            "valor": 304142.75
+          },
+          {
+            "label": "Chalecos Antibalas",
+            "valor": 80000.0
+          },
+          {
+            "label": "Seguro Automotor",
+            "valor": 70898.0
+          }
+        ],
+        "mobDirecto": 393514302.0,
+        "mobOverhead": 112079699.69,
+        "comprasOverheadCorp": 157005040.57,
+        "ventasCorp": 0.0,
+        "mobOperativo": 393514302.0,
+        "comprasAsignadas": 170036012.98,
+        "comprasOperativas": 170036012.98,
+        "gastosPropios": 563550314.98,
+        "gastoCorporativo": 269084740.26,
+        "costoCorporativo": 269084740.26
+      },
+      {
+        "id": "gruas",
+        "nombre": "Grúas",
+        "color": "#fbbf24",
+        "operativa": true,
+        "ventas": 7871207.01,
+        "mob": 57615657.53,
+        "comprasDirectas": 0.0,
+        "comprasProrrateo": 0.0,
+        "compras": 15700504.06,
+        "margen": -65444954.58,
+        "margenDirecto": -38536480.55,
+        "margenPct": -8.3145,
+        "margenDirectoPct": -4.8959,
+        "mobPct": 7.3198,
+        "detalleVentas": [
+          {
+            "label": "INGRESOS POR TRASLADOS",
+            "valor": 3534569.3
+          },
+          {
+            "label": "INGRESOS POR SERVICIOS",
+            "valor": 3121458.71
+          },
+          {
+            "label": "INGRESOS POR T.E.P.",
+            "valor": 1215179.0
+          }
+        ],
+        "detalleMob": [
+          {
+            "label": "GRUAS",
+            "valor": 46407687.56
+          }
+        ],
+        "detalleCompras": [],
+        "mobDirecto": 46407687.56,
+        "mobOverhead": 11207969.97,
+        "comprasOverheadCorp": 15700504.06,
+        "ventasCorp": 0.0,
+        "mobOperativo": 46407687.56,
+        "comprasAsignadas": 0.0,
+        "comprasOperativas": 0.0,
+        "gastosPropios": 46407687.56,
+        "gastoCorporativo": 26908474.03,
+        "costoCorporativo": 26908474.03
+      }
+    ],
+    "overhead": {
+      "mobTotal": 224159399.39,
+      "comprasTotal": 314010081.14,
+      "ventasTotal": 0.0,
+      "criterioMob": "fijo",
+      "criterioCompras": "fijo",
+      "criterioLabel": "MOB corp.: pesos fijos por cobertura operativa · Compras corp.: pesos fijos por cobertura operativa",
+      "pesosMob": {
+        "transporte_caudales": 0.5,
+        "gruas": 0.05,
+        "seguridad": 0.3,
+        "tesoreria_bpc": 0.15
+      },
+      "pesosCompras": {
+        "transporte_caudales": 0.5,
+        "gruas": 0.05,
+        "seguridad": 0.3,
+        "tesoreria_bpc": 0.15
+      },
+      "detalleMob": [
+        {
+          "label": "COMERCIAL",
+          "valor": 40795307.84
+        },
+        {
+          "label": "ADMINISTRACIÓN CENTRAL",
+          "valor": 81682879.78
+        },
+        {
+          "label": "CAPITAL HUMANO",
+          "valor": 24101968.33
+        },
+        {
+          "label": "SISTEMAS Y TECNOLOGIA",
+          "valor": 28883184.33
+        },
+        {
+          "label": "SEGURIDAD PLANTA",
+          "valor": 43908631.44
+        },
+        {
+          "label": "BACAR GASTOS",
+          "valor": 2270732.92
+        },
+        {
+          "label": "MANTENIMIENTO PLANTA",
+          "valor": 2516694.75
+        }
+      ],
+      "detalleCompras": [
+        {
+          "label": "Peajes",
+          "valor": 2017852.09
+        },
+        {
+          "label": "Gastos de Viajes y Movilidad",
+          "valor": 3414368.14
+        },
+        {
+          "label": "Alquiler Playa Vehículos",
+          "valor": 1085000.0
+        },
+        {
+          "label": "Mantenimiento de Planta",
+          "valor": 4903270.88
+        },
+        {
+          "label": "Libreria Impresiones y Papeleria",
+          "valor": 2526909.41
+        },
+        {
+          "label": "Correo  Mensajeria y Cadeteria",
+          "valor": 1033531.8
+        },
+        {
+          "label": "Imp. Internos  Tasas  Cont. y Servicios",
+          "valor": 2060199.34
+        },
+        {
+          "label": "Limpieza",
+          "valor": 8676169.69
+        },
+        {
+          "label": "Uniforme del Personal",
+          "valor": 5742967.35
+        },
+        {
+          "label": "Atencion al Personal",
+          "valor": 9095255.01
+        },
+        {
+          "label": "Carteles y Elementos Publicitarios",
+          "valor": 37150663.48
+        },
+        {
+          "label": "Honorarios de Terceros",
+          "valor": 59055141.57
+        },
+        {
+          "label": "Seg. Devengado por Adelantado",
+          "valor": 639760.04
+        },
+        {
+          "label": "Intereses",
+          "valor": 8350957.9
+        },
+        {
+          "label": "Alquiler de Planta",
+          "valor": 13154971.6
+        },
+        {
+          "label": "Leasing",
+          "valor": 3973187.64
+        },
+        {
+          "label": "Servicios de Monitoreo",
+          "valor": 3049859.98
+        },
+        {
+          "label": "Obra Social Prepaga",
+          "valor": 4845066.48
+        },
+        {
+          "label": "Comisiones y Gtos. Bancarios",
+          "valor": 9440811.1
+        },
+        {
+          "label": "Insumos y Servicios Informaticos",
+          "valor": 6796562.01
+        },
+        {
+          "label": "Publicidad",
+          "valor": 102565498.5
+        },
+        {
+          "label": "Leasing Bancario",
+          "valor": 1244463.84
+        },
+        {
+          "label": "Cursos y Capacitacion",
+          "valor": 412400.0
+        },
+        {
+          "label": "Medicina Laboral",
+          "valor": 1310067.0
+        },
+        {
+          "label": "Servicios de Internet",
+          "valor": 2104133.14
+        },
+        {
+          "label": "Energia Electrica",
+          "valor": 6906117.6
+        },
+        {
+          "label": "Logistica y Seguridad",
+          "valor": 586870.0
+        },
+        {
+          "label": "Gastos de Representacion",
+          "valor": 4161053.07
+        },
+        {
+          "label": "Muebles y Utiles",
+          "valor": 53410.04
+        },
+        {
+          "label": "Cursos y Capacitacion Seguridad",
+          "valor": 450000.0
+        },
+        {
+          "label": "Equipos Informáticos y Eq.",
+          "valor": 6274108.52
+        },
+        {
+          "label": "Accesorios",
+          "valor": 382327.06
+        },
+        {
+          "label": "Telefonia Fijo",
+          "valor": 230867.0
+        },
+        {
+          "label": "Gastos Varios Administracion",
+          "valor": 92259.86
+        },
+        {
+          "label": "Gastos Varios Mantenimiento",
+          "valor": 80000.0
+        },
+        {
+          "label": "Elementos de Seguridad",
+          "valor": 144000.0
+        }
+      ]
+    },
+    "metodo": {
+      "ventas": "Rubro contable BASE IMPONIBLE (reporte 272)",
+      "mob": "Centro de costo directo + overhead corporativo prorrateado",
+      "compras": "Gastos propios = MOB directo + compras imputadas a la UN (sin corporativo). Corporativo se reparte aparte en Gasto corp.",
+      "facturas": "No imputadas por UN en esta versión (ver tablero Facturas)",
+      "overhead": "Gasto corporativo (MOB + compras de estructura) prorrateado por cobertura operativa: Transporte de caudales 50% · Grúas 5% · Seguridad privada 30% · Tesorería BPC 15%. Compras y MOB directo = gastos propios de cada UN. Columna Gasto corp. — no se mezcla con Compras. El margen directo excluye Gasto corp."
+    },
+    "transporte": {
+      "iceEq": 17679.07,
+      "nota": "Camioneros en horas ICE — vinculado a transporte de caudales / recaudación"
+    },
+    "totales": {
+      "ventas": 4031937882.28,
+      "mob": 2607246188.23,
+      "compras": 517610961.86
+    }
+  },
+  "links": [
+    {
+      "id": "ventas_cobranzas",
+      "label": "Ventas y cobranzas",
+      "kicker": "Contabilidad",
+      "href": "ventas-cobranzas.html",
+      "kpi": "$ 4031.9 M",
+      "kpiLabel": "Ventas netas"
+    },
+    {
+      "id": "facturas",
+      "label": "Facturas electrónicas",
+      "kicker": "AFIP / CAE",
+      "href": "facturas-electronicas.html",
+      "kpi": "$ 4345.8 M",
+      "kpiLabel": "Neto facturado"
+    },
+    {
+      "id": "compras",
+      "label": "Compras",
+      "kicker": "Imputaciones",
+      "href": "compras.html",
+      "kpi": "$ 517.6 M",
+      "kpiLabel": "Total imputado"
+    },
+    {
+      "id": "mano_obra",
+      "label": "Costo laboral",
+      "kicker": "Capital humano",
+      "href": "mano-de-obra.html",
+      "kpi": "$ 2607.2 M",
+      "kpiLabel": "Costo empleador"
+    },
+    {
+      "id": "camioneros",
+      "label": "Camioneros (ICE)",
+      "kicker": "Transporte LOL",
+      "href": "camioneros.html",
+      "kpi": "17,679 h ICE",
+      "kpiLabel": "ICE equivalente"
+    },
+    {
+      "id": "imputacion",
+      "label": "Editor imputación UN",
+      "kicker": "Parametrización",
+      "href": "listado-imputacion.html",
+      "kpi": "Dropdown",
+      "kpiLabel": "Asignar rubros / MOB / compras"
+    }
+  ]
+}

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Hospital San Roque Nuevo — Agosto 2026</title>
+<style>
+  :root { --indigo:#4f46e5; --emerald:#10b981; --rose:#f43f5e; --amber:#f59e0b; --slate:#64748b; --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Segoe UI,system-ui,sans-serif; background:linear-gradient(160deg,#0f172a,#1e1b4b); color:var(--text); padding:24px; line-height:1.5; }
+  h1 { font-size:1.75rem; margin:0 0 8px; }
+  .sub { color:#94a3b8; margin-bottom:24px; }
+  .grid { display:grid; gap:16px; }
+  .g4 { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+  .g2 { grid-template-columns:1fr 1fr; }
+  .card { background:var(--card); border-radius:20px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,.35); border:1px solid #334155; }
+  .card h2 { margin:0 0 12px; font-size:1.05rem; color:#cbd5e1; }
+  .kpi { font-size:1.8rem; font-weight:700; }
+  .kpi small { display:block; font-size:.75rem; color:#94a3b8; font-weight:500; margin-top:4px; }
+  .ok { color:var(--emerald); }
+  .warn { color:var(--amber); }
+  .bad { color:var(--rose); }
+  .callout { border-left:4px solid var(--indigo); background:#1e293b99; padding:14px 18px; border-radius:12px; margin-bottom:20px; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th,td { padding:8px 10px; border-bottom:1px solid #334155; text-align:left; }
+  th { color:#94a3b8; font-weight:600; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .heat { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .day { border-radius:10px; padding:8px 4px; text-align:center; font-size:.72rem; min-height:72px; }
+  .day .n { font-weight:700; font-size:1rem; }
+  .bar-wrap { margin:12px 0; }
+  .bar-row { display:grid; grid-template-columns:140px 1fr 70px; gap:10px; align-items:center; margin:6px 0; font-size:.85rem; }
+  .bar { height:22px; border-radius:99px; background:#334155; overflow:hidden; }
+  .bar > i { display:block; height:100%; border-radius:99px; }
+  @media(max-width:900px) { .g2 { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const D = {"meta": {"id": "san-roque", "titulo": "Hospital San Roque Nuevo", "objetivo": "SP - Hospital San Roque Nuevo", "periodo": "Agosto 2026", "generado": "2026-09-07 11:49", "plan_leyenda": "4 puestos 24 h: 4M · 4T · 4N = 96 h/día (Rondín, Playa, Hall, Salud Mental)", "parametro_label": "Contrato (4 puestos × 24 × 31)", "resumen": ["Facturación combinada: 2.928 h (Principal 2.184 h + Refuerzo 744 h). Parámetro contrato: 2.976 h (31 × 24 × 4 puestos).", "Brecha SLA − operativo = 2.928 − 2.976 = −48 h. Gap interno planilla principal: 48 h (2.184 vs 2.232 teóricas).", "Cronograma real: 4 puestos × 3 bandas = 12 turnos/día × 8 h = 96 h/día → 2.976 h contrato.", "Fichadas corregidas: olvido cierre >10 h o 0 h → 8 h nominal (misma regla que Río Primero)."], "facturacion": {"principal": 2184, "principal_teorico": 2232, "refuerzo": 744, "gap_principal": 48}}, "objetivo": "SP - Hospital San Roque Nuevo", "periodo": "Agosto 2026", "marcaciones": 366, "guardias": [{"nombre": "ALONSO Marcio Ruben", "turnos": 20, "horas": 165.67, "bandas": {"M": 9, "N": 6, "T": 5}, "dni": "30659791"}, {"nombre": "ARAMAYO Yamil Laureano David", "turnos": 24, "horas": 196.68, "bandas": {"T": 10, "M": 7, "N": 7}, "dni": "36774157"}, {"nombre": "BAZAN Cintia Soledad", "turnos": 22, "horas": 182.38, "bandas": {"T": 7, "N": 9, "M": 6}, "dni": "32099937"}, {"nombre": "BAZAN Facundo Leonel", "turnos": 1, "horas": 7.98, "bandas": {"M": 1}, "dni": "39080331"}, {"nombre": "BEAN Federico Emanuel", "turnos": 1, "horas": 8.0, "bandas": {"M": 1}, "dni": "39937831"}, {"nombre": "BLASCO Ulises Mateo", "turnos": 1, "horas": 8.13, "bandas": {"T": 1}, "dni": "43562051"}, {"nombre": "BRINGAS Gonzalo Javier", "turnos": 1, "horas": 8.32, "bandas": {"T": 1}, "dni": "27867902"}, {"nombre": "CABRAL CARRION Ever Leonel", "turnos": 19, "horas": 155.0, "bandas": {"N": 7, "M": 6, "T": 6}, "dni": "43694468"}, {"nombre": "CACERES Walter Alejandro", "turnos": 1, "horas": 8.0, "bandas": {"N": 1}, "dni": "25920141"}, {"nombre": "CONTRERAS HEREDI Santiago Bernabe", "turnos": 22, "horas": 178.06, "bandas": {"M": 8, "N": 8, "T": 6}, "dni": "40520808"}, {"nombre": "DIAZ Ezequiel Alejandro", "turnos": 22, "horas": 178.76, "bandas": {"M": 10, "T": 8, "N": 4}, "dni": "32406154"}, {"nombre": "GARAY Karen Melina", "turnos": 25, "horas": 202.54, "bandas": {"T": 8, "N": 8, "M": 9}, "dni": "39325669"}, {"nombre": "GUZMAN Gustavo Ariel", "turnos": 23, "horas": 187.45, "bandas": {"M": 10, "T": 10, "N": 3}, "dni": "36539498"}, {"nombre": "HERRERA Hernan Gabriel", "turnos": 23, "horas": 187.53, "bandas": {"M": 10, "T": 10, "N": 3}, "dni": "25202917"}, {"nombre": "LOPEZ Hector Juan", "turnos": 22, "horas": 180.55, "bandas": {"M": 7, "N": 9, "T": 6}, "dni": "34455369"}, {"nombre": "MENDEZ Norman Gabriel", "turnos": 23, "horas": 190.94, "bandas": {"M": 10, "N": 8, "T": 5}, "dni": "30970497"}, {"nombre": "MONTERO Enzo Gabriel", "turnos": 23, "horas": 186.88, "bandas": {"T": 7, "N": 7, "M": 9}, "dni": "41844746"}, {"nombre": "OLIVA David Emanuel", "turnos": 1, "horas": 7.55, "bandas": {"N": 1}, "dni": "37134308"}, {"nombre": "PUEYO Federico Alexis", "turnos": 1, "horas": 7.98, "bandas": {"N": 1}, "dni": "39693315"}, {"nombre": "QUIROGA Elio Humberto Alejandro", "turnos": 1, "horas": 7.45, "bandas": {"N": 1}, "dni": "32242611"}, {"nombre": "SCHOOP Jorgelina Nayla Ivon", "turnos": 24, "horas": 195.65, "bandas": {"T": 10, "N": 11, "M": 3}, "dni": "29252138"}, {"nombre": "SOLIS Guadalupe Andrea", "turnos": 23, "horas": 189.8, "bandas": {"M": 8, "T": 11, "N": 4}, "dni": "30121997"}, {"nombre": "VALDES Sergio Gines", "turnos": 22, "horas": 178.13, "bandas": {"N": 11, "T": 6, "M": 5}, "dni": "31404670"}, {"nombre": "ZIEGE PIO Leonardo Arturo", "turnos": 21, "horas": 171.9, "bandas": {"N": 10, "T": 6, "M": 5}, "dni": "36239590"}], "calendario": [{"fecha": "2026-08-01", "dia": 1, "domingo": false, "plan_hs": 96, "real_hs": 95.1, "counts": {"M": 4, "T": 5, "N": 3}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-02", "dia": 2, "domingo": true, "plan_hs": 96, "real_hs": 97.82, "counts": {"M": 4, "T": 2, "N": 6}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-03", "dia": 3, "domingo": false, "plan_hs": 96, "real_hs": 90.54, "counts": {"M": 4, "T": 4, "N": 3}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-04", "dia": 4, "domingo": false, "plan_hs": 96, "real_hs": 106.37, "counts": {"M": 5, "T": 2, "N": 6}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-05", "dia": 5, "domingo": false, "plan_hs": 96, "real_hs": 98.17, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-06", "dia": 6, "domingo": false, "plan_hs": 96, "real_hs": 107.2, "counts": {"M": 4, "T": 5, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-07", "dia": 7, "domingo": false, "plan_hs": 96, "real_hs": 98.33, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-08", "dia": 8, "domingo": false, "plan_hs": 96, "real_hs": 98.73, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-09", "dia": 9, "domingo": true, "plan_hs": 96, "real_hs": 106.5, "counts": {"M": 5, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-10", "dia": 10, "domingo": false, "plan_hs": 96, "real_hs": 105.98, "counts": {"M": 4, "T": 5, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-11", "dia": 11, "domingo": false, "plan_hs": 96, "real_hs": 106.86, "counts": {"M": 4, "T": 5, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-12", "dia": 12, "domingo": false, "plan_hs": 96, "real_hs": 98.08, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-13", "dia": 13, "domingo": false, "plan_hs": 96, "real_hs": 97.72, "counts": {"M": 3, "T": 5, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-14", "dia": 14, "domingo": false, "plan_hs": 96, "real_hs": 97.84, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-15", "dia": 15, "domingo": false, "plan_hs": 96, "real_hs": 98.62, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-16", "dia": 16, "domingo": true, "plan_hs": 96, "real_hs": 48.05, "counts": {"M": 3, "T": 3, "N": 0}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-17", "dia": 17, "domingo": false, "plan_hs": 96, "real_hs": 98.66, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-18", "dia": 18, "domingo": false, "plan_hs": 96, "real_hs": 98.54, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-19", "dia": 19, "domingo": false, "plan_hs": 96, "real_hs": 98.22, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-20", "dia": 20, "domingo": false, "plan_hs": 96, "real_hs": 98.22, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-21", "dia": 21, "domingo": false, "plan_hs": 96, "real_hs": 97.84, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-22", "dia": 22, "domingo": false, "plan_hs": 96, "real_hs": 98.68, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-23", "dia": 23, "domingo": true, "plan_hs": 96, "real_hs": 81.33, "counts": {"M": 4, "T": 3, "N": 3}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-24", "dia": 24, "domingo": false, "plan_hs": 96, "real_hs": 89.73, "counts": {"M": 4, "T": 4, "N": 3}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-25", "dia": 25, "domingo": false, "plan_hs": 96, "real_hs": 97.68, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-26", "dia": 26, "domingo": false, "plan_hs": 96, "real_hs": 97.53, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-27", "dia": 27, "domingo": false, "plan_hs": 96, "real_hs": 99.26, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}, {"fecha": "2026-08-28", "dia": 28, "domingo": false, "plan_hs": 96, "real_hs": 105.5, "counts": {"M": 4, "T": 4, "N": 5}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-29", "dia": 29, "domingo": false, "plan_hs": 96, "real_hs": 89.71, "counts": {"M": 4, "T": 4, "N": 3}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-30", "dia": 30, "domingo": true, "plan_hs": 96, "real_hs": 89.65, "counts": {"M": 4, "T": 4, "N": 3}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": false}, {"fecha": "2026-08-31", "dia": 31, "domingo": false, "plan_hs": 96, "real_hs": 98.87, "counts": {"M": 4, "T": 4, "N": 4}, "plan_counts": {"M": 4, "T": 4, "N": 4}, "ok": true}], "incumplimientos": [{"fecha": "2026-08-01", "dia_sem": "Sáb", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 5, "N": 3}, "diffs": {"M": 0, "T": 1, "N": -1}, "horas_marcadas": 95.1}, {"fecha": "2026-08-02", "dia_sem": "Dom", "domingo": true, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 2, "N": 6}, "diffs": {"M": 0, "T": -2, "N": 2}, "horas_marcadas": 97.82}, {"fecha": "2026-08-03", "dia_sem": "Lun", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 4, "N": 3}, "diffs": {"M": 0, "T": 0, "N": -1}, "horas_marcadas": 90.54}, {"fecha": "2026-08-04", "dia_sem": "Mar", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 5, "T": 2, "N": 6}, "diffs": {"M": 1, "T": -2, "N": 2}, "horas_marcadas": 106.37}, {"fecha": "2026-08-06", "dia_sem": "Jue", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 5, "N": 4}, "diffs": {"M": 0, "T": 1, "N": 0}, "horas_marcadas": 107.2}, {"fecha": "2026-08-09", "dia_sem": "Dom", "domingo": true, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 5, "T": 4, "N": 4}, "diffs": {"M": 1, "T": 0, "N": 0}, "horas_marcadas": 106.5}, {"fecha": "2026-08-10", "dia_sem": "Lun", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 5, "N": 4}, "diffs": {"M": 0, "T": 1, "N": 0}, "horas_marcadas": 105.98}, {"fecha": "2026-08-11", "dia_sem": "Mar", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 5, "N": 4}, "diffs": {"M": 0, "T": 1, "N": 0}, "horas_marcadas": 106.86}, {"fecha": "2026-08-13", "dia_sem": "Jue", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 3, "T": 5, "N": 4}, "diffs": {"M": -1, "T": 1, "N": 0}, "horas_marcadas": 97.72}, {"fecha": "2026-08-16", "dia_sem": "Dom", "domingo": true, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 3, "T": 3, "N": 0}, "diffs": {"M": -1, "T": -1, "N": -4}, "horas_marcadas": 48.05}, {"fecha": "2026-08-23", "dia_sem": "Dom", "domingo": true, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 3, "N": 3}, "diffs": {"M": 0, "T": -1, "N": -1}, "horas_marcadas": 81.33}, {"fecha": "2026-08-24", "dia_sem": "Lun", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 4, "N": 3}, "diffs": {"M": 0, "T": 0, "N": -1}, "horas_marcadas": 89.73}, {"fecha": "2026-08-28", "dia_sem": "Vie", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 4, "N": 5}, "diffs": {"M": 0, "T": 0, "N": 1}, "horas_marcadas": 105.5}, {"fecha": "2026-08-29", "dia_sem": "Sáb", "domingo": false, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 4, "N": 3}, "diffs": {"M": 0, "T": 0, "N": -1}, "horas_marcadas": 89.71}, {"fecha": "2026-08-30", "dia_sem": "Dom", "domingo": true, "plan": {"M": 4, "T": 4, "N": 4, "hs_dia": 96}, "real": {"M": 4, "T": 4, "N": 3}, "diffs": {"M": 0, "T": 0, "N": -1}, "horas_marcadas": 89.65}], "dias_sin_marca": [], "validaciones": [{"fecha": "2026-08-01", "nombre": "MONTERO Enzo Gabriel", "banda": "T", "entrada": "14:57", "salida": "23:30", "horas": 8.53, "horas_originales": 8.53, "corregido": false, "issues": ["Jornada extendida (8.53 h) — dentro de tolerancia"]}, {"fecha": "2026-08-01", "nombre": "BAZAN Cintia Soledad", "banda": "T", "entrada": "20:10", "salida": "07:03", "horas": 8.0, "horas_originales": 10.88, "corregido": true, "issues": ["Olvidó cerrar turno (10.88 h registradas) → 8 h"]}, {"fecha": "2026-08-02", "nombre": "GARAY Karen Melina", "banda": "N", "entrada": "23:00", "salida": "23:01", "horas": 8.0, "horas_originales": 0.0, "corregido": true, "issues": ["Fichada sin duración (0 h) → 8 h nominal del turno"]}, {"fecha": "2026-08-02", "nombre": "MONTERO Enzo Gabriel", "banda": "N", "entrada": "23:01", "salida": "14:59", "horas": 8.0, "horas_originales": 15.97, "corregido": true, "issues": ["Olvidó cerrar turno (15.97 h registradas) → 8 h"]}, {"fecha": "2026-08-03", "nombre": "SOLIS Guadalupe Andrea", "banda": "M", "entrada": "06:37", "salida": "15:15", "horas": 8.63, "horas_originales": 8.63, "corregido": false, "issues": ["Jornada extendida (8.63 h) — dentro de tolerancia"]}, {"fecha": "2026-08-03", "nombre": "BAZAN Cintia Soledad", "banda": "N", "entrada": "22:17", "salida": "07:00", "horas": 8.72, "horas_originales": 8.72, "corregido": false, "issues": ["Jornada extendida (8.72 h) — dentro de tolerancia"]}, {"fecha": "2026-08-04", "nombre": "CABRAL CARRION Ever Leonel", "banda": "M", "entrada": "07:10", "salida": "07:10", "horas": 8.0, "horas_originales": 0.0, "corregido": true, "issues": ["Fichada sin duración (0 h) → 8 h nominal del turno"]}, {"fecha": "2026-08-04", "nombre": "GARAY Karen Melina", "banda": "N", "entrada": "23:00", "salida": "23:00", "horas": 8.0, "horas_originales": 0.0, "corregido": true, "issues": ["Fichada sin duración (0 h) → 8 h nominal del turno"]}, {"fecha": "2026-08-06", "nombre": "BEAN Federico Emanuel", "banda": "M", "entrada": "06:50", "salida": "07:04", "horas": 8.0, "horas_originales": 24.23, "corregido": true, "issues": ["Olvidó cerrar turno (24.23 h registradas) → 8 h"]}, {"fecha": "2026-08-06", "nombre": "ALONSO Marcio Ruben", "banda": "N", "entrada": "22:21", "salida": "07:23", "horas": 9.03, "horas_originales": 9.03, "corregido": false, "issues": ["Jornada extendida (9.03 h) — dentro de tolerancia"]}, {"fecha": "2026-08-07", "nombre": "SOLIS Guadalupe Andrea", "banda": "M", "entrada": "06:43", "salida": "15:28", "horas": 8.75, "horas_originales": 8.75, "corregido": false, "issues": ["Jornada extendida (8.75 h) — dentro de tolerancia"]}, {"fecha": "2026-08-09", "nombre": "ALONSO Marcio Ruben", "banda": "N", "entrada": "22:23", "salida": "07:00", "horas": 8.62, "horas_originales": 8.62, "corregido": false, "issues": ["Jornada extendida (8.62 h) — dentro de tolerancia"]}, {"fecha": "2026-08-10", "nombre": "BAZAN Cintia Soledad", "banda": "T", "entrada": "14:30", "salida": "23:01", "horas": 8.52, "horas_originales": 8.52, "corregido": false, "issues": ["Jornada extendida (8.52 h) — dentro de tolerancia"]}, {"fecha": "2026-08-11", "nombre": "SOLIS Guadalupe Andrea", "banda": "N", "entrada": "22:28", "salida": "07:03", "horas": 8.57, "horas_originales": 8.57, "corregido": false, "issues": ["Jornada extendida (8.57 h) — dentro de tolerancia"]}, {"fecha": "2026-08-13", "nombre": "GARAY Karen Melina", "banda": "M", "entrada": "06:59", "salida": "07:02", "horas": 8.0, "horas_originales": 24.05, "corregido": true, "issues": ["Olvidó cerrar turno (24.05 h registradas) → 8 h"]}, {"fecha": "2026-08-13", "nombre": "LOPEZ Hector Juan", "banda": "T", "entrada": "15:03", "salida": "15:03", "horas": 8.0, "horas_originales": 0.0, "corregido": true, "issues": ["Fichada sin duración (0 h) → 8 h nominal del turno"]}, {"fecha": "2026-08-15", "nombre": "BAZAN Cintia Soledad", "banda": "M", "entrada": "06:53", "salida": "19:09", "horas": 8.0, "horas_originales": 36.25, "corregido": true, "issues": ["Olvidó cerrar turno (36.25 h registradas) → 8 h"]}, {"fecha": "2026-08-16", "nombre": "MENDEZ Norman Gabriel", "banda": "M", "entrada": "06:42", "salida": "19:01", "horas": 8.0, "horas_originales": 12.32, "corregido": true, "issues": ["Olvidó cerrar turno (12.32 h registradas) → 8 h"]}, {"fecha": "2026-08-16", "nombre": "CONTRERAS HEREDI Santiago Bernabe", "banda": "M", "entrada": "06:57", "salida": "19:08", "horas": 8.0, "horas_originales": 12.18, "corregido": true, "issues": ["Olvidó cerrar turno (12.18 h registradas) → 8 h"]}, {"fecha": "2026-08-16", "nombre": "SOLIS Guadalupe Andrea", "banda": "T", "entrada": "18:47", "salida": "07:03", "horas": 8.0, "horas_originales": 12.27, "corregido": true, "issues": ["Olvidó cerrar turno (12.27 h registradas) → 8 h"]}, {"fecha": "2026-08-16", "nombre": "GUZMAN Gustavo Ariel", "banda": "T", "entrada": "18:51", "salida": "07:02", "horas": 8.0, "horas_originales": 12.18, "corregido": true, "issues": ["Olvidó cerrar turno (12.18 h registradas) → 8 h"]}, {"fecha": "2026-08-16", "nombre": "HERRERA Hernan Gabriel", "banda": "T", "entrada": "18:53", "salida": "06:53", "horas": 8.0, "horas_originales": 12.0, "corregido": true, "issues": ["Olvidó cerrar turno (12.00 h registradas) → 8 h"]}, {"fecha": "2026-08-17", "nombre": "MENDEZ Norman Gabriel", "banda": "T", "entrada": "14:41", "salida": "23:30", "horas": 8.8, "horas_originales": 8.8, "corregido": false, "issues": ["Jornada extendida (8.80 h) — dentro de tolerancia"]}, {"fecha": "2026-08-24", "nombre": "MENDEZ Norman Gabriel", "banda": "M", "entrada": "06:45", "salida": "19:03", "horas": 8.0, "horas_originales": 12.28, "corregido": true, "issues": ["Olvidó cerrar turno (12.28 h registradas) → 8 h"]}, {"fecha": "2026-08-24", "nombre": "HERRERA Hernan Gabriel", "banda": "T", "entrada": "18:47", "salida": "06:56", "horas": 8.0, "horas_originales": 12.13, "corregido": true, "issues": ["Olvidó cerrar turno (12.13 h registradas) → 8 h"]}, {"fecha": "2026-08-25", "nombre": "BAZAN Cintia Soledad", "banda": "N", "entrada": "22:15", "salida": "22:26", "horas": 8.0, "horas_originales": 24.18, "corregido": true, "issues": ["Olvidó cerrar turno (24.18 h registradas) → 8 h"]}, {"fecha": "2026-08-26", "nombre": "CONTRERAS HEREDI Santiago Bernabe", "banda": "M", "entrada": "06:54", "salida": "22:56", "horas": 8.0, "horas_originales": 88.03, "corregido": true, "issues": ["Olvidó cerrar turno (88.03 h registradas) → 8 h"]}, {"fecha": "2026-08-27", "nombre": "DIAZ Ezequiel Alejandro", "banda": "M", "entrada": "06:36", "salida": "15:07", "horas": 8.52, "horas_originales": 8.52, "corregido": false, "issues": ["Jornada extendida (8.52 h) — dentro de tolerancia"]}, {"fecha": "2026-08-28", "nombre": "MONTERO Enzo Gabriel", "banda": "T", "entrada": "14:50", "salida": "06:53", "horas": 8.0, "horas_originales": 16.03, "corregido": true, "issues": ["Olvidó cerrar turno (16.03 h registradas) → 8 h"]}, {"fecha": "2026-08-30", "nombre": "CONTRERAS HEREDI Santiago Bernabe", "banda": "M", "entrada": "07:00", "salida": "07:01", "horas": 8.0, "horas_originales": 0.0, "corregido": true, "issues": ["Fichada sin duración (0 h) → 8 h nominal del turno"]}, {"fecha": "2026-08-31", "nombre": "SOLIS Guadalupe Andrea", "banda": "M", "entrada": "06:36", "salida": "15:09", "horas": 8.53, "horas_originales": 8.53, "corregido": false, "issues": ["Jornada extendida (8.53 h) — dentro de tolerancia"]}, {"fecha": "2026-08-31", "nombre": "ALONSO Marcio Ruben", "banda": "N", "entrada": "22:20", "salida": "06:59", "horas": 8.63, "horas_originales": 8.63, "corregido": false, "issues": ["Jornada extendida (8.63 h) — dentro de tolerancia"]}, {"fecha": "2026-08-31", "nombre": "MENDEZ Norman Gabriel", "banda": "N", "entrada": "22:50", "salida": "07:35", "horas": 8.73, "horas_originales": 8.73, "corregido": false, "issues": ["Jornada extendida (8.73 h) — dentro de tolerancia"]}], "correcciones": [{"fecha": "2026-08-01", "nombre": "BAZAN Cintia Soledad", "entrada": "20:10", "salida": "07:03", "horas_originales": 10.88, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (10.88 h registradas) → 8 h", "banda": "T"}, {"fecha": "2026-08-02", "nombre": "GARAY Karen Melina", "entrada": "23:00", "salida": "23:01", "horas_originales": 0.0, "horas_corregidas": 8.0, "motivo": "Fichada sin duración (0 h) → 8 h nominal del turno", "banda": "N"}, {"fecha": "2026-08-02", "nombre": "MONTERO Enzo Gabriel", "entrada": "23:01", "salida": "14:59", "horas_originales": 15.97, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (15.97 h registradas) → 8 h", "banda": "N"}, {"fecha": "2026-08-04", "nombre": "CABRAL CARRION Ever Leonel", "entrada": "07:10", "salida": "07:10", "horas_originales": 0.0, "horas_corregidas": 8.0, "motivo": "Fichada sin duración (0 h) → 8 h nominal del turno", "banda": "M"}, {"fecha": "2026-08-04", "nombre": "GARAY Karen Melina", "entrada": "23:00", "salida": "23:00", "horas_originales": 0.0, "horas_corregidas": 8.0, "motivo": "Fichada sin duración (0 h) → 8 h nominal del turno", "banda": "N"}, {"fecha": "2026-08-06", "nombre": "BEAN Federico Emanuel", "entrada": "06:50", "salida": "07:04", "horas_originales": 24.23, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (24.23 h registradas) → 8 h", "banda": "M"}, {"fecha": "2026-08-13", "nombre": "GARAY Karen Melina", "entrada": "06:59", "salida": "07:02", "horas_originales": 24.05, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (24.05 h registradas) → 8 h", "banda": "M"}, {"fecha": "2026-08-13", "nombre": "LOPEZ Hector Juan", "entrada": "15:03", "salida": "15:03", "horas_originales": 0.0, "horas_corregidas": 8.0, "motivo": "Fichada sin duración (0 h) → 8 h nominal del turno", "banda": "T"}, {"fecha": "2026-08-15", "nombre": "BAZAN Cintia Soledad", "entrada": "06:53", "salida": "19:09", "horas_originales": 36.25, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (36.25 h registradas) → 8 h", "banda": "M"}, {"fecha": "2026-08-16", "nombre": "MENDEZ Norman Gabriel", "entrada": "06:42", "salida": "19:01", "horas_originales": 12.32, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (12.32 h registradas) → 8 h", "banda": "M"}, {"fecha": "2026-08-16", "nombre": "CONTRERAS HEREDI Santiago Bernabe", "entrada": "06:57", "salida": "19:08", "horas_originales": 12.18, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (12.18 h registradas) → 8 h", "banda": "M"}, {"fecha": "2026-08-16", "nombre": "SOLIS Guadalupe Andrea", "entrada": "18:47", "salida": "07:03", "horas_originales": 12.27, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (12.27 h registradas) → 8 h", "banda": "T"}, {"fecha": "2026-08-16", "nombre": "GUZMAN Gustavo Ariel", "entrada": "18:51", "salida": "07:02", "horas_originales": 12.18, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (12.18 h registradas) → 8 h", "banda": "T"}, {"fecha": "2026-08-16", "nombre": "HERRERA Hernan Gabriel", "entrada": "18:53", "salida": "06:53", "horas_originales": 12.0, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (12.00 h registradas) → 8 h", "banda": "T"}, {"fecha": "2026-08-24", "nombre": "MENDEZ Norman Gabriel", "entrada": "06:45", "salida": "19:03", "horas_originales": 12.28, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (12.28 h registradas) → 8 h", "banda": "M"}, {"fecha": "2026-08-24", "nombre": "HERRERA Hernan Gabriel", "entrada": "18:47", "salida": "06:56", "horas_originales": 12.13, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (12.13 h registradas) → 8 h", "banda": "T"}, {"fecha": "2026-08-25", "nombre": "BAZAN Cintia Soledad", "entrada": "22:15", "salida": "22:26", "horas_originales": 24.18, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (24.18 h registradas) → 8 h", "banda": "N"}, {"fecha": "2026-08-26", "nombre": "CONTRERAS HEREDI Santiago Bernabe", "entrada": "06:54", "salida": "22:56", "horas_originales": 88.03, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (88.03 h registradas) → 8 h", "banda": "M"}, {"fecha": "2026-08-28", "nombre": "MONTERO Enzo Gabriel", "entrada": "14:50", "salida": "06:53", "horas_originales": 16.03, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (16.03 h registradas) → 8 h", "banda": "T"}, {"fecha": "2026-08-30", "nombre": "CONTRERAS HEREDI Santiago Bernabe", "entrada": "07:00", "salida": "07:01", "horas_originales": 0.0, "horas_corregidas": 8.0, "motivo": "Fichada sin duración (0 h) → 8 h nominal del turno", "banda": "M"}], "anomalias": [], "totales": {"horas_marcadas_brutas": 3156.31, "horas_marcadas": 2991.33, "horas_nominales_8h": 2928.0, "turnos_marcados": 366, "turnos_corregidos": 20, "horas_plan_pdf": 2976, "horas_facturadas": 2928, "horas_teoricas_param": 2976, "dias_con_marca": 31, "dias_incompletos": 15}};
+const fmt = n => n.toLocaleString('es-AR', {maximumFractionDigits:1}) + ' h';
+const fmtN = n => n.toLocaleString('es-AR', {maximumFractionDigits:0});
+
+function bar(label, val, max, color, isHs=true) {
+  const pct = max ? Math.min(100, val/max*100) : 0;
+  const txt = isHs ? fmt(val) : fmtN(val);
+  return `<div class="bar-row"><span>${label}</span><div class="bar"><i style="width:${pct}%;background:${color}"></i></div><span class="num">${txt}</span></div>`;
+}
+
+function render() {
+  const t = D.totales;
+  const M = D.meta || {};
+  const comp = [
+    { label: M.parametro_label || 'Parámetro SLA', val: t.horas_teoricas_param, c:'#6366f1' },
+    { label:'Facturado SLA', val:t.horas_facturadas, c:'#f59e0b' },
+    { label:'Plan operativo', val:t.horas_plan_pdf, c:'#10b981' },
+    { label:'Fichadas corregidas', val:t.horas_marcadas, c:'#38bdf8' },
+  ];
+  const maxC = Math.max(...comp.map(x=>x.val));
+  const resumenHtml = (M.resumen || []).map((p,i) => `${i+1}. ${p}`).join('<br>');
+  const fac = M.facturacion;
+  const brecha = t.horas_facturadas - t.horas_plan_pdf;
+  const brechaCls = brecha === 0 ? 'ok' : (brecha > 0 ? 'warn' : 'bad');
+  const brechaNota = brecha === 0 ? 'SLA = plan operativo' : (brecha > 0 ? 'SLA > plan operativo' : 'SLA < plan operativo');
+  let facBlock = '';
+  if (fac && fac.principal != null) {
+    facBlock = `<div class="card" style="margin-bottom:14px;border-color:#f59e0b">
+      <h2>Desglose facturación vs plan operativo</h2>
+      <div class="grid g4">
+        <div><span class="muted">Principal</span><div class="kpi warn">${fmtN(fac.principal)}<small>teórico 3 vig: ${fmtN(fac.principal_teorico)} · gap interno ${fmtN(fac.gap_principal)} h</small></div></div>
+        <div><span class="muted">Refuerzo</span><div class="kpi">${fmtN(fac.refuerzo)}<small>1 vig × 24 × 31</small></div></div>
+        <div><span class="muted">Total facturado (SLA)</span><div class="kpi warn">${fmtN(t.horas_facturadas)}</div></div>
+        <div><span class="muted">Brecha (SLA − operativo)</span><div class="kpi ${brechaCls}">${fmtN(brecha)}<small>${brechaNota} · plan ${fmtN(t.horas_plan_pdf)} h</small></div></div>
+      </div>
+      <p style="color:#94a3b8;font-size:.85rem;margin:12px 0 0">Fichadas corregidas: <b>${fmt(t.horas_marcadas)}</b> (referencia) · ${t.turnos_corregidos} turno(s) normalizados · bruto ${fmt(t.horas_marcadas_brutas)}</p>
+    </div>`;
+  } else if (fac && fac.facturado != null) {
+    facBlock = `<div class="card" style="margin-bottom:14px;border-color:#f59e0b">
+      <h2>Desglose facturación vs plan operativo</h2>
+      <div class="grid g4">
+        <div><span class="muted">Facturado SLA</span><div class="kpi warn">${fmtN(t.horas_facturadas)}<small>hs mes agosto</small></div></div>
+        <div><span class="muted">Plan operativo</span><div class="kpi ok">${fmtN(t.horas_plan_pdf)}<small>${M.plan_leyenda || ''}</small></div></div>
+        <div><span class="muted">Brecha (SLA − operativo)</span><div class="kpi ${brechaCls}">${fmtN(brecha)}<small>${brechaNota}</small></div></div>
+        <div><span class="muted">Fichadas corregidas</span><div class="kpi">${fmt(t.horas_marcadas)}<small>referencia · ${t.turnos_corregidos} turnos norm.</small></div></div>
+      </div>
+    </div>`;
+  }
+
+  const heat = D.calendario.map(d => {
+    const cls = d.ok ? 'ok' : 'bad';
+    const bg = d.ok ? '#064e3b55' : '#7f1d1d55';
+    return `<div class="day" style="background:${bg}"><div class="n">${d.dia}</div><div class="${cls}">${d.counts.M}M ${d.counts.T}T ${d.counts.N}N</div><div style="color:#94a3b8">${d.real_hs}h</div></div>`;
+  }).join('');
+
+  const inc = D.incumplimientos.map(r => `<tr>
+    <td>${r.fecha} (${r.dia_sem})</td>
+    <td>${r.plan.M}M ${r.plan.T}T ${r.plan.N}N</td>
+    <td>${r.real.M}M ${r.real.T}T ${r.real.N}N</td>
+    <td class="num ${r.diffs.M||r.diffs.T||r.diffs.N?'bad':''}">${Object.entries(r.diffs).map(([k,v])=>v?k+(v>0?'+':'')+v:'').filter(Boolean).join(' ')||'—'}</td>
+    <td class="num">${r.horas_marcadas} h</td>
+  </tr>`).join('');
+
+  const guards = D.guardias.map(g => `<tr>
+    <td>${g.nombre}</td><td class="num">${g.turnos}</td><td class="num">${g.horas} h</td>
+    <td>M:${g.bandas.M||0} T:${g.bandas.T||0} N:${g.bandas.N||0}</td>
+  </tr>`).join('');
+
+  const val = D.validaciones.slice(0,25).map(v => `<tr>
+    <td>${v.fecha}</td><td>${v.nombre.split(' ')[0]}</td><td>${v.banda}</td>
+    <td>${v.entrada}–${v.salida}</td><td class="num">${v.horas} h</td>
+    <td class="warn">${v.issues.join('; ')}</td>
+  </tr>`).join('');
+
+  const corr = (D.correcciones||[]).map(v => `<tr>
+    <td>${v.fecha}</td><td>${v.nombre?.split(' ').slice(0,2).join(' ')||''}</td><td>${v.banda}</td>
+    <td>${v.entrada}–${v.salida}</td>
+    <td class="num bad">${v.horas_originales} h</td>
+    <td class="num ok">${v.horas_corregidas} h</td>
+    <td class="warn">${v.motivo}</td>
+  </tr>`).join('');
+
+  const anom = (D.anomalias||[]).map(v => `<tr>
+    <td>${v.fecha||v.entrada?.slice(0,10)}</td><td>${v.nombre?.split(' ')[0]||''}</td>
+    <td class="bad">${v.issues?.join('; ')||''}</td><td class="num">${v.horas} h</td>
+  </tr>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <h1>${M.titulo || 'Análisis'}</h1>
+    <p class="sub">${D.objetivo} · ${D.periodo} · ${D.marcaciones} marcaciones · ${D.guardias.length} guardias · <span style="color:#64748b">v ${M.generado || '?'}</span></p>
+
+    <div class="callout">
+      <b>Resumen del caso</b><br>
+      ${resumenHtml}<br><br>
+      <b>Brecha (SLA − operativo):</b> <span class="${brechaCls}">${fmtN(brecha)} h</span> · Fichadas corregidas: ${fmt(t.horas_marcadas)} (${t.turnos_corregidos} turnos norm.)
+    </div>
+    ${facBlock}
+
+    <div class="grid g4" style="margin-bottom:20px">
+      <div class="card"><h2>Facturado SLA</h2><div class="kpi warn">${fmtN(t.horas_facturadas)}<small>hs mes</small></div></div>
+      <div class="card"><h2>Plan operativo</h2><div class="kpi ok">${fmtN(t.horas_plan_pdf)}<small>${M.plan_leyenda || ''}</small></div></div>
+      <div class="card"><h2>Fichadas corregidas</h2><div class="kpi ok">${fmt(t.horas_marcadas)}<small>${t.turnos_corregidos} turnos normalizados · bruto ${fmt(t.horas_marcadas_brutas)}</small></div></div>
+      <div class="card"><h2>Parámetro / contrato</h2><div class="kpi bad">${fmtN(t.horas_teoricas_param)}<small>${M.parametro_label || ''}</small></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Comparativa de horas (conceptos)</h2>
+      <div class="bar-wrap">${comp.map(c=>bar(c.label,c.val,maxC,c.c)).join('')}</div>
+      <p style="color:#94a3b8;font-size:.85rem;margin:8px 0 0">
+        Fichadas corregidas: ${fmt(t.horas_marcadas)} (bruto ${fmt(t.horas_marcadas_brutas)}).<br>
+        <b>Brecha (SLA − operativo): ${fmtN(brecha)} h</b> — ${brechaNota}. Fichadas corregidas: ${fmt(t.horas_marcadas)} (referencia).
+      </p>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Cobertura diaria (marcaciones) — M / T / N por día</h2>
+      <p style="color:#94a3b8;font-size:.85rem">Verde = coincide plan · Rojo = desvío · Esperado: ${M.plan_leyenda || 'ver plan operativo'}</p>
+      <div class="heat" style="margin-top:12px">${heat}</div>
+      <p style="margin-top:10px;color:#94a3b8">${t.dias_incompletos} días con cobertura distinta al plan · ${D.dias_sin_marca.length} días sin ninguna marca en el export</p>
+    </div>
+
+    <div class="grid g2" style="margin-bottom:20px">
+      <div class="card">
+        <h2>Desvíos vs plan (${D.incumplimientos.length} días)</h2>
+        <div style="overflow:auto;max-height:360px"><table>
+          <thead><tr><th>Fecha</th><th>Plan</th><th>Real</th><th>Δ</th><th class="num">Hs</th></tr></thead>
+          <tbody>${inc || '<tr><td colspan=5>Sin desvíos</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h2>Guardias — resumen</h2>
+        <table><thead><tr><th>Nombre</th><th class="num">Turnos</th><th class="num">Horas</th><th>Bandas</th></tr></thead>
+        <tbody>${guards}</tbody></table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Correcciones aplicadas (${(D.correcciones||[]).length}) — regla: máx. 8 h · si &gt;10 h o 0 h → 8 h nominal</h2>
+      <p style="color:#94a3b8;font-size:.85rem">Turnos con olvido de cierre (ej. 23 h, 31 h) o fichada sin duración se normalizan a 8 h CCT para el análisis vs SLA.</p>
+      <div style="overflow:auto"><table>
+        <thead><tr><th>Fecha</th><th>Guardia</th><th>Banda</th><th>Horario fichado</th><th class="num">Hs brutas</th><th class="num">Hs usadas</th><th>Motivo</th></tr></thead>
+        <tbody>${corr || '<tr><td colspan=7>Sin correcciones</td></tr>'}</tbody>
+      </table></div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Otras observaciones (${(D.anomalias||[]).length})</h2>
+      <div style="overflow:auto"><table>
+        <thead><tr><th>Fecha</th><th>Guardia</th><th>Problema</th><th class="num">Hs reportadas</th></tr></thead>
+        <tbody>${anom || '<tr><td colspan=4>Ninguna</td></tr>'}</tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <h2>Validaciones horarias (entrada/salida vs banda 8 h)</h2>
+      <p style="color:#94a3b8;font-size:.85rem">Ventanas: M 05–08 → 14h · T 14–16 → 23h · N 22–01 → 07h</p>
+      <div style="overflow:auto;max-height:400px"><table>
+        <thead><tr><th>Fecha</th><th>Guardia</th><th>Banda</th><th>Horario</th><th class="num">Hs</th><th>Observación</th></tr></thead>
+        <tbody>${val}</tbody>
+      </table></div>
+    </div>
+  `;
+}
+render();
+</script>
+</body>
+</html>

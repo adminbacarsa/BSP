@@ -6,7 +6,7 @@ import { usePortalAuth } from '../../src/context/PortalAuthContext';
 import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
 import { RequireAuth } from '../../src/hooks/useRequireAuth';
-import { radius, spacing } from '../../src/theme/tokens';
+import { spacing } from '../../src/theme/tokens';
 import { useTheme } from '../../src/theme/ThemeContext';
 import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { useConvocatoriasPendientes } from '../../src/hooks/useConvocatoriasPendientes';
@@ -147,50 +147,33 @@ function MasScreenContent() {
           </CommandCard>
         ) : null}
 
-        <CommandCard title="Tu empresa">
-          <View style={styles.flagGrid}>
-            <Flag label="Fichada GPS" on={portalFeatures.checkIn} />
-            <Flag label="Agenda" on={portalFeatures.viewSchedule} />
-            <Flag label="Ausencias" on={portalFeatures.reportAbsence} />
-            <Flag label="Licencias" on={portalFeatures.requestLicense} />
-            <Flag label="Permutas" on={portalFeatures.swapShifts} />
-            <Flag label="Eventos" on={portalFeatures.viewEvents} />
-          </View>
-        </CommandCard>
-
         <CommandCard title="Sesión">
           <CommandButton
             label="Cerrar sesión"
             variant="secondary"
             onPress={() => {
-              void (async () => {
-                await signOut();
-                router.replace('/login');
-              })();
+              Alert.alert(
+                'Cerrar sesión',
+                'Vas a salir de tu cuenta. La app sigue instalada; para volver a usarla tenés que ingresar de nuevo.',
+                [
+                  { text: 'Cancelar', style: 'cancel' },
+                  {
+                    text: 'Cerrar sesión',
+                    style: 'destructive',
+                    onPress: () => {
+                      void (async () => {
+                        await signOut();
+                        router.replace('/login');
+                      })();
+                    },
+                  },
+                ],
+              );
             }}
           />
         </CommandCard>
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function Flag({ label, on }: { label: string; on: boolean }) {
-  const { palette } = useTheme();
-  return (
-    <View
-      style={[
-        styles.flag,
-        {
-          backgroundColor: on ? 'rgba(16,185,129,0.18)' : palette.inputBg,
-          borderColor: on ? palette.success : palette.outline,
-        },
-      ]}
-    >
-      <Text style={[styles.flagText, { color: on ? palette.success : palette.onSurfaceMuted }]}>
-        {label}
-      </Text>
-    </View>
   );
 }
 
@@ -203,7 +186,4 @@ const styles = StyleSheet.create({
   versionLine: { fontSize: 12, fontWeight: '800', marginBottom: 10 },
   themeRow: { flexDirection: 'row', gap: 10 },
   themeBtn: { flex: 1 },
-  flagGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  flag: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.pill, borderWidth: 1 },
-  flagText: { fontSize: 12, fontWeight: '800' },
 });

@@ -13,6 +13,7 @@ const INBOX_NEEDS_FCM = new Set([
     'RELEVO',
     'VACANTE_PLANIFICACION',
     'VACANTE_OPERACIONES',
+    'CONVOCATORIA_COBERTURA',
 ]);
 async function collectTokens(db, uid, employeeId) {
     const tokenSet = new Set();
@@ -73,7 +74,9 @@ exports.onEmployeeNotificationCreated = functions
                 ? '/admin/planificacion'
                 : type === 'VACANTE_OPERACIONES'
                     ? '/admin/operaciones'
-                    : '/empleado/dashboard';
+                    : type === 'CONVOCATORIA_COBERTURA'
+                        ? '/empleado/dashboard'
+                        : '/empleado/dashboard';
     try {
         const result = await admin.messaging().sendEachForMulticast({
             notification: { title, body },

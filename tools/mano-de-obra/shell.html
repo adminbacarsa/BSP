@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tablero financiero — Costo laboral 08/2026</title>
+  <style>
+    :root {
+      --bg: #0f172a; --bg-2: #111827; --card: #1e293b; --stroke: #334155;
+      --text: #f1f5f9; --muted: #94a3b8; --indigo: #6366f1; --indigo-2: #818cf8;
+      --emerald: #34d399; --amber: #fbbf24; --rose: #fb7185; --sky: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: var(--bg); color: var(--text); font-family: "Segoe UI", Inter, system-ui, sans-serif; min-height: 100%; }
+    body { padding: 28px 28px 64px; }
+    .wrap { max-width: 1280px; margin: 0 auto; }
+    .wrap.wide { max-width: 1680px; }
+    header.top {
+      background: var(--card); border: 1px solid var(--stroke); border-radius: 24px;
+      padding: 22px 26px; box-shadow: 0 10px 30px rgba(0,0,0,.28); margin-bottom: 18px;
+    }
+    .kicker { color: var(--indigo-2); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; font-weight: 650; }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -.03em; margin-top: 4px; }
+    h2 { font-size: 18px; font-weight: 700; letter-spacing: -.02em; margin: 8px 0 12px; }
+    .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin-top: 6px; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+    .tab {
+      border: 1px solid var(--stroke); background: var(--bg-2); color: var(--muted);
+      border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .tab:hover { background: #1e293b; color: var(--text); }
+    .tab.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .panel { display: none; }
+    .panel.on { display: block; }
+    .grid { display: grid; gap: 14px; overflow: visible; }
+    .g4 { grid-template-columns: repeat(4, 1fr); }
+    .g3 { grid-template-columns: repeat(3, 1fr); }
+    .g2 { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: var(--card); border: 1px solid var(--stroke); border-radius: 20px;
+      padding: 16px 18px; box-shadow: 0 8px 20px rgba(0,0,0,.18);
+    }
+    .stat .v { font-size: 24px; font-weight: 700; letter-spacing: -.03em; }
+    .stat .l { margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+    .has-tip { position: relative; cursor: help; z-index: 1; }
+    .has-tip:hover, .has-tip:focus-within { z-index: 40; }
+    .tip-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; margin-left: 6px; border-radius: 99px;
+      border: 1px solid #64748b; color: #94a3b8; font-size: 10px; font-weight: 700;
+    }
+    .tip {
+      display: none; position: absolute; left: 10px; right: 10px; top: calc(100% + 8px);
+      z-index: 50; background: #0b1220; border: 1px solid #6366f1; border-radius: 14px;
+      padding: 10px 12px; font-size: 12px; line-height: 1.45; color: #e2e8f0;
+      box-shadow: 0 12px 28px rgba(0,0,0,.45);
+    }
+    .tip b { color: #a5b4fc; font-weight: 650; }
+    .has-tip:hover .tip, .has-tip:focus-within .tip { display: block; }
+    .warn { color: var(--amber); }
+    .danger { color: var(--rose); }
+    .ok { color: var(--emerald); }
+    .info { color: var(--sky); }
+    .callout { border-radius: 20px; padding: 14px 16px; font-size: 14px; line-height: 1.5; margin: 14px 0; }
+    .callout.info { background: #0b1c33; border: 1px solid #1e3a5f; color: #bfdbfe; }
+    details.glosario { margin-bottom: 14px; }
+    details.glosario > summary {
+      list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+      font-size: 18px; font-weight: 700; user-select: none;
+    }
+    details.glosario > summary::-webkit-details-marker { display: none; }
+    .glosario .lead { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 12px 0; }
+    .pie-wrap { display: grid; grid-template-columns: minmax(160px, 200px) 1fr; gap: 16px 20px; align-items: center; }
+    .pie-chart { width: 100%; max-width: 200px; height: auto; display: block; margin: 0 auto; filter: drop-shadow(0 4px 12px rgba(0,0,0,.35)); }
+    .pie-center { font-size: 11px; fill: #94a3b8; font-weight: 600; }
+    .pie-center-v { font-size: 13px; fill: #f1f5f9; font-weight: 700; }
+    .share-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 14px; margin-top: 12px; font-size: 12px; }
+    .share-item { display: flex; gap: 8px; line-height: 1.35; color: var(--muted); }
+    .share-item i { width: 10px; height: 10px; border-radius: 99px; flex-shrink: 0; margin-top: 3px; }
+    .share-item b { color: var(--text); font-weight: 650; }
+    .hbar { display: grid; grid-template-columns: 240px 1fr 120px; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+    .hbar .track { height: 10px; background: #0f172a; border-radius: 99px; overflow: hidden; }
+    .hbar .fill { height: 100%; border-radius: 99px; }
+    .hbar .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { padding: 8px 8px; text-align: left; border-bottom: 1px solid #334155; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 650; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; position: sticky; top: 0; background: var(--card); }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:hover { background: #243044; }
+    .tbl-wrap { overflow: auto; max-height: 640px; border-radius: 12px; }
+    input, select {
+      background: #0f172a; border: 1px solid var(--stroke); color: var(--text);
+      border-radius: 12px; padding: 8px 12px; font-size: 13px;
+    }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .sortbtn {
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--muted);
+      border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .sortbtn.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .muted { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .foot { margin-top: 22px; color: #64748b; font-size: 12px; }
+    input.inc { width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer; }
+    table.roster tr.off { opacity: .45; }
+    table.roster td.chk { width: 34px; text-align: center; }
+    .btn-csv {
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--text);
+      border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    @media (max-width: 980px) { .g4, .g3, .g2 { grid-template-columns: 1fr 1fr; } body { padding: 16px; } .hbar { grid-template-columns: 1fr; } .pie-wrap { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) { .g4, .g3, .g2 { grid-template-columns: 1fr; } h1 { font-size: 22px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="kicker">Grupo Bacar · Capital Humano</div>
+      <h1>Tablero financiero — Costo laboral</h1>
+      <p class="sub" id="subline">Liquidación agosto 2026</p>
+      <div class="tabs" id="tabs"></div>
+    </header>
+    <section class="panel on" id="tablero"></section>
+    <section class="panel" id="centros"></section>
+    <section class="panel" id="plantel"></section>
+    <section class="panel" id="planilla"></section>
+    <p class="foot">Fuente: liquidacion.xls (export Salario/LOL). <b>Costo laboral</b> = columna <code>int__costo_laboral</code> (empleador: neto + cargas + provisiones). Las columnas «horas_extras» / «horasextrasal100» traen importe $, no cantidad de horas.</p>
+  </div>
+  <script>
+    const DOCS = %%DOCS%%;
+    const META = %%META%%;
+    const EXCL_CC = "mano-obra-excl-cc-202608";
+    const CHART_COLORS = ["#6366f1", "#34d399", "#fbbf24", "#fb7185", "#38bdf8", "#a78bfa", "#f472b6", "#2dd4bf", "#64748b"];
+    const REF_VENTAS = 4031937882.28;
+    const REF_COMPRAS = 517600000;
+
+    function loadSet(key) {
+      try {
+        const raw = JSON.parse(localStorage.getItem(key) || "[]");
+        return new Set(Array.isArray(raw) ? raw.map(String) : []);
+      } catch (e) { return new Set(); }
+    }
+    let excludedCc = loadSet(EXCL_CC);
+
+    function saveExcluded() {
+      localStorage.setItem(EXCL_CC, JSON.stringify([...excludedCc]));
+    }
+
+    function fmtPeso(n) {
+      const sign = n < 0 ? "-" : "";
+      const a = Math.abs(n);
+      if (a >= 1e6) return sign + "$ " + (a / 1e6).toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " M";
+      return sign + "$ " + a.toLocaleString("es-AR", { maximumFractionDigits: 0 });
+    }
+    function fmtFull(n) {
+      const sign = n < 0 ? "-" : "";
+      return sign + "$ " + Math.abs(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function pct(n, d) { return d ? ((n / d) * 100).toFixed(1) + "%" : "—"; }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+    function shortLabel(s, n) { return s.length > (n || 38) ? s.slice(0, n - 2) + "…" : s; }
+    function ccKey(d) { return d.cc + "|" + d.ccNom; }
+
+    function roster() {
+      return DOCS.filter(d => !excludedCc.has(ccKey(d)));
+    }
+
+    function metrics(list) {
+      const T = {
+        n: list.length, costo: 0, neto: 0, remun: 0, noRem: 0, desc: 0,
+        contrib: 0, prov: 0, ex50: 0, ex100: 0, noct: 0, fer: 0,
+      };
+      const byCc = {};
+      const bySec = {};
+      for (const d of list) {
+        T.costo += d.costo; T.neto += d.neto; T.remun += d.remun || 0;
+        T.noRem += d.noRem || 0; T.desc += d.desc || 0;
+        T.contrib += d.contrib || 0; T.prov += d.prov || 0;
+        T.ex50 += d.ex50 || 0; T.ex100 += d.ex100 || 0;
+        T.noct += d.nocturnidad || 0; T.fer += d.feriados || 0;
+        const k = ccKey(d);
+        if (!byCc[k]) byCc[k] = { cc: d.cc, ccNom: d.ccNom, costo: 0, neto: 0, n: 0 };
+        byCc[k].costo += d.costo; byCc[k].neto += d.neto; byCc[k].n += 1;
+        const s = d.sec || "—";
+        if (!bySec[s]) bySec[s] = { sec: s, costo: 0, n: 0 };
+        bySec[s].costo += d.costo; bySec[s].n += 1;
+      }
+      const ccArr = Object.values(byCc).sort((a, b) => b.costo - a.costo);
+      const secArr = Object.values(bySec).sort((a, b) => b.costo - a.costo);
+      T.avgCosto = T.n ? T.costo / T.n : 0;
+      T.avgNeto = T.n ? T.neto / T.n : 0;
+      T.mobVentas = REF_VENTAS ? T.costo / REF_VENTAS : 0;
+      return { T, byCc, ccArr, secArr, exclList: [...excludedCc] };
+    }
+
+    function ctx() { return metrics(roster()); }
+
+    function stat(v, l, cls, hint) {
+      return `<div class="card stat${hint ? " has-tip" : ""}"${hint ? ` tabindex="0"` : ""}><div class="v ${cls || ""}">${v}</div><div class="l">${l}${hint ? ` <span class="tip-mark">i</span>` : ""}</div>${hint ? `<div class="tip" role="tooltip">${hint}</div>` : ""}</div>`;
+    }
+
+    function hbars(items, max, color) {
+      return items.map(([label, val]) => {
+        const w = max ? Math.max(4, (Math.abs(val) / max) * 100) : 0;
+        return `<div class="hbar"><div>${esc(label)}</div><div class="track"><div class="fill" style="width:${w}%;background:${color}"></div></div><div class="val">${fmtPeso(val)}</div></div>`;
+      }).join("");
+    }
+
+    function pieChart(items, total, topN, opts) {
+      opts = opts || {};
+      const getVal = opts.getVal || (x => x.costo || x.net);
+      const getLabel = opts.getLabel || (x => x.ccNom || x.sec || x.cuenta || "");
+      const fmtVal = opts.fmtVal || fmtPeso;
+      const centerText = opts.centerText || "Top";
+      const pos = items.map(x => ({ val: getVal(x), label: getLabel(x) })).filter(x => x.val > 0).sort((a, b) => b.val - a.val);
+      if (!pos.length || !total) return `<p class="muted">Sin datos positivos.</p>`;
+      const top = pos.slice(0, topN || 8);
+      const rest = pos.slice(topN || 8);
+      const restVal = rest.reduce((a, x) => a + x.val, 0);
+      const segs = top.map((x, i) => ({
+        label: shortLabel(x.label, 42),
+        val: x.val,
+        pct: (x.val / total) * 100,
+        color: CHART_COLORS[i % CHART_COLORS.length],
+      }));
+      if (restVal > 0) segs.push({ label: `Otros (${rest.length})`, val: restVal, pct: (restVal / total) * 100, color: CHART_COLORS[8] });
+      const cx = 50, cy = 50, r = 46, ri = 26;
+      let ang = -Math.PI / 2;
+      const slices = segs.map(s => {
+        const sweep = (s.pct / 100) * Math.PI * 2;
+        const a0 = ang, a1 = ang + sweep;
+        ang = a1;
+        const large = sweep > Math.PI ? 1 : 0;
+        const x1 = cx + r * Math.cos(a0), y1 = cy + r * Math.sin(a0);
+        const x2 = cx + r * Math.cos(a1), y2 = cy + r * Math.sin(a1);
+        const x3 = cx + ri * Math.cos(a1), y3 = cy + ri * Math.sin(a1);
+        const x4 = cx + ri * Math.cos(a0), y4 = cy + ri * Math.sin(a0);
+        const d = `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${ri} ${ri} 0 ${large} 0 ${x4} ${y4} Z`;
+        return { ...s, d };
+      });
+      const topSeg = segs[0];
+      return `<div class="pie-wrap">
+        <svg viewBox="0 0 100 100" class="pie-chart" role="img" aria-label="Gráfico torta">
+          ${slices.map(s => `<path d="${s.d}" fill="${s.color}" stroke="#0f172a" stroke-width="0.6"><title>${esc(s.label)}: ${s.pct.toFixed(1)}%</title></path>`).join("")}
+          <text x="${cx}" y="${cy - 2}" text-anchor="middle" class="pie-center">${esc(centerText)}</text>
+          <text x="${cx}" y="${cy + 10}" text-anchor="middle" class="pie-center-v">${topSeg ? topSeg.pct.toFixed(0) + "%" : "—"}</text>
+        </svg>
+        <div class="share-grid">${segs.map(s => `<div class="share-item"><i style="background:${s.color}"></i><span><b>${esc(s.label)}</b> · ${s.pct.toFixed(1)}% · ${fmtVal(s.val)}</span></div>`).join("")}</div>
+      </div>`;
+    }
+
+    const TABS = [["tablero", "Tablero"], ["centros", "Centros de costo"], ["plantel", "Plantel"], ["planilla", "Planilla"]];
+    document.getElementById("tabs").innerHTML = TABS.map(([id, l], i) =>
+      `<button class="tab${i === 0 ? " on" : ""}" data-tab="${id}">${l}</button>`
+    ).join("");
+    document.getElementById("tabs").addEventListener("click", (e) => {
+      const b = e.target.closest(".tab");
+      if (!b) return;
+      document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+      document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === b.dataset.tab));
+      document.querySelector(".wrap").classList.toggle("wide", b.dataset.tab === "planilla");
+    });
+
+    function renderTablero() {
+      const { T, ccArr, secArr } = ctx();
+      const margen = REF_VENTAS - T.costo - REF_COMPRAS;
+      const top10 = [...roster()].sort((a, b) => b.costo - a.costo).slice(0, 10);
+      document.getElementById("tablero").innerHTML = `
+        <details class="card glosario">
+          <summary>Qué es el costo laboral acá</summary>
+          <p class="lead"><b>Costo laboral</b> = columna <code>int__costo_laboral</code> del export: incluye neto, contribuciones, provisiones y cargas del empleador. <b>Neto a pagar</b> es lo que cobra el legajo. ${T.n} legajos en ${esc(META.periodo || "—")}.</p>
+        </details>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(fmtPeso(T.costo), "Costo laboral total", "danger", `<b>Suma int__costo_laboral</b><br>${fmtFull(T.costo)} · ${T.n} legajos.<br>Promedio ${fmtPeso(T.avgCosto)} por persona.`)}
+          ${stat(fmtPeso(T.neto), "Neto a pagar", "ok", `<b>Suma neto_a_pagar</b><br>${fmtFull(T.neto)} (${pct(T.neto, T.costo)} del costo laboral).`)}
+          ${stat(fmtPeso(T.contrib), "Contribuciones", "warn", `<b>Suma total_contrib</b><br>${fmtFull(T.contrib)} (${pct(T.contrib, T.costo)} del costo).`)}
+          ${stat(fmtPeso(T.prov), "Provisiones", "", `<b>Suma total_prov</b><br>${fmtFull(T.prov)} (SAC, despidos, etc.).`)}
+        </div>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(fmtPeso(T.ex50 + T.ex100), "Extras $ (50%+100%)", "warn", `<b>horas_extras + horasextrasal100</b><br>Importe en pesos, no hs: ${fmtFull(T.ex50)} + ${fmtFull(T.ex100)}.`)}
+          ${stat(pct(T.costo, REF_VENTAS), "MOB / ventas contables", "info", `<b>Costo laboral / ventas ago contable</b><br>${fmtPeso(T.costo)} / ${fmtPeso(REF_VENTAS)}.<br>Referencia ventas y cobranzas reporte 272.`)}
+          ${stat(String(ccArr.length), "Centros de costo", "", `<b>Centros distintos</b> en el universo tildado.`)}
+          ${stat(fmtPeso(margen), "Margen bruto ref.", margen >= 0 ? "ok" : "danger", `<b>Ventas contables − MOB − compras ago</b><br>${fmtPeso(REF_VENTAS)} − ${fmtPeso(T.costo)} − ${fmtPeso(REF_COMPRAS)}.<br>Aproximado; sin otros costos.`)}
+        </div>
+        <div class="grid g2" style="margin-bottom:14px">
+          <div class="card">
+            <h2>Costo por centro de costo</h2>
+            ${pieChart(ccArr, T.costo, 8, { getLabel: x => x.ccNom, getVal: x => x.costo })}
+          </div>
+          <div class="card">
+            <h2>Costo por sección</h2>
+            ${pieChart(secArr, T.costo, 8, { getLabel: x => x.sec, getVal: x => x.costo })}
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <h2>Top 10 legajos — costo laboral</h2>
+          ${hbars(top10.map(p => [shortLabel(p.nombre, 28), p.costo]), top10[0]?.costo || 1, "#fb7185")}
+        </div>
+        <div class="callout info"><b>Cruce con otros tableros (ago 2026).</b> Ventas contables ~${fmtPeso(REF_VENTAS)} · Cobranzas ~$ 4.196 M · Compras imputadas ~${fmtPeso(REF_COMPRAS)} · <b>MOB ${fmtPeso(T.costo)}</b> = ${pct(T.costo, REF_VENTAS)} de las ventas. El reporting general cerrará acá.</div>
+      `;
+    }
+
+    let ccSort = "costo";
+    let ccQ = "";
+    function renderCentros() {
+      const { T, ccArr, exclList } = ctx();
+      const allKeys = [...new Set(DOCS.map(ccKey))];
+      const q = ccQ.trim().toLowerCase();
+      const rows = allKeys.map(k => {
+        const parts = k.split("|");
+        const agg = roster().filter(d => ccKey(d) === k);
+        const sample = DOCS.find(d => ccKey(d) === k);
+        const costo = agg.reduce((a, d) => a + d.costo, 0);
+        const neto = agg.reduce((a, d) => a + d.neto, 0);
+        return {
+          k, cc: parts[0], ccNom: parts.slice(1).join("|"),
+          n: agg.length,
+          nTotal: DOCS.filter(d => ccKey(d) === k).length,
+          costo, neto,
+          on: !excludedCc.has(k),
+        };
+      }).filter(r => !q || r.ccNom.toLowerCase().includes(q) || r.cc.includes(q))
+        .sort((a, b) => {
+          if (a.on !== b.on) return a.on ? -1 : 1;
+          return (b[ccSort] || 0) - (a[ccSort] || 0);
+        });
+      document.getElementById("centros").innerHTML = `
+        <div class="grid g3" style="margin-bottom:14px">
+          ${stat(fmtPeso(T.costo), "Costo incluido", "danger", `<b>Centros tildados</b>`)}
+          ${stat(String(rows.filter(r => r.on).length), "Centros activos", "", `<b>${exclList.length} excluidos</b>`)}
+          ${stat(fmtPeso(T.avgCosto), "Promedio / legajo", "", `<b>Costo / ${T.n} personas</b>`)}
+        </div>
+        <div class="toolbar">
+          <input id="ccq" type="search" placeholder="Buscar centro…" value="${esc(ccQ)}" style="width:280px" />
+          <button class="sortbtn${ccSort === "costo" ? " on" : ""}" data-sort="costo">Costo</button>
+          <button class="sortbtn${ccSort === "neto" ? " on" : ""}" data-sort="neto">Neto</button>
+          <button class="sortbtn${ccSort === "n" ? " on" : ""}" data-sort="n">Legajos</button>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table class="roster">
+              <thead><tr>
+                <th class="chk"></th><th>Cód.</th><th>Centro de costo</th><th class="num">Legajos</th>
+                <th class="num">Costo laboral</th><th class="num">%</th><th class="num">Neto</th>
+              </tr></thead>
+              <tbody>
+                ${rows.map(r => `<tr class="${r.on ? "" : "off"}">
+                  <td class="chk"><input type="checkbox" class="inc" data-k="${esc(r.k)}" ${r.on ? "checked" : ""} /></td>
+                  <td>${esc(r.cc)}</td><td>${esc(r.ccNom)}</td>
+                  <td class="num">${r.on ? r.n : 0} / ${r.nTotal}</td>
+                  <td class="num">${fmtFull(r.costo)}</td>
+                  <td class="num">${r.on ? pct(r.costo, T.costo) : "—"}</td>
+                  <td class="num">${fmtFull(r.neto)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      document.getElementById("ccq").addEventListener("input", e => { ccQ = e.target.value; renderCentros(); });
+      document.querySelectorAll("#centros .sortbtn").forEach(b => b.addEventListener("click", () => { ccSort = b.dataset.sort; renderCentros(); }));
+      document.querySelectorAll("#centros .inc").forEach(cb => {
+        cb.addEventListener("change", () => {
+          const k = cb.getAttribute("data-k");
+          if (cb.checked) excludedCc.delete(k); else excludedCc.add(k);
+          saveExcluded(); refresh();
+        });
+      });
+    }
+
+    let plSort = "costo";
+    let plQ = "";
+    function renderPlantel() {
+      const { T } = ctx();
+      const q = plQ.trim().toLowerCase();
+      const rows = roster()
+        .filter(p => !q || p.nombre.toLowerCase().includes(q) || String(p.leg).includes(q) || p.cuil.includes(q))
+        .sort((a, b) => (b[plSort] || 0) - (a[plSort] || 0));
+      document.getElementById("plantel").innerHTML = `
+        <div class="toolbar">
+          <input id="pq" type="search" placeholder="Buscar legajo, nombre, CUIL…" value="${esc(plQ)}" style="width:300px" />
+          <button class="sortbtn${plSort === "costo" ? " on" : ""}" data-sort="costo">Costo</button>
+          <button class="sortbtn${plSort === "neto" ? " on" : ""}" data-sort="neto">Neto</button>
+          <button class="sortbtn${plSort === "ex50" ? " on" : ""}" data-sort="ex50">Extras 50%</button>
+          <button class="sortbtn${plSort === "ex100" ? " on" : ""}" data-sort="ex100">Extras 100%</button>
+          <span class="muted">${rows.length} / ${T.n} legajos</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Leg.</th><th>Nombre</th><th>Centro</th><th>Categoría</th>
+                <th class="num">Costo</th><th class="num">Neto</th><th class="num">Ex.50%</th><th class="num">Ex.100%</th><th class="num">%</th>
+              </tr></thead>
+              <tbody>
+                ${rows.map(p => `<tr>
+                  <td>${esc(p.leg)}</td><td>${esc(p.nombre)}</td>
+                  <td>${esc(shortLabel(p.ccNom, 24))}</td><td>${esc(shortLabel(p.cat, 22))}</td>
+                  <td class="num">${fmtFull(p.costo)}</td><td class="num">${fmtFull(p.neto)}</td>
+                  <td class="num">${p.ex50 ? fmtPeso(p.ex50) : "—"}</td>
+                  <td class="num">${p.ex100 ? fmtPeso(p.ex100) : "—"}</td>
+                  <td class="num">${pct(p.costo, T.costo)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      document.getElementById("pq").addEventListener("input", e => { plQ = e.target.value; renderPlantel(); });
+      document.querySelectorAll("#plantel .sortbtn").forEach(b => b.addEventListener("click", () => { plSort = b.dataset.sort; renderPlantel(); }));
+    }
+
+    let planQ = "";
+    function renderPlanilla() {
+      const list = roster();
+      const q = planQ.trim().toLowerCase();
+      const filtered = list.filter(p => !q || [p.leg, p.nombre, p.cuil, p.ccNom, p.cat, p.sec].join(" ").toLowerCase().includes(q));
+      document.getElementById("planilla").innerHTML = `
+        <div class="toolbar">
+          <input id="plq" type="search" placeholder="Buscar…" value="${esc(planQ)}" style="width:300px" />
+          <button type="button" class="btn-csv" id="csvBtn">Export CSV</button>
+          <span class="muted">${filtered.length} / ${list.length} legajos · ${DOCS.length} en archivo</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Leg.</th><th>Nombre</th><th>CUIL</th><th>Centro</th><th>Sección</th><th>Categoría</th>
+                <th class="num">Costo</th><th class="num">Neto</th><th class="num">Remun.</th><th class="num">Contrib.</th><th class="num">Ex.50%</th><th class="num">Ex.100%</th>
+              </tr></thead>
+              <tbody>
+                ${filtered.map(p => `<tr>
+                  <td>${esc(p.leg)}</td><td>${esc(p.nombre)}</td><td>${esc(p.cuil)}</td>
+                  <td>${esc(p.ccNom)}</td><td>${esc(p.sec)}</td><td>${esc(p.cat)}</td>
+                  <td class="num">${fmtFull(p.costo)}</td><td class="num">${fmtFull(p.neto)}</td>
+                  <td class="num">${fmtFull(p.remun || 0)}</td><td class="num">${fmtFull(p.contrib || 0)}</td>
+                  <td class="num">${fmtFull(p.ex50 || 0)}</td><td class="num">${fmtFull(p.ex100 || 0)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      document.getElementById("plq").addEventListener("input", e => { planQ = e.target.value; renderPlanilla(); });
+      document.getElementById("csvBtn").addEventListener("click", () => {
+        const hdr = ["leg","nombre","cuil","cc","ccNom","sec","cat","costo","neto","remun","noRem","desc","contrib","prov","ex50","ex100"];
+        const lines = [hdr.join(";")].concat(filtered.map(p => hdr.map(h => String(p[h] ?? "")).join(";")));
+        const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "costo-laboral-agosto-2026.csv";
+        a.click();
+      });
+    }
+
+    function refresh() {
+      const { T } = ctx();
+      const sub = document.getElementById("subline");
+      if (sub) {
+        sub.textContent = `${META.titulo || "Liquidación"} · ${META.periodo || "—"} · ${T.n} legajos · costo ${fmtPeso(T.costo)} · neto ${fmtPeso(T.neto)}`;
+      }
+      const onTab = document.querySelector(".tab.on");
+      const tabId = onTab ? onTab.dataset.tab : "tablero";
+      renderTablero();
+      renderCentros();
+      renderPlantel();
+      renderPlanilla();
+      if (tabId && tabId !== "tablero") {
+        document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === tabId));
+        document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === tabId));
+        document.querySelector(".wrap").classList.toggle("wide", tabId === "planilla");
+      }
+    }
+    refresh();
+  </script>
+</body>
+</html>

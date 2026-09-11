@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tablero predictivo — Novedades Camioneros 08/2026</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --bg-2: #111827;
+      --card: #1e293b;
+      --stroke: #334155;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --indigo: #6366f1;
+      --indigo-2: #818cf8;
+      --emerald: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --sky: #38bdf8;
+      --violet: #a78bfa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Inter, system-ui, sans-serif;
+      min-height: 100%;
+    }
+    body { padding: 28px 28px 64px; }
+    .wrap { max-width: 1280px; margin: 0 auto; }
+    .wrap.wide { max-width: 1680px; }
+    header.top {
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 24px;
+      padding: 22px 26px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.28);
+      margin-bottom: 18px;
+    }
+    .kicker {
+      color: var(--indigo-2);
+      font-size: 12px;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+      font-weight: 650;
+    }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -.03em; margin-top: 4px; }
+    h2 { font-size: 18px; font-weight: 700; letter-spacing: -.02em; margin: 8px 0 12px; }
+    .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin-top: 6px; }
+    .tabs {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px;
+    }
+    .tab {
+      border: 1px solid var(--stroke);
+      background: var(--bg-2);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .tab:hover { background: #1e293b; color: var(--text); }
+    .tab.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .panel { display: none; }
+    .panel.on { display: block; }
+    .grid { display: grid; gap: 14px; }
+    .g4 { grid-template-columns: repeat(4, 1fr); }
+    .g3 { grid-template-columns: repeat(3, 1fr); }
+    .g2 { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 20px;
+      padding: 16px 18px;
+      box-shadow: 0 8px 20px rgba(0,0,0,.18);
+    }
+    .stat .v { font-size: 24px; font-weight: 700; letter-spacing: -.03em; }
+    .stat .l { margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+    .grid { overflow: visible; }
+    .has-tip { position: relative; cursor: help; z-index: 1; }
+    .has-tip:hover, .has-tip:focus-within { z-index: 40; }
+    .tip-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; margin-left: 6px; border-radius: 99px;
+      border: 1px solid #64748b; color: #94a3b8; font-size: 10px; font-weight: 700;
+      vertical-align: middle; line-height: 1;
+    }
+    .tip {
+      display: none;
+      position: absolute;
+      left: 10px; right: 10px;
+      top: calc(100% + 8px);
+      z-index: 50;
+      background: #0b1220;
+      border: 1px solid #6366f1;
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #e2e8f0;
+      box-shadow: 0 12px 28px rgba(0,0,0,.45);
+    }
+    .tip b { color: #a5b4fc; font-weight: 650; }
+    .has-tip:hover .tip, .has-tip:focus-within .tip { display: block; }
+    .warn { color: var(--amber); }
+    .danger { color: var(--rose); }
+    .ok { color: var(--emerald); }
+    .info { color: var(--sky); }
+    .callout {
+      border-radius: 20px;
+      padding: 14px 16px;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 14px 0;
+    }
+    .callout.info { background: #0b1c33; border: 1px solid #1e3a5f; color: #bfdbfe; }
+    .callout.warning { background: #1a1408; border: 1px solid #854d0e; color: #fde68a; }
+    .callout b { color: inherit; }
+    .glosario { margin-bottom: 14px; }
+    .glosario h2 { margin-top: 0; }
+    .glosario .lead { color: var(--muted); font-size: 13px; line-height: 1.5; margin: -2px 0 12px; }
+    details.glosario > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      user-select: none;
+    }
+    details.glosario > summary::-webkit-details-marker { display: none; }
+    details.glosario > summary::before {
+      content: "";
+      width: 8px; height: 8px;
+      border-right: 2px solid #818cf8;
+      border-bottom: 2px solid #818cf8;
+      transform: rotate(-45deg);
+      margin-top: -2px;
+      flex-shrink: 0;
+    }
+    details.glosario[open] > summary::before { transform: rotate(45deg); margin-top: 2px; }
+    details.glosario > summary .open-hint {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--indigo-2);
+    }
+    details.glosario[open] > summary .open-hint { display: none; }
+    details.glosario[open] > .lead { margin-top: 12px; }
+    table.glosa { width: 100%; font-size: 13px; }
+    table.glosa th {
+      text-transform: none; letter-spacing: 0; font-size: 11px;
+      color: #64748b; font-weight: 700;
+    }
+    table.glosa td { white-space: normal; line-height: 1.45; vertical-align: top; color: #cbd5e1; }
+    table.glosa td.kpi { width: 132px; white-space: nowrap; font-weight: 750; }
+    table.glosa td.kpi.base { color: #e2e8f0; }
+    table.glosa td.kpi.ahorro { color: var(--emerald); }
+    table.glosa td.kpi.alza { color: var(--rose); }
+    table.glosa td.kpi.ice { color: var(--amber); }
+    table.glosa td.para { color: #94a3b8; }
+    .usage {
+      height: 14px;
+      border-radius: 999px;
+      overflow: hidden;
+      display: flex;
+      background: #0f172a;
+      border: 1px solid var(--stroke);
+    }
+    .usage span { display: block; height: 100%; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .legend i {
+      display: inline-block; width: 9px; height: 9px; border-radius: 99px; margin-right: 6px;
+    }
+    .hbar { display: grid; grid-template-columns: 160px 1fr 72px; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+    .hbar .track { height: 10px; background: #0f172a; border-radius: 99px; overflow: hidden; }
+    .hbar .fill { height: 100%; border-radius: 99px; }
+    .hbar .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { padding: 8px 8px; text-align: left; border-bottom: 1px solid #334155; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 650; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; position: sticky; top: 0; background: var(--card); }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:hover { background: #243044; }
+    .tbl-wrap { overflow: auto; max-height: 640px; border-radius: 12px; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 99px; margin-right: 6px; }
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .pill.crit { background: #3f1d24; color: var(--rose); }
+    .pill.alto { background: #3b2a0b; color: var(--amber); }
+    .pill.med { background: #0c2a3a; color: var(--sky); }
+    .pill.bajo { background: #06281f; color: var(--emerald); }
+    input, select {
+      background: #0f172a;
+      border: 1px solid var(--stroke);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .sortbtn {
+      border: 1px solid var(--stroke);
+      background: #0f172a;
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .sortbtn.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .donut-wrap { display: flex; gap: 20px; align-items: center; }
+    .muted { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    input.inc { width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer; }
+    table.roster tr.off { opacity: .45; }
+    table.roster td.chk { width: 34px; text-align: center; }
+    .excl-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .excl-pills button {
+      border: 1px solid #7f1d1d; background: #3f1d24; color: #fb7185;
+      border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+    }
+    .btn-ghost {
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--text);
+      border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .btn-ghost:hover { background: #1e293b; }
+    .stack { display: flex; flex-direction: column; gap: 14px; }
+    .foot { margin-top: 22px; color: #64748b; font-size: 12px; }
+    .fx {
+      display: flex; gap: 10px; align-items: flex-start;
+      background: #0f172a; border: 1px solid var(--stroke);
+      border-radius: 14px; padding: 10px 14px; margin-bottom: 10px;
+      font-size: 13px; line-height: 1.45;
+    }
+    .fx .cellref {
+      font-family: ui-monospace, Consolas, monospace;
+      color: var(--indigo-2); font-weight: 700; min-width: 52px;
+    }
+    .fx .fxbody { color: var(--text); }
+    .fx .fxmath { color: var(--amber); font-family: ui-monospace, Consolas, monospace; font-size: 12px; margin-top: 4px; }
+    .btn-xls {
+      border: 0; background: #065f46; color: #ecfdf5;
+      border-radius: 999px; padding: 7px 14px; font-size: 12px;
+      font-weight: 700; cursor: pointer;
+    }
+    .btn-csv {
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--text);
+      border-radius: 999px; padding: 7px 14px; font-size: 12px;
+      font-weight: 600; cursor: pointer;
+    }
+    .sheet-wrap {
+      overflow: auto; max-height: 68vh;
+      border: 1px solid var(--stroke); border-radius: 14px;
+      background: #0b1220;
+    }
+    table.sheet { width: max-content; min-width: 100%; font-size: 11.5px; border-collapse: separate; border-spacing: 0; }
+    table.sheet th, table.sheet td {
+      border-right: 1px solid #1e293b; border-bottom: 1px solid #1e293b;
+      padding: 5px 7px; white-space: nowrap;
+    }
+    table.sheet thead th { position: sticky; top: 0; z-index: 3; }
+    table.sheet th.rn, table.sheet td.rn {
+      position: sticky; left: 0; z-index: 2;
+      background: #0f172a; color: #64748b; text-align: right;
+      min-width: 36px; font-variant-numeric: tabular-nums;
+    }
+    table.sheet thead th.rn { z-index: 4; }
+    table.sheet th.csv { background: #1e293b; color: #cbd5e1; }
+    table.sheet th.calc { background: #312e81; color: #c7d2fe; }
+    table.sheet td.calc { background: #1e1b4b22; }
+    table.sheet tr.sel td { background: #1e3a5f; }
+    table.sheet td.sel { outline: 2px solid var(--indigo); outline-offset: -2px; }
+    table.sheet tbody tr:hover td { background: #243044; }
+    .grp { font-size: 11px; color: var(--muted); margin: 0 0 8px; }
+    @media (max-width: 980px) {
+      .g4, .g3, .g2 { grid-template-columns: 1fr 1fr; }
+      body { padding: 16px; }
+    }
+    @media (max-width: 640px) {
+      .g4, .g3, .g2 { grid-template-columns: 1fr; }
+      h1 { font-size: 22px; }
+    }
+    @media print {
+      body { background: #fff; color: #0f172a; }
+      .tab { display: none; }
+      .panel { display: block !important; page-break-before: always; }
+      .card, header.top { box-shadow: none; background: #fff; border-color: #cbd5e1; color: #0f172a; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="kicker">Grupo Bacar · Legajos Online</div>
+      <h1>Tablero predictivo — Novedades Camioneros</h1>
+      <p class="sub">Convenio Camioneros 08/2026 · 26/07/2026 al 25/08/2026 · 74 legajos · ICE = hs normales + 50% × 1,5 + 100% × 2 + descanso 100% × 2. Sin tarifa $: todo en horas.</p>
+      <div class="tabs" id="tabs"></div>
+    </header>
+
+    <section class="panel on" id="tablero"></section>
+    <section class="panel" id="riesgos"></section>
+    <section class="panel" id="extras"></section>
+    <section class="panel" id="ausencias"></section>
+    <section class="panel" id="plantel"></section>
+    <section class="panel" id="planilla"></section>
+
+    <p class="foot">Fuente: export CSV Legajos Online «Generacion de Novedades». Un solo período: la proyección de septiembre es persistencia + escenarios, no serie de tiempo. Nocturnas informativas (no se duplican en el ICE).</p>
+  </div>
+
+  <script>
+    const PEOPLE = [{"l":"2794","n":"AGUILAR Edgardo Marcelo","dni":"22336615","hsN":150.2,"h50":16.6,"h100":14.3,"noct":0,"d100":1.28,"tot":181.1,"eq":206.27,"dias":24,"sab":2,"dom":0,"fer":1,"cenas":0,"llegN":2,"llegT":0.33,"licJ":0,"licI":0,"susp":0,"extra":0.171,"hpd":7.55,"rOt":19,"rAbs":0,"rPun":11,"r":10},{"l":"324","n":"ARAYA Pablo Jesus","dni":"31055365","hsN":137.1,"h50":29.5,"h100":53.2,"noct":11.75,"d100":6.07,"tot":219.8,"eq":299.88,"dias":22,"sab":2,"dom":1,"fer":0,"cenas":7,"llegN":14,"llegT":4.2,"licJ":1,"licI":0,"susp":0,"extra":0.376,"hpd":9.99,"rOt":45,"rAbs":6,"rPun":90,"r":43},{"l":"319","n":"ARIAS Lucas Andres","dni":"29161745","hsN":96.6,"h50":1.2,"h100":12.8,"noct":2.08,"d100":3.55,"tot":110.6,"eq":131.1,"dias":15,"sab":1,"dom":0,"fer":0,"cenas":3,"llegN":1,"llegT":0.37,"licJ":14,"licI":0,"susp":0,"extra":0.127,"hpd":7.37,"rOt":16,"rAbs":84,"rPun":7,"r":38},{"l":"2787","n":"ASCARI Ismael Ezequiel","dni":"38986055","hsN":120.7,"h50":7.3,"h100":55.2,"noct":11.63,"d100":8.28,"tot":183.2,"eq":258.62,"dias":22,"sab":3,"dom":1,"fer":0,"cenas":7,"llegN":18,"llegT":3.13,"licJ":1,"licI":0,"susp":0,"extra":0.341,"hpd":8.33,"rOt":43,"rAbs":6,"rPun":97,"r":44},{"l":"2575","n":"ASCARI Lucas Javier","dni":"37853655","hsN":0,"h50":66,"h100":137,"noct":48.03,"d100":5.3,"tot":203,"eq":383.6,"dias":21,"sab":4,"dom":3,"fer":0,"cenas":11,"llegN":3,"llegT":10.9,"licJ":0,"licI":0,"susp":0,"extra":1,"hpd":9.67,"rOt":100,"rAbs":0,"rPun":99,"r":65},{"l":"1077","n":"ASINARDI Eduardo Luis","dni":"18562598","hsN":0,"h50":0,"h100":0,"noct":0,"d100":0,"tot":0,"eq":0,"dias":0,"sab":0,"dom":0,"fer":0,"cenas":0,"llegN":0,"llegT":0,"licJ":8,"licI":0,"susp":0,"extra":0,"hpd":0,"rOt":0,"rAbs":88,"rPun":0,"r":31},{"l":"3210","n":"ASINARDI GENES Ariel Eduardo","dni":"38987405","hsN":0,"h50":77,"h100":111.6,"noct":40.83,"d100":4.85,"tot":188.6,"eq":348.4,"dias":19,"sab":3,"dom":2,"fer":0,"cenas":11,"llegN":3,"llegT":16.08,"licJ":0,"licI":0,"susp":0,"extra":1,"hpd":9.93,"rOt":100,"rAbs":0,"rPun":100,"r":65},{"l":"247","n":"BARRIONUEVO Eduardo Alberto","dni":"20783104","hsN":106.1,"h50":3.8,"h100":14.3,"noct":1.07,"d100":0.13,"tot":124.2,"eq":140.67,"dias":16,"sab":3,"dom":0,"fer":0,"cenas":1,"llegN":2,"llegT":0.25,"licJ":6,"licI":0,"susp":0,"extra":0.146,"hpd":7.76,"rOt":18,"rAbs":36,"rPun":10,"r":22},{"l":"253","n":"BARROZA Lucas Ariel","dni":"25917237","hsN":149.3,"h50":9.9,"h100":17.3,"noct":5.53,"d100":4.63,"tot":176.5,"eq":208.02,"dias":24,"sab":3,"dom":0,"fer":0,"cenas":3,"llegN":11,"llegT":2.7,"licJ":0,"licI":0,"susp":0,"extra":0.154,"hpd":7.35,"rOt":18,"rAbs":0,"rPun":66,"r":24},{"l":"2572","n":"BAZAN Omar Marcelo","dni":"29136007","hsN":152,"h50":8.1,"h100":43.1,"noct":7.9,"d100":4.38,"tot":203.2,"eq":259.12,"dias":27,"sab":3,"dom":3,"fer":0,"cenas":3,"llegN":2,"llegT":0.03,"licJ":0,"licI":0,"susp":0,"extra":0.252,"hpd":7.53,"rOt":32,"rAbs":0,"rPun":8,"r":15},{"l":"2514","n":"BEAS Daniel Oscar","dni":"33491838","hsN":146.8,"h50":14.4,"h100":51.2,"noct":12.5,"d100":7.87,"tot":212.4,"eq":286.53,"dias":25,"sab":3,"dom":1,"fer":1,"cenas":5,"llegN":1,"llegT":0.28,"licJ":1,"licI":0,"susp":0,"extra":0.309,"hpd":8.5,"rOt":38,"rAbs":6,"rPun":6,"r":19},{"l":"3573","n":"BENITEZ Martin Ariel","dni":"27077713","hsN":3,"h50":117.9,"h100":110.1,"noct":42.78,"d100":4.95,"tot":231,"eq":409.95,"dias":22,"sab":4,"dom":2,"fer":0,"cenas":12,"llegN":6,"llegT":22.6,"licJ":1,"licI":0,"susp":0,"extra":0.987,"hpd":10.5,"rOt":100,"rAbs":6,"rPun":100,"r":67},{"l":"2824","n":"BERG Alexis Daniel","dni":"37850304","hsN":157.3,"h50":15.5,"h100":41.2,"noct":1.35,"d100":5.88,"tot":214,"eq":274.72,"dias":26,"sab":4,"dom":1,"fer":0,"cenas":2,"llegN":11,"llegT":1.75,"licJ":0,"licI":0,"susp":0,"extra":0.265,"hpd":8.23,"rOt":32,"rAbs":0,"rPun":58,"r":27},{"l":"67","n":"BESCOS Marcelo Adrian","dni":"24463900","hsN":148.1,"h50":9.4,"h100":17.8,"noct":5.88,"d100":4.67,"tot":175.3,"eq":207.13,"dias":24,"sab":4,"dom":0,"fer":0,"cenas":4,"llegN":16,"llegT":8.88,"licJ":0,"licI":0,"susp":0,"extra":0.155,"hpd":7.3,"rOt":19,"rAbs":0,"rPun":100,"r":33},{"l":"2510","n":"BIONDO JUNCOS Matias Oscar","dni":"31921106","hsN":119.4,"h50":7.9,"h100":33.2,"noct":7.72,"d100":3.07,"tot":160.5,"eq":203.78,"dias":19,"sab":2,"dom":0,"fer":1,"cenas":4,"llegN":0,"llegT":0,"licJ":0,"licI":0,"susp":0,"extra":0.256,"hpd":8.45,"rOt":32,"rAbs":0,"rPun":0,"r":13},{"l":"2782","n":"BRANDAN Jonathan Eric","dni":"36925823","hsN":157.2,"h50":7.6,"h100":49.1,"noct":12.62,"d100":7.35,"tot":213.9,"eq":281.5,"dias":26,"sab":4,"dom":2,"fer":1,"cenas":7,"llegN":12,"llegT":0.98,"licJ":0,"licI":0,"susp":0,"extra":0.265,"hpd":8.23,"rOt":33,"rAbs":0,"rPun":56,"r":27},{"l":"271","n":"BRARDA Juan Esteban","dni":"30267998","hsN":98.6,"h50":4.8,"h100":0,"noct":0,"d100":0,"tot":103.4,"eq":105.8,"dias":13,"sab":0,"dom":0,"fer":0,"cenas":0,"llegN":10,"llegT":5.02,"licJ":0,"licI":0,"susp":0,"extra":0.046,"hpd":7.95,"rOt":5,"rAbs":0,"rPun":80,"r":22},{"l":"174","n":"BRIZUELA Hector Daniel","dni":"16082433","hsN":170.2,"h50":21,"h100":23.6,"noct":2,"d100":4.57,"tot":214.8,"eq":258.03,"dias":27,"sab":4,"dom":0,"fer":1,"cenas":2,"llegN":0,"llegT":0,"licJ":0,"licI":0,"susp":0,"extra":0.208,"hpd":7.96,"rOt":24,"rAbs":0,"rPun":0,"r":10},{"l":"2680","n":"BUSTOS Eduardo David","dni":"25929729","hsN":171.1,"h50":24.6,"h100":47,"noct":6.32,"d100":7.88,"tot":242.7,"eq":317.77,"dias":27,"sab":4,"dom":2,"fer":0,"cenas":5,"llegN":0,"llegT":0,"licJ":0,"licI":0,"susp":0,"extra":0.295,"hpd":8.99,"rOt":55,"rAbs":0,"rPun":0,"r":22},{"l":"2956","n":"BUSTOS Roberto Adrian","dni":"20439799","hsN":0,"h50":62,"h100":241,"noct":16.67,"d100":32.7,"tot":303,"eq":640.4,"dias":23,"sab":3,"dom":0,"fer":1,"cenas":18,"llegN":2,"llegT":0.87,"licJ":0,"licI":0,"susp":0,"extra":1,"hpd":13.17,"rOt":100,"rAbs":0,"rPun":15,"r":44},{"l":"261","n":"CANTON Jose Javier","dni":"24615058","hsN":134.6,"h50":17.4,"h100":25.7,"noct":11.97,"d100":1.32,"tot":177.7,"eq":214.73,"dias":21,"sab":2,"dom":0,"fer":0,"cenas":2,"llegN":7,"llegT":0.63,"licJ":1,"licI":0,"susp":0,"extra":0.243,"hpd":8.46,"rOt":29,"rAbs":6,"rPun":33,"r":22},{"l":"75","n":"CARTAS Jose Daniel","dni":"21392053","hsN":131.6,"h50":22.4,"h100":0,"noct":0,"d100":0,"tot":154,"eq":165.2,"dias":17,"sab":0,"dom":0,"fer":0,"cenas":0,"llegN":17,"llegT":4.3,"licJ":1,"licI":0,"susp":0,"extra":0.145,"hpd":9.06,"rOt":15,"rAbs":6,"rPun":100,"r":33},{"l":"3458","n":"CERVINO Diego Alejandro","dni":"36124465","hsN":0,"h50":62.4,"h100":50.4,"noct":9.15,"d100":0,"tot":112.8,"eq":194.4,"dias":18,"sab":0,"dom":5,"fer":1,"cenas":10,"llegN":7,"llegT":47.77,"licJ":0,"licI":0,"susp":0,"extra":1,"hpd":6.27,"rOt":100,"rAbs":0,"rPun":100,"r":65},{"l":"3570","n":"CHACON Diego Ezequiel","dni":"43605776","hsN":38,"h50":65.5,"h100":137.7,"noct":44.97,"d100":3.82,"tot":241.2,"eq":419.28,"dias":18,"sab":4,"dom":2,"fer":0,"cenas":12,"llegN":2,"llegT":11.35,"licJ":0,"licI":0,"susp":0,"extra":0.842,"hpd":13.4,"rOt":100,"rAbs":0,"rPun":99,"r":65},{"l":"242","n":"CHACON Sergio Daniel","dni":"16409815","hsN":56.3,"h50":2.7,"h100":10.7,"noct":4.68,"d100":0.45,"tot":69.7,"eq":82.65,"dias":10,"sab":3,"dom":0,"fer":0,"cenas":1,"llegN":1,"llegT":2.97,"licJ":0,"licI":0,"susp":0,"extra":0.192,"hpd":6.97,"rOt":24,"rAbs":0,"rPun":28,"r":17},{"l":"2868","n":"CHANDA Emiliano Julian","dni":"37619705","hsN":139.4,"h50":14.1,"h100":54.1,"noct":15.32,"d100":7.13,"tot":207.6,"eq":283.02,"dias":22,"sab":2,"dom":1,"fer":0,"cenas":5,"llegN":9,"llegT":0.55,"licJ":2,"licI":0,"susp":0,"extra":0.329,"hpd":9.44,"rOt":41,"rAbs":12,"rPun":40,"r":31},{"l":"2975","n":"CHARRA Jose Luis","dni":"21966599","hsN":109.2,"h50":20.9,"h100":7.5,"noct":0.52,"d100":4.93,"tot":137.6,"eq":165.42,"dias":17,"sab":2,"dom":0,"fer":0,"cenas":1,"llegN":3,"llegT":9.77,"licJ":7,"licI":0,"susp":0,"extra":0.206,"hpd":8.09,"rOt":22,"rAbs":42,"rPun":90,"r":46},{"l":"216","n":"CIAREZ Cesar Norberto","dni":"27173475","hsN":115.6,"h50":0,"h100":43.1,"noct":12.53,"d100":3.27,"tot":158.7,"eq":208.33,"dias":21,"sab":3,"dom":1,"fer":1,"cenas":4,"llegN":2,"llegT":0.97,"licJ":8,"licI":0,"susp":0,"extra":0.272,"hpd":7.56,"rOt":35,"rAbs":48,"rPun":16,"r":35},{"l":"2946","n":"CORTES Saulo Adrian","dni":"30785792","hsN":136.3,"h50":8.4,"h100":42.5,"noct":10.9,"d100":5.98,"tot":187.2,"eq":245.87,"dias":21,"sab":1,"dom":1,"fer":0,"cenas":5,"llegN":0,"llegT":0,"licJ":1,"licI":0,"susp":0,"extra":0.272,"hpd":8.91,"rOt":34,"rAbs":6,"rPun":0,"r":16},{"l":"2809","n":"CUFRE Esteban Emanuel Joaquin","dni":"31514589","hsN":49.2,"h50":0,"h100":0,"noct":0,"d100":0,"tot":49.2,"eq":49.2,"dias":9,"sab":1,"dom":0,"fer":0,"cenas":0,"llegN":0,"llegT":0,"licJ":16,"licI":0,"susp":0,"extra":0,"hpd":5.47,"rOt":0,"rAbs":96,"rPun":0,"r":34},{"l":"3569","n":"DI MARTINO Gustavo Daniel","dni":"29079234","hsN":0,"h50":57.4,"h100":115.3,"noct":37.53,"d100":9.13,"tot":172.7,"eq":334.97,"dias":18,"sab":3,"dom":2,"fer":1,"cenas":11,"llegN":3,"llegT":10.28,"licJ":0,"licI":0,"susp":0,"extra":1,"hpd":9.59,"rOt":100,"rAbs":0,"rPun":94,"r":64},{"l":"344","n":"DIAZ Mario Matias","dni":"30123190","hsN":124.6,"h50":28.7,"h100":44.5,"noct":5.37,"d100":10.93,"tot":197.8,"eq":278.52,"dias":20,"sab":1,"dom":2,"fer":1,"cenas":3,"llegN":4,"llegT":1.28,"licJ":8,"licI":0,"susp":0,"extra":0.37,"hpd":9.89,"rOt":44,"rAbs":48,"rPun":26,"r":41},{"l":"2541","n":"DIAZ Sergio Gabriel","dni":"35579297","hsN":148.1,"h50":16.5,"h100":45.7,"noct":4.73,"d100":2.47,"tot":210.3,"eq":269.18,"dias":28,"sab":4,"dom":3,"fer":1,"cenas":3,"llegN":17,"llegT":1.53,"licJ":0,"licI":0,"susp":0,"extra":0.296,"hpd":7.51,"rOt":36,"rAbs":0,"rPun":80,"r":34},{"l":"2513","n":"FERRARETTO Pablo Norberto","dni":"26314070","hsN":77.2,"h50":10.9,"h100":12.8,"noct":0,"d100":2.13,"tot":100.9,"eq":123.42,"dias":13,"sab":1,"dom":0,"fer":1,"cenas":0,"llegN":5,"llegT":0.45,"licJ":14,"licI":0,"susp":0,"extra":0.235,"hpd":7.76,"rOt":27,"rAbs":84,"rPun":24,"r":46},{"l":"1443","n":"FERREYRA Mauro Hernan","dni":"28003346","hsN":156.5,"h50":3.5,"h100":18.9,"noct":9,"d100":0,"tot":178.9,"eq":199.55,"dias":20,"sab":0,"dom":0,"fer":0,"cenas":1,"llegN":1,"llegT":0.02,"licJ":0,"licI":0,"susp":0,"extra":0.125,"hpd":8.95,"rOt":16,"rAbs":0,"rPun":4,"r":7},{"l":"2522","n":"FIORENTINO Ramon Adrian","dni":"28850533","hsN":143.2,"h50":4,"h100":40.5,"noct":4.63,"d100":0.03,"tot":187.7,"eq":230.27,"dias":28,"sab":3,"dom":3,"fer":1,"cenas":2,"llegN":2,"llegT":0.37,"licJ":0,"licI":0,"susp":0,"extra":0.237,"hpd":6.7,"rOt":30,"rAbs":0,"rPun":11,"r":15},{"l":"2508","n":"GALINDEZ Emmanuel Fernando","dni":"29966512","hsN":149.7,"h50":55.2,"h100":26.3,"noct":13.25,"d100":7.93,"tot":231.2,"eq":300.97,"dias":24,"sab":2,"dom":0,"fer":1,"cenas":2,"llegN":9,"llegT":1.03,"licJ":1,"licI":0,"susp":0,"extra":0.353,"hpd":9.63,"rOt":59,"rAbs":6,"rPun":44,"r":37},{"l":"2531","n":"GARAVAGLIA Luciano Augusto","dni":"26209581","hsN":140.7,"h50":4.1,"h100":62.4,"noct":17.13,"d100":4.37,"tot":207.2,"eq":280.38,"dias":24,"sab":2,"dom":1,"fer":1,"cenas":5,"llegN":0,"llegT":0,"licJ":1,"licI":0,"susp":0,"extra":0.321,"hpd":8.63,"rOt":41,"rAbs":6,"rPun":0,"r":19},{"l":"1173","n":"GIMENEZ Gabriela Noemi","dni":"27361291","hsN":153.4,"h50":0.7,"h100":19.7,"noct":0,"d100":0,"tot":173.8,"eq":193.85,"dias":24,"sab":2,"dom":0,"fer":1,"cenas":0,"llegN":2,"llegT":0.18,"licJ":1,"licI":0,"susp":0,"extra":0.117,"hpd":7.24,"rOt":15,"rAbs":6,"rPun":9,"r":10},{"l":"3066","n":"GONZALO Andres Maximiliano","dni":"32772026","hsN":163.5,"h50":18,"h100":41.1,"noct":15.18,"d100":7.07,"tot":222.6,"eq":286.83,"dias":24,"sab":2,"dom":0,"fer":1,"cenas":5,"llegN":5,"llegT":0.42,"licJ":0,"licI":0,"susp":0,"extra":0.265,"hpd":9.28,"rOt":52,"rAbs":0,"rPun":23,"r":27},{"l":"285","n":"GRANADO Rodrigo Rafael","dni":"26575000","hsN":0,"h50":49.7,"h100":220.7,"noct":16.08,"d100":26.35,"tot":270.4,"eq":568.65,"dias":22,"sab":3,"dom":0,"fer":1,"cenas":17,"llegN":0,"llegT":0,"licJ":0,"licI":0,"susp":0,"extra":1,"hpd":12.29,"rOt":100,"rAbs":0,"rPun":0,"r":40},{"l":"2939","n":"GUZMAN Fernando Gabriel","dni":"39496423","hsN":137.7,"h50":4.8,"h100":43.9,"noct":1.55,"d100":4.47,"tot":186.4,"eq":241.63,"dias":27,"sab":3,"dom":3,"fer":1,"cenas":3,"llegN":5,"llegT":12,"licJ":0,"licI":0,"susp":0,"extra":0.261,"hpd":6.9,"rOt":33,"rAbs":0,"rPun":100,"r":38},{"l":"2854","n":"GUZMAN Michael Carlos Gabriel","dni":"40404140","hsN":158.1,"h50":17.9,"h100":68.5,"noct":15.62,"d100":2.22,"tot":244.5,"eq":326.38,"dias":26,"sab":4,"dom":1,"fer":1,"cenas":4,"llegN":2,"llegT":0.12,"licJ":1,"licI":0,"susp":0,"extra":0.353,"hpd":9.4,"rOt":64,"rAbs":6,"rPun":9,"r":30},{"l":"3038","n":"HEREDIA Jonathan Ezequiel","dni":"36430638","hsN":6,"h50":59,"h100":136.9,"noct":56.87,"d100":4.42,"tot":201.9,"eq":377.13,"dias":21,"sab":3,"dom":2,"fer":1,"cenas":14,"llegN":4,"llegT":16.42,"licJ":0,"licI":0,"susp":0,"extra":0.97,"hpd":9.61,"rOt":100,"rAbs":0,"rPun":100,"r":65},{"l":"2784","n":"HEREDIA Paulo Sebastian","dni":"27956098","hsN":143.7,"h50":20.7,"h100":60.4,"noct":15.2,"d100":6.78,"tot":224.8,"eq":309.12,"dias":24,"sab":3,"dom":1,"fer":1,"cenas":5,"llegN":7,"llegT":5.32,"licJ":1,"licI":0,"susp":0,"extra":0.361,"hpd":9.37,"rOt":64,"rAbs":6,"rPun":71,"r":45},{"l":"2758","n":"HEREDIA Ramon Osvaldo","dni":"31222873","hsN":107.3,"h50":14.7,"h100":29.7,"noct":4.05,"d100":5.4,"tot":151.7,"eq":199.55,"dias":20,"sab":2,"dom":0,"fer":1,"cenas":6,"llegN":7,"llegT":1.07,"licJ":0,"licI":0,"susp":0,"extra":0.293,"hpd":7.58,"rOt":35,"rAbs":0,"rPun":37,"r":23},{"l":"2537","n":"HERRERA Pablo Sebastian","dni":"26903237","hsN":153.1,"h50":1.9,"h100":36.1,"noct":16.5,"d100":0,"tot":191.1,"eq":228.15,"dias":22,"sab":2,"dom":0,"fer":0,"cenas":3,"llegN":7,"llegT":0.52,"licJ":1,"licI":0,"susp":0,"extra":0.199,"hpd":8.69,"rOt":26,"rAbs":6,"rPun":32,"r":21},{"l":"2698","n":"LESCANO Hector Domingo","dni":"23821839","hsN":3,"h50":118.9,"h100":49.7,"noct":25.22,"d100":0,"tot":171.6,"eq":280.75,"dias":19,"sab":4,"dom":1,"fer":1,"cenas":7,"llegN":4,"llegT":16.42,"licJ":0,"licI":0,"susp":0,"extra":0.983,"hpd":9.03,"rOt":100,"rAbs":0,"rPun":100,"r":65},{"l":"2823","n":"LOPEZ Guillermo Omar","dni":"39689812","hsN":149.6,"h50":8.9,"h100":19.5,"noct":8.28,"d100":2.28,"tot":178,"eq":206.52,"dias":23,"sab":3,"dom":0,"fer":0,"cenas":4,"llegN":0,"llegT":0,"licJ":0,"licI":0,"susp":0,"extra":0.16,"hpd":7.74,"rOt":19,"rAbs":0,"rPun":0,"r":8},{"l":"267","n":"MAGARELLO Luis Francisco","dni":"20150033","hsN":176.2,"h50":0.1,"h100":8.7,"noct":0,"d100":1.02,"tot":185,"eq":195.78,"dias":24,"sab":2,"dom":0,"fer":1,"cenas":0,"llegN":1,"llegT":0.15,"licJ":1,"licI":0,"susp":0,"extra":0.048,"hpd":7.71,"rOt":6,"rAbs":6,"rPun":5,"r":6},{"l":"2786","n":"MAMONDI RIOS Gabriel Maximiliano","dni":"28426441","hsN":72,"h50":0,"h100":12.1,"noct":6.57,"d100":1.92,"tot":84.1,"eq":100.03,"dias":11,"sab":1,"dom":0,"fer":0,"cenas":2,"llegN":4,"llegT":5.6,"licJ":14,"licI":0,"susp":0,"extra":0.144,"hpd":7.65,"rOt":19,"rAbs":84,"rPun":61,"r":52},{"l":"2972","n":"MOLINA Maximiliano Eber","dni":"37999905","hsN":138.6,"h50":25.5,"h100":30,"noct":5.6,"d100":1.92,"tot":194.1,"eq":240.68,"dias":22,"sab":2,"dom":1,"fer":1,"cenas":2,"llegN":14,"llegT":1.4,"licJ":2,"licI":0,"susp":0,"extra":0.286,"hpd":8.82,"rOt":33,"rAbs":12,"rPun":67,"r":34},{"l":"2574","n":"MOLINA Pablo Andres","dni":"37616140","hsN":132.4,"h50":8,"h100":17.4,"noct":5.83,"d100":5.63,"tot":157.8,"eq":190.47,"dias":22,"sab":3,"dom":0,"fer":0,"cenas":2,"llegN":20,"llegT":2.5,"licJ":1,"licI":0,"susp":0,"extra":0.161,"hpd":7.17,"rOt":19,"rAbs":6,"rPun":100,"r":35},{"l":"2527","n":"MONTES HAYAS Jorge Luciano","dni":"21756624","hsN":121.4,"h50":14.6,"h100":12.3,"noct":0.08,"d100":1.6,"tot":148.3,"eq":171.1,"dias":23,"sab":3,"dom":0,"fer":1,"cenas":1,"llegN":0,"llegT":0,"licJ":0,"licI":0,"susp":0,"extra":0.181,"hpd":6.45,"rOt":21,"rAbs":0,"rPun":0,"r":8},{"l":"77","n":"NAVARRO SALUSTIO Miguel Angel","dni":"14154841","hsN":78.1,"h50":4,"h100":12.8,"noct":0.87,"d100":2.13,"tot":94.9,"eq":113.97,"dias":13,"sab":1,"dom":0,"fer":1,"cenas":1,"llegN":2,"llegT":0.2,"licJ":14,"licI":0,"susp":0,"extra":0.177,"hpd":7.3,"rOt":22,"rAbs":84,"rPun":10,"r":41},{"l":"2664","n":"PERTILE Maximiliano Gabriel","dni":"33600110","hsN":78.2,"h50":0.5,"h100":7.2,"noct":1.68,"d100":2.15,"tot":85.9,"eq":97.65,"dias":13,"sab":2,"dom":0,"fer":0,"cenas":2,"llegN":10,"llegT":1.3,"licJ":14,"licI":0,"susp":0,"extra":0.09,"hpd":6.61,"rOt":11,"rAbs":84,"rPun":50,"r":46},{"l":"3571","n":"PRANDI Ariel Alejandro","dni":"21402191","hsN":0,"h50":31.2,"h100":92,"noct":27.37,"d100":3.82,"tot":123.2,"eq":238.43,"dias":13,"sab":2,"dom":2,"fer":0,"cenas":9,"llegN":1,"llegT":5.65,"licJ":0,"licI":0,"susp":0,"extra":1,"hpd":9.48,"rOt":100,"rAbs":0,"rPun":49,"r":52},{"l":"197","n":"PUCHETA Jorge Rodolfo","dni":"21627854","hsN":262.3,"h50":15.5,"h100":84.5,"noct":22.05,"d100":10.75,"tot":362.3,"eq":476.05,"dias":23,"sab":3,"dom":3,"fer":0,"cenas":6,"llegN":0,"llegT":0,"licJ":6,"licI":0,"susp":0,"extra":0.276,"hpd":15.75,"rOt":55,"rAbs":36,"rPun":0,"r":35},{"l":"3572","n":"QUIROGA Alberto Gaspar","dni":"23393310","hsN":6,"h50":116.7,"h100":71.3,"noct":32.75,"d100":3.55,"tot":194,"eq":330.75,"dias":20,"sab":4,"dom":1,"fer":1,"cenas":8,"llegN":4,"llegT":16.95,"licJ":0,"licI":0,"susp":0,"extra":0.969,"hpd":9.7,"rOt":100,"rAbs":0,"rPun":100,"r":65},{"l":"3283","n":"REYNOSO Roberto Isaac","dni":"34440869","hsN":0,"h50":47.8,"h100":141.1,"noct":49.63,"d100":4.92,"tot":188.9,"eq":363.73,"dias":19,"sab":2,"dom":3,"fer":0,"cenas":10,"llegN":5,"llegT":10.78,"licJ":0,"licI":0,"susp":0,"extra":1,"hpd":9.94,"rOt":100,"rAbs":0,"rPun":100,"r":65},{"l":"89","n":"RIVERO Norberto Antonio","dni":"17842644","hsN":107.4,"h50":16.1,"h100":13.1,"noct":0.95,"d100":1.78,"tot":136.6,"eq":161.32,"dias":17,"sab":1,"dom":0,"fer":1,"cenas":1,"llegN":13,"llegT":0.93,"licJ":8,"licI":0,"susp":0,"extra":0.214,"hpd":8.04,"rOt":24,"rAbs":48,"rPun":59,"r":41},{"l":"69","n":"ROBLEDO ESQUIVEL Jorge Alejandro","dni":"25038189","hsN":113.8,"h50":7.6,"h100":27.7,"noct":8.03,"d100":0,"tot":149.1,"eq":180.6,"dias":21,"sab":3,"dom":1,"fer":1,"cenas":2,"llegN":0,"llegT":0,"licJ":8,"licI":0,"susp":0,"extra":0.237,"hpd":7.1,"rOt":29,"rAbs":48,"rPun":0,"r":28},{"l":"87","n":"RODRIGUEZ Bonifacio Miguel","dni":"21390382","hsN":130,"h50":2.7,"h100":33.2,"noct":4.65,"d100":6.9,"tot":165.9,"eq":214.25,"dias":22,"sab":3,"dom":0,"fer":0,"cenas":4,"llegN":8,"llegT":7.53,"licJ":0,"licI":0,"susp":0,"extra":0.216,"hpd":7.54,"rOt":28,"rAbs":0,"rPun":92,"r":34},{"l":"325","n":"RODRIGUEZ GIACOM Nahuel Ezequiel","dni":"34989770","hsN":164.7,"h50":29.5,"h100":36.6,"noct":6.22,"d100":8.88,"tot":230.8,"eq":299.92,"dias":27,"sab":4,"dom":1,"fer":1,"cenas":3,"llegN":5,"llegT":0.35,"licJ":0,"licI":0,"susp":0,"extra":0.286,"hpd":8.55,"rOt":53,"rAbs":0,"rPun":23,"r":27},{"l":"2727","n":"ROSALES Alexis Damian","dni":"29030300","hsN":135.6,"h50":7.5,"h100":0,"noct":0,"d100":0,"tot":143.1,"eq":146.85,"dias":18,"sab":2,"dom":0,"fer":0,"cenas":0,"llegN":7,"llegT":0.52,"licJ":14,"licI":0,"susp":0,"extra":0.052,"hpd":7.95,"rOt":5,"rAbs":84,"rPun":32,"r":39},{"l":"224","n":"SABORIDO Mario Antonio","dni":"21394197","hsN":137.5,"h50":19.4,"h100":20.6,"noct":6.95,"d100":0.92,"tot":177.5,"eq":209.63,"dias":21,"sab":3,"dom":0,"fer":0,"cenas":4,"llegN":8,"llegT":0.57,"licJ":1,"licI":0,"susp":0,"extra":0.225,"hpd":8.45,"rOt":26,"rAbs":6,"rPun":37,"r":22},{"l":"2838","n":"SILVA Pablo Javier","dni":"27173339","hsN":112.4,"h50":4.4,"h100":14.7,"noct":2.9,"d100":2.77,"tot":131.5,"eq":153.93,"dias":17,"sab":1,"dom":0,"fer":0,"cenas":2,"llegN":3,"llegT":0.22,"licJ":7,"licI":0,"susp":0,"extra":0.145,"hpd":7.74,"rOt":18,"rAbs":42,"rPun":14,"r":25},{"l":"85","n":"SIMBRON Claudio Javier","dni":"25045162","hsN":78.2,"h50":5.8,"h100":34.7,"noct":10.22,"d100":2.13,"tot":118.7,"eq":160.57,"dias":13,"sab":2,"dom":0,"fer":0,"cenas":4,"llegN":9,"llegT":2.27,"licJ":15,"licI":0,"susp":0,"extra":0.341,"hpd":9.13,"rOt":43,"rAbs":90,"rPun":54,"r":62},{"l":"26","n":"SOSA Franco Ariel","dni":"23796878","hsN":153.4,"h50":20.8,"h100":32.4,"noct":4.75,"d100":5.22,"tot":206.6,"eq":259.83,"dias":26,"sab":3,"dom":2,"fer":0,"cenas":3,"llegN":3,"llegT":0.22,"licJ":0,"licI":0,"susp":0,"extra":0.258,"hpd":7.95,"rOt":30,"rAbs":0,"rPun":14,"r":16},{"l":"268","n":"SOSA Roque Eduardo","dni":"14155479","hsN":139.4,"h50":19.9,"h100":30.5,"noct":10.78,"d100":2.2,"tot":189.8,"eq":234.65,"dias":24,"sab":3,"dom":1,"fer":0,"cenas":4,"llegN":4,"llegT":11.53,"licJ":3,"licI":0,"susp":0,"extra":0.266,"hpd":7.91,"rOt":31,"rAbs":18,"rPun":100,"r":44},{"l":"226","n":"VACA David Andres","dni":"25080132","hsN":168.6,"h50":14.3,"h100":52.1,"noct":5.68,"d100":7.78,"tot":235,"eq":309.82,"dias":25,"sab":3,"dom":0,"fer":1,"cenas":5,"llegN":1,"llegT":0.02,"licJ":0,"licI":0,"susp":0,"extra":0.283,"hpd":9.4,"rOt":55,"rAbs":0,"rPun":4,"r":23},{"l":"258","n":"VAEZ Luis Gabriel","dni":"22760376","hsN":97,"h50":8.7,"h100":8.9,"noct":3.38,"d100":2.83,"tot":114.6,"eq":133.52,"dias":16,"sab":2,"dom":0,"fer":0,"cenas":2,"llegN":4,"llegT":11.73,"licJ":8,"licI":0,"susp":0,"extra":0.154,"hpd":7.16,"rOt":18,"rAbs":48,"rPun":100,"r":49},{"l":"2934","n":"VARGAS LOPUMO Juan Jose","dni":"39936844","hsN":115.9,"h50":6.6,"h100":36.8,"noct":6.33,"d100":5.47,"tot":159.3,"eq":210.33,"dias":23,"sab":2,"dom":1,"fer":1,"cenas":4,"llegN":9,"llegT":6.22,"licJ":0,"licI":0,"susp":0,"extra":0.272,"hpd":6.93,"rOt":34,"rAbs":0,"rPun":86,"r":35},{"l":"60","n":"ZEMBORAIN Leonardo Sergio","dni":"20622120","hsN":0,"h50":0,"h100":0,"noct":0,"d100":0,"tot":0,"eq":0,"dias":0,"sab":0,"dom":0,"fer":0,"cenas":0,"llegN":0,"llegT":0,"licJ":8,"licI":0,"susp":0,"extra":0,"hpd":0,"rOt":0,"rAbs":88,"rPun":0,"r":31}];
+
+    const EXCL_LS = "camioneros-excluidos-082026";
+    function loadExcluded() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(EXCL_LS) || "[]");
+        return new Set(Array.isArray(raw) ? raw.map(String) : []);
+      } catch (e) { return new Set(); }
+    }
+    let excluded = loadExcluded();
+    const leyendaOpen = {};
+    document.addEventListener("toggle", (e) => {
+      const d = e.target;
+      if (d && d.matches && d.matches("details[data-ley]")) leyendaOpen[d.dataset.ley] = d.open;
+    }, true);
+    function saveExcluded() {
+      localStorage.setItem(EXCL_LS, JSON.stringify([...excluded]));
+    }
+    function roster() {
+      return PEOPLE.filter(p => !excluded.has(String(p.l)));
+    }
+    function sumPeople(list) {
+      return list.reduce((a, p) => {
+        a.n += 1;
+        if (p.dias > 0) a.active += 1;
+        a.hsN += p.hsN; a.h50 += p.h50; a.h100 += p.h100;
+        a.noct += p.noct; a.d100 += p.d100; a.tot += p.tot; a.eq += p.eq;
+        a.dias += p.dias; a.sab += p.sab; a.dom += p.dom; a.fer += p.fer;
+        a.cenas += p.cenas; a.llegN += p.llegN; a.llegT += p.llegT; a.licJ += p.licJ;
+        return a;
+      }, { n:0, active:0, hsN:0, h50:0, h100:0, noct:0, d100:0, tot:0, eq:0, dias:0, sab:0, dom:0, fer:0, cenas:0, llegN:0, llegT:0, licJ:0 });
+    }
+    function ctx() {
+      const R = roster();
+      const T = sumPeople(R);
+      const ICE_CONTROL = T.hsN + T.h50 * 1.5 * 0.8 + T.h100 * 2 * 0.8 + T.d100 * 2;
+      const RELOJ_CONTROL = T.hsN + T.h50 * 0.8 + T.h100 * 0.8;
+      const LIC_POOL = R.filter(p => p.licJ >= 8);
+      const LIC_DELTA = Math.max(0, LIC_POOL.length * 176 - LIC_POOL.reduce((a, p) => a + p.tot, 0));
+      const MARKUP = T.tot ? T.eq / T.tot : 1;
+      const ICE_RETORNO = T.eq + LIC_DELTA * MARKUP;
+      const HIGH_OT = R.filter(p => p.extra >= 0.6 && p.tot > 80);
+      const INVERTED = R.filter(p => p.hsN < 1 && p.tot > 0);
+      const OVER_200 = R.filter(p => p.tot >= 200);
+      const exclList = PEOPLE.filter(p => excluded.has(String(p.l)));
+      const avgDias = T.active ? T.dias / T.active : 0;
+      const avgReloj = T.active ? T.tot / T.active : 0;
+      const avgIce = T.active ? T.eq / T.active : 0;
+      const hpd = T.dias ? T.tot / T.dias : 0;
+      const icepd = T.dias ? T.eq / T.dias : 0;
+      return {
+        R, T, ICE_CONTROL, RELOJ_CONTROL, LIC_POOL, LIC_DELTA, MARKUP, ICE_RETORNO,
+        HIGH_OT, INVERTED, OVER_200, exclList, avgDias, avgReloj, avgIce, hpd, icepd
+      };
+    }
+
+    function fmtH(h) {
+      const sign = h < 0 ? "-" : "";
+      const a = Math.abs(h);
+      let hh = Math.floor(a);
+      let mm = Math.round((a - hh) * 60);
+      if (mm === 60) { hh += 1; mm = 0; }
+      return sign + hh + ":" + String(mm).padStart(2, "0");
+    }
+    function pct(n, d) { return d ? ((n / d) * 100).toFixed(1) + "%" : "—"; }
+    function riskLabel(r) { return r >= 60 ? "Crítico" : r >= 40 ? "Alto" : r >= 25 ? "Medio" : "Bajo"; }
+    function riskClass(r) { return r >= 60 ? "crit" : r >= 40 ? "alto" : r >= 25 ? "med" : "bajo"; }
+    function lastName(n) {
+      const p = n.split(" ");
+      return p.length > 2 ? p[0] + " " + p[1] : n;
+    }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+
+    const TABS = [
+      ["tablero", "Tablero"],
+      ["riesgos", "Riesgos"],
+      ["extras", "Extras"],
+      ["ausencias", "Ausencias"],
+      ["plantel", "Plantel"],
+      ["planilla", "Planilla"],
+    ];
+    document.getElementById("tabs").innerHTML = TABS.map(([id, l], i) =>
+      `<button class="tab${i===0?" on":""}" data-tab="${id}">${l}</button>`
+    ).join("");
+    document.getElementById("tabs").addEventListener("click", (e) => {
+      const b = e.target.closest(".tab");
+      if (!b) return;
+      document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+      document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === b.dataset.tab));
+      document.querySelector(".wrap").classList.toggle("wide", b.dataset.tab === "planilla" || b.dataset.tab === "plantel" || b.dataset.tab === "extras");
+    });
+
+    function stat(v, l, cls, hint) {
+      return `<div class="card stat${hint?" has-tip":""}"${hint?` tabindex="0"`:""}><div class="v ${cls||""}">${v}</div><div class="l">${l}${hint?` <span class="tip-mark" aria-hidden="true">i</span>`:""}</div>${hint?`<div class="tip" role="tooltip">${hint}</div>`:""}</div>`;
+    }
+    function hbars(items, max, color, fmt) {
+      const f = fmt || fmtH;
+      return items.map(([label, val]) => {
+        const w = max ? Math.max(4, (val / max) * 100) : 0;
+        return `<div class="hbar"><div>${esc(label)}</div><div class="track"><div class="fill" style="width:${w}%;background:${color}"></div></div><div class="val">${f(val)}</div></div>`;
+      }).join("");
+    }
+
+    function renderTablero() {
+    const { R, T, ICE_CONTROL, RELOJ_CONTROL, LIC_POOL, LIC_DELTA, MARKUP, ICE_RETORNO, HIGH_OT, INVERTED, OVER_200, exclList, avgDias, avgReloj, avgIce, hpd, icepd } = ctx();
+    const topEq = [...R].sort((a,b) => b.eq - a.eq);
+    const top10eq = topEq.slice(0, 10).reduce((a,p) => a + p.eq, 0);
+    const invEq = INVERTED.reduce((a,p) => a + p.eq, 0);
+    const highOtEq = HIGH_OT.reduce((a,p) => a + p.eq, 0);
+    const mixN = T.tot ? T.hsN / T.tot * 100 : 0;
+    const mix50 = T.tot ? T.h50 / T.tot * 100 : 0;
+    const mix100 = T.tot ? T.h100 / T.tot * 100 : 0;
+    const r = 54, c = 64, circ = 2 * Math.PI * r;
+    const dN = circ * mixN / 100, d50 = circ * mix50 / 100, d100 = circ * mix100 / 100;
+
+    document.getElementById("tablero").innerHTML = `
+      <details class="card glosario" data-ley="kpi"${leyendaOpen.kpi ? " open" : ""}>
+        <summary>Leyenda — qué es cada KPI y para qué <span class="open-hint">Abrir</span></summary>
+        <p class="lead">El número grande de cada tarjeta es el dato. Esta tabla es el diccionario. No hay pesos: todo está en horas. La <b style="color:#a5b4fc">i</b> de cada tarjeta muestra la cuenta de este período.</p>
+        <div class="tbl-wrap" style="max-height:none">
+          <table class="glosa">
+            <thead>
+              <tr><th>KPI</th><th>Qué es</th><th>Para qué lo mirás</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="kpi">Legajos activos</td>
+                <td>Personas incluidas con al menos 1 día trabajado (${T.active} de ${R.length} en el cálculo; ${PEOPLE.length} en el CSV).</td>
+                <td class="para">Saber el plantel que realmente operó, sin gerentes u otros que hayas desmarcado en Plantel.</td>
+              </tr>
+              <tr>
+                <td class="kpi">Horas reloj</td>
+                <td>Horas fichadas/asignadas: normales + 50% + 100%. Sin recargo. Es el “tiempo en el reloj”.</td>
+                <td class="para">Medir volumen de trabajo. No sirve para comparar costo entre choferes con mix distinto.</td>
+              </tr>
+              <tr>
+                <td class="kpi ice">ICE</td>
+                <td>Horas equivalentes de costo. La misma hora “pesa” más si es extra: 50% × 1,5 y 100% × 2. Las nocturnas no se vuelven a sumar.</td>
+                <td class="para">Comparar choferes y meses en una sola unidad. Si 1 h normal = $1, el ICE es lo que “pesa” pagar. Es el número de las proyecciones.</td>
+              </tr>
+              <tr>
+                <td class="kpi alza">Recargo</td>
+                <td>Cuánto más grande es el ICE que el reloj. Acá: +${T.tot ? ((MARKUP-1)*100).toFixed(1) : "0"}% (cada hora reloj pesa ${MARKUP.toFixed(3)} ICE).</td>
+                <td class="para">Ver si el mix de extras está caro. Si baja el recargo, baja el ICE aunque el reloj no cambie.</td>
+              </tr>
+              <tr>
+                <td class="kpi">Horas al 50%</td>
+                <td>Horas con plus 50% (típico sábado / extra diurno).</td>
+                <td class="para">Ver extras “intermedios”. Recortándolas baja el ICE, pero menos que recortar el 100%.</td>
+              </tr>
+              <tr>
+                <td class="kpi alza">Horas al 100%</td>
+                <td>Horas con plus 100% (domingo, feriado o extra). Duplican al 50% en este período.</td>
+                <td class="para">Ahí está el motor del costo. Si no se mueve el 100%, el escenario Ahorro no se logra.</td>
+              </tr>
+              <tr>
+                <td class="kpi">Lic. justificada</td>
+                <td>Días de licencia justificada del universo incluido (${T.licJ}). Injustificadas y suspensiones: 0.</td>
+                <td class="para">Ver hueco de cobertura y alimentar el escenario Alza (quién vuelve el mes que viene).</td>
+              </tr>
+              <tr>
+                <td class="kpi ice">Llegadas tarde</td>
+                <td>Cantidad de eventos y tiempo acumulado (${T.llegN} / ${fmtH(T.llegT)}).</td>
+                <td class="para">Puntualidad y calidad de fichada. Un outlier enorme (Cervino) suele ser reloj, no conducta.</td>
+              </tr>
+              <tr>
+                <td class="kpi">Hs / día</td>
+                <td>Reloj total ÷ días trabajados del universo incluido. Es el promedio ponderado (quien laburó más días pesa más).</td>
+                <td class="para">Ver la jornada típica del plantel operativo. Si hay gerentes adentro, desmarcalos en Plantel: inflan o achican este número.</td>
+              </tr>
+              <tr>
+                <td class="kpi">Promedio / persona</td>
+                <td>Días, reloj e ICE divididos por los activos incluidos (días &gt; 0).</td>
+                <td class="para">Comparar “qué hizo uno típico” vs el total. No reemplaza al ICE total: es otra lectura.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <details class="card glosario" data-ley="univ"${leyendaOpen.univ ? " open" : ""}>
+        <summary>Universo del cálculo <span class="open-hint">Abrir</span></summary>
+        <p class="lead">Los totales y promedios usan solo a los tildados en <b style="color:#a5b4fc">Plantel</b>. Desmarcá gerentes, staff o quien no deba entrar. La exclusión se guarda en este navegador.</p>
+        <p class="muted">${R.length} incluidos · ${exclList.length} excluidos · ${T.active} con días trabajados · ${PEOPLE.length} en el CSV.</p>
+        ${exclList.length ? `<div class="excl-pills">${exclList.map(p => `<button type="button" data-in="${esc(p.l)}" title="Volver a incluir">${esc(lastName(p.n))} · ${esc(p.l)} ×</button>`).join("")}</div>` : `<p class="muted" style="margin-top:8px">Nadie excluido. En Plantel, destildá la fila para sacarla del promedio.</p>`}
+      </details>
+      <div class="grid g4" style="margin-bottom:14px">
+        ${stat(T.active + " / " + R.length, "Activos / incluidos", "", `<b>Días &gt; 0 dentro del universo tildado</b><br>${T.active} trabajaron · ${R.length} incluidos · ${exclList.length} afuera · ${PEOPLE.length} en el CSV.`)}
+        ${stat((avgDias).toFixed(1), "Promedio días / activo", "", `<b>Σ días ÷ activos</b><br>${T.dias} días en ${T.active} personas = ${avgDias.toFixed(2)} días.`)}
+        ${stat(fmtH(avgReloj), "Promedio reloj / activo", "", `<b>Σ reloj ÷ activos</b><br>${fmtH(T.tot)} / ${T.active} = ${fmtH(avgReloj)} por persona que trabajó.`)}
+        ${stat(fmtH(hpd), "Horas / día (ponderado)", "warn", `<b>Σ reloj ÷ Σ días</b><br>${fmtH(T.tot)} / ${T.dias} = ${fmtH(hpd)}.<br>ICE/día: ${fmtH(icepd)}. Promedio ICE/activo: ${fmtH(avgIce)}.`)}
+      </div>
+      <div class="grid g4" style="margin-bottom:14px">
+        ${stat(T.active, "Legajos con días trabajados", "", `<b>Total días &gt; 0 en el universo incluido</b><br>${T.active} de ${R.length} incluidos.${exclList.length ? `<br>Excluidos: ${exclList.map(p=>p.n.split(" ")[0]).join(", ")}.` : ""}`)}
+        ${stat(fmtH(T.tot), "Horas reloj", "", `<b>Normales + 50% + 100%</b><br>${fmtH(T.hsN)} + ${fmtH(T.h50)} + ${fmtH(T.h100)} = ${fmtH(T.tot)}.<br>Es lo fichado/asignado, sin recargo.`)}
+        ${stat(fmtH(T.eq), "Horas equivalentes ICE", "warn", `<b>Normales + 50%×1,5 + 100%×2 + desc.100%×2</b><br>${fmtH(T.hsN)} + ${fmtH(T.h50*1.5)} + ${fmtH(T.h100*2)} + ${fmtH(T.d100*2)} = ${fmtH(T.eq)}.<br>Si 1 h normal = $1, esto es lo que “pesa” pagar. Las nocturnas no se vuelven a sumar.`)}
+        ${stat("+" + ((MARKUP-1)*100).toFixed(1) + "%", "Recargo ICE vs reloj", "danger", `<b>(ICE − Reloj) / Reloj</b><br>(${fmtH(T.eq)} − ${fmtH(T.tot)}) / ${fmtH(T.tot)} = +${((MARKUP-1)*100).toFixed(1)}%.<br>Cada hora reloj cuesta ${MARKUP.toFixed(3)} horas equivalentes.`)}
+      </div>
+      <div class="grid g4" style="margin-bottom:14px">
+        ${stat(fmtH(T.h50), "Horas al 50%", "", `<b>Columna «50%» del CSV</b><br>${fmtH(T.h50)} reloj → ${fmtH(T.h50*1.5)} en el ICE (× 1,5). Recargo extra: ${fmtH(T.h50*0.5)}.`)}
+        ${stat(fmtH(T.h100), "Horas al 100%", "danger", `<b>Columna «100%» del CSV</b><br>${fmtH(T.h100)} reloj → ${fmtH(T.h100*2)} en el ICE (× 2). Recargo extra: ${fmtH(T.h100)}. Es el motor del costo.`)}
+        ${stat(String(T.licJ), "Días licencia justificada", "", `<b>Suma «Lic Just» del universo incluido</b><br>${T.licJ} días. ${LIC_POOL.length} personas con ≥8 días (probable bloque vacaciones).`)}
+        ${stat(T.llegN + " / " + fmtH(T.llegT), "Llegadas tarde (n / tiempo)", "warn", `<b>Eventos + tiempo del CSV (universo incluido)</b><br>${T.llegN} llegadas y ${fmtH(T.llegT)} acumuladas. Promedio ${T.active ? fmtH(T.llegT/T.active) : "0:00"} por activo.`)}
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:8px">
+          <span>ICE ${fmtH(T.eq)} · reloj ${fmtH(T.tot)}</span>
+          <span>Recargo ${fmtH(T.eq - T.tot)} (${pct(T.eq - T.tot, T.tot)})</span>
+        </div>
+        <div class="usage">
+          <span style="width:${T.eq ? T.hsN/T.eq*100 : 0}%;background:#38bdf8"></span>
+          <span style="width:${T.eq ? T.h50*1.5/T.eq*100 : 0}%;background:#fbbf24"></span>
+          <span style="width:${T.eq ? T.h100*2/T.eq*100 : 0}%;background:#fb7185"></span>
+          <span style="width:${T.eq ? T.d100*2/T.eq*100 : 0}%;background:#a78bfa"></span>
+        </div>
+        <div class="legend">
+          <span><i style="background:#38bdf8"></i>Normales</span>
+          <span><i style="background:#fbbf24"></i>50% × 1,5</span>
+          <span><i style="background:#fb7185"></i>100% × 2</span>
+          <span><i style="background:#a78bfa"></i>Descanso 100% × 2</span>
+        </div>
+      </div>
+      <div class="grid g2" style="margin-bottom:14px">
+        <div class="card">
+          <h2>Mezcla de horas reloj</h2>
+          <div class="donut-wrap">
+            <svg width="128" height="128" viewBox="0 0 128 128">
+              <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#0f172a" stroke-width="16"/>
+              <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#38bdf8" stroke-width="16"
+                stroke-dasharray="${dN} ${circ-dN}" stroke-dashoffset="0" transform="rotate(-90 ${c} ${c})"/>
+              <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#fbbf24" stroke-width="16"
+                stroke-dasharray="${d50} ${circ-d50}" stroke-dashoffset="${-dN}" transform="rotate(-90 ${c} ${c})"/>
+              <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="#fb7185" stroke-width="16"
+                stroke-dasharray="${d100} ${circ-d100}" stroke-dashoffset="${-(dN+d50)}" transform="rotate(-90 ${c} ${c})"/>
+              <text x="${c}" y="${c-4}" text-anchor="middle" fill="#f1f5f9" font-size="16" font-weight="700">${fmtH(T.tot)}</text>
+              <text x="${c}" y="${c+14}" text-anchor="middle" fill="#94a3b8" font-size="10">reloj</text>
+            </svg>
+            <div class="legend" style="flex-direction:column;gap:8px">
+              <span><i style="background:#38bdf8"></i>Normales ${fmtH(T.hsN)} (${pct(T.hsN,T.tot)})</span>
+              <span><i style="background:#fbbf24"></i>50% ${fmtH(T.h50)} (${pct(T.h50,T.tot)})</span>
+              <span><i style="background:#fb7185"></i>100% ${fmtH(T.h100)} (${pct(T.h100,T.tot)})</span>
+            </div>
+          </div>
+          <p class="muted">Extras 50%+100% = ${pct(T.h50+T.h100, T.tot)} del reloj · ${OVER_200.length} personas ≥ 200 h (techo COSP).</p>
+        </div>
+        <div class="card">
+          <h2>Distribución de horas reloj por legajo</h2>
+          ${hbars([
+            ["< 80 h", R.filter(p=>p.dias>0 && p.tot<80).length],
+            ["80–139 h", R.filter(p=>p.tot>=80 && p.tot<140).length],
+            ["140–199 h", R.filter(p=>p.tot>=140 && p.tot<200).length],
+            ["200–249 h", R.filter(p=>p.tot>=200 && p.tot<250).length],
+            ["250+ h", R.filter(p=>p.tot>=250).length],
+          ], 32, "#818cf8", n => n + " pers.")}
+          <p class="muted">${T.active} activos incluidos · ${OVER_200.length} arriba del techo 200 h.</p>
+        </div>
+      </div>
+      <h2>Proyección septiembre 2026 (26/08–25/09)</h2>
+      <details class="card glosario" data-ley="proy"${leyendaOpen.proy ? " open" : ""}>
+        <summary>Leyenda — BASE / AHORRO / ALZA <span class="open-hint">Abrir</span></summary>
+        <p class="lead">Hay un solo mes de historia: no hay tendencia. Los tres números de abajo son ICE (costo en horas), no horas reloj. Responden a “¿qué pasa en septiembre si…?”. La <b style="color:#a5b4fc">i</b> de cada tarjeta muestra la cuenta.</p>
+        <div class="tbl-wrap" style="max-height:none">
+          <table class="glosa">
+            <thead>
+              <tr><th>Escenario</th><th>Qué es</th><th>Para qué lo mirás</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="kpi base">BASE</td>
+                <td>Si septiembre copia agosto: mismo mix de extras (${pct(T.h50+T.h100, T.tot)}). ICE ${fmtH(T.eq)}.</td>
+                <td class="para">Piso. Es “no hago nada”. Si la operación no cambia, este es el costo equivalente a esperar.</td>
+              </tr>
+              <tr>
+                <td class="kpi ahorro">AHORRO</td>
+                <td>Si recortás 20% de extras (50% y 100%). Las horas normales no se tocan. ICE ${fmtH(ICE_CONTROL)} (−${fmtH(T.eq-ICE_CONTROL)}).</td>
+                <td class="para">Objetivo operativo. Te dice cuánto ICE se puede bajar sin sacar gente, solo controlando extras.</td>
+              </tr>
+              <tr>
+                <td class="kpi alza">ALZA</td>
+                <td>Si vuelven ${LIC_POOL.length} personas con ≥8 días de licencia a 176 h (8×22). ICE ${fmtH(ICE_RETORNO)} (+${fmtH(ICE_RETORNO-T.eq)}).</td>
+                <td class="para">Riesgo. Cuando termina el bloque de vacaciones, el plantel suma horas y el ICE puede subir aunque no empeore el mix.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <div class="grid g3" style="margin-bottom:14px">
+        <div class="card has-tip" tabindex="0">
+          <div class="kicker">Base <span class="tip-mark">i</span></div>
+          <div class="stat"><div class="v">${fmtH(T.eq)}</div><div class="l">Persistencia — mismo mix extras ${pct(T.h50+T.h100, T.tot)}. Piso si no cambia la operación.</div></div>
+          <div class="tip" role="tooltip"><b>ICE sep = ICE ago</b><br>No hay serie histórica: se asume que septiembre copia agosto.<br>Reloj ${fmtH(T.tot)} → ICE ${fmtH(T.eq)}.</div>
+        </div>
+        <div class="card has-tip" tabindex="0">
+          <div class="kicker">Ahorro <span class="tip-mark">i</span></div>
+          <div class="stat"><div class="v ok">${fmtH(ICE_CONTROL)}</div><div class="l">Control extras −20%. Ahorro ${fmtH(T.eq-ICE_CONTROL)} (${pct(T.eq-ICE_CONTROL,T.eq)}). Reloj ${fmtH(RELOJ_CONTROL)}.</div></div>
+          <div class="tip" role="tooltip"><b>ICE = normales + (50%×1,5 + 100%×2)×0,8 + desc.100%×2</b><br>Baja solo extras. Normales ${fmtH(T.hsN)} no se tocan.<br>50% ${fmtH(T.h50)} → ${fmtH(T.h50*0.8)} · 100% ${fmtH(T.h100)} → ${fmtH(T.h100*0.8)}.<br>Ahorro vs agosto: ${fmtH(T.eq-ICE_CONTROL)} ICE.</div>
+        </div>
+        <div class="card has-tip" tabindex="0">
+          <div class="kicker">Alza <span class="tip-mark">i</span></div>
+          <div class="stat"><div class="v danger">${fmtH(ICE_RETORNO)}</div><div class="l">Retorno licencias. +${fmtH(LIC_DELTA)} reloj / +${fmtH(ICE_RETORNO-T.eq)} ICE. ${LIC_POOL.length} personas con ≥8 días.</div></div>
+          <div class="tip" role="tooltip"><b>Hueco = ${LIC_POOL.length} × 176 h − lo que ya trabajaron</b><br>Capacidad ${LIC_POOL.length * 176} h vs ${fmtH(LIC_POOL.reduce((a,p)=>a+p.tot,0))} actuales = +${fmtH(LIC_DELTA)} reloj.<br>Se pasa a ICE con el recargo medio del plantel (${MARKUP.toFixed(3)}) → +${fmtH(ICE_RETORNO-T.eq)} ICE.</div>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <h2>Escenarios de ICE para septiembre</h2>
+        <p class="sub" style="margin-bottom:12px">Tres proyecciones en horas equivalentes (ICE total del plantel). No es evolución en el tiempo: cada barra es un escenario distinto comparado con agosto.</p>
+        ${hbars([
+          ["Persistencia — ago. real", T.eq],
+          ["Control −20% — piso", ICE_CONTROL],
+          ["Retorno licencias — techo", ICE_RETORNO],
+        ], ICE_RETORNO, "#fbbf24")}
+        <p class="muted" style="margin-top:12px;line-height:1.55"><b>Persistencia</b> = ICE de agosto tal cual (${fmtH(T.eq)}). · <b>Control −20%</b> = recorte hipotético del 20% solo en 50%/100% (−${fmtH(T.eq-ICE_CONTROL)} ICE). · <b>Retorno licencias</b> = ${LIC_POOL.length} personas con ≥8 días de licencia vuelven a 176 h (+${fmtH(ICE_RETORNO-T.eq)} ICE). El ancho de cada barra es proporcional al ICE; la más larga es el techo (retorno licencias).</p>
+      </div>
+      <div class="grid g3" style="margin-bottom:14px">
+        ${stat(pct(top10eq, T.eq), "Top 10 del ICE (" + Math.min(10, R.length) + " / " + R.length + ")", "warn", `<b>Suma ICE top 10 / ICE total del universo incluido</b><br>${fmtH(top10eq)} de ${fmtH(T.eq)} = ${pct(top10eq, T.eq)}.`)}
+        ${stat(pct(highOtEq, T.eq), "Cohorte extras ≥60% (" + HIGH_OT.length + " pers.)", "danger", `<b>(50% + 100%) / Reloj ≥ 60% y Reloj &gt; 80 h</b><br>${HIGH_OT.length} choferes · ICE ${fmtH(highOtEq)} (${pct(highOtEq, T.eq)} del total). Mix estructural de extras.`)}
+        ${stat(pct(invEq, T.eq), "Cero hs normales (" + INVERTED.length + " pers.)", "danger", `<b>Hs normales = 0 y Reloj &gt; 0</b><br>${INVERTED.length} filas · ICE ${fmtH(invEq)} (${pct(invEq, T.eq)}).<br>Todo el servicio está imputado a 50%/100%. Validar LOL o larga distancia.`)}
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <h2>Top 8 — horas equivalentes ICE</h2>
+        ${topEq.length ? hbars(topEq.slice(0,8).map(p => [lastName(p.n), p.eq]), topEq[0].eq, "#fbbf24") : ""}
+        <p class="muted">Bustos R. 640 h y Granado 569 h son el 6,8% del costo con 0 horas normales.</p>
+      </div>
+      <div class="callout warning"><b>Tres señales para liquidación.</b> 1) ${INVERTED.length} choferes con 0 hs normales y todo en 50%/100% (${pct(INVERTED.reduce((a,p)=>a+p.eq,0), T.eq)} del ICE): validar larga distancia / finde o error de parametrización LOL. 2) Revisar outliers de hs/día en Plantel. 3) Llegadas tarde: ${T.llegN} eventos / ${fmtH(T.llegT)} — un outlier enorme suele ser reloj, no conducta.</div>
+    `;
+      document.querySelectorAll("#tablero [data-in]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          excluded.delete(String(btn.getAttribute("data-in")));
+          saveExcluded();
+          refresh();
+        });
+      });
+    }
+
+    function renderRiesgos() {
+    const { R, T } = ctx();
+    const watch = [...R].sort((a,b) => b.r - a.r).slice(0, 15);
+    const crit = R.filter(p => p.r >= 60).length;
+    const alto = R.filter(p => p.r >= 40 && p.r < 60).length;
+    document.getElementById("riesgos").innerHTML = `
+      <p class="sub" style="margin-bottom:14px">Score 0–100 = 40% extras + 35% ausentismo + 25% puntualidad. Ranking operativo, no actuarial: señala quién va a seguir generando recargo si el mix no cambia.</p>
+      <div class="grid g3" style="margin-bottom:14px">
+        ${stat(String(crit), "Score ≥ 60 (crítico)", "danger", `<b>Score = 40% extras + 35% ausentismo + 25% puntualidad</b><br>${crit} personas en banda crítica. Benitez 67 es el máximo. Prioridad de revisión.`)}
+        ${stat(String(alto), "Score 40–59 (alto)", "warn", `<b>Misma fórmula, banda 40–59</b><br>${alto} personas. O recargo estructural o bloque de licencia que vuelve el mes que viene.`)}
+        ${stat(String(R.filter(p=>p.rOt>=80).length), "Extras saturados (rOT ≥ 80)", "", `<b>Subscore extras ≥ 80</b><br>${R.filter(p=>p.rOt>=80).length} personas: mix casi 100% extras o reloj &gt; 220 h. Ahí está el ICE caro.`)}
+      </div>
+      <div class="card">
+        <h2>Watchlist — 15 mayores scores</h2>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th>Legajo</th><th>Nombre</th><th class="num">Score</th><th>Banda</th>
+              <th class="num">Extras</th><th class="num">Ausent.</th><th class="num">Puntual.</th>
+              <th class="num">ICE</th><th class="num">Lic.</th><th class="num">Tardes</th>
+            </tr></thead>
+            <tbody>
+              ${watch.map(p => `<tr>
+                <td>${esc(p.l)}</td><td>${esc(p.n)}</td>
+                <td class="num">${p.r}</td>
+                <td><span class="pill ${riskClass(p.r)}">${riskLabel(p.r)}</span></td>
+                <td class="num">${p.rOt}</td><td class="num">${p.rAbs}</td><td class="num">${p.rPun}</td>
+                <td class="num">${fmtH(p.eq)}</td><td class="num">${p.licJ}</td>
+                <td class="num">${p.llegN} / ${fmtH(p.llegT)}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    }
+
+    function renderExtras() {
+    const { R, T, INVERTED } = ctx();
+    const invEq = INVERTED.reduce((a,p) => a + p.eq, 0);
+    const top100 = [...R].sort((a,b)=>b.h100-a.h100).slice(0,10);
+    const invSorted = [...INVERTED].sort((a,b)=>b.eq-a.eq);
+    document.getElementById("extras").innerHTML = `
+      <div class="grid g4" style="margin-bottom:14px">
+        ${stat(fmtH(T.h50), "Total 50%", "", `<b>Suma «50%»</b><br>${fmtH(T.h50)} reloj = ${fmtH(T.h50*1.5)} ICE (×1,5).`)}
+        ${stat(fmtH(T.h100), "Total 100%", "danger", `<b>Suma «100%»</b><br>${fmtH(T.h100)} reloj = ${fmtH(T.h100*2)} ICE (×2). Duplica al 50% y mueve el recargo.`)}
+        ${stat(fmtH(T.noct), "Nocturnas (info)", "", `<b>Columna «Nocturnas»</b><br>${fmtH(T.noct)}. No entra al ICE: ya está dentro de normales / 50% / 100%.`)}
+        ${stat(fmtH(T.d100), "Descanso 100%", "", `<b>Columna «Descanso100 %»</b><br>${fmtH(T.d100)} reloj = ${fmtH(T.d100*2)} ICE (×2).`)}
+      </div>
+      <p class="sub" style="margin-bottom:14px">Las horas al 100% (${fmtH(T.h100)}) duplican a las del 50% (${fmtH(T.h50)}). Eso es el motor del ICE. Si el 100% es domingo/feriado/extra estructural, el control −20% no se logra sin cambiar asignación. Si es mala imputación LOL, el ahorro es administrativo.</p>
+      <div class="card" style="margin-bottom:14px">
+        <h2>Top 10 horas al 100%</h2>
+        ${top100.length ? hbars(top100.map(p => [lastName(p.n), p.h100]), top100[0].h100, "#fb7185") : `<p class="muted">Sin horas al 100% en el universo incluido.</p>`}
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <h2>Cohorte sin horas normales (${INVERTED.length})</h2>
+        <p class="muted" style="margin-bottom:10px">Cero en «Total Hsnormales» y el 100% del reloj en 50%/100%. Concentran ${fmtH(invEq)} ICE (${pct(invEq, T.eq)} del plantel). ICE incluye Desc. 100% × 2 (no va al reloj).</p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th>Legajo</th><th>Nombre</th><th class="num">Días</th><th class="num">50%</th>
+              <th class="num">100%</th><th class="num" title="Descanso 100% (CSV). No suma al reloj; en ICE cuenta ×2">Desc. 100%</th><th class="num">Nocturnas</th><th class="num">Reloj</th>
+              <th class="num">ICE</th><th class="num">Cenas</th><th class="num">Dom+Fer</th>
+            </tr></thead>
+            <tbody>
+              ${invSorted.map(p => `<tr>
+                <td>${esc(p.l)}</td><td>${esc(p.n)}</td>
+                <td class="num">${p.dias}</td><td class="num">${fmtH(p.h50)}</td>
+                <td class="num">${fmtH(p.h100)}</td><td class="num">${p.d100 ? fmtH(p.d100) : "—"}</td><td class="num">${fmtH(p.noct)}</td>
+                <td class="num">${fmtH(p.tot)}</td><td class="num">${fmtH(p.eq)}</td>
+                <td class="num">${p.cenas}</td><td class="num">${p.dom + p.fer}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <h2>Recargo de calendario (columnas CSV)</h2>
+        <p class="sub" style="margin-bottom:12px">Cada fila del legajo trae cuántos <b>sábados</b>, <b>domingos</b> y <b>feriados</b> trabajó en el período (columnas «Sab», «Dom», «Fer»). Acá se <b>suman entre todos</b>: no son días del calendario agosto, sino <b>ocurrencias</b> — si 10 choferes trabajaron un mismo sábado, suma 10. No entran al ICE directo; explican de dónde sale tanto 100%.</p>
+        <div class="grid g3">
+          ${stat(String(T.sab), "Ocurrencias sábado", "", `<b>Suma «Sab» del plantel</b><br>${T.sab} filas-día sábado (no horas). En Camioneros el sábado suele ir con recargo; muchas veces termina en 50%.`)}
+          ${stat(String(T.dom), "Ocurrencias domingo", "warn", `<b>Suma «Dom» del plantel</b><br>${T.dom} filas-día domingo. Suelen imputarse al 100% en liquidación.`)}
+          ${stat(String(T.fer), "Ocurrencias feriado", "", `<b>Suma «Fer» del plantel</b><br>${T.fer} filas-día feriado. También suelen ir al 100%.`)}
+        </div>
+        <p class="muted" style="margin-top:12px;line-height:1.55">${T.sab} sáb + ${T.dom} dom + ${T.fer} fer = <b>${T.sab+T.dom+T.fer} ocurrencias</b> de recargo calendario vs <b>${T.dias} días trabajados</b> (suma «Total dias» del plantel, ${pct(T.sab+T.dom+T.fer, T.dias)}). Ratio alto = mucho servicio en finde/feriado → ICE caro aunque el reloj no se vea extremo.</p>
+      </div>
+    `;
+    }
+
+    function renderAusencias() {
+    const { R, T, LIC_POOL, LIC_DELTA } = ctx();
+    const lic = [...R].filter(p => p.licJ > 0).sort((a,b)=>b.licJ-a.licJ);
+    const tardes = [...R].filter(p => p.llegN > 0).sort((a,b)=>b.llegT-a.llegT).slice(0,12);
+    document.getElementById("ausencias").innerHTML = `
+      <div class="grid g4" style="margin-bottom:14px">
+        ${stat(String(T.licJ), "Días licencia justificada", "", `<b>Suma «Lic Just»</b><br>${T.licJ} días. Cufre 16, Simbron 15, y 6 personas con 14 (bloque vacaciones).`)}
+        ${stat("0", "Licencias injustificadas", "ok", `<b>Suma «Lic Injust»</b><br>0 en el universo incluido. No hay AA en este corte.`)}
+        ${stat("0", "Suspensiones", "ok", `<b>Suma «Suspensiones»</b><br>0 en el universo incluido.`)}
+        ${stat(String(R.filter(p=>p.licJ>=14).length), "Bloques ≥ 14 días", "info", `<b>Lic Just ≥ 14</b><br>${R.filter(p=>p.licJ>=14).length} personas. Alimentan el escenario Alza: si vuelven a 176 h, sube el ICE de septiembre.`)}
+      </div>
+      <div class="callout info"><b>Predicción de retorno.</b> ${LIC_POOL.length} personas con ≥8 días de licencia (${LIC_POOL.reduce((a,p)=>a+p.licJ,0)} de los ${T.licJ} días). Si vuelven a 176 h, el plantel suma ${fmtH(LIC_DELTA)} reloj vs este período — no es ahorro, es capacidad que reaparece en el ICE de septiembre.</div>
+      <div class="card" style="margin-bottom:14px">
+        <h2>Licencias justificadas — ranking</h2>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr>
+              <th>Legajo</th><th>Nombre</th><th class="num">Lic. just.</th><th class="num">Días trab.</th>
+              <th class="num">Reloj</th><th class="num">ICE</th><th class="num">Tardes</th><th>Señal sep.</th>
+            </tr></thead>
+            <tbody>
+              ${lic.map(p => `<tr>
+                <td>${esc(p.l)}</td><td>${esc(p.n)}</td>
+                <td class="num">${p.licJ}</td><td class="num">${p.dias}</td>
+                <td class="num">${fmtH(p.tot)}</td><td class="num">${fmtH(p.eq)}</td>
+                <td class="num">${p.llegN}</td>
+                <td>${p.dias===0 ? "Vuelve 176 h" : p.licJ>=14 ? "Bloque vacaciones" : "Parcial"}</td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Llegadas tarde — mayor tiempo acumulado</h2>
+        <p class="muted" style="margin-bottom:10px">${T.llegN} eventos y ${fmtH(T.llegT)} acumuladas${T.active ? ` (promedio ${fmtH(T.llegT/T.active)} por activo)` : ""}.</p>
+        ${tardes.length ? hbars(tardes.map(p => [lastName(p.n), p.llegT]), tardes[0].llegT, "#fbbf24") : `<p class="muted">Sin llegadas tarde en el universo incluido.</p>`}
+      </div>
+    `;
+    }
+
+    let plantelSort = "eq";
+    let plantelQ = "";
+    function renderPlantel() {
+      const { R, T, exclList, avgDias, avgReloj, avgIce, hpd, icepd } = ctx();
+      const q = plantelQ.trim().toLowerCase();
+      const rows = PEOPLE.filter(p => !q || p.n.toLowerCase().includes(q) || p.l.includes(q) || p.dni.includes(q))
+        .sort((a,b) => {
+          const offA = excluded.has(String(a.l)) ? 1 : 0;
+          const offB = excluded.has(String(b.l)) ? 1 : 0;
+          if (offA !== offB) return offA - offB;
+          return b[plantelSort] - a[plantelSort];
+        });
+      const visIds = rows.map(p => String(p.l));
+      const sorts = [["eq","ICE"],["tot","Reloj"],["dias","Días"],["hpd","Hs/día"],["h100","100%"],["d100","Desc. 100%"],["extra","% extras"],["llegT","Tardes"],["licJ","Licencias"],["r","Score"]];
+      const wrap = document.querySelector("#plantel .tbl-wrap");
+      const y = wrap ? wrap.scrollTop : 0;
+      document.getElementById("plantel").innerHTML = `
+        <details class="card glosario" data-ley="plantel"${leyendaOpen.plantel ? " open" : ""}>
+          <summary>Quién entra al cálculo <span class="open-hint">Abrir</span></summary>
+          <p class="lead">Destildá gerentes, staff o quien no deba promediarse. El Tablero, Riesgos, Extras y Ausencias se recalcan al toque. La marca queda guardada en este navegador.</p>
+          <div class="grid g4">
+            ${stat(R.length + " / " + PEOPLE.length, "Incluidos / CSV", "", `<b>Tildados en esta grilla</b><br>${R.length} entran al promedio. ${exclList.length} afuera.`)}
+            ${stat((avgDias).toFixed(1), "Promedio días / activo", "", `<b>Σ días ÷ activos incluidos</b><br>${T.dias} / ${T.active} = ${avgDias.toFixed(2)}.`)}
+            ${stat(fmtH(avgReloj), "Promedio reloj / activo", "", `<b>Σ reloj ÷ activos</b><br>${fmtH(T.tot)} / ${T.active} = ${fmtH(avgReloj)}.`)}
+            ${stat(fmtH(hpd), "Horas / día ponderado", "warn", `<b>Σ reloj ÷ Σ días</b><br>${fmtH(T.tot)} / ${T.dias} = ${fmtH(hpd)}.<br>ICE/día ${fmtH(icepd)} · ICE/activo ${fmtH(avgIce)}.`)}
+          </div>
+          ${exclList.length ? `<div class="excl-pills" style="margin-top:12px">${exclList.map(p => `<button type="button" data-in="${esc(p.l)}">${esc(lastName(p.n))} · ${esc(p.l)} ×</button>`).join("")}</div>` : ""}
+        </details>
+        <div class="toolbar">
+          <input id="q" type="search" placeholder="Buscar nombre, legajo o DNI…" value="${esc(plantelQ)}" style="width:280px" />
+          ${sorts.map(([id,l]) => `<button class="sortbtn${plantelSort===id?" on":""}" data-sort="${id}">${l}</button>`).join("")}
+          <button class="btn-ghost" type="button" id="incAll">Incluir todos</button>
+          <button class="btn-ghost" type="button" id="excVis">Excluir visibles</button>
+          <span class="muted">${rows.length} filas · ${R.length} en el cálculo</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table class="roster">
+              <thead><tr>
+                <th class="chk"><input type="checkbox" id="chkAll" ${rows.length && rows.every(p => !excluded.has(String(p.l))) ? "checked" : ""} title="Tildar / destildar visibles" /></th>
+                <th>Leg.</th><th>Nombre</th><th class="num">Días</th><th class="num">Hs/día</th><th class="num">Normales</th>
+                <th class="num">50%</th><th class="num">100%</th><th class="num" title="Descanso 100% (CSV). No suma al reloj; en ICE cuenta ×2">Desc. 100%</th><th class="num">Reloj</th>
+                <th class="num">ICE</th><th class="num">% ext.</th><th class="num">Noct.</th>
+                <th class="num">Lic.</th><th class="num">Tardes</th><th>Score</th>
+              </tr></thead>
+              <tbody>
+                ${rows.map(p => {
+                  const on = !excluded.has(String(p.l));
+                  return `<tr class="${on?"":"off"}">
+                  <td class="chk"><input type="checkbox" class="inc" data-l="${esc(p.l)}" ${on?"checked":""} /></td>
+                  <td>${esc(p.l)}</td><td>${esc(p.n)}</td>
+                  <td class="num">${p.dias}</td>
+                  <td class="num">${fmtH(p.hpd)}</td>
+                  <td class="num">${fmtH(p.hsN)}</td>
+                  <td class="num">${fmtH(p.h50)}</td>
+                  <td class="num">${fmtH(p.h100)}</td>
+                  <td class="num">${p.d100 ? fmtH(p.d100) : "—"}</td>
+                  <td class="num">${fmtH(p.tot)}</td>
+                  <td class="num">${fmtH(p.eq)}</td>
+                  <td class="num">${Math.round(p.extra*100)}%</td>
+                  <td class="num">${fmtH(p.noct)}</td>
+                  <td class="num">${p.licJ}</td>
+                  <td class="num">${p.llegN}/${fmtH(p.llegT)}</td>
+                  <td><span class="pill ${riskClass(p.r)}">${p.r} ${riskLabel(p.r)}</span></td>
+                </tr>`;
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="muted" style="margin-top:10px">Reloj = normales + 50% + 100%. ICE suma además Desc. 100% × 2 (no va al reloj). Cenas del universo incluido: ${T.cenas}${T.active ? ` (promedio ${(T.cenas/T.active).toFixed(1)} por activo)` : ""}. Lic. injustificadas y suspensiones: 0.</p>
+      `;
+      const wrap2 = document.querySelector("#plantel .tbl-wrap");
+      if (wrap2) wrap2.scrollTop = y;
+      const qEl = document.getElementById("q");
+      qEl.addEventListener("input", () => { plantelQ = qEl.value; renderPlantel(); const el=document.getElementById("q"); if(el){ el.focus(); el.setSelectionRange(plantelQ.length, plantelQ.length);} });
+      document.querySelectorAll("#plantel .sortbtn").forEach(b => b.addEventListener("click", () => { plantelSort = b.dataset.sort; renderPlantel(); }));
+      document.querySelectorAll("#plantel .inc").forEach(cb => {
+        cb.addEventListener("change", () => {
+          const id = String(cb.getAttribute("data-l"));
+          if (cb.checked) excluded.delete(id);
+          else excluded.add(id);
+          saveExcluded();
+          refresh();
+        });
+      });
+      const chkAll = document.getElementById("chkAll");
+      if (chkAll) chkAll.addEventListener("change", () => {
+        visIds.forEach(id => { if (chkAll.checked) excluded.delete(id); else excluded.add(id); });
+        saveExcluded();
+        refresh();
+      });
+      document.getElementById("incAll").addEventListener("click", () => { excluded = new Set(); saveExcluded(); refresh(); });
+      document.getElementById("excVis").addEventListener("click", () => { visIds.forEach(id => excluded.add(id)); saveExcluded(); refresh(); });
+      document.querySelectorAll("#plantel [data-in]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          excluded.delete(String(btn.getAttribute("data-in")));
+          saveExcluded();
+          refresh();
+        });
+      });
+    }
+
+    function refresh() {
+      const { R, exclList } = ctx();
+      const sub = document.querySelector("header.top .sub");
+      if (sub) {
+        sub.textContent = `Convenio Camioneros 08/2026 · 26/07/2026 al 25/08/2026 · ${PEOPLE.length} legajos · cálculo sobre ${R.length}${exclList.length ? ` (${exclList.length} excluidos)` : ""} · ICE = hs normales + 50% × 1,5 + 100% × 2 + descanso 100% × 2. Sin tarifa $: todo en horas.`;
+      }
+      const onTab = document.querySelector(".tab.on");
+      const tabId = onTab ? onTab.dataset.tab : "tablero";
+      renderTablero();
+      renderRiesgos();
+      renderExtras();
+      renderAusencias();
+      renderPlantel();
+      if (tabId && tabId !== "tablero") {
+        document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === tabId));
+        document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === tabId));
+        document.querySelector(".wrap").classList.toggle("wide", tabId === "planilla" || tabId === "plantel" || tabId === "extras");
+      }
+    }
+    refresh();
+
+    const SHEET_COLS = [
+      { id:"l", src:"csv", label:"Legajo", kind:"t", get:p=>p.l, fx:"Dato del CSV" },
+      { id:"n", src:"csv", label:"Nombre", kind:"t", get:p=>p.n, fx:"Dato del CSV (sin el sufijo CAMIONEROS)" },
+      { id:"dni", src:"csv", label:"DNI", kind:"t", get:p=>p.dni, fx:"Dato del CSV" },
+      { id:"hsN", src:"csv", label:"Hs normales", kind:"h", get:p=>p.hsN, fx:"CSV: Total Hsnormales" },
+      { id:"hsD", src:"csv", label:"Hs descanso", kind:"h", get:()=>0, fx:"CSV: Total Hsdescanso (en este período todas 00:00)" },
+      { id:"dias", src:"csv", label:"Total días", kind:"n", get:p=>p.dias, fx:"CSV: Total dias" },
+      { id:"sab", src:"csv", label:"Sáb", kind:"n", get:p=>p.sab, fx:"CSV: Sab" },
+      { id:"dom", src:"csv", label:"Dom", kind:"n", get:p=>p.dom, fx:"CSV: Dom" },
+      { id:"fer", src:"csv", label:"Fer", kind:"n", get:p=>p.fer, fx:"CSV: Fer" },
+      { id:"h50", src:"csv", label:"50%", kind:"h", get:p=>p.h50, fx:"CSV: 50%" },
+      { id:"h100", src:"csv", label:"100%", kind:"h", get:p=>p.h100, fx:"CSV: 100%" },
+      { id:"noct", src:"csv", label:"Nocturnas", kind:"h", get:p=>p.noct, fx:"CSV: Nocturnas (informativa; no se suma otra vez al ICE)" },
+      { id:"d100", src:"csv", label:"Descanso 100%", kind:"h", get:p=>p.d100, fx:"CSV: Descanso100 %" },
+      { id:"cenas", src:"csv", label:"Cenas", kind:"n", get:p=>p.cenas, fx:"CSV: Cenas" },
+      { id:"llegN", src:"csv", label:"Lleg. tarde n", kind:"n", get:p=>p.llegN, fx:"CSV: Llegadas tarde (cantidad)" },
+      { id:"llegT", src:"csv", label:"Lleg. tarde tiempo", kind:"h", get:p=>p.llegT, fx:"CSV: Llegadas tarde - Tiempo" },
+      { id:"licJ", src:"csv", label:"Lic Just", kind:"n", get:p=>p.licJ, fx:"CSV: Lic Just" },
+      { id:"licI", src:"csv", label:"Lic Injust", kind:"n", get:p=>p.licI, fx:"CSV: Lic Injust (todas 0 en este período)" },
+      { id:"susp", src:"csv", label:"Suspensiones", kind:"n", get:p=>p.susp, fx:"CSV: Suspensiones (todas 0 en este período)" },
+      { id:"tot", src:"calc", label:"Reloj", kind:"h", get:p=>p.hsN+p.h50+p.h100,
+        fx:"Reloj = Hs normales + 50% + 100%",
+        math:p=>`${fmtH(p.hsN)} + ${fmtH(p.h50)} + ${fmtH(p.h100)} = ${fmtH(p.hsN+p.h50+p.h100)}` },
+      { id:"ice50", src:"calc", label:"ICE de 50%", kind:"h", get:p=>p.h50*1.5,
+        fx:"ICE 50% = 50% × 1,5",
+        math:p=>`${fmtH(p.h50)} × 1,5 = ${fmtH(p.h50*1.5)}` },
+      { id:"ice100", src:"calc", label:"ICE de 100%", kind:"h", get:p=>p.h100*2,
+        fx:"ICE 100% = 100% × 2",
+        math:p=>`${fmtH(p.h100)} × 2 = ${fmtH(p.h100*2)}` },
+      { id:"iceD", src:"calc", label:"ICE desc. 100%", kind:"h", get:p=>p.d100*2,
+        fx:"ICE descanso = Descanso 100% × 2",
+        math:p=>`${fmtH(p.d100)} × 2 = ${fmtH(p.d100*2)}` },
+      { id:"eq", src:"calc", label:"ICE", kind:"h", get:p=>p.hsN+p.h50*1.5+p.h100*2+p.d100*2,
+        fx:"ICE = Hs normales + 50%×1,5 + 100%×2 + Descanso100%×2",
+        math:p=>`${fmtH(p.hsN)} + ${fmtH(p.h50*1.5)} + ${fmtH(p.h100*2)} + ${fmtH(p.d100*2)} = ${fmtH(p.hsN+p.h50*1.5+p.h100*2+p.d100*2)}` },
+      { id:"rec", src:"calc", label:"Recargo", kind:"h", get:p=>(p.hsN+p.h50*1.5+p.h100*2+p.d100*2)-(p.hsN+p.h50+p.h100),
+        fx:"Recargo = ICE − Reloj",
+        math:p=>{ const ice=p.hsN+p.h50*1.5+p.h100*2+p.d100*2; const rel=p.hsN+p.h50+p.h100; return `${fmtH(ice)} − ${fmtH(rel)} = ${fmtH(ice-rel)}`; } },
+      { id:"extra", src:"calc", label:"% extras", kind:"p", get:p=>p.tot? (p.h50+p.h100)/p.tot : 0,
+        fx:"% extras = (50% + 100%) / Reloj",
+        math:p=>p.tot? `(${fmtH(p.h50)} + ${fmtH(p.h100)}) / ${fmtH(p.tot)} = ${Math.round((p.h50+p.h100)/p.tot*100)}%` : "sin reloj" },
+      { id:"hpd", src:"calc", label:"Hs / día", kind:"h", get:p=>p.dias? (p.hsN+p.h50+p.h100)/p.dias : 0,
+        fx:"Hs/día = Reloj / Total días",
+        math:p=>p.dias? `${fmtH(p.hsN+p.h50+p.h100)} / ${p.dias} = ${fmtH((p.hsN+p.h50+p.h100)/p.dias)}` : "sin días" },
+      { id:"rOt", src:"calc", label:"Score extras", kind:"n", get:p=>p.rOt,
+        fx:"Score extras (0–100): peso del mix 50%/100% + tope si reloj > 220 h o si no hay horas normales" },
+      { id:"rAbs", src:"calc", label:"Score ausent.", kind:"n", get:p=>p.rAbs,
+        fx:"Score ausentismo = Lic Just×6 + Lic Injust×15 + SUS×20 + 40 si 0 días" },
+      { id:"rPun", src:"calc", label:"Score puntual.", kind:"n", get:p=>p.rPun,
+        fx:"Score puntualidad = llegadas n×4 + tiempo tarde (h)×8 (tope 100)" },
+      { id:"r", src:"calc", label:"Score", kind:"n", get:p=>p.r,
+        fx:"Score = 40% extras + 35% ausentismo + 25% puntualidad",
+        math:p=>`0,40×${p.rOt} + 0,35×${p.rAbs} + 0,25×${p.rPun} = ${p.r}` },
+    ];
+    SHEET_COLS.forEach((c, i) => { c.letter = String.fromCharCode(65 + (i % 26)); if (i >= 26) c.letter = "A" + String.fromCharCode(65 + i - 26); });
+
+    function fmtCell(col, p) {
+      const v = col.get(p);
+      if (col.kind === "h") return fmtH(v);
+      if (col.kind === "p") return Math.round(v * 100) + "%";
+      return v;
+    }
+
+    let sheetQ = "";
+    let sheetSel = { r: 0, c: 19 };
+
+    function sheetFormula(p, col) {
+      const math = col.math ? col.math(p) : "";
+      return `<div class="fx">
+        <div class="cellref">${col.letter}${sheetSel.r + 2}</div>
+        <div class="fxbody">
+          <b>${esc(col.label)}</b> · ${esc(col.fx)}
+          ${math ? `<div class="fxmath">${esc(math)}</div>` : ""}
+          <div class="muted" style="margin-top:4px">${esc(p.n)} · legajo ${esc(p.l)} · valor ${fmtCell(col, p)}</div>
+        </div>
+      </div>`;
+    }
+
+    function renderPlanilla() {
+      const q = sheetQ.trim().toLowerCase();
+      const rows = PEOPLE.filter(p => !q || p.n.toLowerCase().includes(q) || p.l.includes(q) || p.dni.includes(q));
+      if (sheetSel.r >= rows.length) sheetSel.r = Math.max(0, rows.length - 1);
+      const pSel = rows[sheetSel.r];
+      const colSel = SHEET_COLS[sheetSel.c] || SHEET_COLS[0];
+      document.getElementById("planilla").innerHTML = `
+        <div class="callout info"><b>Vista tipo Excel del CSV.</b> Columnas grises = tal cual Legajos Online. Columnas violeta = cálculos del tablero. Clic en una celda para ver la fórmula con los números de ese legajo. El .xls descarga dos hojas: origen y cálculos con fórmulas de Excel.</div>
+        <div class="toolbar">
+          <input id="sq" type="search" placeholder="Buscar en la planilla…" value="${esc(sheetQ)}" style="width:260px" />
+          <button class="btn-xls" type="button" id="dlXls">Descargar Excel (.xls)</button>
+          <button class="btn-csv" type="button" id="dlCsv">Descargar CSV</button>
+          <span class="muted">${rows.length} filas · período camioneros 082026 · 26/07/2026 al 25/08/2026</span>
+        </div>
+        ${pSel ? sheetFormula(pSel, colSel) : ""}
+        <p class="grp">A–S origen CSV · T–AE cálculos (Reloj, ICE, recargo, scores)</p>
+        <div class="sheet-wrap">
+          <table class="sheet">
+            <thead>
+              <tr>
+                <th class="rn"></th>
+                ${SHEET_COLS.map(c => `<th class="${c.src}">${c.letter}</th>`).join("")}
+              </tr>
+              <tr>
+                <th class="rn">#</th>
+                ${SHEET_COLS.map(c => `<th class="${c.src}">${esc(c.label)}</th>`).join("")}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((p, ri) => `<tr class="${ri===sheetSel.r?"sel":""}" data-r="${ri}">
+                <td class="rn">${ri+1}</td>
+                ${SHEET_COLS.map((c, ci) => `<td class="${c.src==="calc"?"calc":""} ${c.kind!=="t"?"num":""} ${ri===sheetSel.r && ci===sheetSel.c?"sel":""}" data-c="${ci}">${esc(fmtCell(c,p))}</td>`).join("")}
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:10px">Horas en formato HH:MM como en LOL. El Excel usa horas decimales (150,20) para que las fórmulas cierren. Nocturnas no entran al ICE: ya viajan dentro de normales / 50% / 100%.</p>
+      `;
+      const sq = document.getElementById("sq");
+      sq.addEventListener("input", () => { sheetQ = sq.value; renderPlanilla(); const el=document.getElementById("sq"); if(el){ el.focus(); el.setSelectionRange(sheetQ.length, sheetQ.length);} });
+      document.querySelectorAll("#planilla tbody td[data-c]").forEach(td => {
+        td.addEventListener("click", () => {
+          sheetSel = { r: Number(td.parentElement.dataset.r), c: Number(td.dataset.c) };
+          renderPlanilla();
+        });
+      });
+      document.getElementById("dlXls").addEventListener("click", downloadXls);
+      document.getElementById("dlCsv").addEventListener("click", downloadCsv);
+    }
+
+    function csvEscape(v) {
+      const s = String(v ?? "");
+      if (/[",;\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+
+    function sheetRowsForExport() {
+      return PEOPLE.map(p => {
+        const rel = p.hsN + p.h50 + p.h100;
+        const ice = p.hsN + p.h50 * 1.5 + p.h100 * 2 + p.d100 * 2;
+        return {
+          periodo: "camioneros 082026",
+          fecha: "2026-07-26 al 2026-08-25",
+          l: p.l, n: p.n, dni: p.dni,
+          hsN: p.hsN, hsD: 0, dias: p.dias, sab: p.sab, dom: p.dom, fer: p.fer,
+          h50: p.h50, h100: p.h100, noct: p.noct, d100: p.d100,
+          cenas: p.cenas, llegN: p.llegN, llegT: p.llegT, licJ: p.licJ, licI: p.licI, susp: p.susp,
+          rel, ice, rec: ice - rel,
+          extra: rel ? (p.h50 + p.h100) / rel : 0,
+          hpd: p.dias ? rel / p.dias : 0,
+          ice50: p.h50 * 1.5, ice100: p.h100 * 2, iceD: p.d100 * 2,
+          rOt: p.rOt, rAbs: p.rAbs, rPun: p.rPun, r: p.r,
+        };
+      });
+    }
+
+    function downloadCsv() {
+      const headers = ["Periodo","Fecha","Legajo","Nombre","DNI","Hs normales","Hs descanso","Total dias","Sab","Dom","Fer","50%","100%","Nocturnas","Descanso 100%","Cenas","Lleg tarde n","Lleg tarde tiempo","Lic Just","Lic Injust","Suspensiones","Reloj","ICE 50%","ICE 100%","ICE desc 100%","ICE","Recargo","% extras","Hs/dia","Score extras","Score ausent","Score puntual","Score"];
+      const rows = sheetRowsForExport().map(r => [
+        r.periodo, r.fecha, r.l, r.n, r.dni,
+        fmtH(r.hsN), fmtH(r.hsD), r.dias, r.sab, r.dom, r.fer,
+        fmtH(r.h50), fmtH(r.h100), fmtH(r.noct), fmtH(r.d100),
+        r.cenas, r.llegN, fmtH(r.llegT), r.licJ, r.licI, r.susp,
+        fmtH(r.rel), fmtH(r.ice50), fmtH(r.ice100), fmtH(r.iceD), fmtH(r.ice), fmtH(r.rec),
+        Math.round(r.extra*100)+"%", fmtH(r.hpd), r.rOt, r.rAbs, r.rPun, r.r,
+      ]);
+      const bom = "\uFEFF";
+      const body = [headers, ...rows].map(line => line.map(csvEscape).join(";")).join("\r\n");
+      triggerDownload(bom + body, "novedades-camioneros-08-2026.csv", "text/csv;charset=utf-8");
+    }
+
+    function xNum(n) { return Number(n).toFixed(4).replace(/0+$/,"").replace(/\.$/,""); }
+    function xCell(v, type, formula) {
+      if (formula) return `<Cell ss:Formula="${esc(formula)}"><Data ss:Type="Number">${xNum(v)}</Data></Cell>`;
+      if (type === "Number") return `<Cell><Data ss:Type="Number">${xNum(v)}</Data></Cell>`;
+      return `<Cell><Data ss:Type="String">${esc(v)}</Data></Cell>`;
+    }
+
+    function downloadXls() {
+      const rows = sheetRowsForExport();
+      const csvHeader = ["Periodo","Fecha","Legajo","Nombre","DNI","Hs normales","Hs descanso","Total dias","Sab","Dom","Fer","50%","100%","Nocturnas","Descanso 100%","Cenas","Lleg tarde n","Lleg tarde tiempo","Lic Just","Lic Injust","Suspensiones"];
+      const calcHeader = ["Legajo","Nombre","DNI","Total dias","Hs normales","Hs descanso","50%","100%","Nocturnas","Descanso 100%","Reloj","ICE 50%","ICE 100%","ICE desc 100%","ICE","Recargo","% extras","Hs/dia","Score extras","Score ausent","Score puntual","Score"];
+      let csvRows = "";
+      rows.forEach(r => {
+        csvRows += `<Row>${[
+          xCell(r.periodo), xCell(r.fecha), xCell(r.l), xCell(r.n), xCell(r.dni),
+          xCell(fmtH(r.hsN)), xCell(fmtH(r.hsD)), xCell(r.dias,"Number"), xCell(r.sab,"Number"), xCell(r.dom,"Number"), xCell(r.fer,"Number"),
+          xCell(fmtH(r.h50)), xCell(fmtH(r.h100)), xCell(fmtH(r.noct)), xCell(fmtH(r.d100)),
+          xCell(r.cenas,"Number"), xCell(r.llegN,"Number"), xCell(fmtH(r.llegT)),
+          xCell(r.licJ,"Number"), xCell(r.licI,"Number"), xCell(r.susp,"Number"),
+        ].join("")}</Row>`;
+      });
+      let calcRows = "";
+      rows.forEach((r, i) => {
+        const n = i + 2;
+        calcRows += `<Row>${[
+          xCell(r.l), xCell(r.n), xCell(r.dni), xCell(r.dias,"Number"),
+          xCell(r.hsN,"Number"), xCell(r.hsD,"Number"), xCell(r.h50,"Number"), xCell(r.h100,"Number"),
+          xCell(r.noct,"Number"), xCell(r.d100,"Number"),
+          xCell(r.rel,"Number", `=E${n}+G${n}+H${n}`),
+          xCell(r.ice50,"Number", `=G${n}*1.5`),
+          xCell(r.ice100,"Number", `=H${n}*2`),
+          xCell(r.iceD,"Number", `=J${n}*2`),
+          xCell(r.ice,"Number", `=E${n}+G${n}*1.5+H${n}*2+J${n}*2`),
+          xCell(r.rec,"Number", `=O${n}-K${n}`),
+          xCell(r.extra,"Number", `=IF(K${n}=0,0,(G${n}+H${n})/K${n})`),
+          xCell(r.hpd,"Number", `=IF(D${n}=0,0,K${n}/D${n})`),
+          xCell(r.rOt,"Number"), xCell(r.rAbs,"Number"), xCell(r.rPun,"Number"),
+          xCell(r.r,"Number", `=0.4*S${n}+0.35*T${n}+0.25*U${n}`),
+        ].join("")}</Row>`;
+      });
+      const leyenda = [
+        ["Campo","Fórmula / origen"],
+        ["Hs normales…Suspensiones","Copia del CSV de Legajos Online (en la hoja CSV se ven HH:MM; acá van horas decimales para que Excel calcule)."],
+        ["Reloj","= Hs normales + 50% + 100%"],
+        ["ICE de 50%","= 50% × 1,5"],
+        ["ICE de 100%","= 100% × 2"],
+        ["ICE desc. 100%","= Descanso 100% × 2"],
+        ["ICE","= Hs normales + 50%×1,5 + 100%×2 + Descanso100%×2. Las nocturnas NO se duplican."],
+        ["Recargo","= ICE − Reloj"],
+        ["% extras","= (50% + 100%) / Reloj"],
+        ["Hs/día","= Reloj / Total días"],
+        ["Score","= 40% extras + 35% ausentismo + 25% puntualidad"],
+      ].map(([a,b]) => `<Row>${xCell(a)}${xCell(b)}</Row>`).join("");
+      const xml = `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="CSV origen"><Table>
+    <Row>${csvHeader.map(h => xCell(h)).join("")}</Row>
+    ${csvRows}
+  </Table></Worksheet>
+  <Worksheet ss:Name="Calculos"><Table>
+    <Row>${calcHeader.map(h => xCell(h)).join("")}</Row>
+    ${calcRows}
+  </Table></Worksheet>
+  <Worksheet ss:Name="Leyenda"><Table>
+    ${leyenda}
+  </Table></Worksheet>
+</Workbook>`;
+      triggerDownload(xml, "novedades-camioneros-08-2026.xls", "application/vnd.ms-excel");
+    }
+
+    function triggerDownload(content, name, mime) {
+      const blob = new Blob([content], { type: mime });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    }
+
+    renderPlanilla();
+  </script>
+</body>
+</html>

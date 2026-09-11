@@ -40,6 +40,7 @@ import { RequireAuth } from '../../src/hooks/useRequireAuth';
 import { spacing } from '../../src/theme/tokens';
 import { PortalErrorPanel } from '../../src/components/PortalErrorPanel';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
+import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { useTheme } from '../../src/theme/ThemeContext';
 
 export default function AgendaScreen() {
@@ -53,6 +54,7 @@ export default function AgendaScreen() {
 function AgendaScreenContent() {
   const { empDocId, portalFeatures, user, employee } = usePortalAuth();
   const { palette } = useTheme();
+  const { contentMaxWidth, horizontalPadding } = useResponsiveLayout();
   const { isOffline } = useNetworkStatus();
 
   const [mode, setMode] = useState<AgendaViewMode>('month');
@@ -152,7 +154,15 @@ function AgendaScreenContent() {
         />
       ) : (
         <ScrollView
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[
+            styles.scroll,
+            {
+              paddingHorizontal: horizontalPadding,
+              ...(contentMaxWidth
+                ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const, width: '100%' }
+                : {}),
+            },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -206,7 +216,7 @@ function AgendaScreenContent() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scroll: { padding: spacing.container, paddingBottom: 32, gap: 12 },
+  scroll: { paddingVertical: spacing.container, paddingBottom: 32, gap: 12 },
   centerCard: { margin: 20 },
   disabled: { textAlign: 'center' },
   loader: { marginVertical: 40 },

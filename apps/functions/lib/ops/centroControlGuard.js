@@ -10,9 +10,13 @@ function isCentroControlEnabled(data) {
 async function loadCentroControlState(db) {
     const snap = await db.collection('empresas').get();
     const disabled = new Set();
+    const demo = new Set();
     snap.docs.forEach((d) => {
-        if (!isCentroControlEnabled(d.data()))
+        const data = d.data();
+        if (!isCentroControlEnabled(data))
             disabled.add(d.id);
+        if (data?.modoDemoEnabled === true)
+            demo.add(d.id);
     });
     const anyEnabled = snap.empty || snap.docs.some((d) => isCentroControlEnabled(d.data()));
     return {
@@ -20,6 +24,10 @@ async function loadCentroControlState(db) {
         isEnabled: (empresaId) => {
             const id = String(empresaId || '').trim() || 'bacarsa';
             return !disabled.has(id);
+        },
+        isDemo: (empresaId) => {
+            const id = String(empresaId || '').trim();
+            return !!id && demo.has(id);
         },
     };
 }

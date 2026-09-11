@@ -175,6 +175,60 @@ async function registrarPresencia(db, input) {
         incomingPatch.absenceReversedBy = source === 'OPERATIONS' ? 'OPERACIONES' : source;
     }
     await shiftRef.update(incomingPatch);
+    void (async () => {
+        try {
+            const isPortal = source === 'PORTAL_GPS';
+            const title = isPortal ? 'Presente registrado' : 'Operador registró tu ingreso';
+            const body = isPortal
+                ? `Tu ingreso en ${shiftData.objectiveName || 'el puesto'} fue confirmado.`
+                : `${actorName || 'El operador'} registró tu ingreso en ${shiftData.objectiveName || 'el puesto'}.`;
+            const notifType = 'CHECKIN_CONFIRMADO';
+            const notifRef = await db.collection('user_notifications').add({
+                type: notifType,
+                title,
+                body,
+                employeeId: empId || null,
+                userId: empId || null,
+                shiftId,
+                objectiveId: shiftData.objectiveId || null,
+                objectiveName: shiftData.objectiveName || null,
+                empresaId: shiftData.empresaId || null,
+                read: false,
+                readAt: null,
+                createdAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+            const [byEmp, byUid] = await Promise.all([
+                empId ? db.collection('device_tokens').where('employeeId', '==', empId).get() : Promise.resolve({ docs: [] }),
+                (async () => {
+                    if (!empId)
+                        return { docs: [] };
+                    const empDoc = await db.collection('empleados').doc(empId).get();
+                    const uid = empDoc.data()?.uid;
+                    if (!uid)
+                        return { docs: [] };
+                    return db.collection('device_tokens').where('uid', '==', uid).get();
+                })(),
+            ]);
+            const tokenSet = new Set();
+            [...byEmp.docs, ...byUid.docs].forEach((d) => {
+                const t = d.data()?.token;
+                if (typeof t === 'string' && t.length > 10)
+                    tokenSet.add(t);
+            });
+            const tokens = Array.from(tokenSet);
+            if (tokens.length > 0) {
+                const link = `/empleado/dashboard?notif=${notifRef.id}`;
+                await admin.messaging().sendEachForMulticast({
+                    data: { type: notifType, title, body, shiftId, notificationId: notifRef.id, link },
+                    webpush: { headers: { Urgency: 'normal' }, fcmOptions: { link } },
+                    tokens,
+                });
+            }
+        }
+        catch (e) {
+            console.warn('[registrarPresencia] notifyPresenceConfirmed:', e?.message);
+        }
+    })();
     void db
         .collection('novedades')
         .add({
@@ -350,6 +404,39 @@ async function registrarPresencia(db, input) {
             : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}).`,
     })
         .catch(() => { });
+    if (isLate && !shiftData.absenceType) {
+        void (async () => {
+            try {
+                const startMs2 = scheduledStartTs?.toMillis?.() ?? 0;
+                const arDate = new Date(startMs2 - 3 * 60 * 60 * 1000);
+                const dateStr = `${arDate.getUTCFullYear()}-${String(arDate.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate.getUTCDate()).padStart(2, '0')}`;
+                const existing = await db.collection('ausencias').where('shiftId', '==', shiftId).limit(1).get();
+                if (existing.empty) {
+                    await db.collection('ausencias').add({
+                        employeeId: empId || null,
+                        employeeName: shiftData.employeeName || '',
+                        startDate: dateStr,
+                        endDate: dateStr,
+                        type: 'Llegada Tarde',
+                        absenceType: 'LT',
+                        origin: 'LATE_ARRIVAL',
+                        shiftId,
+                        objectiveId: shiftData.objectiveId || null,
+                        objectiveName: shiftData.objectiveName || null,
+                        positionName: shiftData.positionName || null,
+                        reason: `Llegada tarde — ${shiftData.objectiveName || ''} (${shiftData.positionName || ''})`,
+                        arrivedAt: firestore_1.FieldValue.serverTimestamp(),
+                        status: 'Confirmada',
+                        createdAt: firestore_1.FieldValue.serverTimestamp(),
+                        empresaId: shiftData.empresaId || null,
+                        reportedBy: source,
+                    });
+                }
+            }
+            catch {
+            }
+        })();
+    }
     if (shiftData.absenceType === 'AA') {
         void (async () => {
             try {

@@ -23,19 +23,19 @@
 | Fase | Nombre | Estado | Tareas | Progreso | Completada |
 |------|--------|--------|--------|----------|------------|
 | **F0** | Fundación | `EN_CURSO` | 12 | 8/12 | — |
-| **F1** | Auth, activación y turnos | `EN_CURSO` | 14 | 13/14 | — |
+| **F1** | Auth, activación y turnos | `COMPLETA` | 14 | 14/14 | — |
 | **F2** | Fichada con GPS | `EN_CURSO` | 10 | 8/10 | — |
 | **F3** | Ausencias, licencias y push | `EN_CURSO` | 12 | 11/12 | — |
 | **F4** | Permutas de turno | `EN_CURSO` | 8 | 7/8 | — |
-| **F5** | Credencial digital y UX | `EN_CURSO` | 10 | 9/10 | F5-09 en validación |
-| **F6** | Beta cerrada y hardening | `PENDIENTE` | 10 | 0/9* | — |
+| **F5** | Credencial digital y UX | `COMPLETA` | 10 | 10/10 | — |
+| **F6** | Beta cerrada y hardening | `EN_CURSO` | 10 | 0/9* | — |
 | **F7** | Publicación en stores | `PENDIENTE` | 12 | 0/6* | — |
-| | **TOTAL activo (sin iOS)** | | **88** | **36/79*** | |
+| | **TOTAL activo (sin iOS)** | | **88** | **38/79*** | |
 
 \*Tareas iOS marcadas **DESCARTADO v1** (no cuentan para cierre de fase).  
-**Fase activa recomendada:** F1-14 E2E activación → F5-09 pantallas → F6 beta Play. **F4-08 permutas aplazado.**  
-**Última actualización:** 2026-08-22  
-**Última tarea completada:** F3-12 FCM Android + Eventos EV validados en dispositivo; mail dual-link deploy
+**Fase activa recomendada:** F6 beta Play — **F6-01 Internal Testing** (F0-01 Console ✅ verificada). **F4-08 permutas aplazado.**  
+**Última actualización:** 2026-09-08  
+**Última tarea completada:** F0-01 verificación cuenta desarrollador Play
 
 ---
 
@@ -45,22 +45,19 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
-- APK **1.1.3** + OTA preview (Alertas filtradas, Me enteré/Quitar/Borrar todas, filtros 1 fila, sin turnos no publicados, mes cronograma AR, FCM preview por legajo).
-- **Eventos EV** ✅ validados en dispositivo (convocatoria + asignación Planificación + notif).
-- **F3-12 FCM Android** ✅ push con app abierta/cerrada + Probar FCM panel.
-- Push cronograma/cambio turno con `notification` + acuse en Firestore (`ackedAt`).
-- Mail activación dual-link (app + web); banner web «Abrir en COSP Guardia».
-- **OTA preview** «F5-09 responsive + F1 activar/device-blocked» (grupo `2981945d-…`).
+- **F1-14** ✅ activación mail→app.
+- **F5-09** ✅ responsive 3 tamaños (OTA agenda+alertas).
+- **F0-01** ✅ Play Console cuenta personal Mauro **verificada** (crear apps habilitado).
+- **F6-04 / F6-05 / F6-08** ✅ rules EV, secrets, guía RRHH.
+- F1 y F5 fases **COMPLETAS**.
 
 ### Próxima tarea (prioridad)
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **F1-14** | E2E activación + device block en APK físico | F1 |
-| **F5-09** | Revisión 3 tamaños de pantalla | F5 |
-| **F3-12** | ✅ FCM Android validado (2026-08-22) | F3 |
-| **Eventos EV** | ✅ Validado con vigilador (2026-08-22) | Pre-F4 |
-| **F4-08** | Permutas E2E — **PAUSADO** | F4 |
+| **F6-01** | Play Internal Testing (crear app + AAB + testers) | F6 |
+| **F0-11** | Política de privacidad (URL pública; Data Safety) | F0 |
+| Device-block 2º celular | Opcional confirmar | F1 |
 
 ### Aplazado / descartado (no bloquea APK Android)
 
@@ -71,9 +68,8 @@
 
 ### Bloqueantes / fundación aún abiertos (solo Android)
 
-- **F0-01** Google Play Console (cuenta desarrollador).
 - **F0-11** Política de privacidad (URL pública; Data Safety Play).
-- **F6** beta Android: Internal Testing, hardening, pilotos (F6-02 TestFlight **no aplica**).
+- **F6-01** Internal Testing en Play.
 - **F7** publicación **Google Play** (F7-03, F7-05, F7-07 parcial Google, F7-08 Google, F7-10, F7-12).
 - Paridad doc: varias filas web↔app siguen ⬜ aunque el código exista — **marcar tareas al validar en dispositivo**.
 
@@ -102,6 +98,18 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-08 | F6-01 link | Internal Testing invite: https://play.google.com/apps/internaltest/4701606202645789130
+2026-09-08 | Package OK | Firebase Android `com.cosp.guardia` + google-services + EAS secret; AAB production nuevo en curso
+2026-09-08 | Package | Android/iOS id → `com.cosp.guardia` (sin grupobacar); falta Firebase app + google-services + AAB nuevo
+2026-09-08 | F6-01 start | AAB production EAS + checklist Internal Testing Play
+2026-09-08 | Header Hoy | Título = COSP · {empresa} · vX.Y.Z (tab Hoy queda en bottom nav)
+2026-09-08 | UX piloto | Sin Salir en Hoy; Cerrar sesión con confirmación en Más; Probar push solo lab/preview; sin card Tu empresa
+2026-09-08 | Icono final | Misma B mock A; fondo #8B1A1A + B degradé claro; OTA+APK
+2026-09-08 | Naming multi-empresa | UI sin «Grupo Bacar»; marca visible = COSP Guardia (package sigue com.grupobacar…)
+2026-09-08 | F0-01 OK | Play Console verificada — crear apps habilitado; siguiente F6-01 Internal Testing
+2026-09-07 | Brand mock A | Login/icon/loader = mock aprobado (_cap-A); OTA+APK
+2026-09-07 | Brand Bacar fix | Login/loader/iconos usan mock aprobado (PNG), no SVG web2; OTA+APK
+2026-09-07 | Brand Bacar B | Isologo B (SVG RN) en login+LoadingScreen anillo; iconos nativos #D32F2F/#8B1A1A; script generate-bacar-icons.py
 2026-08-22 | F3-12+EV OK | Mauro validó FCM Android y Eventos EV en dispositivo; deploy createPortalAccess (mail app+web) + hosting activar
 2026-08-22 | F1-04 activación app | Mail dual-link (cosp-guardia + web); intentFilters Android; assetlinks template; banner web activar
 2026-08-22 | Alcance v1 Android | iOS descartado del plan activo (F0-02/04, F3-06, F6-02, F7 iOS); F3-12 = solo Android; objetivo F7 = Google Play
@@ -113,6 +121,10 @@
 2026-08-20 | UX-1 | Agenda calendario Día/Semana/Mes (default Mes); Cliente·Objetivo·Puesto; nav período; useEmployeeShifts por mes
 2026-08-20 | UX-0 | Bottom tabs Hoy·Agenda·Alertas·Más; resolveShiftPlacement (Cliente·Objetivo·Puesto); tab Alertas + deep links FCM; Agenda default Mes (calendario = UX-1)
 2026-08-19 | Eventos EV | App /eventos, convocatorias Acepto/No puedo, solicitud cupo, inbox normalizado, firestore.rules empleado, notif convocatoria title/body/employeeId
+2026-09-07 | F6 harden | Rules EV employeeTenantMatches + claim empresaId; guía RRHH; literales lab; F0-01 cuenta Play personal
+2026-09-07 | F0-01 | Google Play Console cuenta personal Mauro (beta; transferible a Bacar)
+2026-09-07 | F5-09 | Responsive 3 tamaños validado (OTA agenda+alertas); F5 COMPLETA → F6
+2026-09-07 | F1-14 | Activación mail→app validada (HTTPS open=app; Gmail ya no bloquea esquema custom)
 2026-08-22 | F5-09 | useResponsiveLayout + login/activar/device-blocked/hero/index OTA preview
 2026-08-04 | F4-08 prep | seed-swap-peer + checklist E2E permutas
 2026-08-04 | F5-05/06 | Banner sin conexión, PortalErrorPanel, novedad temática, LoadingScreen
@@ -147,7 +159,7 @@ apps/functions/         ← Backend existente (ajustes menores)
 ```
 
 **Stack móvil:** Expo + React Native + TypeScript + Expo Router  
-**Identificador sugerido:** `com.grupobacar.cosp.guardia`
+**Identificador (Android / Play):** `com.cosp.guardia` (sin marca Bacar; multi-empresa).
 
 ---
 
@@ -179,9 +191,9 @@ npm run dev:mobile
 
 | ID | Tarea | Criterio de aceptación | Estado | Fecha |
 |----|-------|------------------------|--------|-------|
-| F0-01 | Cuenta Google Play Console | Cuenta activa, perfil de desarrollador completado | ⬜ Pendiente | — |
+| F0-01 | Cuenta Google Play Console | Cuenta activa, perfil de desarrollador completado | ✅ Hecha | 2026-09-08 — verificada; crear apps OK (personal Mauro; transferible a Bacar) |
 | F0-02 | Cuenta Apple Developer Program | Membresía activa (USD 99/año) | ⏸ Descartado v1 | — |
-| F0-03 | App Android en Firebase Console | `google-services.json` descargado; package `com.grupobacar.cosp.guardia` | ✅ Hecha | 2026-08-20 |
+| F0-03 | App Android en Firebase Console | `google-services.json` descargado; package `com.cosp.guardia` | ✅ Hecha | 2026-09-08 — app Firebase `1:…:1acfb487…`; package `com.cosp.guardia` |
 | F0-04 | App iOS en Firebase Console | `GoogleService-Info.plist` descargado; bundle ID definido | ⏸ Descartado v1 | — |
 | F0-05 | Crear `apps/mobile-guardia` | Expo SDK actual, TypeScript, Expo Router, arranca en simulador | ✅ Hecha | 2026-07-28 |
 | F0-06 | Crear `packages/portal-types` | Tipos `Shift`, `PortalFeatures`, `ObjectiveLocation`, `EmpleadoPortal` | ✅ Hecha | 2026-07-28 |
@@ -227,7 +239,7 @@ npm run dev:mobile
 | F1-11 | UI Agenda semana/mes | Lista histórica y próximos turnos | ✅ Hecha | 2026-08-20 |
 | F1-12 | Lectura `portalFeatures` | Ocultar módulos deshabilitados por empresa | ✅ Hecha | 2026-07-30 |
 | F1-13 | Logout | `signOut` + limpieza estado local | ✅ Hecha | 2026-08-22 |
-| F1-14 | Prueba E2E emulador / APK | Activar guardia → ver turno; segundo device bloqueado | ⬜ Pendiente | — |
+| F1-14 | Prueba E2E emulador / APK | Activar guardia → ver turno; segundo device bloqueado | ✅ Hecha | 2026-09-07 |
 
 ---
 
@@ -407,7 +419,7 @@ npm run dev:mobile
 | F5-06 | Loading states globales | LoadingScreen temático + ActivityIndicator | ✅ Hecha | 2026-08-04 |
 | F5-07 | Icono y splash app | Assets para dev y stores (1024 icon) | ✅ Hecha | 2026-08-20 |
 | F5-08 | Accesibilidad básica | Tamaños táctiles, contraste, labels | ✅ Hecha | 2026-08-20 |
-| F5-09 | Revisión en 3 tamaños pantalla | Phone pequeño, estándar, tablet | 🟡 En validación | OTA 2026-08-22; tab Más local pendiente OTA |
+| F5-09 | Revisión en 3 tamaños pantalla | Phone pequeño, estándar, tablet | ✅ Hecha | 2026-09-07 |
 | F5-10 | Manual guardia (borrador) | Guía instalación app (complementa tutorial web) | ✅ Hecha | 2026-08-20 |
 
 ---
@@ -415,13 +427,7 @@ npm run dev:mobile
 # FASE 6 — Beta cerrada y hardening
 
 **Objetivo:** Validación con guardias reales; estabilidad pre-producción.  
-**Estado:** `PENDIENTE`  
-**Duración estimada:** 2 semanas  
-**Depende de:** F5 completa
-
-### Checklist de cierre de fase
-
-- [ ] Las tareas F6 **activas** marcadas como hechas (F6-02 TestFlight no aplica)
+**Estado:** `EN_CURSO`
 - [ ] 2 semanas piloto sin incidentes P0
 - [ ] Bitácora: `F6 COMPLETA`
 
@@ -429,14 +435,14 @@ npm run dev:mobile
 
 | ID | Tarea | Criterio de aceptación | Estado | Fecha |
 |----|-------|------------------------|--------|-------|
-| F6-01 | Play Internal Testing | Track interno; 10+ testers invitados | ⬜ Pendiente | — |
+| F6-01 | Play Internal Testing | Track interno; 10+ testers invitados | 🔄 En curso | 2026-09-08 — AAB subido; invite https://play.google.com/apps/internaltest/4701606202645789130 |
 | F6-02 | TestFlight iOS | Build subido; testers externos | ⏸ Descartado v1 | — |
 | F6-03 | Crashlytics o Sentry | Errores JS y nativos reportados | ⬜ Pendiente | — |
-| F6-04 | Revisión `firestore.rules` | Rol employee puede operar desde app | ⬜ Pendiente | — |
-| F6-05 | Auditoría secrets en bundle | Sin keys privadas en APK/IPA | ⬜ Pendiente | — |
+| F6-04 | Revisión `firestore.rules` | Rol employee puede operar desde app | ✅ Hecha | 2026-09-07 — employeeTenantMatches + claim empresaId |
+| F6-05 | Auditoría secrets en bundle | Sin keys privadas en APK/IPA | ✅ Hecha | 2026-09-07 — literales lab suavizados |
 | F6-06 | Lista bugs piloto | Issues GitHub priorizados P0/P1/P2 | ⬜ Pendiente | — |
 | F6-07 | Fix bugs P0 | Cero bugs críticos abiertos | ⬜ Pendiente | — |
-| F6-08 | Guía RRHH activación app | Cómo generar link; app vs web | ⬜ Pendiente | — |
+| F6-08 | Guía RRHH activación app | Cómo generar link; app vs web | ✅ Hecha | 2026-09-07 — docs/GUIA_RRHH_ACTIVACION_APP_COSP_GUARDIA.md |
 | F6-09 | Comunicación a guardias piloto | Email/WhatsApp con instrucciones | ⬜ Pendiente | — |
 | F6-10 | Sign-off stakeholders | Aprobación Mauro / operaciones para stores | ⬜ Pendiente | — |
 

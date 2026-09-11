@@ -1,0 +1,31 @@
+Bloque agregado,PM_min,PM_base,PM_max,% del total base,Valor_USD_base_interno,Valor_USD_base_LATAM,Prioridad producto multicliente
+01 Plataforma + permisos,9,13,19,8.7%,65000,130000,P0 — multitenancy hardening
+02 CRM + AFIP,4,6,8,4.0%,30000,60000,P1 — onboarding datos cliente
+03 Servicios SLA,5,8,11,5.3%,40000,80000,P0 — contratos son fuente verdad
+04 Planificacion + IA planif,28,38,51,25.3%,190000,380000,P0 — core diferenciador
+05 Operaciones,13,18,25,12.0%,90000,180000,P0 — valor tiempo real
+06 RRHH,5,7,10,4.7%,35000,70000,P1
+07 Analisis,14,21,29,14.0%,105000,210000,P1 — direccion / finanzas
+08 Reportes + balances,5,7,10,4.7%,35000,70000,P1
+09 Portal web empleado,3,4,5,2.7%,20000,40000,P2 — mobile reemplaza parcial
+10 Mobile guardia,10,15,20,10.0%,75000,150000,P0 — cierre F7 para salida
+11 IA plataforma asistente,5,7,10,4.7%,35000,70000,P2 — wow factor ventas
+12 Backend + eventos,10,14,20,9.3%,70000,140000,P0
+13 Infra + scripts,4,6,8,4.0%,30000,60000,P1
+14 QA + hardening,4,6,8,4.0%,30000,60000,P0 antes de tenant externo
+15 Documentacion,2,3,4,2.0%,15000,30000,P1
+TOTAL,113,150,172,100%,750000,1500000,PM_base x USD 5000 / 10000 respectivamente
+
+Nota valoracion,Descripcion
+Costo reemplazo,Cuanto costaria reconstruir hoy desde cero
+Valor contable sugerido,70% a 100% del reemplazo si prod estable documentado
+Valor SaaS,Requiere ARR clientes externos x multiplo 3-8x — no aplicable hoy sin contratos
+Valor estrategico Bacar,Ahorro operativo + errores evitados + escala sin duplicar supervisores
+
+Checklist auditoria interna,Estado
+Codigo en produccion comtroldata.web.app,OK
+Multitenancy parcial empresaId,Parcial — requiere hardening
+Mobile guardia cerrado,En curso
+Clientes externos pagos,Sin ARR formal
+Documentacion dominio CCT,Alta — CLAUDE.md + reglas
+Deuda tecnica conocida,Media — useOperacionesMonitor rules mobile WIP

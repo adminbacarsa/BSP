@@ -1,11 +1,12 @@
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { BacarLoadingMark } from './ui/BacarLoadingMark';
 import { useTheme } from '../theme/ThemeContext';
 
 export function LoadingScreen({ label = 'Cargando…' }: { label?: string }) {
   const { palette } = useTheme();
   return (
     <View style={[styles.wrap, { backgroundColor: palette.background }]}>
-      <ActivityIndicator size="large" color={palette.primary} />
+      <BacarLoadingMark size={128} markSize={56} />
       <Text style={[styles.label, { color: palette.onSurfaceMuted }]}>{label}</Text>
     </View>
   );
@@ -16,7 +17,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 16,
+    gap: 20,
   },
   label: {
     fontSize: 14,
