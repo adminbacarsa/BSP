@@ -28,6 +28,7 @@ import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, Lo
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
 import { WAComposeModal } from '@/components/common/WAComposeModal';
+import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-400 font-mono">CARGANDO MAPA TÁCTICO...</div>, ssr: false });
 
@@ -1199,8 +1200,8 @@ export default function TacticalMapView() {
                     if (vacShift.isVirtual || !novedad.shiftId) {
                         const newRef = doc(collection(db, 'turnos'));
                         await setDoc(newRef, stampEmpresaId({ clientId: vacShift.clientId, clientName: vacShift.clientName, objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName, positionName: vacShift.positionName, employeeId: 'VACANTE', employeeName: 'VACANTE', startTime: Timestamp.fromDate(vacShift.shiftDateObj), endTime: Timestamp.fromDate(vacShift.endDateObj), status: 'UNCOVERED_REPORTED', isReported: true, origin: 'SLA_VIRTUAL', createdAt: serverTimestamp() }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
-                        setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
-                    } else { setCoverageData({ isOpen: true, shift: vacShift }); }
+                        openCoverageProtocol({ ...vacShift, id: newRef.id });
+                    } else { openCoverageProtocol(vacShift); }
                 } else { toast.info('Vacante no encontrada. Verificá en mapa.'); }
             } else if (novedad.type === 'TURA_EXTENSION' || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'TURA' && novedad.parentEmpleadoId)) {
                 const target = resolveTuraExtensionOperacionesTarget(novedad, logic.processedData);
@@ -1237,7 +1238,7 @@ export default function TacticalMapView() {
                         (s.origin === 'CLIENT_REQUEST' && s.objectiveId === novedad.objectiveId && s.isUnassigned)
                     );
                 if (vacShift) {
-                    setCoverageData({ isOpen: true, shift: vacShift });
+                    openCoverageProtocol(vacShift);
                     logic.setViewTab('VACANTES');
                     toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'TURA'}`);
                 } else {
@@ -1262,7 +1263,7 @@ export default function TacticalMapView() {
                 const targetShift = novedad.shiftId
                     ? logic.processedData.find((s: any) => s.id === novedad.shiftId)
                     : logic.processedData.find((s: any) => s.objectiveId === novedad.objectiveId && (s.positionName || '').toLowerCase() === (novedad.positionName || '').toLowerCase() && !s.isCompleted);
-                if (targetShift) { setCoverageData({ isOpen: true, shift: targetShift }); toast.info(`Cobertura abierta: ${novedad.employeeName || 'empleado'}`); }
+                if (targetShift) { openCoverageProtocol(targetShift); toast.info(`Protocolo de cobertura abierto: ${novedad.employeeName || 'empleado'}`); }
                 else { toast.info('Turno no encontrado en datos actuales.'); }
             } else { toast.success('Alerta atendida'); }
         } catch(e) { toast.error('Error al atender la alerta'); }
@@ -1271,7 +1272,8 @@ export default function TacticalMapView() {
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [handoverData, setHandoverData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
-    const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    const [coverageSessions, setCoverageSessions] = useState<CoverageSession[]>([]);
+    const [activeCoverageId, setActiveCoverageId] = useState<string | null>(null);
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [manualRetentionData, setManualRetentionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [absenceDecisionData, setAbsenceDecisionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -1285,10 +1287,22 @@ export default function TacticalMapView() {
         try {
             await updateDocForEmpresa('turnos', shift.id, { status: 'ABSENT', isAbsent: true }, empresaId, migracionCompleta);
             setAttendanceData({isOpen:false, shift:null});
-            setCoverageData({isOpen:true, shift: shift});
+            openCoverageProtocol(shift);
         } catch (e) { toast.error("Error al marcar ausencia"); }
     };
-    const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
+    const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); openCoverageProtocol(newVacancyShift); };
+
+    // ─── Coverage protocol multi-session ─────────────────────────────────────
+    const openCoverageProtocol = (shift: any) => {
+        const existing = coverageSessions.find(s => s.absentShift?.id === shift?.id);
+        if (existing) { setActiveCoverageId(existing.id); setCoverageSessions(prev => prev.map(s => s.id === existing.id ? { ...s, minimized: false } : s)); return; }
+        const newSess = createSession(shift, String(shift.empresaId || empresaId || '').trim());
+        setCoverageSessions(prev => [...prev, newSess]);
+        setActiveCoverageId(newSess.id);
+    };
+    const updateCoverageSession = (id: string, fn: (s: CoverageSession) => CoverageSession) => setCoverageSessions(prev => prev.map(s => s.id === id ? fn(s) : s));
+    const closeCoverageSession = (id: string) => { setCoverageSessions(prev => prev.filter(s => s.id !== id)); setActiveCoverageId(prev => prev === id ? (coverageSessions.find(s => s.id !== id)?.id ?? null) : prev); };
+    // ─────────────────────────────────────────────────────────────────────────
     const handleReportPlanning = async (shift: any) => { toast.info("Reportando..."); };
     const handleOpenWAMap = (shift: any) => {
         setWaData({ isOpen: true, ctx: { employeeName: shift.employeeName || '', phone: shift.phone || '', objectiveName: shift.objectiveName, horaInicio: shift.shiftDateObj ? new Date(shift.shiftDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '', horaFin: shift.endDateObj ? new Date(shift.endDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '' } });
@@ -1302,7 +1316,7 @@ export default function TacticalMapView() {
         await addDoc(collection(db, 'ausencias'), stampEmpresaId({ employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, type: 'NO_PRESENTACION', startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd), status: 'Pendiente', reason: `No presentación — ${shift.objectiveName} (${shift.positionName})`, hasCertificate: false, createdAt: serverTimestamp(), origin: 'OPERACIONES', shiftId: shift.id }, shiftEmpresaId));
         if (shift.employeeId) await addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: shift.employeeId, type: 'AUSENCIA_DECLARADA', title: 'Ausencia registrada', read: false, body: `Tu ausencia en ${shift.objectiveName} fue registrada por Operaciones.`, objectiveId: shift.objectiveId, shiftId: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'AUSENCIA_OPERATIVA', title: 'Ausencia declarada T+5', status: 'pending', employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, shiftId: shift.id, objectiveName: shift.objectiveName || '', positionName: shift.positionName || '', description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
-        setCoverageData({ isOpen: true, shift });
+        openCoverageProtocol(shift);
         toast.success(`Ausencia de ${shift.employeeName} registrada.`);
     };
     const handleLateArrival = async (shift: any, etaTime: string) => {
@@ -1415,7 +1429,7 @@ export default function TacticalMapView() {
                 allObjectives={logic.mapTabObjectives}
                 filteredShifts={logic.listData}
                 tacticalHud
-                onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                onOpenCoverage={(s:any)=>openCoverageProtocol(s)}
                 onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} 
                 onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} 
                 onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} 
@@ -1737,11 +1751,13 @@ export default function TacticalMapView() {
                 logic={logic}
                 onVacancyCreated={handleVacancyCreated}
             />
-            <CoverageModal
-                isOpen={coverageData.isOpen}
-                onClose={() => setCoverageData({isOpen:false, shift:null})}
-                absenceShift={coverageData.shift}
+            <CoverageSessionManager
+                sessions={coverageSessions}
+                activeId={activeCoverageId}
                 logic={logic}
+                onActivate={setActiveCoverageId}
+                onClose={closeCoverageSession}
+                onUpdate={updateCoverageSession}
             />
             <WorkedDayOffModal
                 isOpen={workedFrancoData.isOpen}
@@ -1763,7 +1779,7 @@ export default function TacticalMapView() {
                 isOpen={rrhhVacancyData.isOpen}
                 onClose={() => setRrhhVacancyData({isOpen:false, shift:null})}
                 shift={rrhhVacancyData.shift}
-                onCoverageProtocol={(s:any) => setCoverageData({isOpen:true, shift:s})}
+                onCoverageProtocol={(s:any) => openCoverageProtocol(s)}
                 onSendToPlanning={(s:any) => { logic.handleAction('SEND_TO_PLANNING', s.id, null); setRrhhVacancyData({isOpen:false, shift:null}); }}
             />
             <WAComposeModal
