@@ -74,8 +74,21 @@ export const INFO_NOVEDAD_TYPES = new Set([
     'INGRESO_AUTOREGISTRO',
 ]);
 
+/**
+ * Fin de turno rutinario: el toast basta.
+ * Al completar, el objetivo sale de ACT → en Alertas parece “objetivo sin personal”.
+ * No deben ocupar el inbox de CC / mapa.
+ */
+export const HIDDEN_FROM_OPS_ALERTS_TYPES = new Set([
+    'TURNO_COMPLETADO_AUTO',
+]);
+
 export function isInformationalNovedad(n: any): boolean {
     return INFO_NOVEDAD_TYPES.has(String(n?.type || ''));
+}
+
+export function isHiddenFromOpsAlerts(n: any): boolean {
+    return HIDDEN_FROM_OPS_ALERTS_TYPES.has(String(n?.type || ''));
 }
 
 export const COBERTURA_RESUELTA_META = {

@@ -34,6 +34,7 @@ import {
     novedadHeadline,
     novedadSubline,
     isInformationalNovedad,
+    isHiddenFromOpsAlerts,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
 import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
@@ -1062,18 +1063,26 @@ export default function TacticalMapView() {
             ch.close();
         };
     }, []);
-    const pendingNovedades = useMemo(() =>
-        empNovedades.filter(n => {
+    const pendingNovedades = useMemo(() => {
+        const filtered = empNovedades.filter(n => {
             if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false;
+            if (isHiddenFromOpsAlerts(n)) return false;
             if (n.enGestion) return false;
             if ((n.type === 'VACANTE_OPERATIVA' || n.type === 'TURA_EXTENSION') && n.tipoSolicitud === 'TURA' && n.parentEmpleadoId) {
                 const target = resolveTuraExtensionOperacionesTarget(n, logic.processedData);
                 if (target?.turaContiguous) return false;
             }
             return true;
-        }),
-    [empNovedades, logic.processedData]);
+        });
+        const seen = new Set<string>();
+        return filtered.filter((n: any) => {
+            const key = n.shiftId ? `${n.type}__${n.shiftId}` : n.id;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }, [empNovedades, logic.processedData]);
     // Nombre del operador actual (para marcar enGestion)
     const operatorName = useMemo(() => getAuth().currentUser?.email?.split('@')[0] || 'Operador', []);
     useEffect(() => {

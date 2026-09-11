@@ -34,6 +34,7 @@ import {
     novedadHeadline,
     novedadSubline,
     isInformationalNovedad,
+    isHiddenFromOpsAlerts,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
@@ -2740,9 +2741,10 @@ export default function OperacionesPage() {
 
     const pendingNovedades = useMemo(() => {
         const now = Date.now();
-        return empNovedades.filter(n => {
+        const filtered = empNovedades.filter(n => {
             if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
+            if (isHiddenFromOpsAlerts(n)) return false; // fin rutinario: no inbox
             if (n.enGestion) return false; // otro operador (mapa) la está gestionando
 
             // TURA-extensión ya mergeada en el turno del guardia: no alertar como vacante
@@ -2779,6 +2781,15 @@ export default function OperacionesPage() {
                 }
             }
 
+            return true;
+        });
+
+        // Una sola alerta por (type, shiftId) — evita duplicados por DEMO en varias pestañas
+        const seen = new Set<string>();
+        return filtered.filter((n: any) => {
+            const key = n.shiftId ? `${n.type}__${n.shiftId}` : n.id;
+            if (seen.has(key)) return false;
+            seen.add(key);
             return true;
         });
     }, [empNovedades, logic.processedData]);
@@ -3175,6 +3186,32 @@ export default function OperacionesPage() {
             } catch (e) {
                 autoExpiredRef.current.delete(n.id);
                 console.warn('[auto-expire] Error cerrando novedad vencida', e);
+            }
+        });
+    }, [empNovedades]);
+
+    // Auto-atender TURNO_COMPLETADO_AUTO pendientes (legado / duplicados): no son acción de CC
+    const autoFinAttendedRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        const stale = empNovedades.filter((n: any) =>
+            n.type === 'TURNO_COMPLETADO_AUTO' &&
+            n.status !== 'ATENDIDA' && n.status !== 'atendida' &&
+            !autoFinAttendedRef.current.has(n.id)
+        );
+        if (!stale.length) return;
+        stale.forEach(async (n: any) => {
+            autoFinAttendedRef.current.add(n.id);
+            try {
+                await updateDoc(doc(db, 'novedades', n.id), {
+                    status: 'ATENDIDA',
+                    atendidaAt: serverTimestamp(),
+                    atendidaPor: 'Sistema',
+                    autoAttended: true,
+                    resolution: 'AUTO_FIN_NO_ACTION',
+                });
+            } catch (e) {
+                autoFinAttendedRef.current.delete(n.id);
+                console.warn('[auto-fin] Error atendiendo TURNO_COMPLETADO_AUTO', e);
             }
         });
     }, [empNovedades]);

@@ -379,8 +379,31 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
               realEndTime: serverTimestamp(), autoCompletedAt: serverTimestamp(),
               completionReason: s.manualRetentionType === 'extended' ? 'AUTO_MANUAL_RETENTION_END' : 'AUTO_SHIFT_END',
             });
-            await createNovedad('TURNO_COMPLETADO_AUTO', 'Turno Completado (Auto)',
-              `Finalización automática al vencimiento del horario: ${msg}`, s, empresaId);
+            // No crear novedad pending: al cerrar el turno el objetivo sale de ACT y
+            // en Alertas parece “objetivo sin personal activo”. Toast + bitácora ATENDIDA.
+            const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+            const novedadRef = doc(db, 'novedades', `autocompletar_${safeId}`);
+            const existingNov = await getDoc(novedadRef).catch(() => null);
+            if (!existingNov?.exists()) {
+              await setDoc(novedadRef, stampEmpresaId({
+                type: 'TURNO_COMPLETADO_AUTO',
+                status: 'ATENDIDA',
+                title: 'Turno Completado (Auto)',
+                description: `Finalización automática al vencimiento del horario: ${msg}`,
+                shiftId: s.id || null,
+                clientId: s.clientId || null,
+                objectiveId: s.objectiveId || null,
+                objectiveName: s.objectiveName || null,
+                employeeId: s.employeeId || null,
+                employeeName: s.employeeName || null,
+                positionName: s.positionName || null,
+                createdAt: serverTimestamp(),
+                atendidaAt: serverTimestamp(),
+                atendidaPor: 'SISTEMA_AUTO',
+                autoAttended: true,
+                reportedBy: 'SISTEMA_AUTO',
+              }, String(s.empresaId || empresaId || '').trim()), { merge: false }).catch(() => {});
+            }
             toast.success(`🤖 Turno finalizado: ${msg}`, { duration: 6000 });
             sendBrowserNotif('Turno Completado', msg);
           } catch (e) {
