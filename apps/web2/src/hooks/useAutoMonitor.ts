@@ -352,17 +352,42 @@ export const useAutoMonitor = ({
         }
       }
 
-      // ── Auto-finalización ──
+      // ── Auto-finalización (incluye zombies: retención natural vencida >2h) ──
       const toComplete = processedData.filter(s => {
         if (s.isCompleted || s.status === 'COMPLETED' || s.status === 'INTERRUPTED') return false;
         if (!(s.isPresent || s.status === 'PRESENT')) return false;
         if (s.isFranco || s.isUnassigned) return false;
-        const isOperatorRetention = s.isRetentionByField && !!s.manualRetentionType;
-        if (s.isRetention && s.manualRetentionType !== 'extended' && !(s.isCustomPost && !isOperatorRetention)) return false;
         if (processedIds.current.has(`autocomplete_${s.id}`)) return false;
         const endMs = s.endDateObj?.getTime?.() || 0;
-        return endMs > 0 && (now.getTime() - endMs) > 2 * 60 * 1000;
+        if (!(endMs > 0)) return false;
+        const msPastEnd = now.getTime() - endMs;
+        if (msPastEnd <= 2 * 60 * 1000) return false;
+        const isOperatorRetention = s.isRetentionByField && !!s.manualRetentionType;
+        const isNaturalRetention = s.isRetention && s.manualRetentionType !== 'extended' && !(s.isCustomPost && !isOperatorRetention);
+        // Retención natural reciente: esperar; >2h past end = zombie (Demo/lab)
+        if (isNaturalRetention && msPastEnd < 2 * 60 * 60 * 1000) return false;
+        return true;
       });
+
+      const dismissShiftNoise = async (shiftId: string) => {
+        try {
+          const snap = await getDocs(query(
+            collection(db, 'novedades'),
+            where('shiftId', '==', shiftId),
+            where('status', '==', 'pending'),
+            limit(20),
+          ));
+          const noise = ['RECARGO_12H', 'RETENCION_DETECTADA', 'RETENCION_LARGA'];
+          await Promise.all(snap.docs
+            .filter(d => noise.includes(String(d.data().type || '')))
+            .map(d => updateDoc(d.ref, {
+              status: 'ATENDIDA',
+              atendidaAt: serverTimestamp(),
+              atendidaPor: 'AUTO_SHIFT_END',
+              autoAttended: true,
+            })));
+        } catch { /* ignore */ }
+      };
 
       for (const s of toComplete) {
         processedIds.current.add(`autocomplete_${s.id}`);
@@ -371,8 +396,13 @@ export const useAutoMonitor = ({
           try {
             const turnoSnap = await getDoc(doc(db, 'turnos', s.id));
             const freshData = turnoSnap.data();
+            if (turnoSnap.exists() && freshData?.isCompleted) {
+              continue;
+            }
+            const endMs = s.endDateObj?.getTime?.() || 0;
+            const msPastEnd = endMs > 0 ? now.getTime() - endMs : 0;
             const naturalRetention = freshData?.isRetention && freshData?.manualRetentionType !== 'extended';
-            if (turnoSnap.exists() && (freshData?.isCompleted || naturalRetention)) {
+            if (naturalRetention && msPastEnd < 2 * 60 * 60 * 1000) {
               continue;
             }
             const lastAutoComplete = freshData?.autoCompletedAt?.toMillis?.() ?? 0;
@@ -380,10 +410,13 @@ export const useAutoMonitor = ({
               continue;
             }
             await updateDoc(doc(db, 'turnos', s.id), {
-              status: 'COMPLETED', isCompleted: true,
+              status: 'COMPLETED', isCompleted: true, isPresent: false, isRetention: false,
               realEndTime: serverTimestamp(), autoCompletedAt: serverTimestamp(),
-              completionReason: s.manualRetentionType === 'extended' ? 'AUTO_MANUAL_RETENTION_END' : 'AUTO_SHIFT_END',
+              completionReason: msPastEnd >= 2 * 60 * 60 * 1000
+                ? 'AUTO_ZOMBIE_SHIFT_END'
+                : (s.manualRetentionType === 'extended' ? 'AUTO_MANUAL_RETENTION_END' : 'AUTO_SHIFT_END'),
             });
+            await dismissShiftNoise(s.id);
             const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
             const novedadRef = doc(db, 'novedades', `autocompletar_${safeId}`);
             const existingNov = await getDoc(novedadRef).catch(() => null);
@@ -424,6 +457,9 @@ export const useAutoMonitor = ({
       const over12h = processedData.filter(s => {
         if (!s.isPresent || s.isCompleted || s.isFranco || s.isUnassigned) return false;
         if (processedIds.current.has(`over12h_${s.id}`)) return false;
+        // Horario ya vencido → lo cierra el bloque zombie; no spamear REC+12 (Manzana Histórica, etc.)
+        const endMs = s.endDateObj?.getTime?.() || 0;
+        if (endMs > 0 && now.getTime() > endMs) return false;
         return (s.totalMinutesWorked ?? 0) >= 12 * 60;
       });
       for (const s of over12h) {

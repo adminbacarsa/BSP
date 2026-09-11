@@ -83,12 +83,38 @@ export const HIDDEN_FROM_OPS_ALERTS_TYPES = new Set([
     'TURNO_COMPLETADO_AUTO',
 ]);
 
+/** Ruido ligado a un turno: si el guardia ya no está presente, no alertar. */
+export const SHIFT_TIED_NOISE_TYPES = new Set([
+    'RECARGO_12H',
+    'RETENCION_DETECTADA',
+    'RETENCION_LARGA',
+]);
+
 export function isInformationalNovedad(n: any): boolean {
     return INFO_NOVEDAD_TYPES.has(String(n?.type || ''));
 }
 
 export function isHiddenFromOpsAlerts(n: any): boolean {
     return HIDDEN_FROM_OPS_ALERTS_TYPES.has(String(n?.type || ''));
+}
+
+/**
+ * REC+12 / retención: ocultar si el turno ya no está presente en el monitor
+ * (cerrado, fuera de ventana, u objetivo sin ACT) o si el horario ya venció hace rato (zombie).
+ */
+export function isOrphanShiftNoiseNovedad(n: any, processedData: any[]): boolean {
+    const type = String(n?.type || '');
+    if (!SHIFT_TIED_NOISE_TYPES.has(type)) return false;
+    const shiftId = n?.shiftId;
+    if (!shiftId) return true;
+    const shift = (processedData || []).find((s: any) => s.id === shiftId);
+    if (!shift) return true;
+    if (shift.isCompleted || shift.status === 'COMPLETED') return true;
+    if (!(shift.isPresent || shift.status === 'PRESENT')) return true;
+    const endMs = shift.endDateObj?.getTime?.() ?? 0;
+    // Horario vencido >2h: no es retención operativa, es zombie (p.ej. Demo sin cierre)
+    if (endMs > 0 && Date.now() - endMs > 2 * 60 * 60 * 1000) return true;
+    return false;
 }
 
 export const COBERTURA_RESUELTA_META = {

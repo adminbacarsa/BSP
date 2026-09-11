@@ -35,6 +35,7 @@ import {
     novedadSubline,
     isInformationalNovedad,
     isHiddenFromOpsAlerts,
+    isOrphanShiftNoiseNovedad,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
 import {
@@ -2761,6 +2762,7 @@ export default function OperacionesPage() {
             if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
             if (isHiddenFromOpsAlerts(n)) return false; // fin rutinario: no inbox
+            if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false; // REC+12 / retención sin ACT
             if (n.enGestion) return false; // otro operador (mapa) la está gestionando
 
             // TURA-extensión ya mergeada en el turno del guardia: no alertar como vacante
@@ -3206,14 +3208,16 @@ export default function OperacionesPage() {
         });
     }, [empNovedades]);
 
-    // Auto-atender TURNO_COMPLETADO_AUTO pendientes (legado / duplicados): no son acción de CC
+    // Auto-atender TURNO_COMPLETADO_AUTO + REC+12/retención huérfanas (turno ya no presente)
     const autoFinAttendedRef = useRef<Set<string>>(new Set());
     useEffect(() => {
-        const stale = empNovedades.filter((n: any) =>
-            n.type === 'TURNO_COMPLETADO_AUTO' &&
-            n.status !== 'ATENDIDA' && n.status !== 'atendida' &&
-            !autoFinAttendedRef.current.has(n.id)
-        );
+        const stale = empNovedades.filter((n: any) => {
+            if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
+            if (autoFinAttendedRef.current.has(n.id)) return false;
+            if (n.type === 'TURNO_COMPLETADO_AUTO') return true;
+            if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return true;
+            return false;
+        });
         if (!stale.length) return;
         stale.forEach(async (n: any) => {
             autoFinAttendedRef.current.add(n.id);
@@ -3223,14 +3227,16 @@ export default function OperacionesPage() {
                     atendidaAt: serverTimestamp(),
                     atendidaPor: 'Sistema',
                     autoAttended: true,
-                    resolution: 'AUTO_FIN_NO_ACTION',
+                    resolution: n.type === 'TURNO_COMPLETADO_AUTO'
+                        ? 'AUTO_FIN_NO_ACTION'
+                        : 'SHIFT_NO_LONGER_PRESENT',
                 });
             } catch (e) {
                 autoFinAttendedRef.current.delete(n.id);
-                console.warn('[auto-fin] Error atendiendo TURNO_COMPLETADO_AUTO', e);
+                console.warn('[auto-fin] Error atendiendo novedad ruido', e);
             }
         });
-    }, [empNovedades]);
+    }, [empNovedades, logic.processedData]);
 
     const ACTION_LABELS: Record<string, string> = {
         CHECKIN: 'Ingreso', CHECK_IN: 'Ingreso', GUARDIA_INICIADA: 'Guardia iniciada',
