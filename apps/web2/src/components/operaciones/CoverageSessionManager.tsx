@@ -380,9 +380,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     try {
       const batch = writeBatch(db);
       const isReal = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual;
-      const markCovered = (ct: string) => { if (isReal) batch.update(doc(db, 'turnos', absenceShift.id), { status: 'COVERED', resolvedBy: 'OPERACIONES', coverageType: ct, coveredAt: serverTimestamp() }); };
       const empName = cand.fullName || cand.name || cand.employeeName || '';
       const shiftId = cand.id;
+      // coveredBy* en el turno ausente alimenta "CUBIERTO POR" en planificación y reportes
+      const markCovered = (ct: string) => {
+        if (isReal) batch.update(doc(db, 'turnos', absenceShift.id), {
+          status: 'COVERED', resolvedBy: 'OPERACIONES', coverageType: ct, coveredAt: serverTimestamp(),
+          coveredByEmployeeId: empId, coveredByEmployeeName: empName,
+        });
+      };
 
       if (step.key === 'SIN_TURNO') {
         const newRef = doc(collection(db, 'turnos'));
@@ -447,16 +453,39 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención EXT', status: 'pending', employeeId: slot.empId, employeeName: sh?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: sh?.id || null, description: `${sh?.employeeName} retenido — 1ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
         const newConfirmedExt = slot.empId;
-        if (s.confirmedAdv) { toast.success('Cobertura completa'); onUpd({ status: 'CONFIRMED', confirmedExt: newConfirmedExt, pendingExt: null }); setTimeout(onClose, 2000); }
-        else onUpd({ confirmedExt: newConfirmedExt, pendingExt: null });
+        if (s.confirmedAdv) {
+          // Ambos confirmados: escribir coveredBy en el turno ausente con formato "EXT HH:MM-HH:MM + ADV HH:MM-HH:MM"
+          const advSh = candidatesAdv.find((x: any) => x.employeeId === s.confirmedAdv);
+          const extName = (sh?.employeeName || '').split(' ')[0];
+          const advName = (advSh?.employeeName || '').split(' ')[0];
+          const extLabel = `${extName} ext ${hiStart}–${hiEnd}`;
+          const advLabel = `${advName} adel ${fmtTime(advSh?.shiftDateObj)}–${hiEnd}`;
+          const covLabel = `${extLabel} + ${advLabel}`;
+          if (absenceShift.id) batch.update(doc(db, 'turnos', absenceShift.id), { coveredByEmployeeName: covLabel, resolvedBy: 'OPERACIONES', coverageType: 'RETENCION', coveredAt: serverTimestamp() });
+          await batch.commit();
+          toast.success('Cobertura completa');
+          onUpd({ status: 'CONFIRMED', confirmedExt: newConfirmedExt, pendingExt: null });
+          setTimeout(onClose, 2000);
+        } else onUpd({ confirmedExt: newConfirmedExt, pendingExt: null });
       } else {
         const sh = candidatesAdv.find((x: any) => x.employeeId === slot.empId);
         if (sh) batch.update(doc(db, 'turnos', sh.id), { adjustedStartTime: serverTimestamp(), isEarlyStart: true });
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto ADV', status: 'pending', employeeId: slot.empId, employeeName: sh?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: sh?.id || null, description: `${sh?.employeeName} adelantado — 2ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
         const newConfirmedAdv = slot.empId;
-        if (s.confirmedExt) { toast.success('Cobertura completa'); onUpd({ status: 'CONFIRMED', confirmedAdv: newConfirmedAdv, pendingAdv: null }); setTimeout(onClose, 2000); }
-        else onUpd({ confirmedAdv: newConfirmedAdv, pendingAdv: null });
+        if (s.confirmedExt) {
+          const extSh = candidatesExt.find((x: any) => x.employeeId === s.confirmedExt);
+          const extName = (extSh?.employeeName || '').split(' ')[0];
+          const advName = (sh?.employeeName || '').split(' ')[0];
+          const extLabel = `${extName} ext ${hiStart}–${hiEnd}`;
+          const advLabel = `${advName} adel ${fmtTime(sh?.shiftDateObj)}–${hiEnd}`;
+          const covLabel = `${extLabel} + ${advLabel}`;
+          if (absenceShift.id) batch.update(doc(db, 'turnos', absenceShift.id), { coveredByEmployeeName: covLabel, resolvedBy: 'OPERACIONES', coverageType: 'RETENCION', coveredAt: serverTimestamp() });
+          await batch.commit();
+          toast.success('Cobertura completa');
+          onUpd({ status: 'CONFIRMED', confirmedAdv: newConfirmedAdv, pendingAdv: null });
+          setTimeout(onClose, 2000);
+        } else onUpd({ confirmedAdv: newConfirmedAdv, pendingAdv: null });
       }
     } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     finally { setLoading(null); }
