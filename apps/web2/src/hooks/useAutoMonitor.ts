@@ -6,7 +6,16 @@ import { stampEmpresaId } from '@/lib/multiempresa';
 
 export interface AutoMonitorProps {
   isActive: boolean;
-  isAutoMode: boolean;
+  /**
+   * Pipeline rutinario: cierres, retención T+0, autorelevo.
+   * Demo + Auto + Manual asistido.
+   */
+  pipelineRoutine: boolean;
+  /**
+   * Automatismos de decisión: novedades LLEGADA_TARDE, FCM, etc.
+   * Solo Demo + Auto (no Manual).
+   */
+  fullAuto: boolean;
   empresaId: string;
   activeOperatorId: string | null;
   processedData: any[];
@@ -36,25 +45,32 @@ const createNovedad = (type: string, title: string, description: string, shiftDa
     reportedBy: 'SISTEMA_AUTO',
   }, String(shiftData.empresaId || empresaId || '').trim())).catch(() => {});
 
-export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperatorId, processedData }: AutoMonitorProps) => {
+export const useAutoMonitor = ({
+  isActive,
+  pipelineRoutine,
+  fullAuto,
+  empresaId,
+  activeOperatorId,
+  processedData,
+}: AutoMonitorProps) => {
   const mountTime = useRef(Date.now());
   const processedIds = useRef(new Set<string>());
   // Primera ejecución = baseline silencioso: marca el estado actual como ya visto
   // para evitar toasts de eventos pre-existentes al abrir/recargar el navegador.
   const isBaselineRef = useRef(true);
 
-  // — Detecta ingresos desde el portal del empleado (status → 'InProgress') —
+  // — Detecta ingresos desde el portal del empleado (status PRESENT) —
   useEffect(() => {
     if (!isActive || !empresaId) return;
 
     const startWindow = new Date();
     startWindow.setDate(startWindow.getDate() - 1);
 
-    // Índice compuesto requerido: empresaId ASC, status ASC, startTime ASC
+    // Índice compuesto: empresaId ASC, status ASC, startTime ASC
     const q = query(
       collection(db, 'turnos'),
       where('empresaId', '==', empresaId),
-      where('status', '==', 'InProgress'),
+      where('status', '==', 'PRESENT'),
       where('startTime', '>=', Timestamp.fromDate(startWindow)),
     );
 
@@ -64,18 +80,23 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         const data = change.doc.data();
         const shiftId = change.doc.id;
 
-        // Ignorar si ya procesado, si fue ingreso manual por operador, o si es evento previo al montaje
         if (processedIds.current.has(`checkin_${shiftId}`)) return;
         if (data.isManualRecord || data.processedBy) return;
-        const checkInTs = data.checkInTime?.toDate?.()?.getTime() || 0;
-        if (checkInTs < mountTime.current) return;
+        // Demo auto-presencia: no alertar como ingreso portal
+        if (data.autoPresencia || data.modoDemoAt) return;
+        const checkInTs =
+          data.checkInTime?.toDate?.()?.getTime() ||
+          data.presentAt?.toDate?.()?.getTime() ||
+          data.realStartTime?.toDate?.()?.getTime() ||
+          0;
+        if (!checkInTs || checkInTs < mountTime.current) return;
 
         processedIds.current.add(`checkin_${shiftId}`);
 
         const empName = data.employeeName || 'Guardia';
         const objName = data.objectiveName || 'Objetivo';
 
-        if (isAutoMode) {
+        if (fullAuto) {
           await createNovedad(
             'INGRESO_AUTOREGISTRO',
             'Ingreso por Autoregistro',
@@ -106,7 +127,7 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
     });
 
     return () => unsub();
-  }, [isActive, isAutoMode, empresaId, activeOperatorId]);
+  }, [isActive, fullAuto, empresaId, activeOperatorId]);
 
   // — Timer: guardias tardíos y retenciones (corre cada 3 min) —
   useEffect(() => {
@@ -114,11 +135,9 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
 
     const check = async () => {
       const now = new Date();
-      // Baseline: primera llamada sólo popula processedIds, no tostea ni notifica
       const isBaseline = isBaselineRef.current;
       isBaselineRef.current = false;
 
-      // Guardias tarde: T+5 a T+60 (ventana donde puede marcar llegada tarde)
       const lateGuards = processedData.filter(s => {
         if (s.isPresent || s.isCompleted || s.isAbsent || s.isUnassigned || s.isFranco) return false;
         if (processedIds.current.has(`late_${s.id}`)) return false;
@@ -128,16 +147,14 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
 
       for (const s of lateGuards) {
         processedIds.current.add(`late_${s.id}`);
-        if (isAutoMode) {
+        if (fullAuto) {
           const msg = `${s.employeeName} — ${s.objectiveName}`;
-          // Dedup: evitar duplicados entre tabs o re-renders
           const existing = await getDocs(query(collection(db, 'novedades'),
             where('shiftId', '==', s.id), where('type', '==', 'LLEGADA_TARDE'), limit(1)));
           if (existing.empty) {
             await createNovedad('LLEGADA_TARDE', 'Llegada Tarde',
               `${msg} llegó tarde al turno`, s, empresaId);
           }
-          // FCM al guardia: ¿por qué no fichaste? ¿llegás tarde?
           if (s.employeeId) {
             const existingNotif = await getDocs(query(
               collection(db, 'user_notifications'),
@@ -160,12 +177,11 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         }
       }
 
-      // Toast consolidado — un solo aviso para todos los tardíos del batch
       if (!isBaseline && lateGuards.length > 0) {
         if (lateGuards.length === 1) {
           const s = lateGuards[0];
           const msg = `${s.employeeName} — ${s.objectiveName}`;
-          if (isAutoMode) {
+          if (fullAuto) {
             toast.warning(`⏰ Llegada tarde: ${msg}`, { duration: 8000 });
           } else {
             toast.warning(`⏰ No llegó: ${msg}`, {
@@ -175,10 +191,9 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
           }
           sendBrowserNotif('⚠️ Guardia no presente', msg);
         } else {
-          // Múltiples ausentes: un solo toast consolidado
           const objectives = [...new Set(lateGuards.map(s => s.objectiveName).filter(Boolean))];
           const objSummary = objectives.slice(0, 2).join(', ') + (objectives.length > 2 ? ` y ${objectives.length - 2} más` : '');
-          if (isAutoMode) {
+          if (fullAuto) {
             toast.warning(`🤖 AUTO: ${lateGuards.length} ausencias detectadas`, {
               duration: 10000,
               description: objSummary,
@@ -196,8 +211,7 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         }
       }
 
-      // ── Auto-relevo: cierre automático cuando el entrante ya está presente ──
-      // Agrupa por objetivo + puesto; si hay entrante presente y saliente activo → cierra saliente
+      // ── Auto-relevo ──
       const byPost = new Map<string, { incoming: any[]; outgoing: any[] }>();
       for (const s of processedData) {
         if (s.isFranco || s.isUnassigned || s.isCompleted || !s.isPresent) continue;
@@ -205,7 +219,6 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         if (!byPost.has(key)) byPost.set(key, { incoming: [], outgoing: [] });
         const post = byPost.get(key)!;
         const endMs = s.endDateObj?.getTime() || 0;
-        // Saliente: turno cuyo fin ya pasó o termina en ≤30 min y hay alguien más presente
         if (endMs > 0 && endMs <= now.getTime() + 30 * 60 * 1000) {
           post.outgoing.push(s);
         } else {
@@ -214,12 +227,11 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       }
       for (const [, { incoming, outgoing }] of byPost) {
         if (incoming.length === 0 || outgoing.length === 0) continue;
-        // Relevar de más antiguo a más nuevo (por orden de llegada)
         outgoing.sort((a, b) => (a.arrivedAt?.seconds || 0) - (b.arrivedAt?.seconds || 0));
         for (const s of outgoing) {
           if (processedIds.current.has(`autorelevo_${s.id}`)) continue;
           processedIds.current.add(`autorelevo_${s.id}`);
-          if (isAutoMode) {
+          if (pipelineRoutine) {
             try {
               await updateDoc(doc(db, 'turnos', s.id), {
                 isCompleted: true, status: 'COMPLETED',
@@ -243,18 +255,13 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         }
       }
 
-      // ── RETENCIÓN T+0: guardia presente cuyo turno acaba de terminar ──────────
-      // Escribe isRetention:true a Firestore inmediatamente → dispara onTurnoWrite → push al guardia
-      // Solo si hay continuidad planificada en el mismo puesto (turno sin continuidad se auto-cierra)
+      // ── RETENCIÓN T+0 (solo pipeline rutinario: Demo / Auto / Manual asistido) ──
       const newlyRetained = processedData.filter(s => {
         if (!s.isPresent || s.isCompleted || s.isFranco || s.isUnassigned) return false;
         if (processedIds.current.has(`retention_set_${s.id}`)) return false;
-        // Puestos custom: no marcar isRetention — se auto-cierran al terminar el turno
         if (s.isCustomPost) return false;
-        // isRetention computado (por tiempo) pero aún no guardado en Firestore
         const retentionByTime = s.endDateObj && (new Date()).getTime() > s.endDateObj.getTime();
         if (!retentionByTime || s.isRetention) return false;
-        // Sin continuidad: no retener — dejar que auto-completion cierre a los 2 min
         const hasContinuity = processedData.some(other =>
           other.id !== s.id &&
           other.objectiveId === s.objectiveId &&
@@ -266,38 +273,40 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       });
       for (const s of newlyRetained) {
         processedIds.current.add(`retention_set_${s.id}`);
-        updateDoc(doc(db, 'turnos', s.id), {
-          isRetention: true,
-          retentionReason: 'FIN_TURNO_SIN_RELEVO',
-          autoRetentionAt: serverTimestamp(),
-        }).catch(e => console.warn('[retention T+0]', e));
+        if (pipelineRoutine) {
+          updateDoc(doc(db, 'turnos', s.id), {
+            isRetention: true,
+            retentionReason: 'FIN_TURNO_SIN_RELEVO',
+            autoRetentionAt: serverTimestamp(),
+          }).catch(e => console.warn('[retention T+0]', e));
 
-        // Notificar al entrante: ¿llegás tarde o no venís?
-        if (isAutoMode) {
-          const nextShift = processedData.find(other =>
-            other.id !== s.id &&
-            other.objectiveId === s.objectiveId &&
-            String(other.positionName || '').trim().toLowerCase() === String(s.positionName || '').trim().toLowerCase() &&
-            !other.isCompleted && !other.isPresent &&
-            (other.shiftDateObj?.getTime() || 0) >= (s.endDateObj?.getTime() || 0) - 15 * 60 * 1000
-          );
-          if (nextShift?.employeeId) {
-            addDoc(collection(db, 'user_notifications'), stampEmpresaId({
-              uid: nextShift.employeeId, userId: nextShift.employeeId,
-              type: 'SOLICITUD_ESTADO_RELEVO',
-              title: '¿Llegás a tu turno?',
-              body: `Hay un guardia esperando tu relevo en ${s.objectiveName || ''}. ¿Llegás tarde o no podés venir? Avisá para coordinar cobertura.`,
-              read: false, createdAt: serverTimestamp(),
-              data: { shiftId: nextShift.id, objectiveId: nextShift.objectiveId },
-            }, empresaId)).catch(() => {});
+          if (fullAuto) {
+            const nextShift = processedData.find(other =>
+              other.id !== s.id &&
+              other.objectiveId === s.objectiveId &&
+              String(other.positionName || '').trim().toLowerCase() === String(s.positionName || '').trim().toLowerCase() &&
+              !other.isCompleted && !other.isPresent &&
+              (other.shiftDateObj?.getTime() || 0) >= (s.endDateObj?.getTime() || 0) - 15 * 60 * 1000
+            );
+            if (nextShift?.employeeId) {
+              addDoc(collection(db, 'user_notifications'), stampEmpresaId({
+                uid: nextShift.employeeId, userId: nextShift.employeeId,
+                type: 'SOLICITUD_ESTADO_RELEVO',
+                title: '¿Llegás a tu turno?',
+                body: `Hay un guardia esperando tu relevo en ${s.objectiveName || ''}. ¿Llegás tarde o no podés venir? Avisá para coordinar cobertura.`,
+                read: false, createdAt: serverTimestamp(),
+                data: { shiftId: nextShift.id, objectiveId: nextShift.objectiveId },
+              }, empresaId)).catch(() => {});
+            }
           }
+        } else if (!isBaseline) {
+          toast.info(`⏱️ Retención: ${s.employeeName} — confirmar en UI`, { duration: 12000 });
         }
       }
 
-      // Guardias en retención > 30 min (solo puestos 24h — los custom se auto-cierran)
       const retentions = processedData.filter(s => {
         if (!s.isRetention) return false;
-        if (s.isCustomPost && !s.manualRetentionType) return false; // custom sin retención manual → no alertar
+        if (s.isCustomPost && !s.manualRetentionType) return false;
         if (processedIds.current.has(`retention_${s.id}`)) return false;
         return s.retentionMinutes > 30;
       });
@@ -305,8 +314,7 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       for (const s of retentions) {
         processedIds.current.add(`retention_${s.id}`);
         const msg = `${s.employeeName} lleva ${s.retentionMinutes}min de retención en ${s.objectiveName}`;
-        if (isAutoMode) {
-          // Solo crear si no existe — no sobreescribir novedades ya atendidas
+        if (fullAuto) {
           const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
           const novedadRef = doc(db, 'novedades', `autoreten_${safeId}`);
           const existing = await getDoc(novedadRef).catch(() => null);
@@ -344,13 +352,11 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         }
       }
 
-      // ── Auto-finalización: turnos PRESENT cuyo endTime ya pasó ──
+      // ── Auto-finalización ──
       const toComplete = processedData.filter(s => {
         if (s.isCompleted || s.status === 'COMPLETED' || s.status === 'INTERRUPTED') return false;
         if (!(s.isPresent || s.status === 'PRESENT')) return false;
         if (s.isFranco || s.isUnassigned) return false;
-        // No auto-completar retenciones naturales — sí las retenciones manuales con tiempo fijo (manualRetentionType='extended')
-        // Excepción: puestos custom sin retención manual del operador se auto-cierran siempre
         const isOperatorRetention = s.isRetentionByField && !!s.manualRetentionType;
         if (s.isRetention && s.manualRetentionType !== 'extended' && !(s.isCustomPost && !isOperatorRetention)) return false;
         if (processedIds.current.has(`autocomplete_${s.id}`)) return false;
@@ -361,7 +367,7 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
       for (const s of toComplete) {
         processedIds.current.add(`autocomplete_${s.id}`);
         const msg = `${s.employeeName} — ${s.objectiveName}`;
-        if (isAutoMode) {
+        if (pipelineRoutine) {
           try {
             const turnoSnap = await getDoc(doc(db, 'turnos', s.id));
             const freshData = turnoSnap.data();
@@ -369,7 +375,6 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
             if (turnoSnap.exists() && (freshData?.isCompleted || naturalRetention)) {
               continue;
             }
-            // Guarda extra: no re-completar si ya fue auto-completado recientemente (evita duplicados por re-mount)
             const lastAutoComplete = freshData?.autoCompletedAt?.toMillis?.() ?? 0;
             if (lastAutoComplete && (Date.now() - lastAutoComplete) < 120_000) {
               continue;
@@ -379,8 +384,6 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
               realEndTime: serverTimestamp(), autoCompletedAt: serverTimestamp(),
               completionReason: s.manualRetentionType === 'extended' ? 'AUTO_MANUAL_RETENTION_END' : 'AUTO_SHIFT_END',
             });
-            // No crear novedad pending: al cerrar el turno el objetivo sale de ACT y
-            // en Alertas parece “objetivo sin personal activo”. Toast + bitácora ATENDIDA.
             const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
             const novedadRef = doc(db, 'novedades', `autocompletar_${safeId}`);
             const existingNov = await getDoc(novedadRef).catch(() => null);
@@ -409,14 +412,12 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
           } catch (e) {
             console.error('[autoComplete] Error al finalizar turno:', s.id, e);
           }
-        } else {
-          if (!isBaseline) {
-            toast.info(`⏱️ Finalizar turno: ${msg}`, {
-              duration: 20000,
-              description: 'El horario de fin ya pasó. Confirmar salida manualmente.',
-            });
-            sendBrowserNotif('⏱️ Turno a finalizar', msg);
-          }
+        } else if (!isBaseline) {
+          toast.info(`⏱️ Finalizar turno: ${msg}`, {
+            duration: 20000,
+            description: 'El horario de fin ya pasó. Confirmar salida manualmente.',
+          });
+          sendBrowserNotif('⏱️ Turno a finalizar', msg);
         }
       }
 
@@ -429,8 +430,7 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
         processedIds.current.add(`over12h_${s.id}`);
         const hrs = ((s.totalMinutesWorked ?? 0) / 60).toFixed(1);
         const msg = `${s.employeeName} lleva ${hrs}h en ${s.objectiveName} — ${s.positionName}`;
-        if (isAutoMode) {
-          // Solo crear si no existe — no sobreescribir novedades ya atendidas
+        if (fullAuto) {
           const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
           const novedadRef = doc(db, 'novedades', `autorecargo_${safeId}`);
           const existing = await getDoc(novedadRef).catch(() => null);
@@ -465,5 +465,5 @@ export const useAutoMonitor = ({ isActive, isAutoMode, empresaId, activeOperator
     check();
     const interval = setInterval(check, 3 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [processedData, isAutoMode, isActive, empresaId]);
+  }, [processedData, pipelineRoutine, fullAuto, isActive, empresaId]);
 };

@@ -5,6 +5,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
 import { toast } from 'sonner';
 import { db, functions, auth, storage } from '@/lib/firebase';
+import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
@@ -195,59 +196,27 @@ export default function EmpresasTab() {
 
   const [guardandoModoDemo, setGuardandoModoDemo] = useState(false);
   const modoDemoActivo = empresa?.modoDemoEnabled === true;
-  const [demoSecondsLeft, setDemoSecondsLeft] = useState(0);
-  const demoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const demoCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const demoRunningRef = useRef(false);
-
-  React.useEffect(() => {
-    if (!modoDemoActivo || !empresaId) {
-      if (demoIntervalRef.current) { clearInterval(demoIntervalRef.current); demoIntervalRef.current = null; }
-      if (demoCountdownRef.current) { clearInterval(demoCountdownRef.current); demoCountdownRef.current = null; }
-      setDemoSecondsLeft(0);
-      return;
-    }
-    const INTERVAL_MS = 5 * 60 * 1000;
-    const runCycle = async () => {
-      if (demoRunningRef.current) return;
-      demoRunningRef.current = true;
-      setAutoPresenciaLoading(true);
-      try {
-        const fn = httpsCallable<{ empresaId: string; dryRun: boolean }, any>(functions, 'autoPresenciaYCierre');
-        const { data } = await fn({ empresaId, dryRun: false });
-        setAutoPresenciaResult(data);
-        if ((data?.presenciaMarcada ?? 0) > 0 || (data?.turnosCerrados ?? 0) > 0) {
-          toast.success(`Demo ▶ ${data.presenciaMarcada ?? 0} presencias, ${data.turnosCerrados ?? 0} cierres`);
-        }
-      } catch {
-        /* ciclo automático — fallo silencioso para no spamear */
-      } finally {
-        demoRunningRef.current = false;
-        setAutoPresenciaLoading(false);
-      }
-    };
-    void runCycle();
-    setDemoSecondsLeft(INTERVAL_MS / 1000);
-    demoIntervalRef.current = setInterval(() => {
-      void runCycle();
-      setDemoSecondsLeft(INTERVAL_MS / 1000);
-    }, INTERVAL_MS);
-    demoCountdownRef.current = setInterval(() => {
-      setDemoSecondsLeft(s => Math.max(0, s - 1));
-    }, 1000);
-    return () => {
-      if (demoIntervalRef.current) { clearInterval(demoIntervalRef.current); demoIntervalRef.current = null; }
-      if (demoCountdownRef.current) { clearInterval(demoCountdownRef.current); demoCountdownRef.current = null; }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modoDemoActivo, empresaId]);
 
   const handleToggleModoDemo = async () => {
     if (!empresa) return;
     setGuardandoModoDemo(true);
     try {
-      await guardarEmpresa(empresa.id, { modoDemoEnabled: !modoDemoActivo } as any);
-      toast.success(modoDemoActivo ? 'Modo Demo desactivado' : 'Modo Demo activado — el sistema dará presentes y cerrará turnos automáticamente cada 5 min');
+      const next = !modoDemoActivo;
+      if (next) {
+        const snap = await getDocs(query(
+          collection(db, 'sesiones_operador'),
+          where('empresaId', '==', empresa.id),
+          where('status', '==', 'ACTIVO'),
+        ));
+        await Promise.all(snap.docs.map(d => updateDoc(doc(db, 'sesiones_operador', d.id), {
+          status: 'CERRADO',
+          endTime: serverTimestamp(),
+        })));
+      }
+      await guardarEmpresa(empresa.id, { modoDemoEnabled: next } as any);
+      toast.success(next
+        ? 'Modo Demo ON — pipeline Auto + simulador (cron cada 5 min). Manual cerrado.'
+        : 'Modo Demo OFF — queda Auto con eventos reales');
     } catch {
       toast.error('Error al guardar');
     } finally {
@@ -723,14 +692,15 @@ export default function EmpresasTab() {
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Modo Demo</h3>
                   {modoDemoActivo && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-wide animate-pulse">Activo</span>}
-                  {modoDemoActivo && demoSecondsLeft > 0 && (
-                    <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full tabular-nums">
-                      próx. {Math.floor(demoSecondsLeft / 60)}:{String(demoSecondsLeft % 60).padStart(2, '0')}
+                  {modoDemoActivo && (
+                    <span className="text-[10px] font-mono bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full">
+                      cron 5 min
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                  Cuando está activo, el sistema actúa como operador: da presentes al inicio del turno, cierra al finalizar y completa relevos automáticamente. Se ejecuta cada 5 minutos (también en local).
+                  Demo = Auto + simulador (presente / ausente / tarde). Escribe datos reales en esta empresa lab para validar circuitos.
+                  En producción se apaga Demo y queda Auto con eventos reales. Mutuamente excluyente con Manual.
                 </p>
               </div>
             </div>

@@ -37,6 +37,12 @@ import {
     isHiddenFromOpsAlerts,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
+import {
+    resolveOpsMode,
+    getOpsCapabilities,
+    readManualAssistPreference,
+    writeManualAssistPreference,
+} from '@/lib/operaciones/opsMode';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
@@ -2498,13 +2504,6 @@ export default function OperacionesPage() {
     const logic = useOperacionesMonitor(assignedClientId);
     const session = useOperatorSession();
     const elapsed = useElapsedTime(session.mySession?.startTime || null);
-    useAutoMonitor({
-        isActive: centroControlEnabled,
-        isAutoMode: session.isAutoMode,
-        empresaId,
-        activeOperatorId: session.mySession?.operatorId || null,
-        processedData: logic.processedData,
-    });
 
     // Rol CC: operadores cuya única misión es el CC — se les auto-inicia guardia al abrir
     // Supervisores y superadmin pueden entrar sin iniciar guardia
@@ -2512,10 +2511,27 @@ export default function OperacionesPage() {
 
     const modoDemoActivo = empresa?.modoDemoEnabled === true;
     const manualGuardiaOn = !session.loading && !!session.mySession;
-    /** Estados mutuamente excluyentes: Demo ON | Auto ON | Manual ON */
-    const ccDemoOn = modoDemoActivo;
-    const ccAutoOn = !ccDemoOn && !manualGuardiaOn;
-    const ccManualOn = !ccDemoOn && manualGuardiaOn;
+    /** Demo | Auto | Manual — excluyentes. Manual puede ir con asistido. */
+    const [manualAssist, setManualAssist] = useState(true);
+    useEffect(() => { setManualAssist(readManualAssistPreference()); }, []);
+    const opsMode = resolveOpsMode({
+        modoDemoEnabled: modoDemoActivo,
+        hasManualSession: manualGuardiaOn,
+        sessionLoading: session.loading,
+    });
+    const opsCaps = getOpsCapabilities(opsMode, manualAssist);
+    const ccDemoOn = opsCaps.isDemo;
+    const ccAutoOn = opsCaps.isAuto;
+    const ccManualOn = opsCaps.isManual;
+
+    useAutoMonitor({
+        isActive: centroControlEnabled,
+        pipelineRoutine: opsCaps.pipelineRoutine,
+        fullAuto: opsCaps.fullAuto,
+        empresaId,
+        activeOperatorId: session.mySession?.operatorId || null,
+        processedData: logic.processedData,
+    });
 
     // Auto-inicio de guardia para rol OPERADOR cuando data está lista (no en modo Demo)
     const autoStartedRef = useRef(false);
@@ -2583,8 +2599,8 @@ export default function OperacionesPage() {
             await updateDoc(doc(db, 'empresas', empresaId), { modoDemoEnabled: next });
             toast.success(
                 next
-                    ? 'Demo ON · Auto OFF · Manual OFF'
-                    : 'Demo OFF · Auto ON · Manual OFF',
+                    ? 'Demo ON — pipeline Auto + simulador de eventos (empresa lab)'
+                    : 'Demo OFF — volvés a Auto (realidad, sin simulador)',
             );
         } catch (e) {
             console.error(e);
@@ -2894,12 +2910,12 @@ export default function OperacionesPage() {
         // Persistir en localStorage para no re-abrir tras recarga
         try { localStorage.setItem(ABSENT_ACK_KEY, JSON.stringify([...autoAbsentTriggeredRef.current])); } catch {}
         logic.setViewTab('AUSENTES');
-        if (session.isAutoMode) {
-            toast.info(`AUTO: ausencia detectada — ${newlyAbsent[0].employeeName} · ${newlyAbsent[0].objectiveName}. Gestionando cobertura automáticamente.`);
+        if (opsCaps.fullAuto) {
+            toast.info(`AUTO/DEMO: ausencia — ${newlyAbsent[0].employeeName} · ${newlyAbsent[0].objectiveName}. Cobertura por protocolo / cascada.`);
         } else {
             setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
         }
-    }, [logic.processedData, session.isAutoMode]);
+    }, [logic.processedData, opsCaps.fullAuto]);
 
     const openHandoverFromNovedad = (novedad: any) => {
         const targetShift = novedad.shiftId
@@ -4511,15 +4527,17 @@ export default function OperacionesPage() {
                                             ? 'bg-violet-600 border-violet-700 text-white shadow-sm'
                                             : 'bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200'
                                     }`}
-                                    title={ccManualOn ? 'Cerrá la guardia manual antes de activar Demo' : 'Simulación lab: presentes y cierres cada 5 min (solo SuperAdmin)'}
+                                    title={ccManualOn
+                                        ? 'Cerrá la guardia manual antes de activar Demo'
+                                        : 'Demo = Auto + simulador (presente/ausente/tarde). Escribe datos reales en la empresa lab.'}
                                 >
                                     <Zap size={10} />
-                                    {toggleModoDemoLoading ? 'Demo…' : `Demo ${ccDemoOn ? 'ON' : 'OFF'}`}
+                                    {toggleModoDemoLoading ? 'Demo…' : `Demo ${opsCaps.labels.demo}`}
                                 </button>
                             ) : ccDemoOn ? (
                                 <span
                                     className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-violet-100 border-violet-300 text-violet-800"
-                                    title="Modo demo activo en la empresa (configurado por administrador)"
+                                    title="Demo activo: pipeline Auto + eventos simulados en esta empresa"
                                 >
                                     <Zap size={10} className="text-violet-600" />
                                     Demo ON · lab
@@ -4531,10 +4549,10 @@ export default function OperacionesPage() {
                                         ? 'bg-cyan-600 border-cyan-700 text-white shadow-sm'
                                         : 'bg-slate-50 border-slate-200 text-slate-400'
                                 }`}
-                                title="CC automático: sin operador en guardia; crons y monitor en servidor"
+                                title="Auto = mismo pipeline que Demo, sin simulador. Eventos reales (prod)."
                             >
                                 <Radio size={10} />
-                                Auto {ccAutoOn ? 'ON' : 'OFF'}
+                                Auto {opsCaps.labels.auto}
                             </span>
                             <span
                                 className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border ${
@@ -4542,11 +4560,32 @@ export default function OperacionesPage() {
                                         ? 'bg-emerald-600 border-emerald-700 text-white shadow-sm'
                                         : 'bg-slate-50 border-slate-200 text-slate-400'
                                 }`}
-                                title="Operador registrado en guardia manual"
+                                title="Operador en guardia. Con Asistido: cierres/retención rutinarios; coberturas las decide el operador."
                             >
                                 <Shield size={10} />
-                                Manual {ccManualOn ? 'ON' : 'OFF'}{ccManualOn && elapsed ? ` · ${elapsed}` : ''}
+                                Manual {opsCaps.labels.manual}{ccManualOn && elapsed ? ` · ${elapsed}` : ''}
                             </span>
+                            {ccManualOn && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const next = !manualAssist;
+                                        setManualAssist(next);
+                                        writeManualAssistPreference(next);
+                                        toast.success(next
+                                            ? 'Manual asistido ON — cierres y retención automáticos'
+                                            : 'Manual asistido OFF — solo el operador escribe');
+                                    }}
+                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${
+                                        manualAssist
+                                            ? 'bg-teal-600 border-teal-700 text-white'
+                                            : 'bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200'
+                                    }`}
+                                    title="Asistido: el sistema cierra turnos y marca retención; coberturas quedan al operador"
+                                >
+                                    Asistido {manualAssist ? 'ON' : 'OFF'}
+                                </button>
+                            )}
                             {ccAutoOn && !isCCOperator && (
                                 <button
                                     type="button"
@@ -4744,7 +4783,7 @@ export default function OperacionesPage() {
                                 </div>
                             ) : (
                                 logic.listData.map((s: any) => (
-                                    <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode}
+                                    <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto}
                                         onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
                                         onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
                                         onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
@@ -4799,7 +4838,7 @@ export default function OperacionesPage() {
                                                         <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
                                                     ) : evShifts.map((s: any) => (
                                                         <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
-                                                            isAutoMode={session.isAutoMode}
+                                                            isAutoMode={opsCaps.fullAuto}
                                                             onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
                                                             onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
                                                             onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
@@ -4897,7 +4936,7 @@ export default function OperacionesPage() {
                                                 <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
                                             ) : objShifts.map((s: any) => (
                                                 <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
-                                                    isAutoMode={session.isAutoMode}
+                                                    isAutoMode={opsCaps.fullAuto}
                                                     onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
                                                     onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
                                                     onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
@@ -4977,8 +5016,8 @@ export default function OperacionesPage() {
                         {viewMode === 'lista' && (
                         <div className={`p-3 ${wideOpsPanel ? objectivesLayoutClass : 'space-y-2'}`}>
                         {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> :
-                            isGrouped ? (groupedList.filter((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; return !!logic.publishStatusMap[pubKey]; }).map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished} layoutGrid={wideOpsPanel}/>; })) :
-                            (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})} onRevertAbsence={handleRevertAbsence}/>))
+                            isGrouped ? (groupedList.filter((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; return !!logic.publishStatusMap[pubKey]; }).map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished} layoutGrid={wideOpsPanel}/>; })) :
+                            (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})} onRevertAbsence={handleRevertAbsence}/>))
                         }
                         </div>
                         )}
