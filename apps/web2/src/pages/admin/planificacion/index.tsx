@@ -378,6 +378,7 @@ const SHIFT_STYLES: any = {
     'RFZ': 'bg-red-500 text-white border-red-600 font-black',
     'TURA': 'bg-red-600 text-white border-red-700 font-black',
     'EXTENDED': 'bg-red-600 text-white border-red-700 font-black shadow-sm',
+    'OPS_COV': 'bg-orange-500 text-white border-orange-600 font-black shadow-sm',
     'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
     'EV':  'bg-yellow-400 text-yellow-900 border-yellow-500 font-black',
     'PG':  'bg-white text-blue-700 border-blue-400 font-black',
@@ -436,6 +437,7 @@ const LEGEND_DESCRIPTIONS: Record<string, string> = {
     'SWAP': 'Intercambio de Turno',
     'SWAP_PENDING': 'Intercambio pendiente de autorización',
     'EXTENDED': 'Turno extendido o adelantado (cobertura / horas extra)',
+    'OPS_COV': 'Cobertura operativa (SIN_TURNO / OPERATIONS_COVERAGE)',
     'EV': 'Evento especial (recital, partido, operativo)',
 };
 
@@ -538,6 +540,11 @@ function isOperationalOriginShift(data: any): boolean {
     return false;
 }
 
+/** Cobertura SIN_TURNO: se muestra en grilla (visual) pero no suma CCT. */
+function isOpsCoverageShift(data: any): boolean {
+    return String(data?.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+}
+
 /**
  * Publicado = tiene publishedAt. El doc planificacion_estados también guarda
  * defaultPositionByEmp (asignación de puestos) sin publicar el cronograma.
@@ -612,6 +619,26 @@ function pickCrossObjectiveSavedShift(
     return rawS;
 }
 
+/** Busca cobertura operativa en la lista de turnos de la celda (emp+día). */
+function pickOpsCoverageFromCellTurnos(
+    cellTurnos: any[] | undefined,
+    selectedObjective: string | undefined | null,
+    grupoObjectiveIds?: string[] | null,
+): any | null {
+    if (!cellTurnos?.length) return null;
+    for (const t of cellTurnos) {
+        if (!isOpsCoverageShift(t)) continue;
+        const obj = String(t.objectiveId || '');
+        if (!obj) continue;
+        if (grupoObjectiveIds?.length) {
+            if (grupoObjectiveIds.includes(obj)) return t;
+            continue;
+        }
+        if (selectedObjective && obj === String(selectedObjective)) return t;
+    }
+    return null;
+}
+
 /** Turno visible en celda del crono para el objetivo activo (pending o publicado). */
 function resolveCellShiftAtObjective(
     empId: string,
@@ -632,6 +659,13 @@ function resolveCellShiftAtObjective(
         if (obj != null && obj !== '' && String(obj) !== String(selectedObjective)) return null;
         return activeShift;
     }
+    // OPERATIONS_COVERAGE: visible en grilla, no cuenta para CCT
+    if (
+        isOpsCoverageShift(activeShift)
+        && String(activeShift.objectiveId || '') === String(selectedObjective)
+    ) {
+        return activeShift;
+    }
     if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return null;
     return activeShift;
 }
@@ -645,10 +679,12 @@ function resolveCellShiftDisplay(
     grupoUnifiedMode: boolean,
     pendingChanges: Record<string, any>,
     shiftsMap: Record<string, any>,
+    cellTurnosMap?: Record<string, any[]>,
 ): { s: any | null; p: any | null } {
     const key = `${empId}_${dateStr}`;
     const rawP = pendingChanges[key];
     const rawS = shiftsMap[key];
+    const grupoIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
 
     if (rawP?.isDeleted) {
         const crossAfterDelete = pickCrossObjectiveSavedShift(rawS, selectedObjective);
@@ -658,7 +694,8 @@ function resolveCellShiftDisplay(
     if (selectedGrupo && grupoUnifiedMode) {
         const active = rawP && !rawP.isDeleted ? rawP : rawS;
         if (!active) {
-            return { s: rawS ?? null, p: rawP && !rawP.isDeleted ? rawP : null };
+            const opsEmpty = pickOpsCoverageFromCellTurnos(cellTurnosMap?.[key], selectedObjective, grupoIds);
+            return { s: opsEmpty ?? rawS ?? null, p: rawP && !rawP.isDeleted ? rawP : null };
         }
         const objId = active.objectiveId != null && active.objectiveId !== ''
             ? String(active.objectiveId)
@@ -669,9 +706,13 @@ function resolveCellShiftDisplay(
             }
             return { s: rawS ?? null, p: rawP };
         }
-        if (objId && selectedGrupo.objectiveIds.includes(objId) && !isOperationalOriginShift(active)) {
-            return { s: rawS, p: null };
+        if (objId && selectedGrupo.objectiveIds.includes(objId)) {
+            if (!isOperationalOriginShift(active) || isOpsCoverageShift(active)) {
+                return { s: rawS, p: null };
+            }
         }
+        const opsGrupo = pickOpsCoverageFromCellTurnos(cellTurnosMap?.[key], selectedObjective, grupoIds);
+        if (opsGrupo) return { s: opsGrupo, p: null };
         return { s: null, p: null };
     }
 
@@ -697,6 +738,9 @@ function resolveCellShiftDisplay(
             return { s: rawP, p: null };
         }
     }
+
+    const opsCov = pickOpsCoverageFromCellTurnos(cellTurnosMap?.[key], selectedObjective, null);
+    if (opsCov) return { s: opsCov, p: null };
 
     return { s: null, p: null };
 }
@@ -5477,7 +5521,13 @@ export default function PlanificacionPage() {
                         id: d.id, ...data, code: data.code || data.type, objectiveId: data.objectiveId,
                         startTime: data.startTime, endTime: data.endTime, realStartTime: data.realStartTime,
                         status: data.status, isPresent: data.isPresent || false, isAbsent: data.isAbsent || false,
-                        isExtended: data.isExtended, isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
+                        isExtended: data.isExtended || data.isRetention,
+                        isRetention: !!data.isRetention,
+                        isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
+                        origin: data.origin,
+                        coversAbsenceEmployeeName: data.coversAbsenceEmployeeName || data.absenceEmployeeName,
+                        coveredByEmployeeName: data.coveredByEmployeeName,
+                        absenceShiftId: data.absenceShiftId,
                         isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
                         swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
                         positionName: data.positionName,
@@ -8141,7 +8191,7 @@ export default function PlanificacionPage() {
             const key = `${emp.id}_${dateStr}`; 
             const rfzOnCell = rfzByEmpDate[key];
             const { s: cellS, p: cellP } = resolveCellShiftDisplay(
-                emp.id, dateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
+                emp.id, dateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap, cellTurnosMap,
             );
             const absence = absencesMap[key]; 
             if (selection.start.r === selection.end.r && selection.start.c === selection.end.c) { setSelection({ start: null, end: null }); } 
@@ -10223,7 +10273,7 @@ export default function PlanificacionPage() {
                                         const cellDateStr = getDateKey(day);
                                         const key = `${emp.id}_${cellDateStr}`;
                                         const { s, p } = resolveCellShiftDisplay(
-                                            emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
+                                            emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap, cellTurnosMap,
                                         );
                                         const rfzOnCell = rfzByEmpDate[key];
                                         const selected = !isSnapshotView && isCellSelected(idx, dayIndex);
@@ -10231,7 +10281,8 @@ export default function PlanificacionPage() {
                                         const isCellWeekend = [0, 6].includes(day.getDay());
                                         let content = null; let style = "";
                                         let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
-                                        let isExtended = s?.isExtended || p?.isExtended; let isEarly = s?.isEarlyStart || p?.isEarlyStart; 
+                                        let isExtended = s?.isExtended || p?.isExtended || s?.isRetention || p?.isRetention;
+                                        let isEarly = s?.isEarlyStart || p?.isEarlyStart; 
                                         const covRole = p?.coverageSegmentRole || s?.coverageSegmentRole;
                                         const covNote = p?.coverageNote || s?.coverageNote;
                                         let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
@@ -10315,6 +10366,16 @@ export default function PlanificacionPage() {
                                         if (isCoverageSplitCell) {
                                             style = `${SHIFT_STYLES['EXTENDED']} z-10`;
                                         }
+                                        const isOpsCovCell = !!(
+                                            !absence
+                                            && !isOtherObjectiveShift
+                                            && content != null
+                                            && !(activeShift?.id && turaMap[activeShift.id])
+                                            && isOpsCoverageShift(activeShift)
+                                        );
+                                        if (isOpsCovCell) {
+                                            style = `${SHIFT_STYLES['OPS_COV']} z-10`;
+                                        }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
@@ -10354,7 +10415,13 @@ export default function PlanificacionPage() {
                                             : (isExtended || covRole === 'EXTENSION')
                                                 ? '\n⏱ Extensión (cobertura)'
                                                 : '';
-                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint;
+                                        const _opsCovName = activeShift?.coversAbsenceEmployeeName
+                                            || activeShift?.absenceEmployeeName
+                                            || '';
+                                        const _opsCovHint = isOpsCovCell
+                                            ? `\n🟠 Cobertura ops${_opsCovName ? ` — cubre: ${_opsCovName}` : ''}`
+                                            : '';
+                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _opsCovHint;
                                         const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
                                             ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
                                             : null;
@@ -10363,7 +10430,7 @@ export default function PlanificacionPage() {
                                             : '';
                                         return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? [activeShift?.eventoNombre, activeShift?.servicioNombre].filter(Boolean).join(' · ')
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{isOpsCovCell && (<div className="absolute -bottom-0.5 left-0 right-0 text-[5.5px] font-black bg-amber-800/90 text-white px-0.5 rounded truncate leading-tight" title={_opsCovName ? `Cubre: ${_opsCovName}` : 'Cobertura operativa'}>{_opsCovName ? `Cubre: ${_opsCovName.split(/\s+/)[0]}` : 'COV'}</div>)}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -10395,7 +10462,7 @@ export default function PlanificacionPage() {
                                                 content = snapShift.code;
                                                 style = getDefaultStyle(snapShift.code);
                                             }
-                                            if (snapShift.isExtended || snapShift.isEarlyStart) {
+                                            if (snapShift.isExtended || snapShift.isEarlyStart || snapShift.isRetention) {
                                                 style = SHIFT_STYLES['EXTENDED'];
                                             }
                                         }

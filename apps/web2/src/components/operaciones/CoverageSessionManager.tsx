@@ -409,7 +409,18 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
       if (step.key === 'SIN_TURNO') {
         const newRef = doc(collection(db, 'turnos'));
-        batch.set(newRef, stampEmpresaId({ employeeId: empId, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, code: absenceShift.code || 'T', startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)), endTime: Timestamp.fromDate(absenceEnd), status: 'PENDING', origin: 'OPERATIONS_COVERAGE', resolvedBy: 'OPERACIONES', absenceShiftId: absenceShift.id || null, createdAt: serverTimestamp() }, tid));
+        batch.set(newRef, stampEmpresaId({
+          employeeId: empId, employeeName: empName,
+          clientId: absenceShift.clientId, clientName: absenceShift.clientName,
+          objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+          positionName: absenceShift.positionName, code: absenceShift.code || 'T',
+          startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          endTime: Timestamp.fromDate(absenceEnd),
+          status: 'PENDING', origin: 'OPERATIONS_COVERAGE', resolvedBy: 'OPERACIONES',
+          absenceShiftId: absenceShift.id || null,
+          coversAbsenceEmployeeName: absenceShift.employeeName || '',
+          createdAt: serverTimestamp(),
+        }, tid));
         markCovered('SIN_TURNO');
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_ASIGNADA', title: 'Cobertura asignada', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} asignado a cubrir vacante en ${absenceShift.objectiveName} (${hiStart}–${hiEnd})`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
@@ -468,7 +479,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       const batch = writeBatch(db);
       if (role === 'ext') {
         const sh = candidatesExt.find((x: any) => x.employeeId === slot.empId);
-        if (sh) batch.update(doc(db, 'turnos', sh.id), { isRetention: true, retentionEndTime: Timestamp.fromDate(absenceEnd) });
+        // endTime real = fin de la ausencia: la app móvil y el cronograma leen endTime
+        if (sh) batch.update(doc(db, 'turnos', sh.id), {
+          isRetention: true,
+          isExtended: true,
+          retentionEndTime: Timestamp.fromDate(absenceEnd),
+          endTime: Timestamp.fromDate(absenceEnd),
+        });
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención EXT', status: 'pending', employeeId: slot.empId, employeeName: sh?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: sh?.id || null, description: `${sh?.employeeName} retenido — 1ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
         const newConfirmedExt = slot.empId;
@@ -488,7 +505,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         } else onUpd({ confirmedExt: newConfirmedExt, pendingExt: null });
       } else {
         const sh = candidatesAdv.find((x: any) => x.employeeId === slot.empId);
-        if (sh) batch.update(doc(db, 'turnos', sh.id), { adjustedStartTime: serverTimestamp(), isEarlyStart: true });
+        // Hora real de adelanto = inicio del turno ausente (no la hora de confirmación del operador)
+        const vacancyStart = Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
+        if (sh) batch.update(doc(db, 'turnos', sh.id), {
+          adjustedStartTime: vacancyStart,
+          startTime: vacancyStart,
+          isEarlyStart: true,
+        });
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto ADV', status: 'pending', employeeId: slot.empId, employeeName: sh?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: sh?.id || null, description: `${sh?.employeeName} adelantado — 2ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
         const newConfirmedAdv = slot.empId;

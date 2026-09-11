@@ -386,7 +386,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
         setLoading('ret_' + s.id);
         try {
             const batch = writeBatch(db);
-            batch.update(doc(db, 'turnos', s.id), { isRetention: true, retentionEndTime: Timestamp.fromDate(absenceEnd) });
+            batch.update(doc(db, 'turnos', s.id), {
+                isRetention: true,
+                isExtended: true,
+                retentionEndTime: Timestamp.fromDate(absenceEnd),
+                endTime: Timestamp.fromDate(absenceEnd),
+            });
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'RETENCION', title: 'Quedaste retenido', read: false, body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'RETENTION');
             await batch.commit();
@@ -401,7 +406,14 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
         setLoading('adel_' + s.id);
         try {
             const batch = writeBatch(db);
-            batch.update(doc(db, 'turnos', s.id), { adjustedStartTime: serverTimestamp(), isEarlyStart: true });
+            const vacancyStart = absenceShift.shiftDateObj instanceof Date
+                ? Timestamp.fromDate(absenceShift.shiftDateObj)
+                : Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
+            batch.update(doc(db, 'turnos', s.id), {
+                adjustedStartTime: vacancyStart,
+                startTime: vacancyStart,
+                isEarlyStart: true,
+            });
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'EARLY_START');
             await batch.commit();

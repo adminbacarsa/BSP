@@ -363,7 +363,12 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
       const isRealVacant = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual;
       if (role === 'ext') {
         const extShift = candidatesExt.find((s: any) => s.employeeId === slot.empId);
-        if (extShift) batch.update(doc(db, 'turnos', extShift.id), { isRetention: true, retentionEndTime: Timestamp.fromDate(absenceEnd) });
+        if (extShift) batch.update(doc(db, 'turnos', extShift.id), {
+          isRetention: true,
+          isExtended: true,
+          retentionEndTime: Timestamp.fromDate(absenceEnd),
+          endTime: Timestamp.fromDate(absenceEnd),
+        });
         if (isRealVacant && !session.confirmedAdv) {
           // solo marcar covered cuando ambos estén confirmados; por ahora registrar parcial
         }
@@ -374,7 +379,12 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
         else upd({ confirmedExt: slot.empId, pendingExt: null });
       } else {
         const advShift = candidatesAdv.find((s: any) => s.employeeId === slot.empId);
-        if (advShift) batch.update(doc(db, 'turnos', advShift.id), { adjustedStartTime: serverTimestamp(), isEarlyStart: true });
+        const vacancyStart = Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
+        if (advShift) batch.update(doc(db, 'turnos', advShift.id), {
+          adjustedStartTime: vacancyStart,
+          startTime: vacancyStart,
+          isEarlyStart: true,
+        });
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno (ADV)', status: 'pending', employeeId: slot.empId, employeeName: advShift?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: advShift?.id || null, description: `${advShift?.employeeName} adelantado — cobertura 2ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: 'RETENCION_ADV' }, tid));
         const nextExt = session.confirmedExt;
