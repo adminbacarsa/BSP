@@ -317,8 +317,17 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
   const candidatesExt = (logic.processedData || []).filter((sh: any) =>
     sh.isPresent && !sh.isCompleted && sh.objectiveId === absenceShift.objectiveId && sh.positionName === absenceShift.positionName && sh.id !== absenceShift.id);
+  // ADV: turno que aún no empezó en el mismo objetivo/puesto, dentro de las próximas 12h.
+  // No se usa isSameDay porque el turno N cruza la medianoche (empieza el día siguiente).
+  const advWindowEnd = new Date(now.getTime() + 12 * 3600 * 1000);
   const candidatesAdv = (logic.processedData || [])
-    .filter((sh: any) => !sh.isPresent && !sh.isCompleted && !sh.isAbsent && !sh.isUnassigned && !sh.isFranco && sh.objectiveId === absenceShift.objectiveId && sh.positionName === absenceShift.positionName && toDate(sh.shiftDateObj) > now && isSameDay(sh.shiftDateObj, now))
+    .filter((sh: any) => {
+      const shStart = toDate(sh.shiftDateObj);
+      return !sh.isPresent && !sh.isCompleted && !sh.isAbsent && !sh.isUnassigned && !sh.isFranco
+        && sh.objectiveId === absenceShift.objectiveId
+        && sh.positionName === absenceShift.positionName
+        && shStart > now && shStart <= advWindowEnd;
+    })
     .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
     .slice(0, 1);
 
