@@ -799,18 +799,23 @@ async function executeAgentActionHandler(
 export const executeAgentAction = functions.https.onCall(executeAgentActionHandler);
 
 // =========================================================
-// MODO DEMO CONTINUO — cron cada 5 min para empresas con
-// modoDemoEnabled: true. Actúa como operador automático:
-// da presentes, cierra turnos y completa relevos.
+// MODO DEMO CONTINUO — cron cada 5 min (empresas modoDemoEnabled).
+// SOLO GENERADOR de eventos: presente / tarde / ausente + respuestas
+// a convocatorias. El pipeline Auto (autoCompletarTurnos, useAutoMonitor,
+// cascada onTurnoAbsenciaDetectada) procesa coberturas y cierres.
 // =========================================================
 async function runModoDemoForEmpresa(
   db: admin.firestore.Firestore,
   empresaId: string,
-): Promise<{ presencias: number; cierres: number; retencion: number; vacResueltas: number }> {
+): Promise<{
+  presencias: number;
+  ausenciasDemo: number;
+  convRespuestas: number;
+}> {
   const now = new Date();
   const nowTs = admin.firestore.Timestamp.fromDate(now);
-  const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 26 * 3600000)); // 26h cubre turnos de 12hs que empezaron ayer y aún activos
-  const windowEnd   = admin.firestore.Timestamp.fromDate(new Date(now.getTime() +  2 * 3600000));
+  const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 26 * 3600000));
+  const windowEnd = admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 2 * 3600000));
 
   const snap = await db.collection('turnos')
     .where('empresaId', '==', empresaId)
@@ -819,30 +824,10 @@ async function runModoDemoForEmpresa(
     .limit(600)
     .get();
 
-  interface TIdx { shiftId: string; startMs: number; endMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean; }
-  const byObj = new Map<string, TIdx[]>();
-  for (const doc of snap.docs) {
-    const t = doc.data() as any;
-    const oid = String(t.objectiveId || '');
-    if (!oid) continue;
-    if (!byObj.has(oid)) byObj.set(oid, []);
-    byObj.get(oid)!.push({
-      shiftId: doc.id,
-      startMs: (t.startTime?.seconds ?? 0) * 1000,
-      endMs:   (t.endTime?.seconds   ?? 0) * 1000,
-      isPresent: !!t.isPresent,
-      isCompleted: !!t.isCompleted,
-      isAbsent: !!t.isAbsent,
-    });
-  }
-
-  const hayRelevaYPresente = (oid: string, endMs: number) =>
-    (byObj.get(oid) ?? []).some(r => r.isPresent && !r.isCompleted && Math.abs(r.startMs - endMs) <= 90 * 60 * 1000);
-  const hayRelevoPendiente = (oid: string, endMs: number) =>
-    (byObj.get(oid) ?? []).some(r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - endMs) <= 90 * 60 * 1000);
-
   const batch = db.batch();
-  let presencias = 0, cierres = 0;
+  let presencias = 0;
+  let ausenciasDemo = 0;
+  let batchOps = 0;
 
   const isVacant = (t: any) =>
     !t.employeeId ||
@@ -852,20 +837,21 @@ async function runModoDemoForEmpresa(
     !!t.isSinCobertura;
   const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
 
-  // === Pase 1: Marcar presentes con fichada ===
-  // Hash determinístico: 60% puntuales [-15,+5], 30% llegan tarde +12 min, 10% ausentes (Pase 1b)
+  // Hash determinístico: 60% puntual, 30% tarde, 10% ausente
   const WINDOW_BEFORE_MS = 15 * 60 * 1000;
-  const WINDOW_AFTER_MS  =  5 * 60 * 1000;
-  const LATE_DELAY_MS    = 12 * 60 * 1000;
+  const WINDOW_AFTER_MS = 5 * 60 * 1000;
+  const LATE_DELAY_MS = 12 * 60 * 1000;
   type ShiftCat = 'puntual' | 'late' | 'absent';
   const shiftCategory = (empId: string): ShiftCat => {
     let h = 0;
     for (let i = 0; i < empId.length; i++) h = (h * 31 + empId.charCodeAt(i)) & 0xFFFFFF;
     const m = h % 10;
-    if (m === 0) return 'absent'; // 10%
-    if (m <= 3)  return 'late';   // 30%
-    return 'puntual';             // 60%
+    if (m === 0) return 'absent';
+    if (m <= 3) return 'late';
+    return 'puntual';
   };
+
+  // === Pase 1: Simular presentes (puntual / tarde) ===
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
@@ -874,354 +860,154 @@ async function runModoDemoForEmpresa(
     const empId = String(t.employeeId || '');
     const cat = shiftCategory(empId);
     const oid = String(t.objectiveId || '');
-    if (cat === 'absent') continue; // se procesa en Pase 1b
+    if (cat === 'absent') continue;
+
     if (cat === 'late') {
       if (startMs > now.getTime() + 10 * 60 * 1000) continue;
       if (startMs < now.getTime() - 15 * 60 * 1000) continue;
       const lateTs = admin.firestore.Timestamp.fromMillis(startMs + LATE_DELAY_MS);
-      batch.update(doc.ref, { isPresent: true, presentAt: lateTs, realStartTime: lateTs, autoPresencia: true, llegadaTarde: true, modoDemoAt: nowTs });
-      // Novedad LLEGADA_TARDE directamente (useAutoMonitor la omite porque isPresent ya es true)
-      const novRef = db.collection('novedades').doc();
-      batch.set(novRef, {
-        type: 'LLEGADA_TARDE', status: 'pending', title: 'Llegada Tarde',
-        description: `${t.employeeName || 'Guardia'} llegó ${LATE_DELAY_MS / 60000} min tarde — ${t.objectiveName || ''}`,
-        shiftId: doc.id, clientId: t.clientId || null, objectiveId: oid || null,
-        objectiveName: t.objectiveName || null, employeeId: empId || null,
-        employeeName: t.employeeName || null, positionName: t.positionName || null,
-        empresaId, createdAt: nowTs, reportedBy: 'SISTEMA_AUTO', source: 'MODO_DEMO', modoDemoAt: nowTs,
+      batch.update(doc.ref, {
+        isPresent: true,
+        status: 'PRESENT',
+        presentAt: lateTs,
+        realStartTime: lateTs,
+        autoPresencia: true,
+        llegadaTarde: true,
+        modoDemoAt: nowTs,
       });
+      const safeId = doc.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+      batch.set(db.collection('novedades').doc(`demo_late_${safeId}`), {
+        type: 'LLEGADA_TARDE',
+        status: 'pending',
+        title: 'Llegada Tarde',
+        description: `${t.employeeName || 'Guardia'} llegó ${LATE_DELAY_MS / 60000} min tarde — ${t.objectiveName || ''}`,
+        shiftId: doc.id,
+        clientId: t.clientId || null,
+        objectiveId: oid || null,
+        objectiveName: t.objectiveName || null,
+        employeeId: empId || null,
+        employeeName: t.employeeName || null,
+        positionName: t.positionName || null,
+        empresaId,
+        createdAt: nowTs,
+        reportedBy: 'SISTEMA_AUTO',
+        source: 'MODO_DEMO',
+        modoDemoAt: nowTs,
+      }, { merge: true });
+      batchOps += 2;
     } else {
-      // Para adelantos (isEarlyStart), usar adjustedStartTime como hora real de inicio
       const isEarlyShift = t.isEarlyStart === true && !!t.adjustedStartTime;
       const actualStartTs = isEarlyShift ? t.adjustedStartTime : t.startTime;
       const actualStartMs = (actualStartTs?.seconds ?? 0) * 1000;
       const shiftEndMs = (t.endTime?.seconds ?? 0) * 1000;
       if (isEarlyShift) {
-        // Ventana amplia: hasta 4h en el pasado, mientras el turno no haya terminado
         if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS) continue;
         if (shiftEndMs && shiftEndMs < now.getTime()) continue;
       } else {
         if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS) continue;
         if (actualStartMs < now.getTime() - WINDOW_AFTER_MS) continue;
       }
-      batch.update(doc.ref, { isPresent: true, presentAt: actualStartTs, realStartTime: actualStartTs, autoPresencia: true, modoDemoAt: nowTs });
+      batch.update(doc.ref, {
+        isPresent: true,
+        status: 'PRESENT',
+        presentAt: actualStartTs,
+        realStartTime: actualStartTs,
+        autoPresencia: true,
+        modoDemoAt: nowTs,
+      });
+      batchOps += 1;
     }
     presencias++;
-    const idx = byObj.get(oid);
-    const entry = idx?.find(r => r.shiftId === doc.id);
-    if (entry) entry.isPresent = true;
   }
 
-  // === Pase 1b: Simular ausencias (bucket 'absent') ===
-  // Guarda con hash % 10 === 0 que lleva >5 min sin presentarse → marcarlo ausente
-  let ausenciasDemo = 0;
-  const absentShiftIds = new Set<string>(); // IDs marcados ausentes aquí (usados en Pase 6)
+  // === Pase 1b: Simular ausencias AA (dispara cascada real vía onTurnoAbsenciaDetectada) ===
   const ABSENT_MIN_MS = 5 * 60 * 1000;
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (skipBase(t) || isVacant(t)) continue;
     if (t.isAbsent || t.isPresent || t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime() - ABSENT_MIN_MS) continue; // turno empezó hace <5 min → esperar
+    if (startMs > now.getTime() - ABSENT_MIN_MS) continue;
     const empId = String(t.employeeId || '');
     if (shiftCategory(empId) !== 'absent') continue;
+
     batch.update(doc.ref, {
-      isAbsent: true, status: 'ABSENT', absenceType: 'AA',
-      absenceDetectedAt: nowTs, absenceDetectedBy: 'MODO_DEMO', modoDemoAt: nowTs,
+      isAbsent: true,
+      status: 'ABSENT',
+      absenceType: 'AA',
+      absenceDetectedAt: nowTs,
+      absenceDetectedBy: 'MODO_DEMO',
+      modoDemoAt: nowTs,
     });
-    // Ausencia en colección ausencias — planificación muestra overlay AUS, RRHH registra la novedad
-    {
-      const startMs2 = (t.startTime?.seconds ?? 0) * 1000;
-      const arDate2 = new Date(startMs2 - 3 * 60 * 60 * 1000);
-      const dateStr2 = `${arDate2.getUTCFullYear()}-${String(arDate2.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate2.getUTCDate()).padStart(2, '0')}`;
-      const st2 = t.startTime?.toDate ? t.startTime.toDate() : new Date(startMs2);
-      const et2 = t.endTime?.seconds ? new Date((t.endTime.seconds) * 1000) : null;
-      const fmtT2 = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-      const horario2 = et2 ? `${fmtT2(st2)} - ${fmtT2(et2)}` : fmtT2(st2);
-      const ausRef = db.collection('ausencias').doc();
-      batch.set(ausRef, {
-        employeeId: empId,
-        employeeName: t.employeeName || '',
-        startDate: dateStr2,
-        endDate: dateStr2,
-        type: 'No Presentacion',
-        absenceType: 'AA',
-        origin: 'AUTO_DEMO',
-        shiftId: doc.id,
-        objectiveId: t.objectiveId || null,
-        objectiveName: t.objectiveName || '',
-        clientId: t.clientId || null,
-        empresaId,
-        positionName: t.positionName || '',
-        shiftCode: (t.code || '').toUpperCase() || null,
-        reason: `No presentacion al turno ${horario2} - ${t.objectiveName || ''} (${t.positionName || ''})`,
-        status: 'Confirmada',
-        hasCertificate: false,
-        createdAt: nowTs,
-        source: 'MODO_DEMO',
-        modoDemoAt: nowTs,
-      });
-    }
-    // Novedad AUSENCIA_AUTO — alimenta el globito del sidebar
-    const novRef = db.collection('novedades').doc();
-    batch.set(novRef, {
-      type: 'AUSENCIA_AUTO', status: 'pending', title: 'Ausencia Automática (Demo)',
+
+    const startMs2 = (t.startTime?.seconds ?? 0) * 1000;
+    const arDate2 = new Date(startMs2 - 3 * 60 * 60 * 1000);
+    const dateStr2 = `${arDate2.getUTCFullYear()}-${String(arDate2.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate2.getUTCDate()).padStart(2, '0')}`;
+    const st2 = t.startTime?.toDate ? t.startTime.toDate() : new Date(startMs2);
+    const et2 = t.endTime?.seconds ? new Date((t.endTime.seconds) * 1000) : null;
+    const fmtT2 = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+    const horario2 = et2 ? `${fmtT2(st2)} - ${fmtT2(et2)}` : fmtT2(st2);
+    const safeId = doc.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+
+    batch.set(db.collection('ausencias').doc(`demo_ausencia_${safeId}`), {
+      employeeId: empId,
+      employeeName: t.employeeName || '',
+      startDate: dateStr2,
+      endDate: dateStr2,
+      type: 'No Presentacion',
+      absenceType: 'AA',
+      origin: 'AUTO_DEMO',
+      shiftId: doc.id,
+      objectiveId: t.objectiveId || null,
+      objectiveName: t.objectiveName || '',
+      clientId: t.clientId || null,
+      empresaId,
+      positionName: t.positionName || '',
+      shiftCode: (t.code || '').toUpperCase() || null,
+      reason: `No presentacion al turno ${horario2} - ${t.objectiveName || ''} (${t.positionName || ''})`,
+      status: 'Confirmada',
+      hasCertificate: false,
+      createdAt: nowTs,
+      source: 'MODO_DEMO',
+      modoDemoAt: nowTs,
+    }, { merge: true });
+
+    batch.set(db.collection('novedades').doc(`demo_aus_${safeId}`), {
+      type: 'AUSENCIA_AUTO',
+      status: 'pending',
+      title: 'Ausencia Automática (Demo)',
       description: `${t.employeeName || 'Empleado'} no se presentó — ${t.objectiveName || ''} (MODO DEMO)`,
-      shiftId: doc.id, clientId: t.clientId || null, objectiveId: t.objectiveId || null,
-      objectiveName: t.objectiveName || null, employeeId: empId || null,
-      employeeName: t.employeeName || null, positionName: t.positionName || null,
-      empresaId, createdAt: nowTs, reportedBy: 'MODO_DEMO', source: 'MODO_DEMO', modoDemoAt: nowTs,
-    });
-    absentShiftIds.add(doc.id);
+      shiftId: doc.id,
+      clientId: t.clientId || null,
+      objectiveId: t.objectiveId || null,
+      objectiveName: t.objectiveName || null,
+      employeeId: empId || null,
+      employeeName: t.employeeName || null,
+      positionName: t.positionName || null,
+      empresaId,
+      createdAt: nowTs,
+      reportedBy: 'MODO_DEMO',
+      source: 'MODO_DEMO',
+      modoDemoAt: nowTs,
+    }, { merge: true });
+
+    batchOps += 3;
     ausenciasDemo++;
   }
 
-  // Pase 2: cerrar salientes — tolerancia máx. 15 min sobre endTime (relevo demorado u retención)
-  const MAX_RETENTION_TOLERANCE_MS = 15 * 60 * 1000;
-  for (const doc of snap.docs) {
-    const t = doc.data() as any;
-    if (skipBase(t) || isVacant(t)) continue;
-    if (t.isAbsent || !t.isPresent || t.isCompleted) continue;
-    const endTimeMs = (t.endTime?.seconds ?? 0) * 1000;
-    if (!endTimeMs) continue;
-    const retentionTs = t.retentionUntil ?? t.manualRetentionUntil;
-    const retentionMs = retentionTs ? ((retentionTs.seconds ?? 0) * 1000) : 0;
-    // Cierre efectivo: si hay retención dentro del margen, úsarla; si excede los 15 min, forzar endTime+15min
-    const cappedEndMs = retentionMs > 0
-      ? Math.min(retentionMs, endTimeMs + MAX_RETENTION_TOLERANCE_MS)
-      : endTimeMs;
-    if (cappedEndMs > now.getTime()) continue;
-    // realEndTime para liquidación: usar retención si estaba dentro del margen; sino, endTime contratado
-    const realEndTs = retentionMs > 0 && retentionMs <= endTimeMs + MAX_RETENTION_TOLERANCE_MS
-      ? retentionTs
-      : t.endTime;
-    batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: realEndTs, autoCierre: true, completionReason: 'AUTO_SHIFT_END', modoDemoAt: nowTs });
-    cierres++;
-  }
-
-  // === Pase 3: Limpiar isAbsent+isCompleted inconsistentes ===
-  let absentClean = 0;
-  for (const doc of snap.docs) {
-    const t = doc.data() as any;
-    if (skipBase(t) || isVacant(t)) continue;
-    if (!t.isAbsent || !t.isCompleted) continue;
-    batch.update(doc.ref, { isAbsent: false, modoDemoAt: nowTs });
-    absentClean++;
-  }
-
-  // === Pase 4: Completar slots VAC/SIN_COBERTURA ===
-  let vacResueltas = 0;
-  for (const doc of snap.docs) {
-    const t = doc.data() as any;
-    if (skipBase(t) || !isVacant(t)) continue;
-    if (t.isCompleted) continue;
-    const startMs = (t.startTime?.seconds ?? 0) * 1000;
-    if (startMs > now.getTime() + WINDOW_BEFORE_MS) continue;
-    batch.update(doc.ref, { isCompleted: true, status: 'COMPLETED', resolvedBy: 'MODO_DEMO', modoDemoAt: nowTs });
-    vacResueltas++;
-  }
-
-  // === Pase 5: Reportar ausencias al planificador ===
-  let reportadosPlan = 0;
-  for (const doc of snap.docs) {
-    const t = doc.data() as any;
-    if (skipBase(t) || isVacant(t)) continue;
-    if (!t.isAbsent || t.isCompleted || t.isReportedToPlanning) continue;
-    batch.update(doc.ref, { isReportedToPlanning: true, modoDemoAt: nowTs });
-    reportadosPlan++;
-  }
-
-  // Commit pases 1-5 + 1b
-  if (presencias + cierres + absentClean + vacResueltas + reportadosPlan + ausenciasDemo > 0) {
+  if (batchOps > 0) {
     await batch.commit();
-
-    // Descartar novedades de retención (fire-and-forget)
-    snap.docs.forEach(doc => {
-      const t = doc.data() as any;
-      if (t.isPresent && !t.isCompleted) return;
-      db.collection('novedades').where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(5).get()
-        .then(ns => {
-          if (ns.empty) return;
-          const bRet = db.batch();
-          ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
-            .forEach(d => bRet.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'MODO_DEMO' }));
-          return bRet.commit();
-        }).catch(() => {});
-    });
   }
 
-  // === Pase 6: Auto-asignar SIN PLANIFICAR | Pase 7: FT automático ===
-  // Usan batch2 (batch principal ya fue committed arriba)
-  let autoAsignados = 0;
-  try {
-    const batch2 = db.batch();
-    const todayStr = now.toISOString().slice(0, 10);
-    const dayCode = ['D','L','M','X','J','V','S'][now.getDay()];
-
-    const slaSnap = await db.collection('servicios_sla')
-      .where('empresaId', '==', empresaId)
-      .where('status', '==', 'active')
-      .limit(50)
-      .get();
-
-    const empSnap = await db.collection('empleados')
-      .where('empresaId', '==', empresaId)
-      .where('status', 'in', ['ACTIVE', 'active', 'activo', 'ACTIVO'])
-      .limit(200)
-      .get();
-
-    // índice: objectiveId → lista de empleados
-    const empByObj = new Map<string, { id: string; name: string }[]>();
-    const allEmps: { id: string; name: string }[] = [];
-    for (const d of empSnap.docs) {
-      const e = d.data() as any;
-      const emp = { id: d.id, name: String(e.fullName || e.nombre || 'Guardia') };
-      allEmps.push(emp);
-      const oid = String(e.preferredObjectiveId || '');
-      if (!oid) continue;
-      if (!empByObj.has(oid)) empByObj.set(oid, []);
-      empByObj.get(oid)!.push(emp);
-    }
-
-    // índice: objectiveId → turnos existentes hoy (para detectar cobertura)
-    const coveredSlots = new Set<string>(); // `${oid}_${startHH}`
-    const activeEmpAtObj = new Set<string>(); // `${oid}_${empId}` — empleados ya con turno en este objetivo hoy
-    for (const doc of snap.docs) {
-      const t = doc.data() as any;
-      if (skipBase(t) || isVacant(t)) continue;
-      const oid = String(t.objectiveId || '');
-      if (t.employeeId && t.employeeId !== 'VACANTE') {
-        activeEmpAtObj.add(`${oid}_${t.employeeId}`);
-      }
-      if (t.isAbsent) continue;
-      // Simular Pase 1b: este turno fue marcado ausente en el batch (aún no commitado)
-      if (absentShiftIds.has(doc.id)) continue;
-      // Simular Pase 2: turno presente cuyo tiempo de cierre ya venció (será cerrado en batch)
-      if (t.isPresent && !t.isCompleted) {
-        const endTimeMs = (t.endTime?.seconds ?? 0) * 1000;
-        if (endTimeMs) {
-          const retentionTs = t.retentionUntil ?? t.manualRetentionUntil;
-          const retentionMs = retentionTs ? ((retentionTs.seconds ?? 0) * 1000) : 0;
-          const cappedEndMs = retentionMs > 0
-            ? Math.min(retentionMs, endTimeMs + MAX_RETENTION_TOLERANCE_MS)
-            : endTimeMs;
-          if (cappedEndMs <= now.getTime()) continue;
-        }
-      }
-      const sh = (t.startTime?.seconds ?? 0) * 1000;
-      const hh = new Date(sh).getHours();
-      coveredSlots.add(`${oid}_${hh}`);
-    }
-
-    // contadores rotativos por objetivo para repartir empleados
-    const empIdx = new Map<string, number>();
-
-    for (const slaDoc of slaSnap.docs) {
-      const sla = slaDoc.data() as any;
-      const oid = String(sla.objectiveId || '');
-      if (!oid) continue;
-
-      const positions: any[] = Array.isArray(sla.positions) ? sla.positions : [];
-      for (const pos of positions) {
-        if (pos.status === 'INACTIVE') continue;
-        if (pos.coverageType === 'eventos') continue;
-        const activeDays: string[] = Array.isArray(pos.activeDays) ? pos.activeDays : [];
-        if (activeDays.length > 0 && !activeDays.includes(dayCode)) continue;
-
-        const slots: any[] = Array.isArray(pos.allowedShiftTypes) ? pos.allowedShiftTypes : [];
-        const qty = pos.quantity || 1;
-
-        for (const slot of slots) {
-          if (slot.days && Array.isArray(slot.days) && slot.days.length > 0) {
-            if (!slot.days.includes(dayCode)) continue;
-          }
-
-          const [startH, startM] = String(slot.startTime || '08:00').split(':').map(Number);
-          const [endH, endM]     = String(slot.endTime   || '17:00').split(':').map(Number);
-          const slotStart = new Date(todayStr);
-          slotStart.setHours(startH, startM || 0, 0, 0);
-          let slotEnd = new Date(todayStr);
-          slotEnd.setHours(endH, endM || 0, 0, 0);
-          if (slotEnd <= slotStart) slotEnd.setDate(slotEnd.getDate() + 1); // nocturno
-
-          // No crear turnos que aún no empezaron en más de 10 min
-          if (slotStart.getTime() > now.getTime() + WINDOW_BEFORE_MS) continue;
-
-          // Contar cobertura existente para este slot
-          const covKey = `${oid}_${startH}`;
-          const existing = coveredSlots.has(covKey) ? 1 : 0;
-          const missing = Math.max(0, qty - existing);
-          if (missing === 0) continue;
-
-          // Fallback demo: si no hay empleados con preferredObjectiveId para este objetivo
-          // usar el pool general de activos de la empresa
-          const avail = empByObj.get(oid)?.length ? empByObj.get(oid)! : allEmps;
-          if (avail.length === 0) continue;
-
-          for (let i = 0; i < missing; i++) {
-            // Buscar empleado disponible que no tenga turno activo en este objetivo hoy
-            let emp: { id: string; name: string } | null = null;
-            for (let tries = 0; tries < avail.length; tries++) {
-              const idx = (empIdx.get(oid) ?? 0) % avail.length;
-              empIdx.set(oid, idx + 1);
-              const candidate = avail[idx];
-              if (!activeEmpAtObj.has(`${oid}_${candidate.id}`)) {
-                emp = candidate;
-                break;
-              }
-            }
-            if (!emp) continue; // todos los empleados del objetivo ya tienen turno
-
-            // ID determinístico: si el cron corre dos veces, sobreescribe el mismo doc en lugar de crear uno nuevo
-            const slotDateStr = todayStr.replace(/-/g, '');
-            const autoId = `demo_${empresaId}_${oid}_${emp.id}_${slotDateStr}_${startH}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
-            const autoRef = db.collection('turnos').doc(autoId);
-            batch2.set(autoRef, {
-              empresaId,
-              objectiveId: oid,
-              objectiveName: String(sla.objectiveName || ''),
-              clientId: String(sla.clientId || ''),
-              clientName: String(sla.clientName || ''),
-              positionName: String(pos.name || ''),
-              employeeId: emp.id,
-              employeeName: emp.name,
-              code: String(slot.code || 'M'),
-              startTime: admin.firestore.Timestamp.fromDate(slotStart),
-              endTime: admin.firestore.Timestamp.fromDate(slotEnd),
-              isPresent: true,
-              presentAt: admin.firestore.Timestamp.fromDate(slotStart),
-              realStartTime: admin.firestore.Timestamp.fromDate(slotStart),
-              realEndTime: admin.firestore.Timestamp.fromDate(slotEnd),
-              draft: false,
-              origin: 'OPERATIONS_COVERAGE',
-              autoPresencia: true,
-              modoDemoAt: nowTs,
-              createdAt: nowTs,
-            });
-            autoAsignados++;
-            coveredSlots.add(covKey);
-            activeEmpAtObj.add(`${oid}_${emp.id}`);
-          }
-        }
-      }
-    }
-
-    // FT lo maneja la cascade vía onTurnoAbsenciaDetectada → convocatoriasCobertura (sin Pase 7 aquí).
-
-    if (autoAsignados > 0) await batch2.commit();
-  } catch (e67) {
-    console.warn('[modoDemoCron] pase6-7 error:', (e67 as Error)?.message);
-  }
-
-  // === Pase 8: Simular respuestas de guardias a convocatorias (MODO DEMO) ===
+  // === Pase 8: Simular respuestas de convocatorias (cubre el protocolo real) ===
   let convRespuestas = 0;
   try {
     convRespuestas = await simularRespuestasConvocatorias(db, empresaId);
   } catch (e8) {
-    console.warn('[modoDemoCron] pase8 error:', (e8 as Error)?.message);
+    console.warn('[modoDemoCron] simularRespuestas error:', (e8 as Error)?.message);
   }
 
-  return { presencias, cierres, absentClean, vacResueltas, reportadosPlan, ausenciasDemo, autoAsignados, convRespuestas } as any;
+  return { presencias, ausenciasDemo, convRespuestas };
 }
 
 export const modoDemoCron = functions
@@ -1234,9 +1020,8 @@ export const modoDemoCron = functions
     for (const empDoc of empSnap.docs) {
       try {
         const res = await runModoDemoForEmpresa(db, empDoc.id);
-        const r = res as any;
-        if (res.presencias + res.cierres + (r.vacResueltas||0) + (r.autoAsignados||0) + (r.convRespuestas||0) > 0) {
-          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} cierre=${res.cierres} cleanAbs=${r.absentClean??0} vac=${r.vacResueltas??0} plan=${r.reportadosPlan??0} absDemo=${r.ausenciasDemo??0} auto=${r.autoAsignados??0} conv=${r.convRespuestas??0}`);
+        if (res.presencias + res.ausenciasDemo + res.convRespuestas > 0) {
+          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} absDemo=${res.ausenciasDemo} conv=${res.convRespuestas} (solo generador)`);
         }
       } catch (e) {
         console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);
@@ -3089,6 +2874,7 @@ export const detectarAusencias = functions
     for (const earlyDoc of earlySnap.docs) {
       const s = earlyDoc.data();
       if (!cc.isEnabled(s.empresaId)) continue;
+      if (cc.isDemo(s.empresaId)) continue; // Demo genera sus propios eventos
       if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent) continue;
       if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE') continue;
       if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
@@ -3182,6 +2968,7 @@ export const detectarAusencias = functions
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
+      if (cc.isDemo(shift.empresaId)) continue; // Demo genera presentes/ausentes/tardes
       // Saltar si ya estÃ¡ resuelto o si es una vacante (vacantes tienen su propio flujo)
       if (shift.draft === true) continue;              // borrador no publicado
       if (SKIP_STATUSES.has(shift.status || '')) continue;

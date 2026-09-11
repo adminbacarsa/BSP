@@ -699,8 +699,8 @@ export default function EmpresasTab() {
                   )}
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
-                  Demo = Auto + simulador (presente / ausente / tarde). Escribe datos reales en esta empresa lab para validar circuitos.
-                  En producción se apaga Demo y queda Auto con eventos reales. Mutuamente excluyente con Manual.
+                  Demo = generador de eventos (presente / ausente / tarde) + respuestas a convocatorias.
+                  Cierres y coberturas los hace el mismo pipeline que Auto. En producción: Demo OFF → Auto.
                 </p>
               </div>
             </div>
